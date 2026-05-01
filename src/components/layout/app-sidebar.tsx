@@ -41,7 +41,29 @@ import { Button } from "@/components/ui/button";
 export function AppSidebar() {
   const pathname = usePathname();
   const { theme, setTheme } = useTheme();
-  const user = mockUsers.find((u) => u.id === CURRENT_USER_ID)!;
+  const { user: fbUser, signOut } = useAuth();
+  const mockUser = mockUsers.find((u) => u.id === CURRENT_USER_ID)!;
+  const useMock = isAuthDisabled() || !fbUser;
+  const displayName = useMock
+    ? mockUser.displayName
+    : fbUser.displayName || fbUser.email?.split("@")[0] || "User";
+  const email = useMock ? mockUser.email : (fbUser.email ?? "");
+  const roleLabel = useMock
+    ? ROLES[mockUser.roleId].label
+    : ROLES.salesperson.label;
+  const avatarInitials = useMock
+    ? mockUser.displayName
+        .split(" ")
+        .map((n) => n[0])
+        .join("")
+        .slice(0, 2)
+    : (fbUser.displayName || fbUser.email || "?")
+        .split(/[\s@]+/)
+        .filter(Boolean)
+        .map((n) => n[0])
+        .join("")
+        .slice(0, 2)
+        .toUpperCase();
 
   return (
     <Sidebar collapsible="icon" className="border-r">
@@ -100,17 +122,13 @@ export function AppSidebar() {
                   >
                     <Avatar className="h-8 w-8 rounded-md">
                       <AvatarFallback className="rounded-md bg-primary/20 text-primary font-semibold">
-                        {user.displayName
-                          .split(" ")
-                          .map((n) => n[0])
-                          .join("")
-                          .slice(0, 2)}
+                        {avatarInitials}
                       </AvatarFallback>
                     </Avatar>
                     <div className="grid flex-1 text-left text-sm leading-tight">
-                      <span className="truncate font-medium">{user.displayName}</span>
+                      <span className="truncate font-medium">{displayName}</span>
                       <span className="truncate text-xs text-muted-foreground">
-                        {ROLES[user.roleId].label}
+                        {roleLabel}
                       </span>
                     </div>
                     <ChevronsUpDown className="ml-auto h-4 w-4 opacity-60" />
@@ -124,8 +142,8 @@ export function AppSidebar() {
               >
                 <DropdownMenuLabel>
                   <div className="flex flex-col">
-                    <span className="font-medium">{user.displayName}</span>
-                    <span className="text-xs text-muted-foreground">{user.email}</span>
+                    <span className="font-medium">{displayName}</span>
+                    <span className="text-xs text-muted-foreground">{email}</span>
                   </div>
                 </DropdownMenuLabel>
                 <DropdownMenuSeparator />
@@ -143,7 +161,10 @@ export function AppSidebar() {
                   Toggle theme
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem className="text-destructive">
+                <DropdownMenuItem
+                  className="text-destructive"
+                  onClick={() => void signOut()}
+                >
                   <LogOut className="mr-2 h-4 w-4" /> Sign out
                 </DropdownMenuItem>
               </DropdownMenuContent>

@@ -6,7 +6,10 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "firebase:deploy:rules": "firebase deploy --only firestore:rules",
+    "firebase:deploy:functions": "firebase deploy --only functions",
+    "firebase:deploy": "firebase deploy --only firestore:rules,functions"
   },
   "dependencies": {
     "@base-ui/react": "^1.4.1",

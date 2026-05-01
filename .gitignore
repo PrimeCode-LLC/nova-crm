@@ -17,6 +17,10 @@
 /.next/
 /out/
 
+# Firebase Functions build output
+functions/lib/
+functions/node_modules/
+
 # production
 /build
 

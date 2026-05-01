@@ -1,0 +1,8 @@
+# Firebase App Hosting — connect this repo in the Firebase Console (App Hosting) and point the root at `crm/`.
+# Docs: https://firebase.google.com/docs/app-hosting
+runConfig:
+  minInstances: 0
+  maxInstances: 3
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 1024

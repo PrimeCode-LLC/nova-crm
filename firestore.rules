@@ -1,0 +1,69 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    match /users/{userId} {
+      allow read: if signedIn() && isSelf(userId);
+      allow create: if signedIn() && isSelf(userId);
+      allow update: if signedIn() && isSelf(userId);
+      allow delete: if false;
+    }
+
+    match /computedPermissions/{userId} {
+      allow read: if signedIn() && isSelf(userId);
+      allow write: if false;
+    }
+
+    match /leads/{leadId} {
+      allow read, write: if signedIn();
+    }
+
+    match /accounts/{id} {
+      allow read, write: if signedIn();
+    }
+
+    match /contacts/{id} {
+      allow read, write: if signedIn();
+    }
+
+    match /deals/{id} {
+      allow read, write: if signedIn();
+    }
+
+    match /departments/{id} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /permissionOverrides/{id} {
+      allow read: if signedIn();
+      allow write: if signedIn();
+    }
+
+    match /activityCounters/{id} {
+      allow read, write: if signedIn();
+    }
+
+    match /activityRecords/{id} {
+      allow read, write: if signedIn();
+    }
+
+    match /ingestQueue/{id} {
+      allow read, write: if false;
+    }
+
+    match /auditLog/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn();
+      allow update, delete: if false;
+    }
+  }
+}
