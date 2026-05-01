@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { GlobalCommandMenu } from "./global-command";
 import { QuickAddButton } from "./app-sidebar";
+import { WorkspaceModeToggle } from "./workspace-mode-toggle";
 
 function toLabel(segment: string) {
   return segment
@@ -76,6 +77,7 @@ export function AppTopbar() {
         </Breadcrumb>
 
         <div className="ml-auto flex items-center gap-2">
+          <WorkspaceModeToggle />
           <Button
             variant="outline"
             size="sm"

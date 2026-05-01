@@ -22,11 +22,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { UserChip } from "@/components/common/user-chip";
-import { mockDepartments, mockUsers, mockLeads } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Users2, Building, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 export default function AdminDepartmentsPage() {
+  const { departments, users, leads } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
@@ -44,11 +45,11 @@ export default function AdminDepartmentsPage() {
     setName(""); setDescription(""); setParentId(""); setLeadUserId("");
   }
 
-  const deptStats = mockDepartments.map((d) => ({
+  const deptStats = departments.map((d) => ({
     ...d,
-    memberCount: mockUsers.filter((u) => u.departmentId === d.id).length,
-    leadCount: mockLeads.filter((l) =>
-      mockUsers.find((u) => u.id === l.ownerId)?.departmentId === d.id,
+    memberCount: users.filter((u) => u.departmentId === d.id).length,
+    leadCount: leads.filter((l) =>
+      users.find((u) => u.id === l.ownerId)?.departmentId === d.id,
     ).length,
   }));
 
@@ -145,7 +146,7 @@ export default function AdminDepartmentsPage() {
                   <SelectValue placeholder="None (top-level)" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockDepartments.map((d) => (
+                  {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
                     </SelectItem>
@@ -160,7 +161,7 @@ export default function AdminDepartmentsPage() {
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockUsers.map((u) => (
+                  {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.displayName}
                     </SelectItem>

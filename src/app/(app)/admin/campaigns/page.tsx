@@ -13,7 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ChannelChip } from "@/components/common/channel-chip";
-import { mockCampaigns } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent, fmtRelative } from "@/lib/format";
 import { Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -34,6 +34,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 export default function AdminCampaignsPage() {
+  const { campaigns } = useWorkspace();
   return (
     <>
       <PageHeader
@@ -64,7 +65,7 @@ export default function AdminCampaignsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {mockCampaigns.map((c) => {
+                {campaigns.map((c) => {
                   const replyRate =
                     c.stats.sent > 0
                       ? (c.stats.replied / c.stats.sent) * 100
@@ -134,11 +135,11 @@ export default function AdminCampaignsPage() {
 
         <div className="text-xs text-muted-foreground">
           <span className="tabular-nums font-medium text-foreground">
-            {mockCampaigns.length}
+            {campaigns.length}
           </span>{" "}
           campaigns total ·{" "}
           <span className="tabular-nums font-medium text-foreground">
-            {mockCampaigns.filter((c) => c.status === "active").length}
+            {campaigns.filter((c) => c.status === "active").length}
           </span>{" "}
           active
         </div>

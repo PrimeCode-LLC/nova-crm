@@ -1,3 +1,5 @@
+"use client";
+
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { KpiCard } from "@/components/common/kpi-card";
@@ -7,6 +9,8 @@ import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { IdleLeads } from "@/components/dashboard/idle-leads";
 import { TrendChart } from "@/components/dashboard/trend-chart";
 import { ChannelMix } from "@/components/dashboard/channel-mix";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter } from "lucide-react";
 import {
   Select,
@@ -15,21 +19,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { mockLeads, mockDeals } from "@/lib/mock-data";
 
 export default function DashboardPage() {
-  const totalOpen = mockLeads.filter((l) => !["won", "lost"].includes(l.stage)).length;
-  const idleCount = mockLeads.filter((l) => l.isIdle).length;
+  const { leads, deals, isDemo } = useWorkspace();
+
+  const totalOpen = leads.filter((l) => !["won", "lost"].includes(l.stage)).length;
+  const idleCount = leads.filter((l) => l.isIdle).length;
   const avgResponseMin =
-    mockLeads.filter((l) => l.responseTimeMinutes != null).reduce((s, l) => s + (l.responseTimeMinutes ?? 0), 0) /
-      Math.max(
-        1,
-        mockLeads.filter((l) => l.responseTimeMinutes != null).length,
-      );
-  const pipelineValue = mockDeals
+    leads.filter((l) => l.responseTimeMinutes != null).reduce((s, l) => s + (l.responseTimeMinutes ?? 0), 0) /
+    Math.max(1, leads.filter((l) => l.responseTimeMinutes != null).length);
+  const pipelineValue = deals
     .filter((d) => !["won", "lost"].includes(d.stage))
     .reduce((s, d) => s + d.value, 0);
-  const closedValue = mockDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
+  const closedValue = deals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
 
   const coldEmailCounts = {
     sent: 7230,
@@ -92,81 +94,88 @@ export default function DashboardPage() {
       />
 
       <PageBody>
-        {/* KPI row */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
-          <KpiCard
-            label="Open leads"
-            value={totalOpen}
-            hint="Across 7 channels"
-            delta={12.4}
-            icon={Target}
-          />
-          <KpiCard
-            label="Pipeline value"
-            value={`$${(pipelineValue / 1000).toFixed(0)}k`}
-            hint={`${mockDeals.filter((d) => !["won", "lost"].includes(d.stage)).length} open deals`}
-            delta={8.1}
-            icon={TrendingUp}
-          />
-          <KpiCard
-            label="Closed (30d)"
-            value={`$${(closedValue / 1000).toFixed(0)}k`}
-            hint={`${mockDeals.filter((d) => d.stage === "won").length} deals won`}
-            delta={-4.2}
-            icon={DollarSign}
-          />
-          <KpiCard
-            label="Avg response"
-            value={`${avgResponseMin.toFixed(0)}m`}
-            hint="Time to first outbound"
-            delta={-18.3}
-            deltaType="positive-down"
-            icon={Clock}
-          />
-          <KpiCard
-            label="Idle leads"
-            value={idleCount}
-            hint="Over stage threshold"
-            delta={21.0}
-            deltaType="positive-down"
-            icon={Inbox}
-          />
-        </div>
-
-        {/* Pipeline distribution + trend */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="min-w-0 lg:col-span-2">
-            <TrendChart />
+        {!isDemo && leads.length === 0 ? (
+          <div className="py-8">
+            <WorkspaceEmptyHint
+              title="Your workspace is empty"
+              description="Charts and scorecards need leads and deals. Use Demo mode to see how everything fits together, then switch back when your data is connected."
+            />
           </div>
-          <PipelineDistribution />
-        </div>
-
-        {/* Funnels */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h2 className="text-sm font-semibold">Channel funnels</h2>
-              <p className="text-xs text-muted-foreground">
-                Each channel's stage-by-stage conversion. Click any stage to drill into leads.
-              </p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+              <KpiCard
+                label="Open leads"
+                value={totalOpen}
+                hint="Across 7 channels"
+                delta={12.4}
+                icon={Target}
+              />
+              <KpiCard
+                label="Pipeline value"
+                value={`$${(pipelineValue / 1000).toFixed(0)}k`}
+                hint={`${deals.filter((d) => !["won", "lost"].includes(d.stage)).length} open deals`}
+                delta={8.1}
+                icon={TrendingUp}
+              />
+              <KpiCard
+                label="Closed (30d)"
+                value={`$${(closedValue / 1000).toFixed(0)}k`}
+                hint={`${deals.filter((d) => d.stage === "won").length} deals won`}
+                delta={-4.2}
+                icon={DollarSign}
+              />
+              <KpiCard
+                label="Avg response"
+                value={`${avgResponseMin.toFixed(0)}m`}
+                hint="Time to first outbound"
+                delta={-18.3}
+                deltaType="positive-down"
+                icon={Clock}
+              />
+              <KpiCard
+                label="Idle leads"
+                value={idleCount}
+                hint="Over stage threshold"
+                delta={21.0}
+                deltaType="positive-down"
+                icon={Inbox}
+              />
             </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-            <FunnelChart channel="cold_email" title="Cold Email" counts={coldEmailCounts} />
-            <FunnelChart channel="linkedin_outbound" title="LinkedIn Outbound" counts={linkedinCounts} />
-            <FunnelChart channel="upwork" title="Upwork" counts={upworkCounts} />
-            <FunnelChart channel="website_form" title="Website Form" counts={websiteCounts} />
-          </div>
-        </div>
 
-        {/* Scorecards + idle */}
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-          <div className="xl:col-span-2 flex flex-col gap-4">
-            <PersonScorecard />
-            <ChannelMix />
-          </div>
-          <IdleLeads />
-        </div>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+              <div className="min-w-0 lg:col-span-2">
+                <TrendChart />
+              </div>
+              <PipelineDistribution />
+            </div>
+
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Channel funnels</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Each channel&apos;s stage-by-stage conversion. Click any stage to drill into leads.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
+                <FunnelChart channel="cold_email" title="Cold Email" counts={coldEmailCounts} />
+                <FunnelChart channel="linkedin_outbound" title="LinkedIn Outbound" counts={linkedinCounts} />
+                <FunnelChart channel="upwork" title="Upwork" counts={upworkCounts} />
+                <FunnelChart channel="website_form" title="Website Form" counts={websiteCounts} />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+              <div className="xl:col-span-2 flex flex-col gap-4">
+                <PersonScorecard />
+                <ChannelMix />
+              </div>
+              <IdleLeads />
+            </div>
+          </>
+        )}
       </PageBody>
     </>
   );

@@ -30,7 +30,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { CHANNELS, PIPELINE_STAGES, PRIORITY_TONE, TEMPERATURE_TONE, COMPANY_SIZES, REVENUE_RANGES, CHANNEL_LIST } from "@/lib/constants";
-import { mockUsers, mockAccounts, mockLeads } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { UserRound, Building2, Contact, CheckSquare } from "lucide-react";
 
 type Pill = "lead" | "contact" | "account" | "task";
@@ -88,6 +88,7 @@ type TaskForm = z.infer<typeof taskSchema>;
 
 // ── Sub-form components ──
 function LeadFormBody({ onClose }: { onClose: () => void }) {
+  const { users } = useWorkspace();
   const form = useForm<LeadForm>({
     resolver: zodResolver(leadSchema),
     defaultValues: { contactName: "", company: "", channel: "", email: "", stage: "new", ownerId: "", estimatedValue: "", priority: "medium", temperature: "cold" },
@@ -175,7 +176,7 @@ function LeadFormBody({ onClose }: { onClose: () => void }) {
               <FormLabel className="text-xs">Owner</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
                 <FormControl><SelectTrigger className="h-9"><SelectValue placeholder="Assign to" /></SelectTrigger></FormControl>
-                <SelectContent>{mockUsers.map((u) => <SelectItem key={u.id} value={u.id}>{u.displayName}</SelectItem>)}</SelectContent>
+                <SelectContent>{users.map((u) => <SelectItem key={u.id} value={u.id}>{u.displayName}</SelectItem>)}</SelectContent>
               </Select>
               <FormMessage className="text-xs" />
             </FormItem>
@@ -200,6 +201,7 @@ function LeadFormBody({ onClose }: { onClose: () => void }) {
 }
 
 function ContactFormBody({ onClose }: { onClose: () => void }) {
+  const { accounts } = useWorkspace();
   const form = useForm<ContactForm>({
     resolver: zodResolver(contactSchema),
     defaultValues: { firstName: "", lastName: "", accountId: "", email: "", phone: "", title: "" },
@@ -235,7 +237,7 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
             <FormLabel className="text-xs">Account</FormLabel>
             <Select value={field.value} onValueChange={field.onChange}>
               <FormControl><SelectTrigger className="h-9"><SelectValue placeholder="Select account" /></SelectTrigger></FormControl>
-              <SelectContent>{mockAccounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
+              <SelectContent>{accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
             </Select>
             <FormMessage className="text-xs" />
           </FormItem>
@@ -346,6 +348,7 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
 }
 
 function TaskFormBody({ onClose }: { onClose: () => void }) {
+  const { leads } = useWorkspace();
   const form = useForm<TaskForm>({
     resolver: zodResolver(taskSchema),
     defaultValues: { title: "", leadId: "", dueDate: new Date().toISOString().slice(0, 10), priority: "medium" },
@@ -374,7 +377,7 @@ function TaskFormBody({ onClose }: { onClose: () => void }) {
               <FormControl><SelectTrigger className="h-9"><SelectValue placeholder="No lead" /></SelectTrigger></FormControl>
               <SelectContent>
                 <SelectItem value="">None</SelectItem>
-                {mockLeads.slice(0, 15).map((l) => (
+                {leads.slice(0, 15).map((l) => (
                   <SelectItem key={l.id} value={l.id}>
                     {l.contactName} · {l.companyName}
                   </SelectItem>

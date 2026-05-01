@@ -36,11 +36,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { UserChip } from "@/components/common/user-chip";
-import {
-  mockUsers,
-  mockDepartments,
-  mockPermissionOverrides,
-} from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ROLES } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import type { User } from "@/lib/types";
@@ -60,6 +56,7 @@ const STATUS_LABEL: Record<User["status"], string> = {
 };
 
 export default function AdminUsersPage() {
+  const { users, departments, permissionOverrides } = useWorkspace();
   const [query, setQuery] = React.useState("");
   const [roleFilter, setRoleFilter] = React.useState("all");
   const [deptFilter, setDeptFilter] = React.useState("all");
@@ -72,7 +69,7 @@ export default function AdminUsersPage() {
   const [inviteDept, setInviteDept] = React.useState("");
   const [inviteLoading, setInviteLoading] = React.useState(false);
 
-  const filtered = mockUsers.filter((u) => {
+  const filtered = users.filter((u) => {
     const q = query.toLowerCase();
     const matchQuery =
       !q ||
@@ -100,11 +97,11 @@ export default function AdminUsersPage() {
   }
 
   const userOverrides = selectedUser
-    ? mockPermissionOverrides.filter((p) => p.userId === selectedUser.id)
+    ? permissionOverrides.filter((p) => p.userId === selectedUser.id)
     : [];
 
   const userDept = selectedUser?.departmentId
-    ? mockDepartments.find((d) => d.id === selectedUser.departmentId)
+    ? departments.find((d) => d.id === selectedUser.departmentId)
     : null;
 
   return (
@@ -148,7 +145,7 @@ export default function AdminUsersPage() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All departments</SelectItem>
-              {mockDepartments.map((d) => (
+              {departments.map((d) => (
                 <SelectItem key={d.id} value={d.id}>
                   {d.name}
                 </SelectItem>
@@ -184,7 +181,7 @@ export default function AdminUsersPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map((u) => {
-                  const dept = mockDepartments.find(
+                  const dept = departments.find(
                     (d) => d.id === u.departmentId,
                   );
                   return (
@@ -262,7 +259,7 @@ export default function AdminUsersPage() {
             {filtered.length}
           </span>{" "}
           of{" "}
-          <span className="tabular-nums">{mockUsers.length}</span> users
+          <span className="tabular-nums">{users.length}</span> users
         </div>
       </PageBody>
 
@@ -312,7 +309,7 @@ export default function AdminUsersPage() {
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockDepartments.map((d) => (
+                  {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
                     </SelectItem>

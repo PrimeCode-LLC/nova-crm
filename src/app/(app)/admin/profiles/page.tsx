@@ -25,7 +25,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
-import { mockProfiles, mockActivityRecords, mockUsers } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { CHANNELS, CHANNEL_LIST } from "@/lib/constants";
 import type { ChannelKey } from "@/lib/types";
 import { Plus, User } from "lucide-react";
@@ -34,6 +34,7 @@ import { toast } from "sonner";
 const PROFILE_TYPES = ["upwork", "cv", "email", "linkedin"] as const;
 
 export default function AdminProfilesPage() {
+  const { profiles, activityRecords, users } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
@@ -45,9 +46,9 @@ export default function AdminProfilesPage() {
   const now = Date.now();
   const weekMs = 7 * 24 * 60 * 60 * 1000;
 
-  const enriched = mockProfiles.map((p) => ({
+  const enriched = profiles.map((p) => ({
     ...p,
-    weekActivity: mockActivityRecords.filter(
+    weekActivity: activityRecords.filter(
       (a) =>
         a.profileId === p.id &&
         new Date(a.occurredAt).getTime() >= now - weekMs,
@@ -138,7 +139,7 @@ export default function AdminProfilesPage() {
             <div className="space-y-1.5">
               <Label className="text-xs">Profile name</Label>
               <Input
-                placeholder="e.g. Ali on LinkedIn"
+                placeholder="e.g. Executive — LinkedIn outbound"
                 className="h-9"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -183,7 +184,7 @@ export default function AdminProfilesPage() {
                   <SelectValue placeholder="Select owner" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockUsers.map((u) => (
+                  {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.displayName}
                     </SelectItem>

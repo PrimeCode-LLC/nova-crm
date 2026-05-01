@@ -9,12 +9,14 @@ import {
   DragStartEvent,
   PointerSensor,
   closestCorners,
+  pointerWithin,
+  useDroppable,
   useSensor,
   useSensors,
+  type CollisionDetection,
 } from "@dnd-kit/core";
 import {
   SortableContext,
-  arrayMove,
   useSortable,
   verticalListSortingStrategy,
 } from "@dnd-kit/sortable";
@@ -29,10 +31,25 @@ import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { fmtCurrency, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Calendar, GripVertical, Plus } from "lucide-react";
+import { AlertTriangle, Calendar, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 type LeadMap = Record<PipelineStage, Lead[]>;
+
+const stageIdSet = new Set<string>(KANBAN_STAGES as string[]);
+
+/** Prefer pointer-based hits so column droppables register when moving between boards. */
+const pipelineCollisionDetection: CollisionDetection = (args) => {
+  const pointerCollisions = pointerWithin(args);
+  if (pointerCollisions.length > 0) {
+    const onCard = pointerCollisions.filter((c) => !stageIdSet.has(String(c.id)));
+    if (onCard.length > 0) {
+      return onCard;
+    }
+    return pointerCollisions;
+  }
+  return closestCorners(args);
+};
 
 function groupByStage(leads: Lead[]): LeadMap {
   const acc = Object.fromEntries(
@@ -106,7 +123,7 @@ export function KanbanBoard({ leads: initialLeads }: { leads: Lead[] }) {
   return (
     <DndContext
       sensors={sensors}
-      collisionDetection={closestCorners}
+      collisionDetection={pipelineCollisionDetection}
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
     >
@@ -132,7 +149,13 @@ export function KanbanBoard({ leads: initialLeads }: { leads: Lead[] }) {
       </div>
 
       <DragOverlay>
-        {activeLead ? <LeadCard lead={activeLead} dragging /> : null}
+        {activeLead ? (
+          <Card className="w-[300px] cursor-grabbing shadow-2xl ring-1 ring-primary/30">
+            <CardContent className="p-3 space-y-2">
+              <LeadCardBody lead={activeLead} />
+            </CardContent>
+          </Card>
+        ) : null}
       </DragOverlay>
     </DndContext>
   );
@@ -151,7 +174,7 @@ function KanbanColumn({
   totalValue: number;
   leads: Lead[];
 }) {
-  const { setNodeRef, isOver } = useSortable({
+  const { setNodeRef, isOver } = useDroppable({
     id: stage,
     data: { type: "column", stage },
   });
@@ -203,74 +226,85 @@ function KanbanColumn({
   );
 }
 
-function LeadCard({ lead, dragging }: { lead: Lead; dragging?: boolean }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
-    useSortable({ id: lead.id, data: { type: "lead", lead } });
+function LeadCardBody({ lead }: { lead: Lead }) {
+  return (
+    <>
+      <div className="text-sm font-medium leading-tight line-clamp-1">{lead.contactName}</div>
+      <div className="text-xs text-muted-foreground line-clamp-1">
+        {lead.companyName} · {lead.companyIndustry}
+      </div>
+      <div className="flex items-center gap-1.5 flex-wrap">
+        <ChannelChip channel={lead.channel} />
+        <Badge
+          className={cn(
+            "rounded-md text-[10px] border-transparent",
+            PRIORITY_TONE[lead.priority].className,
+          )}
+        >
+          {PRIORITY_TONE[lead.priority].label}
+        </Badge>
+        {lead.isIdle && (
+          <Badge
+            variant="outline"
+            className="bg-rose-500/10 text-rose-400 border-rose-500/20 text-[10px] gap-1"
+          >
+            <AlertTriangle className="h-2.5 w-2.5" />
+            {lead.idleDays}d
+          </Badge>
+        )}
+      </div>
+      <div className="flex items-center justify-between pt-1">
+        <UserChip userId={lead.ownerId} size="xs" nameOnly />
+        {lead.estimatedValue != null && (
+          <span className="text-xs font-semibold tabular-nums">{fmtCurrency(lead.estimatedValue)}</span>
+        )}
+      </div>
+      {lead.expectedCloseDate && (
+        <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
+          <Calendar className="h-2.5 w-2.5" />
+          Close {fmtRelative(lead.expectedCloseDate)}
+        </div>
+      )}
+    </>
+  );
+}
+
+function LeadCard({ lead }: { lead: Lead }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: lead.id,
+    data: { type: "lead", lead },
+  });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
   };
 
   return (
-    <Card
+    <div
       ref={setNodeRef}
       style={style}
       className={cn(
-        "relative group cursor-grab active:cursor-grabbing transition-shadow",
+        "touch-manipulation",
         isDragging && "opacity-40",
-        dragging && "shadow-2xl ring-1 ring-primary/30",
       )}
       {...attributes}
+      {...listeners}
     >
-      <CardContent className="p-3 space-y-2">
-        <div className="flex items-start justify-between gap-2">
-          <Link
-            href={`/leads/${lead.id}`}
-            className="text-sm font-medium hover:text-primary leading-tight line-clamp-1"
-          >
-            {lead.contactName}
-          </Link>
-          <button
-            type="button"
-            className="opacity-0 group-hover:opacity-100 text-muted-foreground"
-            {...listeners}
-          >
-            <GripVertical className="h-3.5 w-3.5" />
-          </button>
-        </div>
-        <div className="text-xs text-muted-foreground line-clamp-1">
-          {lead.companyName} · {lead.companyIndustry}
-        </div>
-        <div className="flex items-center gap-1.5 flex-wrap">
-          <ChannelChip channel={lead.channel} />
-          <Badge className={cn("rounded-md text-[10px] border-transparent", PRIORITY_TONE[lead.priority].className)}>
-            {PRIORITY_TONE[lead.priority].label}
-          </Badge>
-          {lead.isIdle && (
-            <Badge
-              variant="outline"
-              className="bg-rose-500/10 text-rose-400 border-rose-500/20 text-[10px] gap-1"
-            >
-              <AlertTriangle className="h-2.5 w-2.5" />
-              {lead.idleDays}d
-            </Badge>
-          )}
-        </div>
-        <div className="flex items-center justify-between pt-1">
-          <UserChip userId={lead.ownerId} size="xs" nameOnly />
-          {lead.estimatedValue != null && (
-            <span className="text-xs font-semibold tabular-nums">
-              {fmtCurrency(lead.estimatedValue)}
-            </span>
-          )}
-        </div>
-        {lead.expectedCloseDate && (
-          <div className="flex items-center gap-1 text-[10px] text-muted-foreground">
-            <Calendar className="h-2.5 w-2.5" />
-            Close {fmtRelative(lead.expectedCloseDate)}
-          </div>
+      <Card
+        className={cn(
+          "relative cursor-grab transition-shadow active:cursor-grabbing",
+          isDragging && "shadow-md",
         )}
-      </CardContent>
-    </Card>
+      >
+        <CardContent className="p-0">
+          <Link
+            href={`/leads/${lead.id}?from=pipeline`}
+            className="block space-y-2 p-3 text-left text-foreground no-underline outline-none hover:bg-muted/30 rounded-lg focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+          >
+            <LeadCardBody lead={lead} />
+          </Link>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

@@ -12,7 +12,7 @@ import {
   CommandSeparator,
 } from "@/components/ui/command";
 import { NAV_SECTIONS } from "@/lib/nav";
-import { mockLeads, mockAccounts, mockContacts } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Plus, Sparkles, Target, Building2, User } from "lucide-react";
 
 export function GlobalCommandMenu({
@@ -23,6 +23,7 @@ export function GlobalCommandMenu({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
+  const { leads, accounts, contacts } = useWorkspace();
   const go = (href: string) => {
     onOpenChange(false);
     router.push(href);
@@ -65,7 +66,7 @@ export function GlobalCommandMenu({
         <CommandSeparator />
 
         <CommandGroup heading="Leads">
-          {mockLeads.slice(0, 6).map((l) => (
+          {leads.slice(0, 6).map((l) => (
             <CommandItem key={l.id} onSelect={() => go(`/leads/${l.id}`)}>
               <Target className="mr-2 h-4 w-4" />
               <span>{l.contactName}</span>
@@ -75,7 +76,7 @@ export function GlobalCommandMenu({
         </CommandGroup>
 
         <CommandGroup heading="Accounts">
-          {mockAccounts.slice(0, 5).map((a) => (
+          {accounts.slice(0, 5).map((a) => (
             <CommandItem key={a.id} onSelect={() => go(`/accounts/${a.id}`)}>
               <Building2 className="mr-2 h-4 w-4" />
               {a.name}
@@ -85,7 +86,7 @@ export function GlobalCommandMenu({
         </CommandGroup>
 
         <CommandGroup heading="Contacts">
-          {mockContacts.slice(0, 5).map((c) => (
+          {contacts.slice(0, 5).map((c) => (
             <CommandItem key={c.id} onSelect={() => go(`/contacts/${c.id}`)}>
               <User className="mr-2 h-4 w-4" />
               {c.fullName}

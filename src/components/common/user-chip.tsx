@@ -1,5 +1,7 @@
+"use client";
+
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { getUserById } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { cn } from "@/lib/utils";
 
 export function UserChip({
@@ -13,6 +15,7 @@ export function UserChip({
   nameOnly?: boolean;
   className?: string;
 }) {
+  const { getUserById } = useWorkspace();
   const user = getUserById(userId ?? "");
   if (!user) return <span className="text-muted-foreground text-xs">Unassigned</span>;
   const initials = user.displayName

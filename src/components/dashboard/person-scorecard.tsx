@@ -2,32 +2,33 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { mockUsers, mockLeads, mockDeals } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/format";
 import { ROLES } from "@/lib/constants";
 import { UserChip } from "@/components/common/user-chip";
 import { Badge } from "@/components/ui/badge";
 
 export function PersonScorecard() {
-  const rows = mockUsers
+  const { users, leads, deals } = useWorkspace();
+  const rows = users
     .filter((u) => u.roleId !== "director" && u.status === "active")
     .map((u) => {
-      const leads = mockLeads.filter((l) => l.ownerId === u.id);
-      const replied = leads.filter((l) =>
+      const ownedLeads = leads.filter((l) => l.ownerId === u.id);
+      const replied = ownedLeads.filter((l) =>
         ["replied", "qualified", "discovery", "proposal", "negotiation", "won"].includes(l.stage),
       ).length;
-      const won = leads.filter((l) => l.stage === "won").length;
-      const deals = mockDeals.filter((d) => d.ownerId === u.id && d.stage === "won");
-      const pipeline = mockDeals
+      const won = ownedLeads.filter((l) => l.stage === "won").length;
+      const wonDeals = deals.filter((d) => d.ownerId === u.id && d.stage === "won");
+      const pipeline = deals
         .filter((d) => d.ownerId === u.id && !["won", "lost"].includes(d.stage))
         .reduce((s, d) => s + d.value, 0);
-      const closedValue = deals.reduce((s, d) => s + d.value, 0);
+      const closedValue = wonDeals.reduce((s, d) => s + d.value, 0);
 
       return {
         user: u,
-        leads: leads.length,
-        replyRate: leads.length > 0 ? (replied / leads.length) * 100 : 0,
-        winRate: leads.length > 0 ? (won / leads.length) * 100 : 0,
+        leads: ownedLeads.length,
+        replyRate: ownedLeads.length > 0 ? (replied / ownedLeads.length) * 100 : 0,
+        winRate: ownedLeads.length > 0 ? (won / ownedLeads.length) * 100 : 0,
         pipeline,
         closedValue,
       };

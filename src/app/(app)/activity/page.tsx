@@ -23,7 +23,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { mockActivityCounters, mockActivityRecords, mockUsers, mockProfiles } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { CHANNELS, CHANNEL_FUNNELS } from "@/lib/constants";
 import { fmtDate, fmtNumber, fmtRelative } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
@@ -32,6 +33,9 @@ import { Plus, Save, Calendar } from "lucide-react";
 import { toast } from "sonner";
 
 export default function ActivityPage() {
+  const { isDemo, activityCounters, activityRecords } = useWorkspace();
+  const workspaceEmpty = !isDemo && activityCounters.length === 0 && activityRecords.length === 0;
+
   return (
     <>
       <PageHeader
@@ -44,6 +48,11 @@ export default function ActivityPage() {
         }
       />
       <PageBody>
+        {workspaceEmpty && (
+          <div className="mb-4">
+            <WorkspaceEmptyHint title="No activity history yet" />
+          </div>
+        )}
         <Tabs defaultValue="rollup">
           <TabsList>
             <TabsTrigger value="rollup">Daily rollup</TabsTrigger>
@@ -69,6 +78,7 @@ export default function ActivityPage() {
 }
 
 function DailyRollupForm() {
+  const { profiles } = useWorkspace();
   const [channel, setChannel] = React.useState<keyof typeof CHANNELS>("cold_email");
   const stages = CHANNEL_FUNNELS[channel];
   const [counters, setCounters] = React.useState<Record<string, string>>({});
@@ -118,7 +128,7 @@ function DailyRollupForm() {
                 <SelectValue placeholder="None" />
               </SelectTrigger>
               <SelectContent>
-                {mockProfiles
+                {profiles
                   .filter((p) => p.channel === channel)
                   .map((p) => (
                     <SelectItem key={p.id} value={p.id}>
@@ -163,6 +173,7 @@ function DailyRollupForm() {
 }
 
 function CountersTable() {
+  const { activityCounters } = useWorkspace();
   return (
     <Card>
       <CardContent className="p-0">
@@ -176,7 +187,7 @@ function CountersTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {mockActivityCounters.map((a) => (
+            {activityCounters.map((a) => (
               <TableRow key={a.id}>
                 <TableCell className="py-2 text-sm whitespace-nowrap">{fmtDate(a.date, "MMM d")}</TableCell>
                 <TableCell className="py-2"><UserChip userId={a.userId} size="xs" /></TableCell>
@@ -201,6 +212,7 @@ function CountersTable() {
 }
 
 function RecordsTable() {
+  const { activityRecords, getLeadById } = useWorkspace();
   return (
     <Card>
       <CardContent className="p-0">
@@ -216,7 +228,7 @@ function RecordsTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {mockActivityRecords.map((a) => (
+            {activityRecords.map((a) => (
               <TableRow key={a.id}>
                 <TableCell className="py-2 text-xs font-mono text-muted-foreground">{a.type}</TableCell>
                 <TableCell className="py-2"><UserChip userId={a.userId} size="xs" /></TableCell>
@@ -225,7 +237,7 @@ function RecordsTable() {
                 <TableCell className="py-2 text-sm">
                   {a.leadId ? (
                     <Link href={`/leads/${a.leadId}`} className="hover:text-primary text-primary/80">
-                      {a.leadId}
+                      {getLeadById(a.leadId)?.contactName ?? a.leadId}
                     </Link>
                   ) : (
                     "-"

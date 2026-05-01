@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { mockLeads } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtRelative } from "@/lib/format";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { StageBadge } from "@/components/common/stage-badge";
@@ -12,7 +12,8 @@ import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 
 export function IdleLeads() {
-  const rows = [...mockLeads]
+  const { leads } = useWorkspace();
+  const rows = [...leads]
     .filter((l) => l.isIdle)
     .sort((a, b) => (b.idleDays ?? 0) - (a.idleDays ?? 0))
     .slice(0, 6);

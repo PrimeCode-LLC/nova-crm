@@ -1,11 +1,16 @@
+"use client";
+
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { LeadsTable } from "@/components/leads/leads-table";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { Button } from "@/components/ui/button";
-import { mockLeads } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Kanban, Download, Upload, Bookmark } from "lucide-react";
 import Link from "next/link";
 
 export default function LeadsPage() {
+  const { leads, isDemo } = useWorkspace();
+
   return (
     <>
       <PageHeader
@@ -36,7 +41,11 @@ export default function LeadsPage() {
         }
       />
       <PageBody>
-        <LeadsTable leads={mockLeads} />
+        {!isDemo && leads.length === 0 ? (
+          <WorkspaceEmptyHint title="No leads in workspace" />
+        ) : (
+          <LeadsTable leads={leads} />
+        )}
       </PageBody>
     </>
   );

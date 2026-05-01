@@ -95,7 +95,7 @@ export default function SignupPage() {
                 <FormItem className="col-span-2 sm:col-span-1">
                   <FormLabel className="text-xs">Full name</FormLabel>
                   <FormControl>
-                    <Input placeholder="Ali Raza" className="h-9" {...field} />
+                    <Input placeholder="Jordan Harper" className="h-9" {...field} />
                   </FormControl>
                   <FormMessage className="text-xs" />
                 </FormItem>

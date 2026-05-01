@@ -14,15 +14,17 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { mockAccounts } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtNumber, fmtRelative } from "@/lib/format";
 import { REVENUE_RANGES } from "@/lib/constants";
 import { UserChip } from "@/components/common/user-chip";
 import { Building2, Globe, Plus, Search, Upload } from "lucide-react";
 
 export default function AccountsPage() {
+  const { accounts, isDemo } = useWorkspace();
   const [query, setQuery] = React.useState("");
-  const filtered = mockAccounts.filter(
+  const filtered = accounts.filter(
     (a) =>
       !query ||
       a.name.toLowerCase().includes(query.toLowerCase()) ||
@@ -47,6 +49,10 @@ export default function AccountsPage() {
         }
       />
       <PageBody>
+        {!isDemo && accounts.length === 0 ? (
+          <WorkspaceEmptyHint title="No accounts in workspace" />
+        ) : (
+          <>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -129,8 +135,10 @@ export default function AccountsPage() {
 
         <div className="text-xs text-muted-foreground">
           Showing <span className="tabular-nums font-medium text-foreground">{fmtNumber(filtered.length)}</span> of{" "}
-          <span className="tabular-nums">{fmtNumber(mockAccounts.length)}</span> accounts
+          <span className="tabular-nums">{fmtNumber(accounts.length)}</span> accounts
         </div>
+          </>
+        )}
       </PageBody>
     </>
   );

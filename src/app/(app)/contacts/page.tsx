@@ -15,14 +15,16 @@ import {
 } from "@/components/ui/table";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
-import { mockContacts, mockAccounts } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtRelative, initials } from "@/lib/format";
 import { UserChip } from "@/components/common/user-chip";
 import { Plus, Search, Upload, Mail, Phone, CheckCircle2, XCircle } from "lucide-react";
 
 export default function ContactsPage() {
+  const { contacts, accounts, isDemo } = useWorkspace();
   const [query, setQuery] = React.useState("");
-  const filtered = mockContacts.filter(
+  const filtered = contacts.filter(
     (c) =>
       !query ||
       c.fullName.toLowerCase().includes(query.toLowerCase()) ||
@@ -47,6 +49,10 @@ export default function ContactsPage() {
         }
       />
       <PageBody>
+        {!isDemo && contacts.length === 0 ? (
+          <WorkspaceEmptyHint title="No contacts in workspace" />
+        ) : (
+          <>
         <div className="flex items-center gap-2">
           <div className="relative flex-1 max-w-sm">
             <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -76,7 +82,7 @@ export default function ContactsPage() {
               </TableHeader>
               <TableBody>
                 {filtered.map((c) => {
-                  const account = mockAccounts.find((a) => a.id === c.accountId);
+                  const account = accounts.find((a) => a.id === c.accountId);
                   return (
                     <TableRow key={c.id} className="cursor-pointer">
                       <TableCell className="py-2">
@@ -143,6 +149,8 @@ export default function ContactsPage() {
             </Table>
           </div>
         </div>
+          </>
+        )}
       </PageBody>
     </>
   );

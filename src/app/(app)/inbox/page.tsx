@@ -9,7 +9,9 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { EmptyState } from "@/components/common/empty-state";
 import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
-import { mockUsers } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import type { Lead, User } from "@/lib/types";
 import {
   Inbox,
   AtSign,
@@ -47,14 +49,30 @@ function ago(minutes: number) {
   return new Date(now.getTime() - minutes * 60 * 1000).toISOString();
 }
 
-const MOCK_NOTIFICATIONS: Notification[] = [
+function leadById(leads: Lead[], id: string) {
+  return leads.find((l) => l.id === id);
+}
+
+function buildDemoNotifications(leads: Lead[], users: User[], viewerUserId: string): Notification[] {
+  if (leads.length === 0) return [];
+  const l1 = leadById(leads, "l-1");
+  const l2 = leadById(leads, "l-2");
+  const l6 = leadById(leads, "l-6");
+  const l7 = leadById(leads, "l-7");
+  const l8 = leadById(leads, "l-8");
+  const l10 = leadById(leads, "l-10");
+  const l15 = leadById(leads, "l-15");
+  const l5 = leadById(leads, "l-5");
+  const viewer = users.find((u) => u.id === viewerUserId) ?? users.find((u) => u.id === "u-director") ?? users[0];
+  const first = viewer?.displayName.split(" ")[0] ?? "User";
+  return [
   {
     id: "n1",
     kind: "mention",
     read: false,
     sender: "u-mgr-email",
-    message: "@mentioned you in a note on Forge Robotics",
-    target: "Forge Robotics",
+    message: `@mentioned you in a note on ${l6?.companyName ?? "Forge Robotics"}`,
+    target: l6?.companyName ?? "Forge Robotics",
     targetHref: "/leads/l-6",
     timestamp: ago(8),
   },
@@ -63,8 +81,8 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "assignment",
     read: false,
     sender: "u-director",
-    message: "Lead assigned to you: Jordan Harper at Northwind Logistics",
-    target: "Jordan Harper",
+    message: `Lead assigned to you: ${l1?.contactName ?? "Contact"} at ${l1?.companyName ?? "Account"}`,
+    target: l1?.contactName ?? "Contact",
     targetHref: "/leads/l-1",
     timestamp: ago(25),
   },
@@ -73,8 +91,8 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "followup",
     read: false,
     sender: "u-sales-01",
-    message: "Followup due today: Send proposal to Sofia Morales",
-    target: "Sofia Morales",
+    message: `Followup due today: Send proposal to ${l2?.contactName ?? "Contact"}`,
+    target: l2?.contactName ?? "Contact",
     targetHref: "/followups",
     timestamp: ago(60),
   },
@@ -83,8 +101,8 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "idle",
     read: false,
     sender: "u-director",
-    message: "Idle lead alert: Orbit Analytics has been silent for 9 days",
-    target: "Orbit Analytics",
+    message: `Idle lead alert: ${l8?.companyName ?? "Account"} has been silent for 9 days`,
+    target: l8?.companyName ?? "Account",
     targetHref: "/leads/l-8",
     timestamp: ago(120),
   },
@@ -113,8 +131,8 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "mention",
     read: false,
     sender: "u-sales-03",
-    message: "@mentioned you: 'Can you review the Upwork proposal? @ali'",
-    target: "Bilal Farooq",
+    message: `@mentioned you: 'Can you review the Upwork proposal? @${first.toLowerCase()}'`,
+    target: l15?.contactName ?? "Contact",
     targetHref: "/leads/l-15",
     timestamp: ago(300),
   },
@@ -123,8 +141,8 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "assignment",
     read: true,
     sender: "u-mgr-upwork",
-    message: "Lead reassigned from Zara to you: Meridian Capital",
-    target: "Meridian Capital",
+    message: `Lead reassigned from Emma to you: ${l7?.companyName ?? "Account"}`,
+    target: l7?.companyName ?? "Account",
     targetHref: "/leads/l-7",
     timestamp: ago(600),
   },
@@ -133,8 +151,8 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "followup",
     read: true,
     sender: "u-sales-01",
-    message: "Overdue followup: Follow up with Priya Desai (3 days past due)",
-    target: "Priya Desai",
+    message: `Overdue followup: Follow up with ${l5?.contactName ?? "Contact"} (3 days past due)`,
+    target: l5?.contactName ?? "Contact",
     targetHref: "/followups",
     timestamp: ago(1440),
   },
@@ -143,12 +161,13 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "idle",
     read: true,
     sender: "u-director",
-    message: "Idle alert: Aurora Games, 12 days since last touch",
-    target: "Aurora Games",
+    message: `Idle alert: ${l10?.companyName ?? "Account"}, 12 days since last touch`,
+    target: l10?.companyName ?? "Account",
     targetHref: "/leads/l-10",
     timestamp: ago(2880),
   },
 ];
+}
 
 const KIND_ICONS: Record<NotificationKind, React.ElementType> = {
   mention: AtSign,
@@ -171,7 +190,15 @@ const KIND_COLORS: Record<NotificationKind, string> = {
 type TabFilter = "all" | "unread" | "mentions" | "assignments" | "alerts";
 
 export default function InboxPage() {
-  const [notifications, setNotifications] = React.useState(MOCK_NOTIFICATIONS);
+  const { leads, users, isDemo, demoPersonaId } = useWorkspace();
+  const seed = React.useMemo(
+    () => (isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : []),
+    [isDemo, leads, users, demoPersonaId],
+  );
+  const [notifications, setNotifications] = React.useState(seed);
+  React.useEffect(() => {
+    setNotifications(seed);
+  }, [seed]);
   const [selected, setSelected] = React.useState<Notification | null>(null);
   const [tab, setTab] = React.useState<TabFilter>("all");
 
@@ -233,13 +260,14 @@ export default function InboxPage() {
             </div>
             <div className="flex-1 overflow-y-auto divide-y">
               {filtered.length === 0 && (
-                <div className="p-6 text-center text-sm text-muted-foreground">
-                  No notifications here.
+                <div className="p-6 space-y-4">
+                  <p className="text-center text-sm text-muted-foreground">No notifications here.</p>
+                  {!isDemo && <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />}
                 </div>
               )}
               {filtered.map((n) => {
                 const Icon = KIND_ICONS[n.kind];
-                const sender = mockUsers.find((u) => u.id === n.sender);
+                const sender = users.find((u) => u.id === n.sender);
                 const senderInitials = sender?.displayName
                   .split(" ")
                   .map((x) => x[0])

@@ -2,15 +2,16 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { CHANNELS, CHANNEL_LIST } from "@/lib/constants";
-import { mockLeads } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
 
 export function ChannelMix() {
-  const total = mockLeads.length;
+  const { leads } = useWorkspace();
+  const total = leads.length;
   const rows = CHANNEL_LIST.map((c) => {
-    const count = mockLeads.filter((l) => l.channel === c.key).length;
-    const won = mockLeads.filter((l) => l.channel === c.key && l.stage === "won").length;
+    const count = leads.filter((l) => l.channel === c.key).length;
+    const won = leads.filter((l) => l.channel === c.key && l.stage === "won").length;
     return {
       key: c.key,
       count,

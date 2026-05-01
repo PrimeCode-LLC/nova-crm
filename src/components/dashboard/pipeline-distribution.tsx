@@ -2,12 +2,13 @@
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { PIPELINE_STAGES, STAGES_BY_KEY } from "@/lib/constants";
-import { mockLeads } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber } from "@/lib/format";
 import type { PipelineStage } from "@/lib/types";
 
 export function PipelineDistribution() {
-  const counts = mockLeads.reduce<Record<PipelineStage, number>>(
+  const { leads } = useWorkspace();
+  const counts = leads.reduce<Record<PipelineStage, number>>(
     (acc, l) => {
       acc[l.stage] = (acc[l.stage] ?? 0) + 1;
       return acc;
@@ -15,7 +16,7 @@ export function PipelineDistribution() {
     {} as Record<PipelineStage, number>,
   );
 
-  const total = mockLeads.length;
+  const total = leads.length;
   const stagesToShow = PIPELINE_STAGES.filter((s) => s.key !== "won" && s.key !== "lost");
 
   return (

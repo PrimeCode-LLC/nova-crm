@@ -30,7 +30,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { UserChip } from "@/components/common/user-chip";
-import { mockPermissionOverrides, mockUsers } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { Plus, Shield, Trash2, Info } from "lucide-react";
 import { toast } from "sonner";
@@ -40,6 +40,7 @@ const ACTIONS = ["read", "write", "delete"] as const;
 const SCOPES = ["own", "team", "department", "all", "custom"] as const;
 
 export default function AdminPermissionsPage() {
+  const { permissionOverrides, users } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [userId, setUserId] = React.useState("");
   const [resource, setResource] = React.useState("");
@@ -109,7 +110,7 @@ export default function AdminPermissionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {mockPermissionOverrides.map((po) => (
+                {permissionOverrides.map((po) => (
                   <TableRow key={po.id}>
                     <TableCell className="py-2">
                       <UserChip userId={po.userId} size="xs" />
@@ -169,7 +170,7 @@ export default function AdminPermissionsPage() {
 
         <div className="text-xs text-muted-foreground">
           <span className="tabular-nums font-medium text-foreground">
-            {mockPermissionOverrides.length}
+            {permissionOverrides.length}
           </span>{" "}
           overrides active
         </div>
@@ -190,7 +191,7 @@ export default function AdminPermissionsPage() {
                   <SelectValue placeholder="Select user" />
                 </SelectTrigger>
                 <SelectContent>
-                  {mockUsers.map((u) => (
+                  {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.displayName}
                     </SelectItem>

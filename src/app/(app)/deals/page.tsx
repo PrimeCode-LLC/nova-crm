@@ -16,18 +16,20 @@ import {
 import { KpiCard } from "@/components/common/kpi-card";
 import { StageBadge } from "@/components/common/stage-badge";
 import { UserChip } from "@/components/common/user-chip";
-import { mockDeals } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate } from "@/lib/format";
 import { Plus, Search, DollarSign, TrendingUp, Trophy, Target } from "lucide-react";
 
 export default function DealsPage() {
+  const { deals, isDemo } = useWorkspace();
   const [query, setQuery] = React.useState("");
-  const filtered = mockDeals.filter((d) => !query || d.name.toLowerCase().includes(query.toLowerCase()));
+  const filtered = deals.filter((d) => !query || d.name.toLowerCase().includes(query.toLowerCase()));
 
-  const openDeals = mockDeals.filter((d) => !["won", "lost"].includes(d.stage));
+  const openDeals = deals.filter((d) => !["won", "lost"].includes(d.stage));
   const pipelineValue = openDeals.reduce((s, d) => s + d.value, 0);
   const weighted = openDeals.reduce((s, d) => s + (d.value * d.probability) / 100, 0);
-  const won = mockDeals.filter((d) => d.stage === "won");
+  const won = deals.filter((d) => d.stage === "won");
   const wonValue = won.reduce((s, d) => s + d.value, 0);
 
   return (
@@ -42,6 +44,10 @@ export default function DealsPage() {
         }
       />
       <PageBody>
+        {!isDemo && deals.length === 0 ? (
+          <WorkspaceEmptyHint title="No deals in workspace" />
+        ) : (
+          <>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Open deals" value={openDeals.length} icon={Target} />
           <KpiCard label="Pipeline" value={fmtCurrency(pipelineValue)} hint="Total open value" icon={TrendingUp} />
@@ -110,6 +116,8 @@ export default function DealsPage() {
             </Table>
           </div>
         </div>
+          </>
+        )}
       </PageBody>
     </>
   );

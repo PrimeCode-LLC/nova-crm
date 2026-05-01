@@ -38,8 +38,8 @@ function pick<T>(arr: readonly T[], i: number): T {
 export const mockUsers: User[] = [
   {
     id: "u-director",
-    email: "ali@nova.co",
-    displayName: "Ali Raza",
+    email: "james.mitchell@nova.co",
+    displayName: "James Mitchell",
     roleId: "director",
     title: "Founder & Director",
     status: "active",
@@ -47,8 +47,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-mgr-email",
-    email: "sana@nova.co",
-    displayName: "Sana Malik",
+    email: "sarah.chen@nova.co",
+    displayName: "Sarah Chen",
     roleId: "manager",
     departmentId: "d-outbound",
     managerId: "u-director",
@@ -58,8 +58,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-mgr-upwork",
-    email: "hamza@nova.co",
-    displayName: "Hamza Khan",
+    email: "marcus.webb@nova.co",
+    displayName: "Marcus Webb",
     roleId: "manager",
     departmentId: "d-upwork",
     managerId: "u-director",
@@ -69,8 +69,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-sales-01",
-    email: "omar@nova.co",
-    displayName: "Omar Siddiqui",
+    email: "chris.sullivan@nova.co",
+    displayName: "Chris Sullivan",
     roleId: "salesperson",
     departmentId: "d-outbound",
     managerId: "u-mgr-email",
@@ -80,8 +80,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-sales-02",
-    email: "zara@nova.co",
-    displayName: "Zara Ahmed",
+    email: "emma.walsh@nova.co",
+    displayName: "Emma Walsh",
     roleId: "salesperson",
     departmentId: "d-outbound",
     managerId: "u-mgr-email",
@@ -91,8 +91,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-sales-03",
-    email: "bilal@nova.co",
-    displayName: "Bilal Farooq",
+    email: "ryan.cooper@nova.co",
+    displayName: "Ryan Cooper",
     roleId: "salesperson",
     departmentId: "d-upwork",
     managerId: "u-mgr-upwork",
@@ -102,8 +102,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-scrape-01",
-    email: "ayesha@nova.co",
-    displayName: "Ayesha Tariq",
+    email: "laura.bennett@nova.co",
+    displayName: "Laura Bennett",
     roleId: "data_scraper",
     departmentId: "d-data",
     managerId: "u-mgr-email",
@@ -113,8 +113,8 @@ export const mockUsers: User[] = [
   },
   {
     id: "u-tl-inbound",
-    email: "faraz@nova.co",
-    displayName: "Faraz Iqbal",
+    email: "michael.hayes@nova.co",
+    displayName: "Michael Hayes",
     roleId: "team_lead",
     departmentId: "d-inbound",
     managerId: "u-director",
@@ -143,7 +143,7 @@ export const mockPermissionOverrides: PermissionOverride[] = [
     action: "read",
     scope: "department",
     effect: "grant",
-    note: "Omar mentors Zara and Bilal; needs to review their leads.",
+    note: "Chris mentors Emma and Ryan; needs to review their leads.",
     createdBy: "u-director",
     createdAt: isoDaysAgo(60),
   },
@@ -163,10 +163,10 @@ export const mockPermissionOverrides: PermissionOverride[] = [
 // ───────────────────────── Profiles ─────────────────────────
 export const mockProfiles: Profile[] = [
   { id: "p-upwork-main", name: "CompanyMain (Upwork)", channel: "upwork", type: "upwork", ownerId: "u-mgr-upwork", active: true },
-  { id: "p-upwork-ali", name: "Personal-Ali (Upwork)", channel: "upwork", type: "upwork", ownerId: "u-director", active: true },
+  { id: "p-upwork-personal", name: "Personal — Upwork (exec)", channel: "upwork", type: "upwork", ownerId: "u-director", active: true },
   { id: "p-cv-backend", name: "CV-Backend-v3", channel: "job_apply", type: "cv", ownerId: "u-sales-03", active: true },
   { id: "p-cv-fullstack", name: "CV-Fullstack-v2", channel: "job_apply", type: "cv", ownerId: "u-sales-03", active: true },
-  { id: "p-li-ali", name: "Ali on LinkedIn", channel: "linkedin_outbound", type: "linkedin", ownerId: "u-director", active: true },
+  { id: "p-li-primary", name: "Executive — LinkedIn outbound", channel: "linkedin_outbound", type: "linkedin", ownerId: "u-director", active: true },
 ];
 
 // ───────────────────────── Campaigns ─────────────────────────
@@ -261,8 +261,8 @@ export const mockAccounts: Account[] = accountSeeds.map((a, i) => ({
 }));
 
 // ───────────────────────── Contacts ─────────────────────────
-const firstNames = ["Jordan", "Priya", "Sofia", "Marcus", "Aisha", "Ethan", "Leila", "Noah", "Isabela", "Kenji", "Fatima", "Liam", "Nadia", "Owen", "Mira", "Ravi", "Chloe", "Diego", "Amaia", "Kai"];
-const lastNames = ["Harper", "Desai", "Morales", "Chen", "Okoye", "Novak", "Rahman", "Weiss", "Serrano", "Walsh", "Arora", "Bennett", "Romero", "Takahashi", "Goldstein", "Patel", "Volkov", "Barnes", "Mishra", "Vega"];
+const firstNames = ["Jordan", "Priya", "Sofia", "Marcus", "Avery", "Ethan", "Lucia", "Noah", "Isabela", "Kenji", "Fiona", "Liam", "Nadia", "Owen", "Mira", "Ross", "Chloe", "Diego", "Amaia", "Kai"];
+const lastNames = ["Harper", "Duncan", "Morales", "Chen", "Okoye", "Novak", "Rowe", "Weiss", "Serrano", "Walsh", "Armstrong", "Bennett", "Romero", "Takahashi", "Goldstein", "Porter", "Volkov", "Barnes", "Mason", "Vega"];
 const titles = ["CEO", "Founder", "CTO", "VP of Sales", "Head of Growth", "Director of Marketing", "VP Engineering", "Head of Product", "Chief of Staff", "COO"];
 
 export const mockContacts: Contact[] = mockAccounts.flatMap((acc, i) => {
@@ -325,7 +325,7 @@ export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
     contactId: c.id,
     channel,
     campaignId: channel === "cold_email" ? pick(["c-saas-founders", "c-fintech-cto"], i) : channel === "website_form" ? "c-website-q2" : undefined,
-    profileId: channel === "upwork" ? pick(["p-upwork-main", "p-upwork-ali"], i) : channel === "job_apply" ? pick(["p-cv-backend", "p-cv-fullstack"], i) : undefined,
+    profileId: channel === "upwork" ? pick(["p-upwork-main", "p-upwork-personal"], i) : channel === "job_apply" ? pick(["p-cv-backend", "p-cv-fullstack"], i) : undefined,
     stage,
     temperature: pick(temps, i),
     priority: pick(prios, i + 1),
@@ -539,7 +539,7 @@ export const mockActivityRecords: ActivityRecord[] = Array.from({ length: 15 }).
   id: `ar-${i}`,
   userId: pick(owners, i),
   channel: pick(["upwork", "personalized_email", "linkedin_1to1"] as ChannelKey[], i),
-  profileId: i % 2 === 0 ? "p-upwork-main" : "p-upwork-ali",
+  profileId: i % 2 === 0 ? "p-upwork-main" : "p-upwork-personal",
   leadId: mockLeads[i % mockLeads.length]?.id,
   type: i % 3 === 0 ? "upwork_apply" : i % 3 === 1 ? "1to1_email" : "linkedin_message",
   occurredAt: isoDaysAgo(i % 10),

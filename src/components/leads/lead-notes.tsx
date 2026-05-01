@@ -3,7 +3,7 @@
 import * as React from "react";
 import type { Note } from "@/lib/types";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { getUserById } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,7 @@ import { fmtRelative, fmtDate, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 export function LeadNotes({ notes }: { notes: Note[] }) {
+  const { getUserById } = useWorkspace();
   const [body, setBody] = React.useState("");
 
   return (

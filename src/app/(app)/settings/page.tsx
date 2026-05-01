@@ -12,7 +12,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
-import { mockUsers, CURRENT_USER_ID } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useAuth } from "@/components/providers/auth-provider";
 import { initials } from "@/lib/format";
 import {
   User,
@@ -27,8 +28,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-const currentUser = mockUsers.find((u) => u.id === CURRENT_USER_ID)!;
-
 const INTEGRATIONS = [
   { id: "instantly", name: "Instantly", desc: "Cold email automation: sends, tracks opens/replies.", connected: false },
   { id: "apollo", name: "Apollo", desc: "Lead enrichment and contact data.", connected: false },
@@ -40,9 +39,29 @@ const INTEGRATIONS = [
 ];
 
 export default function SettingsPage() {
-  const [displayName, setDisplayName] = React.useState(currentUser.displayName);
-  const [email] = React.useState(currentUser.email);
-  const [title, setTitle] = React.useState(currentUser.title ?? "");
+  const { isDemo, users, currentUserId, demoPersonaId } = useWorkspace();
+  const { user: fbUser } = useAuth();
+  const demoUser = users.find((u) => u.id === currentUserId);
+
+  const [displayName, setDisplayName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [title, setTitle] = React.useState("");
+
+  React.useEffect(() => {
+    if (isDemo && demoUser) {
+      setDisplayName(demoUser.displayName);
+      setEmail(demoUser.email);
+      setTitle(demoUser.title ?? "");
+    } else if (fbUser) {
+      setDisplayName(fbUser.displayName || fbUser.email?.split("@")[0] || "");
+      setEmail(fbUser.email ?? "");
+      setTitle("");
+    } else {
+      setDisplayName(demoUser?.displayName ?? "");
+      setEmail(demoUser?.email ?? "");
+      setTitle(demoUser?.title ?? "");
+    }
+  }, [isDemo, currentUserId, demoPersonaId, demoUser, fbUser]);
   const [savingProfile, setSavingProfile] = React.useState(false);
 
   const [notifications, setNotifications] = React.useState({
@@ -99,13 +118,18 @@ export default function SettingsPage() {
                 <CardTitle className="text-sm">Personal information</CardTitle>
                 <CardDescription className="text-xs">
                   Update your name, title, and email visible to teammates.
+                  {isDemo && (
+                    <span className="block mt-1 text-amber-500/90">
+                      Demo mode: profile below matches sample data. Switch to Workspace in the top bar for your account.
+                    </span>
+                  )}
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center gap-4">
                   <Avatar className="h-14 w-14 rounded-md">
                     <AvatarFallback className="rounded-md bg-primary/15 text-primary text-lg font-semibold">
-                      {initials(currentUser.displayName)}
+                      {initials(displayName || "?")}
                     </AvatarFallback>
                   </Avatar>
                   <div>

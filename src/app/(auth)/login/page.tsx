@@ -30,6 +30,7 @@ import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { exchangeIdTokenForSession } from "@/lib/auth/client-session";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { DemoRolePicker } from "@/components/auth/demo-role-picker";
 
 const schema = z.object({
   email: z.string().min(1, "Email is required").email("Enter a valid email"),
@@ -186,6 +187,8 @@ function LoginForm() {
         <Globe className="h-4 w-4" />
         Sign in with Google
       </Button>
+
+      <DemoRolePicker />
 
       <p className="text-center text-xs text-muted-foreground">
         No account yet?{" "}

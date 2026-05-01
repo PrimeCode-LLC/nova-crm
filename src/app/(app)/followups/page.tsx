@@ -19,10 +19,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { KpiCard } from "@/components/common/kpi-card";
 import { UserChip } from "@/components/common/user-chip";
-import { mockFollowups, getLeadById } from "@/lib/mock-data";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import type { Followup } from "@/lib/types";
 
 function categorize(dueAt: string) {
   const d = new Date(dueAt);
@@ -36,8 +38,9 @@ function categorize(dueAt: string) {
 }
 
 export default function FollowupsPage() {
-  const open = mockFollowups.filter((f) => !f.completedAt);
-  const done = mockFollowups.filter((f) => f.completedAt);
+  const { followups, isDemo } = useWorkspace();
+  const open = followups.filter((f) => !f.completedAt);
+  const done = followups.filter((f) => f.completedAt);
 
   const overdue = open.filter((f) => categorize(f.dueAt) === "overdue");
   const today = open.filter((f) => categorize(f.dueAt) === "today");
@@ -56,6 +59,10 @@ export default function FollowupsPage() {
         }
       />
       <PageBody>
+        {!isDemo && followups.length === 0 ? (
+          <WorkspaceEmptyHint title="No followups in workspace" />
+        ) : (
+          <>
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <KpiCard label="Overdue" value={overdue.length} icon={AlertTriangle} />
           <KpiCard label="Due today" value={today.length} icon={Clock} />
@@ -125,6 +132,8 @@ export default function FollowupsPage() {
             </Card>
           </TabsContent>
         </Tabs>
+          </>
+        )}
       </PageBody>
     </>
   );
@@ -140,9 +149,10 @@ function FollowupGroup({
   title: string;
   description: string;
   tone: "rose" | "amber" | "neutral";
-  items: typeof mockFollowups;
+  items: Followup[];
   empty: string;
 }) {
+  const { getLeadById } = useWorkspace();
   const toneRing =
     tone === "rose"
       ? "border-rose-500/30 bg-rose-500/5"
