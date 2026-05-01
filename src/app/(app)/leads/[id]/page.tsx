@@ -71,6 +71,7 @@ export default async function LeadDetailPage({
             <Button
               variant="ghost"
               size="icon-sm"
+              nativeButton={false}
               render={
                 <Link href="/leads" aria-label="Back to leads">
                   <ArrowLeft className="h-4 w-4" />
@@ -236,9 +237,9 @@ export default async function LeadDetailPage({
                     <dt className="text-muted-foreground">Size</dt>
                     <dd>{account.size}</dd>
                     <dt className="text-muted-foreground">Revenue</dt>
-                    <dd>{account.revenueRange ? REVENUE_RANGES[account.revenueRange] : "—"}</dd>
+                    <dd>{account.revenueRange ? REVENUE_RANGES[account.revenueRange] : "-"}</dd>
                     <dt className="text-muted-foreground">Founded</dt>
-                    <dd>{account.yearFounded ?? "—"}</dd>
+                    <dd>{account.yearFounded ?? "-"}</dd>
                     <dt className="text-muted-foreground">Location</dt>
                     <dd>{account.location}</dd>
                     <dt className="text-muted-foreground">Website</dt>
@@ -253,7 +254,7 @@ export default async function LeadDetailPage({
                           {account.domain}
                         </a>
                       ) : (
-                        "—"
+                        "-"
                       )}
                     </dd>
                   </dl>
@@ -305,9 +306,13 @@ export default async function LeadDetailPage({
               </CardHeader>
               <CardContent className="pt-0 space-y-2 text-xs text-muted-foreground">
                 <p>
-                  Response time was <span className="font-semibold text-foreground tabular-nums">
+                  Response time was{" "}
+                  <span className="font-semibold text-foreground tabular-nums">
                     {lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "n/a"}
-                  </span> — {lead.responseTimeMinutes && lead.responseTimeMinutes < 60 ? "in top 10%" : "slower than team avg"}.
+                  </span>
+                  {lead.responseTimeMinutes && lead.responseTimeMinutes < 60
+                    ? ", in the top 10%."
+                    : ", slower than team average."}
                 </p>
                 <p>
                   Last activity {fmtRelative(lead.lastActivityAt)} · {lead.touches} touches total.

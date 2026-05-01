@@ -32,7 +32,7 @@ export async function POST(req: Request) {
     const decoded = await adminAuth.verifyIdToken(idToken);
     if (Date.now() / 1000 - decoded.auth_time > 60 * 60) {
       return NextResponse.json(
-        { error: "ID token is too old — sign in again." },
+        { error: "ID token is too old. Sign in again." },
         { status: 401 },
       );
     }

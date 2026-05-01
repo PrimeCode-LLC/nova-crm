@@ -228,13 +228,13 @@ export default function AdminUsersPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="py-2 text-sm text-muted-foreground">
-                        {dept?.name ?? "—"}
+                        {dept?.name ?? "-"}
                       </TableCell>
                       <TableCell className="py-2">
                         {u.managerId ? (
                           <UserChip userId={u.managerId} size="xs" />
                         ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
+                          <span className="text-xs text-muted-foreground">-</span>
                         )}
                       </TableCell>
                       <TableCell className="py-2">
@@ -386,7 +386,7 @@ export default function AdminUsersPage() {
                         <Building2 className="h-3.5 w-3.5" /> Department
                       </dt>
                       <dd className="text-right">
-                        {userDept?.name ?? "—"}
+                        {userDept?.name ?? "-"}
                       </dd>
                     </div>
                     <div className="flex justify-between">
@@ -395,7 +395,7 @@ export default function AdminUsersPage() {
                         {selectedUser.managerId ? (
                           <UserChip userId={selectedUser.managerId} size="xs" />
                         ) : (
-                          "—"
+                          "-"
                         )}
                       </dd>
                     </div>

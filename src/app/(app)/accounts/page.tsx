@@ -34,7 +34,7 @@ export default function AccountsPage() {
     <>
       <PageHeader
         title="Accounts"
-        description="Companies we're selling into — deduped by domain."
+        description="Companies we're selling into, deduped by domain."
         actions={
           <>
             <Button variant="outline" size="sm">
@@ -102,7 +102,7 @@ export default function AccountsPage() {
                     </TableCell>
                     <TableCell className="py-2 text-sm text-muted-foreground">{a.size}</TableCell>
                     <TableCell className="py-2 text-sm text-muted-foreground">
-                      {a.revenueRange ? REVENUE_RANGES[a.revenueRange] : "—"}
+                      {a.revenueRange ? REVENUE_RANGES[a.revenueRange] : "-"}
                     </TableCell>
                     <TableCell className="py-2 text-sm text-muted-foreground">{a.location}</TableCell>
                     <TableCell className="py-2 text-right tabular-nums">{a.contactCount}</TableCell>
@@ -111,7 +111,7 @@ export default function AccountsPage() {
                       {a.openDealValue > 0 ? (
                         <span className="font-semibold text-emerald-400">{fmtCurrency(a.openDealValue)}</span>
                       ) : (
-                        <span className="text-muted-foreground">—</span>
+                        <span className="text-muted-foreground">-</span>
                       )}
                     </TableCell>
                     <TableCell className="py-2">

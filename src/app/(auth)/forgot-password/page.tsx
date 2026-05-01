@@ -41,7 +41,7 @@ export default function ForgotPasswordPage() {
   async function onSubmit(values: FormValues) {
     if (isAuthDisabled()) {
       setSent(true);
-      toast.success("Reset link sent — check your inbox (auth disabled mode)");
+      toast.success("Reset link sent. Check your inbox (auth disabled mode)");
       return;
     }
     if (!isFirebaseWebConfigured()) {
@@ -54,7 +54,7 @@ export default function ForgotPasswordPage() {
       const auth = getFirebaseAuth();
       await sendPasswordResetEmail(auth, values.email);
       setSent(true);
-      toast.success("Reset link sent — check your inbox");
+      toast.success("Reset link sent. Check your inbox");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Request failed";
       toast.error(msg);

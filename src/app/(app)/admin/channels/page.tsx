@@ -39,7 +39,7 @@ export default function AdminChannelsPage() {
         title="Channels"
         description="Configure outreach channels, funnel stages, and automation rules."
         actions={
-          <Button variant="outline" size="sm" onClick={() => toast.info("Custom channel UI — coming soon")}>
+          <Button variant="outline" size="sm" onClick={() => toast.info("Custom channel UI (coming soon)")}>
             <Plus className="h-3.5 w-3.5" /> Add custom channel
           </Button>
         }
@@ -92,7 +92,7 @@ export default function AdminChannelsPage() {
                     variant="outline"
                     size="sm"
                     className="h-7"
-                    onClick={() => toast.info(`Configure ${ch.label} — coming soon`)}
+                    onClick={() => toast.info(`Configure ${ch.label} (coming soon)`)}
                   >
                     <Settings className="h-3.5 w-3.5" /> Configure
                   </Button>
@@ -115,7 +115,7 @@ export default function AdminChannelsPage() {
               variant="outline"
               size="sm"
               className="mt-3"
-              onClick={() => toast.info("Custom channel creation — coming soon")}
+              onClick={() => toast.info("Custom channel creation (coming soon)")}
             >
               <Plus className="h-3.5 w-3.5" /> Add custom channel
             </Button>

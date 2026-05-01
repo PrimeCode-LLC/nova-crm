@@ -79,7 +79,7 @@ function DailyRollupForm() {
       <CardHeader>
         <CardTitle className="text-sm">Log today's activity</CardTitle>
         <CardDescription className="text-xs">
-          Enter counts for your channel — takes ~30 seconds. Feeds into funnel analytics and scorecards.
+          Enter counts for your channel (~30 seconds). Feeds into funnel analytics and scorecards.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -221,14 +221,14 @@ function RecordsTable() {
                 <TableCell className="py-2 text-xs font-mono text-muted-foreground">{a.type}</TableCell>
                 <TableCell className="py-2"><UserChip userId={a.userId} size="xs" /></TableCell>
                 <TableCell className="py-2"><ChannelChip channel={a.channel} /></TableCell>
-                <TableCell className="py-2 text-sm">{a.summary ?? "—"}</TableCell>
+                <TableCell className="py-2 text-sm">{a.summary ?? "-"}</TableCell>
                 <TableCell className="py-2 text-sm">
                   {a.leadId ? (
                     <Link href={`/leads/${a.leadId}`} className="hover:text-primary text-primary/80">
                       {a.leadId}
                     </Link>
                   ) : (
-                    "—"
+                    "-"
                   )}
                 </TableCell>
                 <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">

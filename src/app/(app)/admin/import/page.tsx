@@ -142,7 +142,7 @@ export default function AdminImportPage() {
                   Drop your file here, or{" "}
                   <button
                     className="text-primary hover:underline"
-                    onClick={() => toast.info("File picker — coming soon")}
+                    onClick={() => toast.info("File picker (coming soon)")}
                   >
                     browse
                   </button>
@@ -156,14 +156,14 @@ export default function AdminImportPage() {
             <div className="flex items-center gap-3">
               <Button
                 variant="outline"
-                onClick={() => toast.info("File picker — coming soon")}
+                onClick={() => toast.info("File picker (coming soon)")}
               >
                 <Upload className="h-4 w-4" /> Upload file
               </Button>
               <Button
                 variant="outline"
                 onClick={() => {
-                  toast.success("Paste detected — 248 rows");
+                  toast.success("Paste detected: 248 rows");
                   setTimeout(() => setStep(1), 400);
                 }}
               >
@@ -215,7 +215,7 @@ export default function AdminImportPage() {
                         </SelectTrigger>
                         <SelectContent>
                           <SelectItem value="skip" className="text-muted-foreground">
-                            — Skip this column —
+                            Skip this column
                           </SelectItem>
                           {TARGET_FIELDS.map((tf) => (
                             <SelectItem key={tf.value} value={tf.value}>

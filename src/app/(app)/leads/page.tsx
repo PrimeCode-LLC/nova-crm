@@ -19,6 +19,7 @@ export default function LeadsPage() {
             <Button
               variant="outline"
               size="sm"
+              nativeButton={false}
               render={
                 <Link href="/pipeline">
                   <Kanban className="h-3.5 w-3.5" /> Kanban

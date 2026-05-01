@@ -110,7 +110,7 @@ function LoginForm() {
       <div>
         <h2 className="text-lg font-semibold tracking-tight">Sign in</h2>
         <p className="text-sm text-muted-foreground mt-0.5">
-          Welcome back — let&apos;s get to work.
+          Welcome back. Let&apos;s get to work.
         </p>
       </div>
 

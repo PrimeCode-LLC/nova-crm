@@ -51,7 +51,7 @@
   --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* Light theme — neutral zinc with indigo accent */
+/* Light theme: neutral zinc with indigo accent */
 :root {
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
@@ -90,7 +90,7 @@
   --sidebar-ring: oklch(0.54 0.18 265);
 }
 
-/* Dark theme — neutral near-black with indigo accent (DEFAULT) */
+/* Dark theme: neutral near-black with indigo accent (DEFAULT) */
 .dark {
   --background: oklch(0.14 0 0);
   --foreground: oklch(0.98 0 0);

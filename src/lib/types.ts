@@ -1,4 +1,4 @@
-// Domain types — the single source of truth for the CRM entities.
+// Domain types: single source of truth for the CRM entities.
 // These mirror the Firestore collection shapes (see PLAN.md §3).
 
 export type ISODate = string;

@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import {
   ResponsiveContainer,
@@ -28,7 +29,8 @@ function generateSeries(seed: number, days = 30) {
 }
 
 export function TrendChart() {
-  const data = generateSeries(4);
+  const data = React.useMemo(() => generateSeries(4), []);
+
   return (
     <Card className="min-w-0">
       <CardHeader className="pb-3">
@@ -94,6 +96,7 @@ export function TrendChart() {
                 stroke="var(--chart-1)"
                 strokeWidth={2}
                 fill="url(#gReplies)"
+                isAnimationActive={false}
               />
               <Area
                 type="monotone"
@@ -101,6 +104,7 @@ export function TrendChart() {
                 stroke="var(--chart-2)"
                 strokeWidth={2}
                 fill="url(#gMeetings)"
+                isAnimationActive={false}
               />
               <Area
                 type="monotone"
@@ -108,6 +112,7 @@ export function TrendChart() {
                 stroke="var(--chart-3)"
                 strokeWidth={2}
                 fill="url(#gClosed)"
+                isAnimationActive={false}
               />
             </AreaChart>
           </ResponsiveContainer>

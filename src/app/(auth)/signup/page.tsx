@@ -67,7 +67,7 @@ export default function SignupPage() {
       const idToken = await cred.user.getIdToken();
       await exchangeIdTokenForSession(idToken, { company: values.company });
       router.replace("/dashboard");
-      toast.success("Account created — welcome aboard!");
+      toast.success("Account created. Welcome aboard!");
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : "Sign-up failed";
       toast.error(msg);

@@ -87,7 +87,7 @@ export default function AdminPermissionsPage() {
               <span className="rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 font-medium">Person override (wins)</span>
             </div>
             <p className="text-muted-foreground text-xs">
-              A <em>deny</em> at any level blocks access, even if a lower layer grants it. Use sparingly — most access should flow from roles.
+              A <em>deny</em> at any level blocks access, even if a lower layer grants it. Use sparingly; most access should flow from roles.
             </p>
           </div>
         </div>
@@ -142,7 +142,7 @@ export default function AdminPermissionsPage() {
                       </Badge>
                     </TableCell>
                     <TableCell className="py-2 text-xs text-muted-foreground max-w-[240px] truncate">
-                      {po.note ?? "—"}
+                      {po.note ?? "-"}
                     </TableCell>
                     <TableCell className="py-2">
                       <UserChip userId={po.createdBy} size="xs" />

@@ -34,7 +34,7 @@ export default function ContactsPage() {
     <>
       <PageHeader
         title="Contacts"
-        description="People at our accounts — deduped by email."
+        description="People at our accounts, deduped by email."
         actions={
           <>
             <Button variant="outline" size="sm">
@@ -120,7 +120,7 @@ export default function ContactsPage() {
                             {c.phone}
                           </span>
                         ) : (
-                          "—"
+                          "-"
                         )}
                       </TableCell>
                       <TableCell className="py-2">

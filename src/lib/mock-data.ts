@@ -154,7 +154,7 @@ export const mockPermissionOverrides: PermissionOverride[] = [
     action: "delete",
     scope: "own",
     effect: "deny",
-    note: "PIP — can edit but not delete during probation.",
+    note: "PIP: can edit but not delete during probation.",
     createdBy: "u-mgr-email",
     createdAt: isoDaysAgo(14),
   },
@@ -302,7 +302,7 @@ const triggers = [
   "New VP of Sales hired 9 days ago",
   "Posted on LinkedIn about scaling outbound",
   "Shipped mobile app on Product Hunt",
-  "Opened NYC office — hiring SDRs",
+  "Opened NYC office; hiring SDRs",
   "Mentioned Klaviyo pain in a podcast",
   "ICP match, using HubSpot, no BDRs yet",
 ];
@@ -347,7 +347,7 @@ export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
     businessFocus: "B2B SaaS selling into mid-market and enterprise.",
     hiringSignals: i % 3 === 0 ? "Open SDR role posted 4 days ago." : undefined,
     recentNews: i % 4 === 0 ? "Announced new product launch last week." : undefined,
-    psLine: i % 2 === 0 ? "Saw your recent LinkedIn post on outbound efficiency — resonated." : undefined,
+    psLine: i % 2 === 0 ? "Saw your recent LinkedIn post on outbound efficiency; resonated." : undefined,
 
     pushToInstantly: channel === "cold_email" ? pick(pushes, i) : undefined,
     pushToLinkedIn: channel === "linkedin_outbound" ? pick(pushes, i + 1) : undefined,
@@ -380,7 +380,7 @@ export const mockDeals: Deal[] = mockLeads
     leadId: l.id,
     accountId: l.accountId,
     contactId: l.contactId,
-    name: `${l.companyName} — SaaS Subscription`,
+    name: `${l.companyName}: SaaS Subscription`,
     stage: l.stage,
     value: l.estimatedValue ?? 10000 + i * 2500,
     currency: "USD",
@@ -452,7 +452,7 @@ export const mockTimelineByLead: Record<string, TimelineEvent[]> = Object.fromEn
         leadId: l.id,
         type: "email_sent",
         actorId: l.ownerId,
-        summary: `Outbound email sent — Step 1`,
+        summary: `Outbound email sent (Step 1)`,
         createdAt: isoDaysAgo(18 - i),
       },
       {
@@ -460,7 +460,7 @@ export const mockTimelineByLead: Record<string, TimelineEvent[]> = Object.fromEn
         leadId: l.id,
         type: "email_replied",
         actorId: l.ownerId,
-        summary: `Reply received — positive, wants demo next week`,
+        summary: `Reply received: positive, wants demo next week`,
         createdAt: isoDaysAgo(12 - (i % 5)),
       },
       {

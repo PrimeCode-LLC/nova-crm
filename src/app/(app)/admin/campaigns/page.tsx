@@ -40,7 +40,7 @@ export default function AdminCampaignsPage() {
         title="Campaigns"
         description="Track all outreach campaigns across channels."
         actions={
-          <Button size="sm" onClick={() => toast.info("New campaign — coming soon")}>
+          <Button size="sm" onClick={() => toast.info("New campaign (coming soon)")}>
             <Plus className="h-3.5 w-3.5" /> New campaign
           </Button>
         }
@@ -94,10 +94,10 @@ export default function AdminCampaignsPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="py-2 text-xs font-mono text-muted-foreground">
-                        {c.externalRef ?? "—"}
+                        {c.externalRef ?? "-"}
                       </TableCell>
                       <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
-                        {c.startedAt ? fmtRelative(c.startedAt) : "—"}
+                        {c.startedAt ? fmtRelative(c.startedAt) : "-"}
                       </TableCell>
                       <TableCell className="py-2 text-right tabular-nums text-sm">
                         {fmtNumber(c.stats.sent)}

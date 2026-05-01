@@ -17,6 +17,7 @@ export default function PipelinePage() {
             <Button
               variant="outline"
               size="sm"
+              nativeButton={false}
               render={
                 <Link href="/leads">
                   <TableIcon className="h-3.5 w-3.5" /> Table

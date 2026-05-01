@@ -48,6 +48,7 @@ export default async function AccountDetailPage({
             <Button
               variant="ghost"
               size="icon-sm"
+              nativeButton={false}
               render={
                 <Link href="/accounts" aria-label="Back">
                   <ArrowLeft className="h-4 w-4" />
@@ -149,7 +150,7 @@ export default async function AccountDetailPage({
                           </TableCell>
                           <TableCell className="py-2 text-sm text-muted-foreground">{c.title}</TableCell>
                           <TableCell className="py-2 text-sm text-muted-foreground">{c.email}</TableCell>
-                          <TableCell className="py-2 text-sm text-muted-foreground tabular-nums">{c.phone ?? "—"}</TableCell>
+                          <TableCell className="py-2 text-sm text-muted-foreground tabular-nums">{c.phone ?? "-"}</TableCell>
                           <TableCell className="py-2">
                             <UserChip userId={c.ownerId} size="xs" />
                           </TableCell>
@@ -254,9 +255,9 @@ export default async function AccountDetailPage({
                   <dt className="text-muted-foreground">Size</dt>
                   <dd>{account.size}</dd>
                   <dt className="text-muted-foreground">Revenue</dt>
-                  <dd>{account.revenueRange ? REVENUE_RANGES[account.revenueRange] : "—"}</dd>
+                  <dd>{account.revenueRange ? REVENUE_RANGES[account.revenueRange] : "-"}</dd>
                   <dt className="text-muted-foreground">Founded</dt>
-                  <dd>{account.yearFounded ?? "—"}</dd>
+                  <dd>{account.yearFounded ?? "-"}</dd>
                   <dt className="text-muted-foreground">Location</dt>
                   <dd>{account.location}</dd>
                   <dt className="text-muted-foreground">Website</dt>
@@ -271,7 +272,7 @@ export default async function AccountDetailPage({
                         {account.domain}
                       </a>
                     ) : (
-                      "—"
+                      "-"
                     )}
                   </dd>
                   {account.linkedin && (

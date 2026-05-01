@@ -189,7 +189,7 @@ export function LeadsTable({ leads }: LeadsTableProps) {
       header: "Push",
       cell: ({ row }) => {
         const v = row.original.pushToInstantly ?? row.original.pushToLinkedIn;
-        if (!v) return <span className="text-xs text-muted-foreground">—</span>;
+        if (!v) return <span className="text-xs text-muted-foreground">-</span>;
         const t = PUSH_STATUS_TONE[v];
         return (
           <Badge variant="outline" className={cn("rounded-md", t.className)}>

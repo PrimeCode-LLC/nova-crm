@@ -44,7 +44,7 @@ export function LeadTouchpoints({ touchpoints }: { touchpoints: Touchpoint[] }) 
                     <Badge variant="outline" className="font-mono text-[10px]">
                       {t.state}
                     </Badge>
-                    <span className="text-sm flex-1">{t.summary ?? "—"}</span>
+                    <span className="text-sm flex-1">{t.summary ?? "-"}</span>
                     <span
                       className="text-xs text-muted-foreground tabular-nums"
                       title={fmtDate(t.occurredAt, "PPpp")}

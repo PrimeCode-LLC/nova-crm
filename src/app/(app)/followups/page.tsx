@@ -48,7 +48,7 @@ export default function FollowupsPage() {
     <>
       <PageHeader
         title="Followups"
-        description="Your tasks and reminders — including auto-generated idle warnings."
+        description="Your tasks and reminders, including auto-generated idle warnings."
         actions={
           <Button size="sm">
             <Plus className="h-3.5 w-3.5" /> New followup
@@ -78,7 +78,7 @@ export default function FollowupsPage() {
           <TabsContent value="open" className="mt-4 space-y-4">
             <FollowupGroup
               title="Overdue"
-              description="Past due — highest priority."
+              description="Past due (highest priority)."
               tone="rose"
               items={overdue}
               empty="Nothing overdue. Nice."

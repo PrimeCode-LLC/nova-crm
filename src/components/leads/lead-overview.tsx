@@ -34,15 +34,15 @@ export function LeadOverview({ lead }: { lead: Lead }) {
                   variant="outline"
                   className="bg-amber-500/10 text-amber-400 border-amber-500/20 gap-1"
                 >
-                  <AlertTriangle className="h-3 w-3" /> Required — fill before pushing
+                  <AlertTriangle className="h-3 w-3" /> Required: fill before pushing
                 </Badge>
               )}
             </Field>
-            <Field label="Business focus">{lead.businessFocus ?? "—"}</Field>
-            <Field label="Pain points">{lead.painPoints ?? "—"}</Field>
-            <Field label="Recent news">{lead.recentNews ?? "—"}</Field>
-            <Field label="Hiring signals">{lead.hiringSignals ?? "—"}</Field>
-            <Field label="P.S. line">{lead.psLine ?? "—"}</Field>
+            <Field label="Business focus">{lead.businessFocus ?? "-"}</Field>
+            <Field label="Pain points">{lead.painPoints ?? "-"}</Field>
+            <Field label="Recent news">{lead.recentNews ?? "-"}</Field>
+            <Field label="Hiring signals">{lead.hiringSignals ?? "-"}</Field>
+            <Field label="P.S. line">{lead.psLine ?? "-"}</Field>
             <Field label="Tools used">
               {lead.toolsUsed?.length ? (
                 <div className="flex flex-wrap gap-1">
@@ -53,7 +53,7 @@ export function LeadOverview({ lead }: { lead: Lead }) {
                   ))}
                 </div>
               ) : (
-                "—"
+                "-"
               )}
             </Field>
           </dl>
@@ -78,7 +78,7 @@ export function LeadOverview({ lead }: { lead: Lead }) {
               </Badge>
             </Field>
             <Field label="Estimated value">{fmtCurrency(lead.estimatedValue)}</Field>
-            <Field label="Expected close">{lead.expectedCloseDate ? fmtDate(lead.expectedCloseDate) : "—"}</Field>
+            <Field label="Expected close">{lead.expectedCloseDate ? fmtDate(lead.expectedCloseDate) : "-"}</Field>
           </dl>
           {lead.bant && (
             <div className="space-y-2 pt-2">
@@ -128,9 +128,9 @@ export function LeadOverview({ lead }: { lead: Lead }) {
                 {lead.doNotContact ? "Yes" : "No"}
               </Badge>
             </Field>
-            <Field label="Company size">{lead.companySize ?? "—"}</Field>
+            <Field label="Company size">{lead.companySize ?? "-"}</Field>
             <Field label="Revenue range">
-              {lead.revenueRange ? REVENUE_RANGES[lead.revenueRange] : "—"}
+              {lead.revenueRange ? REVENUE_RANGES[lead.revenueRange] : "-"}
             </Field>
           </dl>
         </CardContent>
@@ -146,7 +146,7 @@ export function LeadOverview({ lead }: { lead: Lead }) {
           <Metric label="Last activity" value={fmtRelative(lead.lastActivityAt)} />
           <Metric
             label="Response time"
-            value={lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "—"}
+            value={lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "-"}
           />
           <Metric label="Created" value={fmtRelative(lead.createdAt)} />
         </CardContent>
@@ -158,7 +158,7 @@ export function LeadOverview({ lead }: { lead: Lead }) {
           <CardTitle className="text-sm">Next action</CardTitle>
         </CardHeader>
         <CardContent className="pt-0 space-y-2 text-sm">
-          <p className="font-medium">{lead.nextAction ?? "—"}</p>
+          <p className="font-medium">{lead.nextAction ?? "-"}</p>
           {lead.notes && (
             <p className="text-muted-foreground border-l-2 pl-3">{lead.notes}</p>
           )}

@@ -30,7 +30,7 @@ import { toast } from "sonner";
 const currentUser = mockUsers.find((u) => u.id === CURRENT_USER_ID)!;
 
 const INTEGRATIONS = [
-  { id: "instantly", name: "Instantly", desc: "Cold email automation — sends, tracks opens/replies.", connected: false },
+  { id: "instantly", name: "Instantly", desc: "Cold email automation: sends, tracks opens/replies.", connected: false },
   { id: "apollo", name: "Apollo", desc: "Lead enrichment and contact data.", connected: false },
   { id: "outlook", name: "Outlook / Exchange", desc: "Sync email threads to lead timeline.", connected: false },
   { id: "linkedin", name: "LinkedIn Sales Nav", desc: "Import connection data + sequence tracking.", connected: false },
@@ -252,7 +252,7 @@ export default function SettingsPage() {
                       className="shrink-0"
                       onClick={() =>
                         toast.info(
-                          int.connected ? `Configure ${int.name}` : `Connect ${int.name} — coming soon`,
+                          int.connected ? `Configure ${int.name}` : `Connect ${int.name} (coming soon)`,
                         )
                       }
                     >
@@ -354,7 +354,7 @@ export default function SettingsPage() {
                     <div>
                       <div className="text-sm font-medium">Indigo</div>
                       <div className="text-xs text-muted-foreground">
-                        Default accent — more colors in v2
+                        Default accent. More colors in v2.
                       </div>
                     </div>
                   </div>

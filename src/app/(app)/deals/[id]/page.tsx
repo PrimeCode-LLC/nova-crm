@@ -32,6 +32,7 @@ export default async function DealDetailPage({
             <Button
               variant="ghost"
               size="icon-sm"
+              nativeButton={false}
               render={
                 <Link href="/deals" aria-label="Back">
                   <ArrowLeft className="h-4 w-4" />

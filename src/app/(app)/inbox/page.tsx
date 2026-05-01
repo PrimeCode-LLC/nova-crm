@@ -143,7 +143,7 @@ const MOCK_NOTIFICATIONS: Notification[] = [
     kind: "idle",
     read: true,
     sender: "u-director",
-    message: "Idle alert: Aurora Games — 12 days since last touch",
+    message: "Idle alert: Aurora Games, 12 days since last touch",
     target: "Aurora Games",
     targetHref: "/leads/l-10",
     timestamp: ago(2880),

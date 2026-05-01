@@ -41,6 +41,7 @@ export default async function ContactDetailPage({
             <Button
               variant="ghost"
               size="icon-sm"
+              nativeButton={false}
               render={
                 <Link href="/contacts" aria-label="Back">
                   <ArrowLeft className="h-4 w-4" />

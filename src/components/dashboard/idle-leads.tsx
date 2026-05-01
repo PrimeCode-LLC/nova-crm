@@ -34,6 +34,7 @@ export function IdleLeads() {
             variant="ghost"
             size="sm"
             className="text-xs"
+            nativeButton={false}
             render={
               <Link href="/leads?filter=idle">
                 See all <ChevronRight className="h-3 w-3 ml-1" />

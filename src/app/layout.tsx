@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     default: "Nova CRM",
     template: "%s · Nova CRM",
   },
-  description: "Multi-channel Sales CRM — built for pipeline clarity and funnel diagnosis.",
+  description: "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
 };
 
 export default function RootLayout({

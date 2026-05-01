@@ -71,7 +71,7 @@ export default function AdminProfilesPage() {
     <>
       <PageHeader
         title="Profiles"
-        description="Outreach personas — Upwork accounts, CVs, email inboxes, LinkedIn profiles."
+        description="Outreach personas: Upwork accounts, CVs, email inboxes, LinkedIn profiles."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New profile

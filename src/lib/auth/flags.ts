@@ -1,4 +1,4 @@
-/** No Firebase imports — safe for Edge middleware. */
+/** No Firebase imports; safe for Edge proxy. */
 export function isAuthDisabled(): boolean {
   return (
     process.env.DISABLE_AUTH === "true" ||
