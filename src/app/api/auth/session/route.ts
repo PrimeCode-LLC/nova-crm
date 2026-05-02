@@ -19,6 +19,7 @@ import {
   lookupInviteByTokenServer,
   markInviteAcceptedServer,
 } from "@/lib/platform/invites-server";
+import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
 
 type SessionRequestBody = {
   idToken?: string;
@@ -26,6 +27,8 @@ type SessionRequestBody = {
   company?: string;
   /** Optional invite token from `/signup?invite=...`. */
   inviteToken?: string;
+  /** Optional org-wide join token from `/signup?join=...` or login with the same param. */
+  openJoinToken?: string;
 };
 
 function isFirestoreFailedPrecondition(err: unknown): boolean {
@@ -58,6 +61,10 @@ export async function POST(req: Request) {
   const inviteToken =
     typeof body.inviteToken === "string" && body.inviteToken.trim()
       ? body.inviteToken.trim()
+      : undefined;
+  const openJoinToken =
+    typeof body.openJoinToken === "string" && body.openJoinToken.trim()
+      ? body.openJoinToken.trim()
       : undefined;
   if (!idToken || typeof idToken !== "string") {
     return NextResponse.json({ error: "idToken is required" }, { status: 400 });
@@ -99,6 +106,7 @@ export async function POST(req: Request) {
   let organizationId: string | undefined;
   let orgRole: "owner" | "admin" | "manager" | "member" | undefined;
   let isFreshSignup = false;
+  let membershipPending = false;
 
   // (a) invite
   if (inviteToken) {
@@ -140,8 +148,69 @@ export async function POST(req: Request) {
     isFreshSignup = true;
   }
 
+  // (a2) org-wide open join link — creates a pending member until an admin approves.
+  if (!organizationId && openJoinToken) {
+    const joinOrg = await verifyOpenJoinTokenServer(openJoinToken);
+    if (!joinOrg) {
+      return NextResponse.json(
+        { error: "Join link is invalid or has been rotated. Ask an admin for a new link." },
+        { status: 400 },
+      );
+    }
+    const targetOrgId = joinOrg.orgId;
+    let existingForJoin: Awaited<
+      ReturnType<typeof findMembershipForUserServer>
+    > = null;
+    try {
+      existingForJoin = await findMembershipForUserServer(uid);
+    } catch (err: unknown) {
+      if (isFirestoreFailedPrecondition(err)) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not resolve your workspace (Firestore index still deploying). Run from `crm`: firebase deploy --only firestore:indexes.",
+          },
+          { status: 503 },
+        );
+      }
+      throw err;
+    }
+
+    if (existingForJoin) {
+      if (existingForJoin.organizationId !== targetOrgId) {
+        return NextResponse.json(
+          { error: "You already belong to a different workspace." },
+          { status: 400 },
+        );
+      }
+      if (existingForJoin.status === "active") {
+        organizationId = existingForJoin.organizationId;
+        orgRole = existingForJoin.role;
+      } else if (existingForJoin.status === "pending") {
+        membershipPending = true;
+      } else {
+        return NextResponse.json(
+          { error: "Your membership in this workspace is not active." },
+          { status: 400 },
+        );
+      }
+    } else {
+      await upsertMemberServer({
+        organizationId: targetOrgId,
+        uid,
+        email,
+        displayName,
+        role: "member",
+        status: "pending",
+        invitedByUid: "open-join-link",
+      });
+      membershipPending = true;
+      isFreshSignup = true;
+    }
+  }
+
   // (b) reuse existing membership
-  if (!organizationId) {
+  if (!organizationId && !membershipPending) {
     // Fast path: `users/{uid}.organizationId` + direct `members/{uid}` read — no
     // collection-group index (covers normal sign-in after at least one session).
     const userSnap = await db.collection("users").doc(uid).get();
@@ -153,13 +222,17 @@ export async function POST(req: Request) {
     if (mirroredOrgId) {
       const member = await getMemberServer(mirroredOrgId, uid);
       if (member) {
-        organizationId = member.organizationId;
-        orgRole = member.role;
+        if (member.status === "pending") {
+          membershipPending = true;
+        } else if (member.status === "active") {
+          organizationId = member.organizationId;
+          orgRole = member.role;
+        }
       }
     }
   }
 
-  if (!organizationId) {
+  if (!organizationId && !membershipPending) {
     let existing;
     try {
       existing = await findMembershipForUserServer(uid);
@@ -176,13 +249,17 @@ export async function POST(req: Request) {
       throw err;
     }
     if (existing) {
-      organizationId = existing.organizationId;
-      orgRole = existing.role;
+      if (existing.status === "pending") {
+        membershipPending = true;
+      } else if (existing.status === "active") {
+        organizationId = existing.organizationId;
+        orgRole = existing.role;
+      }
     }
   }
 
   // (c) platform-seeded "pending owner" record matching this email
-  if (!organizationId && email) {
+  if (!organizationId && !membershipPending && email) {
     const pending = await findOrganizationByPendingEmailServer(email);
     if (pending) {
       const claim = await claimPendingOrgOwnerServer(pending.id, uid, email);
@@ -204,7 +281,7 @@ export async function POST(req: Request) {
   }
 
   // (d) brand-new signup with a company name → bootstrap a personal org
-  if (!organizationId && company) {
+  if (!organizationId && !membershipPending && company) {
     const created = await createOrganizationServer({
       name: company,
       ownerUid: uid,
@@ -237,8 +314,25 @@ export async function POST(req: Request) {
     updatedAt: FieldValue.serverTimestamp(),
   };
   if (company) userPayload.company = company;
-  if (organizationId) userPayload.organizationId = organizationId;
-  if (orgRole) userPayload.orgRole = orgRole;
+  if (membershipPending) {
+    let pendingOrgId = organizationId;
+    if (!pendingOrgId) {
+      try {
+        pendingOrgId = (await findMembershipForUserServer(uid))?.organizationId;
+      } catch {
+        /* ignore — user doc may still list membershipPendingOrgId from prior write */
+      }
+    }
+    if (pendingOrgId) {
+      userPayload.membershipPendingOrgId = pendingOrgId;
+    }
+    userPayload.organizationId = FieldValue.delete();
+    userPayload.orgRole = FieldValue.delete();
+  } else {
+    userPayload.membershipPendingOrgId = FieldValue.delete();
+    if (organizationId) userPayload.organizationId = organizationId;
+    if (orgRole) userPayload.orgRole = orgRole;
+  }
   if (!snap.exists) {
     userPayload.createdAt = FieldValue.serverTimestamp();
     // Map org owner to 'director' for the legacy CRM role system; everyone
@@ -251,8 +345,8 @@ export async function POST(req: Request) {
   // ────────────── 3. Stamp custom claims (Firestore rules read these) ──────────────
   const platformAdmin = await isUserPlatformAdmin(uid, email);
   await setAppClaims(adminAuth, uid, {
-    organizationId,
-    orgRole,
+    organizationId: membershipPending ? undefined : organizationId,
+    orgRole: membershipPending ? undefined : orgRole,
     platformAdmin: platformAdmin || undefined,
   });
 
@@ -270,9 +364,10 @@ export async function POST(req: Request) {
 
   const res = NextResponse.json({
     ok: true,
-    organizationId: organizationId ?? null,
-    orgRole: orgRole ?? null,
-    needsClaimRefresh: isFreshSignup,
+    organizationId: membershipPending ? null : (organizationId ?? null),
+    orgRole: membershipPending ? null : (orgRole ?? null),
+    membershipPending,
+    needsClaimRefresh: isFreshSignup || membershipPending,
   });
   res.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
     httpOnly: true,

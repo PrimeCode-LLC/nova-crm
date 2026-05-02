@@ -68,6 +68,10 @@ function docToOrg(id: string, data: DocumentData): Organization {
     settings,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
+    openJoinTokenHash:
+      typeof data.openJoinTokenHash === "string" && data.openJoinTokenHash
+        ? data.openJoinTokenHash
+        : undefined,
   };
 }
 
@@ -75,8 +79,9 @@ function docToOrg(id: string, data: DocumentData): Organization {
 export function sanitizeOrganizationForApi(org: Organization): Organization {
   const safeSettings: OrganizationSettings = { ...org.settings };
   delete safeSettings.inboundWebhookSecret;
+  const { openJoinTokenHash: _h, ...rest } = org;
   return {
-    ...org,
+    ...rest,
     settings: safeSettings,
     hasInboundWebhookSecret: Boolean(org.settings.inboundWebhookSecret?.trim()),
   };

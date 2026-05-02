@@ -7,11 +7,32 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isAuthDisabled } from "@/lib/auth/flags";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [name, setName] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+
+  React.useEffect(() => {
+    if (isAuthDisabled()) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { membershipPending?: boolean };
+        if (!cancelled && data.membershipPending) {
+          router.replace("/join/pending");
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

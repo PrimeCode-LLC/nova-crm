@@ -5,13 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CalendarClock, Clock, Plus, Sparkles } from "lucide-react";
-import type { Followup } from "@/lib/types";
+import type { Followup, Lead } from "@/lib/types";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { UserChip } from "@/components/common/user-chip";
+import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
-export function LeadFollowups({ followups }: { followups: Followup[] }) {
+export function LeadFollowups({ followups, lead }: { followups: Followup[]; lead: Lead }) {
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const { addFollowup, setFollowupCompleted, currentUserId, leads } = useWorkspace();
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
 
@@ -24,10 +28,19 @@ export function LeadFollowups({ followups }: { followups: Followup[] }) {
             Manual reminders + auto-generated idle warnings.
           </p>
         </div>
-        <Button size="sm">
+        <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> Add followup
         </Button>
       </div>
+
+      <NewFollowupDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        leads={leads}
+        currentUserId={currentUserId}
+        fixedLeadId={lead.id}
+        onCreate={addFollowup}
+      />
 
       <ul className="space-y-2">
         {open.map((f) => {
@@ -41,7 +54,13 @@ export function LeadFollowups({ followups }: { followups: Followup[] }) {
                 overdue && "border-destructive/30 bg-destructive/5",
               )}
             >
-              <Checkbox />
+              <Checkbox
+                checked={false}
+                onCheckedChange={(v) => {
+                  if (v === true) setFollowupCompleted(f.id, true);
+                }}
+                aria-label={`Mark ${f.title} complete`}
+              />
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium truncate">{f.title}</span>
@@ -92,7 +111,13 @@ export function LeadFollowups({ followups }: { followups: Followup[] }) {
                 key={f.id}
                 className="flex items-center gap-3 rounded-md border px-3 py-1.5 bg-muted/20 opacity-70"
               >
-                <Checkbox checked disabled />
+                <Checkbox
+                  checked
+                  onCheckedChange={(v) => {
+                    if (v !== true) setFollowupCompleted(f.id, false);
+                  }}
+                  aria-label={`Mark ${f.title} incomplete`}
+                />
                 <span className="text-sm line-through text-muted-foreground truncate flex-1">
                   {f.title}
                 </span>

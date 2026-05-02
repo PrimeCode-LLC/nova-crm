@@ -42,12 +42,15 @@ export function NewFollowupDialog({
   leads,
   currentUserId,
   onCreate,
+  /** When set, the followup is always created for this lead (lead picker hidden). */
+  fixedLeadId,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   leads: Lead[];
   currentUserId: string;
   onCreate: (followup: Followup) => void;
+  fixedLeadId?: string;
 }) {
   const [leadId, setLeadId] = React.useState("");
   const [title, setTitle] = React.useState("");
@@ -57,15 +60,15 @@ export function NewFollowupDialog({
 
   React.useEffect(() => {
     if (!open) return;
-    const lead = leads[0];
+    const lead = fixedLeadId ? leads.find((l) => l.id === fixedLeadId) : leads[0];
     React.startTransition(() => {
-      setLeadId(lead?.id ?? "");
+      setLeadId(fixedLeadId ?? lead?.id ?? "");
       setTitle(lead ? `Follow up with ${lead.contactName}` : "");
       setDescription("");
       setDueDate(todayInputValue());
       setPriority("medium");
     });
-  }, [open, leads]);
+  }, [open, leads, fixedLeadId]);
 
   const selectedLead = leads.find((l) => l.id === leadId);
 
@@ -106,31 +109,33 @@ export function NewFollowupDialog({
           <DialogHeader>
             <DialogTitle>New followup</DialogTitle>
             <DialogDescription>
-              Create a reminder linked to a lead. In demo mode this is saved for your browser session.
+              Create a reminder linked to a lead. Saved in this browser tab until you refresh or leave demo mode.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            <div className="grid gap-2">
-              <Label htmlFor="followup-lead">Lead</Label>
-              <Select
-                value={leadId}
-                onValueChange={(v) => {
-                  if (v) setLeadId(v);
-                }}
-                disabled={leads.length === 0}
-              >
-                <SelectTrigger id="followup-lead">
-                  <SelectValue placeholder="Select a lead" />
-                </SelectTrigger>
-                <SelectContent>
-                  {leads.map((l) => (
-                    <SelectItem key={l.id} value={l.id}>
-                      {l.contactName} · {l.companyName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {!fixedLeadId && (
+              <div className="grid gap-2">
+                <Label htmlFor="followup-lead">Lead</Label>
+                <Select
+                  value={leadId}
+                  onValueChange={(v) => {
+                    if (v) setLeadId(v);
+                  }}
+                  disabled={leads.length === 0}
+                >
+                  <SelectTrigger id="followup-lead">
+                    <SelectValue placeholder="Select a lead" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {leads.map((l) => (
+                      <SelectItem key={l.id} value={l.id}>
+                        {l.contactName} · {l.companyName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <div className="grid gap-2">
               <Label htmlFor="followup-title">Title</Label>
               <Input

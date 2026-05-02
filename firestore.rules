@@ -86,6 +86,8 @@ service cloud.firestore {
         && request.resource.data.organizationId == resource.data.organizationId
         && request.resource.data.orgRole == resource.data.orgRole
         && request.resource.data.roleId == resource.data.roleId
+        && request.resource.data.get('membershipPendingOrgId', null)
+            == resource.data.get('membershipPendingOrgId', null)
         && (!('isSuperAdmin' in request.resource.data)
             || request.resource.data.isSuperAdmin == resource.data.get('isSuperAdmin', false));
 

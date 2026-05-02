@@ -118,7 +118,8 @@ export async function upsertMemberServer(input: {
 
   await ref.set(payload, { merge: true });
 
-  if (!existing.exists && payload.status !== "disabled") {
+  const nextStatus = (payload.status as OrgMemberStatus) ?? "active";
+  if (!existing.exists && nextStatus === "active") {
     await bumpOrganizationSeatsServer(input.organizationId, 1);
   }
   return { created: !existing.exists };
@@ -147,10 +148,10 @@ export async function setMemberStatusServer(
   }
   await ref.update(updates);
 
-  if (prevStatus !== "disabled" && status === "disabled") {
-    await bumpOrganizationSeatsServer(orgId, -1);
-  } else if (prevStatus === "disabled" && status !== "disabled") {
+  if (prevStatus !== "active" && status === "active") {
     await bumpOrganizationSeatsServer(orgId, 1);
+  } else if (prevStatus === "active" && status !== "active") {
+    await bumpOrganizationSeatsServer(orgId, -1);
   }
   return { ok: true };
 }
@@ -180,10 +181,11 @@ export async function deleteMemberServer(
   if (!col) return { error: "Database not configured" };
   const cur = await col.doc(uid).get();
   if (!cur.exists) return { error: "Member not found" };
-  const wasActive =
-    (cur.data()?.status as OrgMemberStatus | undefined) !== "disabled";
+  const prevStatus = (cur.data()?.status as OrgMemberStatus | undefined) ?? "active";
   await col.doc(uid).delete();
-  if (wasActive) await bumpOrganizationSeatsServer(orgId, -1);
+  if (prevStatus === "active") {
+    await bumpOrganizationSeatsServer(orgId, -1);
+  }
   return { ok: true };
 }
 

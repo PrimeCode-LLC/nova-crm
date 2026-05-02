@@ -4,6 +4,7 @@ import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
 import { isAuthDisabled } from "@/lib/auth/flags";
 
 const APP_PROTECTED_PREFIXES = [
+  "/join",
   "/dashboard",
   "/leads",
   "/pipeline",
@@ -35,9 +36,11 @@ export function proxy(request: NextRequest) {
 
   // Don't bounce off /signup if there's an invite token to honor.
   const hasInvite = request.nextUrl.searchParams.has("invite");
+  const hasJoin = request.nextUrl.searchParams.has("join");
   if (
     hasSession &&
     !hasInvite &&
+    !hasJoin &&
     (pathname === "/login" || pathname === "/signup")
   ) {
     return NextResponse.redirect(new URL("/dashboard", request.url));

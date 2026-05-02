@@ -45,10 +45,15 @@ function SignupForm() {
   const router = useRouter();
   const params = useSearchParams();
   const inviteToken = params.get("invite") ?? undefined;
+  const joinToken = params.get("join") ?? undefined;
   const [loading, setLoading] = React.useState(false);
   const [invitePreview, setInvitePreview] =
     React.useState<InvitePreview | null>(null);
   const [inviteError, setInviteError] = React.useState<string | null>(null);
+  const [joinPreview, setJoinPreview] = React.useState<{ organizationName: string } | null>(
+    null,
+  );
+  const [joinError, setJoinError] = React.useState<string | null>(null);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -83,8 +88,35 @@ function SignupForm() {
     };
   }, [inviteToken, form]);
 
+  React.useEffect(() => {
+    if (!joinToken || inviteToken) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/auth/join/preview?token=${encodeURIComponent(joinToken)}`,
+          { cache: "no-store" },
+        );
+        const data = (await res.json()) as
+          | { organizationName: string }
+          | { error: string };
+        if (cancelled) return;
+        if ("error" in data) {
+          setJoinError(data.error);
+        } else {
+          setJoinPreview(data);
+        }
+      } catch {
+        if (!cancelled) setJoinError("Could not verify join link.");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [joinToken, inviteToken]);
+
   async function onSubmit(values: FormValues) {
-    if (!inviteToken && !values.company?.trim()) {
+    if (!inviteToken && !joinToken && !values.company?.trim()) {
       form.setError("company", { message: "Company name is required" });
       return;
     }
@@ -107,10 +139,18 @@ function SignupForm() {
       );
       await updateProfile(cred.user, { displayName: values.fullName });
       const idToken = await cred.user.getIdToken();
-      await exchangeIdTokenForSession(idToken, {
-        company: inviteToken ? undefined : values.company,
+      const exchanged = await exchangeIdTokenForSession(idToken, {
+        company: inviteToken || joinToken ? undefined : values.company,
         inviteToken,
+        openJoinToken: joinToken,
       });
+      if (exchanged.membershipPending) {
+        router.replace("/join/pending");
+        toast.message("Request submitted", {
+          description: "An admin will approve your access shortly.",
+        });
+        return;
+      }
       router.replace("/dashboard");
       toast.success(
         inviteToken
@@ -123,6 +163,24 @@ function SignupForm() {
     } finally {
       setLoading(false);
     }
+  }
+
+  if (joinError && !inviteToken) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold tracking-tight">Join link issue</h2>
+          <p className="mt-1 text-sm text-destructive">{joinError}</p>
+        </div>
+        <p className="text-sm text-muted-foreground">
+          Ask an admin for a new organization link, or{" "}
+          <Link href="/signup" className="text-primary hover:underline">
+            create your own workspace
+          </Link>
+          .
+        </p>
+      </div>
+    );
   }
 
   if (inviteError) {
@@ -147,12 +205,18 @@ function SignupForm() {
     <div className="space-y-5">
       <div>
         <h2 className="text-lg font-semibold tracking-tight">
-          {invitePreview ? `Join ${invitePreview.organizationName}` : "Create account"}
+          {invitePreview
+            ? `Join ${invitePreview.organizationName}`
+            : joinPreview
+              ? `Request access to ${joinPreview.organizationName}`
+              : "Create account"}
         </h2>
         <p className="mt-0.5 text-sm text-muted-foreground">
           {invitePreview
             ? `You've been invited as ${invitePreview.role}.`
-            : "Get your team set up in under 2 minutes."}
+            : joinPreview
+              ? "After you sign up, an admin approves your account before you can use the workspace."
+              : "Get your team set up in under 2 minutes."}
         </p>
       </div>
 
@@ -176,7 +240,7 @@ function SignupForm() {
                 </FormItem>
               )}
             />
-            {!invitePreview && (
+            {!invitePreview && !joinPreview && (
               <FormField
                 control={form.control}
                 name="company"
@@ -241,14 +305,23 @@ function SignupForm() {
               ? "Creating account…"
               : invitePreview
                 ? "Join workspace"
-                : "Create account"}
+                : joinPreview
+                  ? "Submit request"
+                  : "Create account"}
           </Button>
         </form>
       </Form>
 
       <p className="text-center text-xs text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/login" className="text-primary hover:underline font-medium">
+        <Link
+          href={
+            joinToken && !inviteToken
+              ? `/login?join=${encodeURIComponent(joinToken)}`
+              : "/login"
+          }
+          className="text-primary hover:underline font-medium"
+        >
           Sign in
         </Link>
       </p>

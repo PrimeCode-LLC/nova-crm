@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { FieldValue } from "firebase-admin/firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   deleteMemberServer,
@@ -7,9 +8,13 @@ import {
   listMembersServer,
   setMemberRoleServer,
   setMemberStatusServer,
+  hasSeatAvailableServer,
 } from "@/lib/platform/members-server";
 import { setAppClaims } from "@/lib/auth/claims";
 import { recordAudit } from "@/lib/firestore/audit";
+import type { AuditEvent } from "@/lib/firestore/audit";
+import { getAdminDb } from "@/lib/firebase/admin";
+import { COLLECTIONS } from "@/lib/firestore/collections";
 
 const patchSchema = z.object({
   uid: z.string().min(1),
@@ -64,14 +69,50 @@ export async function PATCH(req: Request) {
     });
   }
   if (status) {
+    const beforeStatus = (await getMemberServer(orgId, uid))?.status ?? "active";
+    if (status === "active" && beforeStatus === "pending") {
+      const seat = await hasSeatAvailableServer(orgId);
+      if ("error" in seat) {
+        return NextResponse.json({ error: seat.error }, { status: 400 });
+      }
+    }
     const r = await setMemberStatusServer(orgId, uid, status);
     if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
+
+    let auditEvent: AuditEvent = "member.enabled";
+    if (status === "disabled") auditEvent = "member.disabled";
+    else if (beforeStatus === "pending" && status === "active") {
+      auditEvent = "member.approved";
+    } else if (beforeStatus === "disabled" && status === "active") {
+      auditEvent = "member.enabled";
+    }
+
     await recordAudit({
       organizationId: orgId,
       actorUid: g.ctx.session.uid,
-      event: status === "disabled" ? "member.disabled" : "member.enabled",
+      event: auditEvent,
       meta: { uid },
     });
+
+    if (beforeStatus === "pending" && status === "active") {
+      const member = await getMemberServer(orgId, uid);
+      const db = getAdminDb();
+      if (db) {
+        await db
+          .collection(COLLECTIONS.users)
+          .doc(uid)
+          .set(
+            {
+              organizationId: orgId,
+              orgRole: member?.role ?? "member",
+              membershipPendingOrgId: FieldValue.delete(),
+              updatedAt: FieldValue.serverTimestamp(),
+            },
+            { merge: true },
+          );
+      }
+      await g.ctx.adminAuth.revokeRefreshTokens(uid);
+    }
   }
 
   // Refresh claims so the affected user's next ID-token refresh picks up the change.
@@ -84,10 +125,15 @@ export async function PATCH(req: Request) {
         orgRole: undefined,
       });
       await g.ctx.adminAuth.revokeRefreshTokens(uid);
-    } else {
+    } else if (effectiveStatus === "active") {
       await setAppClaims(g.ctx.adminAuth, uid, {
         organizationId: orgId,
         orgRole: member?.role,
+      });
+    } else {
+      await setAppClaims(g.ctx.adminAuth, uid, {
+        organizationId: undefined,
+        orgRole: undefined,
       });
     }
   }
@@ -112,6 +158,21 @@ export async function DELETE(req: Request) {
   const orgId = g.ctx.session.organizationId;
   const r = await deleteMemberServer(orgId, uid);
   if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
+  const db = getAdminDb();
+  if (db) {
+    await db
+      .collection(COLLECTIONS.users)
+      .doc(uid)
+      .set(
+        {
+          organizationId: FieldValue.delete(),
+          orgRole: FieldValue.delete(),
+          membershipPendingOrgId: FieldValue.delete(),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+  }
   await setAppClaims(g.ctx.adminAuth, uid, {});
   await g.ctx.adminAuth.revokeRefreshTokens(uid);
   await recordAudit({

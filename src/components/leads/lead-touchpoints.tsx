@@ -1,13 +1,20 @@
+"use client";
+
+import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import type { Touchpoint } from "@/lib/types";
+import type { Lead, Touchpoint } from "@/lib/types";
 import { CHANNELS } from "@/lib/constants";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { fmtRelative, fmtDate } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Plus } from "lucide-react";
+import { LogTouchpointDialog } from "@/components/leads/log-touchpoint-dialog";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
-export function LeadTouchpoints({ touchpoints }: { touchpoints: Touchpoint[] }) {
+export function LeadTouchpoints({ touchpoints, lead }: { touchpoints: Touchpoint[]; lead: Lead }) {
+  const [open, setOpen] = React.useState(false);
+  const { addLeadTouchpoint, currentUserId } = useWorkspace();
   const byChannel = touchpoints.reduce<Record<string, Touchpoint[]>>((acc, t) => {
     (acc[t.channel] ??= []).push(t);
     return acc;
@@ -15,14 +22,22 @@ export function LeadTouchpoints({ touchpoints }: { touchpoints: Touchpoint[] }) 
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           Per-channel engagement state. A lead can be active on multiple channels at once.
         </p>
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="outline" type="button" onClick={() => setOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> Add touchpoint
         </Button>
       </div>
+
+      <LogTouchpointDialog
+        open={open}
+        onOpenChange={setOpen}
+        lead={lead}
+        currentUserId={currentUserId}
+        onCreate={addLeadTouchpoint}
+      />
 
       {Object.entries(byChannel).map(([channel, items]) => (
         <Card key={channel}>

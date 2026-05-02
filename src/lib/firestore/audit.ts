@@ -5,10 +5,13 @@ import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 export type AuditEvent =
   | "member.invited"
   | "member.joined"
+  | "member.approved"
   | "member.role_changed"
   | "member.disabled"
   | "member.enabled"
   | "member.removed"
+  | "org.open_join_link_rotated"
+  | "org.open_join_link_cleared"
   | "invite.revoked"
   | "lead.created"
   | "lead.stage_changed"

@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Info, Loader2 } from "lucide-react";
+import { Info, Loader2, Link2, Copy, RefreshCw, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -40,6 +40,28 @@ export function OrganizationSettingsClient({
     organization?.billingEmail ?? "",
   );
   const [submitting, setSubmitting] = React.useState(false);
+
+  const [joinConfigured, setJoinConfigured] = React.useState(false);
+  const [joinUrl, setJoinUrl] = React.useState<string | null>(null);
+  const [joinBusy, setJoinBusy] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!canEdit || !organization) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/org/join-link", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { configured?: boolean };
+        if (!cancelled) setJoinConfigured(Boolean(data.configured));
+      } catch {
+        /* ignore */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [canEdit, organization?.id]);
 
   React.useEffect(() => {
     if (!organization) return;
@@ -92,6 +114,47 @@ export function OrganizationSettingsClient({
       toast.error(err instanceof Error ? err.message : "Failed to save");
     } finally {
       setSubmitting(false);
+    }
+  }
+
+  async function createOrRotateJoinLink() {
+    if (!canEdit) return;
+    setJoinBusy(true);
+    try {
+      const res = await fetch("/api/org/join-link", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "rotate" }),
+      });
+      const data = (await res.json()) as { signupUrl?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Could not create link");
+      if (data.signupUrl) {
+        setJoinUrl(data.signupUrl);
+        setJoinConfigured(true);
+        toast.success("Join link ready — copy it below.");
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setJoinBusy(false);
+    }
+  }
+
+  async function clearJoinLink() {
+    if (!canEdit) return;
+    if (!confirm("Remove the join link? Existing shared URLs will stop working.")) return;
+    setJoinBusy(true);
+    try {
+      const res = await fetch("/api/org/join-link", { method: "DELETE" });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      setJoinConfigured(false);
+      setJoinUrl(null);
+      toast.success("Join link removed.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setJoinBusy(false);
     }
   }
 
@@ -215,6 +278,75 @@ export function OrganizationSettingsClient({
             )}
           </CardContent>
         </Card>
+
+        {organization && canEdit && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Link2 className="h-4 w-4" />
+                Self-service join link
+              </CardTitle>
+              <p className="text-sm text-muted-foreground">
+                Only owners and admins see this. Share one link with your team: they sign up, then
+                appear under Team → Pending requests until you approve them.
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {joinConfigured && !joinUrl && (
+                <p className="text-xs text-muted-foreground">
+                  A join link is active. Rotating generates a new URL and invalidates the previous one.
+                  The full URL is only shown right after you create or rotate it — for security it is
+                  not stored in the browser.
+                </p>
+              )}
+              {joinUrl && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Signup URL</Label>
+                  <div className="flex gap-2">
+                    <Input readOnly value={joinUrl} className="h-9 font-mono text-xs" />
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="shrink-0"
+                      onClick={() => {
+                        void navigator.clipboard.writeText(joinUrl);
+                        toast.success("Copied");
+                      }}
+                    >
+                      <Copy className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  disabled={joinBusy}
+                  onClick={() => void createOrRotateJoinLink()}
+                >
+                  {joinBusy && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <RefreshCw className="h-4 w-4" />
+                  {joinConfigured ? "Rotate link" : "Generate link"}
+                </Button>
+                {joinConfigured && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={joinBusy}
+                    onClick={() => void clearJoinLink()}
+                  >
+                    <Trash2 className="h-4 w-4 text-destructive" />
+                    Disable link
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </PageBody>
     </>
   );

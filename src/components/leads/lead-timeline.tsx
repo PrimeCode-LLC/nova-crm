@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { toast } from "sonner";
 import {
   CirclePlus,
   CornerUpLeft,
@@ -16,12 +17,15 @@ import {
   Handshake,
   type LucideIcon,
 } from "lucide-react";
-import type { TimelineEvent, TimelineEventType } from "@/lib/types";
+import type { Lead, TimelineEvent, TimelineEventType } from "@/lib/types";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { UserChip } from "@/components/common/user-chip";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { LeadStageDialog } from "@/components/leads/lead-stage-dialog";
+import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
 
 const ICONS: Record<TimelineEventType, LucideIcon> = {
   lead_created: CirclePlus,
@@ -51,13 +55,68 @@ const TONES: Record<TimelineEventType, string> = {
   field_changed: "bg-muted text-muted-foreground border-muted",
 };
 
-export function LeadTimeline({ events }: { events: TimelineEvent[] }) {
+function newTeId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `te-local-${crypto.randomUUID()}`;
+  }
+  return `te-local-${Date.now()}`;
+}
+
+export function LeadTimeline({ events, lead }: { events: TimelineEvent[]; lead: Lead }) {
   const [note, setNote] = React.useState("");
+  const [stageOpen, setStageOpen] = React.useState(false);
+  const [followupOpen, setFollowupOpen] = React.useState(false);
+  const {
+    addLeadNote,
+    addTimelineEvent,
+    updateLeadStage,
+    bumpLeadActivity,
+    currentUserId,
+    leads,
+    addFollowup,
+  } = useWorkspace();
   const sorted = [...events].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  function appendNoteFromComposer() {
+    const t = note.trim();
+    if (!t) return;
+    addLeadNote(lead.id, t, currentUserId);
+    setNote("");
+    toast.success("Note added to timeline");
+  }
+
+  function logEmail() {
+    const iso = new Date().toISOString();
+    addTimelineEvent({
+      id: newTeId(),
+      leadId: lead.id,
+      type: "email_sent",
+      actorId: currentUserId,
+      summary: "Outbound email logged (manual)",
+      createdAt: iso,
+    });
+    toast.success("Email logged on timeline");
+  }
+
+  function logLinkedIn() {
+    const iso = new Date().toISOString();
+    addTimelineEvent({
+      id: newTeId(),
+      leadId: lead.id,
+      type: "touchpoint_added",
+      actorId: currentUserId,
+      summary: "LinkedIn activity logged",
+      createdAt: iso,
+    });
+    toast.success("LinkedIn touch logged");
+  }
+
+  function openFollowup() {
+    setFollowupOpen(true);
+  }
 
   return (
     <div className="space-y-6">
-      {/* Quick composer */}
       <div className="rounded-lg border bg-card p-3 space-y-2">
         <Textarea
           placeholder="Log a note, send an email, record a touchpoint…"
@@ -65,28 +124,49 @@ export function LeadTimeline({ events }: { events: TimelineEvent[] }) {
           onChange={(e) => setNote(e.target.value)}
           className="min-h-[72px] resize-none border-0 focus-visible:ring-0 p-0 shadow-none"
         />
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" type="button" onClick={logEmail}>
             <Mail className="h-3.5 w-3.5" /> Log email
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" type="button" onClick={logLinkedIn}>
             <MessageSquare className="h-3.5 w-3.5" /> LinkedIn
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" type="button" onClick={openFollowup}>
             <CalendarClock className="h-3.5 w-3.5" /> Followup
           </Button>
-          <Button variant="outline" size="sm">
+          <Button variant="outline" size="sm" type="button" onClick={() => setStageOpen(true)}>
             <RefreshCw className="h-3.5 w-3.5" /> Stage
           </Button>
           <div className="ml-auto">
-            <Button size="sm" disabled={!note.trim()}>
+            <Button size="sm" disabled={!note.trim()} type="button" onClick={appendNoteFromComposer}>
               <NotebookPen className="h-3.5 w-3.5" /> Add note
             </Button>
           </div>
         </div>
       </div>
 
-      {/* Timeline */}
+      <LeadStageDialog
+        open={stageOpen}
+        onOpenChange={setStageOpen}
+        currentStage={lead.stage}
+        contactName={lead.contactName}
+        onConfirm={(next) => {
+          if (next === lead.stage) return;
+          updateLeadStage(lead.id, next, lead.stage, currentUserId);
+          bumpLeadActivity(lead.id);
+          toast.success("Stage updated");
+        }}
+      />
+
+      <NewFollowupDialog
+        open={followupOpen}
+        onOpenChange={setFollowupOpen}
+        leads={leads}
+        currentUserId={currentUserId}
+        fixedLeadId={lead.id}
+        onCreate={addFollowup}
+      />
+
       <div className="relative pl-6">
         <div className="absolute left-[11px] top-1 bottom-1 w-px bg-border" />
         <div className="space-y-4">

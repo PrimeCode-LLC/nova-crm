@@ -10,11 +10,15 @@ import {
   Trash2,
   ShieldCheck,
   XCircle,
+  Pencil,
+  UserCheck,
 } from "lucide-react";
+import Link from "next/link";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
@@ -27,6 +31,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -97,6 +108,8 @@ export function TeamPageClient({
   const [lastDeliveryNote, setLastDeliveryNote] = React.useState<string | null>(
     null,
   );
+
+  const [editMember, setEditMember] = React.useState<OrganizationMember | null>(null);
 
   const canManage = role === "owner" || role === "admin";
   const isOwner = role === "owner";
@@ -186,7 +199,10 @@ export function TeamPageClient({
     }
   }
 
-  async function patchMember(uid: string, patch: { role?: OrgMemberRole; status?: "active" | "disabled" }) {
+  async function patchMember(
+    uid: string,
+    patch: { role?: OrgMemberRole; status?: "active" | "disabled" },
+  ) {
     try {
       const res = await fetch("/api/org/members", {
         method: "PATCH",
@@ -223,6 +239,7 @@ export function TeamPageClient({
   }
 
   const pendingInvites = invites.filter((i) => i.status === "pending");
+  const pendingRequests = members.filter((m) => m.status === "pending");
   const seatLabel =
     organization?.maxUsers != null
       ? `${organization.seatsUsed}/${organization.maxUsers} seats`
@@ -299,7 +316,10 @@ export function TeamPageClient({
         <Tabs defaultValue="members" className="space-y-4">
           <TabsList>
             <TabsTrigger value="members">
-              Members ({members.length})
+              Members ({members.filter((m) => m.status !== "pending").length})
+            </TabsTrigger>
+            <TabsTrigger value="requests">
+              Pending requests ({pendingRequests.length})
             </TabsTrigger>
             <TabsTrigger value="invites">
               Pending invites ({pendingInvites.length})
@@ -309,8 +329,8 @@ export function TeamPageClient({
           <TabsContent value="members">
             {loading ? (
               <div className="h-32 animate-pulse rounded-md border bg-muted/30" />
-            ) : members.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No members yet.</p>
+            ) : members.filter((m) => m.status !== "pending").length === 0 ? (
+              <p className="text-sm text-muted-foreground">No active members yet.</p>
             ) : (
               <div className="overflow-hidden rounded-md border">
                 <Table>
@@ -325,7 +345,9 @@ export function TeamPageClient({
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {members.map((m) => {
+                    {members
+                      .filter((m) => m.status !== "pending")
+                      .map((m) => {
                       const canTouchThisMember =
                         canManage &&
                         m.uid !== currentUid &&
@@ -395,57 +417,123 @@ export function TeamPageClient({
                           </TableCell>
                           {canManage && (
                             <TableCell className="text-right">
-                              {canTouchThisMember ? (
-                                <div className="flex justify-end gap-1">
-                                  {m.status !== "disabled" ? (
+                              <div className="flex justify-end gap-1">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-7 px-2"
+                                  onClick={() => setEditMember(m)}
+                                >
+                                  <Pencil className="h-3.5 w-3.5" />
+                                  <span className="sr-only sm:not-sr-only sm:ml-1">View / edit</span>
+                                </Button>
+                                {canTouchThisMember ? (
+                                  <>
+                                    {m.status !== "disabled" ? (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 px-2"
+                                        onClick={() =>
+                                          void patchMember(m.uid, { status: "disabled" })
+                                        }
+                                      >
+                                        <XCircle className="h-3.5 w-3.5" />
+                                        <span className="sr-only sm:not-sr-only sm:ml-1">
+                                          Disable
+                                        </span>
+                                      </Button>
+                                    ) : (
+                                      <Button
+                                        size="sm"
+                                        variant="ghost"
+                                        className="h-7 px-2"
+                                        onClick={() =>
+                                          void patchMember(m.uid, { status: "active" })
+                                        }
+                                      >
+                                        <RefreshCw className="h-3.5 w-3.5" />
+                                        <span className="sr-only sm:not-sr-only sm:ml-1">
+                                          Enable
+                                        </span>
+                                      </Button>
+                                    )}
                                     <Button
                                       size="sm"
                                       variant="ghost"
-                                      className="h-7 px-2"
-                                      onClick={() =>
-                                        void patchMember(m.uid, { status: "disabled" })
-                                      }
+                                      className="h-7 px-2 text-destructive hover:text-destructive"
+                                      onClick={() => void removeMember(m)}
                                     >
-                                      <XCircle className="h-3.5 w-3.5" />
+                                      <Trash2 className="h-3.5 w-3.5" />
                                       <span className="sr-only sm:not-sr-only sm:ml-1">
-                                        Disable
+                                        Remove
                                       </span>
                                     </Button>
-                                  ) : (
-                                    <Button
-                                      size="sm"
-                                      variant="ghost"
-                                      className="h-7 px-2"
-                                      onClick={() =>
-                                        void patchMember(m.uid, { status: "active" })
-                                      }
-                                    >
-                                      <RefreshCw className="h-3.5 w-3.5" />
-                                      <span className="sr-only sm:not-sr-only sm:ml-1">
-                                        Enable
-                                      </span>
-                                    </Button>
-                                  )}
-                                  <Button
-                                    size="sm"
-                                    variant="ghost"
-                                    className="h-7 px-2 text-destructive hover:text-destructive"
-                                    onClick={() => void removeMember(m)}
-                                  >
-                                    <Trash2 className="h-3.5 w-3.5" />
-                                    <span className="sr-only sm:not-sr-only sm:ml-1">
-                                      Remove
-                                    </span>
-                                  </Button>
-                                </div>
-                              ) : (
-                                <span className="text-xs text-muted-foreground">—</span>
-                              )}
+                                  </>
+                                ) : null}
+                              </div>
                             </TableCell>
                           )}
                         </TableRow>
                       );
                     })}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="requests">
+            {pendingRequests.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No accounts waiting for approval. Share your organization join link from
+                Organization settings so teammates can request access.
+              </p>
+            ) : (
+              <div className="overflow-hidden rounded-md border">
+                <Table>
+                  <TableHeader className="bg-muted/30">
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Email</TableHead>
+                      <TableHead>Requested</TableHead>
+                      {canManage && <TableHead className="text-right">Actions</TableHead>}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pendingRequests.map((m) => (
+                      <TableRow key={m.uid}>
+                        <TableCell className="font-medium">{m.displayName || m.email}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground">{m.email}</TableCell>
+                        <TableCell className="text-xs text-muted-foreground">
+                          {fmtRelative(m.joinedAt)}
+                        </TableCell>
+                        {canManage && (
+                          <TableCell className="text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button
+                                size="sm"
+                                variant="secondary"
+                                className="h-7 px-2"
+                                onClick={() => void patchMember(m.uid, { status: "active" })}
+                              >
+                                <UserCheck className="h-3.5 w-3.5" />
+                                Approve
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-7 px-2 text-destructive hover:text-destructive"
+                                onClick={() => void removeMember(m)}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                                Decline
+                              </Button>
+                            </div>
+                          </TableCell>
+                        )}
+                      </TableRow>
+                    ))}
                   </TableBody>
                 </Table>
               </div>
@@ -602,6 +690,110 @@ export function TeamPageClient({
           </form>
         </DialogContent>
       </Dialog>
+
+      <Sheet open={editMember !== null} onOpenChange={(o) => !o && setEditMember(null)}>
+        <SheetContent className="sm:max-w-md overflow-y-auto">
+          {editMember && (
+            <>
+              <SheetHeader>
+                <SheetTitle>{editMember.displayName || editMember.email}</SheetTitle>
+                <SheetDescription>
+                  Workspace membership (owner / admin / manager / member). For CRM job roles and
+                  permissions, use Users.
+                </SheetDescription>
+              </SheetHeader>
+              <div className="grid gap-3 py-4 text-sm">
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Email</div>
+                  <div className="mt-0.5">{editMember.email}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">User ID</div>
+                  <div className="mt-0.5 font-mono text-xs break-all">{editMember.uid}</div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Organization role
+                  </div>
+                  <div className="mt-1.5">
+                    {(() => {
+                      const canTouchThis =
+                        canManage &&
+                        editMember.uid !== currentUid &&
+                        (isOwner ||
+                          (ROLE_RANK[editMember.role] < ROLE_RANK[role] &&
+                            editMember.role !== "owner"));
+                      return canTouchThis ? (
+                        <Select
+                          value={editMember.role}
+                          onValueChange={(v) => {
+                            void patchMember(editMember.uid, {
+                              role: v as OrgMemberRole,
+                            }).then(() =>
+                              setEditMember((prev) =>
+                                prev && prev.uid === editMember.uid
+                                  ? { ...prev, role: v as OrgMemberRole }
+                                  : prev,
+                              ),
+                            );
+                          }}
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ROLE_OPTIONS.filter((opt) => {
+                              if (opt.value === "owner" && !isOwner) return false;
+                              return true;
+                            }).map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      ) : (
+                        <Badge variant="outline" className="capitalize">
+                          {editMember.role}
+                        </Badge>
+                      );
+                    })()}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
+                  <div className="mt-1">
+                    <Badge variant="outline" className="capitalize">
+                      {editMember.status}
+                    </Badge>
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Joined</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">
+                    {fmtRelative(editMember.joinedAt)}
+                  </div>
+                </div>
+                <div>
+                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
+                    Invited / source
+                  </div>
+                  <div className="mt-0.5 font-mono text-xs break-all">{editMember.invitedByUid}</div>
+                </div>
+              </div>
+              <Link
+                href="/admin/users"
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                  "inline-flex w-fit",
+                )}
+              >
+                Open Users (CRM roles)
+              </Link>
+            </>
+          )}
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

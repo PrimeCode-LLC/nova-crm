@@ -2,7 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { toast } from "sonner";
 import {
   Building2,
   Mail,
@@ -37,6 +38,15 @@ import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import type { Lead } from "@/lib/types";
 
 const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
@@ -51,12 +61,27 @@ function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): 
 
 export function LeadDetailView({ leadId }: { leadId: string }) {
   const ws = useWorkspace();
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
   const [activeTab, setActiveTab] = React.useState<LeadTab>(tabFromUrl);
+  const [editOpen, setEditOpen] = React.useState(false);
   React.useEffect(() => {
     setActiveTab(tabFromUrl);
   }, [tabFromUrl]);
+
+  const onTabChange = React.useCallback(
+    (v: string) => {
+      const t = v as LeadTab;
+      setActiveTab(t);
+      const p = new URLSearchParams(searchParams.toString());
+      p.set("tab", t);
+      const qs = p.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+    },
+    [pathname, router, searchParams],
+  );
 
   const backHref = searchParams.get("from") === "pipeline" ? "/pipeline" : "/leads";
   const lead = ws.getLeadById(leadId);
@@ -86,6 +111,31 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const timeline = ws.timelineByLead[lead.id] ?? [];
   const notes = ws.notes.filter((n) => n.leadId === lead.id);
   const followups = ws.followups.filter((f) => f.leadId === lead.id);
+
+  const pinned = ws.isLeadPinned(lead.id);
+
+  async function copyToClipboard(text: string, okMsg: string) {
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success(okMsg);
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }
+
+  function handleSaveLead(patch: Partial<Lead>) {
+    const latest = ws.getLeadById(leadId);
+    if (!latest) return;
+    const nextStage = patch.stage;
+    if (nextStage != null && nextStage !== latest.stage) {
+      ws.updateLeadStage(latest.id, nextStage, latest.stage, ws.currentUserId);
+    }
+    const { stage: _removed, ...rest } = patch;
+    if (Object.keys(rest).length > 0) {
+      ws.patchLead(latest.id, rest);
+    }
+    ws.bumpLeadActivity(latest.id);
+  }
 
   return (
     <>
@@ -121,25 +171,60 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         }
         actions={
           <>
-            <Button variant="outline" size="sm">
-              <Star className="h-3.5 w-3.5" /> Pin
+            <Button
+              variant={pinned ? "default" : "outline"}
+              size="sm"
+              type="button"
+              onClick={() => {
+                ws.toggleLeadPin(lead.id);
+                toast.success(pinned ? "Unpinned" : "Pinned for this session");
+              }}
+            >
+              <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} /> Pin
             </Button>
-            <Button variant="outline" size="sm">
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => {
+                const url = typeof window !== "undefined" ? window.location.href : "";
+                void copyToClipboard(url, "Link copied");
+              }}
+            >
               <Share2 className="h-3.5 w-3.5" /> Share
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
-            <Button variant="outline" size="icon-sm">
-              <MoreHorizontal className="h-3.5 w-3.5" />
-            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="icon-sm" aria-label="More actions">
+                    <MoreHorizontal className="h-3.5 w-3.5" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem
+                  onSelect={() => {
+                    const url = typeof window !== "undefined" ? window.location.href : "";
+                    void copyToClipboard(url, "Link copied");
+                  }}
+                >
+                  Copy link
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => void copyToClipboard(lead.id, "Lead ID copied")}>
+                  Copy lead ID
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </>
         }
       />
       <PageBody className="p-0">
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] min-h-[calc(100vh-8rem)]">
           <div className="p-6 border-r">
-            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LeadTab)} className="w-full">
+            <Tabs value={activeTab} onValueChange={onTabChange} className="w-full">
               <TabsList>
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="timeline">
@@ -173,16 +258,16 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <LeadOverview lead={lead} />
                 </TabsContent>
                 <TabsContent value="timeline">
-                  <LeadTimeline events={timeline} />
+                  <LeadTimeline events={timeline} lead={lead} />
                 </TabsContent>
                 <TabsContent value="touchpoints">
-                  <LeadTouchpoints touchpoints={touchpoints} />
+                  <LeadTouchpoints touchpoints={touchpoints} lead={lead} />
                 </TabsContent>
                 <TabsContent value="notes">
-                  <LeadNotes notes={notes} />
+                  <LeadNotes notes={notes} leadId={lead.id} />
                 </TabsContent>
                 <TabsContent value="followups">
-                  <LeadFollowups followups={followups} />
+                  <LeadFollowups followups={followups} lead={lead} />
                 </TabsContent>
               </div>
             </Tabs>
@@ -362,6 +447,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </aside>
         </div>
       </PageBody>
+
+      <EditLeadDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        lead={lead}
+        onSave={handleSaveLead}
+      />
     </>
   );
 }

@@ -5,6 +5,7 @@ import { getFirebaseAuth } from "@/lib/firebase/client";
 export type ExchangeResult = {
   organizationId: string | null;
   orgRole: string | null;
+  membershipPending?: boolean;
 };
 
 /**
@@ -18,7 +19,7 @@ export type ExchangeResult = {
  */
 export async function exchangeIdTokenForSession(
   idToken: string,
-  options?: { company?: string; inviteToken?: string },
+  options?: { company?: string; inviteToken?: string; openJoinToken?: string },
 ): Promise<ExchangeResult> {
   const res = await fetch("/api/auth/session", {
     method: "POST",
@@ -27,6 +28,7 @@ export async function exchangeIdTokenForSession(
       idToken,
       company: options?.company,
       inviteToken: options?.inviteToken,
+      openJoinToken: options?.openJoinToken,
     }),
   });
   if (!res.ok) {
@@ -52,9 +54,17 @@ export async function exchangeIdTokenForSession(
         throw new Error(body.error ?? `Session refresh failed (${re.status})`);
       }
       const refreshed = (await re.json()) as ExchangeResult;
-      return refreshed;
+      return {
+        organizationId: refreshed.organizationId,
+        orgRole: refreshed.orgRole,
+        membershipPending: refreshed.membershipPending,
+      };
     }
   }
 
-  return { organizationId: data.organizationId, orgRole: data.orgRole };
+  return {
+    organizationId: data.organizationId,
+    orgRole: data.orgRole,
+    membershipPending: data.membershipPending,
+  };
 }

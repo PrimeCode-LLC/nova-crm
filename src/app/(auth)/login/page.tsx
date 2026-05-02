@@ -62,6 +62,7 @@ function LoginFormAfterMount() {
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const joinToken = searchParams.get("join") ?? undefined;
   const [loading, setLoading] = React.useState(false);
 
   const form = useForm<FormValues>({
@@ -89,7 +90,16 @@ function LoginForm() {
         values.password,
       );
       const idToken = await cred.user.getIdToken();
-      await exchangeIdTokenForSession(idToken);
+      const exchanged = await exchangeIdTokenForSession(idToken, {
+        openJoinToken: joinToken,
+      });
+      if (exchanged.membershipPending) {
+        router.replace("/join/pending");
+        toast.message("Access pending approval", {
+          description: "An admin still needs to approve your workspace request.",
+        });
+        return;
+      }
       const next = searchParams.get("next") ?? "/dashboard";
       router.replace(next);
       toast.success("Signed in");
@@ -115,7 +125,16 @@ function LoginForm() {
       const auth = getFirebaseAuth();
       const cred = await signInWithPopup(auth, new GoogleAuthProvider());
       const idToken = await cred.user.getIdToken();
-      await exchangeIdTokenForSession(idToken);
+      const exchanged = await exchangeIdTokenForSession(idToken, {
+        openJoinToken: joinToken,
+      });
+      if (exchanged.membershipPending) {
+        router.replace("/join/pending");
+        toast.message("Access pending approval", {
+          description: "An admin still needs to approve your workspace request.",
+        });
+        return;
+      }
       router.replace(searchParams.get("next") ?? "/dashboard");
       toast.success("Signed in with Google");
     } catch (e: unknown) {
@@ -210,7 +229,14 @@ function LoginForm() {
 
       <p className="text-center text-xs text-muted-foreground">
         No account yet?{" "}
-        <Link href="/signup" className="text-primary hover:underline font-medium">
+        <Link
+          href={
+            joinToken
+              ? `/signup?join=${encodeURIComponent(joinToken)}`
+              : "/signup"
+          }
+          className="text-primary hover:underline font-medium"
+        >
           Create one
         </Link>
       </p>

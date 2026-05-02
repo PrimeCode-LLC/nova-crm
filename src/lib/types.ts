@@ -68,6 +68,8 @@ export interface User {
   company?: string;
   /** SaaS organization (tenant). All CRM rows must filter by this. */
   organizationId?: string;
+  /** Set while self-service join is awaiting admin approval (no tenant access yet). */
+  membershipPendingOrgId?: string;
   /** Cached for fast reads in the app shell; authoritative copy lives in the org member doc. */
   orgRole?: OrgMemberRole;
   status: "active" | "inactive" | "pip";
@@ -110,12 +112,17 @@ export interface Organization {
   updatedAt: ISODate;
   /** Populated by platform GET APIs after stripping `settings.inboundWebhookSecret`. */
   hasInboundWebhookSecret?: boolean;
+  /**
+   * SHA-256 of the secret segment of the org-wide self-service join link.
+   * Never exposed to clients; admins receive the full URL only when creating or rotating the link.
+   */
+  openJoinTokenHash?: string;
 }
 
 /** Authoritative role for a user inside a single organization. */
 export type OrgMemberRole = "owner" | "admin" | "manager" | "member";
 
-export type OrgMemberStatus = "active" | "invited" | "disabled";
+export type OrgMemberStatus = "active" | "invited" | "disabled" | "pending";
 
 export interface OrganizationMember {
   /** Same as the auth uid. Doc id = uid. */

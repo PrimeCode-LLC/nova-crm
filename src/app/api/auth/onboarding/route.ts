@@ -31,6 +31,15 @@ export async function POST(req: Request) {
 
   const existing = await findMembershipForUserServer(session.uid);
   if (existing) {
+    if (existing.status === "pending") {
+      return NextResponse.json(
+        {
+          error:
+            "Your join request is still pending. Wait for an admin to approve it, or contact them for a new link.",
+        },
+        { status: 400 },
+      );
+    }
     return NextResponse.json(
       { error: "You already belong to a workspace." },
       { status: 400 },

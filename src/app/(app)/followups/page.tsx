@@ -28,39 +28,6 @@ import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead } from "@/lib/types";
 
-const FOLLOWUP_DELTA_KEY = "nova-crm-followup-delta-v1";
-
-type FollowupDelta = {
-  extras: Followup[];
-  completion: Record<string, string | null>;
-};
-
-function emptyDelta(): FollowupDelta {
-  return { extras: [], completion: {} };
-}
-
-function readDeltaFromStorage(): FollowupDelta {
-  if (typeof window === "undefined") return emptyDelta();
-  try {
-    const raw = sessionStorage.getItem(FOLLOWUP_DELTA_KEY);
-    if (!raw) return emptyDelta();
-    const parsed = JSON.parse(raw) as FollowupDelta;
-    if (!parsed || !Array.isArray(parsed.extras) || typeof parsed.completion !== "object") {
-      return emptyDelta();
-    }
-    return { extras: parsed.extras, completion: parsed.completion };
-  } catch {
-    return emptyDelta();
-  }
-}
-
-function mergeFollowup(f: Followup, completion: Record<string, string | null>): Followup {
-  if (!Object.prototype.hasOwnProperty.call(completion, f.id)) return f;
-  const c = completion[f.id];
-  if (c === null) return { ...f, completedAt: undefined };
-  return { ...f, completedAt: c };
-}
-
 function categorize(dueAt: string) {
   const d = new Date(dueAt);
   const now = Date.now();
@@ -77,34 +44,10 @@ type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
 export default function FollowupsPage() {
   const router = useRouter();
   const ws = useWorkspace();
-  const { followups: baseFollowups, isDemo, leads, currentUserId } = ws;
-  const [delta, setDelta] = React.useState<FollowupDelta>(emptyDelta);
-  const [hydrated, setHydrated] = React.useState(false);
+  const { followups, isDemo, leads, currentUserId, addFollowup, setFollowupCompleted } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [tab, setTab] = React.useState<"open" | "completed">("open");
   const [bucketFilter, setBucketFilter] = React.useState<BucketFilter>("all");
-
-  React.useEffect(() => {
-    React.startTransition(() => {
-      setDelta(readDeltaFromStorage());
-      setHydrated(true);
-    });
-  }, []);
-
-  React.useEffect(() => {
-    if (!hydrated || typeof window === "undefined") return;
-    try {
-      sessionStorage.setItem(FOLLOWUP_DELTA_KEY, JSON.stringify(delta));
-    } catch {
-      /* ignore quota */
-    }
-  }, [delta, hydrated]);
-
-  const followups = React.useMemo(() => {
-    const mergedBase = baseFollowups.map((f) => mergeFollowup(f, delta.completion));
-    const mergedExtras = delta.extras.map((f) => mergeFollowup(f, delta.completion));
-    return [...mergedBase, ...mergedExtras];
-  }, [baseFollowups, delta.extras, delta.completion]);
 
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
@@ -113,19 +56,6 @@ export default function FollowupsPage() {
   const today = open.filter((f) => categorize(f.dueAt) === "today");
   const thisWeek = open.filter((f) => categorize(f.dueAt) === "thisWeek");
   const later = open.filter((f) => categorize(f.dueAt) === "later");
-
-  function setCompleted(id: string, completed: boolean) {
-    setDelta((d) => {
-      const completion = { ...d.completion };
-      if (completed) completion[id] = new Date().toISOString();
-      else completion[id] = null;
-      return { ...d, completion };
-    });
-  }
-
-  function handleCreateFollowup(f: Followup) {
-    setDelta((d) => ({ ...d, extras: [...d.extras, f] }));
-  }
 
   function toggleBucket(next: BucketFilter) {
     setTab("open");
@@ -256,7 +186,7 @@ export default function FollowupsPage() {
                       items={overdue}
                       empty="Nothing overdue. Nice."
                       getLeadById={ws.getLeadById}
-                      onToggleComplete={setCompleted}
+                      onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
                     />
                   </div>
@@ -270,7 +200,7 @@ export default function FollowupsPage() {
                       items={today}
                       empty="Nothing due today."
                       getLeadById={ws.getLeadById}
-                      onToggleComplete={setCompleted}
+                      onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
                     />
                   </div>
@@ -284,7 +214,7 @@ export default function FollowupsPage() {
                       items={thisWeek}
                       empty="No followups this week."
                       getLeadById={ws.getLeadById}
-                      onToggleComplete={setCompleted}
+                      onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
                     />
                   </div>
@@ -298,7 +228,7 @@ export default function FollowupsPage() {
                       items={later}
                       empty="Nothing scheduled further out."
                       getLeadById={ws.getLeadById}
-                      onToggleComplete={setCompleted}
+                      onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
                     />
                   </div>
@@ -334,7 +264,7 @@ export default function FollowupsPage() {
                           <Checkbox
                             checked
                             onCheckedChange={(v) => {
-                              if (v !== true) setCompleted(f.id, false);
+                              if (v !== true) setFollowupCompleted(f.id, false);
                             }}
                             aria-label={`Mark ${f.title} as not done`}
                           />
@@ -374,7 +304,7 @@ export default function FollowupsPage() {
         onOpenChange={setDialogOpen}
         leads={leads}
         currentUserId={currentUserId}
-        onCreate={handleCreateFollowup}
+        onCreate={addFollowup}
       />
     </>
   );
