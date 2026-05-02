@@ -95,13 +95,142 @@ export const LIVE_SNAPSHOT: WorkspaceSnapshot = {
   currentUserId: "",
 };
 
+/** Users managed under `rootManagerId` (not including `rootManagerId`). */
+function collectDescendantUserIds(rootManagerId: string, users: readonly User[]): Set<string> {
+  const ids = new Set<string>();
+  const queue = [rootManagerId];
+  while (queue.length) {
+    const mid = queue.shift()!;
+    for (const u of users) {
+      if (u.managerId === mid && !ids.has(u.id)) {
+        ids.add(u.id);
+        queue.push(u.id);
+      }
+    }
+  }
+  return ids;
+}
+
+/**
+ * User IDs this persona can see in directory / admin pickers.
+ * `null` = entire org (director).
+ */
+function directoryUserIdsFor(persona: User, allUsers: readonly User[]): Set<string> | null {
+  if (persona.roleId === "director") return null;
+  if (persona.roleId === "manager") {
+    const s = new Set<string>([persona.id]);
+    for (const id of collectDescendantUserIds(persona.id, allUsers)) s.add(id);
+    return s;
+  }
+  if (persona.departmentId) {
+    return new Set(allUsers.filter((u) => u.departmentId === persona.departmentId).map((u) => u.id));
+  }
+  return new Set([persona.id]);
+}
+
+/** Whether a demo lead is visible to the active persona (org + ownership rules). */
+function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly User[]): boolean {
+  if (persona.roleId === "director") return true;
+  if (persona.roleId === "manager") {
+    const owners = new Set<string>([persona.id]);
+    for (const id of collectDescendantUserIds(persona.id, allUsers)) owners.add(id);
+    return owners.has(lead.ownerId);
+  }
+  // Chris (Senior SDR): mock permission grant — read leads for full Outbound department.
+  if (persona.id === "u-sales-01") {
+    return allUsers.some((u) => u.id === lead.ownerId && u.departmentId === "d-outbound");
+  }
+  // Laura: sourced leads + any she owns.
+  if (persona.id === "u-scrape-01") {
+    return lead.ownerId === persona.id || lead.scraperId === persona.id;
+  }
+  return lead.ownerId === persona.id;
+}
+
+/**
+ * Narrows demo mock data to what this persona would realistically see (so switching sample users changes lists, pipeline, inbox, etc.).
+ */
+function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
+  const persona = mockUsers.find((u) => u.id === snapshot.currentUserId);
+  if (!persona || persona.roleId === "director") {
+    return snapshot;
+  }
+
+  const dirIds = directoryUserIdsFor(persona, mockUsers);
+  const users = dirIds === null ? snapshot.users : snapshot.users.filter((u) => dirIds.has(u.id));
+
+  const leads = snapshot.leads.filter((l) => leadVisibleForPersona(l, persona, mockUsers));
+  const visibleLeadIds = new Set(leads.map((l) => l.id));
+  const visibleAccountIds = new Set(leads.map((l) => l.accountId));
+
+  const deals = snapshot.deals.filter((d) => visibleLeadIds.has(d.leadId));
+  const visibleDealIds = new Set(deals.map((d) => d.id));
+
+  const accounts = snapshot.accounts.filter((a) => visibleAccountIds.has(a.id));
+  const contacts = snapshot.contacts.filter((c) => visibleAccountIds.has(c.accountId));
+
+  const touchpoints = snapshot.touchpoints.filter((t) => visibleLeadIds.has(t.leadId));
+
+  const timelineByLead: Record<string, TimelineEvent[]> = {};
+  for (const id of visibleLeadIds) {
+    const te = snapshot.timelineByLead[id];
+    if (te) timelineByLead[id] = te;
+  }
+
+  const followups = snapshot.followups.filter(
+    (f) =>
+      (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
+      (f.dealId != null && visibleDealIds.has(f.dealId)),
+  );
+
+  const notes = snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
+
+  const profiles =
+    dirIds === null ? snapshot.profiles : snapshot.profiles.filter((p) => dirIds.has(p.ownerId));
+
+  const permissionOverrides =
+    dirIds === null
+      ? snapshot.permissionOverrides
+      : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
+
+  const activityCounters =
+    dirIds === null
+      ? snapshot.activityCounters
+      : snapshot.activityCounters.filter((row) => dirIds.has(row.userId));
+
+  const activityRecords =
+    dirIds === null
+      ? snapshot.activityRecords
+      : snapshot.activityRecords.filter(
+          (r) => dirIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+        );
+
+  return {
+    ...snapshot,
+    users,
+    leads,
+    deals,
+    accounts,
+    contacts,
+    touchpoints,
+    timelineByLead,
+    followups,
+    notes,
+    profiles,
+    permissionOverrides,
+    activityCounters,
+    activityRecords,
+  };
+}
+
 export function getWorkspaceSnapshot(
   mode: WorkspaceMode,
   demoPersonaId?: string,
 ): WorkspaceSnapshot {
   if (mode === "demo") {
     const id = parseDemoPersonaId(demoPersonaId);
-    return { ...DEMO_SNAPSHOT, currentUserId: id };
+    const snapshot = { ...DEMO_SNAPSHOT, currentUserId: id };
+    return applyDemoPersonaScope(snapshot);
   }
   return LIVE_SNAPSHOT;
 }

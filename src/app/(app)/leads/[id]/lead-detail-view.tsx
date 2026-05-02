@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import {
@@ -37,9 +38,26 @@ import { LeadFollowups } from "@/components/leads/lead-followups";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 
+const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups"] as const;
+type LeadTab = (typeof LEAD_TABS)[number];
+
+function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): LeadTab {
+  const raw = searchParams.get("tab");
+  if (raw && (LEAD_TABS as readonly string[]).includes(raw)) {
+    return raw as LeadTab;
+  }
+  return "overview";
+}
+
 export function LeadDetailView({ leadId }: { leadId: string }) {
   const ws = useWorkspace();
   const searchParams = useSearchParams();
+  const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
+  const [activeTab, setActiveTab] = React.useState<LeadTab>(tabFromUrl);
+  React.useEffect(() => {
+    setActiveTab(tabFromUrl);
+  }, [tabFromUrl]);
+
   const backHref = searchParams.get("from") === "pipeline" ? "/pipeline" : "/leads";
   const lead = ws.getLeadById(leadId);
 
@@ -121,7 +139,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       <PageBody className="p-0">
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] min-h-[calc(100vh-8rem)]">
           <div className="p-6 border-r">
-            <Tabs defaultValue="overview" className="w-full">
+            <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as LeadTab)} className="w-full">
               <TabsList>
                 <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="timeline">

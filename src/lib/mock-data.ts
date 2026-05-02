@@ -42,6 +42,7 @@ export const mockUsers: User[] = [
     displayName: "James Mitchell",
     roleId: "director",
     title: "Founder & Director",
+    isSuperAdmin: true,
     status: "active",
     createdAt: isoDaysAgo(720),
   },

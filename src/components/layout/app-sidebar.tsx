@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { ChevronsUpDown, LogOut, UserCircle, Moon, Sun, Plus, FlaskConical, Check, Monitor, Palette } from "lucide-react";
-import { QuickAddDialog } from "./quick-add-dialog";
+import { useOpenQuickAdd } from "./quick-add-launcher";
 import { useTheme } from "next-themes";
 
 import { NAV_SECTIONS } from "@/lib/nav";
@@ -240,13 +240,10 @@ export function AppSidebar() {
 }
 
 export function QuickAddButton({ className }: { className?: string }) {
-  const [open, setOpen] = React.useState(false);
+  const { openQuickAdd } = useOpenQuickAdd();
   return (
-    <>
-      <Button size="sm" className={cn("gap-2", className)} onClick={() => setOpen(true)}>
-        <Plus className="h-4 w-4" /> Quick add
-      </Button>
-      <QuickAddDialog open={open} onOpenChange={setOpen} />
-    </>
+    <Button size="sm" className={cn("gap-2", className)} onClick={() => openQuickAdd()}>
+      <Plus className="h-4 w-4" /> Quick add
+    </Button>
   );
 }

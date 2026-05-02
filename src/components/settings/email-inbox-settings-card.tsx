@@ -1,0 +1,307 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { useEmailAccountStore, isEmailAccountConfigured } from "@/stores/email-account-store";
+import { toast } from "sonner";
+import { Loader2, Mail, ShieldAlert } from "lucide-react";
+
+export function EmailInboxSettingsCard() {
+  const account = useEmailAccountStore((s) => s.account);
+  const setAccount = useEmailAccountStore((s) => s.setAccount);
+  const setSmtp = useEmailAccountStore((s) => s.setSmtp);
+  const setImap = useEmailAccountStore((s) => s.setImap);
+  const [testing, setTesting] = React.useState(false);
+
+  async function testSmtp() {
+    setTesting(true);
+    try {
+      const res = await fetch("/api/email/smtp-verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          host: account.smtp.host,
+          port: account.smtp.port,
+          secure: account.smtp.secure,
+          user: account.smtp.user,
+          pass: account.smtp.password,
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (data.ok) toast.success("SMTP connection verified");
+      else toast.error(data.error ?? "Verification failed");
+    } catch {
+      toast.error("Could not reach the server");
+    } finally {
+      setTesting(false);
+    }
+  }
+
+  const configured = isEmailAccountConfigured(account);
+
+  return (
+    <div className="max-w-2xl space-y-4">
+      <Card className="border-warning/30 bg-warning/5">
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ShieldAlert className="h-4 w-4 text-warning" />
+            Security note
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Mail passwords are stored in this browser only (localStorage). For production, move credentials to a
+            secure server vault and use OAuth where your provider supports it. Never share this device while logged in
+            to Nova CRM with mail enabled.
+          </CardDescription>
+        </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Mail className="h-4 w-4" />
+            Unified inbox (SMTP / IMAP)
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Connect your mailbox so Nova can send email and (soon) sync inbound threads into the Email tab on{" "}
+            <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
+              Inbox
+            </Link>
+            . IMAP fields are saved for the upcoming background sync engine.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
+            <div>
+              <div className="text-sm font-medium">Enable mail in Nova</div>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Turn on when SMTP is ready. The Email view stays available either way.
+              </p>
+            </div>
+            <Switch
+              checked={account.enabled}
+              onCheckedChange={(v) => {
+                setAccount({ enabled: !!v });
+                toast.success(v ? "Mail enabled" : "Mail disabled");
+              }}
+            />
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-1.5 sm:col-span-1">
+              <Label className="text-xs">Display name</Label>
+              <Input
+                className="h-9"
+                value={account.displayName}
+                onChange={(e) => setAccount({ displayName: e.target.value })}
+                placeholder="James Mitchell"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-1">
+              <Label className="text-xs">Email address (From)</Label>
+              <Input
+                className="h-9"
+                type="email"
+                value={account.emailAddress}
+                onChange={(e) => setAccount({ emailAddress: e.target.value })}
+                placeholder="you@company.com"
+              />
+            </div>
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label className="text-xs">Reply-To (optional)</Label>
+              <Input
+                className="h-9"
+                type="email"
+                value={account.replyTo}
+                onChange={(e) => setAccount({ replyTo: e.target.value })}
+                placeholder="support@company.com"
+              />
+            </div>
+          </div>
+
+          <Separator />
+
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">Outgoing (SMTP)</h4>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs">SMTP host</Label>
+                <Input
+                  className="h-9"
+                  value={account.smtp.host}
+                  onChange={(e) => setSmtp({ host: e.target.value })}
+                  placeholder="smtp.gmail.com"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Port</Label>
+                <Input
+                  className="h-9"
+                  type="number"
+                  value={account.smtp.port || ""}
+                  onChange={(e) => setSmtp({ port: Number(e.target.value) || 0 })}
+                />
+              </div>
+              <div className="flex items-end pb-1 gap-2">
+                <Switch
+                  id="smtp-secure"
+                  checked={account.smtp.secure}
+                  onCheckedChange={(v) => setSmtp({ secure: !!v })}
+                />
+                <Label htmlFor="smtp-secure" className="text-xs cursor-pointer">
+                  TLS / SSL (implicit)
+                </Label>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Username</Label>
+                <Input
+                  className="h-9"
+                  value={account.smtp.user}
+                  onChange={(e) => setSmtp({ user: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Password / app password</Label>
+                <Input
+                  className="h-9"
+                  type="password"
+                  autoComplete="new-password"
+                  value={account.smtp.password}
+                  onChange={(e) => setSmtp({ password: e.target.value })}
+                />
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button type="button" variant="outline" size="sm" disabled={testing} onClick={() => void testSmtp()}>
+                {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                Test SMTP connection
+              </Button>
+              <span className="text-[11px] text-muted-foreground self-center">
+                {configured ? "Ready to send from Inbox → Email." : "Fill host, user, and From address to send."}
+              </span>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div>
+            <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
+              Incoming (IMAP) — reserved for sync
+            </h4>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs">IMAP host</Label>
+                <Input
+                  className="h-9"
+                  value={account.imap.host}
+                  onChange={(e) => setImap({ host: e.target.value })}
+                  placeholder="imap.gmail.com"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Port</Label>
+                <Input
+                  className="h-9"
+                  type="number"
+                  value={account.imap.port || ""}
+                  onChange={(e) => setImap({ port: Number(e.target.value) || 0 })}
+                />
+              </div>
+              <div className="flex items-end pb-1 gap-2">
+                <Switch
+                  id="imap-secure"
+                  checked={account.imap.secure}
+                  onCheckedChange={(v) => setImap({ secure: !!v })}
+                />
+                <Label htmlFor="imap-secure" className="text-xs cursor-pointer">
+                  TLS (typical for 993)
+                </Label>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Username</Label>
+                <Input
+                  className="h-9"
+                  value={account.imap.user}
+                  onChange={(e) => setImap({ user: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Password</Label>
+                <Input
+                  className="h-9"
+                  type="password"
+                  autoComplete="new-password"
+                  value={account.imap.password}
+                  onChange={(e) => setImap({ password: e.target.value })}
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className="text-xs">Sync interval (minutes)</Label>
+                <Input
+                  className="h-9 max-w-[120px]"
+                  type="number"
+                  min={5}
+                  value={account.syncIntervalMinutes}
+                  onChange={(e) =>
+                    setAccount({ syncIntervalMinutes: Math.max(5, Number(e.target.value) || 15) })
+                  }
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Used when server-side IMAP polling ships. Minimum 5 minutes recommended.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <Separator />
+
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="archive-send"
+                  checked={account.archiveOnSend}
+                  onCheckedChange={(v) => setAccount({ archiveOnSend: !!v })}
+                />
+                <Label htmlFor="archive-send" className="text-xs cursor-pointer">
+                  Archive on send (future)
+                </Label>
+              </div>
+              <div className="flex items-center gap-2">
+                <Switch
+                  id="read-rcpt"
+                  checked={account.readReceipts}
+                  onCheckedChange={(v) => setAccount({ readReceipts: !!v })}
+                />
+                <Label htmlFor="read-rcpt" className="text-xs cursor-pointer">
+                  Read receipts (future)
+                </Label>
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Email signature</Label>
+              <Textarea
+                rows={4}
+                value={account.signature}
+                onChange={(e) => setAccount({ signature: e.target.value })}
+                placeholder="—&#10;James Mitchell&#10;Director, Nova Inc."
+                className="text-sm resize-y min-h-[88px]"
+              />
+            </div>
+          </div>
+
+          <p className="text-[11px] text-muted-foreground">
+            Settings save automatically in this browser. Use an app-specific password for Gmail / Microsoft when 2FA
+            is on.
+          </p>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -1,7 +1,9 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
+import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -13,10 +15,15 @@ import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
+import { useLocalDeals } from "@/hooks/use-local-deals";
 
 export function DealDetailView({ dealId }: { dealId: string }) {
   const ws = useWorkspace();
-  const deal = ws.deals.find((d) => d.id === dealId);
+  const { localDeals } = useLocalDeals();
+  const deal = React.useMemo(
+    () => ws.deals.find((d) => d.id === dealId) ?? localDeals.find((d) => d.id === dealId),
+    [ws.deals, localDeals, dealId],
+  );
 
   if (!deal) {
     return (
@@ -58,7 +65,16 @@ export function DealDetailView({ dealId }: { dealId: string }) {
             </div>
           </div>
         }
-        actions={<Button variant="outline" size="sm">Edit</Button>}
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => toast.info("Deal editing will use your workspace API when connected.")}
+          >
+            Edit
+          </Button>
+        }
       />
       <PageBody>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,8 +27,18 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Users2, Building, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+const SELECT_NONE = "__none__";
+
+function newDepartmentId() {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return `d-${crypto.randomUUID()}`;
+  }
+  return `d-${Date.now()}`;
+}
+
 export default function AdminDepartmentsPage() {
-  const { departments, users, leads } = useWorkspace();
+  const router = useRouter();
+  const { departments, users, leads, addDepartment } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
@@ -36,13 +47,32 @@ export default function AdminDepartmentsPage() {
   const [loading, setLoading] = React.useState(false);
 
   async function handleCreate() {
-    if (!name) { toast.error("Name is required"); return; }
+    if (!name.trim()) {
+      toast.error("Name is required");
+      return;
+    }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 400));
+    const id = newDepartmentId();
+    addDepartment({
+      id,
+      name: name.trim(),
+      description: description.trim() || undefined,
+      parentId: parentId || undefined,
+      leadUserId: leadUserId || undefined,
+    });
     setLoading(false);
-    toast.success(`Department "${name}" created`);
+    toast.success(`Department "${name.trim()}" created`);
     setNewOpen(false);
-    setName(""); setDescription(""); setParentId(""); setLeadUserId("");
+    setName("");
+    setDescription("");
+    setParentId("");
+    setLeadUserId("");
+    router.push(`/admin/departments/${id}`);
+  }
+
+  function openDepartment(id: string) {
+    router.push(`/admin/departments/${id}`);
   }
 
   const deptStats = departments.map((d) => ({
@@ -67,7 +97,20 @@ export default function AdminDepartmentsPage() {
       <PageBody>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {deptStats.map((d) => (
-            <Card key={d.id} className="hover:bg-muted/20 transition-colors cursor-pointer">
+            <Card
+              key={d.id}
+              role="button"
+              tabIndex={0}
+              aria-label={`Open department ${d.name}`}
+              className="hover:bg-muted/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+              onClick={() => openDepartment(d.id)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openDepartment(d.id);
+                }
+              }}
+            >
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2">
@@ -141,11 +184,15 @@ export default function AdminDepartmentsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Parent department (optional)</Label>
-              <Select value={parentId} onValueChange={(v) => setParentId(v ?? "")}>
+              <Select
+                value={parentId || SELECT_NONE}
+                onValueChange={(v) => setParentId(v === SELECT_NONE ? "" : (v ?? ""))}
+              >
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="None (top-level)" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={SELECT_NONE}>None (top-level)</SelectItem>
                   {departments.map((d) => (
                     <SelectItem key={d.id} value={d.id}>
                       {d.name}
@@ -156,11 +203,15 @@ export default function AdminDepartmentsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Lead (optional)</Label>
-              <Select value={leadUserId} onValueChange={(v) => setLeadUserId(v ?? "")}>
+              <Select
+                value={leadUserId || SELECT_NONE}
+                onValueChange={(v) => setLeadUserId(v === SELECT_NONE ? "" : (v ?? ""))}
+              >
                 <SelectTrigger className="h-9">
                   <SelectValue placeholder="None" />
                 </SelectTrigger>
                 <SelectContent>
+                  <SelectItem value={SELECT_NONE}>None</SelectItem>
                   {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
                       {u.displayName}

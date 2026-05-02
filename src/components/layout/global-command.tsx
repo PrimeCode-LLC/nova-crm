@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/command";
 import { NAV_SECTIONS } from "@/lib/nav";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { Plus, Sparkles, Target, Building2, User } from "lucide-react";
+import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
+import { Plus, Sparkles, Target, Building2, User, IdCard } from "lucide-react";
 
 export function GlobalCommandMenu({
   open,
@@ -23,7 +24,8 @@ export function GlobalCommandMenu({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const { leads, accounts, contacts } = useWorkspace();
+  const { leads, accounts, contacts, users, profiles } = useWorkspace();
+  const { openQuickAdd } = useOpenQuickAdd();
   const go = (href: string) => {
     onOpenChange(false);
     router.push(href);
@@ -36,13 +38,39 @@ export function GlobalCommandMenu({
         <CommandEmpty>No results.</CommandEmpty>
 
         <CommandGroup heading="Quick actions">
-          <CommandItem onSelect={() => go("/leads/new")}>
+          <CommandItem
+            onSelect={() => {
+              onOpenChange(false);
+              openQuickAdd({ initialPill: "lead" });
+            }}
+          >
             <Plus className="mr-2 h-4 w-4" /> Add new lead
           </CommandItem>
-          <CommandItem onSelect={() => go("/accounts/new")}>
+          <CommandItem
+            onSelect={() => {
+              onOpenChange(false);
+              openQuickAdd({ initialPill: "contact" });
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" /> Add new contact
+          </CommandItem>
+          <CommandItem
+            onSelect={() => {
+              onOpenChange(false);
+              openQuickAdd({ initialPill: "account" });
+            }}
+          >
             <Plus className="mr-2 h-4 w-4" /> Add new account
           </CommandItem>
-          <CommandItem onSelect={() => go("/activity/new")}>
+          <CommandItem
+            onSelect={() => {
+              onOpenChange(false);
+              openQuickAdd({ initialPill: "profile" });
+            }}
+          >
+            <Plus className="mr-2 h-4 w-4" /> Add outreach profile
+          </CommandItem>
+          <CommandItem onSelect={() => go("/activity")}>
             <Sparkles className="mr-2 h-4 w-4" /> Log daily activity
           </CommandItem>
         </CommandGroup>
@@ -62,6 +90,23 @@ export function GlobalCommandMenu({
             })}
           </CommandGroup>
         ))}
+
+        <CommandSeparator />
+
+        <CommandGroup heading="Team">
+          {users.slice(0, 12).map((u) => (
+            <CommandItem
+              key={u.id}
+              onSelect={() => go(`/admin/users?user=${encodeURIComponent(u.id)}`)}
+            >
+              <User className="mr-2 h-4 w-4" />
+              <span>{u.displayName}</span>
+              <span className="ml-auto max-w-[140px] truncate text-xs text-muted-foreground">
+                {u.title ?? u.email}
+              </span>
+            </CommandItem>
+          ))}
+        </CommandGroup>
 
         <CommandSeparator />
 
@@ -94,6 +139,18 @@ export function GlobalCommandMenu({
             </CommandItem>
           ))}
         </CommandGroup>
+
+        {profiles.length > 0 && (
+          <CommandGroup heading="Profiles">
+            {profiles.slice(0, 12).map((p) => (
+              <CommandItem key={p.id} onSelect={() => go("/admin/profiles")}>
+                <IdCard className="mr-2 h-4 w-4" />
+                <span className="truncate">{p.name}</span>
+                <span className="ml-auto text-xs capitalize text-muted-foreground">{p.type}</span>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
       </CommandList>
     </CommandDialog>
   );

@@ -31,10 +31,41 @@ import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { Plus, Save, Calendar } from "lucide-react";
 import { toast } from "sonner";
+import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
+import { mergeActivityCounters } from "@/lib/activity-local-rollups";
+import type { ActivityCounterRow, ChannelKey } from "@/lib/types";
+
+const PROFILE_NONE = "__none__";
+
+type ActivityTab = "rollup" | "counters" | "records";
 
 export default function ActivityPage() {
-  const { isDemo, activityCounters, activityRecords } = useWorkspace();
+  const { isDemo, activityCounters, activityRecords, currentUserId } = useWorkspace();
+  const { localRollups, upsertLocalRollup } = useLocalActivityRollups();
+  const mergedCounters = React.useMemo(
+    () => mergeActivityCounters(activityCounters, localRollups),
+    [activityCounters, localRollups],
+  );
+  const sortedCounters = React.useMemo(
+    () => [...mergedCounters].sort((a, b) => b.date.localeCompare(a.date)),
+    [mergedCounters],
+  );
+
   const workspaceEmpty = !isDemo && activityCounters.length === 0 && activityRecords.length === 0;
+
+  const [tab, setTab] = React.useState<ActivityTab>("rollup");
+  const rollupAnchorRef = React.useRef<HTMLDivElement>(null);
+
+  const goToRollupForm = React.useCallback(() => {
+    setTab("rollup");
+    requestAnimationFrame(() => {
+      rollupAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const first = rollupAnchorRef.current?.querySelector<HTMLInputElement>(
+        'input[type="number"], input[type="date"]',
+      );
+      first?.focus();
+    });
+  }, []);
 
   return (
     <>
@@ -42,7 +73,7 @@ export default function ActivityPage() {
         title="Activity"
         description="Daily counter rollups + per-record activities. Drives funnel diagnostics."
         actions={
-          <Button size="sm">
+          <Button type="button" size="sm" onClick={goToRollupForm}>
             <Plus className="h-3.5 w-3.5" /> Log activity
           </Button>
         }
@@ -53,7 +84,7 @@ export default function ActivityPage() {
             <WorkspaceEmptyHint title="No activity history yet" />
           </div>
         )}
-        <Tabs defaultValue="rollup">
+        <Tabs value={tab} onValueChange={(v) => setTab(v as ActivityTab)}>
           <TabsList>
             <TabsTrigger value="rollup">Daily rollup</TabsTrigger>
             <TabsTrigger value="counters">Counters history</TabsTrigger>
@@ -61,11 +92,22 @@ export default function ActivityPage() {
           </TabsList>
 
           <TabsContent value="rollup" className="mt-4">
-            <DailyRollupForm />
+            <div ref={rollupAnchorRef} id="activity-daily-rollup">
+              <DailyRollupForm
+                currentUserId={currentUserId || "local-user"}
+                onSaved={() => {
+                  setTab("counters");
+                  toast.success("Rollup saved", {
+                    description: "Shown in Counters history and included in dashboard funnel totals this session.",
+                  });
+                }}
+                upsertLocalRollup={upsertLocalRollup}
+              />
+            </div>
           </TabsContent>
 
           <TabsContent value="counters" className="mt-4">
-            <CountersTable />
+            <CountersTable rows={sortedCounters} />
           </TabsContent>
 
           <TabsContent value="records" className="mt-4">
@@ -77,12 +119,65 @@ export default function ActivityPage() {
   );
 }
 
-function DailyRollupForm() {
+function DailyRollupForm({
+  currentUserId,
+  onSaved,
+  upsertLocalRollup,
+}: {
+  currentUserId: string;
+  onSaved: () => void;
+  upsertLocalRollup: (row: ActivityCounterRow) => void;
+}) {
   const { profiles } = useWorkspace();
-  const [channel, setChannel] = React.useState<keyof typeof CHANNELS>("cold_email");
+  const [channel, setChannel] = React.useState<ChannelKey>("cold_email");
   const stages = CHANNEL_FUNNELS[channel];
   const [counters, setCounters] = React.useState<Record<string, string>>({});
-  const [date, setDate] = React.useState(new Date().toISOString().slice(0, 10));
+  const [date, setDate] = React.useState(() => new Date().toISOString().slice(0, 10));
+  const [profileId, setProfileId] = React.useState<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    setCounters({});
+    setProfileId(undefined);
+  }, [channel]);
+
+  function resetForm() {
+    setChannel("cold_email");
+    setCounters({});
+    setDate(new Date().toISOString().slice(0, 10));
+    setProfileId(undefined);
+  }
+
+  function saveRollup() {
+    const numericCounters: Record<string, number> = {};
+    for (const s of stages) {
+      const raw = counters[s.key];
+      if (raw === undefined || raw === "") continue;
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+        toast.error("Invalid counter", { description: `Use whole numbers ≥ 0 for ${s.label}.` });
+        return;
+      }
+      if (n > 0) numericCounters[s.key] = n;
+    }
+    if (Object.keys(numericCounters).length === 0) {
+      toast.error("Add at least one non-zero count", { description: "Otherwise there is nothing to save." });
+      return;
+    }
+
+    const row: ActivityCounterRow = {
+      id: `local-ac-${Date.now()}`,
+      userId: currentUserId,
+      channel,
+      profileId: profileId || undefined,
+      date: `${date}T12:00:00.000Z`,
+      counters: numericCounters,
+    };
+    upsertLocalRollup(row);
+    setCounters({});
+    onSaved();
+  }
+
+  const profileOptions = profiles.filter((p) => p.channel === channel);
 
   return (
     <Card>
@@ -108,7 +203,7 @@ function DailyRollupForm() {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Channel</Label>
-            <Select value={channel} onValueChange={(v) => setChannel(v as keyof typeof CHANNELS)}>
+            <Select value={channel} onValueChange={(v) => setChannel(v as ChannelKey)}>
               <SelectTrigger className="h-9">
                 <SelectValue />
               </SelectTrigger>
@@ -123,18 +218,22 @@ function DailyRollupForm() {
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Profile (optional)</Label>
-            <Select>
+            <Select
+              value={profileId ?? PROFILE_NONE}
+              onValueChange={(v) =>
+                setProfileId(!v || v === PROFILE_NONE ? undefined : v)
+              }
+            >
               <SelectTrigger className="h-9">
                 <SelectValue placeholder="None" />
               </SelectTrigger>
               <SelectContent>
-                {profiles
-                  .filter((p) => p.channel === channel)
-                  .map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
+                <SelectItem value={PROFILE_NONE}>None</SelectItem>
+                {profileOptions.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
@@ -151,6 +250,7 @@ function DailyRollupForm() {
                 <Input
                   type="number"
                   min={0}
+                  step={1}
                   placeholder="0"
                   value={counters[s.key] ?? ""}
                   onChange={(e) => setCounters({ ...counters, [s.key]: e.target.value })}
@@ -162,8 +262,10 @@ function DailyRollupForm() {
         </div>
 
         <div className="flex items-center gap-2 justify-end">
-          <Button variant="ghost" size="sm">Reset</Button>
-          <Button size="sm" onClick={() => toast.success("Activity logged")}>
+          <Button type="button" variant="ghost" size="sm" onClick={resetForm}>
+            Reset
+          </Button>
+          <Button type="button" size="sm" onClick={saveRollup}>
             <Save className="h-3.5 w-3.5" /> Save rollup
           </Button>
         </div>
@@ -172,8 +274,7 @@ function DailyRollupForm() {
   );
 }
 
-function CountersTable() {
-  const { activityCounters } = useWorkspace();
+function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
   return (
     <Card>
       <CardContent className="p-0">
@@ -187,23 +288,35 @@ function CountersTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activityCounters.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell className="py-2 text-sm whitespace-nowrap">{fmtDate(a.date, "MMM d")}</TableCell>
-                <TableCell className="py-2"><UserChip userId={a.userId} size="xs" /></TableCell>
-                <TableCell className="py-2"><ChannelChip channel={a.channel} /></TableCell>
-                <TableCell className="py-2 text-xs tabular-nums">
-                  <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                    {Object.entries(a.counters).map(([k, v]) => (
-                      <span key={k}>
-                        <span className="text-muted-foreground">{k.replace(/_/g, " ")}</span>:{" "}
-                        <span className="font-semibold">{fmtNumber(v)}</span>
-                      </span>
-                    ))}
-                  </div>
+            {rows.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                  No counter rollups yet. Use Daily rollup to add your first entry.
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              rows.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell className="py-2 text-sm whitespace-nowrap">{fmtDate(a.date, "MMM d")}</TableCell>
+                  <TableCell className="py-2">
+                    <UserChip userId={a.userId} size="xs" />
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <ChannelChip channel={a.channel} />
+                  </TableCell>
+                  <TableCell className="py-2 text-xs tabular-nums">
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                      {Object.entries(a.counters).map(([k, v]) => (
+                        <span key={k}>
+                          <span className="text-muted-foreground">{k.replace(/_/g, " ")}</span>:{" "}
+                          <span className="font-semibold">{fmtNumber(v)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </CardContent>
@@ -228,26 +341,38 @@ function RecordsTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activityRecords.map((a) => (
-              <TableRow key={a.id}>
-                <TableCell className="py-2 text-xs font-mono text-muted-foreground">{a.type}</TableCell>
-                <TableCell className="py-2"><UserChip userId={a.userId} size="xs" /></TableCell>
-                <TableCell className="py-2"><ChannelChip channel={a.channel} /></TableCell>
-                <TableCell className="py-2 text-sm">{a.summary ?? "-"}</TableCell>
-                <TableCell className="py-2 text-sm">
-                  {a.leadId ? (
-                    <Link href={`/leads/${a.leadId}`} className="hover:text-primary text-primary/80">
-                      {getLeadById(a.leadId)?.contactName ?? a.leadId}
-                    </Link>
-                  ) : (
-                    "-"
-                  )}
-                </TableCell>
-                <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
-                  {fmtRelative(a.occurredAt)}
+            {activityRecords.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                  No per-record activities yet.
                 </TableCell>
               </TableRow>
-            ))}
+            ) : (
+              activityRecords.map((a) => (
+                <TableRow key={a.id}>
+                  <TableCell className="py-2 text-xs font-mono text-muted-foreground">{a.type}</TableCell>
+                  <TableCell className="py-2">
+                    <UserChip userId={a.userId} size="xs" />
+                  </TableCell>
+                  <TableCell className="py-2">
+                    <ChannelChip channel={a.channel} />
+                  </TableCell>
+                  <TableCell className="py-2 text-sm">{a.summary ?? "-"}</TableCell>
+                  <TableCell className="py-2 text-sm">
+                    {a.leadId ? (
+                      <Link href={`/leads/${a.leadId}`} className="hover:text-primary text-primary/80">
+                        {getLeadById(a.leadId)?.contactName ?? a.leadId}
+                      </Link>
+                    ) : (
+                      "-"
+                    )}
+                  </TableCell>
+                  <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
+                    {fmtRelative(a.occurredAt)}
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
           </TableBody>
         </Table>
       </CardContent>

@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
 import { requireSession } from "@/lib/auth/server";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
+import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
 import { DEMO_PERSONA_COOKIE, parseDemoPersonaId } from "@/lib/demo-persona";
 
@@ -19,13 +20,15 @@ export default async function AppLayout({
 
   return (
     <WorkspaceModeProvider initialMode={initialMode} initialDemoPersonaId={initialDemoPersonaId}>
-      <SidebarProvider>
-        <AppSidebar />
-        <SidebarInset>
-          <AppTopbar />
-          <div className="flex flex-1 flex-col">{children}</div>
-        </SidebarInset>
-      </SidebarProvider>
+      <QuickAddLauncherProvider>
+        <SidebarProvider>
+          <AppSidebar />
+          <SidebarInset>
+            <AppTopbar />
+            <div className="flex flex-1 flex-col">{children}</div>
+          </SidebarInset>
+        </SidebarProvider>
+      </QuickAddLauncherProvider>
     </WorkspaceModeProvider>
   );
 }

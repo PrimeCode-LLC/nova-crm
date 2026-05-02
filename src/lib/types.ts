@@ -62,6 +62,8 @@ export interface User {
   departmentId?: string;
   managerId?: string;
   title?: string;
+  /** Workspace-level super admin (can manage users alongside director / founder). */
+  isSuperAdmin?: boolean;
   status: "active" | "inactive" | "pip";
   createdAt: ISODate;
 }

@@ -1,10 +1,13 @@
 "use client";
 
+import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { CHANNEL_FUNNELS } from "@/lib/constants";
 import type { ChannelKey } from "@/lib/types";
 import { fmtNumber, fmtPercent } from "@/lib/format";
+import { buildFunnelDrillHref } from "@/lib/leads-drill-down";
+import { cn } from "@/lib/utils";
 
 interface FunnelChartProps {
   channel: ChannelKey;
@@ -34,10 +37,18 @@ export function FunnelChart({ channel, title, counts }: FunnelChartProps) {
           const prev = i === 0 ? val : counts[stages[i - 1].key] ?? 0;
           const pctOfTop = top > 0 ? (val / top) * 100 : 0;
           const convFromPrev = prev > 0 ? (val / prev) * 100 : 0;
+          const href = buildFunnelDrillHref(channel, s.key);
           return (
-            <div key={s.key} className="group">
+            <Link
+              key={s.key}
+              href={href}
+              className={cn(
+                "group block rounded-md -mx-1 px-1 py-0.5 transition-colors",
+                "hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
+            >
               <div className="flex items-center justify-between text-xs mb-1">
-                <span className="font-medium text-muted-foreground">
+                <span className="font-medium text-muted-foreground group-hover:text-foreground">
                   {s.label}
                 </span>
                 <span className="flex items-center gap-2 tabular-nums">
@@ -49,8 +60,8 @@ export function FunnelChart({ channel, title, counts }: FunnelChartProps) {
                   )}
                 </span>
               </div>
-              <Progress value={pctOfTop} className="h-1.5" />
-            </div>
+              <Progress value={pctOfTop} className="h-1.5 pointer-events-none" />
+            </Link>
           );
         })}
       </CardContent>

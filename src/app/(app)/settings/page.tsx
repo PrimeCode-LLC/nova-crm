@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,8 +31,10 @@ import {
   Sun,
   Moon,
   Monitor,
+  Mail,
 } from "lucide-react";
 import { toast } from "sonner";
+import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 
 /**
  * Mini theme preview — a tiny faux-app rendered with the literal hex/oklch
@@ -148,7 +152,15 @@ const INTEGRATIONS = [
   { id: "website", name: "Website Webhook", desc: "Inbound form submissions as new leads.", connected: true },
 ];
 
-export default function SettingsPage() {
+function SettingsPage() {
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = React.useState("profile");
+
+  React.useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t === "email") setActiveTab("email");
+  }, [searchParams]);
+
   const { isDemo, users, currentUserId, demoPersonaId } = useWorkspace();
   const { user: fbUser } = useAuth();
   const demoUser = users.find((u) => u.id === currentUserId);
@@ -202,8 +214,8 @@ export default function SettingsPage() {
         description="Manage your profile, preferences, and integrations."
       />
       <PageBody>
-        <Tabs defaultValue="profile">
-          <TabsList className="mb-2">
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="mb-2 flex-wrap h-auto gap-1 py-1">
             <TabsTrigger value="profile" className="gap-1.5">
               <User className="h-3.5 w-3.5" /> Profile
             </TabsTrigger>
@@ -212,6 +224,9 @@ export default function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="notifications" className="gap-1.5">
               <Bell className="h-3.5 w-3.5" /> Notifications
+            </TabsTrigger>
+            <TabsTrigger value="email" className="gap-1.5">
+              <Mail className="h-3.5 w-3.5" /> Email
             </TabsTrigger>
             <TabsTrigger value="integrations" className="gap-1.5">
               <Plug className="h-3.5 w-3.5" /> Integrations
@@ -350,6 +365,11 @@ export default function SettingsPage() {
                 ))}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Email / SMTP inbox */}
+          <TabsContent value="email">
+            <EmailInboxSettingsCard />
           </TabsContent>
 
           {/* Integrations */}
@@ -566,5 +586,24 @@ export default function SettingsPage() {
         </Tabs>
       </PageBody>
     </>
+  );
+}
+
+function SettingsFallback() {
+  return (
+    <>
+      <PageHeader title="Settings" description="Loading preferences…" />
+      <PageBody>
+        <div className="h-48 max-w-lg animate-pulse rounded-lg bg-muted/40" />
+      </PageBody>
+    </>
+  );
+}
+
+export default function SettingsPageRoute() {
+  return (
+    <Suspense fallback={<SettingsFallback />}>
+      <SettingsPage />
+    </Suspense>
   );
 }

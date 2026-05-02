@@ -11,25 +11,27 @@ import {
   Tooltip,
   CartesianGrid,
 } from "recharts";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { buildActivityTrendSeries } from "@/lib/dashboard-analytics";
+import type { ActivityRecord, Deal, Lead } from "@/lib/types";
 
-function generateSeries(seed: number, days = 30) {
-  const arr: { day: string; replies: number; meetings: number; closed: number }[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const base = 8 + Math.sin((i + seed) * 0.6) * 4 + (seed % 3);
-    arr.push({
-      day: d.toLocaleDateString("en", { month: "short", day: "numeric" }),
-      replies: Math.max(0, Math.round(base + 6)),
-      meetings: Math.max(0, Math.round(base * 0.35 + 1)),
-      closed: Math.max(0, Math.round(base * 0.1)),
-    });
-  }
-  return arr;
-}
-
-export function TrendChart() {
-  const data = React.useMemo(() => generateSeries(4), []);
+export function TrendChart({
+  leads: leadsOverride,
+  deals: dealsOverride,
+  activityRecords: activityRecordsOverride,
+}: {
+  leads?: Lead[];
+  deals?: Deal[];
+  activityRecords?: ActivityRecord[];
+} = {}) {
+  const ws = useWorkspace();
+  const activityRecords = activityRecordsOverride ?? ws.activityRecords;
+  const deals = dealsOverride ?? ws.deals;
+  const leads = leadsOverride ?? ws.leads;
+  const data = React.useMemo(
+    () => buildActivityTrendSeries(activityRecords, deals, leads, 30),
+    [activityRecords, deals, leads],
+  );
 
   return (
     <Card className="min-w-0">

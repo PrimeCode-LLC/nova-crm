@@ -26,7 +26,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { KANBAN_STAGES, PIPELINE_STAGES, STAGES_BY_KEY, PRIORITY_TONE } from "@/lib/constants";
-import type { Lead, PipelineStage } from "@/lib/types";
+import type { Lead, LeadPriority, PipelineStage } from "@/lib/types";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { fmtCurrency, fmtRelative } from "@/lib/format";
@@ -63,10 +63,42 @@ function groupByStage(leads: Lead[]): LeadMap {
   return acc;
 }
 
-export function KanbanBoard({ leads: initialLeads }: { leads: Lead[] }) {
+export type PipelineBoardFilter = {
+  query: string;
+  /** When non-empty, only these priorities are shown. */
+  priorities: LeadPriority[];
+};
+
+export function KanbanBoard({
+  leads: initialLeads,
+  boardFilter,
+  onAddToStage,
+}: {
+  leads: Lead[];
+  boardFilter?: PipelineBoardFilter;
+  onAddToStage?: (stage: PipelineStage) => void;
+}) {
   const [leads, setLeads] = React.useState(initialLeads);
   const [activeId, setActiveId] = React.useState<string | null>(null);
-  const groups = React.useMemo(() => groupByStage(leads), [leads]);
+
+  React.useEffect(() => {
+    setLeads(initialLeads);
+  }, [initialLeads]);
+
+  const filteredLeads = React.useMemo(() => {
+    const q = (boardFilter?.query ?? "").trim().toLowerCase();
+    const pri = boardFilter?.priorities;
+    return leads.filter((l) => {
+      if (q) {
+        const hay = `${l.contactName} ${l.companyName}`.toLowerCase();
+        if (!hay.includes(q)) return false;
+      }
+      if (pri && pri.length > 0 && !pri.includes(l.priority)) return false;
+      return true;
+    });
+  }, [leads, boardFilter]);
+
+  const groups = React.useMemo(() => groupByStage(filteredLeads), [filteredLeads]);
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
@@ -100,6 +132,14 @@ export function KanbanBoard({ leads: initialLeads }: { leads: Lead[] }) {
     }
 
     if (!destStage) return;
+
+    if (destStage === "won") {
+      const v = activeLead.estimatedValue;
+      if (v == null || v <= 0) {
+        toast.error("Won requires a positive estimated value. Open the lead and set deal value first.");
+        return;
+      }
+    }
 
     setLeads((prev) => {
       const next = [...prev];
@@ -143,6 +183,7 @@ export function KanbanBoard({ leads: initialLeads }: { leads: Lead[] }) {
               count={stageLeads.length}
               totalValue={totalValue}
               leads={stageLeads}
+              onAddToStage={onAddToStage}
             />
           );
         })}
@@ -167,12 +208,14 @@ function KanbanColumn({
   count,
   totalValue,
   leads,
+  onAddToStage,
 }: {
   stage: PipelineStage;
   label: string;
   count: number;
   totalValue: number;
   leads: Lead[];
+  onAddToStage?: (stage: PipelineStage) => void;
 }) {
   const { setNodeRef, isOver } = useDroppable({
     id: stage,
@@ -205,7 +248,17 @@ function KanbanColumn({
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">
           {fmtCurrency(totalValue)}
         </span>
-        <Button variant="ghost" size="icon-xs">
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-xs"
+          aria-label={`Add lead to ${label}`}
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddToStage?.(stage);
+          }}
+        >
           <Plus className="h-3 w-3" />
         </Button>
       </div>

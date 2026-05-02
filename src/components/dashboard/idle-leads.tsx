@@ -10,9 +10,11 @@ import { ChevronRight, AlertTriangle } from "lucide-react";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
+import type { Lead } from "@/lib/types";
 
-export function IdleLeads() {
-  const { leads } = useWorkspace();
+export function IdleLeads({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
+  const ws = useWorkspace();
+  const leads = leadsOverride ?? ws.leads;
   const rows = [...leads]
     .filter((l) => l.isIdle)
     .sort((a, b) => (b.idleDays ?? 0) - (a.idleDays ?? 0))

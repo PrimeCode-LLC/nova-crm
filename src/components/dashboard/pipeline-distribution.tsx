@@ -4,10 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { PIPELINE_STAGES, STAGES_BY_KEY } from "@/lib/constants";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber } from "@/lib/format";
-import type { PipelineStage } from "@/lib/types";
+import type { Lead, PipelineStage } from "@/lib/types";
 
-export function PipelineDistribution() {
-  const { leads } = useWorkspace();
+export function PipelineDistribution({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
+  const ws = useWorkspace();
+  const leads = leadsOverride ?? ws.leads;
   const counts = leads.reduce<Record<PipelineStage, number>>(
     (acc, l) => {
       acc[l.stage] = (acc[l.stage] ?? 0) + 1;
@@ -24,7 +25,7 @@ export function PipelineDistribution() {
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-semibold">Pipeline distribution</CardTitle>
         <CardDescription className="text-xs">
-          {fmtNumber(total)} open leads across all channels
+          {fmtNumber(total)} leads across channels you can access
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">

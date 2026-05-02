@@ -5,9 +5,11 @@ import { CHANNELS, CHANNEL_LIST } from "@/lib/constants";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
+import type { Lead } from "@/lib/types";
 
-export function ChannelMix() {
-  const { leads } = useWorkspace();
+export function ChannelMix({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
+  const ws = useWorkspace();
+  const leads = leadsOverride ?? ws.leads;
   const total = leads.length;
   const rows = CHANNEL_LIST.map((c) => {
     const count = leads.filter((l) => l.channel === c.key).length;

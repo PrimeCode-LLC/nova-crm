@@ -10,6 +10,8 @@ export function KpiCard({
   icon: Icon,
   deltaType = "auto",
   className,
+  onClick,
+  selected,
 }: {
   label: string;
   value: React.ReactNode;
@@ -18,6 +20,8 @@ export function KpiCard({
   icon?: LucideIcon;
   deltaType?: "auto" | "positive-up" | "positive-down";
   className?: string;
+  onClick?: () => void;
+  selected?: boolean;
 }) {
   let trend: "up" | "down" | "flat" = "flat";
   if (delta != null) {
@@ -30,8 +34,30 @@ export function KpiCard({
       : trend === "up";
   const TrendIcon = trend === "up" ? ArrowUpRight : trend === "down" ? ArrowDownRight : Minus;
 
+  const interactive = Boolean(onClick);
+
   return (
-    <Card className={cn("relative overflow-hidden", className)}>
+    <Card
+      className={cn(
+        "relative overflow-hidden transition-colors",
+        interactive && "cursor-pointer hover:bg-muted/40",
+        selected && "ring-2 ring-primary/60 border-primary/40",
+        className,
+      )}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={onClick}
+      onKeyDown={
+        interactive
+          ? (e) => {
+              if (e.key === "Enter" || e.key === " ") {
+                e.preventDefault();
+                onClick?.();
+              }
+            }
+          : undefined
+      }
+    >
       <CardContent className="p-4">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">

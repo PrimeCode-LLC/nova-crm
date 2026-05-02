@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Bell, Command as CommandIcon, Search } from "lucide-react";
 
@@ -9,6 +9,14 @@ import { SidebarTrigger } from "@/components/ui/sidebar";
 import { Separator } from "@/components/ui/separator";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Breadcrumb,
   BreadcrumbItem,
@@ -20,6 +28,10 @@ import {
 import { GlobalCommandMenu } from "./global-command";
 import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { buildDemoNotifications } from "@/lib/inbox-demo-notifications";
+import { mergeNotificationSeed, useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
+import { useZustandPersistHydrated } from "@/hooks/use-zustand-persist-hydrated";
 
 function toLabel(segment: string) {
   return segment
@@ -27,9 +39,42 @@ function toLabel(segment: string) {
     .replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
+function shortRelativeTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return "Just now";
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
+
 export function AppTopbar() {
   const pathname = usePathname();
+  const router = useRouter();
   const [cmdOpen, setCmdOpen] = React.useState(false);
+  const { leads, users, isDemo, demoPersonaId } = useWorkspace();
+  const inboxHydrated = useZustandPersistHydrated(useInboxNotificationOverrides);
+  const readIds = useInboxNotificationOverrides((s) => s.readIds);
+  const unreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
+  const dismissedIds = useInboxNotificationOverrides((s) => s.dismissedIds);
+  const markRead = useInboxNotificationOverrides((s) => s.markRead);
+
+  const mergedNotifications = React.useMemo(() => {
+    if (!isDemo || !inboxHydrated) return [];
+    const seed = buildDemoNotifications(leads, users, demoPersonaId);
+    return mergeNotificationSeed(seed, { readIds, unreadIds, dismissedIds });
+  }, [isDemo, inboxHydrated, leads, users, demoPersonaId, readIds, unreadIds, dismissedIds]);
+
+  const bellUnread = mergedNotifications.filter((n) => !n.read).length;
+
+  const sortedForMenu = React.useMemo(() => {
+    return [...mergedNotifications].sort((a, b) => {
+      if (a.read !== b.read) return a.read ? 1 : -1;
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+  }, [mergedNotifications]);
 
   const segments = pathname.split("/").filter(Boolean);
 
@@ -80,6 +125,15 @@ export function AppTopbar() {
           <WorkspaceModeToggle />
           <Button
             variant="outline"
+            size="icon-sm"
+            className="text-muted-foreground md:hidden"
+            aria-label="Open search"
+            onClick={() => setCmdOpen(true)}
+          >
+            <Search className="h-3.5 w-3.5" />
+          </Button>
+          <Button
+            variant="outline"
             size="sm"
             className="text-muted-foreground w-60 justify-between px-3 hidden md:flex"
             onClick={() => setCmdOpen(true)}
@@ -92,10 +146,60 @@ export function AppTopbar() {
               <CommandIcon className="h-3 w-3" />K
             </kbd>
           </Button>
-          <Button variant="ghost" size="icon" className="relative">
-            <Bell className="h-4 w-4" />
-            <Badge className="absolute -right-1 -top-1 h-4 w-4 rounded-full p-0 text-[10px]">3</Badge>
-          </Button>
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              nativeButton={false}
+              render={
+                <Button variant="ghost" size="icon" className="relative" aria-label="Notifications menu">
+                  <Bell className="h-4 w-4" />
+                  {bellUnread > 0 && (
+                    <Badge className="absolute -right-1 -top-1 min-w-4 h-4 rounded-full px-0.5 p-0 text-[10px] tabular-nums">
+                      {bellUnread > 99 ? "99+" : bellUnread}
+                    </Badge>
+                  )}
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-80">
+              <DropdownMenuLabel className="font-semibold">Notifications</DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              {!isDemo || !inboxHydrated ? (
+                <div className="px-2 py-3 text-sm text-muted-foreground">
+                  {isDemo && !inboxHydrated
+                    ? "Loading…"
+                    : "Turn on demo mode to see sample notifications, or open the inbox."}
+                </div>
+              ) : sortedForMenu.length === 0 ? (
+                <div className="px-2 py-3 text-sm text-muted-foreground">You&apos;re all caught up.</div>
+              ) : (
+                sortedForMenu.slice(0, 8).map((n) => (
+                  <DropdownMenuItem
+                    key={n.id}
+                    className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
+                    onSelect={() => {
+                      markRead(n.id);
+                      router.push(n.targetHref);
+                    }}
+                  >
+                    <span className="text-xs font-medium leading-tight text-foreground line-clamp-2">
+                      {n.message}
+                    </span>
+                    <span className="text-[10px] text-muted-foreground">
+                      {shortRelativeTime(n.timestamp)}
+                      {!n.read ? " · Unread" : ""}
+                    </span>
+                  </DropdownMenuItem>
+                ))
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                className="justify-center font-medium text-primary"
+                onSelect={() => router.push("/inbox")}
+              >
+                View all in Inbox
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           <QuickAddButton />
         </div>
       </header>

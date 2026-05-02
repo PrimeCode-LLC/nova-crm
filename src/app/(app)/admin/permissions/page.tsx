@@ -29,18 +29,45 @@ import {
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { fmtDate, fmtRelative } from "@/lib/format";
-import { Plus, Shield, Trash2, Info } from "lucide-react";
+import { fmtDate } from "@/lib/format";
+import type { PermissionOverride } from "@/lib/types";
+import { Plus, Shield, Trash2, Info, X } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 const RESOURCES = ["leads", "deals", "accounts", "contacts", "activities"] as const;
 const ACTIONS = ["read", "write", "delete"] as const;
 const SCOPES = ["own", "team", "department", "all", "custom"] as const;
 
+type ColumnFilterKey = "resource" | "action" | "scope" | "effect";
+
+function newOverrideId(): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `po-${crypto.randomUUID()}`;
+  }
+  return `po-${Date.now()}`;
+}
+
 export default function AdminPermissionsPage() {
-  const { permissionOverrides, users } = useWorkspace();
+  const {
+    permissionOverrides,
+    users,
+    currentUserId,
+    addPermissionOverride,
+    removePermissionOverride,
+  } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [userId, setUserId] = React.useState("");
   const [resource, setResource] = React.useState("");
@@ -49,6 +76,41 @@ export default function AdminPermissionsPage() {
   const [effect, setEffect] = React.useState<"grant" | "deny">("grant");
   const [note, setNote] = React.useState("");
   const [loading, setLoading] = React.useState(false);
+  const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [columnFilter, setColumnFilter] = React.useState<Partial<
+    Record<ColumnFilterKey, string>
+  >>({});
+
+  function resetForm() {
+    setUserId("");
+    setResource("");
+    setAction("");
+    setScope("");
+    setEffect("grant");
+    setNote("");
+  }
+
+  function toggleColumnFilter(key: ColumnFilterKey, value: string) {
+    setColumnFilter((f) => {
+      const cur = f[key];
+      if (cur === value) {
+        const next = { ...f };
+        delete next[key];
+        return next;
+      }
+      return { ...f, [key]: value };
+    });
+  }
+
+  const filteredOverrides = permissionOverrides.filter((po) => {
+    if (columnFilter.resource && po.resource !== columnFilter.resource) return false;
+    if (columnFilter.action && po.action !== columnFilter.action) return false;
+    if (columnFilter.scope && po.scope !== columnFilter.scope) return false;
+    if (columnFilter.effect && po.effect !== columnFilter.effect) return false;
+    return true;
+  });
+
+  const hasColumnFilters = Object.keys(columnFilter).length > 0;
 
   async function handleCreate() {
     if (!userId || !resource || !action || !scope) {
@@ -56,11 +118,30 @@ export default function AdminPermissionsPage() {
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 400));
+    const row: PermissionOverride = {
+      id: newOverrideId(),
+      userId,
+      resource: resource as PermissionOverride["resource"],
+      action: action as PermissionOverride["action"],
+      scope: scope as PermissionOverride["scope"],
+      effect,
+      note: note.trim() || undefined,
+      createdBy: currentUserId || "u-director",
+      createdAt: new Date().toISOString(),
+    };
+    addPermissionOverride(row);
     setLoading(false);
     toast.success("Permission override created");
     setNewOpen(false);
-    setUserId(""); setResource(""); setAction(""); setScope(""); setNote("");
+    resetForm();
+  }
+
+  function confirmDelete() {
+    if (!deleteId) return;
+    removePermissionOverride(deleteId);
+    toast.success("Override removed");
+    setDeleteId(null);
   }
 
   return (
@@ -85,13 +166,80 @@ export default function AdminPermissionsPage() {
               <span className="text-muted-foreground/60">→</span>
               <span className="rounded-md bg-background border px-2 py-0.5">Department override</span>
               <span className="text-muted-foreground/60">→</span>
-              <span className="rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 font-medium">Person override (wins)</span>
+              <span className="rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 font-medium">
+                Person override (wins)
+              </span>
             </div>
             <p className="text-muted-foreground text-xs">
               A <em>deny</em> at any level blocks access, even if a lower layer grants it. Use sparingly; most access should flow from roles.
             </p>
           </div>
         </div>
+
+        {hasColumnFilters && (
+          <div className="flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-muted-foreground">Table filter:</span>
+            {columnFilter.resource && (
+              <Badge variant="secondary" className="gap-1 font-normal">
+                resource: {columnFilter.resource}
+                <button
+                  type="button"
+                  className="rounded-sm hover:bg-muted p-0.5"
+                  aria-label="Clear resource filter"
+                  onClick={() => toggleColumnFilter("resource", columnFilter.resource!)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {columnFilter.action && (
+              <Badge variant="secondary" className="gap-1 font-normal">
+                action: {columnFilter.action}
+                <button
+                  type="button"
+                  className="rounded-sm hover:bg-muted p-0.5"
+                  aria-label="Clear action filter"
+                  onClick={() => toggleColumnFilter("action", columnFilter.action!)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {columnFilter.scope && (
+              <Badge variant="secondary" className="gap-1 font-normal">
+                scope: {columnFilter.scope}
+                <button
+                  type="button"
+                  className="rounded-sm hover:bg-muted p-0.5"
+                  aria-label="Clear scope filter"
+                  onClick={() => toggleColumnFilter("scope", columnFilter.scope!)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {columnFilter.effect && (
+              <Badge variant="secondary" className="gap-1 font-normal">
+                effect: {columnFilter.effect}
+                <button
+                  type="button"
+                  className="rounded-sm hover:bg-muted p-0.5"
+                  aria-label="Clear effect filter"
+                  onClick={() => toggleColumnFilter("effect", columnFilter.effect!)}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setColumnFilter({})}>
+              Clear all
+            </Button>
+          </div>
+        )}
+
+        <p className="text-[11px] text-muted-foreground">
+          Tip: click a resource, action, scope, or effect pill to filter the table. Click again to clear that column.
+        </p>
 
         <div className="rounded-md border overflow-hidden">
           <div className="overflow-x-auto scrollbar-thin">
@@ -110,73 +258,152 @@ export default function AdminPermissionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {permissionOverrides.map((po) => (
-                  <TableRow key={po.id}>
-                    <TableCell className="py-2">
-                      <UserChip userId={po.userId} size="xs" />
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        {po.resource}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Badge variant="outline" className="text-[10px] font-mono">
-                        {po.action}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Badge variant="outline" className="text-[10px]">
-                        {po.scope}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Badge
-                        variant="outline"
-                        className={`text-[10px] font-semibold uppercase ${
-                          po.effect === "grant"
-                            ? "bg-success/10 text-success border-success/20"
-                            : "bg-destructive/10 text-destructive border-destructive/20"
-                        }`}
-                      >
-                        {po.effect}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground max-w-[240px] truncate">
-                      {po.note ?? "-"}
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <UserChip userId={po.createdBy} size="xs" />
-                    </TableCell>
-                    <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
-                      {fmtDate(po.createdAt, "MMM d, yyyy")}
-                    </TableCell>
-                    <TableCell className="py-2">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive"
-                        onClick={() => toast.success("Override deleted")}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                {filteredOverrides.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
+                      {hasColumnFilters
+                        ? "No overrides match the current filters."
+                        : "No permission overrides yet."}
                     </TableCell>
                   </TableRow>
-                ))}
+                ) : (
+                  filteredOverrides.map((po) => (
+                    <TableRow key={po.id}>
+                      <TableCell className="py-2">
+                        <UserChip
+                          userId={po.userId}
+                          size="xs"
+                          profileHref={`/admin/users?user=${encodeURIComponent(po.userId)}`}
+                        />
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <button
+                          type="button"
+                          className="inline-flex"
+                          title="Filter by this resource"
+                          onClick={() => toggleColumnFilter("resource", po.resource)}
+                        >
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-mono cursor-pointer transition-colors",
+                              columnFilter.resource === po.resource && "ring-2 ring-primary/40",
+                            )}
+                          >
+                            {po.resource}
+                          </Badge>
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <button
+                          type="button"
+                          className="inline-flex"
+                          title="Filter by this action"
+                          onClick={() => toggleColumnFilter("action", po.action)}
+                        >
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-mono cursor-pointer transition-colors",
+                              columnFilter.action === po.action && "ring-2 ring-primary/40",
+                            )}
+                          >
+                            {po.action}
+                          </Badge>
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <button
+                          type="button"
+                          className="inline-flex"
+                          title="Filter by this scope"
+                          onClick={() => toggleColumnFilter("scope", po.scope)}
+                        >
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] cursor-pointer transition-colors",
+                              columnFilter.scope === po.scope && "ring-2 ring-primary/40",
+                            )}
+                          >
+                            {po.scope}
+                          </Badge>
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <button
+                          type="button"
+                          className="inline-flex"
+                          title="Filter by grant/deny"
+                          onClick={() => toggleColumnFilter("effect", po.effect)}
+                        >
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-semibold uppercase cursor-pointer transition-colors",
+                              po.effect === "grant"
+                                ? "bg-success/10 text-success border-success/20"
+                                : "bg-destructive/10 text-destructive border-destructive/20",
+                              columnFilter.effect === po.effect && "ring-2 ring-primary/40",
+                            )}
+                          >
+                            {po.effect}
+                          </Badge>
+                        </button>
+                      </TableCell>
+                      <TableCell className="py-2 text-xs text-muted-foreground max-w-[240px] truncate">
+                        {po.note ?? "-"}
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <UserChip
+                          userId={po.createdBy}
+                          size="xs"
+                          profileHref={`/admin/users?user=${encodeURIComponent(po.createdBy)}`}
+                        />
+                      </TableCell>
+                      <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
+                        {fmtDate(po.createdAt, "MMM d, yyyy")}
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-destructive hover:text-destructive"
+                          aria-label="Remove override"
+                          onClick={() => setDeleteId(po.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
               </TableBody>
             </Table>
           </div>
         </div>
 
         <div className="text-xs text-muted-foreground">
-          <span className="tabular-nums font-medium text-foreground">
-            {permissionOverrides.length}
-          </span>{" "}
+          <span className="tabular-nums font-medium text-foreground">{permissionOverrides.length}</span>{" "}
           overrides active
+          {hasColumnFilters && (
+            <>
+              {" "}
+              · showing{" "}
+              <span className="tabular-nums font-medium text-foreground">{filteredOverrides.length}</span>{" "}
+              filtered
+            </>
+          )}
         </div>
       </PageBody>
 
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+      <Dialog
+        open={newOpen}
+        onOpenChange={(open) => {
+          setNewOpen(open);
+          if (open) resetForm();
+        }}
+      >
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -208,7 +435,9 @@ export default function AdminPermissionsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {RESOURCES.map((r) => (
-                      <SelectItem key={r} value={r}>{r}</SelectItem>
+                      <SelectItem key={r} value={r}>
+                        {r}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -221,7 +450,9 @@ export default function AdminPermissionsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {ACTIONS.map((a) => (
-                      <SelectItem key={a} value={a}>{a}</SelectItem>
+                      <SelectItem key={a} value={a}>
+                        {a}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -235,7 +466,9 @@ export default function AdminPermissionsPage() {
                 </SelectTrigger>
                 <SelectContent>
                   {SCOPES.map((s) => (
-                    <SelectItem key={s} value={s}>{s}</SelectItem>
+                    <SelectItem key={s} value={s}>
+                      {s}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -249,11 +482,15 @@ export default function AdminPermissionsPage() {
               >
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="grant" id="r-grant" />
-                  <Label htmlFor="r-grant" className="text-sm text-success cursor-pointer">Grant</Label>
+                  <Label htmlFor="r-grant" className="text-sm text-success cursor-pointer">
+                    Grant
+                  </Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="deny" id="r-deny" />
-                  <Label htmlFor="r-deny" className="text-sm text-destructive cursor-pointer">Deny</Label>
+                  <Label htmlFor="r-deny" className="text-sm text-destructive cursor-pointer">
+                    Deny
+                  </Label>
                 </div>
               </RadioGroup>
             </div>
@@ -277,6 +514,26 @@ export default function AdminPermissionsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteId} onOpenChange={(open) => !open && setDeleteId(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove this override?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the person-level rule immediately. Role and department defaults still apply.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={confirmDelete}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

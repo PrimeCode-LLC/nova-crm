@@ -7,10 +7,23 @@ import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/format";
 import { ROLES } from "@/lib/constants";
 import { UserChip } from "@/components/common/user-chip";
 import { Badge } from "@/components/ui/badge";
+import type { Deal, Lead } from "@/lib/types";
 
-export function PersonScorecard() {
-  const { users, leads, deals } = useWorkspace();
-  const rows = users
+export function PersonScorecard({
+  leads: leadsOverride,
+  deals: dealsOverride,
+}: {
+  leads?: Lead[];
+  deals?: Deal[];
+} = {}) {
+  const ws = useWorkspace();
+  const { users, currentUserId } = ws;
+  const leads = leadsOverride ?? ws.leads;
+  const deals = dealsOverride ?? ws.deals;
+  const viewer = users.find((u) => u.id === currentUserId);
+  const canSeeTeamScorecards = viewer?.roleId === "director" || viewer?.roleId === "manager";
+
+  const rowsAll = users
     .filter((u) => u.roleId !== "director" && u.status === "active")
     .map((u) => {
       const ownedLeads = leads.filter((l) => l.ownerId === u.id);
@@ -35,12 +48,20 @@ export function PersonScorecard() {
     })
     .sort((a, b) => b.closedValue - a.closedValue);
 
+  const rows = canSeeTeamScorecards
+    ? rowsAll
+    : rowsAll.filter((r) => r.user.id === currentUserId);
+
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold">Team scorecards</CardTitle>
+        <CardTitle className="text-sm font-semibold">
+          {canSeeTeamScorecards ? "Team scorecards" : "Your scorecard"}
+        </CardTitle>
         <CardDescription className="text-xs">
-          Per-person funnel performance · last 30 days
+          {canSeeTeamScorecards
+            ? "Per-person funnel performance · last 30 days"
+            : "Your funnel performance on leads you can access · last 30 days"}
         </CardDescription>
       </CardHeader>
       <CardContent className="pt-0">

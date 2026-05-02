@@ -23,18 +23,33 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetFooter,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { CHANNELS, CHANNEL_LIST } from "@/lib/constants";
-import type { ChannelKey } from "@/lib/types";
+import { CHANNEL_LIST } from "@/lib/constants";
+import type { ChannelKey, Profile } from "@/lib/types";
 import { Plus, User } from "lucide-react";
 import { toast } from "sonner";
 
 const PROFILE_TYPES = ["upwork", "cv", "email", "linkedin"] as const;
 
+function newProfileId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `p-${crypto.randomUUID()}`;
+  }
+  return `p-${Date.now()}`;
+}
+
 export default function AdminProfilesPage() {
-  const { profiles, activityRecords, users } = useWorkspace();
+  const { profiles, activityRecords, users, updateProfile, addProfile } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
@@ -43,29 +58,98 @@ export default function AdminProfilesPage() {
   const [notes, setNotes] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
-  const now = Date.now();
-  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const [detailOpen, setDetailOpen] = React.useState(false);
+  const [detailId, setDetailId] = React.useState<string | null>(null);
+  const [draftName, setDraftName] = React.useState("");
+  const [draftChannel, setDraftChannel] = React.useState<ChannelKey | "">("");
+  const [draftType, setDraftType] = React.useState("");
+  const [draftOwnerId, setDraftOwnerId] = React.useState("");
+  const [draftNotes, setDraftNotes] = React.useState("");
+  const [draftActive, setDraftActive] = React.useState(true);
+  const [detailSaving, setDetailSaving] = React.useState(false);
 
-  const enriched = profiles.map((p) => ({
-    ...p,
-    weekActivity: activityRecords.filter(
-      (a) =>
-        a.profileId === p.id &&
-        new Date(a.occurredAt).getTime() >= now - weekMs,
-    ).length,
-  }));
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const [weekCutoff] = React.useState(() => Date.now() - weekMs);
+
+  const enriched = React.useMemo(
+    () =>
+      profiles.map((p) => ({
+        ...p,
+        weekActivity: activityRecords.filter(
+          (a) =>
+            a.profileId === p.id && new Date(a.occurredAt).getTime() >= weekCutoff,
+        ).length,
+      })),
+    [profiles, activityRecords, weekCutoff],
+  );
+
+  const detailProfile = detailId ? enriched.find((p) => p.id === detailId) : undefined;
+
+  function openDetail(profile: Profile) {
+    setDetailId(profile.id);
+    setDraftName(profile.name);
+    setDraftChannel(profile.channel);
+    setDraftType(profile.type);
+    setDraftOwnerId(profile.ownerId);
+    setDraftNotes(profile.notes ?? "");
+    setDraftActive(profile.active);
+    setDetailOpen(true);
+  }
+
+  function closeDetail() {
+    setDetailOpen(false);
+    setDetailId(null);
+  }
+
+  async function handleDetailSave() {
+    if (!detailId || !draftName.trim() || !draftChannel || !draftType || !draftOwnerId) {
+      toast.error("Name, channel, type, and owner are required.");
+      return;
+    }
+    setDetailSaving(true);
+    await new Promise((r) => setTimeout(r, 400));
+    updateProfile(detailId, {
+      name: draftName.trim(),
+      channel: draftChannel as ChannelKey,
+      type: draftType as Profile["type"],
+      ownerId: draftOwnerId,
+      notes: draftNotes.trim() || undefined,
+      active: draftActive,
+    });
+    setDetailSaving(false);
+    toast.success("Profile updated");
+    closeDetail();
+  }
 
   async function handleCreate() {
-    if (!name || !channel || !type || !ownerId) {
-      toast.error("All required fields missing");
+    const missing: string[] = [];
+    if (!name.trim()) missing.push("profile name");
+    if (!channel) missing.push("channel");
+    if (!type) missing.push("type");
+    if (!ownerId) missing.push("owner");
+    if (missing.length) {
+      toast.error(`Please add: ${missing.join(", ")}.`);
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 800));
+    await new Promise((r) => setTimeout(r, 600));
+    addProfile({
+      id: newProfileId(),
+      name: name.trim(),
+      channel: channel as ChannelKey,
+      type: type as Profile["type"],
+      ownerId,
+      active: true,
+      notes: notes.trim() || undefined,
+    });
     setLoading(false);
-    toast.success(`Profile "${name}" created`);
+    toast.success(`Profile "${name.trim()}" created`);
     setNewOpen(false);
-    setName(""); setChannel(""); setType(""); setOwnerId(""); setNotes("");
+    setName("");
+    setChannel("");
+    setType("");
+    setOwnerId("");
+    setNotes("");
   }
 
   return (
@@ -82,7 +166,19 @@ export default function AdminProfilesPage() {
       <PageBody>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {enriched.map((p) => (
-            <Card key={p.id} className="hover:bg-muted/20 transition-colors">
+            <Card
+              key={p.id}
+              role="button"
+              tabIndex={0}
+              onClick={() => openDetail(p)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openDetail(p);
+                }
+              }}
+              className="hover:bg-muted/20 transition-colors cursor-pointer text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
               <CardHeader className="pb-2">
                 <div className="flex items-start justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
@@ -93,16 +189,23 @@ export default function AdminProfilesPage() {
                       <CardTitle className="text-sm truncate">{p.name}</CardTitle>
                     </div>
                   </div>
-                  <Switch
-                    checked={p.active}
-                    onCheckedChange={() =>
-                      toast.success(`${p.name}: ${p.active ? "deactivated" : "activated"}`)
-                    }
-                  />
+                  <div
+                    className="shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                    onKeyDown={(e) => e.stopPropagation()}
+                  >
+                    <Switch
+                      checked={p.active}
+                      onCheckedChange={(v) => {
+                        updateProfile(p.id, { active: v });
+                        toast.success(`${p.name}: ${v ? "activated" : "deactivated"}`);
+                      }}
+                    />
+                  </div>
                 </div>
               </CardHeader>
               <CardContent className="pt-0 space-y-3">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <ChannelChip channel={p.channel} />
                   <Badge variant="outline" className="text-[10px] capitalize">
                     {p.type}
@@ -206,12 +309,120 @@ export default function AdminProfilesPage() {
             <Button variant="ghost" size="sm" onClick={() => setNewOpen(false)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleCreate} disabled={loading}>
+            <Button size="sm" onClick={() => void handleCreate()} disabled={loading}>
               {loading ? "Creating…" : "Create profile"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Sheet
+        open={detailOpen}
+        onOpenChange={(open) => {
+          if (!open) closeDetail();
+        }}
+      >
+        <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
+          <SheetHeader className="border-b pb-4 text-left">
+            <SheetTitle>Edit profile</SheetTitle>
+            <SheetDescription>
+              {detailProfile ? (
+                <>
+                  <span className="font-medium text-foreground">{detailProfile.weekActivity}</span>{" "}
+                  activities logged this week.
+                </>
+              ) : (
+                "Loading…"
+              )}
+            </SheetDescription>
+          </SheetHeader>
+          {detailProfile && (
+            <div className="flex flex-1 flex-col gap-4 overflow-y-auto py-4">
+              <div className="space-y-1.5">
+                <Label className="text-xs">Profile name</Label>
+                <Input
+                  className="h-9"
+                  value={draftName}
+                  onChange={(e) => setDraftName(e.target.value)}
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Channel</Label>
+                  <Select
+                    value={draftChannel}
+                    onValueChange={(v) => setDraftChannel((v ?? "") as ChannelKey)}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Channel" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CHANNEL_LIST.map((c) => (
+                        <SelectItem key={c.key} value={c.key}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Type</Label>
+                  <Select value={draftType} onValueChange={(v) => setDraftType(v ?? "")}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROFILE_TYPES.map((t) => (
+                        <SelectItem key={t} value={t} className="capitalize">
+                          {t}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Owner</Label>
+                <Select value={draftOwnerId} onValueChange={(v) => setDraftOwnerId(v ?? "")}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Owner" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {users.map((u) => (
+                      <SelectItem key={u.id} value={u.id}>
+                        {u.displayName}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Notes</Label>
+                <Textarea
+                  value={draftNotes}
+                  onChange={(e) => setDraftNotes(e.target.value)}
+                  className="min-h-[80px] text-sm resize-none"
+                />
+              </div>
+              <div className="flex items-center justify-between rounded-lg border px-3 py-2">
+                <div>
+                  <p className="text-sm font-medium">Active</p>
+                  <p className="text-xs text-muted-foreground">Include in routing and reports</p>
+                </div>
+                <Switch checked={draftActive} onCheckedChange={setDraftActive} />
+              </div>
+            </div>
+          )}
+          <SheetFooter className="mt-auto border-t pt-4">
+            <Button variant="ghost" size="sm" onClick={closeDetail}>
+              Cancel
+            </Button>
+            <Button size="sm" disabled={detailSaving || !detailProfile} onClick={() => void handleDetailSave()}>
+              {detailSaving ? "Saving…" : "Save changes"}
+            </Button>
+          </SheetFooter>
+        </SheetContent>
+      </Sheet>
     </>
   );
 }

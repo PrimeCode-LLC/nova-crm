@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   CalendarClock,
   AlertTriangle,
@@ -21,10 +22,44 @@ import { KpiCard } from "@/components/common/kpi-card";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Followup } from "@/lib/types";
+import type { Followup, Lead } from "@/lib/types";
+
+const FOLLOWUP_DELTA_KEY = "nova-crm-followup-delta-v1";
+
+type FollowupDelta = {
+  extras: Followup[];
+  completion: Record<string, string | null>;
+};
+
+function emptyDelta(): FollowupDelta {
+  return { extras: [], completion: {} };
+}
+
+function readDeltaFromStorage(): FollowupDelta {
+  if (typeof window === "undefined") return emptyDelta();
+  try {
+    const raw = sessionStorage.getItem(FOLLOWUP_DELTA_KEY);
+    if (!raw) return emptyDelta();
+    const parsed = JSON.parse(raw) as FollowupDelta;
+    if (!parsed || !Array.isArray(parsed.extras) || typeof parsed.completion !== "object") {
+      return emptyDelta();
+    }
+    return { extras: parsed.extras, completion: parsed.completion };
+  } catch {
+    return emptyDelta();
+  }
+}
+
+function mergeFollowup(f: Followup, completion: Record<string, string | null>): Followup {
+  if (!Object.prototype.hasOwnProperty.call(completion, f.id)) return f;
+  const c = completion[f.id];
+  if (c === null) return { ...f, completedAt: undefined };
+  return { ...f, completedAt: c };
+}
 
 function categorize(dueAt: string) {
   const d = new Date(dueAt);
@@ -37,8 +72,40 @@ function categorize(dueAt: string) {
   return "later";
 }
 
+type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
+
 export default function FollowupsPage() {
-  const { followups, isDemo } = useWorkspace();
+  const router = useRouter();
+  const ws = useWorkspace();
+  const { followups: baseFollowups, isDemo, leads, currentUserId } = ws;
+  const [delta, setDelta] = React.useState<FollowupDelta>(emptyDelta);
+  const [hydrated, setHydrated] = React.useState(false);
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [tab, setTab] = React.useState<"open" | "completed">("open");
+  const [bucketFilter, setBucketFilter] = React.useState<BucketFilter>("all");
+
+  React.useEffect(() => {
+    React.startTransition(() => {
+      setDelta(readDeltaFromStorage());
+      setHydrated(true);
+    });
+  }, []);
+
+  React.useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    try {
+      sessionStorage.setItem(FOLLOWUP_DELTA_KEY, JSON.stringify(delta));
+    } catch {
+      /* ignore quota */
+    }
+  }, [delta, hydrated]);
+
+  const followups = React.useMemo(() => {
+    const mergedBase = baseFollowups.map((f) => mergeFollowup(f, delta.completion));
+    const mergedExtras = delta.extras.map((f) => mergeFollowup(f, delta.completion));
+    return [...mergedBase, ...mergedExtras];
+  }, [baseFollowups, delta.extras, delta.completion]);
+
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
 
@@ -47,13 +114,63 @@ export default function FollowupsPage() {
   const thisWeek = open.filter((f) => categorize(f.dueAt) === "thisWeek");
   const later = open.filter((f) => categorize(f.dueAt) === "later");
 
+  function setCompleted(id: string, completed: boolean) {
+    setDelta((d) => {
+      const completion = { ...d.completion };
+      if (completed) completion[id] = new Date().toISOString();
+      else completion[id] = null;
+      return { ...d, completion };
+    });
+  }
+
+  function handleCreateFollowup(f: Followup) {
+    setDelta((d) => ({ ...d, extras: [...d.extras, f] }));
+  }
+
+  function toggleBucket(next: BucketFilter) {
+    setTab("open");
+    setBucketFilter((prev) => (prev === next ? "all" : next));
+  }
+
+  function scrollToBucket(b: Exclude<BucketFilter, "all">) {
+    const id =
+      b === "overdue"
+        ? "followups-bucket-overdue"
+        : b === "today"
+          ? "followups-bucket-today"
+          : "followups-bucket-week";
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+
+  function handleKpiOverdue() {
+    toggleBucket("overdue");
+    queueMicrotask(() => scrollToBucket("overdue"));
+  }
+
+  function handleKpiToday() {
+    toggleBucket("today");
+    queueMicrotask(() => scrollToBucket("today"));
+  }
+
+  function handleKpiThisWeek() {
+    toggleBucket("thisWeek");
+    queueMicrotask(() => scrollToBucket("thisWeek"));
+  }
+
+  function handleKpiCompleted() {
+    setTab("completed");
+    setBucketFilter("all");
+  }
+
+  const showGroup = (bucket: BucketFilter) => bucketFilter === "all" || bucketFilter === bucket;
+
   return (
     <>
       <PageHeader
         title="Followups"
         description="Your tasks and reminders, including auto-generated idle warnings."
         actions={
-          <Button size="sm">
+          <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New followup
           </Button>
         }
@@ -63,78 +180,202 @@ export default function FollowupsPage() {
           <WorkspaceEmptyHint title="No followups in workspace" />
         ) : (
           <>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <KpiCard label="Overdue" value={overdue.length} icon={AlertTriangle} />
-          <KpiCard label="Due today" value={today.length} icon={Clock} />
-          <KpiCard label="This week" value={thisWeek.length} icon={CalendarClock} />
-          <KpiCard label="Completed" value={done.length} icon={CheckCircle2} />
-        </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <KpiCard
+                label="Overdue"
+                value={overdue.length}
+                icon={AlertTriangle}
+                onClick={handleKpiOverdue}
+                selected={tab === "open" && bucketFilter === "overdue"}
+              />
+              <KpiCard
+                label="Due today"
+                value={today.length}
+                icon={Clock}
+                onClick={handleKpiToday}
+                selected={tab === "open" && bucketFilter === "today"}
+              />
+              <KpiCard
+                label="This week"
+                value={thisWeek.length}
+                icon={CalendarClock}
+                onClick={handleKpiThisWeek}
+                selected={tab === "open" && bucketFilter === "thisWeek"}
+              />
+              <KpiCard
+                label="Completed"
+                value={done.length}
+                icon={CheckCircle2}
+                onClick={handleKpiCompleted}
+                selected={tab === "completed"}
+              />
+            </div>
 
-        <Tabs defaultValue="open">
-          <TabsList>
-            <TabsTrigger value="open">
-              Open
-              <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">{open.length}</Badge>
-            </TabsTrigger>
-            <TabsTrigger value="completed">
-              Completed
-              <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">{done.length}</Badge>
-            </TabsTrigger>
-          </TabsList>
+            <Tabs
+              value={tab}
+              onValueChange={(v) => {
+                const next = v as "open" | "completed";
+                setTab(next);
+                if (next === "completed") setBucketFilter("all");
+              }}
+              className="mt-4"
+            >
+              <TabsList>
+                <TabsTrigger value="open">
+                  Open
+                  <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                    {open.length}
+                  </Badge>
+                </TabsTrigger>
+                <TabsTrigger value="completed">
+                  Completed
+                  <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                    {done.length}
+                  </Badge>
+                </TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="open" className="mt-4 space-y-4">
-            <FollowupGroup
-              title="Overdue"
-              description="Past due (highest priority)."
-              tone="rose"
-              items={overdue}
-              empty="Nothing overdue. Nice."
-            />
-            <FollowupGroup
-              title="Due today"
-              description="Let's knock these out today."
-              tone="amber"
-              items={today}
-              empty="Nothing due today."
-            />
-            <FollowupGroup
-              title="This week"
-              description="Coming up in the next 7 days."
-              tone="neutral"
-              items={thisWeek}
-              empty="No followups this week."
-            />
-            <FollowupGroup
-              title="Later"
-              description="Scheduled further out."
-              tone="neutral"
-              items={later}
-              empty="Nothing scheduled further out."
-            />
-          </TabsContent>
-
-          <TabsContent value="completed" className="mt-4">
-            <Card>
-              <CardContent className="p-0 divide-y">
-                {done.map((f) => (
-                  <div key={f.id} className="flex items-center gap-3 px-4 py-2 opacity-70">
-                    <Checkbox checked disabled />
-                    <span className="text-sm line-through truncate flex-1">{f.title}</span>
-                    <span className="text-xs text-muted-foreground">{fmtRelative(f.completedAt)}</span>
-                  </div>
-                ))}
-                {done.length === 0 && (
-                  <div className="p-6 text-center text-sm text-muted-foreground">
-                    Nothing completed yet.
+              <TabsContent value="open" className="mt-4 space-y-4">
+                {bucketFilter !== "all" && (
+                  <p className="text-xs text-muted-foreground">
+                    Showing{" "}
+                    {bucketFilter === "overdue"
+                      ? "overdue"
+                      : bucketFilter === "today"
+                        ? "due today"
+                        : "this week"}{" "}
+                    only. Click the same summary card again to show all open followups.
+                  </p>
+                )}
+                {showGroup("overdue") && (
+                  <div id="followups-bucket-overdue">
+                    <FollowupGroup
+                      title="Overdue"
+                      description="Past due (highest priority)."
+                      tone="rose"
+                      items={overdue}
+                      empty="Nothing overdue. Nice."
+                      getLeadById={ws.getLeadById}
+                      onToggleComplete={setCompleted}
+                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                    />
                   </div>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+                {showGroup("today") && (
+                  <div id="followups-bucket-today">
+                    <FollowupGroup
+                      title="Due today"
+                      description="Let's knock these out today."
+                      tone="amber"
+                      items={today}
+                      empty="Nothing due today."
+                      getLeadById={ws.getLeadById}
+                      onToggleComplete={setCompleted}
+                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                    />
+                  </div>
+                )}
+                {showGroup("thisWeek") && (
+                  <div id="followups-bucket-week">
+                    <FollowupGroup
+                      title="This week"
+                      description="Coming up in the next 7 days."
+                      tone="neutral"
+                      items={thisWeek}
+                      empty="No followups this week."
+                      getLeadById={ws.getLeadById}
+                      onToggleComplete={setCompleted}
+                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                    />
+                  </div>
+                )}
+                {bucketFilter === "all" && (
+                  <div id="followups-bucket-later">
+                    <FollowupGroup
+                      title="Later"
+                      description="Scheduled further out."
+                      tone="neutral"
+                      items={later}
+                      empty="Nothing scheduled further out."
+                      getLeadById={ws.getLeadById}
+                      onToggleComplete={setCompleted}
+                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                    />
+                  </div>
+                )}
+              </TabsContent>
+
+              <TabsContent value="completed" className="mt-4">
+                <Card>
+                  <CardContent className="p-0 divide-y">
+                    {done.map((f) => {
+                      const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
+                      return (
+                        <div
+                          key={f.id}
+                          role={lead ? "button" : undefined}
+                          tabIndex={lead ? 0 : undefined}
+                          className={cn(
+                            "flex items-center gap-3 px-4 py-2 opacity-90",
+                            lead && "cursor-pointer hover:bg-muted/50",
+                          )}
+                          onClick={(e) => {
+                            if ((e.target as HTMLElement).closest("[data-slot=checkbox]")) return;
+                            if (lead) router.push(`/leads/${lead.id}`);
+                          }}
+                          onKeyDown={(e) => {
+                            if (!lead) return;
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              router.push(`/leads/${lead.id}`);
+                            }
+                          }}
+                        >
+                          <Checkbox
+                            checked
+                            onCheckedChange={(v) => {
+                              if (v !== true) setCompleted(f.id, false);
+                            }}
+                            aria-label={`Mark ${f.title} as not done`}
+                          />
+                          <div className="flex-1 min-w-0">
+                            <span className="text-sm line-through truncate block">{f.title}</span>
+                            {lead && (
+                              <Link
+                                href={`/leads/${lead.id}`}
+                                className="text-xs text-muted-foreground hover:text-primary truncate block mt-0.5"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                {lead.contactName} · {lead.companyName}
+                              </Link>
+                            )}
+                          </div>
+                          <span className="text-xs text-muted-foreground shrink-0">
+                            {fmtRelative(f.completedAt)}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {done.length === 0 && (
+                      <div className="p-6 text-center text-sm text-muted-foreground">
+                        Nothing completed yet.
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </TabsContent>
+            </Tabs>
           </>
         )}
       </PageBody>
+
+      <NewFollowupDialog
+        open={dialogOpen}
+        onOpenChange={setDialogOpen}
+        leads={leads}
+        currentUserId={currentUserId}
+        onCreate={handleCreateFollowup}
+      />
     </>
   );
 }
@@ -145,14 +386,19 @@ function FollowupGroup({
   tone,
   items,
   empty,
+  getLeadById,
+  onToggleComplete,
+  onRowNavigate,
 }: {
   title: string;
   description: string;
   tone: "rose" | "amber" | "neutral";
   items: Followup[];
   empty: string;
+  getLeadById: (id: string) => Lead | undefined;
+  onToggleComplete: (id: string, completed: boolean) => void;
+  onRowNavigate: (leadId: string) => void;
 }) {
-  const { getLeadById } = useWorkspace();
   const toneRing =
     tone === "rose"
       ? "border-destructive/30 bg-destructive/5"
@@ -181,14 +427,43 @@ function FollowupGroup({
         ) : (
           <ul className="divide-y">
             {items.map((f) => {
-              const lead = getLeadById(f.leadId ?? "");
+              const lead = f.leadId ? getLeadById(f.leadId) : undefined;
+              const done = Boolean(f.completedAt);
               return (
-                <li key={f.id} className="flex items-center gap-3 py-2.5">
-                  <Checkbox />
+                <li
+                  key={f.id}
+                  className={cn(
+                    "flex items-center gap-3 py-2.5 -mx-1 px-1 rounded-md transition-colors",
+                    lead && "cursor-pointer hover:bg-muted/40",
+                  )}
+                  role={lead ? "button" : undefined}
+                  tabIndex={lead ? 0 : undefined}
+                  onClick={(e) => {
+                    if ((e.target as HTMLElement).closest("[data-slot=checkbox], a")) return;
+                    if (f.leadId) onRowNavigate(f.leadId);
+                  }}
+                  onKeyDown={(e) => {
+                    if (!f.leadId) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onRowNavigate(f.leadId);
+                    }
+                  }}
+                >
+                  <Checkbox
+                    checked={done}
+                    onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
+                    aria-label={done ? `Mark ${f.title} incomplete` : `Mark ${f.title} complete`}
+                  />
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2">
                       <span className="text-sm font-medium truncate">{f.title}</span>
-                      <Badge className={cn("rounded-md border-transparent text-[10px]", PRIORITY_TONE[f.priority].className)}>
+                      <Badge
+                        className={cn(
+                          "rounded-md border-transparent text-[10px]",
+                          PRIORITY_TONE[f.priority].className,
+                        )}
+                      >
                         {PRIORITY_TONE[f.priority].label}
                       </Badge>
                       {f.auto && (
@@ -201,6 +476,7 @@ function FollowupGroup({
                       <Link
                         href={`/leads/${lead.id}`}
                         className="text-xs text-muted-foreground hover:text-primary truncate block mt-0.5"
+                        onClick={(e) => e.stopPropagation()}
                       >
                         {lead.contactName} · {lead.companyName}
                       </Link>

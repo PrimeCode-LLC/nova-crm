@@ -77,11 +77,19 @@ function DropdownMenuItem({
   className,
   inset,
   variant = "default",
+  onClick,
+  onSelect,
   ...props
 }: MenuPrimitive.Item.Props & {
   inset?: boolean
   variant?: "default" | "destructive"
+  /** Radix-style alias; Base UI `MenuItem` only fires `onClick`. */
+  onSelect?: MenuPrimitive.Item.Props["onClick"]
 }) {
+  const handleClick: NonNullable<MenuPrimitive.Item.Props["onClick"]> = (e) => {
+    onClick?.(e);
+    onSelect?.(e);
+  };
   return (
     <MenuPrimitive.Item
       data-slot="dropdown-menu-item"
@@ -92,6 +100,7 @@ function DropdownMenuItem({
         className
       )}
       {...props}
+      onClick={handleClick}
     />
   )
 }

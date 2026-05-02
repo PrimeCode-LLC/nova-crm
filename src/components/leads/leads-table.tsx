@@ -2,6 +2,8 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import {
   ColumnDef,
   flexRender,
@@ -66,30 +68,98 @@ import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { fmtRelative, fmtDate, fmtCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
+import { downloadLeadsCsv } from "@/lib/leads-csv";
 
-interface LeadsTableProps {
-  leads: Lead[];
+export type LeadsTablePreset = "default" | "high-priority";
+
+export type LeadsTableRef = {
+  /** Downloads CSV for rows currently visible after toolbar filters (search, stage, channel, priority preset, etc.). */
+  exportFilteredCsv: () => void;
+};
+
+function initialColumnFiltersForPreset(preset: LeadsTablePreset | undefined): ColumnFiltersState {
+  if (preset === "high-priority") {
+    return [{ id: "priority", value: ["high", "urgent"] }];
+  }
+  return [];
 }
 
-export function LeadsTable({ leads }: LeadsTableProps) {
+function mergeUrlColumnFilters(
+  preset: LeadsTablePreset | undefined,
+  initialChannels: ChannelKey[],
+  initialStages: PipelineStage[],
+): ColumnFiltersState {
+  const out = initialColumnFiltersForPreset(preset);
+  if (initialChannels.length) out.push({ id: "channel", value: [...initialChannels] });
+  if (initialStages.length) out.push({ id: "stage", value: [...initialStages] });
+  return out;
+}
+
+export interface LeadsTableProps {
+  leads: Lead[];
+  preset?: LeadsTablePreset;
+  /** Sorted `channel` query values joined with `|` (stable for effects). */
+  urlChannelKey?: string;
+  /** Sorted `stage` query values joined with `|` (stable for effects). */
+  urlStageKey?: string;
+  idleOnly?: boolean;
+}
+
+export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
+  { leads, preset = "default", urlChannelKey = "", urlStageKey = "", idleOnly = false },
+  ref,
+) {
+  const router = useRouter();
+  const { currentUserId, users, getUserById, isDemo } = useWorkspace();
+  const { openQuickAdd } = useOpenQuickAdd();
+  const initialChannels = React.useMemo(
+    () => (urlChannelKey ? (urlChannelKey.split("|").filter(Boolean) as ChannelKey[]) : []),
+    [urlChannelKey],
+  );
+  const initialStages = React.useMemo(
+    () => (urlStageKey ? (urlStageKey.split("|").filter(Boolean) as PipelineStage[]) : []),
+    [urlStageKey],
+  );
   const [sorting, setSorting] = React.useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = React.useState("");
-  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([]);
+  const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(() =>
+    mergeUrlColumnFilters(preset, initialChannels, initialStages),
+  );
   const [rowSelection, setRowSelection] = React.useState({});
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({});
+  const [ownerScope, setOwnerScope] = React.useState("all-owners");
+
+  React.useEffect(() => {
+    setColumnFilters(mergeUrlColumnFilters(preset, initialChannels, initialStages));
+  }, [urlChannelKey, urlStageKey, preset, initialChannels, initialStages]);
+
+  const afterIdleFilter = React.useMemo(
+    () => (idleOnly ? leads.filter((l) => l.isIdle) : leads),
+    [leads, idleOnly],
+  );
+
+  const dataForTable = React.useMemo(() => {
+    if (ownerScope === "all-owners") return afterIdleFilter;
+    if (ownerScope === "me") return afterIdleFilter.filter((l) => l.ownerId === currentUserId);
+    if (ownerScope === "unassigned") {
+      return afterIdleFilter.filter((l) => !l.ownerId || !getUserById(l.ownerId));
+    }
+    if (ownerScope === "team") {
+      const peerIds = new Set(users.filter((u) => u.id !== currentUserId).map((u) => u.id));
+      return afterIdleFilter.filter((l) => peerIds.has(l.ownerId));
+    }
+    return afterIdleFilter;
+  }, [afterIdleFilter, ownerScope, currentUserId, users, getUserById]);
 
   const columns = React.useMemo<ColumnDef<Lead>[]>(() => [
     {
       id: "select",
       header: ({ table }) => (
         <Checkbox
-          checked={
-            table.getIsAllRowsSelected()
-              ? true
-              : table.getIsSomeRowsSelected()
-                ? false
-                : false
-          }
+          checked={table.getIsAllRowsSelected()}
+          indeterminate={table.getIsSomeRowsSelected() && !table.getIsAllRowsSelected()}
           onCheckedChange={(v) => table.toggleAllRowsSelected(!!v)}
           aria-label="Select all"
         />
@@ -183,6 +253,8 @@ export function LeadsTable({ leads }: LeadsTableProps) {
         const p = PRIORITY_TONE[row.original.priority];
         return <Badge className={cn("rounded-md border-transparent", p.className)}>{p.label}</Badge>;
       },
+      filterFn: (row, id, value: string[]) =>
+        !value?.length || value.includes(row.getValue<string>(id)),
     },
     {
       id: "push",
@@ -244,35 +316,61 @@ export function LeadsTable({ leads }: LeadsTableProps) {
     {
       id: "actions",
       header: "",
-      cell: () => (
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            render={
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={(e) => e.stopPropagation()}
+      cell: ({ row }) => {
+        const id = row.original.id;
+        return (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => router.push(`/leads/${id}`)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  toast.info(isDemo ? "Demo workspace" : "Not yet available", {
+                    description: isDemo
+                      ? "Reassign is read-only in sample data."
+                      : "Connect your backend to reassign owners.",
+                  })
+                }
               >
-                <MoreHorizontal className="h-3.5 w-3.5" />
-              </Button>
-            }
-          />
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem>Edit</DropdownMenuItem>
-            <DropdownMenuItem>Reassign</DropdownMenuItem>
-            <DropdownMenuItem>Add note</DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem className="text-destructive">Archive</DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ),
+                Reassign
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push(`/leads/${id}?tab=notes`)}>
+                Add note
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onClick={() =>
+                  toast.info(isDemo ? "Demo workspace" : "Not yet available", {
+                    description: isDemo
+                      ? "Archiving is disabled in sample data."
+                      : "Archive will be available once your workspace is connected.",
+                  })
+                }
+              >
+                Archive
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        );
+      },
       enableSorting: false,
       size: 40,
     },
-  ], []);
+  ], [router, isDemo]);
 
   const table = useReactTable({
-    data: leads,
+    data: dataForTable,
     columns,
     state: { sorting, globalFilter, columnFilters, rowSelection, columnVisibility },
     onSortingChange: setSorting,
@@ -297,6 +395,28 @@ export function LeadsTable({ leads }: LeadsTableProps) {
         .some((v) => String(v).toLowerCase().includes(q));
     },
   });
+
+  React.useImperativeHandle(
+    ref,
+    () => ({
+      exportFilteredCsv: () => {
+        const rows = table.getFilteredRowModel().rows.map((r) => r.original);
+        if (!rows.length) {
+          toast.message("Nothing to export", {
+            description: "Adjust filters or add leads first.",
+          });
+          return;
+        }
+        downloadLeadsCsv(rows);
+        toast.success("Exported", { description: `${rows.length} lead(s) downloaded as CSV.` });
+      },
+    }),
+    [table],
+  );
+
+  React.useEffect(() => {
+    setRowSelection({});
+  }, [ownerScope]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
@@ -385,8 +505,8 @@ export function LeadsTable({ leads }: LeadsTableProps) {
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Select defaultValue="all-owners">
-          <SelectTrigger size="sm" className="w-32">
+        <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
+          <SelectTrigger size="sm" className="w-[8.5rem]">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -426,7 +546,11 @@ export function LeadsTable({ leads }: LeadsTableProps) {
               </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
-          <Button size="sm">
+          <Button
+            size="sm"
+            type="button"
+            onClick={() => openQuickAdd({ initialPill: "lead" })}
+          >
             <Plus className="h-3.5 w-3.5" /> New lead
           </Button>
         </div>
@@ -436,13 +560,47 @@ export function LeadsTable({ leads }: LeadsTableProps) {
       {selectedCount > 0 && (
         <div className="flex items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
           <span className="font-medium">{selectedCount} selected</span>
-          <Button variant="outline" size="sm" className="ml-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="ml-auto"
+            type="button"
+            onClick={() =>
+              toast.info(isDemo ? "Demo workspace" : "Not yet available", {
+                description: isDemo
+                  ? "Bulk reassign is read-only in sample data."
+                  : "Bulk reassign will be available once your workspace is connected.",
+              })
+            }
+          >
             <UserCog className="h-3.5 w-3.5" /> Reassign
           </Button>
-          <Button variant="outline" size="sm">
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() =>
+              toast.info(isDemo ? "Demo workspace" : "Not yet available", {
+                description: isDemo
+                  ? "Bulk tagging is read-only in sample data."
+                  : "Bulk tags will be available once your workspace is connected.",
+              })
+            }
+          >
             <Tag className="h-3.5 w-3.5" /> Tag
           </Button>
-          <Button variant="destructive" size="sm">
+          <Button
+            variant="destructive"
+            size="sm"
+            type="button"
+            onClick={() =>
+              toast.info(isDemo ? "Demo workspace" : "Not yet available", {
+                description: isDemo
+                  ? "Bulk archive is disabled in sample data."
+                  : "Bulk archive will be available once your workspace is connected.",
+              })
+            }
+          >
             <Trash2 className="h-3.5 w-3.5" /> Archive
           </Button>
         </div>
@@ -491,6 +649,13 @@ export function LeadsTable({ leads }: LeadsTableProps) {
                     key={row.id}
                     data-state={row.getIsSelected() && "selected"}
                     className="cursor-pointer"
+                    onClick={(e) => {
+                      const el = e.target as HTMLElement;
+                      if (el.closest("a, button, [data-slot='checkbox'], [data-slot='dropdown-menu-trigger']")) {
+                        return;
+                      }
+                      router.push(`/leads/${row.original.id}`);
+                    }}
                   >
                     {row.getVisibleCells().map((cell) => (
                       <TableCell key={cell.id} className="py-2 whitespace-nowrap">
@@ -508,9 +673,11 @@ export function LeadsTable({ leads }: LeadsTableProps) {
       <div className="flex items-center justify-between text-xs text-muted-foreground">
         <span>
           Showing <span className="font-medium text-foreground tabular-nums">{table.getRowModel().rows.length}</span> of{" "}
-          <span className="tabular-nums">{leads.length}</span> leads
+          <span className="tabular-nums">{table.getCoreRowModel().rows.length}</span> leads
         </span>
       </div>
     </div>
   );
-}
+});
+
+LeadsTable.displayName = "LeadsTable";
