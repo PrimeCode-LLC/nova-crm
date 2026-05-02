@@ -64,7 +64,15 @@ export function SiteFooter() {
         <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-border/60 pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center">
           <p>
             © {new Date().getFullYear()} Nova CRM. Built for high-output sales
-            teams.
+            teams. ·{" "}
+            <a
+              href="https://stellixsoft.com/"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-medium text-foreground/80 transition-colors hover:text-foreground"
+            >
+              Stellix Soft LLC
+            </a>
           </p>
           <p className="font-mono">v1 · pre-launch</p>
         </div>
