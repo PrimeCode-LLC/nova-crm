@@ -65,5 +65,14 @@ service cloud.firestore {
       allow create: if signedIn();
       allow update, delete: if false;
     }
+
+    // SaaS tenants & platform operators — server-only (Firebase Admin SDK).
+    match /organizations/{id} {
+      allow read, write: if false;
+    }
+
+    match /platformAdmins/{id} {
+      allow read, write: if false;
+    }
   }
 }

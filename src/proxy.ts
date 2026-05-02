@@ -16,6 +16,7 @@ const APP_PROTECTED_PREFIXES = [
   "/admin",
   "/settings",
   "/actions",
+  "/platform",
 ];
 
 function isProtectedAppPath(pathname: string): boolean {

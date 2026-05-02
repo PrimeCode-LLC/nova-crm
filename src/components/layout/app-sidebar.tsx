@@ -3,7 +3,19 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { ChevronsUpDown, LogOut, UserCircle, Moon, Sun, Plus, FlaskConical, Check, Monitor, Palette } from "lucide-react";
+import {
+  ChevronsUpDown,
+  LogOut,
+  UserCircle,
+  Moon,
+  Sun,
+  Plus,
+  FlaskConical,
+  Check,
+  Monitor,
+  Palette,
+  ShieldCheck,
+} from "lucide-react";
 import { useOpenQuickAdd } from "./quick-add-launcher";
 import { useTheme } from "next-themes";
 
@@ -45,7 +57,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { AppMark } from "@/components/brand/app-mark";
 
-export function AppSidebar() {
+export function AppSidebar({
+  showPlatformLink = false,
+}: {
+  showPlatformLink?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
@@ -116,6 +132,27 @@ export function AppSidebar() {
             </SidebarGroupContent>
           </SidebarGroup>
         ))}
+        {showPlatformLink && (
+          <SidebarGroup>
+            <SidebarGroupLabel>Product</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>
+                <SidebarMenuItem>
+                  <SidebarMenuButton
+                    isActive={pathname.startsWith("/platform")}
+                    tooltip="Platform admin"
+                    render={
+                      <Link href="/platform">
+                        <ShieldCheck />
+                        <span>Platform admin</span>
+                      </Link>
+                    }
+                  />
+                </SidebarMenuItem>
+              </SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
       </SidebarContent>
 
       <SidebarFooter>

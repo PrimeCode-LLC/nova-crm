@@ -64,7 +64,46 @@ export interface User {
   title?: string;
   /** Workspace-level super admin (can manage users alongside director / founder). */
   isSuperAdmin?: boolean;
+  /** Display name from signup (customer company), not the SaaS tenant id. */
+  company?: string;
+  /** SaaS organization (tenant). CRM rows should eventually filter by this. */
+  organizationId?: string;
   status: "active" | "inactive" | "pip";
+  createdAt: ISODate;
+}
+
+/** SaaS customer (tenant). Managed only via platform admin + Admin SDK. */
+export type OrganizationStatus = "trial" | "active" | "suspended";
+
+export type SaaSPlanId = "free" | "pro" | "enterprise";
+
+export interface OrganizationSettings {
+  billingEmail?: string;
+  /** Internal notes for operators (not shown to tenant users). */
+  operatorNotes?: string;
+}
+
+export interface Organization {
+  id: string;
+  name: string;
+  slug: string;
+  status: OrganizationStatus;
+  planId: SaaSPlanId;
+  maxUsers?: number;
+  settings: OrganizationSettings;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+/** Product operator (you / staff). Not the same as workspace `isSuperAdmin`. */
+export type PlatformAdminRole = "owner" | "admin";
+
+export interface PlatformAdminRecord {
+  uid: string;
+  email: string;
+  role: PlatformAdminRole;
+  active: boolean;
+  createdByUid?: string;
   createdAt: ISODate;
 }
 

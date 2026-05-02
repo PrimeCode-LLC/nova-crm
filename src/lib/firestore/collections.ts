@@ -12,4 +12,8 @@ export const COLLECTIONS = {
   activityRecords: "activityRecords",
   ingestQueue: "ingestQueue",
   auditLog: "auditLog",
+  /** SaaS tenants — read/write only through server (Admin SDK). */
+  organizations: "organizations",
+  /** Product-level operators — read/write only through server (Admin SDK). */
+  platformAdmins: "platformAdmins",
 } as const;
