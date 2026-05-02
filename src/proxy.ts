@@ -33,7 +33,13 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 
-  if (hasSession && (pathname === "/login" || pathname === "/signup")) {
+  // Don't bounce off /signup if there's an invite token to honor.
+  const hasInvite = request.nextUrl.searchParams.has("invite");
+  if (
+    hasSession &&
+    !hasInvite &&
+    (pathname === "/login" || pathname === "/signup")
+  ) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

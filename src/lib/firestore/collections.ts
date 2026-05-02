@@ -17,3 +17,26 @@ export const COLLECTIONS = {
   /** Product-level operators — read/write only through server (Admin SDK). */
   platformAdmins: "platformAdmins",
 } as const;
+
+/** Subcollections under `organizations/{orgId}/*` (server-managed). */
+export const ORG_SUBCOLLECTIONS = {
+  members: "members",
+  invites: "invites",
+  audit: "audit",
+} as const;
+
+/**
+ * CRM collections that store tenant data. Every document in these MUST carry
+ * `organizationId` so security rules and queries can filter by tenant.
+ */
+export const TENANT_COLLECTIONS = [
+  COLLECTIONS.leads,
+  COLLECTIONS.accounts,
+  COLLECTIONS.contacts,
+  COLLECTIONS.deals,
+  COLLECTIONS.departments,
+  COLLECTIONS.permissionOverrides,
+  COLLECTIONS.activityCounters,
+  COLLECTIONS.activityRecords,
+  COLLECTIONS.auditLog,
+] as const;

@@ -1,7 +1,7 @@
 import {
   FieldValue,
+  Timestamp,
   type DocumentData,
-  type Timestamp,
 } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
@@ -14,6 +14,8 @@ import type {
 } from "@/lib/types";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
 
+const TRIAL_DAYS = 14;
+
 /** Firestore rejects `undefined`; omit empty optional strings. */
 function settingsForFirestore(s: OrganizationSettings): Record<string, string> {
   const out: Record<string, string> = {};
@@ -22,8 +24,13 @@ function settingsForFirestore(s: OrganizationSettings): Record<string, string> {
   return out;
 }
 
-function tsToIso(t: Timestamp | undefined): ISODate {
-  if (!t?.toDate) return new Date().toISOString();
+function tsToIso(t: Timestamp | undefined | null): ISODate {
+  if (!t || !t.toDate) return new Date().toISOString();
+  return t.toDate().toISOString();
+}
+
+function maybeTsToIso(t: Timestamp | undefined | null): ISODate | undefined {
+  if (!t || !t.toDate) return undefined;
   return t.toDate().toISOString();
 }
 
@@ -36,9 +43,18 @@ function docToOrg(id: string, data: DocumentData): Organization {
     status: (data.status as OrganizationStatus) ?? "trial",
     planId: (data.planId as SaaSPlanId) ?? "free",
     maxUsers: typeof data.maxUsers === "number" ? data.maxUsers : undefined,
+    seatsUsed: typeof data.seatsUsed === "number" ? data.seatsUsed : undefined,
+    ownerUid: typeof data.ownerUid === "string" ? data.ownerUid : undefined,
+    primaryEmail:
+      typeof data.primaryEmail === "string" ? data.primaryEmail : undefined,
+    pendingOwnerEmail:
+      typeof data.pendingOwnerEmail === "string"
+        ? data.pendingOwnerEmail
+        : undefined,
+    trialEndsAt: maybeTsToIso(data.trialEndsAt as Timestamp | undefined),
     settings,
-    createdAt: tsToIso(data.createdAt),
-    updatedAt: tsToIso(data.updatedAt),
+    createdAt: tsToIso(data.createdAt as Timestamp | undefined),
+    updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
   };
 }
 
@@ -64,14 +80,59 @@ export async function getOrganizationServer(
   return docToOrg(d.id, d.data()!);
 }
 
+export async function findOrganizationByPendingEmailServer(
+  email: string,
+): Promise<Organization | null> {
+  const db = getAdminDb();
+  if (!db) return null;
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+  const snap = await db
+    .collection(COLLECTIONS.organizations)
+    .where("pendingOwnerEmail", "==", normalized)
+    .limit(1)
+    .get();
+  if (snap.empty) return null;
+  const d = snap.docs[0]!;
+  return docToOrg(d.id, d.data());
+}
+
+export async function claimPendingOrgOwnerServer(
+  orgId: string,
+  uid: string,
+  email: string,
+): Promise<{ ok: true } | { error: string }> {
+  const db = getAdminDb();
+  if (!db) return { error: "Database not configured" };
+  const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
+  const snap = await ref.get();
+  if (!snap.exists) return { error: "Organization not found" };
+  const data = snap.data() ?? {};
+  if (data.ownerUid && data.ownerUid !== uid) {
+    return { error: "Organization already has an owner" };
+  }
+  await ref.update({
+    ownerUid: uid,
+    primaryEmail: email.toLowerCase(),
+    pendingOwnerEmail: FieldValue.delete(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+  return { ok: true };
+}
+
 export async function createOrganizationServer(input: {
   name: string;
   slug?: string;
   status?: OrganizationStatus;
   planId?: SaaSPlanId;
   maxUsers?: number;
+  /** When set, the org is created in `trial` status with this email recorded as the future owner. */
+  pendingOwnerEmail?: string;
+  /** When set, this uid is stamped as `ownerUid` immediately (used by signup self-create). */
+  ownerUid?: string;
+  ownerEmail?: string;
   settings?: OrganizationSettings;
-}): Promise<{ id: string } | { error: string }> {
+}): Promise<{ id: string; slug: string } | { error: string }> {
   const db = getAdminDb();
   if (!db) return { error: "Database not configured" };
 
@@ -92,18 +153,40 @@ export async function createOrganizationServer(input: {
 
   const ref = db.collection(COLLECTIONS.organizations).doc();
   const settings = settingsForFirestore(input.settings ?? {});
-  const payload = {
+  const trialEnds = Timestamp.fromMillis(
+    Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000,
+  );
+  const payload: Record<string, unknown> = {
     name,
     slug,
     status: input.status ?? "trial",
     planId: input.planId ?? "free",
     maxUsers: input.maxUsers ?? null,
+    seatsUsed: input.ownerUid ? 1 : 0,
     settings,
+    trialEndsAt: trialEnds,
     createdAt: FieldValue.serverTimestamp(),
     updatedAt: FieldValue.serverTimestamp(),
   };
+  if (input.ownerUid) payload.ownerUid = input.ownerUid;
+  if (input.ownerEmail) payload.primaryEmail = input.ownerEmail.toLowerCase();
+  if (input.pendingOwnerEmail) {
+    payload.pendingOwnerEmail = input.pendingOwnerEmail.toLowerCase();
+  }
   await ref.set(payload);
-  return { id: ref.id };
+  return { id: ref.id, slug };
+}
+
+export async function bumpOrganizationSeatsServer(
+  orgId: string,
+  delta: number,
+): Promise<void> {
+  const db = getAdminDb();
+  if (!db) return;
+  await db.collection(COLLECTIONS.organizations).doc(orgId).update({
+    seatsUsed: FieldValue.increment(delta),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
 }
 
 export async function updateOrganizationServer(

@@ -292,17 +292,25 @@ function AdminUsersPageContent() {
     <>
       <PageHeader
         title="Users"
-        description="Manage team members, roles, and access."
+        description="Demo / display view of the org chart. For real account management use Team →"
         actions={
-          canManage ? (
-            <Button size="sm" onClick={() => setInviteOpen(true)}>
-              <UserPlus className="h-3.5 w-3.5" /> Invite user
-            </Button>
-          ) : (
-            <Button size="sm" variant="outline" disabled title="Only directors, founders, or super admins can invite users">
-              <UserPlus className="h-3.5 w-3.5" /> Invite user
-            </Button>
-          )
+          <div className="flex items-center gap-2">
+            <a
+              href="/admin/team"
+              className="inline-flex h-7 items-center rounded-[12px] bg-secondary px-2.5 text-[0.8rem] font-medium text-secondary-foreground hover:bg-secondary/80"
+            >
+              Team &amp; invites
+            </a>
+            {canManage ? (
+              <Button size="sm" onClick={() => setInviteOpen(true)}>
+                <UserPlus className="h-3.5 w-3.5" /> Demo invite
+              </Button>
+            ) : (
+              <Button size="sm" variant="outline" disabled title="Only directors, founders, or super admins can invite users">
+                <UserPlus className="h-3.5 w-3.5" /> Invite user
+              </Button>
+            )}
+          </div>
         }
       />
       <PageBody>

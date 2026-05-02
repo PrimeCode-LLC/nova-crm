@@ -1,6 +1,9 @@
 rules_version = '2';
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // ───────────────────────────── Helpers ─────────────────────────────
 
     function signedIn() {
       return request.auth != null;
@@ -10,65 +13,180 @@ service cloud.firestore {
       return signedIn() && request.auth.uid == uid;
     }
 
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    /**
+     * Tenant id for the requesting user. Tries the JWT claim first (fast,
+     * no document read). Falls back to the user doc so brand-new signups
+     * work before the ID-token refresh propagates.
+     */
+    function callerOrgId() {
+      return signedIn()
+        ? (request.auth.token.organizationId != null
+            ? request.auth.token.organizationId
+            : userDoc().organizationId)
+        : null;
+    }
+
+    function callerOrgRole() {
+      return signedIn()
+        ? (request.auth.token.orgRole != null
+            ? request.auth.token.orgRole
+            : userDoc().orgRole)
+        : null;
+    }
+
+    function isOrgRole(role) {
+      return callerOrgRole() == role;
+    }
+
+    function isOrgAtLeast(role) {
+      let r = callerOrgRole();
+      return role == 'member'
+        ? r in ['owner', 'admin', 'manager', 'member']
+        : role == 'manager'
+          ? r in ['owner', 'admin', 'manager']
+          : role == 'admin'
+            ? r in ['owner', 'admin']
+            : r == 'owner';
+    }
+
+    /** True when the doc lives in the caller's tenant. */
+    function inCallerOrg(data) {
+      return data.organizationId != null
+        && data.organizationId == callerOrgId();
+    }
+
+    /** Used on writes — the *new* doc must declare the caller's tenant and not change it. */
+    function isCreatingInOwnOrg() {
+      return request.resource.data.organizationId == callerOrgId();
+    }
+
+    function tenantUnchanged() {
+      return request.resource.data.organizationId == resource.data.organizationId;
+    }
+
+    // ───────────────────────────── Users ─────────────────────────────
+    // Users can read members in their own tenant (so /admin/team can list).
+    // Users can read/write their own user doc, but they CANNOT change their
+    // own organizationId, orgRole, isSuperAdmin, roleId — those are
+    // server-only fields. Membership in another org is impossible.
+
     match /users/{userId} {
-      allow read: if signedIn() && isSelf(userId);
-      allow create: if signedIn() && isSelf(userId);
-      allow update: if signedIn() && isSelf(userId);
+      allow read: if signedIn() && (
+        isSelf(userId)
+        || (resource.data.organizationId == callerOrgId() && resource.data.organizationId != null)
+      );
+
+      allow create: if isSelf(userId);
+
+      allow update: if isSelf(userId)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.orgRole == resource.data.orgRole
+        && request.resource.data.roleId == resource.data.roleId
+        && (!('isSuperAdmin' in request.resource.data)
+            || request.resource.data.isSuperAdmin == resource.data.get('isSuperAdmin', false));
+
       allow delete: if false;
     }
 
     match /computedPermissions/{userId} {
-      allow read: if signedIn() && isSelf(userId);
+      allow read: if isSelf(userId);
       allow write: if false;
     }
 
-    match /leads/{leadId} {
-      allow read, write: if signedIn();
+    // ───────────────────────── Tenant-scoped CRM data ─────────────────────────
+    // Every doc must declare `organizationId == caller's org`. Reads are
+    // unconditional within the tenant (per-record ACLs are enforced in app
+    // code through `permissionOverrides`); writes additionally must not
+    // change the tenant id.
+
+    function tenantReadable() {
+      return signedIn() && inCallerOrg(resource.data);
+    }
+
+    function tenantWritable() {
+      return signedIn()
+        && (resource == null
+              ? isCreatingInOwnOrg()
+              : (inCallerOrg(resource.data) && tenantUnchanged()));
+    }
+
+    match /leads/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
     }
 
     match /accounts/{id} {
-      allow read, write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
     }
 
     match /contacts/{id} {
-      allow read, write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
     }
 
     match /deals/{id} {
-      allow read, write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
     }
 
     match /departments/{id} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable() && isOrgAtLeast('admin');
     }
 
     match /permissionOverrides/{id} {
-      allow read: if signedIn();
-      allow write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable() && isOrgAtLeast('admin');
     }
 
     match /activityCounters/{id} {
-      allow read, write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
     }
 
     match /activityRecords/{id} {
-      allow read, write: if signedIn();
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
     }
 
+    match /auditLog/{id} {
+      allow read: if tenantReadable() && isOrgAtLeast('admin');
+      allow create: if tenantWritable();
+      allow update, delete: if false;
+    }
+
+    // Server-only collections: admin SDK bypasses rules; no client access.
     match /ingestQueue/{id} {
       allow read, write: if false;
     }
 
-    match /auditLog/{id} {
-      allow read: if signedIn();
-      allow create: if signedIn();
-      allow update, delete: if false;
-    }
+    match /organizations/{orgId} {
+      // Members of an org can READ their own org doc (for plan / seats UI).
+      // Admins / owners can update *settings* (name, billingEmail, etc.) — but
+      // writes that touch ownership / planId / status are server-only.
+      allow read: if signedIn() && orgId == callerOrgId();
+      allow write: if false;
 
-    // SaaS tenants & platform operators — server-only (Firebase Admin SDK).
-    match /organizations/{id} {
-      allow read, write: if false;
+      match /members/{memberUid} {
+        // Anyone in the org can list members. Modifications are server-only.
+        allow read: if signedIn() && orgId == callerOrgId();
+        allow write: if false;
+      }
+
+      match /invites/{inviteId} {
+        // Invites are server-only — recipients verify them via the unsigned API.
+        allow read, write: if false;
+      }
+
+      match /audit/{auditId} {
+        allow read: if signedIn() && orgId == callerOrgId() && isOrgAtLeast('admin');
+        allow write: if false;
+      }
     }
 
     match /platformAdmins/{id} {

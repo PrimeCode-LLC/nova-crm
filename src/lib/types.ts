@@ -66,13 +66,15 @@ export interface User {
   isSuperAdmin?: boolean;
   /** Display name from signup (customer company), not the SaaS tenant id. */
   company?: string;
-  /** SaaS organization (tenant). CRM rows should eventually filter by this. */
+  /** SaaS organization (tenant). All CRM rows must filter by this. */
   organizationId?: string;
+  /** Cached for fast reads in the app shell; authoritative copy lives in the org member doc. */
+  orgRole?: OrgMemberRole;
   status: "active" | "inactive" | "pip";
   createdAt: ISODate;
 }
 
-/** SaaS customer (tenant). Managed only via platform admin + Admin SDK. */
+/** SaaS customer (tenant). Managed via platform admin + Admin SDK + tenant owner. */
 export type OrganizationStatus = "trial" | "active" | "suspended";
 
 export type SaaSPlanId = "free" | "pro" | "enterprise";
@@ -89,10 +91,59 @@ export interface Organization {
   slug: string;
   status: OrganizationStatus;
   planId: SaaSPlanId;
+  /** Seat cap (per plan or operator override). `null` / undefined = unlimited. */
   maxUsers?: number;
+  /** Live count of active members; refreshed on add/remove. */
+  seatsUsed?: number;
+  /** Owner is the only member that cannot be removed; required after first signup. */
+  ownerUid?: string;
+  /** Primary contact email (typically owner's signup email). */
+  primaryEmail?: string;
+  /** Set when the platform admin pre-seats an owner before they have signed up yet. */
+  pendingOwnerEmail?: string;
+  /** ISO date when the trial ends (used to gate feature/seat warnings). */
+  trialEndsAt?: ISODate;
   settings: OrganizationSettings;
   createdAt: ISODate;
   updatedAt: ISODate;
+}
+
+/** Authoritative role for a user inside a single organization. */
+export type OrgMemberRole = "owner" | "admin" | "manager" | "member";
+
+export type OrgMemberStatus = "active" | "invited" | "disabled";
+
+export interface OrganizationMember {
+  /** Same as the auth uid. Doc id = uid. */
+  uid: string;
+  organizationId: string;
+  email: string;
+  displayName: string;
+  role: OrgMemberRole;
+  status: OrgMemberStatus;
+  /** Who invited them (or "owner-bootstrap" for the first owner). */
+  invitedByUid: string;
+  joinedAt: ISODate;
+  /** When the owner / admin disabled this member; null while active. */
+  disabledAt?: ISODate;
+}
+
+/** Pending invitation. Token is hashed; only the recipient knows the plaintext. */
+export type OrganizationInviteStatus = "pending" | "accepted" | "revoked" | "expired";
+
+export interface OrganizationInvite {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: OrgMemberRole;
+  /** SHA-256 of the secret token sent to the recipient. */
+  tokenHash: string;
+  status: OrganizationInviteStatus;
+  expiresAt: ISODate;
+  createdAt: ISODate;
+  createdByUid: string;
+  acceptedAt?: ISODate;
+  acceptedByUid?: string;
 }
 
 /** Product operator (you / staff). Not the same as workspace `isSuperAdmin`. */

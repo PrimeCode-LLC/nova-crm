@@ -16,6 +16,7 @@ import {
   Megaphone,
   Radio,
   BarChart3,
+  UsersRound,
   type LucideIcon,
 } from "lucide-react";
 
@@ -49,7 +50,9 @@ export const NAV_SECTIONS: NavSection[] = [
   {
     label: "Configuration",
     items: [
-      { href: "/admin/users", label: "Users", icon: Users },
+      { href: "/admin/organization", label: "Organization", icon: Building2 },
+      { href: "/admin/team", label: "Team", icon: UsersRound },
+      { href: "/admin/users", label: "Users (demo)", icon: Users },
       { href: "/admin/permissions", label: "Permissions", icon: Shield },
       { href: "/admin/departments", label: "Departments", icon: UserCog },
       { href: "/admin/channels", label: "Channels", icon: Radio },

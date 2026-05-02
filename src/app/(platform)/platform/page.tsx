@@ -8,7 +8,8 @@ import {
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Building2, Shield, ArrowRight } from "lucide-react";
+import { Building2, Shield, ArrowRight, Wrench } from "lucide-react";
+import { MigrateExistingUsersButton } from "./migrate-existing-users";
 
 export default function PlatformOverviewPage() {
   return (
@@ -63,6 +64,22 @@ export default function PlatformOverviewPage() {
               Manage super admins
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
+          </CardContent>
+        </Card>
+
+        <Card className="sm:col-span-2 border-dashed">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Wrench className="h-4 w-4" />
+              One-shot: migrate legacy users
+            </CardTitle>
+            <CardDescription>
+              For users who signed up before multi-tenant landed. Creates a personal workspace
+              for each user that has no organization and stamps them as owner. Idempotent.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <MigrateExistingUsersButton />
           </CardContent>
         </Card>
       </div>

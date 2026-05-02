@@ -29,37 +29,58 @@ If you have not set **Firebase Admin** credentials yet, either:
 | `FIREBASE_ADMIN_PROJECT_ID` | Server | Admin SDK |
 | `FIREBASE_ADMIN_CLIENT_EMAIL` | Server | Service account email |
 | `FIREBASE_ADMIN_PRIVATE_KEY` | Server | PEM private key (`\n` escaped as `\\n` in `.env`) |
-| `INBOUND_WEBHOOK_SECRET` | Server | Bearer or `x-webhook-secret` for `POST /api/integrations/webhook/lead` |
+| `PLATFORM_ADMIN_EMAILS` | Server | Comma-separated bootstrap operators for `/platform` |
+| `SYSTEM_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` / `_FROM` | Server | Outbound transactional mail (invitations, owner setup links). If unset, the UI shows the link for manual copy. |
+| `NEXT_PUBLIC_SITE_URL` | Server | Origin used in invite links (falls back to host header) |
+| `INBOUND_WEBHOOK_SECRET` | Server | Legacy single-tenant webhook secret. New per-tenant secrets live on the org doc. |
 | `DISABLE_AUTH` | Server | `true` = skip session verification in `(app)` layout |
 | `NEXT_PUBLIC_AUTH_DISABLED` | Client + Edge | `true` = skip Firebase listeners + middleware auth |
 
 See `.env.example` for the full list.
 
-## Auth flow
+## Auth & multi-tenant flow
 
-1. User signs in with **Firebase Auth** (email/password or Google) on the client.  
-2. Client calls **`POST /api/auth/session`** with a fresh **ID token**.  
-3. Server verifies the token with **Admin SDK**, creates a **session cookie** (`__session`), and upserts **`users/{uid}`** in Firestore.  
-4. **`middleware.ts`** redirects unauthenticated users to `/login`.  
-5. **`(app)/layout.tsx`** calls **`requireSession()`** to verify the cookie on the server (Node).
+The product is multi-tenant SaaS. See `docs/SAAS-ARCHITECTURE.md` for the full reference.
 
-Sign out clears the cookie and calls Firebase `signOut()`.
+**Three signup branches** (`POST /api/auth/session`):
+
+1. **`/signup?invite=<token>`** — joins an existing org. The token resolves to an `organizations/{orgId}/invites/{inviteId}` doc; on accept, a `members/{uid}` doc is written and the invite is marked `accepted`.
+2. **Email matches a `pendingOwnerEmail`** — when an operator pre-seats an org from `/platform/organizations/new`, the first signup with that email auto-claims the workspace as `owner`.
+3. **Plain `/signup` with a company name** — bootstraps a personal org, the signer becomes `owner` (legacy CRM `roleId` set to `director`, `isSuperAdmin: true`).
+
+After any branch, the server stamps Firebase **custom claims** (`organizationId`, `orgRole`, `platformAdmin`) and the client forces an ID-token refresh + re-exchange so the session cookie carries the new claims. `firestore.rules` reads claims first and falls back to the user doc, so freshly-signed-up users have working access on the very first request.
+
+`/onboarding` is a defensive page for users that ended up signed in without an org (legacy accounts, or platform admins).
+
+**Sign out** clears the cookie and calls Firebase `signOut()`.
 
 ## Firestore & rules
 
-- Rules file: `firestore.rules`  
-- Deploy: `npm run firebase:deploy:rules` (requires [Firebase CLI](https://firebase.google.com/docs/cli))
+- Rules file: `firestore.rules` — enforces tenant isolation. Every CRM doc must declare `organizationId == caller's org`. Server (Admin SDK) bypasses rules.
+- Indexes: `firestore.indexes.json` — pre-declares the composite indexes that tenant-filtered queries will hit.
+- Deploy: `npm run firebase:deploy:rules` and `firebase deploy --only firestore:indexes`
 
-Collections used in rules: `users`, `computedPermissions`, `leads`, `accounts`, `contacts`, `deals`, `departments`, `permissionOverrides`, `activityCounters`, `activityRecords`, `ingestQueue` (admin-only writes), `auditLog`.
+Collections used in rules:
+- Tenant CRM: `leads`, `accounts`, `contacts`, `deals`, `departments`, `permissionOverrides`, `activityCounters`, `activityRecords`, `auditLog`
+- Identity: `users`, `computedPermissions`
+- SaaS: `organizations` (with subcollections `members`, `invites`, `audit`), `platformAdmins`
+- Server-only: `ingestQueue`
+
+## Org management
+
+- **`/admin/team`** — owner / admin invite teammates, change roles, disable members. Talks to `/api/org/members` and `/api/org/invites`.
+- **`/admin/users`** — legacy demo view of the org chart (mock data). Linked from /admin/team.
+- **`/platform`** — operator console (gated by `platformAdmins` collection or `PLATFORM_ADMIN_EMAILS`). Create / edit organizations, manage other operators, run the legacy-user migration once after deploy.
 
 ## Website → CRM webhook
 
-`POST /api/integrations/webhook/lead` with header **`Authorization: Bearer <INBOUND_WEBHOOK_SECRET>`** or **`x-webhook-secret: <secret>`**.
+`POST /api/integrations/webhook/lead` with header **`Authorization: Bearer <secret>`** or **`x-webhook-secret: <secret>`**.
 
-JSON body (all optional except you should send enough to process):
+The body MUST include `organizationId` so the lead is stamped to the right tenant. The secret is checked against `organizations/{orgId}.inboundWebhookSecret` (per-tenant) with `INBOUND_WEBHOOK_SECRET` env as a legacy fallback.
 
 ```json
 {
+  "organizationId": "abc123",
   "source": "website",
   "contactEmail": "lead@example.com",
   "contactName": "Jane Doe",
@@ -69,7 +90,7 @@ JSON body (all optional except you should send enough to process):
 }
 ```
 
-Writes an **`ingestQueue`** document via Admin SDK (clients cannot write this collection).
+Writes a tenant-stamped doc to **`ingestQueue`** via Admin SDK (clients cannot write this collection).
 
 ## Cloud Functions
 

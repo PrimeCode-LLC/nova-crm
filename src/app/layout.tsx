@@ -42,7 +42,10 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${GeistSans.variable} ${GeistMono.variable} h-full`}
     >
-      <body className="min-h-full bg-background text-foreground font-sans antialiased">
+      <body
+        className="min-h-full bg-background text-foreground font-sans antialiased"
+        suppressHydrationWarning
+      >
         <ThemeProvider
           attribute="class"
           defaultTheme="dark"

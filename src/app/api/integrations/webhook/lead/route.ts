@@ -2,8 +2,12 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { COLLECTIONS } from "@/lib/firestore/collections";
+import { stampForCreate } from "@/lib/firestore/tenant-write";
 
 const bodySchema = z.object({
+  /** Tenant id this lead belongs to. Required (multi-tenant). */
+  organizationId: z.string().min(1),
   source: z.string().optional(),
   contactEmail: z.string().email().optional(),
   contactName: z.string().min(1).optional(),
@@ -17,21 +21,17 @@ function unauthorized() {
 }
 
 export async function POST(req: Request) {
-  const secret = process.env.INBOUND_WEBHOOK_SECRET;
-  if (!secret) {
-    return NextResponse.json(
-      { error: "INBOUND_WEBHOOK_SECRET is not configured" },
-      { status: 503 },
-    );
-  }
+  // Tenant-aware webhook secret. Two modes:
+  //  1) Legacy single-tenant: INBOUND_WEBHOOK_SECRET still works (for backward compat).
+  //  2) Per-tenant: organizations/{orgId}.settings.inboundWebhookSecret on the doc.
+  const fallbackSecret = process.env.INBOUND_WEBHOOK_SECRET;
 
   const authHeader = req.headers.get("authorization");
   const headerSecret = req.headers.get("x-webhook-secret");
-  const token =
+  const presented =
     authHeader?.startsWith("Bearer ") ? authHeader.slice(7) : headerSecret;
-  if (token !== secret) {
-    return unauthorized();
-  }
+
+  if (!presented) return unauthorized();
 
   const db = getAdminDb();
   if (!db) {
@@ -47,7 +47,6 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
-
   const parsed = bodySchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json(
@@ -56,12 +55,30 @@ export async function POST(req: Request) {
     );
   }
 
-  const ref = await db.collection("ingestQueue").add({
-    type: "website_lead",
-    payload: parsed.data,
-    receivedAt: FieldValue.serverTimestamp(),
-    status: "pending",
-  });
+  // Verify the secret against the tenant doc (or fallback env).
+  const orgRef = db
+    .collection(COLLECTIONS.organizations)
+    .doc(parsed.data.organizationId);
+  const orgSnap = await orgRef.get();
+  if (!orgSnap.exists) {
+    return unauthorized();
+  }
+  const orgData = orgSnap.data() ?? {};
+  const orgSecret =
+    typeof orgData.inboundWebhookSecret === "string"
+      ? orgData.inboundWebhookSecret
+      : null;
+  const accepted = orgSecret ? presented === orgSecret : presented === fallbackSecret;
+  if (!accepted) return unauthorized();
+
+  const ref = await db.collection(COLLECTIONS.ingestQueue).add(
+    stampForCreate(parsed.data.organizationId, {
+      type: "website_lead",
+      payload: parsed.data,
+      receivedAt: FieldValue.serverTimestamp(),
+      status: "pending",
+    }),
+  );
 
   return NextResponse.json({ ok: true, id: ref.id });
 }
