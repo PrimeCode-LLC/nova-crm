@@ -27,6 +27,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import type { Role } from "@/lib/types";
 
 import {
   Sidebar,
@@ -57,6 +59,27 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { AppMark } from "@/components/brand/app-mark";
 
+function workspaceRoleSubtitle(
+  roleId: Role | undefined,
+  isSuperAdmin: boolean | undefined,
+  opts: { loading: boolean; hasDoc: boolean },
+): string {
+  const { loading, hasDoc } = opts;
+  if (loading && !hasDoc) return "…";
+  let base: string;
+  if (roleId && roleId in ROLES) {
+    base = ROLES[roleId as Role].label;
+  } else if (hasDoc) {
+    base = typeof roleId === "string" ? roleId : "Member";
+  } else {
+    base = ROLES.salesperson.label;
+  }
+  if (isSuperAdmin) {
+    return roleId && roleId in ROLES ? `${base} · Super admin` : "Super admin";
+  }
+  return base;
+}
+
 export function AppSidebar({
   showPlatformLink = false,
 }: {
@@ -67,6 +90,9 @@ export function AppSidebar({
   const { theme, setTheme } = useTheme();
   const { user: fbUser, signOut } = useAuth();
   const { isDemo, demoPersonaId, setDemoPersona } = useWorkspace();
+  const { data: userDoc, loading: userDocLoading } = useUserDoc(
+    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
+  );
   const mockUser =
     mockUsers.find((u) => u.id === demoPersonaId) ?? mockUsers[0]!;
   const useMockPersona = isDemo || isAuthDisabled() || !fbUser;
@@ -76,7 +102,10 @@ export function AppSidebar({
   const email = useMockPersona ? mockUser.email : (fbUser.email ?? "");
   const roleLabel = useMockPersona
     ? ROLES[mockUser.roleId].label
-    : ROLES.salesperson.label;
+    : workspaceRoleSubtitle(userDoc?.roleId, userDoc?.isSuperAdmin, {
+        loading: userDocLoading,
+        hasDoc: userDoc != null,
+      });
   const avatarInitials = useMockPersona
     ? mockUser.displayName
         .split(" ")
