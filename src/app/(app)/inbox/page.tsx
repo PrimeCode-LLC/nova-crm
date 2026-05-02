@@ -302,7 +302,7 @@ export default function InboxPage() {
           </Tabs>
           {inboxMode === "email" && !isEmailAccountConfigured(account) && (
             <p className="text-[11px] text-muted-foreground">
-              SMTP not fully configured — you can still compose;{" "}
+              SMTP not fully configured, you can still compose;{" "}
               <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
                 open Email settings
               </Link>{" "}

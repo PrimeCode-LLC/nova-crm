@@ -96,7 +96,7 @@ export function CampaignDetailView({ campaignId }: { campaignId: string }) {
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <StatCard label="Started" value={c.startedAt ? fmtRelative(c.startedAt) : "—"} />
+          <StatCard label="Started" value={c.startedAt ? fmtRelative(c.startedAt) : "-"} />
           <StatCard label="Sent" value={fmtNumber(c.stats.sent)} />
           <StatCard label="Replied" value={fmtNumber(c.stats.replied)} />
           <StatCard label="Meetings" value={fmtNumber(c.stats.meetings)} />

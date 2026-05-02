@@ -507,7 +507,7 @@ function ConfigureBuiltinChannelForm({
   return (
     <>
       <SheetHeader>
-        <SheetTitle>Configure — {channelLabel}</SheetTitle>
+        <SheetTitle>Configure: {channelLabel}</SheetTitle>
         <SheetDescription>
           Adjust how this channel is described in the list and whether automation runs.
         </SheetDescription>
@@ -603,7 +603,7 @@ function ConfigureCustomChannelForm({
   return (
     <>
       <SheetHeader>
-        <SheetTitle>Configure — {channel.name}</SheetTitle>
+        <SheetTitle>Configure: {channel.name}</SheetTitle>
         <SheetDescription>
           Edit this custom channel. Changes apply immediately after you save.
         </SheetDescription>

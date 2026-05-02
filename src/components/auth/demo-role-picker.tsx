@@ -29,7 +29,7 @@ export function DemoRolePicker() {
         router.push("/dashboard");
         return;
       }
-      toast.success("Demo mode and sample role saved. Sign in below — the app will open in Demo as that user.");
+      toast.success("Demo mode and sample role saved. Sign in below; the app will open in Demo as that user.");
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not start demo";
       toast.error(msg);
@@ -50,7 +50,7 @@ export function DemoRolePicker() {
           and <strong className="text-foreground">Settings</strong> context so you can compare Admin → Users &
           Permissions.{" "}
           {isAuthDisabled()
-            ? "Auth is off — one click opens the dashboard."
+            ? "Auth is off: one click opens the dashboard."
             : "We save your pick; sign in next, then use the account menu to change role anytime in Demo mode."}
         </CardDescription>
       </CardHeader>

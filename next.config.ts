@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 /**
- * Do not set `turbopack.root` to this app folder — it breaks Tailwind v4
+ * Do not set `turbopack.root` to this app folder; it breaks Tailwind v4
  * `@import "tailwindcss"` (vercel/next.js#90307).
  *
  * If `next dev` slows the whole system: Next may infer Turbopack’s workspace root

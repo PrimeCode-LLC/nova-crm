@@ -192,7 +192,7 @@ export function EmailInboxSettingsCard() {
 
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-              Incoming (IMAP) — reserved for sync
+              Incoming (IMAP), reserved for sync
             </h4>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5 sm:col-span-2">
@@ -290,7 +290,7 @@ export function EmailInboxSettingsCard() {
                 rows={4}
                 value={account.signature}
                 onChange={(e) => setAccount({ signature: e.target.value })}
-                placeholder="—&#10;James Mitchell&#10;Director, Nova Inc."
+                placeholder="&#10;James Mitchell&#10;Director, Nova Inc."
                 className="text-sm resize-y min-h-[88px]"
               />
             </div>

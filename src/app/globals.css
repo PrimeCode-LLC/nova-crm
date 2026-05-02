@@ -54,29 +54,29 @@
 /* Light theme: warm near-white with refined indigo accent (WCAG AA verified) */
 :root {
   --background: oklch(0.995 0.002 265);
-  --foreground: oklch(0.18 0.01 265);            /* ~14:1 vs bg — AAA */
+  --foreground: oklch(0.18 0.01 265);            /* ~14:1 vs bg, AAA */
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.18 0.01 265);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.18 0.01 265);
-  --primary: oklch(0.5 0.2 265);                 /* indigo, ~8.5:1 vs white — AAA */
+  --primary: oklch(0.5 0.2 265);                 /* indigo, ~8.5:1 vs white, AAA */
   --primary-foreground: oklch(0.99 0 0);
   --secondary: oklch(0.965 0.005 265);
   --secondary-foreground: oklch(0.22 0.01 265);
   --muted: oklch(0.965 0.005 265);
-  --muted-foreground: oklch(0.44 0.015 265);     /* ~5.6:1 vs bg — AA pass */
+  --muted-foreground: oklch(0.44 0.015 265);     /* ~5.6:1 vs bg, AA pass */
   --accent: oklch(0.955 0.025 265);
-  --accent-foreground: oklch(0.32 0.14 265);     /* ~7:1 vs accent bg — AA */
-  --destructive: oklch(0.52 0.23 28);            /* ~5.0:1 vs white — AA */
-  --success: oklch(0.5 0.16 160);                /* ~4.6:1 vs white — AA */
-  --warning: oklch(0.55 0.17 60);                /* shifted toward amber, ~4.5:1 — AA */
-  --info: oklch(0.52 0.18 230);                  /* ~5.0:1 vs white — AA */
+  --accent-foreground: oklch(0.32 0.14 265);     /* ~7:1 vs accent bg, AA */
+  --destructive: oklch(0.52 0.23 28);            /* ~5.0:1 vs white, AA */
+  --success: oklch(0.5 0.16 160);                /* ~4.6:1 vs white, AA */
+  --warning: oklch(0.55 0.17 60);                /* shifted toward amber, ~4.5:1, AA */
+  --info: oklch(0.52 0.18 230);                  /* ~5.0:1 vs white, AA */
   --border: oklch(0.9 0.005 265);
   --input: oklch(0.92 0.005 265);
   --ring: oklch(0.5 0.2 265);
   --chart-1: oklch(0.5 0.2 265);                 /* indigo, ~8.5:1 */
-  --chart-2: oklch(0.55 0.16 190);               /* teal, ~3.7:1 — UI/large text */
-  --chart-3: oklch(0.55 0.18 70);                /* amber, ~3.4:1 — UI/large text */
+  --chart-2: oklch(0.55 0.16 190);               /* teal, ~3.7:1, UI/large text */
+  --chart-3: oklch(0.55 0.18 70);                /* amber, ~3.4:1, UI/large text */
   --chart-4: oklch(0.55 0.21 25);                /* red-orange, ~4.2:1 */
   --chart-5: oklch(0.55 0.21 330);               /* magenta, ~4.5:1 */
   --radius: 0.625rem;

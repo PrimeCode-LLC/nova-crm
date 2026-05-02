@@ -81,8 +81,8 @@ cd functions && npm install && npm run build
 
 Exports:
 
-- **`health`** — HTTP sanity check  
-- **`recomputePermissionsOnUserWrite`** — on `users/{userId}` write, merges role + `permissionOverrides` into `computedPermissions/{userId}` (merge logic duplicated in `functions/src/mergePermissions.ts` — keep in sync with `src/lib/permissions/merge.ts` or extract to a shared package later).
+- **`health`**: HTTP sanity check  
+- **`recomputePermissionsOnUserWrite`**: on `users/{userId}` write, merges role + `permissionOverrides` into `computedPermissions/{userId}` (merge logic duplicated in `functions/src/mergePermissions.ts`; keep in sync with `src/lib/permissions/merge.ts` or extract to a shared package later).
 
 Deploy: `npm run firebase:deploy:functions` from `crm/` (requires Blaze for callable HTTP/functions).
 
@@ -91,7 +91,7 @@ Deploy: `npm run firebase:deploy:functions` from `crm/` (requires Blaze for call
 | File | Purpose |
 |------|---------|
 | `firebase.json` | Firestore + Functions |
-| `.firebaserc` | Default project id (`novacrm-41ef8` — change if needed) |
+| `.firebaserc` | Default project id (`novacrm-41ef8`; change if needed) |
 | `apphosting.yaml` | App Hosting resource hints |
 | `firestore.rules` / `firestore.indexes.json` | Security + indexes |
 

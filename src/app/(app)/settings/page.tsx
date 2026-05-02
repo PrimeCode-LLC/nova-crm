@@ -37,7 +37,7 @@ import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 
 /**
- * Mini theme preview — a tiny faux-app rendered with the literal hex/oklch
+ * Mini theme preview, a tiny faux-app rendered with the literal hex/oklch
  * palette of each theme so users can see what they'll get without applying it.
  * Kept self-contained (no theme tokens) so each card always shows its own theme.
  */

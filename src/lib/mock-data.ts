@@ -164,10 +164,10 @@ export const mockPermissionOverrides: PermissionOverride[] = [
 // ───────────────────────── Profiles ─────────────────────────
 export const mockProfiles: Profile[] = [
   { id: "p-upwork-main", name: "CompanyMain (Upwork)", channel: "upwork", type: "upwork", ownerId: "u-mgr-upwork", active: true },
-  { id: "p-upwork-personal", name: "Personal — Upwork (exec)", channel: "upwork", type: "upwork", ownerId: "u-director", active: true },
+  { id: "p-upwork-personal", name: "Personal, Upwork (exec)", channel: "upwork", type: "upwork", ownerId: "u-director", active: true },
   { id: "p-cv-backend", name: "CV-Backend-v3", channel: "job_apply", type: "cv", ownerId: "u-sales-03", active: true },
   { id: "p-cv-fullstack", name: "CV-Fullstack-v2", channel: "job_apply", type: "cv", ownerId: "u-sales-03", active: true },
-  { id: "p-li-primary", name: "Executive — LinkedIn outbound", channel: "linkedin_outbound", type: "linkedin", ownerId: "u-director", active: true },
+  { id: "p-li-primary", name: "Executive, LinkedIn outbound", channel: "linkedin_outbound", type: "linkedin", ownerId: "u-director", active: true },
 ];
 
 // ───────────────────────── Campaigns ─────────────────────────

@@ -29,11 +29,12 @@ import {
   FormLabel,
   FormMessage,
 } from "@/components/ui/form";
+import { Label } from "@/components/ui/label";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { PIPELINE_STAGES, PRIORITY_TONE, TEMPERATURE_TONE, COMPANY_SIZES, REVENUE_RANGES, CHANNEL_LIST } from "@/lib/constants";
-import type { PipelineStage } from "@/lib/types";
+import type { Account, ChannelKey, CompanySize, Contact, PipelineStage, Profile, RevenueRange } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import type { ChannelKey, Profile } from "@/lib/types";
-import { UserRound, Building2, Contact, CheckSquare, User } from "lucide-react";
+import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
 
 export type QuickAddPill = "lead" | "contact" | "account" | "task" | "profile";
 
@@ -43,7 +44,7 @@ const PROFILE_TYPES = ["upwork", "cv", "email", "linkedin"] as const;
 
 const PILLS: { key: Pill; label: string; icon: React.ElementType }[] = [
   { key: "lead", label: "Lead", icon: UserRound },
-  { key: "contact", label: "Contact", icon: Contact },
+  { key: "contact", label: "Contact", icon: ContactIcon },
   { key: "account", label: "Account", icon: Building2 },
   { key: "task", label: "Task", icon: CheckSquare },
   { key: "profile", label: "Profile", icon: User },
@@ -63,16 +64,36 @@ const leadSchema = z.object({
 });
 type LeadForm = z.infer<typeof leadSchema>;
 
-// ── Contact schema ──
-const contactSchema = z.object({
-  firstName: z.string().min(1, "First name required"),
-  lastName: z.string().min(1, "Last name required"),
-  accountId: z.string().min(1, "Account required"),
-  email: z.string().email("Invalid email").or(z.literal("")),
-  phone: z.string().optional(),
-  title: z.string().optional(),
-});
+// ── Contact schema (link to existing account or create company inline) ──
+const contactSchema = z
+  .object({
+    accountMode: z.enum(["existing", "new"]),
+    accountId: z.string(),
+    newCompanyName: z.string(),
+    newCompanyDomain: z.string().optional(),
+    firstName: z.string().min(1, "First name required"),
+    lastName: z.string().min(1, "Last name required"),
+    email: z.string().email("Invalid email").or(z.literal("")),
+    phone: z.string().optional(),
+    title: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.accountMode === "existing") {
+      if (!data.accountId.trim()) {
+        ctx.addIssue({ code: "custom", message: "Select an account", path: ["accountId"] });
+      }
+    } else if (!data.newCompanyName.trim()) {
+      ctx.addIssue({ code: "custom", message: "Company name required", path: ["newCompanyName"] });
+    }
+  });
 type ContactForm = z.infer<typeof contactSchema>;
+
+function newEntityId(prefix: string): string {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}`;
+}
 
 // ── Account schema ──
 const accountSchema = z.object({
@@ -140,7 +161,7 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
         <label className="text-xs font-medium text-foreground">Profile name</label>
         <Input
           className="h-9"
-          placeholder="e.g. Executive — LinkedIn outbound"
+          placeholder="e.g. Executive, LinkedIn outbound"
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
@@ -342,14 +363,66 @@ function LeadFormBody({
 }
 
 function ContactFormBody({ onClose }: { onClose: () => void }) {
-  const { accounts } = useWorkspace();
+  const { accounts, addAccount, addContact, currentUserId, users } = useWorkspace();
   const form = useForm<ContactForm>({
     resolver: zodResolver(contactSchema),
-    defaultValues: { firstName: "", lastName: "", accountId: "", email: "", phone: "", title: "" },
+    defaultValues: {
+      accountMode: "existing",
+      accountId: "",
+      newCompanyName: "",
+      newCompanyDomain: "",
+      firstName: "",
+      lastName: "",
+      email: "",
+      phone: "",
+      title: "",
+    },
   });
+  const accountMode = form.watch("accountMode");
 
-  async function onSubmit(_v: ContactForm) {
-    await new Promise((r) => setTimeout(r, 800));
+  React.useEffect(() => {
+    if (accounts.length === 0) {
+      form.setValue("accountMode", "new");
+    }
+  }, [accounts.length, form]);
+
+  async function onSubmit(values: ContactForm) {
+    const ownerId = currentUserId || users[0]?.id;
+    if (!ownerId) {
+      toast.error("Could not assign owner. Try again after refresh.");
+      return;
+    }
+    const now = new Date().toISOString();
+    let accountId = values.accountId.trim();
+    if (values.accountMode === "new") {
+      accountId = newEntityId("a");
+      addAccount({
+        id: accountId,
+        name: values.newCompanyName.trim(),
+        domain: values.newCompanyDomain?.trim() || undefined,
+        contactCount: 0,
+        leadCount: 0,
+        openDealValue: 0,
+        ownerId,
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    const fn = values.firstName.trim();
+    const ln = values.lastName.trim();
+    addContact({
+      id: newEntityId("ct"),
+      accountId,
+      firstName: fn,
+      lastName: ln,
+      fullName: `${fn} ${ln}`.trim(),
+      email: values.email.trim() || undefined,
+      phone: values.phone?.trim() || undefined,
+      title: values.title?.trim() || undefined,
+      ownerId,
+      createdAt: now,
+      updatedAt: now,
+    });
     toast.success("Contact created");
     onClose();
   }
@@ -357,57 +430,198 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-3">
+        <FormField
+          control={form.control}
+          name="accountMode"
+          render={({ field }) => (
+            <FormItem className="space-y-2">
+              <FormLabel className="text-xs font-medium text-foreground">Company</FormLabel>
+              <FormControl>
+                <RadioGroup
+                  value={field.value}
+                  onValueChange={(v) => {
+                    const mode = v as ContactForm["accountMode"];
+                    field.onChange(mode);
+                    if (mode === "existing") {
+                      form.setValue("newCompanyName", "");
+                      form.setValue("newCompanyDomain", "");
+                    } else {
+                      form.setValue("accountId", "");
+                    }
+                  }}
+                  className="grid grid-cols-2 gap-2"
+                >
+                  <div>
+                    <RadioGroupItem
+                      value="existing"
+                      id="contact-acc-existing"
+                      className="sr-only"
+                      disabled={accounts.length === 0}
+                    />
+                    <Label
+                      htmlFor="contact-acc-existing"
+                      className={`flex items-center justify-center rounded-lg border px-2 py-2 text-center text-xs font-medium transition-colors ${
+                        accounts.length === 0
+                          ? "cursor-not-allowed border-border/40 text-muted-foreground/50"
+                          : `cursor-pointer ${
+                              field.value === "existing"
+                                ? "border-primary bg-primary/5 text-primary"
+                                : "border-border/60 text-muted-foreground hover:bg-muted/40"
+                            }`
+                      }`}
+                    >
+                      Existing account
+                    </Label>
+                  </div>
+                  <div>
+                    <RadioGroupItem value="new" id="contact-acc-new" className="sr-only" />
+                    <Label
+                      htmlFor="contact-acc-new"
+                      className={`flex cursor-pointer items-center justify-center rounded-lg border px-2 py-2 text-center text-xs font-medium transition-colors ${
+                        field.value === "new"
+                          ? "border-primary bg-primary/5 text-primary"
+                          : "border-border/60 text-muted-foreground hover:bg-muted/40"
+                      }`}
+                    >
+                      New company
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </FormControl>
+              <FormMessage className="text-xs" />
+            </FormItem>
+          )}
+        />
+
+        {accountMode === "existing" ? (
+          <FormField
+            control={form.control}
+            name="accountId"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Account</FormLabel>
+                <Select value={field.value} onValueChange={field.onChange}>
+                  <FormControl>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select account" />
+                    </SelectTrigger>
+                  </FormControl>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>
+                        {a.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
+        ) : (
+          <div className="grid grid-cols-2 gap-3">
+            <FormField
+              control={form.control}
+              name="newCompanyName"
+              render={({ field }) => (
+                <FormItem className="col-span-2 sm:col-span-1">
+                  <FormLabel className="text-xs">Company name</FormLabel>
+                  <FormControl>
+                    <Input className="h-9" placeholder="Acme Inc." {...field} />
+                  </FormControl>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )}
+            />
+            <FormField
+              control={form.control}
+              name="newCompanyDomain"
+              render={({ field }) => (
+                <FormItem className="col-span-2 sm:col-span-1">
+                  <FormLabel className="text-xs">Domain (optional)</FormLabel>
+                  <FormControl>
+                    <Input className="h-9" placeholder="acme.com" {...field} />
+                  </FormControl>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )}
+            />
+          </div>
+        )}
+
         <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="firstName" render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-xs">First name</FormLabel>
-              <FormControl><Input className="h-9" placeholder="Jordan" {...field} /></FormControl>
-              <FormMessage className="text-xs" />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="lastName" render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-xs">Last name</FormLabel>
-              <FormControl><Input className="h-9" placeholder="Harper" {...field} /></FormControl>
-              <FormMessage className="text-xs" />
-            </FormItem>
-          )} />
+          <FormField
+            control={form.control}
+            name="firstName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">First name</FormLabel>
+                <FormControl>
+                  <Input className="h-9" placeholder="Jordan" {...field} />
+                </FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="lastName"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Last name</FormLabel>
+                <FormControl>
+                  <Input className="h-9" placeholder="Harper" {...field} />
+                </FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
         </div>
-        <FormField control={form.control} name="accountId" render={({ field }) => (
-          <FormItem>
-            <FormLabel className="text-xs">Account</FormLabel>
-            <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger className="h-9"><SelectValue placeholder="Select account" /></SelectTrigger></FormControl>
-              <SelectContent>{accounts.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
-            </Select>
-            <FormMessage className="text-xs" />
-          </FormItem>
-        )} />
         <div className="grid grid-cols-2 gap-3">
-          <FormField control={form.control} name="email" render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-xs">Email</FormLabel>
-              <FormControl><Input type="email" className="h-9" placeholder="jordan@co.com" {...field} /></FormControl>
-              <FormMessage className="text-xs" />
-            </FormItem>
-          )} />
-          <FormField control={form.control} name="phone" render={({ field }) => (
-            <FormItem>
-              <FormLabel className="text-xs">Phone</FormLabel>
-              <FormControl><Input className="h-9" placeholder="+1 555-0100" {...field} /></FormControl>
-              <FormMessage className="text-xs" />
-            </FormItem>
-          )} />
+          <FormField
+            control={form.control}
+            name="email"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Email</FormLabel>
+                <FormControl>
+                  <Input type="email" className="h-9" placeholder="jordan@co.com" {...field} />
+                </FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="phone"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel className="text-xs">Phone</FormLabel>
+                <FormControl>
+                  <Input className="h-9" placeholder="+1 555-0100" {...field} />
+                </FormControl>
+                <FormMessage className="text-xs" />
+              </FormItem>
+            )}
+          />
         </div>
-        <FormField control={form.control} name="title" render={({ field }) => (
-          <FormItem>
-            <FormLabel className="text-xs">Title</FormLabel>
-            <FormControl><Input className="h-9" placeholder="CEO" {...field} /></FormControl>
-            <FormMessage className="text-xs" />
-          </FormItem>
-        )} />
+        <FormField
+          control={form.control}
+          name="title"
+          render={({ field }) => (
+            <FormItem>
+              <FormLabel className="text-xs">Title</FormLabel>
+              <FormControl>
+                <Input className="h-9" placeholder="CEO" {...field} />
+              </FormControl>
+              <FormMessage className="text-xs" />
+            </FormItem>
+          )}
+        />
         <div className="flex justify-end gap-2 pt-1">
-          <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={onClose}>
+            Cancel
+          </Button>
           <Button type="submit" size="sm" disabled={form.formState.isSubmitting}>
             {form.formState.isSubmitting ? "Creating…" : "Create contact"}
           </Button>
@@ -418,13 +632,33 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
 }
 
 function AccountFormBody({ onClose }: { onClose: () => void }) {
+  const { addAccount, currentUserId, users } = useWorkspace();
   const form = useForm<AccountForm>({
     resolver: zodResolver(accountSchema),
     defaultValues: { name: "", domain: "", industry: "", size: "", revenueRange: "" },
   });
 
-  async function onSubmit(_v: AccountForm) {
-    await new Promise((r) => setTimeout(r, 800));
+  function onSubmit(v: AccountForm) {
+    const ownerId = currentUserId || users[0]?.id;
+    if (!ownerId) {
+      toast.error("Could not assign owner. Try again after refresh.");
+      return;
+    }
+    const now = new Date().toISOString();
+    addAccount({
+      id: newEntityId("a"),
+      name: v.name.trim(),
+      domain: v.domain?.trim() || undefined,
+      industry: v.industry?.trim() || undefined,
+      size: (v.size as CompanySize) || undefined,
+      revenueRange: (v.revenueRange as RevenueRange) || undefined,
+      contactCount: 0,
+      leadCount: 0,
+      openDealValue: 0,
+      ownerId,
+      createdAt: now,
+      updatedAt: now,
+    });
     toast.success("Account created");
     onClose();
   }
@@ -586,7 +820,7 @@ export function QuickAddDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-xl gap-4">
+      <DialogContent className="max-w-xl gap-4 sm:max-w-xl">
         <DialogHeader className="text-left">
           <DialogTitle className="text-base font-semibold tracking-tight">Quick add</DialogTitle>
         </DialogHeader>
@@ -602,14 +836,14 @@ export function QuickAddDialog({
               role="tab"
               aria-selected={pill === key}
               onClick={() => setPill(key)}
-              className={`flex items-center justify-center gap-1.5 rounded-md px-2 py-1.5 text-xs font-medium transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:text-sm ${
+              className={`flex min-w-0 flex-col items-center justify-center gap-1 rounded-md px-1.5 py-2.5 text-center text-xs font-medium leading-snug transition-colors outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background sm:px-2 sm:text-sm ${
                 pill === key
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
-              <Icon className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{label}</span>
+              <Icon className="h-4 w-4 shrink-0" aria-hidden />
+              <span className="w-full max-w-full whitespace-normal break-words">{label}</span>
             </button>
           ))}
         </div>

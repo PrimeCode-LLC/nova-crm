@@ -165,7 +165,7 @@ export function NewDealDialog({
                   <SelectContent>
                     {leads.map((l) => (
                       <SelectItem key={l.id} value={l.id}>
-                        {l.companyName} — {l.contactName}
+                        {l.companyName}, {l.contactName}
                       </SelectItem>
                     ))}
                   </SelectContent>

@@ -148,7 +148,6 @@ export function AppTopbar() {
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger
-              nativeButton={false}
               render={
                 <Button variant="ghost" size="icon" className="relative" aria-label="Notifications menu">
                   <Bell className="h-4 w-4" />

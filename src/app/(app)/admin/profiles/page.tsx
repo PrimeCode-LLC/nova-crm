@@ -242,7 +242,7 @@ export default function AdminProfilesPage() {
             <div className="space-y-1.5">
               <Label className="text-xs">Profile name</Label>
               <Input
-                placeholder="e.g. Executive — LinkedIn outbound"
+                placeholder="e.g. Executive, LinkedIn outbound"
                 className="h-9"
                 value={name}
                 onChange={(e) => setName(e.target.value)}

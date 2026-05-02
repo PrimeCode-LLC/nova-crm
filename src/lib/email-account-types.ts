@@ -15,7 +15,7 @@ export interface ImapConfig {
 }
 
 export interface EmailAccountSettings {
-  /** Master switch — when off, mail UI stays in setup mode */
+  /** Master switch, when off, mail UI stays in setup mode */
   enabled: boolean;
   displayName: string;
   emailAddress: string;

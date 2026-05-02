@@ -6,14 +6,31 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { SITE } from "@/lib/site";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE.url),
   title: {
-    default: "Nova CRM",
-    template: "%s · Nova CRM",
+    default: `${SITE.name}: ${SITE.tagline}`,
+    template: `%s · ${SITE.name}`,
   },
-  description: "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+  description:
+    "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+  openGraph: {
+    type: "website",
+    siteName: SITE.name,
+    title: `${SITE.name}: ${SITE.tagline}`,
+    description:
+      "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+    url: SITE.url,
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: `${SITE.name}: ${SITE.tagline}`,
+    description:
+      "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+  },
 };
 
 export default function RootLayout({

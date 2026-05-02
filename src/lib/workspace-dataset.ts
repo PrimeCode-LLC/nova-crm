@@ -136,7 +136,7 @@ function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly Use
     for (const id of collectDescendantUserIds(persona.id, allUsers)) owners.add(id);
     return owners.has(lead.ownerId);
   }
-  // Chris (Senior SDR): mock permission grant — read leads for full Outbound department.
+  // Chris (Senior SDR): mock permission grant, read leads for full Outbound department.
   if (persona.id === "u-sales-01") {
     return allUsers.some((u) => u.id === lead.ownerId && u.departmentId === "d-outbound");
   }

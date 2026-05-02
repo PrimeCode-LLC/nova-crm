@@ -276,7 +276,7 @@ export default function AdminImportPage() {
     setDuplicateHandling("skip");
     setStep(1);
     toast.message("Using built-in sample column layout", {
-      description: "Map fields or continue to review — row counts are illustrative.",
+      description: "Map fields or continue to review, row counts are illustrative.",
     });
   }
 

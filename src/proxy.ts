@@ -3,20 +3,25 @@ import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
 import { isAuthDisabled } from "@/lib/auth/flags";
 
-function isPublicPath(pathname: string): boolean {
-  if (
-    pathname === "/login" ||
-    pathname === "/signup" ||
-    pathname === "/forgot-password"
-  ) {
-    return true;
-  }
-  if (pathname.startsWith("/_next")) return true;
-  if (pathname.startsWith("/api/auth/session")) return true;
-  if (pathname === "/api/auth/logout") return true;
-  if (pathname === "/api/auth/me") return true;
-  if (pathname.startsWith("/api/integrations/webhook")) return true;
-  return false;
+const APP_PROTECTED_PREFIXES = [
+  "/dashboard",
+  "/leads",
+  "/pipeline",
+  "/accounts",
+  "/contacts",
+  "/deals",
+  "/activity",
+  "/followups",
+  "/inbox",
+  "/admin",
+  "/settings",
+  "/actions",
+];
+
+function isProtectedAppPath(pathname: string): boolean {
+  return APP_PROTECTED_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  );
 }
 
 export function proxy(request: NextRequest) {
@@ -31,11 +36,9 @@ export function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 
-  if (!hasSession && !isPublicPath(pathname)) {
+  if (!hasSession && isProtectedAppPath(pathname)) {
     const login = new URL("/login", request.url);
-    if (pathname !== "/") {
-      login.searchParams.set("next", pathname);
-    }
+    login.searchParams.set("next", pathname);
     return NextResponse.redirect(login);
   }
 

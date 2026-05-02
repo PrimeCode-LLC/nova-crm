@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import type { WorkspaceMode } from "@/lib/workspace-mode";
-import type { Campaign, Department, PermissionOverride, Profile } from "@/lib/types";
+import type { Account, Campaign, Contact, Department, PermissionOverride, Profile } from "@/lib/types";
 import {
   getWorkspaceSnapshot,
   createWorkspaceLookup,
@@ -27,6 +27,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addProfile: (profile: Profile) => void;
     updateCampaign: (id: string, patch: Partial<Campaign>) => void;
     addCampaign: (campaign: Campaign) => void;
+    addAccount: (account: Account) => void;
+    addContact: (contact: Contact) => void;
   };
 
 const WorkspaceContext = React.createContext<WorkspaceContextValue | null>(null);
@@ -90,12 +92,19 @@ export function WorkspaceModeProvider({
   const [campaignEdits, setCampaignEdits] = React.useState<Record<string, Partial<Campaign>>>({});
   const [campaignsAdded, setCampaignsAdded] = React.useState<Campaign[]>([]);
 
+  const [accountsAdded, setAccountsAdded] = React.useState<Account[]>([]);
+  const [contactsAdded, setContactsAdded] = React.useState<Contact[]>([]);
+  const [accountContactBumps, setAccountContactBumps] = React.useState<Record<string, number>>({});
+
   React.useEffect(() => {
     setPoDelta({ added: [], removedIds: [] });
     setAddedDepartments([]);
     setProfileDelta({ updates: {}, added: [] });
     setCampaignEdits({});
     setCampaignsAdded([]);
+    setAccountsAdded([]);
+    setContactsAdded([]);
+    setAccountContactBumps({});
   }, [mode, demoPersonaId]);
 
   const addPermissionOverride = React.useCallback((override: PermissionOverride) => {
@@ -136,6 +145,18 @@ export function WorkspaceModeProvider({
     setCampaignsAdded((prev) => [...prev, campaign]);
   }, []);
 
+  const addAccount = React.useCallback((account: Account) => {
+    setAccountsAdded((prev) => [...prev, account]);
+  }, []);
+
+  const addContact = React.useCallback((contact: Contact) => {
+    setContactsAdded((prev) => [...prev, contact]);
+    setAccountContactBumps((b) => ({
+      ...b,
+      [contact.accountId]: (b[contact.accountId] ?? 0) + 1,
+    }));
+  }, []);
+
   const snapshot = React.useMemo((): WorkspaceSnapshot => {
     const removed = new Set(poDelta.removedIds);
     const permissionOverrides = [
@@ -159,14 +180,31 @@ export function WorkspaceModeProvider({
         campaignEdits[c.id] ? { ...c, ...campaignEdits[c.id] } : c,
       ),
     ];
+    const accountsMerged = [...baseSnapshot.accounts, ...accountsAdded].map((a) => ({
+      ...a,
+      contactCount: a.contactCount + (accountContactBumps[a.id] ?? 0),
+    }));
+    const contactsMerged = [...baseSnapshot.contacts, ...contactsAdded];
     return {
       ...baseSnapshot,
       permissionOverrides,
       departments: [...baseSnapshot.departments, ...addedDepartments],
       profiles,
       campaigns,
+      accounts: accountsMerged,
+      contacts: contactsMerged,
     };
-  }, [baseSnapshot, poDelta, addedDepartments, profileDelta, campaignEdits, campaignsAdded]);
+  }, [
+    baseSnapshot,
+    poDelta,
+    addedDepartments,
+    profileDelta,
+    campaignEdits,
+    campaignsAdded,
+    accountsAdded,
+    contactsAdded,
+    accountContactBumps,
+  ]);
 
   const value = React.useMemo<WorkspaceContextValue>(() => {
     const lookup = createWorkspaceLookup(snapshot);
@@ -185,6 +223,8 @@ export function WorkspaceModeProvider({
       addProfile,
       updateCampaign,
       addCampaign,
+      addAccount,
+      addContact,
     };
   }, [
     snapshot,
@@ -199,6 +239,8 @@ export function WorkspaceModeProvider({
     addProfile,
     updateCampaign,
     addCampaign,
+    addAccount,
+    addContact,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
