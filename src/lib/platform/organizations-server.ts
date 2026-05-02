@@ -21,6 +21,9 @@ function settingsForFirestore(s: OrganizationSettings): Record<string, string> {
   const out: Record<string, string> = {};
   if (s.billingEmail?.trim()) out.billingEmail = s.billingEmail.trim();
   if (s.operatorNotes?.trim()) out.operatorNotes = s.operatorNotes.trim();
+  if (s.inboundWebhookSecret?.trim()) {
+    out.inboundWebhookSecret = s.inboundWebhookSecret.trim();
+  }
   return out;
 }
 
@@ -35,7 +38,17 @@ function maybeTsToIso(t: Timestamp | undefined | null): ISODate | undefined {
 }
 
 function docToOrg(id: string, data: DocumentData): Organization {
-  const settings = (data.settings ?? {}) as OrganizationSettings;
+  const raw = (data.settings ?? {}) as Record<string, unknown>;
+  const settings: OrganizationSettings = {
+    billingEmail:
+      typeof raw.billingEmail === "string" ? raw.billingEmail : undefined,
+    operatorNotes:
+      typeof raw.operatorNotes === "string" ? raw.operatorNotes : undefined,
+    inboundWebhookSecret:
+      typeof raw.inboundWebhookSecret === "string"
+        ? raw.inboundWebhookSecret
+        : undefined,
+  };
   return {
     id,
     name: String(data.name ?? ""),
@@ -55,6 +68,17 @@ function docToOrg(id: string, data: DocumentData): Organization {
     settings,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
+  };
+}
+
+/** Strips secrets before returning orgs to browser-facing JSON APIs. */
+export function sanitizeOrganizationForApi(org: Organization): Organization {
+  const safeSettings: OrganizationSettings = { ...org.settings };
+  delete safeSettings.inboundWebhookSecret;
+  return {
+    ...org,
+    settings: safeSettings,
+    hasInboundWebhookSecret: Boolean(org.settings.inboundWebhookSecret?.trim()),
   };
 }
 
@@ -229,7 +253,20 @@ export async function updateOrganizationServer(
     updates.maxUsers = patch.maxUsers === null ? null : patch.maxUsers;
   }
   if (patch.settings !== undefined) {
-    updates.settings = settingsForFirestore(patch.settings);
+    const prevSettings = docToOrg(orgId, cur.data()!).settings;
+    const merged: OrganizationSettings = { ...prevSettings };
+    const incoming = patch.settings as Partial<OrganizationSettings>;
+    for (const k of Object.keys(incoming) as (keyof OrganizationSettings)[]) {
+      if (!Object.prototype.hasOwnProperty.call(incoming, k)) continue;
+      const v = incoming[k];
+      if (v === undefined) continue;
+      if (typeof v === "string" && v.trim() === "") {
+        delete merged[k];
+      } else {
+        merged[k] = v as never;
+      }
+    }
+    updates.settings = settingsForFirestore(merged);
   }
 
   await ref.update(updates);

@@ -83,6 +83,8 @@ export interface OrganizationSettings {
   billingEmail?: string;
   /** Internal notes for operators (not shown to tenant users). */
   operatorNotes?: string;
+  /** Per-tenant secret for `POST /api/integrations/webhook/lead` (never returned to browsers). */
+  inboundWebhookSecret?: string;
 }
 
 export interface Organization {
@@ -106,6 +108,8 @@ export interface Organization {
   settings: OrganizationSettings;
   createdAt: ISODate;
   updatedAt: ISODate;
+  /** Populated by platform GET APIs after stripping `settings.inboundWebhookSecret`. */
+  hasInboundWebhookSecret?: boolean;
 }
 
 /** Authoritative role for a user inside a single organization. */

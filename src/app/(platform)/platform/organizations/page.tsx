@@ -56,9 +56,9 @@ export default function PlatformOrganizationsPage() {
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Organizations</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Each organization is a tenant you sell to. CRM data isolation by{" "}
-            <code className="rounded bg-muted px-1">organizationId</code> is the next step in the
-            product roadmap.
+            Each organization is a tenant. CRM data is isolated by{" "}
+            <code className="rounded bg-muted px-1">organizationId</code> in Firestore rules and
+            custom claims.
           </p>
         </div>
         <Link

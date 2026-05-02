@@ -12,7 +12,9 @@ function Sheet({ ...props }: SheetPrimitive.Root.Props) {
 }
 
 function SheetTrigger({ ...props }: SheetPrimitive.Trigger.Props) {
-  return <SheetPrimitive.Trigger data-slot="sheet-trigger" {...props} />
+  // Avoid data-slot here: when `render={<Button />}` merges props, SSR vs client
+  // can disagree on `data-slot` (trigger vs button) and cause hydration errors.
+  return <SheetPrimitive.Trigger {...props} />
 }
 
 function SheetClose({ ...props }: SheetPrimitive.Close.Props) {

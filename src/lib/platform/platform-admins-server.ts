@@ -1,6 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import type { Auth } from "firebase-admin/auth";
-import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { ISODate, PlatformAdminRecord, PlatformAdminRole } from "@/lib/types";
 

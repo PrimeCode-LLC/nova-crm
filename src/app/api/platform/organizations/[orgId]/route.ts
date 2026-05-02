@@ -3,6 +3,7 @@ import { z } from "zod";
 import { guardPlatformApi } from "@/lib/platform/platform-api-guard";
 import {
   getOrganizationServer,
+  sanitizeOrganizationForApi,
   updateOrganizationServer,
 } from "@/lib/platform/organizations-server";
 
@@ -16,6 +17,8 @@ const patchSchema = z.object({
     .object({
       billingEmail: z.string().email().optional().or(z.literal("")),
       operatorNotes: z.string().max(5000).optional(),
+      /** Empty string clears the per-tenant webhook secret. */
+      inboundWebhookSecret: z.string().max(500).optional().or(z.literal("")),
     })
     .optional(),
 });
@@ -29,7 +32,7 @@ export async function GET(
   const { orgId } = await ctx.params;
   const org = await getOrganizationServer(orgId);
   if (!org) return NextResponse.json({ error: "Not found" }, { status: 404 });
-  return NextResponse.json({ organization: org });
+  return NextResponse.json({ organization: sanitizeOrganizationForApi(org) });
 }
 
 export async function PATCH(
@@ -58,10 +61,20 @@ export async function PATCH(
   const { settings: s, ...rest } = parsed.data;
   const patch = { ...rest } as Parameters<typeof updateOrganizationServer>[1];
   if (s !== undefined) {
-    patch.settings = {
-      billingEmail: s.billingEmail || undefined,
-      operatorNotes: s.operatorNotes,
-    };
+    const next: Parameters<typeof updateOrganizationServer>[1]["settings"] = {};
+    if ("billingEmail" in s) {
+      next.billingEmail = s.billingEmail === "" ? undefined : s.billingEmail;
+    }
+    if ("operatorNotes" in s) {
+      next.operatorNotes =
+        s.operatorNotes === "" ? undefined : s.operatorNotes;
+    }
+    if ("inboundWebhookSecret" in s) {
+      // Empty string clears the secret in `updateOrganizationServer` merge logic.
+      next.inboundWebhookSecret =
+        s.inboundWebhookSecret === "" ? "" : s.inboundWebhookSecret;
+    }
+    patch.settings = next;
   }
 
   const result = await updateOrganizationServer(orgId, patch);

@@ -38,6 +38,27 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+function LoginFormSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-6 w-32 rounded bg-muted" />
+      <div className="h-9 w-full rounded bg-muted" />
+      <div className="h-9 w-full rounded bg-muted" />
+      <div className="h-9 w-full rounded bg-muted" />
+    </div>
+  );
+}
+
+/** Renders the form only after mount so password-manager extensions cannot break SSR hydration. */
+function LoginFormAfterMount() {
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => {
+    setMounted(true);
+  }, []);
+  if (!mounted) return <LoginFormSkeleton />;
+  return <LoginForm />;
+}
+
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -199,17 +220,8 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="space-y-4 animate-pulse">
-          <div className="h-6 w-32 rounded bg-muted" />
-          <div className="h-9 w-full rounded bg-muted" />
-          <div className="h-9 w-full rounded bg-muted" />
-          <div className="h-9 w-full rounded bg-muted" />
-        </div>
-      }
-    >
-      <LoginForm />
+    <Suspense fallback={<LoginFormSkeleton />}>
+      <LoginFormAfterMount />
     </Suspense>
   );
 }

@@ -64,10 +64,18 @@ export async function POST(req: Request) {
     return unauthorized();
   }
   const orgData = orgSnap.data() ?? {};
-  const orgSecret =
+  const settings = (orgData.settings ?? {}) as {
+    inboundWebhookSecret?: string;
+  };
+  const fromSettings =
+    typeof settings.inboundWebhookSecret === "string"
+      ? settings.inboundWebhookSecret.trim()
+      : "";
+  const fromLegacy =
     typeof orgData.inboundWebhookSecret === "string"
-      ? orgData.inboundWebhookSecret
-      : null;
+      ? String(orgData.inboundWebhookSecret).trim()
+      : "";
+  const orgSecret = fromSettings || fromLegacy || null;
   const accepted = orgSecret ? presented === orgSecret : presented === fallbackSecret;
   if (!accepted) return unauthorized();
 

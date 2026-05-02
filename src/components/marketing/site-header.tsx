@@ -43,7 +43,11 @@ export async function SiteHeader() {
 
         <div className="flex items-center gap-2">
           {hasSession ? (
-            <Button size="sm" render={<Link href="/dashboard" />}>
+            <Button
+              size="sm"
+              nativeButton={false}
+              render={<Link href="/dashboard" />}
+            >
               Go to dashboard
               <ArrowRight />
             </Button>
@@ -53,11 +57,16 @@ export async function SiteHeader() {
                 size="sm"
                 variant="ghost"
                 className="hidden sm:inline-flex"
+                nativeButton={false}
                 render={<Link href="/login" />}
               >
                 Log in
               </Button>
-              <Button size="sm" render={<Link href="/signup" />}>
+              <Button
+                size="sm"
+                nativeButton={false}
+                render={<Link href="/signup" />}
+              >
                 Get started
                 <ArrowRight />
               </Button>
@@ -93,6 +102,7 @@ export async function SiteHeader() {
                   {hasSession ? (
                     <Button
                       className="w-full"
+                      nativeButton={false}
                       render={<Link href="/dashboard" />}
                     >
                       Go to dashboard
@@ -103,11 +113,16 @@ export async function SiteHeader() {
                       <Button
                         variant="outline"
                         className="w-full"
+                        nativeButton={false}
                         render={<Link href="/login" />}
                       >
                         Log in
                       </Button>
-                      <Button className="w-full" render={<Link href="/signup" />}>
+                      <Button
+                        className="w-full"
+                        nativeButton={false}
+                        render={<Link href="/signup" />}
+                      >
                         Get started
                       </Button>
                     </div>

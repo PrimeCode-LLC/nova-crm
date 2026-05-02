@@ -57,6 +57,7 @@ export default async function BlogPostPage({
         <Button
           size="sm"
           variant="ghost"
+          nativeButton={false}
           render={<Link href="/blog" />}
           className="-ml-2"
         >

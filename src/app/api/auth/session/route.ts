@@ -11,6 +11,7 @@ import {
 } from "@/lib/platform/organizations-server";
 import {
   findMembershipForUserServer,
+  getMemberServer,
   hasSeatAvailableServer,
   upsertMemberServer,
 } from "@/lib/platform/members-server";
@@ -26,6 +27,12 @@ type SessionRequestBody = {
   /** Optional invite token from `/signup?invite=...`. */
   inviteToken?: string;
 };
+
+function isFirestoreFailedPrecondition(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const code = (err as { code?: number | string }).code;
+  return code === 9 || code === "failed-precondition";
+}
 
 export async function POST(req: Request) {
   const adminAuth = getAdminAuth();
@@ -135,7 +142,39 @@ export async function POST(req: Request) {
 
   // (b) reuse existing membership
   if (!organizationId) {
-    const existing = await findMembershipForUserServer(uid);
+    // Fast path: `users/{uid}.organizationId` + direct `members/{uid}` read — no
+    // collection-group index (covers normal sign-in after at least one session).
+    const userSnap = await db.collection("users").doc(uid).get();
+    const uData = userSnap.exists ? userSnap.data() : undefined;
+    const mirroredOrgId =
+      typeof uData?.organizationId === "string" && uData.organizationId.trim()
+        ? uData.organizationId.trim()
+        : undefined;
+    if (mirroredOrgId) {
+      const member = await getMemberServer(mirroredOrgId, uid);
+      if (member) {
+        organizationId = member.organizationId;
+        orgRole = member.role;
+      }
+    }
+  }
+
+  if (!organizationId) {
+    let existing;
+    try {
+      existing = await findMembershipForUserServer(uid);
+    } catch (err: unknown) {
+      if (isFirestoreFailedPrecondition(err)) {
+        return NextResponse.json(
+          {
+            error:
+              "Could not resolve your workspace (Firestore index still deploying, or first-time setup). Run from `crm`: firebase deploy --only firestore:indexes — then wait until the `members` / `uid` index is Enabled in the Firebase console.",
+          },
+          { status: 503 },
+        );
+      }
+      throw err;
+    }
     if (existing) {
       organizationId = existing.organizationId;
       orgRole = existing.role;

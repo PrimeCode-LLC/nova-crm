@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { buttonVariants } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -30,6 +30,9 @@ export default function EditOrganizationPage() {
   const [maxUsers, setMaxUsers] = React.useState("");
   const [billingEmail, setBillingEmail] = React.useState("");
   const [operatorNotes, setOperatorNotes] = React.useState("");
+  const [inboundWebhookSecret, setInboundWebhookSecret] = React.useState("");
+  const [hasInboundWebhookSecret, setHasInboundWebhookSecret] =
+    React.useState(false);
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
@@ -50,6 +53,8 @@ export default function EditOrganizationPage() {
           setMaxUsers(o.maxUsers != null ? String(o.maxUsers) : "");
           setBillingEmail(o.settings.billingEmail ?? "");
           setOperatorNotes(o.settings.operatorNotes ?? "");
+          setInboundWebhookSecret("");
+          setHasInboundWebhookSecret(Boolean(o.hasInboundWebhookSecret));
         }
       } catch (e) {
         if (!cancelled) toast.error(e instanceof Error ? e.message : "Load failed");
@@ -67,6 +72,19 @@ export default function EditOrganizationPage() {
     setSaving(true);
     try {
       const maxParsed = maxUsers.trim() ? parseInt(maxUsers, 10) : null;
+      const settings: {
+        billingEmail?: string;
+        operatorNotes?: string;
+        inboundWebhookSecret?: string;
+      } = {
+        billingEmail: billingEmail.trim() || undefined,
+        operatorNotes: operatorNotes.trim() || undefined,
+      };
+      const trimmedSecret = inboundWebhookSecret.trim();
+      if (trimmedSecret) {
+        settings.inboundWebhookSecret = trimmedSecret;
+      }
+
       const res = await fetch(`/api/platform/organizations/${orgId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -76,10 +94,7 @@ export default function EditOrganizationPage() {
           status,
           planId,
           maxUsers: maxParsed === null || Number.isNaN(maxParsed) ? null : maxParsed,
-          settings: {
-            billingEmail: billingEmail.trim() || undefined,
-            operatorNotes: operatorNotes.trim() || undefined,
-          },
+          settings,
         }),
       });
       const data = (await res.json()) as { error?: unknown };
@@ -91,6 +106,8 @@ export default function EditOrganizationPage() {
         throw new Error(msg);
       }
       toast.success("Saved");
+      setInboundWebhookSecret("");
+      if (trimmedSecret) setHasInboundWebhookSecret(true);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -188,6 +205,58 @@ export default function EditOrganizationPage() {
             value={operatorNotes}
             onChange={(e) => setOperatorNotes(e.target.value)}
           />
+        </div>
+        <div className="space-y-2 rounded-lg border border-dashed p-3">
+          <Label htmlFor="webhook-secret">Inbound lead webhook secret</Label>
+          <p className="text-xs text-muted-foreground">
+            Stored per tenant under <code className="rounded bg-muted px-1">settings.inboundWebhookSecret</code>.
+            Used with <code className="rounded bg-muted px-1">POST /api/integrations/webhook/lead</code>{" "}
+            and body field <code className="rounded bg-muted px-1">organizationId</code>. Type a new
+            secret and save the form, or clear the per-tenant secret below (then the env fallback applies).
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Status:{" "}
+            {hasInboundWebhookSecret ? (
+              <span className="text-success">secret configured</span>
+            ) : (
+              <span>not set (falls back to INBOUND_WEBHOOK_SECRET env)</span>
+            )}
+          </p>
+          <Input
+            id="webhook-secret"
+            type="password"
+            autoComplete="new-password"
+            value={inboundWebhookSecret}
+            onChange={(e) => setInboundWebhookSecret(e.target.value)}
+            placeholder="New secret (min 8 characters recommended)"
+          />
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!hasInboundWebhookSecret}
+            onClick={() => {
+              void (async () => {
+                if (!confirm("Remove the per-tenant webhook secret?")) return;
+                try {
+                  const res = await fetch(`/api/platform/organizations/${orgId}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      settings: { inboundWebhookSecret: "" },
+                    }),
+                  });
+                  if (!res.ok) throw new Error("Failed");
+                  setHasInboundWebhookSecret(false);
+                  toast.success("Webhook secret cleared");
+                } catch {
+                  toast.error("Could not clear secret");
+                }
+              })();
+            }}
+          >
+            Clear per-tenant secret
+          </Button>
         </div>
         <button type="submit" disabled={saving} className={cn(buttonVariants())}>
           {saving ? "Saving…" : "Save changes"}

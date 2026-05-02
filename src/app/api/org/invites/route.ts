@@ -11,6 +11,7 @@ import { getRequestOrigin, inviteAcceptUrl } from "@/lib/invite-link";
 import { renderInviteEmail } from "@/lib/email/invite-email";
 import { sendSystemEmail } from "@/lib/email/send-system-email";
 import { recordAudit } from "@/lib/firestore/audit";
+import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
 const postSchema = z.object({
   email: z.string().email(),
@@ -70,8 +71,9 @@ export async function POST(req: Request) {
 
   const origin = await getRequestOrigin();
   const acceptUrl = inviteAcceptUrl(origin, result.token);
+  const org = await getOrganizationServer(g.ctx.session.organizationId);
   const email = renderInviteEmail({
-    organizationName: g.ctx.session.name ?? "Workspace",
+    organizationName: org?.name ?? "Workspace",
     inviterName: g.ctx.session.name,
     recipientEmail: result.invite.email,
     role: result.invite.role,

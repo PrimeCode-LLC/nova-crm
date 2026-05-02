@@ -3,6 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   deleteMemberServer,
+  getMemberServer,
   listMembersServer,
   setMemberRoleServer,
   setMemberStatusServer,
@@ -75,12 +76,19 @@ export async function PATCH(req: Request) {
 
   // Refresh claims so the affected user's next ID-token refresh picks up the change.
   if (role || status) {
-    await setAppClaims(g.ctx.adminAuth, uid, {
-      organizationId: status === "disabled" ? undefined : orgId,
-      orgRole: status === "disabled" ? undefined : role ?? undefined,
-    });
-    if (status === "disabled") {
+    const member = await getMemberServer(orgId, uid);
+    const effectiveStatus = member?.status ?? "active";
+    if (effectiveStatus === "disabled") {
+      await setAppClaims(g.ctx.adminAuth, uid, {
+        organizationId: undefined,
+        orgRole: undefined,
+      });
       await g.ctx.adminAuth.revokeRefreshTokens(uid);
+    } else {
+      await setAppClaims(g.ctx.adminAuth, uid, {
+        organizationId: orgId,
+        orgRole: member?.role,
+      });
     }
   }
 

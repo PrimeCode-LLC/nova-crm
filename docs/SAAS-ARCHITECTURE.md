@@ -54,7 +54,9 @@ Canonical TypeScript shapes live in `crm/src/lib/types.ts`. Collection names are
 - **planId** (`free` | `pro` | `enterprise`) — Label only today; no payment integration
 - **ownerUid**, **primaryEmail**, **pendingOwnerEmail** (pre-seeded owner before first login)
 - **seatsUsed**, **maxUsers** (`null`/undefined = unlimited cap)
-- **trialEndsAt**, **settings** (`billingEmail`, `operatorNotes`), timestamps
+- **trialEndsAt**, **settings** (`billingEmail`, `operatorNotes`, optional **`inboundWebhookSecret`** for `POST /api/integrations/webhook/lead`), timestamps
+
+Platform **GET** JSON never returns `settings.inboundWebhookSecret`; responses include **`hasInboundWebhookSecret`** instead. Partial **`settings`** updates merge with the existing map server-side so unrelated keys are not wiped.
 
 **`platformAdmins/{uid}`** — Operator registry (Firestore doc id = Auth uid). Fields include **email**, **role** (`owner` | `admin`), **active**, **createdAt**, **createdByUid**. No direct client writes; API/layout use Admin SDK + guards.
 

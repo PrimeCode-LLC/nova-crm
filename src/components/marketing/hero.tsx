@@ -31,13 +31,18 @@ export function Hero() {
           </p>
 
           <div className="mt-9 flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Button size="lg" render={<Link href="/signup" />}>
+            <Button
+              size="lg"
+              nativeButton={false}
+              render={<Link href="/signup" />}
+            >
               Start free
               <ArrowRight />
             </Button>
             <Button
               size="lg"
               variant="outline"
+              nativeButton={false}
               render={<Link href="/features" />}
             >
               <BarChart3 />

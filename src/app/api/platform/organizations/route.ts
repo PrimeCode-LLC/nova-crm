@@ -4,6 +4,7 @@ import { guardPlatformApi } from "@/lib/platform/platform-api-guard";
 import {
   createOrganizationServer,
   listOrganizationsServer,
+  sanitizeOrganizationForApi,
 } from "@/lib/platform/organizations-server";
 import { upsertMemberServer } from "@/lib/platform/members-server";
 import { setAppClaims } from "@/lib/auth/claims";
@@ -33,7 +34,9 @@ export async function GET() {
   const g = await guardPlatformApi();
   if (!g.ok) return g.response;
   const items = await listOrganizationsServer();
-  return NextResponse.json({ organizations: items });
+  return NextResponse.json({
+    organizations: items.map(sanitizeOrganizationForApi),
+  });
 }
 
 export async function POST(req: Request) {

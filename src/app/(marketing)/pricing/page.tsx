@@ -128,6 +128,7 @@ export default function PricingPage() {
                 size="lg"
                 variant={tier.highlight ? "default" : "outline"}
                 className="mt-6 w-full"
+                nativeButton={false}
                 render={<Link href={tier.href} />}
               >
                 {tier.cta}
