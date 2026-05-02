@@ -39,10 +39,10 @@ export function DemoRolePicker() {
   }
 
   return (
-    <Card className="border-amber-500/25 bg-amber-500/[0.04]">
+    <Card className="border-warning/25 bg-warning/[0.04]">
       <CardHeader className="pb-2">
         <CardTitle className="text-sm flex items-center gap-2">
-          <FlaskConical className="h-4 w-4 text-amber-400" />
+          <FlaskConical className="h-4 w-4 text-warning" />
           Try the app with sample roles
         </CardTitle>
         <CardDescription className="text-xs leading-relaxed">
@@ -61,7 +61,7 @@ export function DemoRolePicker() {
             type="button"
             variant="outline"
             size="sm"
-            className="h-auto min-h-11 flex-col items-stretch gap-0.5 py-2 px-3 text-left border-amber-500/20 hover:bg-amber-500/10"
+            className="h-auto min-h-11 flex-col items-stretch gap-0.5 py-2 px-3 text-left border-warning/20 hover:bg-warning/10"
             disabled={pendingId !== null}
             onClick={() => void choose(p.userId)}
           >

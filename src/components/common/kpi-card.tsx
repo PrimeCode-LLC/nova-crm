@@ -50,8 +50,8 @@ export function KpiCard({
                 trend === "flat" && "bg-muted text-muted-foreground",
                 trend !== "flat" &&
                   (isGood
-                    ? "bg-emerald-500/10 text-emerald-400"
-                    : "bg-rose-500/10 text-rose-400"),
+                    ? "bg-success/10 text-success"
+                    : "bg-destructive/10 text-destructive"),
               )}
             >
               <TrendIcon className="h-3 w-3" />

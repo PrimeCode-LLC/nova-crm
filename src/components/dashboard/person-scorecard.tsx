@@ -73,7 +73,7 @@ export function PersonScorecard() {
                 <TableCell className="py-2 text-right tabular-nums text-muted-foreground">
                   {fmtCurrency(r.pipeline)}
                 </TableCell>
-                <TableCell className="py-2 text-right tabular-nums font-semibold text-emerald-400">
+                <TableCell className="py-2 text-right tabular-nums font-semibold text-success">
                   {fmtCurrency(r.closedValue)}
                 </TableCell>
               </TableRow>

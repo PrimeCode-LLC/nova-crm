@@ -38,16 +38,16 @@ const ICONS: Record<TimelineEventType, LucideIcon> = {
 };
 
 const TONES: Record<TimelineEventType, string> = {
-  lead_created: "bg-sky-500/10 text-sky-400 border-sky-500/20",
-  stage_changed: "bg-violet-500/10 text-violet-400 border-violet-500/20",
-  touchpoint_added: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  email_sent: "bg-indigo-500/10 text-indigo-400 border-indigo-500/20",
-  email_replied: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  note_added: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  followup_created: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  followup_completed: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  deal_created: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  assignment_changed: "bg-sky-500/10 text-sky-400 border-sky-500/20",
+  lead_created: "bg-info/10 text-info border-info/20",
+  stage_changed: "bg-violet-500/10 text-violet-700 dark:text-violet-400 border-violet-500/20",
+  touchpoint_added: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/20",
+  email_sent: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20",
+  email_replied: "bg-success/10 text-success border-success/20",
+  note_added: "bg-warning/10 text-warning border-warning/20",
+  followup_created: "bg-warning/10 text-warning border-warning/20",
+  followup_completed: "bg-success/10 text-success border-success/20",
+  deal_created: "bg-success/10 text-success border-success/20",
+  assignment_changed: "bg-info/10 text-info border-info/20",
   field_changed: "bg-muted text-muted-foreground border-muted",
 };
 

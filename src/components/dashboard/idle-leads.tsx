@@ -24,7 +24,7 @@ export function IdleLeads() {
         <div className="flex items-center justify-between gap-2">
           <div>
             <CardTitle className="text-sm font-semibold flex items-center gap-2">
-              <AlertTriangle className="h-4 w-4 text-amber-400" />
+              <AlertTriangle className="h-4 w-4 text-warning" />
               Idle leads
             </CardTitle>
             <CardDescription className="text-xs">
@@ -64,7 +64,7 @@ export function IdleLeads() {
               <StageBadge stage={l.stage} />
               <Badge
                 variant="outline"
-                className="bg-rose-500/10 text-rose-400 border-rose-500/20 tabular-nums"
+                className="bg-destructive/10 text-destructive border-destructive/20 tabular-nums"
               >
                 {l.idleDays}d idle
               </Badge>

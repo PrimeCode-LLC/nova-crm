@@ -15,6 +15,7 @@ import { Separator } from "@/components/ui/separator";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useAuth } from "@/components/providers/auth-provider";
 import { initials } from "@/lib/format";
+import { useTheme } from "next-themes";
 import {
   User,
   Building2,
@@ -25,8 +26,117 @@ import {
   Check,
   X,
   ExternalLink,
+  Sun,
+  Moon,
+  Monitor,
 } from "lucide-react";
 import { toast } from "sonner";
+
+/**
+ * Mini theme preview — a tiny faux-app rendered with the literal hex/oklch
+ * palette of each theme so users can see what they'll get without applying it.
+ * Kept self-contained (no theme tokens) so each card always shows its own theme.
+ */
+function ThemePreview({ kind }: { kind: "light" | "dark" | "system" }) {
+  const palettes = {
+    light: {
+      bg: "oklch(0.995 0.002 265)",
+      sidebar: "oklch(0.975 0.005 265)",
+      card: "oklch(1 0 0)",
+      border: "oklch(0.9 0.005 265)",
+      muted: "oklch(0.965 0.005 265)",
+      mutedFg: "oklch(0.44 0.015 265)",
+      fg: "oklch(0.18 0.01 265)",
+      primary: "oklch(0.5 0.2 265)",
+    },
+    dark: {
+      bg: "oklch(0.14 0 0)",
+      sidebar: "oklch(0.155 0 0)",
+      card: "oklch(0.175 0 0)",
+      border: "oklch(1 0 0 / 8%)",
+      muted: "oklch(0.23 0 0)",
+      mutedFg: "oklch(0.65 0 0)",
+      fg: "oklch(0.98 0 0)",
+      primary: "oklch(0.7 0.17 265)",
+    },
+  } as const;
+
+  if (kind === "system") {
+    return (
+      <div className="relative h-16 w-full overflow-hidden rounded-md border">
+        <div className="absolute inset-y-0 left-0 w-1/2 overflow-hidden">
+          <ThemePreviewInner p={palettes.light} />
+        </div>
+        <div
+          className="absolute inset-y-0 right-0 w-1/2 overflow-hidden"
+          style={{ clipPath: "polygon(8% 0, 100% 0, 100% 100%, 0 100%)" }}
+        >
+          <ThemePreviewInner p={palettes.dark} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="h-16 w-full overflow-hidden rounded-md border">
+      <ThemePreviewInner p={palettes[kind]} />
+    </div>
+  );
+}
+
+function ThemePreviewInner({
+  p,
+}: {
+  p: {
+    bg: string;
+    sidebar: string;
+    card: string;
+    border: string;
+    muted: string;
+    mutedFg: string;
+    fg: string;
+    primary: string;
+  };
+}) {
+  return (
+    <div
+      className="flex h-full w-full"
+      style={{ background: p.bg, color: p.fg }}
+    >
+      <div
+        className="flex w-1/3 flex-col gap-1 border-r p-1.5"
+        style={{ background: p.sidebar, borderColor: p.border }}
+      >
+        <div
+          className="h-1 w-3/4 rounded-full"
+          style={{ background: p.primary }}
+        />
+        <div
+          className="h-1 w-2/3 rounded-full"
+          style={{ background: p.mutedFg, opacity: 0.5 }}
+        />
+        <div
+          className="h-1 w-1/2 rounded-full"
+          style={{ background: p.mutedFg, opacity: 0.5 }}
+        />
+      </div>
+      <div className="flex flex-1 flex-col gap-1 p-1.5">
+        <div
+          className="h-2 w-full rounded-sm border"
+          style={{ background: p.card, borderColor: p.border }}
+        />
+        <div
+          className="h-1.5 w-3/4 rounded-full"
+          style={{ background: p.muted }}
+        />
+        <div
+          className="mt-auto h-2.5 w-8 rounded-sm"
+          style={{ background: p.primary }}
+        />
+      </div>
+    </div>
+  );
+}
 
 const INTEGRATIONS = [
   { id: "instantly", name: "Instantly", desc: "Cold email automation: sends, tracks opens/replies.", connected: false },
@@ -72,7 +182,10 @@ export default function SettingsPage() {
     weeklyScorecard: false,
   });
 
-  const [theme, setTheme] = React.useState("dark");
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = React.useState(false);
+  React.useEffect(() => setMounted(true), []);
+  const activeTheme = mounted ? (theme ?? "system") : "dark";
   const [density, setDensity] = React.useState("comfortable");
 
   async function handleSaveProfile() {
@@ -119,7 +232,7 @@ export default function SettingsPage() {
                 <CardDescription className="text-xs">
                   Update your name, title, and email visible to teammates.
                   {isDemo && (
-                    <span className="block mt-1 text-amber-500/90">
+                    <span className="block mt-1 text-warning">
                       Demo mode: profile below matches sample data. Switch to Workspace in the top bar for your account.
                     </span>
                   )}
@@ -255,7 +368,7 @@ export default function SettingsPage() {
                           variant="outline"
                           className={`text-[10px] ${
                             int.connected
-                              ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
+                              ? "bg-success/10 text-success border-success/20"
                               : "bg-muted text-muted-foreground"
                           }`}
                         >
@@ -309,30 +422,64 @@ export default function SettingsPage() {
                     Theme
                   </Label>
                   <RadioGroup
-                    value={theme}
+                    value={activeTheme}
                     onValueChange={(v) => {
                       setTheme(v);
-                      toast.success(`Theme set to ${v}`);
+                      toast.success(
+                        v === "system" ? "Theme follows your system" : `Theme set to ${v}`,
+                      );
                     }}
                     className="grid grid-cols-3 gap-3"
                   >
-                    {["light", "dark", "system"].map((t) => (
-                      <div key={t}>
-                        <RadioGroupItem value={t} id={`theme-${t}`} className="sr-only" />
-                        <Label
-                          htmlFor={`theme-${t}`}
-                          className={`flex flex-col items-center gap-1.5 rounded-lg border p-3 cursor-pointer text-xs capitalize transition-colors ${
-                            theme === t
-                              ? "border-primary bg-primary/5 text-primary"
-                              : "hover:bg-muted/30"
-                          }`}
-                        >
-                          <div className={`h-8 w-full rounded-md ${t === "light" ? "bg-zinc-100" : t === "dark" ? "bg-zinc-900 border" : "bg-gradient-to-r from-zinc-100 to-zinc-900"}`} />
-                          {t}
-                        </Label>
-                      </div>
-                    ))}
+                    {(
+                      [
+                        { value: "light", label: "Light", Icon: Sun },
+                        { value: "dark", label: "Dark", Icon: Moon },
+                        { value: "system", label: "System", Icon: Monitor },
+                      ] as const
+                    ).map(({ value, label, Icon }) => {
+                      const isActive = activeTheme === value;
+                      return (
+                        <div key={value}>
+                          <RadioGroupItem
+                            value={value}
+                            id={`theme-${value}`}
+                            className="sr-only"
+                          />
+                          <Label
+                            htmlFor={`theme-${value}`}
+                            className={`group relative flex flex-col gap-2 rounded-lg border p-2 cursor-pointer transition-colors ${
+                              isActive
+                                ? "border-primary ring-1 ring-primary/40"
+                                : "hover:bg-muted/30"
+                            }`}
+                          >
+                            <ThemePreview kind={value} />
+                            <div className="flex items-center gap-1.5 px-1">
+                              <Icon
+                                className={`h-3.5 w-3.5 ${isActive ? "text-primary" : "text-muted-foreground"}`}
+                              />
+                              <span
+                                className={`text-xs font-medium ${isActive ? "text-primary" : ""}`}
+                              >
+                                {label}
+                              </span>
+                              {isActive && (
+                                <Check className="ml-auto h-3 w-3 text-primary" />
+                              )}
+                            </div>
+                          </Label>
+                        </div>
+                      );
+                    })}
                   </RadioGroup>
+                  <p className="text-[11px] text-muted-foreground">
+                    {activeTheme === "system"
+                      ? "Follows your OS appearance. Updates automatically when your system theme changes."
+                      : activeTheme === "dark"
+                        ? "Default. Best for long sessions and low-light rooms."
+                        : "Soft warm whites with refined indigo accent."}
+                  </p>
                 </div>
 
                 <div className="space-y-2">
@@ -374,7 +521,7 @@ export default function SettingsPage() {
                     Accent color
                   </Label>
                   <div className="flex items-center gap-2">
-                    <div className="h-8 w-8 rounded-md bg-indigo-600 ring-2 ring-indigo-600/40 ring-offset-2 ring-offset-background" />
+                    <div className="h-8 w-8 rounded-md bg-primary ring-2 ring-primary/40 ring-offset-2 ring-offset-background" />
                     <div>
                       <div className="text-sm font-medium">Indigo</div>
                       <div className="text-xs text-muted-foreground">

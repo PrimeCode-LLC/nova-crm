@@ -5,11 +5,11 @@ import { cn } from "@/lib/utils";
 
 const toneClass: Record<string, string> = {
   neutral: "bg-muted text-muted-foreground border-transparent",
-  blue: "bg-sky-500/10 text-sky-400 border-sky-500/20",
-  cyan: "bg-cyan-500/10 text-cyan-400 border-cyan-500/20",
-  green: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  red: "bg-rose-500/10 text-rose-400 border-rose-500/20",
-  amber: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  blue: "bg-info/10 text-info border-info/20",
+  cyan: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/20",
+  green: "bg-success/10 text-success border-success/20",
+  red: "bg-destructive/10 text-destructive border-destructive/20",
+  amber: "bg-warning/10 text-warning border-warning/20",
 };
 
 export function StageBadge({

@@ -155,9 +155,9 @@ function FollowupGroup({
   const { getLeadById } = useWorkspace();
   const toneRing =
     tone === "rose"
-      ? "border-rose-500/30 bg-rose-500/5"
+      ? "border-destructive/30 bg-destructive/5"
       : tone === "amber"
-        ? "border-amber-500/30 bg-amber-500/5"
+        ? "border-warning/30 bg-warning/5"
         : "";
 
   return (

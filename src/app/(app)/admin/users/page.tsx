@@ -44,9 +44,9 @@ import { Search, UserPlus, Mail, Shield, Building2 } from "lucide-react";
 import { toast } from "sonner";
 
 const STATUS_TONE: Record<User["status"], string> = {
-  active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+  active: "bg-success/10 text-success border-success/20",
   inactive: "bg-muted text-muted-foreground border-transparent",
-  pip: "bg-amber-500/10 text-amber-400 border-amber-500/20",
+  pip: "bg-warning/10 text-warning border-warning/20",
 };
 
 const STATUS_LABEL: Record<User["status"], string> = {
@@ -428,7 +428,7 @@ export default function AdminUsersPage() {
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <Badge
                               variant="outline"
-                              className={`text-[10px] ${po.effect === "grant" ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20" : "bg-rose-500/10 text-rose-400 border-rose-500/20"}`}
+                              className={`text-[10px] ${po.effect === "grant" ? "bg-success/10 text-success border-success/20" : "bg-destructive/10 text-destructive border-destructive/20"}`}
                             >
                               {po.effect.toUpperCase()}
                             </Badge>

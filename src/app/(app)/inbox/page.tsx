@@ -180,10 +180,10 @@ const KIND_ICONS: Record<NotificationKind, React.ElementType> = {
 
 const KIND_COLORS: Record<NotificationKind, string> = {
   mention: "bg-indigo-500/10 text-indigo-400",
-  assignment: "bg-sky-500/10 text-sky-400",
-  followup: "bg-amber-500/10 text-amber-400",
-  idle: "bg-rose-500/10 text-rose-400",
-  stage: "bg-emerald-500/10 text-emerald-400",
+  assignment: "bg-info/10 text-info",
+  followup: "bg-warning/10 text-warning",
+  idle: "bg-destructive/10 text-destructive",
+  stage: "bg-success/10 text-success",
   form: "bg-violet-500/10 text-violet-400",
 };
 

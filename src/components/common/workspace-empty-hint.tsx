@@ -16,7 +16,7 @@ export function WorkspaceEmptyHint({
   return (
     <div className="rounded-lg border border-dashed bg-muted/20 px-6 py-10 text-center space-y-3 max-w-md mx-auto">
       <div className="flex justify-center">
-        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-amber-500/10 text-amber-400">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/10 text-warning">
           <FlaskConical className="h-5 w-5" />
         </div>
       </div>

@@ -115,7 +115,7 @@ export default function AccountsPage() {
                     <TableCell className="py-2 text-right tabular-nums">{a.leadCount}</TableCell>
                     <TableCell className="py-2 text-right tabular-nums">
                       {a.openDealValue > 0 ? (
-                        <span className="font-semibold text-emerald-400">{fmtCurrency(a.openDealValue)}</span>
+                        <span className="font-semibold text-success">{fmtCurrency(a.openDealValue)}</span>
                       ) : (
                         <span className="text-muted-foreground">-</span>
                       )}

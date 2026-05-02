@@ -38,7 +38,7 @@ export function LeadFollowups({ followups }: { followups: Followup[] }) {
               key={f.id}
               className={cn(
                 "flex items-center gap-3 rounded-md border px-3 py-2 bg-card",
-                overdue && "border-rose-500/30 bg-rose-500/5",
+                overdue && "border-destructive/30 bg-destructive/5",
               )}
             >
               <Checkbox />
@@ -63,7 +63,7 @@ export function LeadFollowups({ followups }: { followups: Followup[] }) {
                 <span
                   className={cn(
                     "flex items-center gap-1 text-xs tabular-nums",
-                    overdue ? "text-rose-400" : "text-muted-foreground",
+                    overdue ? "text-destructive" : "text-muted-foreground",
                   )}
                 >
                   <Clock className="h-3 w-3" />

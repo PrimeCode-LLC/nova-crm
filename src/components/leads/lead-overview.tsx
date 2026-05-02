@@ -32,7 +32,7 @@ export function LeadOverview({ lead }: { lead: Lead }) {
               ) : (
                 <Badge
                   variant="outline"
-                  className="bg-amber-500/10 text-amber-400 border-amber-500/20 gap-1"
+                  className="bg-warning/10 text-warning border-warning/20 gap-1"
                 >
                   <AlertTriangle className="h-3 w-3" /> Required: fill before pushing
                 </Badge>
@@ -121,7 +121,7 @@ export function LeadOverview({ lead }: { lead: Lead }) {
                 variant="outline"
                 className={
                   lead.doNotContact
-                    ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                    ? "bg-destructive/10 text-destructive border-destructive/20"
                     : "bg-muted text-muted-foreground"
                 }
               >

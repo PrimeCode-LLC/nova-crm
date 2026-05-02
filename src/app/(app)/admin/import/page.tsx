@@ -102,7 +102,7 @@ export default function AdminImportPage() {
                   step === i
                     ? "bg-primary/10 text-primary"
                     : i < step
-                      ? "text-emerald-400 hover:bg-muted/30"
+                      ? "text-success hover:bg-muted/30"
                       : "text-muted-foreground hover:bg-muted/30",
                 )}
               >
@@ -112,7 +112,7 @@ export default function AdminImportPage() {
                     step === i
                       ? "bg-primary text-primary-foreground border-primary"
                       : i < step
-                        ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/30"
+                        ? "bg-success/10 text-success border-success/30"
                         : "bg-muted text-muted-foreground border-transparent",
                   )}
                 >
@@ -249,8 +249,8 @@ export default function AdminImportPage() {
               <div className="grid grid-cols-3 gap-4">
                 {[
                   { label: "Total rows", value: "248", color: "text-foreground" },
-                  { label: "Duplicates detected", value: "11", hint: "matched on email", color: "text-amber-400" },
-                  { label: "Will be created", value: "237", color: "text-emerald-400" },
+                  { label: "Duplicates detected", value: "11", hint: "matched on email", color: "text-warning" },
+                  { label: "Will be created", value: "237", color: "text-success" },
                 ].map((s) => (
                   <div key={s.label} className="space-y-0.5">
                     <div className={`text-2xl font-semibold tabular-nums ${s.color}`}>
@@ -290,7 +290,7 @@ export default function AdminImportPage() {
               </RadioGroup>
             </div>
 
-            <div className="flex items-center gap-2 p-3 rounded-md bg-amber-500/5 border border-amber-500/20 text-xs text-amber-400">
+            <div className="flex items-center gap-2 p-3 rounded-md bg-warning/5 border border-warning/20 text-xs text-warning">
               <AlertCircle className="h-4 w-4 shrink-0" />
               <span>
                 This action imports <strong>237</strong> new leads. Review your column mapping before proceeding.

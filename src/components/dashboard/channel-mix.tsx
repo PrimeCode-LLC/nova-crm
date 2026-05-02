@@ -37,7 +37,7 @@ export function ChannelMix() {
               </div>
               <span className="flex items-center gap-3 tabular-nums">
                 <span className="text-muted-foreground">{fmtNumber(r.count)} leads</span>
-                <span className="font-semibold text-emerald-400">
+                <span className="font-semibold text-success">
                   {fmtPercent(r.winRate, 1)} win
                 </span>
               </span>

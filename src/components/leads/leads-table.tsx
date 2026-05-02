@@ -34,6 +34,7 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -221,7 +222,7 @@ export function LeadsTable({ leads }: LeadsTableProps) {
             className={cn(
               "rounded-md tabular-nums",
               isIdle
-                ? "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                ? "bg-destructive/10 text-destructive border-destructive/20"
                 : "bg-muted text-muted-foreground",
             )}
           >
@@ -406,19 +407,23 @@ export function LeadsTable({ leads }: LeadsTableProps) {
               }
             />
             <DropdownMenuContent align="end" className="w-44">
-              <DropdownMenuLabel>Show columns</DropdownMenuLabel>
-              {table
-                .getAllLeafColumns()
-                .filter((c) => !["select", "actions", "contact"].includes(c.id))
-                .map((col) => (
-                  <DropdownMenuCheckboxItem
-                    key={col.id}
-                    checked={col.getIsVisible()}
-                    onCheckedChange={(v) => col.toggleVisibility(!!v)}
-                  >
-                    {typeof col.columnDef.header === "string" ? col.columnDef.header : col.id}
-                  </DropdownMenuCheckboxItem>
-                ))}
+              <DropdownMenuGroup>
+                <DropdownMenuLabel>Show columns</DropdownMenuLabel>
+              </DropdownMenuGroup>
+              <DropdownMenuGroup>
+                {table
+                  .getAllLeafColumns()
+                  .filter((c) => !["select", "actions", "contact"].includes(c.id))
+                  .map((col) => (
+                    <DropdownMenuCheckboxItem
+                      key={col.id}
+                      checked={col.getIsVisible()}
+                      onCheckedChange={(v) => col.toggleVisibility(!!v)}
+                    >
+                      {typeof col.columnDef.header === "string" ? col.columnDef.header : col.id}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
           <Button size="sm">

@@ -97,9 +97,9 @@ export const TEMPERATURE_TONE: Record<
   LeadTemperature,
   { label: string; className: string }
 > = {
-  cold: { label: "Cold", className: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
-  warm: { label: "Warm", className: "bg-amber-500/10 text-amber-400 border-amber-500/20" },
-  hot: { label: "Hot", className: "bg-rose-500/10 text-rose-400 border-rose-500/20" },
+  cold: { label: "Cold", className: "bg-info/10 text-info border-info/20" },
+  warm: { label: "Warm", className: "bg-warning/10 text-warning border-warning/20" },
+  hot: { label: "Hot", className: "bg-destructive/10 text-destructive border-destructive/20" },
 };
 
 export const PRIORITY_TONE: Record<
@@ -107,9 +107,9 @@ export const PRIORITY_TONE: Record<
   { label: string; className: string }
 > = {
   low: { label: "Low", className: "bg-muted text-muted-foreground" },
-  medium: { label: "Medium", className: "bg-sky-500/10 text-sky-400" },
-  high: { label: "High", className: "bg-amber-500/10 text-amber-400" },
-  urgent: { label: "Urgent", className: "bg-rose-500/10 text-rose-400" },
+  medium: { label: "Medium", className: "bg-info/10 text-info" },
+  high: { label: "High", className: "bg-warning/10 text-warning" },
+  urgent: { label: "Urgent", className: "bg-destructive/10 text-destructive" },
 };
 
 export const PUSH_STATUS_TONE: Record<
@@ -119,12 +119,12 @@ export const PUSH_STATUS_TONE: Record<
   not_ready: { label: "Not Ready", className: "bg-muted text-muted-foreground" },
   ready: {
     label: "Ready",
-    className: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
+    className: "bg-success/10 text-success border-success/20",
   },
-  pushed: { label: "Pushed", className: "bg-sky-500/10 text-sky-400 border-sky-500/20" },
+  pushed: { label: "Pushed", className: "bg-info/10 text-info border-info/20" },
   do_not_push: {
     label: "Do Not Push",
-    className: "bg-rose-500/10 text-rose-400 border-rose-500/20",
+    className: "bg-destructive/10 text-destructive border-destructive/20",
   },
 };
 

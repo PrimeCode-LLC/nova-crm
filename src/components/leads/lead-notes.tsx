@@ -45,7 +45,7 @@ export function LeadNotes({ notes }: { notes: Note[] }) {
                 key={n.id}
                 className={cn(
                   "flex gap-3 rounded-lg border p-3 bg-card",
-                  n.pinned && "border-amber-500/30 bg-amber-500/5",
+                  n.pinned && "border-warning/30 bg-warning/5",
                 )}
               >
                 <Avatar className="h-7 w-7 shrink-0">
@@ -62,7 +62,7 @@ export function LeadNotes({ notes }: { notes: Note[] }) {
                     {n.pinned && (
                       <Badge
                         variant="outline"
-                        className="bg-amber-500/10 text-amber-400 border-amber-500/20 text-[10px] gap-1"
+                        className="bg-warning/10 text-warning border-warning/20 text-[10px] gap-1"
                       >
                         <Pin className="h-2.5 w-2.5" /> Pinned
                       </Badge>

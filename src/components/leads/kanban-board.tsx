@@ -181,11 +181,11 @@ function KanbanColumn({
   const stageMeta = PIPELINE_STAGES.find((s) => s.key === stage);
   const tone: Record<string, string> = {
     neutral: "bg-muted-foreground/70",
-    blue: "bg-sky-400",
-    cyan: "bg-cyan-400",
-    green: "bg-emerald-400",
-    red: "bg-rose-400",
-    amber: "bg-amber-400",
+    blue: "bg-info",
+    cyan: "bg-cyan-600 dark:bg-cyan-400",
+    green: "bg-success",
+    red: "bg-destructive",
+    amber: "bg-warning",
   };
 
   return (
@@ -246,7 +246,7 @@ function LeadCardBody({ lead }: { lead: Lead }) {
         {lead.isIdle && (
           <Badge
             variant="outline"
-            className="bg-rose-500/10 text-rose-400 border-rose-500/20 text-[10px] gap-1"
+            className="bg-destructive/10 text-destructive border-destructive/20 text-[10px] gap-1"
           >
             <AlertTriangle className="h-2.5 w-2.5" />
             {lead.idleDays}d

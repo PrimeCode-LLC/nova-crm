@@ -112,7 +112,7 @@ export default function ContactsPage() {
                             <Mail className="h-3 w-3" />
                             <span className="truncate max-w-[220px]">{c.email}</span>
                             {c.emailVerified ? (
-                              <CheckCircle2 className="h-3 w-3 text-emerald-400" />
+                              <CheckCircle2 className="h-3 w-3 text-success" />
                             ) : (
                               <XCircle className="h-3 w-3 text-muted-foreground/60" />
                             )}

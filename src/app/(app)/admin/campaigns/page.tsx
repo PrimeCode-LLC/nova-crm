@@ -21,9 +21,9 @@ import Link from "next/link";
 
 const STATUS_TONE: Record<string, string> = {
   draft: "bg-muted text-muted-foreground border-transparent",
-  active: "bg-emerald-500/10 text-emerald-400 border-emerald-500/20",
-  paused: "bg-amber-500/10 text-amber-400 border-amber-500/20",
-  done: "bg-sky-500/10 text-sky-400 border-sky-500/20",
+  active: "bg-success/10 text-success border-success/20",
+  paused: "bg-warning/10 text-warning border-warning/20",
+  done: "bg-info/10 text-info border-info/20",
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -116,9 +116,9 @@ export default function AdminCampaignsPage() {
                         <span
                           className={
                             replyRate >= 5
-                              ? "text-emerald-400"
+                              ? "text-success"
                               : replyRate >= 2
-                                ? "text-amber-400"
+                                ? "text-warning"
                                 : "text-muted-foreground"
                           }
                         >

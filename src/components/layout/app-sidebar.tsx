@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { Zap, ChevronsUpDown, LogOut, UserCircle, Moon, Sun, Plus, FlaskConical, Check } from "lucide-react";
+import { ChevronsUpDown, LogOut, UserCircle, Moon, Sun, Plus, FlaskConical, Check, Monitor, Palette } from "lucide-react";
 import { QuickAddDialog } from "./quick-add-dialog";
 import { useTheme } from "next-themes";
 
@@ -32,13 +32,18 @@ import {
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   DropdownMenuLabel,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
+import { AppMark } from "@/components/brand/app-mark";
 
 export function AppSidebar() {
   const pathname = usePathname();
@@ -74,9 +79,7 @@ export function AppSidebar() {
     <Sidebar collapsible="icon" className="border-r">
       <SidebarHeader>
         <div className="flex items-center gap-2 px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground">
-            <Zap className="h-4 w-4" />
-          </div>
+          <AppMark />
           <div className="flex flex-col leading-none group-data-[collapsible=icon]:hidden">
             <span className="text-sm font-semibold">{APP_NAME}</span>
             <span className="text-[11px] text-muted-foreground">Sales ops, finally sane</span>
@@ -145,59 +148,87 @@ export function AppSidebar() {
                 align="end"
                 className="min-w-56"
               >
-                <DropdownMenuLabel>
-                  <div className="flex flex-col">
-                    <span className="font-medium">{displayName}</span>
-                    <span className="text-xs text-muted-foreground">{email}</span>
-                  </div>
-                </DropdownMenuLabel>
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel>
+                    <div className="flex flex-col">
+                      <span className="font-medium">{displayName}</span>
+                      <span className="text-xs text-muted-foreground">{email}</span>
+                    </div>
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
                 {isDemo && (
                   <>
-                    <DropdownMenuLabel className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
-                      Sample user
-                    </DropdownMenuLabel>
-                    {DEMO_ROLE_PRESETS.map((p) => (
-                      <DropdownMenuItem
-                        key={p.userId}
-                        onSelect={() => void setDemoPersona(p.userId)}
-                        className="flex items-start gap-2 py-2"
-                      >
-                        <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-400" />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-1.5">
-                            <span className="text-sm font-medium leading-tight">{p.title}</span>
-                            {p.userId === demoPersonaId && (
-                              <Check className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                            )}
+                    <DropdownMenuGroup>
+                      <DropdownMenuLabel className="text-[10px] font-normal uppercase tracking-wide text-muted-foreground">
+                        Sample user
+                      </DropdownMenuLabel>
+                      {DEMO_ROLE_PRESETS.map((p) => (
+                        <DropdownMenuItem
+                          key={p.userId}
+                          onSelect={() => void setDemoPersona(p.userId)}
+                          className="flex items-start gap-2 py-2"
+                        >
+                          <FlaskConical className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-medium leading-tight">{p.title}</span>
+                              {p.userId === demoPersonaId && (
+                                <Check className="h-3.5 w-3.5 shrink-0 text-success" />
+                              )}
+                            </div>
+                            <span className="text-[10px] text-muted-foreground leading-snug">{p.subtitle}</span>
                           </div>
-                          <span className="text-[10px] text-muted-foreground leading-snug">{p.subtitle}</span>
-                        </div>
-                      </DropdownMenuItem>
-                    ))}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuGroup>
                     <DropdownMenuSeparator />
                   </>
                 )}
-                <DropdownMenuItem onSelect={() => router.push("/settings")}>
-                  <UserCircle className="mr-2 h-4 w-4" /> Profile
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-                >
-                  {theme === "dark" ? (
-                    <Sun className="mr-2 h-4 w-4" />
-                  ) : (
-                    <Moon className="mr-2 h-4 w-4" />
-                  )}
-                  Toggle theme
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem onSelect={() => router.push("/settings")}>
+                    <UserCircle className="mr-2 h-4 w-4" /> Profile
+                  </DropdownMenuItem>
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger>
+                      <Palette className="mr-2 h-4 w-4 text-muted-foreground" />
+                      <span>Theme</span>
+                      <span className="ml-auto mr-1 text-xs capitalize text-muted-foreground">
+                        {theme ?? "system"}
+                      </span>
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuSubContent className="min-w-40">
+                      {(
+                        [
+                          { value: "light", label: "Light", Icon: Sun },
+                          { value: "dark", label: "Dark", Icon: Moon },
+                          { value: "system", label: "System", Icon: Monitor },
+                        ] as const
+                      ).map(({ value, label, Icon }) => (
+                        <DropdownMenuItem
+                          key={value}
+                          onSelect={() => setTheme(value)}
+                          className="flex items-center gap-2 py-1.5"
+                        >
+                          <Icon className="h-4 w-4 text-muted-foreground" />
+                          <span>{label}</span>
+                          {theme === value && (
+                            <Check className="ml-auto h-3.5 w-3.5 text-primary" />
+                          )}
+                        </DropdownMenuItem>
+                      ))}
+                    </DropdownMenuSubContent>
+                  </DropdownMenuSub>
+                </DropdownMenuGroup>
                 <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  className="text-destructive"
-                  onClick={() => void signOut()}
-                >
-                  <LogOut className="mr-2 h-4 w-4" /> Sign out
-                </DropdownMenuItem>
+                <DropdownMenuGroup>
+                  <DropdownMenuItem
+                    className="text-destructive"
+                    onClick={() => void signOut()}
+                  >
+                    <LogOut className="mr-2 h-4 w-4" /> Sign out
+                  </DropdownMenuItem>
+                </DropdownMenuGroup>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

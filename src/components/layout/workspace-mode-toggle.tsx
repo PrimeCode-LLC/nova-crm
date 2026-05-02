@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -38,7 +39,7 @@ export function WorkspaceModeToggle() {
             size="sm"
             className={cn(
               "h-8 gap-1.5 px-2.5 text-xs font-medium",
-              isDemo && "border-amber-500/40 bg-amber-500/5 text-amber-200",
+              isDemo && "border-warning/40 bg-warning/5 text-warning",
             )}
             disabled={pending}
           >
@@ -60,28 +61,32 @@ export function WorkspaceModeToggle() {
         }
       />
       <DropdownMenuContent align="end" className="w-56">
-        <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-          Data mode
-        </DropdownMenuLabel>
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+            Data mode
+          </DropdownMenuLabel>
+        </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={() => void select("demo")} className="gap-2 text-sm">
-          <FlaskConical className="h-4 w-4 text-amber-400" />
-          <div className="flex flex-col gap-0.5">
-            <span>Demo</span>
-            <span className="text-[11px] text-muted-foreground font-normal">
-              Sample pipeline for tours and training.
-            </span>
-          </div>
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={() => void select("live")} className="gap-2 text-sm">
-          <Briefcase className="h-4 w-4 text-sky-400" />
-          <div className="flex flex-col gap-0.5">
-            <span>Workspace</span>
-            <span className="text-[11px] text-muted-foreground font-normal">
-              Your real CRM data (empty until connected).
-            </span>
-          </div>
-        </DropdownMenuItem>
+        <DropdownMenuGroup>
+          <DropdownMenuItem onSelect={() => void select("demo")} className="gap-2 text-sm">
+            <FlaskConical className="h-4 w-4 text-warning" />
+            <div className="flex flex-col gap-0.5">
+              <span>Demo</span>
+              <span className="text-[11px] text-muted-foreground font-normal">
+                Sample pipeline for tours and training.
+              </span>
+            </div>
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => void select("live")} className="gap-2 text-sm">
+            <Briefcase className="h-4 w-4 text-info" />
+            <div className="flex flex-col gap-0.5">
+              <span>Workspace</span>
+              <span className="text-[11px] text-muted-foreground font-normal">
+                Your real CRM data (empty until connected).
+              </span>
+            </div>
+          </DropdownMenuItem>
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

@@ -66,7 +66,7 @@ export default function ForgotPasswordPage() {
   if (sent) {
     return (
       <div className="space-y-5 text-center">
-        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-500/10">
+        <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
           <span className="text-2xl">✉️</span>
         </div>
         <div>

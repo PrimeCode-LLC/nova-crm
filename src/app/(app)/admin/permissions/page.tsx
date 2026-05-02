@@ -135,8 +135,8 @@ export default function AdminPermissionsPage() {
                         variant="outline"
                         className={`text-[10px] font-semibold uppercase ${
                           po.effect === "grant"
-                            ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
-                            : "bg-rose-500/10 text-rose-400 border-rose-500/20"
+                            ? "bg-success/10 text-success border-success/20"
+                            : "bg-destructive/10 text-destructive border-destructive/20"
                         }`}
                       >
                         {po.effect}
@@ -249,11 +249,11 @@ export default function AdminPermissionsPage() {
               >
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="grant" id="r-grant" />
-                  <Label htmlFor="r-grant" className="text-sm text-emerald-400 cursor-pointer">Grant</Label>
+                  <Label htmlFor="r-grant" className="text-sm text-success cursor-pointer">Grant</Label>
                 </div>
                 <div className="flex items-center gap-2">
                   <RadioGroupItem value="deny" id="r-deny" />
-                  <Label htmlFor="r-deny" className="text-sm text-rose-400 cursor-pointer">Deny</Label>
+                  <Label htmlFor="r-deny" className="text-sm text-destructive cursor-pointer">Deny</Label>
                 </div>
               </RadioGroup>
             </div>
