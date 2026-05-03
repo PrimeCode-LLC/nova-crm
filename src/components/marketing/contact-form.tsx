@@ -11,14 +11,37 @@ import { Textarea } from "@/components/ui/textarea";
 export function ContactForm() {
   const [submitting, setSubmitting] = React.useState(false);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setSubmitting(true);
-    // Wire up to /api/contact later. For now, just acknowledge.
-    await new Promise((r) => setTimeout(r, 600));
-    toast.success("Got it. We'll be in touch within 24 hours.");
-    (e.currentTarget as HTMLFormElement).reset();
-    setSubmitting(false);
+    try {
+      const form = e.currentTarget;
+      const fd = new FormData(form);
+      const entry = {
+        at: new Date().toISOString(),
+        name: String(fd.get("name") ?? "").trim(),
+        email: String(fd.get("email") ?? "").trim(),
+        company: String(fd.get("company") ?? "").trim(),
+        size: String(fd.get("size") ?? "").trim(),
+        message: String(fd.get("message") ?? "").trim(),
+      };
+      if (!entry.name || !entry.email || !entry.message) {
+        toast.error("Please fill in name, email, and your message.");
+        return;
+      }
+      const key = "nova-marketing-contact-intake";
+      const raw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
+      const prev = (raw ? (JSON.parse(raw) as unknown[]) : []) as typeof entry[];
+      if (typeof window !== "undefined") {
+        localStorage.setItem(key, JSON.stringify([...prev, entry]));
+      }
+      toast.success("Got it. We'll be in touch within 24 hours.");
+      form.reset();
+    } catch {
+      toast.error("Could not save your message in this browser.");
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (

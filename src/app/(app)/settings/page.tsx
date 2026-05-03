@@ -36,6 +36,19 @@ import {
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 
+const LS_PROFILE = "nova-crm-settings-profile-v1";
+const LS_ACCOUNT = "nova-crm-settings-account-v1";
+const LS_NOTIFS = "nova-crm-settings-notifications-v1";
+const LS_DENSITY = "nova-crm-settings-density-v1";
+
+const DEFAULT_NOTIFICATIONS = {
+  emailNotifs: true,
+  slackNotifs: false,
+  leadAssigned: true,
+  dailyDigest: true,
+  weeklyScorecard: false,
+} as const;
+
 /**
  * Mini theme preview, a tiny faux-app rendered with the literal hex/oklch
  * palette of each theme so users can see what they'll get without applying it.
@@ -161,7 +174,7 @@ function SettingsPage() {
     if (t === "email") setActiveTab("email");
   }, [searchParams]);
 
-  const { isDemo, users, currentUserId, demoPersonaId } = useWorkspace();
+  const { isDemo, users, currentUserId, demoPersonaId, patchUser } = useWorkspace();
   const { user: fbUser } = useAuth();
   const demoUser = users.find((u) => u.id === currentUserId);
 
@@ -175,8 +188,19 @@ function SettingsPage() {
       setEmail(demoUser.email);
       setTitle(demoUser.title ?? "");
     } else if (fbUser) {
-      setDisplayName(fbUser.displayName || fbUser.email?.split("@")[0] || "");
       setEmail(fbUser.email ?? "");
+      try {
+        const raw = typeof window !== "undefined" ? localStorage.getItem(`${LS_PROFILE}:${fbUser.uid}`) : null;
+        if (raw) {
+          const j = JSON.parse(raw) as { displayName?: string; title?: string };
+          setDisplayName(j.displayName?.trim() || fbUser.displayName || fbUser.email?.split("@")[0] || "");
+          setTitle(j.title?.trim() ?? "");
+          return;
+        }
+      } catch {
+        /* ignore */
+      }
+      setDisplayName(fbUser.displayName || fbUser.email?.split("@")[0] || "");
       setTitle("");
     } else {
       setDisplayName(demoUser?.displayName ?? "");
@@ -186,13 +210,18 @@ function SettingsPage() {
   }, [isDemo, currentUserId, demoPersonaId, demoUser, fbUser]);
   const [savingProfile, setSavingProfile] = React.useState(false);
 
-  const [notifications, setNotifications] = React.useState({
-    emailNotifs: true,
-    slackNotifs: false,
-    leadAssigned: true,
-    dailyDigest: true,
-    weeklyScorecard: false,
-  });
+  const [notifications, setNotifications] = React.useState({ ...DEFAULT_NOTIFICATIONS });
+
+  React.useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem(LS_NOTIFS) : null;
+      if (!raw) return;
+      const j = JSON.parse(raw) as Partial<typeof DEFAULT_NOTIFICATIONS>;
+      setNotifications((prev) => ({ ...prev, ...j }));
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = React.useState(false);
@@ -200,11 +229,80 @@ function SettingsPage() {
   const activeTheme = mounted ? (theme ?? "system") : "dark";
   const [density, setDensity] = React.useState("comfortable");
 
-  async function handleSaveProfile() {
+  React.useEffect(() => {
+    try {
+      const d = typeof window !== "undefined" ? localStorage.getItem(LS_DENSITY) : null;
+      if (d === "compact" || d === "comfortable") setDensity(d);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const [orgName, setOrgName] = React.useState("Nova Inc.");
+  const [orgTimezone, setOrgTimezone] = React.useState("UTC+5 (PKT)");
+
+  React.useEffect(() => {
+    try {
+      const raw = typeof window !== "undefined" ? localStorage.getItem(LS_ACCOUNT) : null;
+      if (!raw) return;
+      const j = JSON.parse(raw) as { orgName?: string; timezone?: string };
+      if (j.orgName?.trim()) setOrgName(j.orgName.trim());
+      if (j.timezone?.trim()) setOrgTimezone(j.timezone.trim());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  function persistNotifications(next: typeof DEFAULT_NOTIFICATIONS) {
+    try {
+      if (typeof window !== "undefined") {
+        localStorage.setItem(LS_NOTIFS, JSON.stringify(next));
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function handleSaveProfile() {
+    const dn = displayName.trim();
+    if (!dn) {
+      toast.error("Display name is required.");
+      return;
+    }
     setSavingProfile(true);
-    await new Promise((r) => setTimeout(r, 800));
-    setSavingProfile(false);
-    toast.success("Profile saved");
+    try {
+      if (isDemo && currentUserId) {
+        patchUser(currentUserId, { displayName: dn, title: title.trim() || undefined });
+      } else if (fbUser?.uid) {
+        try {
+          localStorage.setItem(
+            `${LS_PROFILE}:${fbUser.uid}`,
+            JSON.stringify({ displayName: dn, title: title.trim() }),
+          );
+        } catch {
+          toast.error("Could not save profile in this browser (storage blocked).");
+          return;
+        }
+      } else {
+        toast.error("Sign in or use Demo mode to save your profile.");
+        return;
+      }
+      toast.success("Profile saved");
+    } finally {
+      setSavingProfile(false);
+    }
+  }
+
+  function handleSaveAccount() {
+    try {
+      localStorage.setItem(
+        LS_ACCOUNT,
+        JSON.stringify({ orgName: orgName.trim(), timezone: orgTimezone.trim() }),
+      );
+      toast.success("Account settings saved");
+    } catch {
+      toast.error("Could not save (storage blocked).");
+    }
   }
 
   return (
@@ -317,14 +415,14 @@ function SettingsPage() {
               <CardContent className="space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs">Organization name</Label>
-                  <Input defaultValue="Nova Inc." className="h-9" />
+                  <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} className="h-9" />
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs">Default timezone</Label>
-                  <Input defaultValue="UTC+5 (PKT)" className="h-9" />
+                  <Input value={orgTimezone} onChange={(e) => setOrgTimezone(e.target.value)} className="h-9" />
                 </div>
                 <div className="flex justify-end">
-                  <Button size="sm" onClick={() => toast.success("Account settings saved")}>
+                  <Button size="sm" onClick={handleSaveAccount}>
                     Save changes
                   </Button>
                 </div>
@@ -342,22 +440,28 @@ function SettingsPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-1 divide-y">
-                {[
-                  { key: "emailNotifs", label: "Email notifications", desc: "Receive activity summaries via email." },
-                  { key: "slackNotifs", label: "Slack notifications", desc: "Get pinged in your Slack workspace." },
-                  { key: "leadAssigned", label: "Lead assigned", desc: "When a lead is assigned or reassigned to you." },
-                  { key: "dailyDigest", label: "Daily digest", desc: "Morning summary of your open pipeline." },
-                  { key: "weeklyScorecard", label: "Weekly scorecard", desc: "Performance summary every Monday." },
-                ].map(({ key, label, desc }) => (
+                {(
+                  [
+                    { key: "emailNotifs", label: "Email notifications", desc: "Receive activity summaries via email." },
+                    { key: "slackNotifs", label: "Slack notifications", desc: "Get pinged in your Slack workspace." },
+                    { key: "leadAssigned", label: "Lead assigned", desc: "When a lead is assigned or reassigned to you." },
+                    { key: "dailyDigest", label: "Daily digest", desc: "Morning summary of your open pipeline." },
+                    { key: "weeklyScorecard", label: "Weekly scorecard", desc: "Performance summary every Monday." },
+                  ] as const
+                ).map(({ key, label, desc }) => (
                   <div key={key} className="flex items-center justify-between py-3 gap-3">
                     <div>
                       <div className="text-sm font-medium">{label}</div>
                       <div className="text-xs text-muted-foreground">{desc}</div>
                     </div>
                     <Switch
-                      checked={notifications[key as keyof typeof notifications]}
+                      checked={notifications[key]}
                       onCheckedChange={(v) => {
-                        setNotifications((prev) => ({ ...prev, [key]: !!v }));
+                        setNotifications((prev) => {
+                          const next = { ...prev, [key]: !!v };
+                          persistNotifications(next);
+                          return next;
+                        });
                         toast.success(`${label}: ${!!v ? "on" : "off"}`);
                       }}
                     />
@@ -510,6 +614,11 @@ function SettingsPage() {
                     value={density}
                     onValueChange={(v) => {
                       setDensity(v);
+                      try {
+                        if (typeof window !== "undefined") localStorage.setItem(LS_DENSITY, v);
+                      } catch {
+                        /* ignore */
+                      }
                       toast.success(`Density set to ${v}`);
                     }}
                     className="grid grid-cols-2 gap-3"

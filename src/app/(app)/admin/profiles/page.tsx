@@ -101,13 +101,12 @@ export default function AdminProfilesPage() {
     setDetailId(null);
   }
 
-  async function handleDetailSave() {
+  function handleDetailSave() {
     if (!detailId || !draftName.trim() || !draftChannel || !draftType || !draftOwnerId) {
       toast.error("Name, channel, type, and owner are required.");
       return;
     }
     setDetailSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
     updateProfile(detailId, {
       name: draftName.trim(),
       channel: draftChannel as ChannelKey,
@@ -121,7 +120,7 @@ export default function AdminProfilesPage() {
     closeDetail();
   }
 
-  async function handleCreate() {
+  function handleCreate() {
     const missing: string[] = [];
     if (!name.trim()) missing.push("profile name");
     if (!channel) missing.push("channel");
@@ -132,7 +131,6 @@ export default function AdminProfilesPage() {
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
     addProfile({
       id: newProfileId(),
       name: name.trim(),

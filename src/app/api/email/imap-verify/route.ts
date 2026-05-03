@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
+import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 
 export async function POST(req: Request) {
   try {
     const b = (await req.json()) as Record<string, unknown>;
-    const host = String(b.host ?? "").trim();
+    const host = normalizeMailHost(String(b.host ?? ""));
     const port = Number(b.port ?? 993);
     const secure = Boolean(b.secure);
     const user = String(b.user ?? "").trim();

@@ -6,6 +6,7 @@ import {
   type MailSent,
   defaultEmailAccountSettings,
 } from "@/lib/email-account-types";
+import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 
 export interface EmailAccountStore {
   account: EmailAccountSettings;
@@ -68,7 +69,7 @@ export function isEmailAccountConfigured(account: EmailAccountSettings): boolean
   return (
     account.enabled &&
     !!account.emailAddress.trim() &&
-    !!account.smtp.host.trim() &&
+    !!normalizeMailHost(account.smtp.host) &&
     !!account.smtp.user.trim()
   );
 }

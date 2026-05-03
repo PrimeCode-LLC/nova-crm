@@ -24,6 +24,14 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { toast } from "sonner";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import {
+  collectNormalizedEmailsFromWorkspace,
+  filterRowsForCsvImport,
+  ingestMappedRowAsLead,
+  mapSpreadsheetRowToTargets,
+  rowHasImportIdentity,
+} from "@/lib/workspace-csv-import";
 
 const STEPS = [
   { label: "Upload", description: "Choose your file" },
@@ -148,6 +156,7 @@ const DEMO_DUP = 11;
 const DEMO_CREATE = 237;
 
 export default function AdminImportPage() {
+  const { addAccount, addContact, addLead, currentUserId, users, leads, contacts } = useWorkspace();
   const [step, setStep] = React.useState(0);
   const [sourceColumns, setSourceColumns] = React.useState<string[]>(SAMPLE_SOURCE_FIELDS);
   const [mappings, setMappings] = React.useState<Record<string, string>>(() => ({
@@ -280,17 +289,38 @@ export default function AdminImportPage() {
     });
   }
 
-  async function handleImport() {
+  function handleImport() {
+    if (!parsedRows?.length) {
+      toast.error("Load a CSV or paste data before importing.");
+      return;
+    }
+    const ownerId = currentUserId || users[0]?.id;
+    if (!ownerId) {
+      toast.error("No owner is available for imported leads. Open the app with a signed-in user or switch to Demo.");
+      return;
+    }
+    const workspaceEmails = collectNormalizedEmailsFromWorkspace(leads, contacts);
+    const rows = filterRowsForCsvImport(parsedRows, mappings, duplicateHandling, workspaceEmails);
+    const usable = rows.filter((row) => rowHasImportIdentity(mapSpreadsheetRowToTargets(row, mappings)));
+    if (usable.length === 0) {
+      toast.error("No rows to import. Check column mapping and duplicate rules.");
+      return;
+    }
     setImporting(true);
-    await new Promise((r) => setTimeout(r, 1200));
-    setImporting(false);
-    const n = duplicateHandling === "create" ? importStats.total : willCreateCount;
-    toast.success(`${n} lead${n === 1 ? "" : "s"} imported successfully`);
-    setStep(0);
-    setParsedRows(null);
-    setSourceColumns([...SAMPLE_SOURCE_FIELDS]);
-    setMappings({ ...DEFAULT_MAPPINGS });
-    setDuplicateHandling("skip");
+    try {
+      for (const row of usable) {
+        const mapped = mapSpreadsheetRowToTargets(row, mappings);
+        ingestMappedRowAsLead(mapped, ownerId, addAccount, addContact, addLead);
+      }
+      toast.success(`${usable.length} lead${usable.length === 1 ? "" : "s"} imported successfully`);
+      setStep(0);
+      setParsedRows(null);
+      setSourceColumns([...SAMPLE_SOURCE_FIELDS]);
+      setMappings({ ...DEFAULT_MAPPINGS });
+      setDuplicateHandling("skip");
+    } finally {
+      setImporting(false);
+    }
   }
 
   return (
@@ -560,7 +590,7 @@ export default function AdminImportPage() {
               <Button type="button" variant="outline" size="sm" onClick={() => setStep(1)}>
                 <ArrowLeft className="h-3.5 w-3.5" /> Back
               </Button>
-              <Button type="button" size="sm" onClick={() => void handleImport()} disabled={importing}>
+              <Button type="button" size="sm" onClick={() => handleImport()} disabled={importing}>
                 {importing ? (
                   <>Importing…</>
                 ) : (

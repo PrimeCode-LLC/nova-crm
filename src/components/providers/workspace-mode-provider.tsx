@@ -16,6 +16,7 @@ import type {
   Profile,
   Touchpoint,
   TimelineEvent,
+  User,
 } from "@/lib/types";
 import {
   getWorkspaceSnapshot,
@@ -50,6 +51,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addCampaign: (campaign: Campaign) => void;
     addAccount: (account: Account) => void;
     addContact: (contact: Contact) => void;
+    addLead: (lead: Lead) => void;
+    patchUser: (userId: string, patch: Partial<Omit<User, "id">>) => void;
     /** Session-backed (persists in tab until refresh / mode change). */
     sessionHydrated: boolean;
     addFollowup: (f: Followup) => void;
@@ -136,6 +139,8 @@ export function WorkspaceModeProvider({
 
   const [accountsAdded, setAccountsAdded] = React.useState<Account[]>([]);
   const [contactsAdded, setContactsAdded] = React.useState<Contact[]>([]);
+  const [leadsAdded, setLeadsAdded] = React.useState<Lead[]>([]);
+  const [userPatches, setUserPatches] = React.useState<Record<string, Partial<Omit<User, "id">>>>({});
   const [accountContactBumps, setAccountContactBumps] = React.useState<Record<string, number>>({});
 
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
@@ -167,6 +172,8 @@ export function WorkspaceModeProvider({
     setCampaignsAdded([]);
     setAccountsAdded([]);
     setContactsAdded([]);
+    setLeadsAdded([]);
+    setUserPatches({});
     setAccountContactBumps({});
   }, [mode, demoPersonaId]);
 
@@ -218,6 +225,14 @@ export function WorkspaceModeProvider({
       ...b,
       [contact.accountId]: (b[contact.accountId] ?? 0) + 1,
     }));
+  }, []);
+
+  const addLead = React.useCallback((lead: Lead) => {
+    setLeadsAdded((prev) => [...prev, lead]);
+  }, []);
+
+  const patchUser = React.useCallback((userId: string, patch: Partial<Omit<User, "id">>) => {
+    setUserPatches((prev) => ({ ...prev, [userId]: { ...prev[userId], ...patch } }));
   }, []);
 
   const bumpLeadActivity = React.useCallback((leadId: string) => {
@@ -445,6 +460,11 @@ export function WorkspaceModeProvider({
       contactCount: a.contactCount + (accountContactBumps[a.id] ?? 0),
     }));
     const contactsMerged = [...baseSnapshot.contacts, ...contactsAdded];
+    const leadsMerged = [...baseSnapshot.leads, ...leadsAdded];
+    const usersMerged = baseSnapshot.users.map((u) => ({
+      ...u,
+      ...(userPatches[u.id] ?? {}),
+    }));
     return {
       ...baseSnapshot,
       permissionOverrides,
@@ -453,6 +473,8 @@ export function WorkspaceModeProvider({
       campaigns,
       accounts: accountsMerged,
       contacts: contactsMerged,
+      leads: leadsMerged,
+      users: usersMerged,
     };
   }, [
     baseSnapshot,
@@ -463,6 +485,8 @@ export function WorkspaceModeProvider({
     campaignsAdded,
     accountsAdded,
     contactsAdded,
+    leadsAdded,
+    userPatches,
     accountContactBumps,
   ]);
 
@@ -490,6 +514,8 @@ export function WorkspaceModeProvider({
       addCampaign,
       addAccount,
       addContact,
+      addLead,
+      patchUser,
       sessionHydrated,
       addFollowup,
       setFollowupCompleted,
@@ -519,6 +545,8 @@ export function WorkspaceModeProvider({
     addCampaign,
     addAccount,
     addContact,
+    addLead,
+    patchUser,
     sessionHydrated,
     addFollowup,
     setFollowupCompleted,

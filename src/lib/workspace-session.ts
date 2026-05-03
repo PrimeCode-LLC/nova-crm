@@ -150,6 +150,7 @@ export function mergeSessionIntoSnapshot(
   const mergedExtras = session.followups.extras
     .filter(
       (f) =>
+        (f.leadId == null && f.dealId == null) ||
         (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
         (f.dealId != null && visibleDealIds.has(f.dealId)),
     )

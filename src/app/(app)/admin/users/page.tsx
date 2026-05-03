@@ -229,7 +229,7 @@ function AdminUsersPageContent() {
     setEditUserId(null);
   }
 
-  async function handleSaveEdit() {
+  function handleSaveEdit() {
     if (!editUserId || !editingUser) return;
     const email = editEmail.trim();
     if (!editDisplayName.trim() || !email) {
@@ -237,7 +237,6 @@ function AdminUsersPageContent() {
       return;
     }
     setEditSaving(true);
-    await new Promise((r) => setTimeout(r, 400));
     const patch: Partial<Omit<User, "id">> = {
       displayName: editDisplayName.trim(),
       email,
@@ -253,13 +252,12 @@ function AdminUsersPageContent() {
     closeEdit();
   }
 
-  async function handleInvite() {
+  function handleInvite() {
     if (!inviteEmail.trim() || !inviteRole) {
       toast.error("Email and role are required");
       return;
     }
     setInviteLoading(true);
-    await new Promise((r) => setTimeout(r, 600));
     const email = inviteEmail.trim();
     const displayName =
       inviteName.trim() || titleFromEmail(email);

@@ -112,13 +112,12 @@ export default function AdminPermissionsPage() {
 
   const hasColumnFilters = Object.keys(columnFilter).length > 0;
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!userId || !resource || !action || !scope) {
       toast.error("All fields are required");
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
     const row: PermissionOverride = {
       id: newOverrideId(),
       userId,

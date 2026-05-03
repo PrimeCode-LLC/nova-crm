@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { useEmailAccountStore, isEmailAccountConfigured } from "@/stores/email-account-store";
+import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
 import { Loader2, Mail, PlugZap, ShieldAlert } from "lucide-react";
 
@@ -21,14 +22,14 @@ export function EmailInboxSettingsCard() {
   const [testing, setTesting] = React.useState(false);
 
   async function testConnections() {
-    const smtpHost = account.smtp.host.trim();
+    const smtpHost = normalizeMailHost(account.smtp.host);
     const smtpUser = account.smtp.user.trim();
     if (!smtpHost || !smtpUser) {
       toast.error("Enter SMTP host and username first.");
       return;
     }
 
-    const imapHost = account.imap.host.trim();
+    const imapHost = normalizeMailHost(account.imap.host);
     const imapUser = account.imap.user.trim();
     const testImap = Boolean(imapHost && imapUser);
 
@@ -190,8 +191,15 @@ export function EmailInboxSettingsCard() {
                   className="h-9"
                   value={account.smtp.host}
                   onChange={(e) => setSmtp({ host: e.target.value })}
-                  placeholder="smtp.gmail.com"
+                  onBlur={() => {
+                    const n = normalizeMailHost(account.smtp.host);
+                    if (n && n !== account.smtp.host) setSmtp({ host: n });
+                  }}
+                  placeholder="amsr200.websitehostserver.net"
                 />
+                <p className="text-[11px] text-muted-foreground">
+                  Hostname only — do not paste a web URL (no <code className="text-foreground">http://</code> or path).
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Port</Label>
@@ -251,7 +259,11 @@ export function EmailInboxSettingsCard() {
                   className="h-9"
                   value={account.imap.host}
                   onChange={(e) => setImap({ host: e.target.value })}
-                  placeholder="imap.gmail.com"
+                  onBlur={() => {
+                    const n = normalizeMailHost(account.imap.host);
+                    if (n && n !== account.imap.host) setImap({ host: n });
+                  }}
+                  placeholder="amsr200.websitehostserver.net"
                 />
               </div>
               <div className="space-y-1.5">

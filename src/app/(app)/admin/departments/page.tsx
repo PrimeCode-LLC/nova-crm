@@ -46,13 +46,12 @@ export default function AdminDepartmentsPage() {
   const [leadUserId, setLeadUserId] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
-  async function handleCreate() {
+  function handleCreate() {
     if (!name.trim()) {
       toast.error("Name is required");
       return;
     }
     setLoading(true);
-    await new Promise((r) => setTimeout(r, 400));
     const id = newDepartmentId();
     addDepartment({
       id,

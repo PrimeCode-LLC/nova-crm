@@ -32,7 +32,19 @@ import {
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { PIPELINE_STAGES, PRIORITY_TONE, TEMPERATURE_TONE, COMPANY_SIZES, REVENUE_RANGES, CHANNEL_LIST } from "@/lib/constants";
-import type { Account, ChannelKey, CompanySize, Contact, PipelineStage, Profile, RevenueRange } from "@/lib/types";
+import type {
+  Account,
+  ChannelKey,
+  CompanySize,
+  Contact,
+  Followup,
+  Lead,
+  LeadPriority,
+  LeadTemperature,
+  PipelineStage,
+  Profile,
+  RevenueRange,
+} from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
 
@@ -95,6 +107,11 @@ function newEntityId(prefix: string): string {
   return `${prefix}-${Date.now()}`;
 }
 
+function isoFromDateInput(dateStr: string): string {
+  const d = new Date(`${dateStr}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
 // ── Account schema ──
 const accountSchema = z.object({
   name: z.string().min(1, "Name required"),
@@ -136,7 +153,6 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
       return;
     }
     setSubmitting(true);
-    await new Promise((r) => setTimeout(r, 500));
     const id =
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? `p-${crypto.randomUUID()}`
@@ -242,7 +258,7 @@ function LeadFormBody({
   onClose: () => void;
   defaultStage?: PipelineStage;
 }) {
-  const { users, currentUserId } = useWorkspace();
+  const { users, currentUserId, addAccount, addContact, addLead } = useWorkspace();
   /** Live workspace snapshot often has no `users` / `currentUserId`; session gives the signed-in uid for owner + picker. */
   const [sessionOwnerId, setSessionOwnerId] = React.useState<string | null>(null);
   const [sessionOwnerLabel, setSessionOwnerLabel] = React.useState("");
@@ -311,8 +327,64 @@ function LeadFormBody({
     }
   }, [defaultOwnerId, ownerOptions, form]);
 
-  async function onSubmit(_v: LeadForm) {
-    await new Promise((r) => setTimeout(r, 800));
+  function onSubmit(values: LeadForm) {
+    const ownerId = values.ownerId.trim();
+    if (!ownerId) {
+      toast.error("Could not assign owner. Try again after refresh.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const accountId = newEntityId("a");
+    const contactId = newEntityId("ct");
+    const leadId = newEntityId("l");
+    const nameParts = values.contactName.trim().split(/\s+/);
+    const firstName = nameParts[0] ?? values.contactName.trim();
+    const lastName = nameParts.slice(1).join(" ") || firstName;
+    const fullName = values.contactName.trim();
+    const emailTrim = values.email.trim();
+    const estRaw = values.estimatedValue?.replace(/,/g, "").trim();
+    const estimatedValue =
+      estRaw && Number.isFinite(Number(estRaw)) && Number(estRaw) >= 0 ? Number(estRaw) : undefined;
+
+    addAccount({
+      id: accountId,
+      name: values.company.trim(),
+      contactCount: 0,
+      leadCount: 1,
+      openDealValue: 0,
+      ownerId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    addContact({
+      id: contactId,
+      accountId,
+      firstName,
+      lastName,
+      fullName,
+      email: emailTrim || undefined,
+      ownerId,
+      createdAt: now,
+      updatedAt: now,
+    });
+    addLead({
+      id: leadId,
+      accountId,
+      contactId,
+      channel: values.channel as ChannelKey,
+      stage: values.stage as PipelineStage,
+      temperature: values.temperature as LeadTemperature,
+      priority: values.priority as LeadPriority,
+      ownerId,
+      contactName: fullName,
+      companyName: values.company.trim(),
+      contactEmail: emailTrim || undefined,
+      touches: 0,
+      isIdle: false,
+      estimatedValue,
+      createdAt: now,
+      updatedAt: now,
+    });
     toast.success("Lead created");
     onClose();
   }
@@ -788,14 +860,33 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
 }
 
 function TaskFormBody({ onClose }: { onClose: () => void }) {
-  const { leads } = useWorkspace();
+  const { leads, addFollowup, currentUserId, users } = useWorkspace();
   const form = useForm<TaskForm>({
     resolver: zodResolver(taskSchema),
     defaultValues: { title: "", leadId: "", dueDate: new Date().toISOString().slice(0, 10), priority: "medium" },
   });
 
-  async function onSubmit(_v: TaskForm) {
-    await new Promise((r) => setTimeout(r, 800));
+  function onSubmit(v: TaskForm) {
+    const ownerId = currentUserId || users[0]?.id;
+    if (!ownerId) {
+      toast.error("Could not assign owner. Try again after refresh.");
+      return;
+    }
+    const title = v.title.trim();
+    if (!title) {
+      toast.error("Enter a task title.");
+      return;
+    }
+    const followup: Followup = {
+      id: newEntityId("f"),
+      leadId: (v.leadId ?? "").trim() || undefined,
+      title,
+      dueAt: isoFromDateInput(v.dueDate),
+      ownerId,
+      priority: v.priority as LeadPriority,
+      auto: false,
+    };
+    addFollowup(followup);
     toast.success("Task created");
     onClose();
   }

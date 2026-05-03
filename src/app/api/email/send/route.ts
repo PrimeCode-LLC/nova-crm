@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
+import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 
 export async function POST(req: Request) {
   try {
     const b = (await req.json()) as Record<string, unknown>;
     const smtp = b.smtp as Record<string, unknown> | undefined;
-    const host = String(smtp?.host ?? "").trim();
+    const host = normalizeMailHost(String(smtp?.host ?? ""));
     const port = Number(smtp?.port ?? 587);
     const secure = Boolean(smtp?.secure);
     const user = String(smtp?.user ?? "").trim();
