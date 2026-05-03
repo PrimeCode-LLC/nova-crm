@@ -211,6 +211,7 @@ export function TeamPageClient({
       const res = await fetch("/api/org/provision-login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
         body: JSON.stringify({
           email: provisionEmail.trim(),
           password: provisionPassword,
@@ -218,11 +219,29 @@ export function TeamPageClient({
           role: provisionRole,
         }),
       });
-      const data = (await res.json()) as {
+      const raw = await res.text();
+      let data: {
         ok?: boolean;
         linkedExistingFirebaseUser?: boolean;
         error?: unknown;
-      };
+      } = {};
+      if (raw.trim()) {
+        try {
+          data = JSON.parse(raw) as typeof data;
+        } catch {
+          throw new Error(
+            res.status === 404
+              ? "This action is not on the server yet (404). Deploy the latest app build so /api/org/provision-login is available."
+              : res.status >= 500
+                ? `Server error (HTTP ${res.status}). Check deployment logs.`
+                : `Unexpected response from server (HTTP ${res.status}).`,
+          );
+        }
+      } else if (!res.ok) {
+        throw new Error(
+          `Request failed (HTTP ${res.status}) with an empty response. Deploy the latest build or check server logs.`,
+        );
+      }
       if (!res.ok) {
         const msg =
           typeof data.error === "string"

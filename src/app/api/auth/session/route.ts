@@ -20,6 +20,7 @@ import {
   markInviteAcceptedServer,
 } from "@/lib/platform/invites-server";
 import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
+import { isFirestoreFailedPrecondition } from "@/lib/firestore/errors";
 
 type SessionRequestBody = {
   idToken?: string;
@@ -30,12 +31,6 @@ type SessionRequestBody = {
   /** Optional org-wide join token from `/signup?join=...` or login with the same param. */
   openJoinToken?: string;
 };
-
-function isFirestoreFailedPrecondition(err: unknown): boolean {
-  if (typeof err !== "object" || err === null) return false;
-  const code = (err as { code?: number | string }).code;
-  return code === 9 || code === "failed-precondition";
-}
 
 export async function POST(req: Request) {
   const adminAuth = getAdminAuth();
