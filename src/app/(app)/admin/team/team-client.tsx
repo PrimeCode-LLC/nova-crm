@@ -12,6 +12,7 @@ import {
   XCircle,
   Pencil,
   UserCheck,
+  KeyRound,
 } from "lucide-react";
 import Link from "next/link";
 import { toast } from "sonner";
@@ -86,6 +87,19 @@ const ROLE_RANK: Record<OrgMemberRole, number> = {
   member: 1,
 };
 
+function randomTempPassword(): string {
+  const alphabet =
+    "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@%^&*";
+  const len = 14;
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  let out = "";
+  for (let i = 0; i < len; i++) {
+    out += alphabet[bytes[i]! % alphabet.length]!;
+  }
+  return out;
+}
+
 export function TeamPageClient({
   currentUid,
   organization,
@@ -104,6 +118,13 @@ export function TeamPageClient({
   const [inviteEmail, setInviteEmail] = React.useState("");
   const [inviteRole, setInviteRole] = React.useState<OrgMemberRole>("member");
   const [inviteSubmitting, setInviteSubmitting] = React.useState(false);
+  const [provisionOpen, setProvisionOpen] = React.useState(false);
+  const [provisionEmail, setProvisionEmail] = React.useState("");
+  const [provisionDisplayName, setProvisionDisplayName] = React.useState("");
+  const [provisionPassword, setProvisionPassword] = React.useState("");
+  const [provisionRole, setProvisionRole] =
+    React.useState<OrgMemberRole>("member");
+  const [provisionSubmitting, setProvisionSubmitting] = React.useState(false);
   const [lastAcceptUrl, setLastAcceptUrl] = React.useState<string | null>(null);
   const [lastDeliveryNote, setLastDeliveryNote] = React.useState<string | null>(
     null,
@@ -179,6 +200,55 @@ export function TeamPageClient({
       toast.error(err instanceof Error ? err.message : "Failed");
     } finally {
       setInviteSubmitting(false);
+    }
+  }
+
+  async function submitProvision(e: React.FormEvent) {
+    e.preventDefault();
+    if (!provisionEmail.trim() || provisionPassword.length < 8) return;
+    setProvisionSubmitting(true);
+    try {
+      const res = await fetch("/api/org/provision-login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: provisionEmail.trim(),
+          password: provisionPassword,
+          displayName: provisionDisplayName.trim() || undefined,
+          role: provisionRole,
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        linkedExistingFirebaseUser?: boolean;
+        error?: unknown;
+      };
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string"
+            ? data.error
+            : JSON.stringify(data.error ?? "Request failed");
+        throw new Error(msg);
+      }
+      if (data.linkedExistingFirebaseUser) {
+        toast.success(
+          "Existing Firebase account was added to this workspace. Ask them to sign in with their current password.",
+        );
+      } else {
+        toast.success(
+          "Login created. Share the email and temporary password securely; they can use “Forgot password” anytime to set a new one.",
+        );
+      }
+      setProvisionOpen(false);
+      setProvisionEmail("");
+      setProvisionDisplayName("");
+      setProvisionPassword("");
+      setProvisionRole("member");
+      await refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setProvisionSubmitting(false);
     }
   }
 
@@ -266,9 +336,18 @@ export function TeamPageClient({
               Refresh
             </Button>
             {canManage && (
-              <Button size="sm" onClick={() => setInviteOpen(true)}>
-                <UserPlus className="h-3.5 w-3.5" /> Invite
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setProvisionOpen(true)}
+                >
+                  <KeyRound className="h-3.5 w-3.5" /> Create login
+                </Button>
+                <Button size="sm" onClick={() => setInviteOpen(true)}>
+                  <UserPlus className="h-3.5 w-3.5" /> Invite
+                </Button>
+              </>
             )}
           </div>
         }
@@ -594,6 +673,108 @@ export function TeamPageClient({
           </TabsContent>
         </Tabs>
       </PageBody>
+
+      <Dialog open={provisionOpen} onOpenChange={setProvisionOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4" /> Create login (admin)
+            </DialogTitle>
+            <DialogDescription>
+              Creates a Firebase email/password account (or adds an existing account
+              to this workspace) and activates them immediately. Share the password
+              out-of-band; they can reset it from the login screen.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={submitProvision} className="space-y-3">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Full name</Label>
+              <Input
+                placeholder="Jordan Harper"
+                value={provisionDisplayName}
+                onChange={(e) => setProvisionDisplayName(e.target.value)}
+                autoComplete="name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Email</Label>
+              <Input
+                type="email"
+                placeholder="teammate@company.com"
+                value={provisionEmail}
+                onChange={(e) => setProvisionEmail(e.target.value)}
+                required
+                autoComplete="off"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Temporary password</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setProvisionPassword(randomTempPassword())}
+                >
+                  Generate
+                </Button>
+              </div>
+              <Input
+                type="text"
+                placeholder="8+ characters"
+                value={provisionPassword}
+                onChange={(e) => setProvisionPassword(e.target.value)}
+                autoComplete="new-password"
+                required
+                minLength={8}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Workspace role</Label>
+              <Select
+                value={provisionRole}
+                onValueChange={(v) => setProvisionRole(v as OrgMemberRole)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.filter((opt) => {
+                    if (opt.value === "owner") return isOwner;
+                    if (opt.value === "admin") return isOwner;
+                    return true;
+                  }).map((opt) => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      <div className="flex flex-col">
+                        <span>{opt.label}</span>
+                        <span className="text-[11px] text-muted-foreground">
+                          {opt.help}
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setProvisionOpen(false)}
+              >
+                Close
+              </Button>
+              <Button type="submit" disabled={provisionSubmitting}>
+                {provisionSubmitting && (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                )}
+                Create & add to team
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="max-w-md">

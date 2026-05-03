@@ -30,6 +30,7 @@ import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { exchangeIdTokenForSession } from "@/lib/auth/client-session";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
 
 const schema = z.object({
   email: z.string().min(1, "Email is required").email("Enter a valid email"),
@@ -63,6 +64,7 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const joinToken = searchParams.get("join") ?? undefined;
+  const inviteToken = searchParams.get("invite") ?? undefined;
   const [loading, setLoading] = React.useState(false);
 
   const form = useForm<FormValues>({
@@ -92,6 +94,7 @@ function LoginForm() {
       const idToken = await cred.user.getIdToken();
       const exchanged = await exchangeIdTokenForSession(idToken, {
         openJoinToken: joinToken,
+        inviteToken,
       });
       if (exchanged.membershipPending) {
         router.replace("/join/pending");
@@ -104,8 +107,7 @@ function LoginForm() {
       router.replace(next);
       toast.success("Signed in");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Sign-in failed";
-      toast.error(msg);
+      toast.error(formatFirebaseAuthError(e));
     } finally {
       setLoading(false);
     }
@@ -127,6 +129,7 @@ function LoginForm() {
       const idToken = await cred.user.getIdToken();
       const exchanged = await exchangeIdTokenForSession(idToken, {
         openJoinToken: joinToken,
+        inviteToken,
       });
       if (exchanged.membershipPending) {
         router.replace("/join/pending");
@@ -138,8 +141,7 @@ function LoginForm() {
       router.replace(searchParams.get("next") ?? "/dashboard");
       toast.success("Signed in with Google");
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Google sign-in failed";
-      toast.error(msg);
+      toast.error(formatFirebaseAuthError(e));
     } finally {
       setLoading(false);
     }
@@ -231,9 +233,11 @@ function LoginForm() {
         No account yet?{" "}
         <Link
           href={
-            joinToken
-              ? `/signup?join=${encodeURIComponent(joinToken)}`
-              : "/signup"
+            inviteToken
+              ? `/signup?invite=${encodeURIComponent(inviteToken)}`
+              : joinToken
+                ? `/signup?join=${encodeURIComponent(joinToken)}`
+                : "/signup"
           }
           className="text-primary hover:underline font-medium"
         >

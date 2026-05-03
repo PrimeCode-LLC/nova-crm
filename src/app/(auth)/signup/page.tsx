@@ -11,6 +11,7 @@ import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import { createUserWithEmailAndPassword, updateProfile } from "firebase/auth";
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -25,6 +26,10 @@ import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { exchangeIdTokenForSession } from "@/lib/auth/client-session";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import {
+  formatFirebaseAuthError,
+  isEmailAlreadyRegisteredError,
+} from "@/lib/firebase/auth-errors";
 
 type InvitePreview = {
   organizationName: string;
@@ -54,6 +59,7 @@ function SignupForm() {
     null,
   );
   const [joinError, setJoinError] = React.useState<string | null>(null);
+  const [existingAccountHint, setExistingAccountHint] = React.useState(false);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -130,6 +136,7 @@ function SignupForm() {
     }
 
     setLoading(true);
+    setExistingAccountHint(false);
     try {
       const auth = getFirebaseAuth();
       const cred = await createUserWithEmailAndPassword(
@@ -158,8 +165,12 @@ function SignupForm() {
           : "Workspace created. Welcome aboard!",
       );
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Sign-up failed";
-      toast.error(msg);
+      if (isEmailAlreadyRegisteredError(e)) {
+        setExistingAccountHint(true);
+      }
+      toast.error(formatFirebaseAuthError(e), {
+        duration: isEmailAlreadyRegisteredError(e) ? 8000 : 5000,
+      });
     } finally {
       setLoading(false);
     }
@@ -201,6 +212,13 @@ function SignupForm() {
     );
   }
 
+  const signInHref =
+    inviteToken != null && inviteToken !== ""
+      ? `/login?invite=${encodeURIComponent(inviteToken)}`
+      : joinToken != null && joinToken !== ""
+        ? `/login?join=${encodeURIComponent(joinToken)}`
+        : "/login";
+
   return (
     <div className="space-y-5">
       <div>
@@ -219,6 +237,28 @@ function SignupForm() {
               : "Get your team set up in under 2 minutes."}
         </p>
       </div>
+
+      {existingAccountHint && (
+        <Alert variant="destructive">
+          <AlertTitle>Account already exists</AlertTitle>
+          <AlertDescription className="space-y-2">
+            <p>
+              This email is already registered. Use{" "}
+              <Link href={signInHref} className="font-medium text-foreground underline">
+                Sign in
+              </Link>{" "}
+              with your existing password
+              {joinPreview || invitePreview
+                ? " so you can finish joining this workspace."
+                : "."}
+            </p>
+            <p className="text-xs">
+              After signing in, you can change your password from the login screen with
+              &quot;Forgot password&quot; if needed.
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
 
       <Form {...form}>
         <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -314,14 +354,7 @@ function SignupForm() {
 
       <p className="text-center text-xs text-muted-foreground">
         Already have an account?{" "}
-        <Link
-          href={
-            joinToken && !inviteToken
-              ? `/login?join=${encodeURIComponent(joinToken)}`
-              : "/login"
-          }
-          className="text-primary hover:underline font-medium"
-        >
+        <Link href={signInHref} className="text-primary hover:underline font-medium">
           Sign in
         </Link>
       </p>

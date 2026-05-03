@@ -4,6 +4,7 @@ import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 
 export type AuditEvent =
   | "member.invited"
+  | "member.provisioned"
   | "member.joined"
   | "member.approved"
   | "member.role_changed"
