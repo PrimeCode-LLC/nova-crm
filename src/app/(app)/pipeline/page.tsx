@@ -61,6 +61,7 @@ export default function PipelinePage() {
                   placeholder="Contact or company…"
                   value={boardQuery}
                   onChange={(e) => setBoardQuery(e.target.value)}
+                  onKeyDown={(e) => e.stopPropagation()}
                 />
                 <DropdownMenuSeparator />
                 <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">

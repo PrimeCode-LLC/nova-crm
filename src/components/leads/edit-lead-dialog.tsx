@@ -2,11 +2,24 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import type { Lead, LeadPriority, LeadTemperature, PipelineStage } from "@/lib/types";
+import type {
+  Lead,
+  LeadPriority,
+  LeadTemperature,
+  PipelineStage,
+  CompanySize,
+  RevenueRange,
+  PushStatus,
+  BANT,
+  ChannelKey,
+} from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
   DialogContent,
@@ -22,7 +35,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { PIPELINE_STAGES, TEMPERATURE_TONE, PRIORITY_TONE } from "@/lib/constants";
+import {
+  PIPELINE_STAGES,
+  CHANNEL_LIST,
+  TEMPERATURE_TONE,
+  PRIORITY_TONE,
+  REVENUE_RANGES,
+  COMPANY_SIZES,
+  PUSH_STATUS_TONE,
+} from "@/lib/constants";
+
+const UNSET = "__unset__" as const;
+type UnsetToken = typeof UNSET;
 
 function isoFromDateInput(dateStr: string): string | undefined {
   if (!dateStr.trim()) return undefined;
@@ -40,6 +64,26 @@ function dateInputFromIso(iso?: string): string {
   return `${y}-${m}-${day}`;
 }
 
+function parseToolsUsed(raw: string): string[] | undefined {
+  const parts = raw
+    .split(/[,;\n]+/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const uniq = [...new Set(parts)];
+  return uniq.length ? uniq : undefined;
+}
+
+function toolsUsedToString(tools?: string[]): string {
+  return tools?.length ? tools.join(", ") : "";
+}
+
+function clampBant(n: number): number {
+  return Math.min(5, Math.max(1, Math.round(n)));
+}
+
+const PUSH_KEYS = Object.keys(PUSH_STATUS_TONE) as PushStatus[];
+const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
+
 export function EditLeadDialog({
   open,
   onOpenChange,
@@ -51,6 +95,7 @@ export function EditLeadDialog({
   lead: Lead | null;
   onSave: (patch: Partial<Lead>) => void;
 }) {
+  const [channel, setChannel] = React.useState<ChannelKey>("cold_email");
   const [stage, setStage] = React.useState<PipelineStage>("new");
   const [temperature, setTemperature] = React.useState<LeadTemperature>("cold");
   const [priority, setPriority] = React.useState<LeadPriority>("medium");
@@ -59,9 +104,30 @@ export function EditLeadDialog({
   const [estimatedValue, setEstimatedValue] = React.useState("");
   const [expectedClose, setExpectedClose] = React.useState("");
 
+  const [triggerEvent, setTriggerEvent] = React.useState("");
+  const [businessFocus, setBusinessFocus] = React.useState("");
+  const [painPoints, setPainPoints] = React.useState("");
+  const [recentNews, setRecentNews] = React.useState("");
+  const [hiringSignals, setHiringSignals] = React.useState("");
+  const [psLine, setPsLine] = React.useState("");
+  const [toolsUsedStr, setToolsUsedStr] = React.useState("");
+
+  const [doNotContact, setDoNotContact] = React.useState(false);
+  const [companySize, setCompanySize] = React.useState<CompanySize | UnsetToken>(UNSET);
+  const [revenueRange, setRevenueRange] = React.useState<RevenueRange | UnsetToken>(UNSET);
+  const [pushToInstantly, setPushToInstantly] = React.useState<PushStatus | UnsetToken>(UNSET);
+  const [pushToLinkedIn, setPushToLinkedIn] = React.useState<PushStatus | UnsetToken>(UNSET);
+
+  const [useBant, setUseBant] = React.useState(false);
+  const [bantBudget, setBantBudget] = React.useState("3");
+  const [bantAuthority, setBantAuthority] = React.useState("3");
+  const [bantNeed, setBantNeed] = React.useState("3");
+  const [bantTimeline, setBantTimeline] = React.useState("3");
+
   React.useEffect(() => {
     if (!open || !lead) return;
     React.startTransition(() => {
+      setChannel(lead.channel);
       setStage(lead.stage);
       setTemperature(lead.temperature);
       setPriority(lead.priority);
@@ -69,6 +135,27 @@ export function EditLeadDialog({
       setNotes(lead.notes ?? "");
       setEstimatedValue(lead.estimatedValue != null ? String(lead.estimatedValue) : "");
       setExpectedClose(dateInputFromIso(lead.expectedCloseDate));
+
+      setTriggerEvent(lead.triggerEvent ?? "");
+      setBusinessFocus(lead.businessFocus ?? "");
+      setPainPoints(lead.painPoints ?? "");
+      setRecentNews(lead.recentNews ?? "");
+      setHiringSignals(lead.hiringSignals ?? "");
+      setPsLine(lead.psLine ?? "");
+      setToolsUsedStr(toolsUsedToString(lead.toolsUsed));
+
+      setDoNotContact(!!lead.doNotContact);
+      setCompanySize(lead.companySize ?? UNSET);
+      setRevenueRange(lead.revenueRange ?? UNSET);
+      setPushToInstantly(lead.pushToInstantly ?? UNSET);
+      setPushToLinkedIn(lead.pushToLinkedIn ?? UNSET);
+
+      const b = lead.bant;
+      setUseBant(!!b);
+      setBantBudget(String(b?.budget ?? 3));
+      setBantAuthority(String(b?.authority ?? 3));
+      setBantNeed(String(b?.need ?? 3));
+      setBantTimeline(String(b?.timeline ?? 3));
     });
   }, [open, lead]);
 
@@ -88,7 +175,19 @@ export function EditLeadDialog({
       estimatedValueNum = undefined;
     }
     const expectedCloseDate = isoFromDateInput(expectedClose);
+
+    let bant: BANT | undefined;
+    if (useBant) {
+      bant = {
+        budget: clampBant(Number(bantBudget)),
+        authority: clampBant(Number(bantAuthority)),
+        need: clampBant(Number(bantNeed)),
+        timeline: clampBant(Number(bantTimeline)),
+      };
+    }
+
     onSave({
+      channel,
       stage,
       temperature,
       priority,
@@ -96,6 +195,22 @@ export function EditLeadDialog({
       notes: notes.trim() || undefined,
       estimatedValue: estimatedValueNum,
       expectedCloseDate,
+
+      triggerEvent: triggerEvent.trim() || undefined,
+      businessFocus: businessFocus.trim() || undefined,
+      painPoints: painPoints.trim() || undefined,
+      recentNews: recentNews.trim() || undefined,
+      hiringSignals: hiringSignals.trim() || undefined,
+      psLine: psLine.trim() || undefined,
+      toolsUsed: parseToolsUsed(toolsUsedStr),
+
+      doNotContact,
+      companySize: companySize === UNSET ? undefined : companySize,
+      revenueRange: revenueRange === UNSET ? undefined : revenueRange,
+      pushToInstantly: pushToInstantly === UNSET ? undefined : pushToInstantly,
+      pushToLinkedIn: pushToLinkedIn === UNSET ? undefined : pushToLinkedIn,
+
+      bant,
     });
     toast.success("Lead updated");
     onOpenChange(false);
@@ -105,103 +220,333 @@ export function EditLeadDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" showCloseButton>
+      <DialogContent className="sm:max-w-2xl" showCloseButton>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Edit lead</DialogTitle>
             <DialogDescription>
-              Update qualification and next steps for {lead.contactName}. Changes apply for this browser session.
+              Update research, routing, qualification, and next steps for {lead.contactName}. Changes apply for this
+              browser session.
             </DialogDescription>
           </DialogHeader>
-          <div className="grid gap-3 py-2 max-h-[min(70vh,520px)] overflow-y-auto pr-1">
-            <div className="grid gap-2">
-              <Label>Stage</Label>
-              <Select value={stage} onValueChange={(v) => v && setStage(v as PipelineStage)}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {PIPELINE_STAGES.map((s) => (
-                    <SelectItem key={s.key} value={s.key}>
-                      {s.label}
-                    </SelectItem>
+          <div className="grid gap-4 py-2 max-h-[min(78vh,640px)] overflow-y-auto pr-1">
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Research & personalization
+              </p>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-trigger">Trigger event</Label>
+                <Textarea
+                  id="edit-trigger"
+                  value={triggerEvent}
+                  onChange={(e) => setTriggerEvent(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                  placeholder="Why reach out now?"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-focus">Business focus</Label>
+                <Textarea
+                  id="edit-focus"
+                  value={businessFocus}
+                  onChange={(e) => setBusinessFocus(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-pain">Pain points</Label>
+                <Textarea
+                  id="edit-pain"
+                  value={painPoints}
+                  onChange={(e) => setPainPoints(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-news">Recent news</Label>
+                <Textarea
+                  id="edit-news"
+                  value={recentNews}
+                  onChange={(e) => setRecentNews(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-hiring">Hiring signals</Label>
+                <Textarea
+                  id="edit-hiring"
+                  value={hiringSignals}
+                  onChange={(e) => setHiringSignals(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-ps">P.S. line</Label>
+                <Input id="edit-ps" value={psLine} onChange={(e) => setPsLine(e.target.value)} />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-tools">Tools used</Label>
+                <Input
+                  id="edit-tools"
+                  value={toolsUsedStr}
+                  onChange={(e) => setToolsUsedStr(e.target.value)}
+                  placeholder="Comma-separated, e.g. Salesforce, HubSpot"
+                />
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campaign routing</p>
+              <div className="grid gap-2">
+                <Label>Channel</Label>
+                <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CHANNEL_LIST.map((c) => (
+                      <SelectItem key={c.key} value={c.key}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-2">
+                <Checkbox
+                  id="edit-dnc"
+                  checked={doNotContact}
+                  onCheckedChange={(v) => setDoNotContact(v === true)}
+                />
+                <Label htmlFor="edit-dnc" className="font-normal cursor-pointer">
+                  Do not contact
+                </Label>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Company size</Label>
+                  <Select
+                    value={companySize}
+                    onValueChange={(v) => v && setCompanySize(v as CompanySize | UnsetToken)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not set" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSET}>Not set</SelectItem>
+                      {COMPANY_SIZES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Revenue range</Label>
+                  <Select
+                    value={revenueRange}
+                    onValueChange={(v) => v && setRevenueRange(v as RevenueRange | UnsetToken)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not set" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSET}>Not set</SelectItem>
+                      {REVENUE_KEYS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {REVENUE_RANGES[k]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Push to Instantly</Label>
+                  <Select
+                    value={pushToInstantly}
+                    onValueChange={(v) => v && setPushToInstantly(v as PushStatus | UnsetToken)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not set" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSET}>Not set</SelectItem>
+                      {PUSH_KEYS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {PUSH_STATUS_TONE[k].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Push to LinkedIn</Label>
+                  <Select
+                    value={pushToLinkedIn}
+                    onValueChange={(v) => v && setPushToLinkedIn(v as PushStatus | UnsetToken)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not set" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSET}>Not set</SelectItem>
+                      {PUSH_KEYS.map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {PUSH_STATUS_TONE[k].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Qualification</p>
+              <div className="grid gap-2">
+                <Label>Stage</Label>
+                <Select value={stage} onValueChange={(v) => v && setStage(v as PipelineStage)}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PIPELINE_STAGES.map((s) => (
+                      <SelectItem key={s.key} value={s.key}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Temperature</Label>
+                  <Select value={temperature} onValueChange={(v) => v && setTemperature(v as LeadTemperature)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(TEMPERATURE_TONE) as LeadTemperature[]).map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {TEMPERATURE_TONE[k].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Priority</Label>
+                  <Select value={priority} onValueChange={(v) => v && setPriority(v as LeadPriority)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(Object.keys(PRIORITY_TONE) as LeadPriority[]).map((k) => (
+                        <SelectItem key={k} value={k}>
+                          {PRIORITY_TONE[k].label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-ev">Est. value (USD)</Label>
+                  <Input
+                    id="edit-ev"
+                    inputMode="decimal"
+                    value={estimatedValue}
+                    onChange={(e) => setEstimatedValue(e.target.value)}
+                    placeholder="Optional"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="edit-close">Expected close</Label>
+                  <Input
+                    id="edit-close"
+                    type="date"
+                    value={expectedClose}
+                    onChange={(e) => setExpectedClose(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-3 pt-1">
+                <p className="text-xs font-medium text-muted-foreground">BANT scores</p>
+                <div className="flex items-center gap-2">
+                  <Switch checked={useBant} onCheckedChange={setUseBant} id="edit-bant-switch" size="sm" />
+                  <Label htmlFor="edit-bant-switch" className="text-xs font-normal cursor-pointer">
+                    Score this lead
+                  </Label>
+                </div>
+              </div>
+              {useBant && (
+                <div className="grid grid-cols-2 gap-3">
+                  {(
+                    [
+                      ["Budget", bantBudget, setBantBudget],
+                      ["Authority", bantAuthority, setBantAuthority],
+                      ["Need", bantNeed, setBantNeed],
+                      ["Timeline", bantTimeline, setBantTimeline],
+                    ] as const
+                  ).map(([label, val, setVal]) => (
+                    <div key={label} className="grid gap-2">
+                      <Label>{label} (1–5)</Label>
+                      <Select value={val} onValueChange={(v) => v && setVal(v)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <SelectItem key={n} value={String(n)}>
+                              {n}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
                   ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
+                </div>
+              )}
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Next steps</p>
               <div className="grid gap-2">
-                <Label>Temperature</Label>
-                <Select value={temperature} onValueChange={(v) => v && setTemperature(v as LeadTemperature)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(TEMPERATURE_TONE) as LeadTemperature[]).map((k) => (
-                      <SelectItem key={k} value={k}>
-                        {TEMPERATURE_TONE[k].label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="grid gap-2">
-                <Label>Priority</Label>
-                <Select value={priority} onValueChange={(v) => v && setPriority(v as LeadPriority)}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(Object.keys(PRIORITY_TONE) as LeadPriority[]).map((k) => (
-                      <SelectItem key={k} value={k}>
-                        {PRIORITY_TONE[k].label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-next">Next action</Label>
-              <Input
-                id="edit-next"
-                value={nextAction}
-                onChange={(e) => setNextAction(e.target.value)}
-                placeholder="e.g. Send proposal deck by Friday"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label htmlFor="edit-notes">Internal notes</Label>
-              <Textarea
-                id="edit-notes"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                rows={3}
-                className="resize-none"
-                placeholder="Team-only context…"
-              />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div className="grid gap-2">
-                <Label htmlFor="edit-ev">Est. value (USD)</Label>
+                <Label htmlFor="edit-next">Next action</Label>
                 <Input
-                  id="edit-ev"
-                  inputMode="decimal"
-                  value={estimatedValue}
-                  onChange={(e) => setEstimatedValue(e.target.value)}
-                  placeholder="Optional"
+                  id="edit-next"
+                  value={nextAction}
+                  onChange={(e) => setNextAction(e.target.value)}
+                  placeholder="e.g. Send proposal deck by Friday"
                 />
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-close">Expected close</Label>
-                <Input
-                  id="edit-close"
-                  type="date"
-                  value={expectedClose}
-                  onChange={(e) => setExpectedClose(e.target.value)}
+                <Label htmlFor="edit-notes">Internal notes</Label>
+                <Textarea
+                  id="edit-notes"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={3}
+                  className="resize-none"
+                  placeholder="Team-only context…"
                 />
               </div>
-            </div>
+            </section>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

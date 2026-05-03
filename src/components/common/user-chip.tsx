@@ -19,10 +19,17 @@ export function UserChip({
   /** When set, the chip is a link (e.g. `/admin/users?user=u-123`). */
   profileHref?: string;
 }) {
-  const { getUserById } = useWorkspace();
-  const user = getUserById(userId ?? "");
-  if (!user) return <span className="text-muted-foreground text-xs">Unassigned</span>;
-  const initials = user.displayName
+  const { getUserById, getOwnerDisplayName } = useWorkspace();
+  const uid = userId?.trim() ?? "";
+  if (!uid) return <span className="text-muted-foreground text-xs">Unassigned</span>;
+
+  const user = getUserById(uid);
+  const displayName = user?.displayName?.trim() || getOwnerDisplayName(uid) || "";
+  if (!displayName) {
+    return <span className="text-muted-foreground text-xs">Unknown owner</span>;
+  }
+
+  const initials = displayName
     .split(" ")
     .map((n) => n[0])
     .join("")
@@ -38,9 +45,7 @@ export function UserChip({
           {initials}
         </AvatarFallback>
       </Avatar>
-      {!nameOnly && (
-        <span className="truncate text-sm">{user.displayName}</span>
-      )}
+      {!nameOnly && <span className="truncate text-sm">{displayName}</span>}
     </>
   );
 

@@ -18,12 +18,23 @@ import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST } from "@/lib/constants";
+import {
+  OWNER_SCOPE_PREFIX,
+  buildPersonOwnerOptions,
+  filterActivityCountersByOwnerScope,
+  filterActivityRecordsByOwnerScope,
+  filterLeadsByOwnerScope,
+  getOwnerFilterTriggerLabel,
+} from "@/lib/owner-scope";
 import type { ChannelKey } from "@/lib/types";
-import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter } from "lucide-react";
+import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users } from "lucide-react";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -40,7 +51,17 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 
 export default function DashboardPage() {
-  const { leads, deals, isDemo, activityCounters, activityRecords } = useWorkspace();
+  const {
+    leads,
+    deals,
+    isDemo,
+    activityCounters,
+    activityRecords,
+    users,
+    currentUserId,
+    getUserById,
+    getOwnerDisplayName,
+  } = useWorkspace();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
     () => mergeActivityCounters(activityCounters, localRollups),
@@ -49,25 +70,46 @@ export default function DashboardPage() {
   const [filterOpen, setFilterOpen] = React.useState(false);
   const [channelScope, setChannelScope] = React.useState<ChannelKey[]>([]);
   const [draftChannels, setDraftChannels] = React.useState<ChannelKey[]>([]);
+  const [ownerScope, setOwnerScope] = React.useState("all-owners");
+
+  const ownerScopeDeps = React.useMemo(
+    () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
+    [currentUserId, users, getUserById, getOwnerDisplayName],
+  );
+
+  const personOwnerOptions = React.useMemo(
+    () => buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName),
+    [leads, users, getUserById, getOwnerDisplayName],
+  );
+
+  const ownerFilterTriggerLabel = React.useMemo(
+    () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
+    [ownerScope, personOwnerOptions],
+  );
 
   function openFilterDialog() {
     setDraftChannels(channelScope);
     setFilterOpen(true);
   }
 
-  const scopedLeads = React.useMemo(
+  const channelScopedLeads = React.useMemo(
     () => (channelScope.length ? leads.filter((l) => channelScope.includes(l.channel)) : leads),
     [leads, channelScope],
   );
 
-  const scopedLeadIds = React.useMemo(() => new Set(scopedLeads.map((l) => l.id)), [scopedLeads]);
-
-  const scopedDeals = React.useMemo(
-    () => (channelScope.length ? deals.filter((d) => scopedLeadIds.has(d.leadId)) : deals),
-    [deals, channelScope, scopedLeadIds],
+  const scopedLeads = React.useMemo(
+    () => filterLeadsByOwnerScope(channelScopedLeads, ownerScope, ownerScopeDeps),
+    [channelScopedLeads, ownerScope, ownerScopeDeps],
   );
 
-  const scopedActivityCounters = React.useMemo(
+  const scopedLeadIds = React.useMemo(() => new Set(scopedLeads.map((l) => l.id)), [scopedLeads]);
+
+  const scopedDeals = React.useMemo(() => {
+    if (channelScope.length === 0 && ownerScope === "all-owners") return deals;
+    return deals.filter((d) => scopedLeadIds.has(d.leadId));
+  }, [deals, scopedLeadIds, channelScope.length, ownerScope]);
+
+  const activityAfterChannel = React.useMemo(
     () =>
       channelScope.length
         ? activityCountersWithLocal.filter((r) => channelScope.includes(r.channel))
@@ -75,10 +117,20 @@ export default function DashboardPage() {
     [activityCountersWithLocal, channelScope],
   );
 
-  const scopedActivityRecords = React.useMemo(
+  const scopedActivityCounters = React.useMemo(
+    () => filterActivityCountersByOwnerScope(activityAfterChannel, ownerScope, ownerScopeDeps),
+    [activityAfterChannel, ownerScope, ownerScopeDeps],
+  );
+
+  const activityRecordsAfterChannel = React.useMemo(
     () =>
       channelScope.length ? activityRecords.filter((r) => channelScope.includes(r.channel)) : activityRecords,
     [activityRecords, channelScope],
+  );
+
+  const scopedActivityRecords = React.useMemo(
+    () => filterActivityRecordsByOwnerScope(activityRecordsAfterChannel, ownerScope, ownerScopeDeps),
+    [activityRecordsAfterChannel, ownerScope, ownerScopeDeps],
   );
 
   const totalOpen = scopedLeads.filter((l) => !["won", "lost"].includes(l.stage)).length;
@@ -135,10 +187,12 @@ export default function DashboardPage() {
   }
 
   function exportOverviewCsv() {
-    const scope =
+    const ch =
       channelScope.length === 0
         ? "all channels"
         : channelScope.map((c) => CHANNEL_LIST.find((x) => x.key === c)?.label ?? c).join("; ");
+    const own = ownerFilterTriggerLabel;
+    const scope = `${ch} · ${own}`;
     downloadDashboardKpiCsv(
       [
         { label: "Scope", value: scope },
@@ -176,6 +230,36 @@ export default function DashboardPage() {
                 <SelectItem value="90d">Last 90 days</SelectItem>
                 <SelectItem value="qtd">Quarter to date</SelectItem>
                 <SelectItem value="ytd">Year to date</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
+              <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem] gap-1.5">
+                <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                <SelectValue placeholder="Owner">
+                  {ownerFilterTriggerLabel}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent className="max-h-72">
+                <SelectGroup>
+                  <SelectLabel className="text-[10px] uppercase tracking-wide">Quick</SelectLabel>
+                  <SelectItem value="all-owners">All owners</SelectItem>
+                  <SelectItem value="me">Owned by me</SelectItem>
+                  <SelectItem value="team">My team</SelectItem>
+                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                </SelectGroup>
+                {personOwnerOptions.length > 0 && (
+                  <>
+                    <SelectSeparator />
+                    <SelectGroup>
+                      <SelectLabel className="text-[10px] uppercase tracking-wide">By teammate</SelectLabel>
+                      {personOwnerOptions.map((o) => (
+                        <SelectItem key={o.id} value={`${OWNER_SCOPE_PREFIX}${o.id}`}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  </>
+                )}
               </SelectContent>
             </Select>
             <Button variant="outline" size="sm" type="button" onClick={openFilterDialog} className="gap-1.5">
@@ -234,6 +318,7 @@ export default function DashboardPage() {
               onClick={() => {
                 setDraftChannels([]);
                 setChannelScope([]);
+                setOwnerScope("all-owners");
                 setFilterOpen(false);
               }}
             >
@@ -256,19 +341,31 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {channelScope.length > 0 && (
+            {(channelScope.length > 0 || ownerScope !== "all-owners") && (
               <p className="text-xs text-muted-foreground mb-2">
-                Showing{" "}
-                <span className="font-medium text-foreground">
-                  {channelScope.map((k) => CHANNEL_LIST.find((c) => c.key === k)?.label ?? k).join(", ")}
-                </span>
-                .{" "}
+                {channelScope.length > 0 && (
+                  <>
+                    Channels:{" "}
+                    <span className="font-medium text-foreground">
+                      {channelScope.map((k) => CHANNEL_LIST.find((c) => c.key === k)?.label ?? k).join(", ")}
+                    </span>
+                    .{" "}
+                  </>
+                )}
+                {ownerScope !== "all-owners" && (
+                  <>
+                    Owner: <span className="font-medium text-foreground">{ownerFilterTriggerLabel}</span>.{" "}
+                  </>
+                )}
                 <button
                   type="button"
                   className="text-primary underline-offset-4 hover:underline"
-                  onClick={() => setChannelScope([])}
+                  onClick={() => {
+                    setChannelScope([]);
+                    setOwnerScope("all-owners");
+                  }}
                 >
-                  Reset
+                  Reset filters
                 </button>
               </p>
             )}

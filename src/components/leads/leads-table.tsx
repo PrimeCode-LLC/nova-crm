@@ -29,7 +29,10 @@ import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
+  SelectSeparator,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -45,6 +48,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   ArrowUpDown,
+  Check,
   ChevronDown,
   Columns3,
   Filter,
@@ -71,6 +75,63 @@ import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { downloadLeadsCsv } from "@/lib/leads-csv";
+import {
+  OWNER_SCOPE_PREFIX,
+  buildPersonOwnerOptions,
+  filterLeadsByOwnerScope,
+  getOwnerFilterTriggerLabel,
+} from "@/lib/owner-scope";
+import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
+
+function LeadChannelCell({ lead }: { lead: Lead }) {
+  const { patchLead, bumpLeadActivity } = useWorkspace();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            type="button"
+            size="sm"
+            className="h-auto gap-1 px-1 py-0 font-normal hover:bg-muted/60"
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Change channel"
+          >
+            <ChannelChip channel={lead.channel} />
+            <ChevronDown className="h-3 w-3 shrink-0 opacity-50" aria-hidden />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="start" className="min-w-44">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Set channel</DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuGroup>
+          {CHANNEL_LIST.map((c) => (
+            <DropdownMenuItem
+              key={c.key}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (c.key === lead.channel) return;
+                patchLead(lead.id, { channel: c.key });
+                bumpLeadActivity(lead.id);
+                toast.success("Channel updated");
+              }}
+            >
+              <span className="flex w-full min-w-0 items-center gap-2">
+                <span className="flex w-4 shrink-0 justify-center">
+                  {c.key === lead.channel ? <Check className="h-3.5 w-3.5" /> : null}
+                </span>
+                <ChannelChip channel={c.key} compact className="shrink-0" />
+                <span className="min-w-0 truncate">{c.label}</span>
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 export type LeadsTablePreset = "default" | "high-priority";
 
@@ -112,7 +173,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   ref,
 ) {
   const router = useRouter();
-  const { currentUserId, users, getUserById, isDemo } = useWorkspace();
+  const { currentUserId, users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
   const { openQuickAdd } = useOpenQuickAdd();
   const initialChannels = React.useMemo(
     () => (urlChannelKey ? (urlChannelKey.split("|").filter(Boolean) as ChannelKey[]) : []),
@@ -130,6 +191,13 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [rowSelection, setRowSelection] = React.useState({});
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({});
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [reassignOpen, setReassignOpen] = React.useState(false);
+  const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
+
+  const openReassignForIds = React.useCallback((ids: string[]) => {
+    setReassignLeadIds(ids);
+    setReassignOpen(true);
+  }, []);
 
   React.useEffect(() => {
     setColumnFilters(mergeUrlColumnFilters(preset, initialChannels, initialStages));
@@ -140,18 +208,25 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     [leads, idleOnly],
   );
 
-  const dataForTable = React.useMemo(() => {
-    if (ownerScope === "all-owners") return afterIdleFilter;
-    if (ownerScope === "me") return afterIdleFilter.filter((l) => l.ownerId === currentUserId);
-    if (ownerScope === "unassigned") {
-      return afterIdleFilter.filter((l) => !l.ownerId || !getUserById(l.ownerId));
-    }
-    if (ownerScope === "team") {
-      const peerIds = new Set(users.filter((u) => u.id !== currentUserId).map((u) => u.id));
-      return afterIdleFilter.filter((l) => peerIds.has(l.ownerId));
-    }
-    return afterIdleFilter;
-  }, [afterIdleFilter, ownerScope, currentUserId, users, getUserById]);
+  const ownerScopeDeps = React.useMemo(
+    () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
+    [currentUserId, users, getUserById, getOwnerDisplayName],
+  );
+
+  const personOwnerOptions = React.useMemo(
+    () => buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName),
+    [leads, users, getUserById, getOwnerDisplayName],
+  );
+
+  const dataForTable = React.useMemo(
+    () => filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps),
+    [afterIdleFilter, ownerScope, ownerScopeDeps],
+  );
+
+  const ownerFilterTriggerLabel = React.useMemo(
+    () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
+    [ownerScope, personOwnerOptions],
+  );
 
   const columns = React.useMemo<ColumnDef<Lead>[]>(() => [
     {
@@ -214,7 +289,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       id: "channel",
       accessorKey: "channel",
       header: "Channel",
-      cell: ({ row }) => <ChannelChip channel={row.original.channel} />,
+      cell: ({ row }) => <LeadChannelCell lead={row.original} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
     },
@@ -334,13 +409,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             <DropdownMenuContent align="end">
               <DropdownMenuItem onClick={() => router.push(`/leads/${id}`)}>Edit</DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() =>
-                  toast.info(isDemo ? "Demo workspace" : "Not yet available", {
-                    description: isDemo
-                      ? "Reassign is read-only in sample data."
-                      : "Connect your backend to reassign owners.",
-                  })
-                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openReassignForIds([id]);
+                }}
               >
                 Reassign
               </DropdownMenuItem>
@@ -367,7 +439,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, isDemo]);
+  ], [router, openReassignForIds, isDemo]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -437,6 +509,15 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   return (
     <div className="flex flex-col gap-3">
+      <ReassignLeadsDialog
+        open={reassignOpen}
+        onOpenChange={(o) => {
+          setReassignOpen(o);
+          if (!o) setReassignLeadIds([]);
+        }}
+        leadIds={reassignLeadIds}
+        onSuccess={() => setRowSelection({})}
+      />
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
@@ -506,14 +587,32 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         </DropdownMenu>
 
         <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
-          <SelectTrigger size="sm" className="w-[8.5rem]">
-            <SelectValue />
+          <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem]">
+            <SelectValue placeholder="Owner filter">
+              {ownerFilterTriggerLabel}
+            </SelectValue>
           </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all-owners">All owners</SelectItem>
-            <SelectItem value="me">Owned by me</SelectItem>
-            <SelectItem value="team">My team</SelectItem>
-            <SelectItem value="unassigned">Unassigned</SelectItem>
+          <SelectContent className="max-h-72">
+            <SelectGroup>
+              <SelectLabel className="text-[10px] uppercase tracking-wide">Quick</SelectLabel>
+              <SelectItem value="all-owners">All owners</SelectItem>
+              <SelectItem value="me">Owned by me</SelectItem>
+              <SelectItem value="team">My team</SelectItem>
+              <SelectItem value="unassigned">Unassigned</SelectItem>
+            </SelectGroup>
+            {personOwnerOptions.length > 0 && (
+              <>
+                <SelectSeparator />
+                <SelectGroup>
+                  <SelectLabel className="text-[10px] uppercase tracking-wide">By teammate</SelectLabel>
+                  {personOwnerOptions.map((o) => (
+                    <SelectItem key={o.id} value={`${OWNER_SCOPE_PREFIX}${o.id}`}>
+                      {o.label}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </>
+            )}
           </SelectContent>
         </Select>
 
@@ -565,13 +664,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             size="sm"
             className="ml-auto"
             type="button"
-            onClick={() =>
-              toast.info(isDemo ? "Demo workspace" : "Not yet available", {
-                description: isDemo
-                  ? "Bulk reassign is read-only in sample data."
-                  : "Bulk reassign will be available once your workspace is connected.",
-              })
-            }
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              if (!ids.length) return;
+              openReassignForIds(ids);
+            }}
           >
             <UserCog className="h-3.5 w-3.5" /> Reassign
           </Button>

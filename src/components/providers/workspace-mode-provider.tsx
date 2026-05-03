@@ -11,6 +11,7 @@ import type {
   Followup,
   Lead,
   Note,
+  OrganizationMember,
   PermissionOverride,
   PipelineStage,
   Profile,
@@ -73,6 +74,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     toggleLeadPin: (leadId: string) => void;
     isLeadPinned: (leadId: string) => boolean;
     bumpLeadActivity: (leadId: string) => void;
+    /** Display name for CRM `ownerId` when the user exists in org members but not (yet) in Firestore `users`. */
+    getOwnerDisplayName: (uid: string) => string | undefined;
   };
 
 const WorkspaceContext = React.createContext<WorkspaceContextValue | null>(null);
@@ -154,6 +157,36 @@ export function WorkspaceModeProvider({
   const liveOrgId =
     mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
   const liveFs = useLiveWorkspaceFirestore(liveOrgId);
+
+  const [orgMemberLabels, setOrgMemberLabels] = React.useState<Record<string, string>>({});
+  React.useEffect(() => {
+    if (!liveOrgId) {
+      setOrgMemberLabels({});
+      return;
+    }
+    let cancelled = false;
+    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { members?: OrganizationMember[] };
+        const members = data.members ?? [];
+        const next: Record<string, string> = {};
+        for (const m of members) {
+          const label =
+            m.displayName?.trim() ||
+            (m.email.includes("@") ? m.email.split("@")[0] : m.email) ||
+            m.uid;
+          next[m.uid] = label;
+        }
+        if (!cancelled) setOrgMemberLabels(next);
+      })
+      .catch(() => {
+        if (!cancelled) setOrgMemberLabels({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [liveOrgId]);
 
   React.useEffect(() => {
     React.startTransition(() => {
@@ -446,9 +479,14 @@ export function WorkspaceModeProvider({
       return getWorkspaceSnapshot(mode, demoPersonaId);
     }
     const uid = fbUser?.uid ?? "";
+    /** Firestore query uses `organizationId`; if the member doc is missing that field, the roster is empty but leads still store `ownerId` as Firebase uid — merge the viewer so UserChip and owner pickers resolve. */
+    let usersForSnapshot = liveFs.users;
+    if (uid && userDoc && !usersForSnapshot.some((u) => u.id === uid)) {
+      usersForSnapshot = [...usersForSnapshot, { ...userDoc, id: uid }];
+    }
     const raw: WorkspaceSnapshot = {
       ...LIVE_SNAPSHOT,
-      users: liveFs.users,
+      users: usersForSnapshot,
       leads: liveFs.leads,
       accounts: liveFs.accounts,
       contacts: liveFs.contacts,
@@ -456,10 +494,15 @@ export function WorkspaceModeProvider({
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
-      return raw;
+      return { ...raw, users: liveFs.users };
     }
     const viewer: User = { ...userDoc, id: uid };
-    const roster = liveFs.users.length > 0 ? liveFs.users : [viewer];
+    const roster =
+      liveFs.users.length === 0
+        ? [viewer]
+        : liveFs.users.some((u) => u.id === uid)
+          ? liveFs.users
+          : [...liveFs.users, viewer];
     return applyLiveHierarchyScope(raw, viewer, roster);
   }, [
     mode,
@@ -550,6 +593,13 @@ export function WorkspaceModeProvider({
 
   const value = React.useMemo<WorkspaceContextValue>(() => {
     const lookup = createWorkspaceLookup(snapshot);
+    const getOwnerDisplayName = (uid: string): string | undefined => {
+      const id = uid?.trim();
+      if (!id) return undefined;
+      const fromUser = snapshot.users.find((u) => u.id === id)?.displayName?.trim();
+      if (fromUser) return fromUser;
+      return orgMemberLabels[id]?.trim() || undefined;
+    };
     return {
       ...snapshot,
       ...lookup,
@@ -582,9 +632,11 @@ export function WorkspaceModeProvider({
       toggleLeadPin,
       isLeadPinned,
       bumpLeadActivity,
+      getOwnerDisplayName,
     };
   }, [
     snapshot,
+    orgMemberLabels,
     mode,
     demoPersonaId,
     setMode,
