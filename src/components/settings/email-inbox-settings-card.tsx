@@ -11,7 +11,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { useEmailAccountStore, isEmailAccountConfigured } from "@/stores/email-account-store";
 import { toast } from "sonner";
-import { Loader2, Mail, ShieldAlert } from "lucide-react";
+import { Loader2, Mail, PlugZap, ShieldAlert } from "lucide-react";
 
 export function EmailInboxSettingsCard() {
   const account = useEmailAccountStore((s) => s.account);
@@ -20,23 +20,64 @@ export function EmailInboxSettingsCard() {
   const setImap = useEmailAccountStore((s) => s.setImap);
   const [testing, setTesting] = React.useState(false);
 
-  async function testSmtp() {
+  async function testConnections() {
+    const smtpHost = account.smtp.host.trim();
+    const smtpUser = account.smtp.user.trim();
+    if (!smtpHost || !smtpUser) {
+      toast.error("Enter SMTP host and username first.");
+      return;
+    }
+
+    const imapHost = account.imap.host.trim();
+    const imapUser = account.imap.user.trim();
+    const testImap = Boolean(imapHost && imapUser);
+
     setTesting(true);
     try {
-      const res = await fetch("/api/email/smtp-verify", {
+      const smtpRes = await fetch("/api/email/smtp-verify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          host: account.smtp.host,
+          host: smtpHost,
           port: account.smtp.port,
           secure: account.smtp.secure,
-          user: account.smtp.user,
+          user: smtpUser,
           pass: account.smtp.password,
         }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (data.ok) toast.success("SMTP connection verified");
-      else toast.error(data.error ?? "Verification failed");
+      const smtpData = (await smtpRes.json()) as { ok?: boolean; error?: string };
+
+      let imapData: { ok?: boolean; error?: string } | null = null;
+      if (testImap) {
+        const imapRes = await fetch("/api/email/imap-verify", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            host: imapHost,
+            port: account.imap.port,
+            secure: account.imap.secure,
+            user: imapUser,
+            pass: account.imap.password,
+          }),
+        });
+        imapData = (await imapRes.json()) as { ok?: boolean; error?: string };
+      }
+
+      const smtpOk = Boolean(smtpData.ok);
+      const imapOk = !testImap || Boolean(imapData?.ok);
+
+      if (smtpOk && imapOk) {
+        toast.success(
+          testImap ? "SMTP and IMAP settings look correct." : "SMTP settings look correct.",
+        );
+      } else {
+        const parts: string[] = [];
+        if (!smtpOk) parts.push(`SMTP: ${smtpData.error ?? "failed"}`);
+        if (testImap && imapData && !imapData.ok) {
+          parts.push(`IMAP: ${imapData.error ?? "failed"}`);
+        }
+        toast.error(parts.join(" · "));
+      }
     } catch {
       toast.error("Could not reach the server");
     } finally {
@@ -63,18 +104,31 @@ export function EmailInboxSettingsCard() {
       </Card>
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Mail className="h-4 w-4" />
-            Unified inbox (SMTP / IMAP)
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Connect your mailbox so Nova can send email and (soon) sync inbound threads into the Email tab on{" "}
-            <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
-              Inbox
-            </Link>
-            . IMAP fields are saved for the upcoming background sync engine.
-          </CardDescription>
+        <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3 space-y-0 pb-4">
+          <div className="min-w-0 space-y-1.5">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <Mail className="h-4 w-4 shrink-0" />
+              Unified inbox (SMTP / IMAP)
+            </CardTitle>
+            <CardDescription className="text-xs">
+              Connect your mailbox so Nova can send email and (soon) sync inbound threads into the Email tab on{" "}
+              <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
+                Inbox
+              </Link>
+              . IMAP fields are saved for the upcoming background sync engine.
+            </CardDescription>
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            className="shrink-0 gap-1.5"
+            disabled={testing}
+            onClick={() => void testConnections()}
+          >
+            {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <PlugZap className="h-3.5 w-3.5" />}
+            Test connection
+          </Button>
         </CardHeader>
         <CardContent className="space-y-6">
           <div className="flex items-center justify-between gap-4 rounded-lg border p-3">
@@ -177,15 +231,11 @@ export function EmailInboxSettingsCard() {
                 />
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button type="button" variant="outline" size="sm" disabled={testing} onClick={() => void testSmtp()}>
-                {testing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                Test SMTP connection
-              </Button>
-              <span className="text-[11px] text-muted-foreground self-center">
-                {configured ? "Ready to send from Inbox → Email." : "Fill host, user, and From address to send."}
-              </span>
-            </div>
+            <p className="mt-2 text-[11px] text-muted-foreground">
+              Use <span className="font-medium text-foreground">Test connection</span> above to verify SMTP (and
+              IMAP when host and username are filled).{" "}
+              {configured ? "Ready to send from Inbox → Email." : "Fill host, user, and From address to send."}
+            </p>
           </div>
 
           <Separator />

@@ -242,7 +242,48 @@ function LeadFormBody({
   onClose: () => void;
   defaultStage?: PipelineStage;
 }) {
-  const { users } = useWorkspace();
+  const { users, currentUserId } = useWorkspace();
+  /** Live workspace snapshot often has no `users` / `currentUserId`; session gives the signed-in uid for owner + picker. */
+  const [sessionOwnerId, setSessionOwnerId] = React.useState<string | null>(null);
+  const [sessionOwnerLabel, setSessionOwnerLabel] = React.useState("");
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json()) as {
+          user?: { uid?: string; email?: string; name?: string } | null;
+        };
+        if (cancelled || !data.user?.uid) return;
+        setSessionOwnerId(data.user.uid);
+        const label =
+          data.user.name?.trim() ||
+          data.user.email?.split("@")[0]?.trim() ||
+          "You";
+        setSessionOwnerLabel(label);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  type OwnerOption = { id: string; label: string };
+  const ownerOptions = React.useMemo((): OwnerOption[] => {
+    const list: OwnerOption[] = users.map((u) => ({
+      id: u.id,
+      label: u.displayName,
+    }));
+    if (sessionOwnerId && !list.some((o) => o.id === sessionOwnerId)) {
+      list.push({
+        id: sessionOwnerId,
+        label: sessionOwnerLabel ? `${sessionOwnerLabel} (you)` : "You",
+      });
+    }
+    return list;
+  }, [users, sessionOwnerId, sessionOwnerLabel]);
+
   const form = useForm<LeadForm>({
     resolver: zodResolver(leadSchema),
     defaultValues: {
@@ -257,6 +298,18 @@ function LeadFormBody({
       temperature: "cold",
     },
   });
+
+  const defaultOwnerId =
+    currentUserId || sessionOwnerId || users[0]?.id || "";
+
+  React.useEffect(() => {
+    if (!defaultOwnerId) return;
+    const cur = form.getValues("ownerId");
+    const valid = ownerOptions.some((o) => o.id === cur);
+    if (!cur || !valid) {
+      form.setValue("ownerId", defaultOwnerId);
+    }
+  }, [defaultOwnerId, ownerOptions, form]);
 
   async function onSubmit(_v: LeadForm) {
     await new Promise((r) => setTimeout(r, 800));
@@ -337,8 +390,20 @@ function LeadFormBody({
             <FormItem className="col-span-6 min-w-0 sm:col-span-2">
               <FormLabel className="text-xs font-medium text-foreground">Owner</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue placeholder="Assign to" /></SelectTrigger></FormControl>
-                <SelectContent>{users.map((u) => <SelectItem key={u.id} value={u.id}>{u.displayName}</SelectItem>)}</SelectContent>
+                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue placeholder="You (default)" /></SelectTrigger></FormControl>
+                <SelectContent>
+                  {ownerOptions.length === 0 ? (
+                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                      Loading team…
+                    </div>
+                  ) : (
+                    ownerOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
               </Select>
               <FormMessage className="text-xs" />
             </FormItem>
