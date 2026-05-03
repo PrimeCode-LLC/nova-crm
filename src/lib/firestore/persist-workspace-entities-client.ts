@@ -16,17 +16,19 @@ export async function persistNoteCreate(
   organizationId: string,
   note: Note,
 ): Promise<void> {
-  await setDoc(doc(db, COLLECTIONS.notes, note.id), {
+  /** Omit optional string fields instead of writing `null` — Firestore `null` was deserialized so `asNote` dropped `leadId` and notes disappeared from the lead tab. */
+  const data: Record<string, unknown> = {
     organizationId,
-    leadId: note.leadId ?? null,
-    contactId: note.contactId ?? null,
-    accountId: note.accountId ?? null,
-    dealId: note.dealId ?? null,
     authorId: note.authorId,
     body: note.body,
     pinned: note.pinned ?? false,
     createdAt: note.createdAt,
-  });
+  };
+  if (note.leadId) data.leadId = note.leadId;
+  if (note.contactId) data.contactId = note.contactId;
+  if (note.accountId) data.accountId = note.accountId;
+  if (note.dealId) data.dealId = note.dealId;
+  await setDoc(doc(db, COLLECTIONS.notes, note.id), data);
 }
 
 export async function persistNoteUpdate(
@@ -49,19 +51,20 @@ export async function persistFollowupCreate(
   organizationId: string,
   f: Followup,
 ): Promise<void> {
-  await setDoc(doc(db, COLLECTIONS.followups, f.id), {
+  const data: Record<string, unknown> = {
     organizationId,
-    leadId: f.leadId ?? null,
-    dealId: f.dealId ?? null,
-    contactId: f.contactId ?? null,
     title: f.title,
-    description: f.description ?? null,
     dueAt: f.dueAt,
-    completedAt: f.completedAt ?? null,
     ownerId: f.ownerId,
     priority: f.priority,
     auto: f.auto,
-  });
+  };
+  if (f.leadId) data.leadId = f.leadId;
+  if (f.dealId) data.dealId = f.dealId;
+  if (f.contactId) data.contactId = f.contactId;
+  if (f.description) data.description = f.description;
+  if (f.completedAt) data.completedAt = f.completedAt;
+  await setDoc(doc(db, COLLECTIONS.followups, f.id), data);
 }
 
 export async function persistFollowupSetCompleted(

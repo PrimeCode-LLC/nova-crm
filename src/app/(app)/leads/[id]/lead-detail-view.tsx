@@ -110,6 +110,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const touchpoints = ws.touchpoints.filter((t) => t.leadId === lead.id);
   const timeline = ws.timelineByLead[lead.id] ?? [];
   const notes = ws.notes.filter((n) => n.leadId === lead.id);
+  const notesTabCount = notes.length + (lead.notes?.trim() ? 1 : 0);
   const followups = ws.followups.filter((f) => f.leadId === lead.id);
 
   const pinned = ws.isLeadPinned(lead.id);
@@ -242,7 +243,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <TabsTrigger value="notes">
                   Notes
                   <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
-                    {notes.length}
+                    {notesTabCount}
                   </Badge>
                 </TabsTrigger>
                 <TabsTrigger value="followups">
@@ -264,7 +265,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <LeadTouchpoints touchpoints={touchpoints} lead={lead} />
                 </TabsContent>
                 <TabsContent value="notes">
-                  <LeadNotes notes={notes} leadId={lead.id} />
+                  <LeadNotes notes={notes} leadId={lead.id} leadProfileNotes={lead.notes} />
                 </TabsContent>
                 <TabsContent value="followups">
                   <LeadFollowups followups={followups} lead={lead} />

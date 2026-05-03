@@ -118,13 +118,19 @@ function asDeal(id: string, raw: Record<string, unknown>): Deal {
   };
 }
 
+function optionalNonEmptyString(v: unknown): string | undefined {
+  if (typeof v !== "string") return undefined;
+  const t = v.trim();
+  return t.length > 0 ? t : undefined;
+}
+
 function asNote(id: string, raw: Record<string, unknown>): Note {
   return {
     id,
-    leadId: typeof raw.leadId === "string" ? raw.leadId : undefined,
-    contactId: typeof raw.contactId === "string" ? raw.contactId : undefined,
-    accountId: typeof raw.accountId === "string" ? raw.accountId : undefined,
-    dealId: typeof raw.dealId === "string" ? raw.dealId : undefined,
+    leadId: optionalNonEmptyString(raw.leadId),
+    contactId: optionalNonEmptyString(raw.contactId),
+    accountId: optionalNonEmptyString(raw.accountId),
+    dealId: optionalNonEmptyString(raw.dealId),
     authorId: String(raw.authorId ?? ""),
     body: String(raw.body ?? ""),
     createdAt: firestoreValueToIso(raw.createdAt),
@@ -135,9 +141,9 @@ function asNote(id: string, raw: Record<string, unknown>): Note {
 function asFollowup(id: string, raw: Record<string, unknown>): Followup {
   return {
     id,
-    leadId: typeof raw.leadId === "string" ? raw.leadId : undefined,
-    dealId: typeof raw.dealId === "string" ? raw.dealId : undefined,
-    contactId: typeof raw.contactId === "string" ? raw.contactId : undefined,
+    leadId: optionalNonEmptyString(raw.leadId),
+    dealId: optionalNonEmptyString(raw.dealId),
+    contactId: optionalNonEmptyString(raw.contactId),
     title: String(raw.title ?? ""),
     description: typeof raw.description === "string" ? raw.description : undefined,
     dueAt: firestoreValueToIso(raw.dueAt),

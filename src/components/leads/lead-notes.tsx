@@ -25,11 +25,20 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Pin, Trash2, Pencil } from "lucide-react";
+import { Pin, Trash2, Pencil, FileText } from "lucide-react";
 import { fmtRelative, fmtDate, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
-export function LeadNotes({ notes, leadId }: { notes: Note[]; leadId: string }) {
+export function LeadNotes({
+  notes,
+  leadId,
+  /** Free-form notes saved on the lead record (Edit lead), shared with everyone who can open this lead. */
+  leadProfileNotes,
+}: {
+  notes: Note[];
+  leadId: string;
+  leadProfileNotes?: string;
+}) {
   const { getUserById, addLeadNote, updateLeadNote, deleteLeadNote, currentUserId } = useWorkspace();
   const [body, setBody] = React.useState("");
   const [editOpen, setEditOpen] = React.useState(false);
@@ -71,8 +80,24 @@ export function LeadNotes({ notes, leadId }: { notes: Note[]; leadId: string }) 
     toast.success("Note removed");
   }
 
+  const profileText = leadProfileNotes?.trim() ?? "";
+
   return (
     <div className="space-y-4">
+      {profileText ? (
+        <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/20 p-3 space-y-2">
+          <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground uppercase tracking-wide">
+            <FileText className="h-3.5 w-3.5 shrink-0" aria-hidden />
+            Lead profile note
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Saved from <span className="font-medium text-foreground">Edit lead</span>. Anyone who can view this lead
+            sees it here. To change it, use Edit lead on the lead header.
+          </p>
+          <p className="text-sm whitespace-pre-wrap text-foreground">{profileText}</p>
+        </div>
+      ) : null}
+
       <div className="rounded-lg border p-3 space-y-2">
         <Textarea
           value={body}
@@ -167,7 +192,7 @@ export function LeadNotes({ notes, leadId }: { notes: Note[]; leadId: string }) 
               </div>
             );
           })}
-        {notes.length === 0 && (
+        {notes.length === 0 && !profileText && (
           <div className="rounded-md border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
             No notes yet.
           </div>
