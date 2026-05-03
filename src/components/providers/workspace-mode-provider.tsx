@@ -30,6 +30,23 @@ import { applyLiveHierarchyScope } from "@/lib/workspace-hierarchy";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { getFirebaseDb } from "@/lib/firebase/client";
+import { COLLECTIONS } from "@/lib/firestore/collections";
+import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
+import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
+import {
+  persistFollowupCreate,
+  persistFollowupSetCompleted,
+  persistLeadActivityBump,
+  persistNoteCreate,
+  persistNoteDelete,
+  persistNoteUpdate,
+  persistTimelineEventCreate,
+  persistTouchpointCreate,
+} from "@/lib/firestore/persist-workspace-entities-client";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { toast } from "sonner";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { setWorkspaceModeCookie } from "@/app/(app)/actions/workspace-mode";
 import { setDemoPersonaCookie } from "@/app/(app)/actions/demo-persona";
@@ -200,8 +217,12 @@ export function WorkspaceModeProvider({
     writeWorkspaceSession(sessionV2);
   }, [sessionV2, sessionHydrated]);
 
+  /** Only drop session-layer deltas when leaving demo; clearing on every live mount wiped `leadPatches` after sessionStorage hydrate. */
+  const prevModeRef = React.useRef<WorkspaceMode | null>(null);
   React.useEffect(() => {
-    if (mode !== "demo") {
+    const prev = prevModeRef.current;
+    prevModeRef.current = mode;
+    if (prev === "demo" && mode === "live") {
       setSessionV2(emptyWorkspaceSession());
     }
   }, [mode]);
@@ -277,49 +298,101 @@ export function WorkspaceModeProvider({
     setUserPatches((prev) => ({ ...prev, [userId]: { ...prev[userId], ...patch } }));
   }, []);
 
-  const bumpLeadActivity = React.useCallback((leadId: string) => {
-    const iso = new Date().toISOString();
-    setSessionV2((s) => ({
-      ...s,
-      leadActivity: {
-        ...s.leadActivity,
-        [leadId]: {
-          bump: (s.leadActivity[leadId]?.bump ?? 0) + 1,
-          lastAt: iso,
-        },
-      },
-    }));
-  }, []);
-
-  const addFollowup = React.useCallback((f: Followup) => {
-    const iso = new Date().toISOString();
-    setSessionV2((s) => {
-      const next: WorkspaceSessionV2 = {
+  const bumpLeadActivity = React.useCallback(
+    (leadId: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistLeadActivityBump(db, leadId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update activity", { description: msg });
+          }
+        })();
+        return;
+      }
+      const iso = new Date().toISOString();
+      setSessionV2((s) => ({
         ...s,
-        followups: { ...s.followups, extras: [...s.followups.extras, f] },
-      };
-      if (!f.leadId) return next;
-      return {
-        ...next,
         leadActivity: {
-          ...next.leadActivity,
-          [f.leadId]: {
-            bump: (next.leadActivity[f.leadId]?.bump ?? 0) + 1,
+          ...s.leadActivity,
+          [leadId]: {
+            bump: (s.leadActivity[leadId]?.bump ?? 0) + 1,
             lastAt: iso,
           },
         },
-      };
-    });
-  }, []);
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const setFollowupCompleted = React.useCallback((id: string, completed: boolean) => {
-    setSessionV2((s) => {
-      const completion = { ...s.followups.completion };
-      if (completed) completion[id] = new Date().toISOString();
-      else completion[id] = null;
-      return { ...s, followups: { ...s.followups, completion } };
-    });
-  }, []);
+  const addFollowup = React.useCallback(
+    (f: Followup) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupCreate(db, orgId, f);
+            if (f.leadId) await persistLeadActivityBump(db, f.leadId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save follow-up", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => {
+        const next: WorkspaceSessionV2 = {
+          ...s,
+          followups: { ...s.followups, extras: [...s.followups.extras, f] },
+        };
+        if (!f.leadId) return next;
+        if (writeFs) return next;
+        return {
+          ...next,
+          leadActivity: {
+            ...next.leadActivity,
+            [f.leadId]: {
+              bump: (next.leadActivity[f.leadId]?.bump ?? 0) + 1,
+              lastAt: iso,
+            },
+          },
+        };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const setFollowupCompleted = React.useCallback(
+    (id: string, completed: boolean) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupSetCompleted(db, id, completed);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update follow-up", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => {
+        const completion = { ...s.followups.completion };
+        if (completed) completion[id] = new Date().toISOString();
+        else completion[id] = null;
+        return { ...s, followups: { ...s.followups, completion } };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
 
   const addLeadNote = React.useCallback(
     (leadId: string, body: string, authorId: string) => {
@@ -341,98 +414,204 @@ export function WorkspaceModeProvider({
         summary: `Added note: "${body.trim().slice(0, 80)}${body.trim().length > 80 ? "…" : ""}"`,
         createdAt: iso,
       };
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistNoteCreate(db, orgId, note);
+            await persistTimelineEventCreate(db, orgId, timeline);
+            await persistLeadActivityBump(db, leadId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save note", { description: msg });
+          }
+        })();
+      }
       setSessionV2((s) => ({
         ...s,
         notes: { ...s.notes, added: [...s.notes.added, note] },
         timelineAdded: [...s.timelineAdded, timeline],
-        leadActivity: {
-          ...s.leadActivity,
-          [leadId]: {
-            bump: (s.leadActivity[leadId]?.bump ?? 0) + 1,
-            lastAt: iso,
-          },
-        },
+        leadActivity: writeFs
+          ? s.leadActivity
+          : {
+              ...s.leadActivity,
+              [leadId]: {
+                bump: (s.leadActivity[leadId]?.bump ?? 0) + 1,
+                lastAt: iso,
+              },
+            },
       }));
     },
-    [],
+    [mode, userDoc?.organizationId],
   );
 
-  const updateLeadNote = React.useCallback((noteId: string, patch: Partial<Pick<Note, "body" | "pinned">>) => {
-    setSessionV2((s) => {
-      const inAdded = s.notes.added.findIndex((n) => n.id === noteId);
-      if (inAdded >= 0) {
-        const nextAdded = s.notes.added.map((n, i) => (i === inAdded ? { ...n, ...patch } : n));
-        return { ...s, notes: { ...s.notes, added: nextAdded } };
+  const updateLeadNote = React.useCallback(
+    (noteId: string, patch: Partial<Pick<Note, "body" | "pinned">>) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistNoteUpdate(db, noteId, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save note", { description: msg });
+          }
+        })();
       }
-      return {
-        ...s,
-        notes: {
-          ...s.notes,
-          updates: { ...s.notes.updates, [noteId]: { ...s.notes.updates[noteId], ...patch } },
-        },
-      };
-    });
-  }, []);
-
-  const deleteLeadNote = React.useCallback((noteId: string) => {
-    setSessionV2((s) => {
-      const wasAdded = s.notes.added.some((n) => n.id === noteId);
-      if (wasAdded) {
+      setSessionV2((s) => {
+        const inAdded = s.notes.added.findIndex((n) => n.id === noteId);
+        if (inAdded >= 0) {
+          const nextAdded = s.notes.added.map((n, i) => (i === inAdded ? { ...n, ...patch } : n));
+          return { ...s, notes: { ...s.notes, added: nextAdded } };
+        }
         return {
           ...s,
-          notes: { ...s.notes, added: s.notes.added.filter((n) => n.id !== noteId) },
+          notes: {
+            ...s.notes,
+            updates: { ...s.notes.updates, [noteId]: { ...s.notes.updates[noteId], ...patch } },
+          },
         };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const deleteLeadNote = React.useCallback(
+    (noteId: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistNoteDelete(db, noteId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not delete note", { description: msg });
+          }
+        })();
       }
-      if (s.notes.removedIds.includes(noteId)) return s;
-      return { ...s, notes: { ...s.notes, removedIds: [...s.notes.removedIds, noteId] } };
-    });
-  }, []);
+      setSessionV2((s) => {
+        const wasAdded = s.notes.added.some((n) => n.id === noteId);
+        if (wasAdded) {
+          return {
+            ...s,
+            notes: { ...s.notes, added: s.notes.added.filter((n) => n.id !== noteId) },
+          };
+        }
+        if (s.notes.removedIds.includes(noteId)) return s;
+        return { ...s, notes: { ...s.notes, removedIds: [...s.notes.removedIds, noteId] } };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addLeadTouchpoint = React.useCallback((t: Touchpoint) => {
-    const iso = t.occurredAt || new Date().toISOString();
-    const event: TimelineEvent = {
-      id: newLocalId("te-local"),
-      leadId: t.leadId,
-      type: "touchpoint_added",
-      actorId: t.actorId,
-      summary: t.summary ? `Touchpoint: ${t.summary}` : `Touchpoint logged (${t.state})`,
-      createdAt: iso,
-    };
-    setSessionV2((s) => ({
-      ...s,
-      touchpointsAdded: [...s.touchpointsAdded, { ...t, occurredAt: iso }],
-      timelineAdded: [...s.timelineAdded, event],
-      leadActivity: {
-        ...s.leadActivity,
-        [t.leadId]: {
-          bump: (s.leadActivity[t.leadId]?.bump ?? 0) + 1,
-          lastAt: iso,
-        },
-      },
-    }));
-  }, []);
+  const addLeadTouchpoint = React.useCallback(
+    (t: Touchpoint) => {
+      const iso = t.occurredAt || new Date().toISOString();
+      const event: TimelineEvent = {
+        id: newLocalId("te-local"),
+        leadId: t.leadId,
+        type: "touchpoint_added",
+        actorId: t.actorId,
+        summary: t.summary ? `Touchpoint: ${t.summary}` : `Touchpoint logged (${t.state})`,
+        createdAt: iso,
+      };
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso });
+            await persistTimelineEventCreate(db, orgId, event);
+            await persistLeadActivityBump(db, t.leadId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save touchpoint", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        touchpointsAdded: [...s.touchpointsAdded, { ...t, occurredAt: iso }],
+        timelineAdded: [...s.timelineAdded, event],
+        leadActivity: writeFs
+          ? s.leadActivity
+          : {
+              ...s.leadActivity,
+              [t.leadId]: {
+                bump: (s.leadActivity[t.leadId]?.bump ?? 0) + 1,
+                lastAt: iso,
+              },
+            },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addTimelineEvent = React.useCallback((e: TimelineEvent) => {
-    setSessionV2((s) => ({
-      ...s,
-      timelineAdded: [...s.timelineAdded, e],
-      leadActivity: {
-        ...s.leadActivity,
-        [e.leadId]: {
-          bump: (s.leadActivity[e.leadId]?.bump ?? 0) + 1,
-          lastAt: e.createdAt,
-        },
-      },
-    }));
-  }, []);
+  const addTimelineEvent = React.useCallback(
+    (e: TimelineEvent) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistTimelineEventCreate(db, orgId, e);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            toast.error("Could not save timeline event", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        timelineAdded: [...s.timelineAdded, e],
+        leadActivity: writeFs
+          ? s.leadActivity
+          : {
+              ...s.leadActivity,
+              [e.leadId]: {
+                bump: (s.leadActivity[e.leadId]?.bump ?? 0) + 1,
+                lastAt: e.createdAt,
+              },
+            },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const patchLead = React.useCallback((leadId: string, patch: Partial<Lead>) => {
-    const iso = new Date().toISOString();
-    setSessionV2((s) => ({
-      ...s,
-      leadPatches: { ...s.leadPatches, [leadId]: { ...s.leadPatches[leadId], ...patch, updatedAt: iso } },
-    }));
-  }, []);
+  const patchLead = React.useCallback(
+    (leadId: string, patch: Partial<Lead>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistLeadPatchClient(db, leadId, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save lead", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        leadPatches: { ...s.leadPatches, [leadId]: { ...s.leadPatches[leadId], ...patch, updatedAt: iso } },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
   const updateLeadStage = React.useCallback(
     (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => {
@@ -445,6 +624,24 @@ export function WorkspaceModeProvider({
         summary: `Moved from ${STAGES_BY_KEY[previousStage].label} → ${STAGES_BY_KEY[nextStage].label}`,
         createdAt: iso,
       };
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await updateDoc(doc(db, COLLECTIONS.leads, leadId), {
+              stage: nextStage,
+              updatedAt: serverTimestamp(),
+            });
+            await persistTimelineEventCreate(db, orgId, ev);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save stage", { description: msg });
+          }
+        })();
+      }
       setSessionV2((s) => ({
         ...s,
         leadPatches: {
@@ -454,7 +651,7 @@ export function WorkspaceModeProvider({
         timelineAdded: [...s.timelineAdded, ev],
       }));
     },
-    [],
+    [mode, userDoc?.organizationId],
   );
 
   const toggleLeadPin = React.useCallback((leadId: string) => {
@@ -491,6 +688,10 @@ export function WorkspaceModeProvider({
       accounts: liveFs.accounts,
       contacts: liveFs.contacts,
       deals: liveFs.deals,
+      notes: liveFs.notes,
+      followups: liveFs.followups,
+      touchpoints: liveFs.touchpoints,
+      timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
@@ -514,6 +715,10 @@ export function WorkspaceModeProvider({
     liveFs.accounts,
     liveFs.contacts,
     liveFs.deals,
+    liveFs.notes,
+    liveFs.followups,
+    liveFs.touchpoints,
+    liveFs.timelineEvents,
   ]);
 
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {

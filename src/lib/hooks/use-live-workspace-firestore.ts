@@ -12,7 +12,18 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
-import type { Account, Contact, Deal, Lead, Role, User } from "@/lib/types";
+import type {
+  Account,
+  Contact,
+  Deal,
+  Followup,
+  Lead,
+  Note,
+  Role,
+  Touchpoint,
+  TimelineEvent,
+  User,
+} from "@/lib/types";
 
 export type LiveWorkspaceFirestoreState = {
   loading: boolean;
@@ -22,6 +33,10 @@ export type LiveWorkspaceFirestoreState = {
   accounts: Account[];
   contacts: Contact[];
   deals: Deal[];
+  notes: Note[];
+  followups: Followup[];
+  touchpoints: Touchpoint[];
+  timelineEvents: TimelineEvent[];
 };
 
 const empty: LiveWorkspaceFirestoreState = {
@@ -32,6 +47,10 @@ const empty: LiveWorkspaceFirestoreState = {
   accounts: [],
   contacts: [],
   deals: [],
+  notes: [],
+  followups: [],
+  touchpoints: [],
+  timelineEvents: [],
 };
 
 function asUser(id: string, raw: Record<string, unknown>): User {
@@ -99,6 +118,68 @@ function asDeal(id: string, raw: Record<string, unknown>): Deal {
   };
 }
 
+function asNote(id: string, raw: Record<string, unknown>): Note {
+  return {
+    id,
+    leadId: typeof raw.leadId === "string" ? raw.leadId : undefined,
+    contactId: typeof raw.contactId === "string" ? raw.contactId : undefined,
+    accountId: typeof raw.accountId === "string" ? raw.accountId : undefined,
+    dealId: typeof raw.dealId === "string" ? raw.dealId : undefined,
+    authorId: String(raw.authorId ?? ""),
+    body: String(raw.body ?? ""),
+    createdAt: firestoreValueToIso(raw.createdAt),
+    pinned: Boolean(raw.pinned),
+  };
+}
+
+function asFollowup(id: string, raw: Record<string, unknown>): Followup {
+  return {
+    id,
+    leadId: typeof raw.leadId === "string" ? raw.leadId : undefined,
+    dealId: typeof raw.dealId === "string" ? raw.dealId : undefined,
+    contactId: typeof raw.contactId === "string" ? raw.contactId : undefined,
+    title: String(raw.title ?? ""),
+    description: typeof raw.description === "string" ? raw.description : undefined,
+    dueAt: firestoreValueToIso(raw.dueAt),
+    completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
+    ownerId: String(raw.ownerId ?? ""),
+    priority: (raw.priority as Followup["priority"]) ?? "medium",
+    auto: Boolean(raw.auto),
+  };
+}
+
+function asTouchpoint(id: string, raw: Record<string, unknown>): Touchpoint {
+  return {
+    id,
+    leadId: String(raw.leadId ?? ""),
+    channel: raw.channel as Touchpoint["channel"],
+    state: String(raw.state ?? ""),
+    stepNumber: typeof raw.stepNumber === "number" ? raw.stepNumber : undefined,
+    occurredAt: firestoreValueToIso(raw.occurredAt),
+    actorId: typeof raw.actorId === "string" ? raw.actorId : undefined,
+    summary: typeof raw.summary === "string" ? raw.summary : undefined,
+    payload:
+      raw.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload)
+        ? (raw.payload as Record<string, unknown>)
+        : undefined,
+  };
+}
+
+function asTimelineEvent(id: string, raw: Record<string, unknown>): TimelineEvent {
+  return {
+    id,
+    leadId: String(raw.leadId ?? ""),
+    type: raw.type as TimelineEvent["type"],
+    actorId: typeof raw.actorId === "string" ? raw.actorId : undefined,
+    summary: String(raw.summary ?? ""),
+    payload:
+      raw.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload)
+        ? (raw.payload as Record<string, unknown>)
+        : undefined,
+    createdAt: firestoreValueToIso(raw.createdAt),
+  };
+}
+
 /**
  * Real-time tenant CRM documents for live workspace mode.
  */
@@ -115,6 +196,10 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         accounts: [],
         contacts: [],
         deals: [],
+        notes: [],
+        followups: [],
+        touchpoints: [],
+        timelineEvents: [],
       });
       return;
     }
@@ -131,6 +216,10 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         accounts: [],
         contacts: [],
         deals: [],
+        notes: [],
+        followups: [],
+        touchpoints: [],
+        timelineEvents: [],
       });
       return;
     }
@@ -213,6 +302,72 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         (snap) => {
           const deals = snap.docs.map((d) => asDeal(d.id, d.data() as Record<string, unknown>));
           setState((prev) => ({ ...prev, deals, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qNotes = query(
+      collection(db, COLLECTIONS.notes),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qNotes,
+        (snap) => {
+          const notes = snap.docs.map((d) => asNote(d.id, d.data() as Record<string, unknown>));
+          setState((prev) => ({ ...prev, notes, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qFollowups = query(
+      collection(db, COLLECTIONS.followups),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qFollowups,
+        (snap) => {
+          const followups = snap.docs.map((d) =>
+            asFollowup(d.id, d.data() as Record<string, unknown>),
+          );
+          setState((prev) => ({ ...prev, followups, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qTouchpoints = query(
+      collection(db, COLLECTIONS.touchpoints),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qTouchpoints,
+        (snap) => {
+          const touchpoints = snap.docs.map((d) =>
+            asTouchpoint(d.id, d.data() as Record<string, unknown>),
+          );
+          setState((prev) => ({ ...prev, touchpoints, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qTimeline = query(
+      collection(db, COLLECTIONS.timelineEvents),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qTimeline,
+        (snap) => {
+          const timelineEvents = snap.docs.map((d) =>
+            asTimelineEvent(d.id, d.data() as Record<string, unknown>),
+          );
+          setState((prev) => ({ ...prev, timelineEvents, loading: false }));
         },
         (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
       ),

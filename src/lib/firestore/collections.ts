@@ -3,6 +3,10 @@ export const COLLECTIONS = {
   users: "users",
   computedPermissions: "computedPermissions",
   leads: "leads",
+  notes: "notes",
+  followups: "followups",
+  touchpoints: "touchpoints",
+  timelineEvents: "timelineEvents",
   accounts: "accounts",
   contacts: "contacts",
   deals: "deals",
@@ -31,6 +35,10 @@ export const ORG_SUBCOLLECTIONS = {
  */
 export const TENANT_COLLECTIONS = [
   COLLECTIONS.leads,
+  COLLECTIONS.notes,
+  COLLECTIONS.followups,
+  COLLECTIONS.touchpoints,
+  COLLECTIONS.timelineEvents,
   COLLECTIONS.accounts,
   COLLECTIONS.contacts,
   COLLECTIONS.deals,

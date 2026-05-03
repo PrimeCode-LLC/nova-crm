@@ -122,37 +122,50 @@ export function mergeSessionIntoSnapshot(
   const visibleDealIds = new Set(base.deals.map((d) => d.id));
 
   const removedNotes = new Set(session.notes.removedIds);
+  const mergedBaseNotes = base.notes
+    .filter((n) => !removedNotes.has(n.id))
+    .map((n) => {
+      const u = session.notes.updates[n.id];
+      return u ? { ...n, ...u } : n;
+    });
+  const baseNoteIds = new Set(mergedBaseNotes.map((n) => n.id));
   const notes = [
-    ...base.notes
-      .filter((n) => !removedNotes.has(n.id))
-      .map((n) => {
-        const u = session.notes.updates[n.id];
-        return u ? { ...n, ...u } : n;
-      }),
-    ...session.notes.added.filter((n) => leadVisible(n.leadId, visibleLeadIds)),
+    ...mergedBaseNotes,
+    ...session.notes.added.filter(
+      (n) => leadVisible(n.leadId, visibleLeadIds) && !baseNoteIds.has(n.id),
+    ),
   ];
 
+  const baseTouchpointIds = new Set(base.touchpoints.map((t) => t.id));
   const touchpoints = [
     ...base.touchpoints,
-    ...session.touchpointsAdded.filter((t) => visibleLeadIds.has(t.leadId)),
+    ...session.touchpointsAdded.filter(
+      (t) => visibleLeadIds.has(t.leadId) && !baseTouchpointIds.has(t.id),
+    ),
   ];
 
-  const timelineByLead: Record<string, TimelineEvent[]> = { ...base.timelineByLead };
+  const timelineByLead: Record<string, TimelineEvent[]> = {};
+  for (const [leadId, events] of Object.entries(base.timelineByLead)) {
+    timelineByLead[leadId] = [...events];
+  }
   for (const e of session.timelineAdded) {
     if (!visibleLeadIds.has(e.leadId)) continue;
     const list = timelineByLead[e.leadId] ? [...timelineByLead[e.leadId]] : [];
+    if (list.some((x) => x.id === e.id)) continue;
     list.push(e);
     list.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
     timelineByLead[e.leadId] = list;
   }
 
   const mergedBaseFollowups = base.followups.map((f) => mergeFollowup(f, session.followups.completion));
+  const baseFollowupIds = new Set(mergedBaseFollowups.map((f) => f.id));
   const mergedExtras = session.followups.extras
     .filter(
       (f) =>
-        (f.leadId == null && f.dealId == null) ||
-        (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
-        (f.dealId != null && visibleDealIds.has(f.dealId)),
+        !baseFollowupIds.has(f.id) &&
+        ((f.leadId == null && f.dealId == null) ||
+          (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
+          (f.dealId != null && visibleDealIds.has(f.dealId))),
     )
     .map((f) => mergeFollowup(f, session.followups.completion));
   const followups = [...mergedBaseFollowups, ...mergedExtras];

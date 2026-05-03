@@ -95,6 +95,7 @@ export function LeadTimeline({ events, lead }: { events: TimelineEvent[]; lead: 
       summary: "Outbound email logged (manual)",
       createdAt: iso,
     });
+    bumpLeadActivity(lead.id);
     toast.success("Email logged on timeline");
   }
 
@@ -108,6 +109,7 @@ export function LeadTimeline({ events, lead }: { events: TimelineEvent[]; lead: 
       summary: "LinkedIn activity logged",
       createdAt: iso,
     });
+    bumpLeadActivity(lead.id);
     toast.success("LinkedIn touch logged");
   }
 

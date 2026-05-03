@@ -121,6 +121,26 @@ service cloud.firestore {
       allow write: if tenantWritable();
     }
 
+    match /notes/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /followups/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /touchpoints/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /timelineEvents/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
     match /accounts/{id} {
       allow read: if tenantReadable();
       allow write: if tenantWritable();
