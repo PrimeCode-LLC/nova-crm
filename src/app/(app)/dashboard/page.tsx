@@ -15,7 +15,7 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
-import { aggregateChannelFunnelCounts } from "@/lib/dashboard-analytics";
+import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST } from "@/lib/constants";
 import type { ChannelKey } from "@/lib/types";
@@ -86,10 +86,22 @@ export default function DashboardPage() {
   const avgResponseMin =
     scopedLeads.filter((l) => l.responseTimeMinutes != null).reduce((s, l) => s + (l.responseTimeMinutes ?? 0), 0) /
     Math.max(1, scopedLeads.filter((l) => l.responseTimeMinutes != null).length);
-  const pipelineValue = scopedDeals
-    .filter((d) => !["won", "lost"].includes(d.stage))
-    .reduce((s, d) => s + d.value, 0);
+  const pipelineMetrics = React.useMemo(
+    () => computeOpenPipelineMetrics(scopedLeads, scopedDeals),
+    [scopedLeads, scopedDeals],
+  );
+  const pipelineValue = pipelineMetrics.total;
   const closedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
+
+  const pipelineHint = React.useMemo(() => {
+    const parts = [`${pipelineMetrics.openDealCount} open deal${pipelineMetrics.openDealCount === 1 ? "" : "s"}`];
+    if (pipelineMetrics.leadEstimateContributors > 0) {
+      parts.push(
+        `${pipelineMetrics.leadEstimateContributors} lead estimate${pipelineMetrics.leadEstimateContributors === 1 ? "" : "s"}`,
+      );
+    }
+    return parts.join(" · ");
+  }, [pipelineMetrics.leadEstimateContributors, pipelineMetrics.openDealCount]);
 
   const coldEmailCounts = React.useMemo(
     () => aggregateChannelFunnelCounts("cold_email", scopedActivityCounters, scopedLeads, scopedDeals),
@@ -135,7 +147,7 @@ export default function DashboardPage() {
         { label: "Closed revenue (USD)", value: String(Math.round(closedValue)) },
         {
           label: "Open deals",
-          value: String(scopedDeals.filter((d) => !["won", "lost"].includes(d.stage)).length),
+          value: String(pipelineMetrics.openDealCount),
         },
         { label: "Won deals", value: String(scopedDeals.filter((d) => d.stage === "won").length) },
         { label: "Idle leads", value: String(idleCount) },
@@ -270,7 +282,7 @@ export default function DashboardPage() {
               <KpiCard
                 label="Pipeline value"
                 value={`$${(pipelineValue / 1000).toFixed(0)}k`}
-                hint={`${scopedDeals.filter((d) => !["won", "lost"].includes(d.stage)).length} open deals`}
+                hint={pipelineHint}
                 icon={TrendingUp}
               />
               <KpiCard

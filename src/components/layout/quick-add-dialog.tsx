@@ -46,6 +46,12 @@ import type {
   RevenueRange,
 } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useAuth } from "@/components/providers/auth-provider";
+import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import { getFirebaseDb } from "@/lib/firebase/client";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
+import { isAuthDisabled } from "@/lib/auth/flags";
 import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
 
 export type QuickAddPill = "lead" | "contact" | "account" | "task" | "profile";
@@ -258,7 +264,11 @@ function LeadFormBody({
   onClose: () => void;
   defaultStage?: PipelineStage;
 }) {
-  const { users, currentUserId, addAccount, addContact, addLead } = useWorkspace();
+  const { users, currentUserId, addAccount, addContact, addLead, isDemo } = useWorkspace();
+  const { user: fbUser } = useAuth();
+  const { data: liveUserDoc } = useUserDoc(
+    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
+  );
   /** Live workspace snapshot often has no `users` / `currentUserId`; session gives the signed-in uid for owner + picker. */
   const [sessionOwnerId, setSessionOwnerId] = React.useState<string | null>(null);
   const [sessionOwnerLabel, setSessionOwnerLabel] = React.useState("");
@@ -327,7 +337,7 @@ function LeadFormBody({
     }
   }, [defaultOwnerId, ownerOptions, form]);
 
-  function onSubmit(values: LeadForm) {
+  async function onSubmit(values: LeadForm) {
     const ownerId = values.ownerId.trim();
     if (!ownerId) {
       toast.error("Could not assign owner. Try again after refresh.");
@@ -346,7 +356,7 @@ function LeadFormBody({
     const estimatedValue =
       estRaw && Number.isFinite(Number(estRaw)) && Number(estRaw) >= 0 ? Number(estRaw) : undefined;
 
-    addAccount({
+    const account: Account = {
       id: accountId,
       name: values.company.trim(),
       contactCount: 0,
@@ -355,8 +365,8 @@ function LeadFormBody({
       ownerId,
       createdAt: now,
       updatedAt: now,
-    });
-    addContact({
+    };
+    const contact: Contact = {
       id: contactId,
       accountId,
       firstName,
@@ -366,8 +376,8 @@ function LeadFormBody({
       ownerId,
       createdAt: now,
       updatedAt: now,
-    });
-    addLead({
+    };
+    const lead: Lead = {
       id: leadId,
       accountId,
       contactId,
@@ -384,7 +394,24 @@ function LeadFormBody({
       estimatedValue,
       createdAt: now,
       updatedAt: now,
-    });
+    };
+
+    if (!isDemo && liveUserDoc?.organizationId && isFirebaseWebConfigured()) {
+      try {
+        const db = getFirebaseDb();
+        await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
+        toast.success("Lead created");
+        onClose();
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        toast.error(`Could not save lead: ${msg}`);
+      }
+      return;
+    }
+
+    addAccount(account);
+    addContact(contact);
+    addLead(lead);
     toast.success("Lead created");
     onClose();
   }

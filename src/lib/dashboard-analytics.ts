@@ -13,6 +13,47 @@ function dealsForChannel(leads: Lead[], deals: Deal[], channel: ChannelKey): Dea
 }
 
 /**
+ * Open pipeline $ = sum of open (not won/lost) deal values, plus estimated value on
+ * open leads that do not yet have any open deal. Avoids double-counting once a deal exists.
+ */
+export function computeOpenPipelineMetrics(leads: Lead[], deals: Deal[]) {
+  const openDeals = deals.filter((d) => !["won", "lost"].includes(d.stage));
+  const leadIdsWithOpenDeal = new Set(openDeals.map((d) => d.leadId));
+  const fromDeals = openDeals.reduce((s, d) => s + d.value, 0);
+  const openLeadsWithoutOpenDeal = leads.filter(
+    (l) => !["won", "lost"].includes(l.stage) && !leadIdsWithOpenDeal.has(l.id),
+  );
+  const fromLeadEstimates = openLeadsWithoutOpenDeal.reduce((s, l) => s + (l.estimatedValue ?? 0), 0);
+  const leadEstimateContributors = openLeadsWithoutOpenDeal.filter((l) => (l.estimatedValue ?? 0) > 0).length;
+
+  return {
+    total: fromDeals + fromLeadEstimates,
+    openDealCount: openDeals.length,
+    leadEstimateContributors,
+  };
+}
+
+/** Same rules as {@link computeOpenPipelineMetrics}, scoped to one user (deal owner + lead owner). */
+export function computeUserOpenPipelineMetrics(userId: string, leads: Lead[], deals: Deal[]) {
+  const openDeals = deals.filter((d) => !["won", "lost"].includes(d.stage));
+  const leadIdsWithOpenDeal = new Set(openDeals.map((d) => d.leadId));
+  const userOpenDeals = openDeals.filter((d) => d.ownerId === userId);
+  const fromDeals = userOpenDeals.reduce((s, d) => s + d.value, 0);
+  const ownedOpenLeadsNoDeal = leads.filter(
+    (l) =>
+      l.ownerId === userId && !["won", "lost"].includes(l.stage) && !leadIdsWithOpenDeal.has(l.id),
+  );
+  const fromLeadEstimates = ownedOpenLeadsNoDeal.reduce((s, l) => s + (l.estimatedValue ?? 0), 0);
+  const leadEstimateContributors = ownedOpenLeadsNoDeal.filter((l) => (l.estimatedValue ?? 0) > 0).length;
+
+  return {
+    total: fromDeals + fromLeadEstimates,
+    openDealCount: userOpenDeals.length,
+    leadEstimateContributors,
+  };
+}
+
+/**
  * Funnel stage counts for one channel, derived only from workspace-scoped
  * activity rollups and pipeline (leads/deals the viewer may already see).
  */

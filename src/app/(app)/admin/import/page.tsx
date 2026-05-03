@@ -25,10 +25,17 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useAuth } from "@/components/providers/auth-provider";
+import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import { getFirebaseDb } from "@/lib/firebase/client";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
+import { isAuthDisabled } from "@/lib/auth/flags";
 import {
   collectNormalizedEmailsFromWorkspace,
   filterRowsForCsvImport,
   ingestMappedRowAsLead,
+  buildLeadGraphFromMappedRow,
   mapSpreadsheetRowToTargets,
   rowHasImportIdentity,
 } from "@/lib/workspace-csv-import";
@@ -156,7 +163,12 @@ const DEMO_DUP = 11;
 const DEMO_CREATE = 237;
 
 export default function AdminImportPage() {
-  const { addAccount, addContact, addLead, currentUserId, users, leads, contacts } = useWorkspace();
+  const { addAccount, addContact, addLead, currentUserId, users, leads, contacts, isDemo } =
+    useWorkspace();
+  const { user: fbUser } = useAuth();
+  const { data: liveUserDoc } = useUserDoc(
+    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
+  );
   const [step, setStep] = React.useState(0);
   const [sourceColumns, setSourceColumns] = React.useState<string[]>(SAMPLE_SOURCE_FIELDS);
   const [mappings, setMappings] = React.useState<Record<string, string>>(() => ({
@@ -289,7 +301,7 @@ export default function AdminImportPage() {
     });
   }
 
-  function handleImport() {
+  async function handleImport() {
     if (!parsedRows?.length) {
       toast.error("Load a CSV or paste data before importing.");
       return;
@@ -306,11 +318,23 @@ export default function AdminImportPage() {
       toast.error("No rows to import. Check column mapping and duplicate rules.");
       return;
     }
+    const orgId = liveUserDoc?.organizationId;
+    const persistLive = !isDemo && Boolean(orgId) && isFirebaseWebConfigured();
+
     setImporting(true);
     try {
-      for (const row of usable) {
-        const mapped = mapSpreadsheetRowToTargets(row, mappings);
-        ingestMappedRowAsLead(mapped, ownerId, addAccount, addContact, addLead);
+      if (persistLive && orgId) {
+        const db = getFirebaseDb();
+        for (const row of usable) {
+          const mapped = mapSpreadsheetRowToTargets(row, mappings);
+          const { account, contact, lead } = buildLeadGraphFromMappedRow(mapped, ownerId);
+          await persistLeadGraphClient(db, orgId, account, contact, lead);
+        }
+      } else {
+        for (const row of usable) {
+          const mapped = mapSpreadsheetRowToTargets(row, mappings);
+          ingestMappedRowAsLead(mapped, ownerId, addAccount, addContact, addLead);
+        }
       }
       toast.success(`${usable.length} lead${usable.length === 1 ? "" : "s"} imported successfully`);
       setStep(0);
@@ -318,6 +342,9 @@ export default function AdminImportPage() {
       setSourceColumns([...SAMPLE_SOURCE_FIELDS]);
       setMappings({ ...DEFAULT_MAPPINGS });
       setDuplicateHandling("skip");
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error(`Import failed: ${msg}`);
     } finally {
       setImporting(false);
     }
@@ -590,7 +617,7 @@ export default function AdminImportPage() {
               <Button type="button" variant="outline" size="sm" onClick={() => setStep(1)}>
                 <ArrowLeft className="h-3.5 w-3.5" /> Back
               </Button>
-              <Button type="button" size="sm" onClick={() => handleImport()} disabled={importing}>
+              <Button type="button" size="sm" onClick={() => void handleImport()} disabled={importing}>
                 {importing ? (
                   <>Importing…</>
                 ) : (

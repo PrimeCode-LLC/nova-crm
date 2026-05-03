@@ -21,9 +21,15 @@ import type {
 import {
   getWorkspaceSnapshot,
   createWorkspaceLookup,
+  LIVE_SNAPSHOT,
   type WorkspaceSnapshot,
   type WorkspaceLookup,
 } from "@/lib/workspace-dataset";
+import { applyLiveHierarchyScope } from "@/lib/workspace-hierarchy";
+import { useAuth } from "@/components/providers/auth-provider";
+import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
+import { isAuthDisabled } from "@/lib/auth/flags";
 import { setWorkspaceModeCookie } from "@/app/(app)/actions/workspace-mode";
 import { setDemoPersonaCookie } from "@/app/(app)/actions/demo-persona";
 import {
@@ -117,11 +123,6 @@ export function WorkspaceModeProvider({
     [router],
   );
 
-  const baseSnapshot = React.useMemo(
-    () => getWorkspaceSnapshot(mode, demoPersonaId),
-    [mode, demoPersonaId],
-  );
-
   const [poDelta, setPoDelta] = React.useState<{
     added: PermissionOverride[];
     removedIds: string[];
@@ -145,6 +146,14 @@ export function WorkspaceModeProvider({
 
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
+
+  const { user: fbUser } = useAuth();
+  const { data: userDoc } = useUserDoc(
+    mode === "demo" || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
+  );
+  const liveOrgId =
+    mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
+  const liveFs = useLiveWorkspaceFirestore(liveOrgId);
 
   React.useEffect(() => {
     React.startTransition(() => {
@@ -432,10 +441,42 @@ export function WorkspaceModeProvider({
     [sessionV2.pinnedLeadIds],
   );
 
+  const tenantBaseSnapshot = React.useMemo((): WorkspaceSnapshot => {
+    if (mode === "demo") {
+      return getWorkspaceSnapshot(mode, demoPersonaId);
+    }
+    const uid = fbUser?.uid ?? "";
+    const raw: WorkspaceSnapshot = {
+      ...LIVE_SNAPSHOT,
+      users: liveFs.users,
+      leads: liveFs.leads,
+      accounts: liveFs.accounts,
+      contacts: liveFs.contacts,
+      deals: liveFs.deals,
+      currentUserId: uid,
+    };
+    if (!uid || !userDoc) {
+      return raw;
+    }
+    const viewer: User = { ...userDoc, id: uid };
+    const roster = liveFs.users.length > 0 ? liveFs.users : [viewer];
+    return applyLiveHierarchyScope(raw, viewer, roster);
+  }, [
+    mode,
+    demoPersonaId,
+    fbUser?.uid,
+    userDoc,
+    liveFs.users,
+    liveFs.leads,
+    liveFs.accounts,
+    liveFs.contacts,
+    liveFs.deals,
+  ]);
+
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {
     const removed = new Set(poDelta.removedIds);
     const permissionOverrides = [
-      ...baseSnapshot.permissionOverrides.filter((p) => !removed.has(p.id)),
+      ...tenantBaseSnapshot.permissionOverrides.filter((p) => !removed.has(p.id)),
       ...poDelta.added,
     ];
     const applyPatches = (list: Profile[]) =>
@@ -444,31 +485,43 @@ export function WorkspaceModeProvider({
         return patch ? { ...p, ...patch } : p;
       });
     const profiles = [
-      ...applyPatches(baseSnapshot.profiles),
+      ...applyPatches(tenantBaseSnapshot.profiles),
       ...applyPatches(profileDelta.added),
     ];
     const campaigns = [
-      ...baseSnapshot.campaigns.map((c) =>
+      ...tenantBaseSnapshot.campaigns.map((c) =>
         campaignEdits[c.id] ? { ...c, ...campaignEdits[c.id] } : c,
       ),
       ...campaignsAdded.map((c) =>
         campaignEdits[c.id] ? { ...c, ...campaignEdits[c.id] } : c,
       ),
     ];
-    const accountsMerged = [...baseSnapshot.accounts, ...accountsAdded].map((a) => ({
+    const accountIds = new Set(tenantBaseSnapshot.accounts.map((a) => a.id));
+    const contactIds = new Set(tenantBaseSnapshot.contacts.map((c) => c.id));
+    const leadIds = new Set(tenantBaseSnapshot.leads.map((l) => l.id));
+    const accountsMerged = [
+      ...tenantBaseSnapshot.accounts,
+      ...accountsAdded.filter((a) => !accountIds.has(a.id)),
+    ].map((a) => ({
       ...a,
       contactCount: a.contactCount + (accountContactBumps[a.id] ?? 0),
     }));
-    const contactsMerged = [...baseSnapshot.contacts, ...contactsAdded];
-    const leadsMerged = [...baseSnapshot.leads, ...leadsAdded];
-    const usersMerged = baseSnapshot.users.map((u) => ({
+    const contactsMerged = [
+      ...tenantBaseSnapshot.contacts,
+      ...contactsAdded.filter((c) => !contactIds.has(c.id)),
+    ];
+    const leadsMerged = [
+      ...tenantBaseSnapshot.leads,
+      ...leadsAdded.filter((l) => !leadIds.has(l.id)),
+    ];
+    const usersMerged = tenantBaseSnapshot.users.map((u) => ({
       ...u,
       ...(userPatches[u.id] ?? {}),
     }));
     return {
-      ...baseSnapshot,
+      ...tenantBaseSnapshot,
       permissionOverrides,
-      departments: [...baseSnapshot.departments, ...addedDepartments],
+      departments: [...tenantBaseSnapshot.departments, ...addedDepartments],
       profiles,
       campaigns,
       accounts: accountsMerged,
@@ -477,7 +530,7 @@ export function WorkspaceModeProvider({
       users: usersMerged,
     };
   }, [
-    baseSnapshot,
+    tenantBaseSnapshot,
     poDelta,
     addedDepartments,
     profileDelta,

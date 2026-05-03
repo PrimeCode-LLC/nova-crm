@@ -5,6 +5,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/format";
 import { ROLES } from "@/lib/constants";
+import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { UserChip } from "@/components/common/user-chip";
 import { Badge } from "@/components/ui/badge";
 import type { Deal, Lead } from "@/lib/types";
@@ -32,9 +33,7 @@ export function PersonScorecard({
       ).length;
       const won = ownedLeads.filter((l) => l.stage === "won").length;
       const wonDeals = deals.filter((d) => d.ownerId === u.id && d.stage === "won");
-      const pipeline = deals
-        .filter((d) => d.ownerId === u.id && !["won", "lost"].includes(d.stage))
-        .reduce((s, d) => s + d.value, 0);
+      const pipeline = computeUserOpenPipelineMetrics(u.id, leads, deals).total;
       const closedValue = wonDeals.reduce((s, d) => s + d.value, 0);
 
       return {

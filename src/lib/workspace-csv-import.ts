@@ -50,16 +50,11 @@ export function rowHasImportIdentity(m: MappedImportRow): boolean {
   return Boolean(email || company || (fn && ln) || fn || ln);
 }
 
-/**
- * Creates account + contact + lead from one mapped CSV row (same pattern as Quick add lead).
- */
-export function ingestMappedRowAsLead(
+/** Builds account + contact + lead from one mapped CSV row (same shape as Quick add). */
+export function buildLeadGraphFromMappedRow(
   m: MappedImportRow,
   ownerId: string,
-  addAccount: (a: Account) => void,
-  addContact: (c: Contact) => void,
-  addLead: (l: Lead) => void,
-): void {
+): { account: Account; contact: Contact; lead: Lead } {
   const now = new Date().toISOString();
   const email = (m.contactEmail ?? "").trim().toLowerCase();
   const domainFromEmail = email.includes("@") ? email.split("@")[1]?.trim() : undefined;
@@ -99,7 +94,7 @@ export function ingestMappedRowAsLead(
   const contactId = newEntityId("ct");
   const leadId = newEntityId("l");
 
-  addAccount({
+  const account: Account = {
     id: accountId,
     name: companyName,
     domain: (m.companyDomain ?? "").trim() || domainFromEmail || undefined,
@@ -111,9 +106,9 @@ export function ingestMappedRowAsLead(
     ownerId,
     createdAt: now,
     updatedAt: now,
-  });
+  };
 
-  addContact({
+  const contact: Contact = {
     id: contactId,
     accountId,
     firstName,
@@ -126,9 +121,9 @@ export function ingestMappedRowAsLead(
     ownerId,
     createdAt: now,
     updatedAt: now,
-  });
+  };
 
-  addLead({
+  const lead: Lead = {
     id: leadId,
     accountId,
     contactId,
@@ -149,7 +144,25 @@ export function ingestMappedRowAsLead(
     isIdle: false,
     createdAt: now,
     updatedAt: now,
-  });
+  };
+
+  return { account, contact, lead };
+}
+
+/**
+ * Creates account + contact + lead from one mapped CSV row (same pattern as Quick add lead).
+ */
+export function ingestMappedRowAsLead(
+  m: MappedImportRow,
+  ownerId: string,
+  addAccount: (a: Account) => void,
+  addContact: (c: Contact) => void,
+  addLead: (l: Lead) => void,
+): void {
+  const { account, contact, lead } = buildLeadGraphFromMappedRow(m, ownerId);
+  addAccount(account);
+  addContact(contact);
+  addLead(lead);
 }
 
 export function collectNormalizedEmailsFromWorkspace(
