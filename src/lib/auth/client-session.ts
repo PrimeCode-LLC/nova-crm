@@ -1,5 +1,6 @@
 "use client";
 
+import { reload, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 
 export type ExchangeResult = {
@@ -23,6 +24,7 @@ export async function exchangeIdTokenForSession(
 ): Promise<ExchangeResult> {
   const res = await fetch("/api/auth/session", {
     method: "POST",
+    credentials: "include",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       idToken,
@@ -46,6 +48,7 @@ export async function exchangeIdTokenForSession(
       const fresh = await user.getIdToken(true);
       const re = await fetch("/api/auth/session", {
         method: "POST",
+        credentials: "include",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ idToken: fresh }),
       });
@@ -67,4 +70,28 @@ export async function exchangeIdTokenForSession(
     orgRole: data.orgRole,
     membershipPending: data.membershipPending,
   };
+}
+
+/**
+ * After Firebase credential changes (e.g. password update), forces user reload +
+ * fresh ID token and exchanges for a new httpOnly session cookie. Retries handle
+ * races right after refresh-token rotation.
+ */
+export async function refreshServerSessionFromCurrentUser(
+  user: User,
+): Promise<ExchangeResult> {
+  await reload(user);
+  let lastErr: Error | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 250 * attempt));
+    }
+    try {
+      const idToken = await user.getIdToken(true);
+      return await exchangeIdTokenForSession(idToken);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+    }
+  }
+  throw lastErr ?? new Error("Session refresh failed");
 }

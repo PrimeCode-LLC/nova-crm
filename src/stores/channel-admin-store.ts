@@ -2,41 +2,27 @@
 
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
-import type { ChannelKey } from "@/lib/types";
+import type { ChannelKey, OrganizationChannelAdminConfig } from "@/lib/types";
+import type { OrganizationCustomChannelRow } from "@/lib/types";
+import { DEFAULT_CHANNEL_AUTO } from "@/lib/channel-admin-defaults";
 
-export const DEFAULT_CHANNEL_AUTO: Record<ChannelKey, boolean> = {
-  cold_email: true,
-  personalized_email: false,
-  linkedin_outbound: true,
-  linkedin_1to1: false,
-  website_form: true,
-  upwork: false,
-  job_apply: false,
-};
+/** @deprecated name — use OrganizationCustomChannelRow */
+export type CustomChannelRow = OrganizationCustomChannelRow;
 
-export type CustomChannelRow = {
-  id: string;
-  name: string;
-  description: string;
-  stages: { key: string; label: string }[];
-  auto: boolean;
-};
+export type ChannelAdminPersisted = OrganizationChannelAdminConfig;
 
-export type ChannelAdminPersisted = {
-  autoMap: Record<ChannelKey, boolean>;
-  descriptionOverrides: Partial<Record<ChannelKey, string>>;
-  customChannels: CustomChannelRow[];
-};
-
-export interface ChannelAdminState extends ChannelAdminPersisted {
+export interface ChannelAdminState extends OrganizationChannelAdminConfig {
   setAuto: (key: ChannelKey, value: boolean) => void;
   setDescriptionOverride: (key: ChannelKey, value: string | undefined) => void;
-  addCustomChannel: (input: Omit<CustomChannelRow, "id">) => void;
-  updateCustomChannel: (id: string, patch: Partial<Omit<CustomChannelRow, "id">>) => void;
+  addCustomChannel: (input: Omit<OrganizationCustomChannelRow, "id">) => void;
+  updateCustomChannel: (
+    id: string,
+    patch: Partial<Omit<OrganizationCustomChannelRow, "id">>,
+  ) => void;
   removeCustomChannel: (id: string) => void;
 }
 
-const emptyPersisted: ChannelAdminPersisted = {
+const emptyPersisted: OrganizationChannelAdminConfig = {
   autoMap: { ...DEFAULT_CHANNEL_AUTO },
   descriptionOverrides: {},
   customChannels: [],
@@ -54,6 +40,16 @@ export function parseStagesInput(raw: string): { key: string; label: string }[] 
       .replace(/[^a-z0-9_]/g, "") || `stage_${i}`,
     label,
   }));
+}
+
+export function getChannelAdminPersistedSnapshot(
+  s: Pick<ChannelAdminState, "autoMap" | "descriptionOverrides" | "customChannels">,
+): OrganizationChannelAdminConfig {
+  return {
+    autoMap: s.autoMap,
+    descriptionOverrides: s.descriptionOverrides,
+    customChannels: s.customChannels,
+  };
 }
 
 export const useChannelAdminStore = create<ChannelAdminState>()(
@@ -75,7 +71,10 @@ export const useChannelAdminStore = create<ChannelAdminState>()(
         set({
           customChannels: [
             ...get().customChannels,
-            { ...input, id: globalThis.crypto?.randomUUID?.() ?? `c_${Date.now()}` },
+            {
+              ...input,
+              id: globalThis.crypto?.randomUUID?.() ?? `c_${Date.now()}`,
+            },
           ],
         }),
       updateCustomChannel: (id, patch) =>
@@ -93,7 +92,7 @@ export const useChannelAdminStore = create<ChannelAdminState>()(
       name: "nova-crm-channel-admin",
       storage: createJSONStorage(() => localStorage),
       merge: (persisted, current) => {
-        const p = persisted as Partial<ChannelAdminPersisted> | undefined;
+        const p = persisted as Partial<OrganizationChannelAdminConfig> | undefined;
         if (!p || typeof p !== "object") return current as ChannelAdminState;
         return {
           ...(current as ChannelAdminState),

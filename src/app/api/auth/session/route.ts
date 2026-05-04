@@ -72,7 +72,12 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid token" }, { status: 401 });
   }
 
-  if (Date.now() / 1000 - decoded.auth_time > 60 * 60) {
+  /* Reject obviously stale JWTs. Use *iat* (issued-at), not *auth_time*: a forced
+   * ID-token refresh after password change updates iat but often keeps auth_time
+   * from the original sign-in, which incorrectly failed the old 1h auth_time rule. */
+  const nowSec = Date.now() / 1000;
+  const iat = typeof decoded.iat === "number" ? decoded.iat : 0;
+  if (!iat || nowSec - iat > 70 * 60) {
     return NextResponse.json(
       { error: "ID token is too old. Sign in again." },
       { status: 401 },

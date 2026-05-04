@@ -7,8 +7,6 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
 import { Loader2, ArrowLeft } from "lucide-react";
-import { sendPasswordResetEmail } from "firebase/auth";
-
 import { Button } from "@/components/ui/button";
 import {
   Form,
@@ -20,7 +18,6 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth } from "@/lib/firebase/client";
 import { isAuthDisabled } from "@/lib/auth/flags";
 
 const schema = z.object({
@@ -51,13 +48,24 @@ export default function ForgotPasswordPage() {
 
     setLoading(true);
     try {
-      const auth = getFirebaseAuth();
-      await sendPasswordResetEmail(auth, values.email);
+      const res = await fetch("/api/auth/password-reset-mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: values.email.trim().toLowerCase() }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || data.ok === false) {
+        toast.error(data.error ?? "Request failed");
+        return;
+      }
       setSent(true);
-      toast.success("Reset link sent. Check your inbox");
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : "Request failed";
-      toast.error(msg);
+      toast.success(data.message ?? "Reset link sent. Check your inbox");
+    } catch {
+      toast.error("Could not reach the server.");
     } finally {
       setLoading(false);
     }

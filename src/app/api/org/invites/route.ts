@@ -9,7 +9,10 @@ import {
 import { hasSeatAvailableServer } from "@/lib/platform/members-server";
 import { getRequestOrigin, inviteAcceptUrl } from "@/lib/invite-link";
 import { renderInviteEmail } from "@/lib/email/invite-email";
-import { sendSystemEmail } from "@/lib/email/send-system-email";
+import {
+  sendSystemEmail,
+  systemEmailConfigHint,
+} from "@/lib/email/send-system-email";
 import { recordAudit } from "@/lib/firestore/audit";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
@@ -101,7 +104,7 @@ export async function POST(req: Request) {
     emailDelivered: send.ok,
     deliveryNote:
       send.ok === false && send.reason === "not_configured"
-        ? "SYSTEM_SMTP_* not set — copy the accept link manually."
+        ? `${systemEmailConfigHint()} Copy the accept link below to share manually.`
         : send.ok === false
           ? send.error
           : undefined,

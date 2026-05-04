@@ -8,6 +8,9 @@ import {
   findMembershipForUserServer,
   getMemberServer,
 } from "@/lib/platform/members-server";
+import { roleAtLeast } from "./org-role";
+
+export { roleAtLeast };
 
 export type TenantApiContext = {
   session: AppSession & { organizationId: string };
@@ -18,17 +21,6 @@ export type TenantApiContext = {
 export type TenantGuardResult =
   | { ok: true; ctx: TenantApiContext }
   | { ok: false; response: NextResponse };
-
-const ROLE_ORDER: Record<OrgMemberRole, number> = {
-  owner: 4,
-  admin: 3,
-  manager: 2,
-  member: 1,
-};
-
-export function roleAtLeast(have: OrgMemberRole, need: OrgMemberRole): boolean {
-  return ROLE_ORDER[have] >= ROLE_ORDER[need];
-}
 
 /**
  * Guard for tenant-scoped APIs — requires a session with an `organizationId`

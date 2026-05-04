@@ -9,6 +9,7 @@ import { findMembershipForUserServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
+import { ChannelAdminSync } from "@/components/providers/channel-admin-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
 import { DEMO_PERSONA_COOKIE, parseDemoPersonaId } from "@/lib/demo-persona";
@@ -52,6 +53,7 @@ export default async function AppLayout({
       initialDemoPersonaId={initialDemoPersonaId}
       organizationName={organizationName}
     >
+      <ChannelAdminSync />
       <QuickAddLauncherProvider>
         <SidebarProvider>
           <AppSidebar showPlatformLink={showPlatformLink} />

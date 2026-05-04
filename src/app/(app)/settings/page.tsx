@@ -18,6 +18,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useAuth } from "@/components/providers/auth-provider";
 import { initials } from "@/lib/format";
 import { useTheme } from "next-themes";
+import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import {
   User,
   Building2,
@@ -32,9 +33,14 @@ import {
   Moon,
   Monitor,
   Mail,
+  Loader2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
+import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
+import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isAuthDisabled } from "@/lib/auth/flags";
 
 const LS_PROFILE = "nova-crm-settings-profile-v1";
 const LS_ACCOUNT = "nova-crm-settings-account-v1";
@@ -181,6 +187,9 @@ function SettingsPage() {
   const [displayName, setDisplayName] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [title, setTitle] = React.useState("");
+  const [currentPassword, setCurrentPassword] = React.useState("");
+  const [newPassword, setNewPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
 
   React.useEffect(() => {
     if (isDemo && demoUser) {
@@ -209,6 +218,8 @@ function SettingsPage() {
     }
   }, [isDemo, currentUserId, demoPersonaId, demoUser, fbUser]);
   const [savingProfile, setSavingProfile] = React.useState(false);
+  const [changingPassword, setChangingPassword] = React.useState(false);
+  const [sendingResetEmail, setSendingResetEmail] = React.useState(false);
 
   const [notifications, setNotifications] = React.useState({ ...DEFAULT_NOTIFICATIONS });
 
@@ -305,6 +316,110 @@ function SettingsPage() {
     }
   }
 
+  async function handleChangePassword() {
+    if (isDemo) {
+      toast.info("Password change is not available in Demo mode.");
+      return;
+    }
+    if (!fbUser || !fbUser.email) {
+      toast.error("Sign in with email/password to change your password.");
+      return;
+    }
+    if (!currentPassword) {
+      toast.error("Enter your current password.");
+      return;
+    }
+    if (newPassword.length < 8) {
+      toast.error("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast.error("New password and confirmation do not match.");
+      return;
+    }
+    if (newPassword === currentPassword) {
+      toast.error("New password must be different from current password.");
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      const credential = EmailAuthProvider.credential(
+        fbUser.email,
+        currentPassword,
+      );
+      await reauthenticateWithCredential(fbUser, credential);
+      await updatePassword(fbUser, newPassword);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      /* Firebase revokes old refresh tokens on password change; re-exchange so the
+       * httpOnly session cookie stays valid and protected routes are not 307→login storms. */
+      if (!isAuthDisabled() && isFirebaseWebConfigured()) {
+        try {
+          await refreshServerSessionFromCurrentUser(fbUser);
+        } catch (e) {
+          const detail = e instanceof Error ? e.message : "Session refresh failed.";
+          toast.error(
+            `Password was saved. ${detail} Sign out and sign in again if navigation breaks.`,
+          );
+          return;
+        }
+        toast.success("Password updated.");
+        window.setTimeout(() => window.location.reload(), 100);
+        return;
+      }
+      toast.success("Password updated.");
+    } catch (error) {
+      toast.error(formatFirebaseAuthError(error));
+    } finally {
+      setChangingPassword(false);
+    }
+  }
+
+  async function handleSendPasswordResetEmail() {
+    if (isDemo) {
+      toast.info("Password reset email is not available in Demo mode.");
+      return;
+    }
+    if (isAuthDisabled()) {
+      toast.success("Reset link sent (auth disabled mode — no email sent).");
+      return;
+    }
+    const addr = fbUser?.email?.trim();
+    if (!addr) {
+      toast.error("No email address on this account.");
+      return;
+    }
+    if (!isFirebaseWebConfigured()) {
+      toast.error("Firebase is not configured.");
+      return;
+    }
+
+    setSendingResetEmail(true);
+    try {
+      const res = await fetch("/api/auth/password-reset-mail", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: addr }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (!res.ok || data.ok === false) {
+        toast.error(data.error ?? "Could not send reset email.");
+        return;
+      }
+      toast.success(data.message ?? `Check ${addr} for a link to reset your password.`);
+    } catch {
+      toast.error("Could not reach the server.");
+    } finally {
+      setSendingResetEmail(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
@@ -398,6 +513,86 @@ function SettingsPage() {
                   <Button size="sm" onClick={handleSaveProfile} disabled={savingProfile}>
                     {savingProfile ? "Saving…" : "Save profile"}
                   </Button>
+                </div>
+                <Separator />
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-sm font-medium">Change password</div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Enter your current password, then set a new one.
+                    </p>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5 sm:col-span-2">
+                      <Label className="text-xs">Current password</Label>
+                      <Input
+                        type="password"
+                        className="h-9"
+                        autoComplete="current-password"
+                        value={currentPassword}
+                        onChange={(e) => setCurrentPassword(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">New password</Label>
+                      <Input
+                        type="password"
+                        className="h-9"
+                        autoComplete="new-password"
+                        value={newPassword}
+                        onChange={(e) => setNewPassword(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Confirm new password</Label>
+                      <Input
+                        type="password"
+                        className="h-9"
+                        autoComplete="new-password"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleChangePassword()}
+                      disabled={changingPassword}
+                    >
+                      {changingPassword ? "Updating…" : "Update password"}
+                    </Button>
+                  </div>
+                </div>
+                <Separator />
+                <div className="space-y-3">
+                  <div>
+                    <div className="text-sm font-medium">Reset password by email</div>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      We&apos;ll email a secure reset link from this app (your SYSTEM_SMTP mail server), not Firebase&apos;s mailer.
+                      {fbUser?.email ? (
+                        <span className="block mt-1 font-medium text-foreground/90">{fbUser.email}</span>
+                      ) : null}
+                    </p>
+                  </div>
+                  <div className="flex justify-end">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="secondary"
+                      className="gap-1.5"
+                      onClick={() => void handleSendPasswordResetEmail()}
+                      disabled={sendingResetEmail || !fbUser?.email}
+                    >
+                      {sendingResetEmail ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Mail className="h-3.5 w-3.5" />
+                      )}
+                      {sendingResetEmail ? "Sending…" : "Send reset link"}
+                    </Button>
+                  </div>
                 </div>
               </CardContent>
             </Card>

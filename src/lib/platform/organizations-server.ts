@@ -5,13 +5,18 @@ import {
 } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { CHANNELS } from "@/lib/constants";
 import type {
+  ChannelKey,
   ISODate,
   Organization,
+  OrganizationChannelAdminConfig,
+  OrganizationCustomChannelRow,
   OrganizationSettings,
   OrganizationStatus,
   SaaSPlanId,
 } from "@/lib/types";
+import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
 
 const TRIAL_DAYS = 14;
@@ -37,6 +42,64 @@ function maybeTsToIso(t: Timestamp | undefined | null): ISODate | undefined {
   return t.toDate().toISOString();
 }
 
+const CHANNEL_KEY_SET = new Set(Object.keys(CHANNELS) as ChannelKey[]);
+
+function parseOrgChannelAdmin(raw: unknown): OrganizationChannelAdminConfig | undefined {
+  if (raw === null || raw === undefined) return undefined;
+  if (typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+
+  const autoPartial: Partial<Record<ChannelKey, boolean>> = {};
+  if (o.autoMap && typeof o.autoMap === "object") {
+    for (const [k, v] of Object.entries(o.autoMap as Record<string, unknown>)) {
+      if (CHANNEL_KEY_SET.has(k as ChannelKey) && typeof v === "boolean") {
+        autoPartial[k as ChannelKey] = v;
+      }
+    }
+  }
+
+  const descPartial: Partial<Record<ChannelKey, string>> = {};
+  if (o.descriptionOverrides && typeof o.descriptionOverrides === "object") {
+    for (const [k, v] of Object.entries(
+      o.descriptionOverrides as Record<string, unknown>,
+    )) {
+      if (CHANNEL_KEY_SET.has(k as ChannelKey) && typeof v === "string") {
+        descPartial[k as ChannelKey] = v;
+      }
+    }
+  }
+
+  const custom: OrganizationCustomChannelRow[] = [];
+  if (Array.isArray(o.customChannels)) {
+    for (const row of o.customChannels) {
+      if (!row || typeof row !== "object") continue;
+      const r = row as Record<string, unknown>;
+      const id = typeof r.id === "string" ? r.id : "";
+      const name = typeof r.name === "string" ? r.name : "";
+      if (!id || !name.trim()) continue;
+      const description = typeof r.description === "string" ? r.description : "";
+      const auto = typeof r.auto === "boolean" ? r.auto : false;
+      const stages: { key: string; label: string }[] = [];
+      if (Array.isArray(r.stages)) {
+        for (const s of r.stages) {
+          if (!s || typeof s !== "object") continue;
+          const st = s as Record<string, unknown>;
+          const sk = typeof st.key === "string" ? st.key : "";
+          const label = typeof st.label === "string" ? st.label : "";
+          if (sk && label) stages.push({ key: sk, label });
+        }
+      }
+      custom.push({ id, name, description, stages, auto });
+    }
+  }
+
+  return mergeChannelAdminConfig({
+    autoMap: autoPartial,
+    descriptionOverrides: descPartial,
+    customChannels: custom,
+  });
+}
+
 function docToOrg(id: string, data: DocumentData): Organization {
   const raw = (data.settings ?? {}) as Record<string, unknown>;
   const settings: OrganizationSettings = {
@@ -49,6 +112,12 @@ function docToOrg(id: string, data: DocumentData): Organization {
         ? raw.inboundWebhookSecret
         : undefined,
   };
+  const channelAdminRaw = data.channelAdmin;
+  const channelAdmin =
+    channelAdminRaw !== undefined && channelAdminRaw !== null
+      ? parseOrgChannelAdmin(channelAdminRaw)
+      : undefined;
+
   return {
     id,
     name: String(data.name ?? ""),
@@ -66,6 +135,7 @@ function docToOrg(id: string, data: DocumentData): Organization {
         : undefined,
     trialEndsAt: maybeTsToIso(data.trialEndsAt as Timestamp | undefined),
     settings,
+    channelAdmin,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
     openJoinTokenHash:
@@ -79,7 +149,7 @@ function docToOrg(id: string, data: DocumentData): Organization {
 export function sanitizeOrganizationForApi(org: Organization): Organization {
   const safeSettings: OrganizationSettings = { ...org.settings };
   delete safeSettings.inboundWebhookSecret;
-  const { openJoinTokenHash: _h, ...rest } = org;
+  const { openJoinTokenHash: _h, channelAdmin: _ca, ...rest } = org;
   return {
     ...rest,
     settings: safeSettings,
@@ -275,5 +345,27 @@ export async function updateOrganizationServer(
   }
 
   await ref.update(updates);
+  return { ok: true };
+}
+
+export async function updateOrganizationChannelAdminServer(
+  orgId: string,
+  config: OrganizationChannelAdminConfig,
+): Promise<{ ok: true } | { error: string }> {
+  const db = getAdminDb();
+  if (!db) return { error: "Database not configured" };
+
+  const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
+  const cur = await ref.get();
+  if (!cur.exists) return { error: "Organization not found" };
+
+  await ref.update({
+    channelAdmin: {
+      autoMap: config.autoMap,
+      descriptionOverrides: config.descriptionOverrides,
+      customChannels: config.customChannels,
+    },
+    updatedAt: FieldValue.serverTimestamp(),
+  });
   return { ok: true };
 }

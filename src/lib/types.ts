@@ -89,6 +89,21 @@ export interface OrganizationSettings {
   inboundWebhookSecret?: string;
 }
 
+/** Workspace-wide channel admin config; stored on org doc as `channelAdmin`. */
+export type OrganizationCustomChannelRow = {
+  id: string;
+  name: string;
+  description: string;
+  stages: { key: string; label: string }[];
+  auto: boolean;
+};
+
+export type OrganizationChannelAdminConfig = {
+  autoMap: Record<ChannelKey, boolean>;
+  descriptionOverrides: Partial<Record<ChannelKey, string>>;
+  customChannels: OrganizationCustomChannelRow[];
+};
+
 export interface Organization {
   id: string;
   name: string;
@@ -108,6 +123,8 @@ export interface Organization {
   /** ISO date when the trial ends (used to gate feature/seat warnings). */
   trialEndsAt?: ISODate;
   settings: OrganizationSettings;
+  /** From Firestore `channelAdmin`; stripped in `sanitizeOrganizationForApi`. */
+  channelAdmin?: OrganizationChannelAdminConfig;
   createdAt: ISODate;
   updatedAt: ISODate;
   /** Populated by platform GET APIs after stripping `settings.inboundWebhookSecret`. */

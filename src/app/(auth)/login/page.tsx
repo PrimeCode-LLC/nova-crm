@@ -39,6 +39,11 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
+/** Full navigation so the next document request includes the freshly Set-Cookie __session (App Router client transitions can race). */
+function goAfterSessionCookie(nextPath: string) {
+  window.location.assign(nextPath);
+}
+
 function LoginFormSkeleton() {
   return (
     <div className="space-y-4 animate-pulse">
@@ -66,6 +71,15 @@ function LoginForm() {
   const joinToken = searchParams.get("join") ?? undefined;
   const inviteToken = searchParams.get("invite") ?? undefined;
   const [loading, setLoading] = React.useState(false);
+  const resetBannerShown = React.useRef(false);
+
+  React.useEffect(() => {
+    if (searchParams.get("reset") !== "complete" || resetBannerShown.current) return;
+    resetBannerShown.current = true;
+    toast.message("Password updated", {
+      description: "Sign in with your new password.",
+    });
+  }, [searchParams]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(schema),
@@ -97,15 +111,15 @@ function LoginForm() {
         inviteToken,
       });
       if (exchanged.membershipPending) {
-        router.replace("/join/pending");
+        goAfterSessionCookie("/join/pending");
         toast.message("Access pending approval", {
           description: "An admin still needs to approve your workspace request.",
         });
         return;
       }
       const next = searchParams.get("next") ?? "/dashboard";
-      router.replace(next);
       toast.success("Signed in");
+      goAfterSessionCookie(next);
     } catch (e: unknown) {
       toast.error(formatFirebaseAuthError(e));
     } finally {
@@ -132,14 +146,14 @@ function LoginForm() {
         inviteToken,
       });
       if (exchanged.membershipPending) {
-        router.replace("/join/pending");
+        goAfterSessionCookie("/join/pending");
         toast.message("Access pending approval", {
           description: "An admin still needs to approve your workspace request.",
         });
         return;
       }
-      router.replace(searchParams.get("next") ?? "/dashboard");
       toast.success("Signed in with Google");
+      goAfterSessionCookie(searchParams.get("next") ?? "/dashboard");
     } catch (e: unknown) {
       toast.error(formatFirebaseAuthError(e));
     } finally {
