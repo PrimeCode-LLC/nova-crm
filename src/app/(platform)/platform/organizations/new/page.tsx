@@ -15,13 +15,16 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { Copy } from "lucide-react";
+import { Copy, KeyRound } from "lucide-react";
+import { Checkbox } from "@/components/ui/checkbox";
 
 type CreateResponse = {
   id?: string;
   slug?: string;
   ownerLinked?: boolean;
   ownerEmail?: string | null;
+  ownerLoginProvisioned?: boolean;
+  linkedExistingFirebaseUser?: boolean | null;
   setupLink?: string | null;
   setupEmailDelivered?: boolean;
   setupEmailNote?: string;
@@ -40,12 +43,26 @@ export default function NewOrganizationPage() {
   const [operatorNotes, setOperatorNotes] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
   const [created, setCreated] = React.useState<CreateResponse | null>(null);
+  const [provisionOwnerLogin, setProvisionOwnerLogin] = React.useState(false);
+  const [ownerDisplayName, setOwnerDisplayName] = React.useState("");
+  const [ownerPassword, setOwnerPassword] = React.useState("");
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitting(true);
     setCreated(null);
     try {
+      const trimmedOwnerEmail = ownerEmail.trim();
+      if (provisionOwnerLogin) {
+        if (!trimmedOwnerEmail) {
+          toast.error("Owner email is required when creating a login.");
+          return;
+        }
+        if (ownerPassword.trim().length < 8) {
+          toast.error("Password must be at least 8 characters.");
+          return;
+        }
+      }
       const maxParsed = maxUsers.trim() ? parseInt(maxUsers, 10) : undefined;
       const res = await fetch("/api/platform/organizations", {
         method: "POST",
@@ -59,7 +76,13 @@ export default function NewOrganizationPage() {
             maxParsed === undefined || Number.isNaN(maxParsed)
               ? undefined
               : maxParsed,
-          ownerEmail: ownerEmail.trim() || undefined,
+          ownerEmail: trimmedOwnerEmail || undefined,
+          ...(provisionOwnerLogin
+            ? {
+                ownerPassword: ownerPassword.trim(),
+                ownerDisplayName: ownerDisplayName.trim() || undefined,
+              }
+            : {}),
           settings: {
             billingEmail: billingEmail.trim() || undefined,
             operatorNotes: operatorNotes.trim() || undefined,
@@ -75,12 +98,19 @@ export default function NewOrganizationPage() {
         throw new Error(msg);
       }
       setCreated(data);
+      if (provisionOwnerLogin) {
+        setOwnerPassword("");
+      }
       toast.success(
-        data.ownerLinked
-          ? "Organization created and owner linked"
-          : data.ownerEmail
-            ? "Organization created — owner setup link ready"
-            : "Organization created",
+        data.ownerLoginProvisioned
+          ? data.linkedExistingFirebaseUser
+            ? "Organization created — existing login linked as owner"
+            : "Organization created — owner can sign in with the password you set"
+          : data.ownerLinked
+            ? "Organization created and owner linked"
+            : data.ownerEmail
+              ? "Organization created — owner setup link ready"
+              : "Organization created",
       );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to create");
@@ -129,12 +159,70 @@ export default function NewOrganizationPage() {
             value={ownerEmail}
             onChange={(e) => setOwnerEmail(e.target.value)}
             placeholder="founder@acme.com"
+            required={provisionOwnerLogin}
           />
           <p className="text-xs text-muted-foreground">
-            Person who manages this workspace. If they already have an account, they&apos;re
-            linked as Owner immediately. Otherwise the workspace is reserved for that
-            email and self-claims when they sign up.
+            {provisionOwnerLogin
+              ? "Creates or reuses a Firebase login for this address and assigns Owner on this workspace (same idea as Team → Create login)."
+              : "Person who manages this workspace. If they already have an account, they’re linked as Owner immediately. Otherwise the workspace is reserved for that email and self-claims when they sign up."}
           </p>
+        </div>
+
+        <div className="rounded-lg border bg-muted/30 p-4 space-y-4">
+          <label className="flex cursor-pointer items-start gap-3">
+            <Checkbox
+              checked={provisionOwnerLogin}
+              onCheckedChange={(v) => {
+                const on = !!v;
+                setProvisionOwnerLogin(on);
+                if (!on) {
+                  setOwnerDisplayName("");
+                  setOwnerPassword("");
+                }
+              }}
+              className="mt-0.5"
+              aria-labelledby="provision-owner-label"
+            />
+            <span className="space-y-1">
+              <span
+                id="provision-owner-label"
+                className="flex items-center gap-2 text-sm font-medium leading-none"
+              >
+                <KeyRound className="h-3.5 w-3.5" />
+                Create owner login now
+              </span>
+              <span className="block text-xs text-muted-foreground font-normal leading-snug">
+                Firebase email/password for the owner, activated immediately. Share the password
+                securely out of band; they can change it from the login screen.
+              </span>
+            </span>
+          </label>
+          {provisionOwnerLogin && (
+            <div className="space-y-3 pt-1 border-t border-border/60">
+              <div className="space-y-2">
+                <Label htmlFor="owner-display">Owner full name</Label>
+                <Input
+                  id="owner-display"
+                  value={ownerDisplayName}
+                  onChange={(e) => setOwnerDisplayName(e.target.value)}
+                  placeholder="Jordan Harper"
+                  autoComplete="name"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="owner-password">Temporary password</Label>
+                <Input
+                  id="owner-password"
+                  type="password"
+                  value={ownerPassword}
+                  onChange={(e) => setOwnerPassword(e.target.value)}
+                  placeholder="At least 8 characters"
+                  autoComplete="new-password"
+                  minLength={8}
+                />
+              </div>
+            </div>
+          )}
         </div>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
@@ -210,17 +298,28 @@ export default function NewOrganizationPage() {
       {created && (
         <div className="rounded-md border bg-card p-4 text-sm">
           <div className="font-medium">
-            {created.ownerLinked
-              ? "Owner linked"
-              : created.ownerEmail
-                ? "Awaiting owner signup"
-                : "Workspace ready"}
+            {created.ownerLoginProvisioned
+              ? "Owner login ready"
+              : created.ownerLinked
+                ? "Owner linked"
+                : created.ownerEmail
+                  ? "Awaiting owner signup"
+                  : "Workspace ready"}
           </div>
           {created.ownerEmail && (
             <p className="mt-1 text-xs text-muted-foreground">
-              {created.ownerLinked
-                ? `${created.ownerEmail} is now the owner.`
-                : `${created.ownerEmail} will become the owner the first time they sign up.`}
+              {created.ownerLoginProvisioned
+                ? created.linkedExistingFirebaseUser
+                  ? `${created.ownerEmail} already had an account; they’re now Owner here.`
+                  : `${created.ownerEmail} can sign in with the password you entered.`
+                : created.ownerLinked
+                  ? `${created.ownerEmail} is now the owner.`
+                  : `${created.ownerEmail} will become the owner the first time they sign up.`}
+            </p>
+          )}
+          {created.ownerLoginProvisioned && (
+            <p className="mt-2 text-xs text-muted-foreground">
+              No invitation email was sent for this flow — share access details directly if needed.
             </p>
           )}
           {created.setupLink && (
@@ -263,6 +362,9 @@ export default function NewOrganizationPage() {
                 setMaxUsers("");
                 setBillingEmail("");
                 setOperatorNotes("");
+                setProvisionOwnerLogin(false);
+                setOwnerDisplayName("");
+                setOwnerPassword("");
                 setCreated(null);
               }}
               className={cn(buttonVariants({ size: "sm", variant: "ghost" }))}
