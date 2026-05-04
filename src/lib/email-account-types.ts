@@ -72,3 +72,17 @@ export interface MailSent {
   body: string;
   sentAt: string;
 }
+
+/** Message loaded from the mailbox via IMAP (server round-trip). */
+export interface MailInbound {
+  id: string;
+  uid: number;
+  subject: string;
+  from: string;
+  to: string;
+  date: string;
+  seen: boolean;
+  preview: string;
+  bodyText: string;
+  bodyHtml?: string;
+}

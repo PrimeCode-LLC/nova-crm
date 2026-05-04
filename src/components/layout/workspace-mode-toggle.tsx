@@ -17,7 +17,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { cn } from "@/lib/utils";
 
 export function WorkspaceModeToggle() {
-  const { mode, isDemo, setMode } = useWorkspace();
+  const { mode, isDemo, setMode, organizationName } = useWorkspace();
   const [pending, setPending] = React.useState(false);
 
   async function select(next: typeof mode) {
@@ -50,8 +50,8 @@ export function WorkspaceModeToggle() {
               </>
             ) : (
               <>
-                <Briefcase className="h-3.5 w-3.5" />
-                Workspace
+                <Briefcase className="h-3.5 w-3.5 shrink-0" />
+                <span className="max-w-[min(200px,28vw)] truncate">{organizationName}</span>
               </>
             )}
             <Badge variant="secondary" className="ml-0.5 h-4 px-1 text-[9px] font-normal text-muted-foreground">
@@ -78,9 +78,9 @@ export function WorkspaceModeToggle() {
             </div>
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={() => void select("live")} className="gap-2 text-sm">
-            <Briefcase className="h-4 w-4 text-info" />
-            <div className="flex flex-col gap-0.5">
-              <span>Workspace</span>
+            <Briefcase className="h-4 w-4 text-info shrink-0" />
+            <div className="flex flex-col gap-0.5 min-w-0">
+              <span className="truncate">{organizationName}</span>
               <span className="text-[11px] text-muted-foreground font-normal">
                 Your real CRM data (empty until connected).
               </span>

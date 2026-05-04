@@ -48,6 +48,7 @@ import type {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
@@ -118,6 +119,27 @@ function isoFromDateInput(dateStr: string): string {
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
+type ChannelOption = { key: string; label: string };
+
+function buildChannelOptions(
+  customChannels: { id: string; name: string }[],
+): ChannelOption[] {
+  return [
+    ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
+    ...customChannels
+      .map((c) => ({ key: `custom_${c.id}`, label: c.name.trim() }))
+      .filter((c) => c.label.length > 0),
+  ];
+}
+
+function channelLabelFromValue(
+  value: string | undefined,
+  options: ChannelOption[],
+): string {
+  if (!value) return "";
+  return options.find((o) => o.key === value)?.label ?? value;
+}
+
 // ── Account schema ──
 const accountSchema = z.object({
   name: z.string().min(1, "Name required"),
@@ -140,12 +162,21 @@ type TaskForm = z.infer<typeof taskSchema>;
 // ── Profile quick form (outreach persona) ──
 function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
   const { users, addProfile } = useWorkspace();
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const channelOptions = React.useMemo(
+    () => buildChannelOptions(customChannels),
+    [customChannels],
+  );
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
   const [type, setType] = React.useState("");
   const [ownerId, setOwnerId] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const channelLabel = React.useMemo(
+    () => channelLabelFromValue(channel, channelOptions),
+    [channel, channelOptions],
+  );
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -193,10 +224,10 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
           <label className="text-xs font-medium text-foreground">Channel</label>
           <Select value={channel} onValueChange={(v) => setChannel((v ?? "") as ChannelKey)}>
             <SelectTrigger className="h-9">
-              <SelectValue placeholder="Channel" />
+              <SelectValue placeholder="Channel">{channelLabel || undefined}</SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {CHANNEL_LIST.map((c) => (
+              {channelOptions.map((c) => (
                 <SelectItem key={c.key} value={c.key}>
                   {c.label}
                 </SelectItem>
@@ -265,6 +296,11 @@ function LeadFormBody({
   defaultStage?: PipelineStage;
 }) {
   const { users, currentUserId, addAccount, addContact, addLead, isDemo } = useWorkspace();
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const channelOptions = React.useMemo(
+    () => buildChannelOptions(customChannels),
+    [customChannels],
+  );
   const { user: fbUser } = useAuth();
   const { data: liveUserDoc } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
@@ -324,6 +360,11 @@ function LeadFormBody({
       temperature: "cold",
     },
   });
+  const selectedChannel = form.watch("channel");
+  const selectedChannelLabel = React.useMemo(
+    () => channelLabelFromValue(selectedChannel, channelOptions),
+    [selectedChannel, channelOptions],
+  );
 
   const defaultOwnerId =
     currentUserId || sessionOwnerId || users[0]?.id || "";
@@ -442,8 +483,8 @@ function LeadFormBody({
             <FormItem className="col-span-6 min-w-0 sm:col-span-2">
               <FormLabel className="text-xs font-medium text-foreground">Channel</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue placeholder="Select channel" /></SelectTrigger></FormControl>
-                <SelectContent>{CHANNEL_LIST.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}</SelectContent>
+                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue placeholder="Select channel">{selectedChannelLabel || undefined}</SelectValue></SelectTrigger></FormControl>
+                <SelectContent>{channelOptions.map((c) => <SelectItem key={c.key} value={c.key}>{c.label}</SelectItem>)}</SelectContent>
               </Select>
               <FormMessage className="text-xs" />
             </FormItem>

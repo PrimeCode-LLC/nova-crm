@@ -1,0 +1,60 @@
+/** Shared timeouts so verify/send fail fast with predictable latency. */
+const CONNECTION_MS = 12_000;
+const GREETING_MS = 12_000;
+const SOCKET_MS = 25_000;
+
+/**
+ * Base options for nodemailer SMTP (used by verify + send).
+ * Tight connection limits avoid multi-minute hangs on bad host/port.
+ */
+export function smtpTransportOptions(input: {
+  host: string;
+  port: number;
+  secure: boolean;
+  user: string;
+  pass: string;
+}): {
+  host: string;
+  port: number;
+  secure: boolean;
+  auth: { user: string; pass: string };
+  connectionTimeout: number;
+  greetingTimeout: number;
+  socketTimeout: number;
+} {
+  return {
+    host: input.host,
+    port: input.port,
+    secure: input.secure,
+    auth: { user: input.user, pass: input.pass },
+    connectionTimeout: CONNECTION_MS,
+    greetingTimeout: GREETING_MS,
+    socketTimeout: SOCKET_MS,
+  };
+}
+
+/** Turn low-level socket / SMTP errors into short, actionable copy for the UI. */
+export function formatSmtpError(err: unknown): string {
+  if (!(err instanceof Error)) return "SMTP verification failed";
+
+  const code = (err as NodeJS.ErrnoException).code;
+  const msg = err.message || "";
+
+  if (code === "ETIMEDOUT" || /timeout/i.test(msg)) {
+    return "Connection timed out — check the hostname and port, your network, and whether TLS should be on (465) or off with STARTTLS (587).";
+  }
+  if (code === "ECONNREFUSED") {
+    return "Connection refused — wrong port or the server is not accepting SMTP on this address.";
+  }
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
+    return "Host not found — check the SMTP hostname spelling.";
+  }
+  if (/535|authentication failed|invalid login|auth failed|535 5\.7\.8/i.test(msg)) {
+    return "Login rejected — check username and password, or create an app password if your provider uses 2FA.";
+  }
+  if (/certificate|SSL|TLS|UNABLE_TO_VERIFY_LEAF_SIGNATURE|self signed/i.test(msg)) {
+    return "TLS/SSL error — try port 587 with “TLS/SSL (implicit)” off, or 465 with it on, per your provider.";
+  }
+
+  return msg.length > 280 ? `${msg.slice(0, 280)}…` : msg;
+}

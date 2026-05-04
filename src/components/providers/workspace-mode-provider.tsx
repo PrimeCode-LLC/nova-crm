@@ -64,6 +64,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     mode: WorkspaceMode;
     isDemo: boolean;
     demoPersonaId: string;
+    /** Display name for the signed-in tenant (from Firestore org). */
+    organizationName: string;
     setMode: (next: WorkspaceMode) => Promise<void>;
     setDemoPersona: (userId: string) => Promise<void>;
     addPermissionOverride: (override: PermissionOverride) => void;
@@ -107,15 +109,21 @@ function newLocalId(prefix: string) {
 export function WorkspaceModeProvider({
   initialMode,
   initialDemoPersonaId,
+  organizationName: organizationNameProp,
   children,
 }: {
   initialMode: WorkspaceMode;
   initialDemoPersonaId: string;
+  /** Resolved on the server from the session’s organizationId; fallback label if missing. */
+  organizationName?: string | null;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const [mode, setModeState] = React.useState<WorkspaceMode>(initialMode);
   const [demoPersonaId, setDemoPersonaState] = React.useState(initialDemoPersonaId);
+
+  const organizationName =
+    organizationNameProp?.trim() || "Workspace";
 
   React.useEffect(() => {
     setModeState(initialMode);
@@ -811,6 +819,7 @@ export function WorkspaceModeProvider({
       mode,
       isDemo: mode === "demo",
       demoPersonaId,
+      organizationName,
       setMode,
       setDemoPersona,
       addPermissionOverride,
@@ -844,6 +853,7 @@ export function WorkspaceModeProvider({
     orgMemberLabels,
     mode,
     demoPersonaId,
+    organizationName,
     setMode,
     setDemoPersona,
     addPermissionOverride,

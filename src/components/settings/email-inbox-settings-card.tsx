@@ -77,7 +77,9 @@ export function EmailInboxSettingsCard() {
         if (testImap && imapData && !imapData.ok) {
           parts.push(`IMAP: ${imapData.error ?? "failed"}`);
         }
-        toast.error(parts.join(" · "));
+        toast.error("Connection check failed", {
+          description: parts.join("\n\n"),
+        });
       }
     } catch {
       toast.error("Could not reach the server");
@@ -112,11 +114,12 @@ export function EmailInboxSettingsCard() {
               Unified inbox (SMTP / IMAP)
             </CardTitle>
             <CardDescription className="text-xs">
-              Connect your mailbox so Nova can send email and (soon) sync inbound threads into the Email tab on{" "}
+              Add your mailbox like you would in Outlook: use the same address, SMTP to send, and IMAP to load your
+              Inbox on the{" "}
               <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
                 Inbox
-              </Link>
-              . IMAP fields are saved for the upcoming background sync engine.
+              </Link>{" "}
+              → Email tab. Open the Inbox after saving to pull new mail, or use Refresh.
             </CardDescription>
           </div>
           <Button
@@ -242,7 +245,9 @@ export function EmailInboxSettingsCard() {
             <p className="mt-2 text-[11px] text-muted-foreground">
               Use <span className="font-medium text-foreground">Test connection</span> above to verify SMTP (and
               IMAP when host and username are filled).{" "}
-              {configured ? "Ready to send from Inbox → Email." : "Fill host, user, and From address to send."}
+              {configured
+                ? "Ready to send from Inbox → Email; with IMAP filled, Refresh loads incoming mail."
+                : "Fill host, user, and From address to send."}
             </p>
           </div>
 
@@ -250,7 +255,7 @@ export function EmailInboxSettingsCard() {
 
           <div>
             <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
-              Incoming (IMAP), reserved for sync
+              Incoming (IMAP)
             </h4>
             <div className="grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5 sm:col-span-2">
@@ -315,7 +320,7 @@ export function EmailInboxSettingsCard() {
                   }
                 />
                 <p className="text-[11px] text-muted-foreground">
-                  Used when server-side IMAP polling ships. Minimum 5 minutes recommended.
+                  Reserved for automatic polling later; today use Refresh on Inbox → Email to fetch mail.
                 </p>
               </div>
             </div>

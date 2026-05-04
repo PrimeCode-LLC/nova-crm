@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
+import { formatSmtpError, smtpTransportOptions } from "@/lib/email/smtp-client-options";
 
 export async function POST(req: Request) {
   try {
@@ -26,12 +27,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const transporter = nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: { user, pass },
-    });
+    const transporter = nodemailer.createTransport(
+      smtpTransportOptions({ host, port, secure, user, pass }),
+    );
 
     const fromHeader = displayName ? `"${displayName.replace(/"/g, "")}" <${from}>` : from;
 
@@ -46,7 +44,6 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "Send failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    return NextResponse.json({ ok: false, error: formatSmtpError(e) }, { status: 400 });
   }
 }

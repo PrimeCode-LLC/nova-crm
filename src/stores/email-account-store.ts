@@ -73,3 +73,12 @@ export function isEmailAccountConfigured(account: EmailAccountSettings): boolean
     !!account.smtp.user.trim()
   );
 }
+
+/** Enough IMAP settings to load the mailbox (password sent only when fetching). */
+export function isImapInboxConfigured(account: EmailAccountSettings): boolean {
+  return (
+    account.enabled &&
+    !!normalizeMailHost(account.imap.host) &&
+    !!account.imap.user.trim()
+  );
+}

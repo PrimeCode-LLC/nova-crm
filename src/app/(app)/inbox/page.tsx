@@ -34,9 +34,10 @@ import {
 } from "@/stores/inbox-notification-overrides-store";
 import {
   isEmailAccountConfigured,
+  isImapInboxConfigured,
   useEmailAccountStore,
 } from "@/stores/email-account-store";
-import type { MailDraft, MailSent } from "@/lib/email-account-types";
+import type { MailDraft, MailInbound, MailSent } from "@/lib/email-account-types";
 import {
   Inbox,
   AtSign,
@@ -50,6 +51,8 @@ import {
   Mail,
   Loader2,
   PenLine,
+  RefreshCw,
+  Reply,
   Send,
   Trash2,
 } from "lucide-react";
@@ -108,13 +111,66 @@ export default function InboxPage() {
   const addSent = useEmailAccountStore((s) => s.addSent);
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
-  const [selectedMail, setSelectedMail] = React.useState<MailDraft | MailSent | null>(null);
+  const [selectedMail, setSelectedMail] = React.useState<MailDraft | MailSent | MailInbound | null>(null);
   const [composeOpen, setComposeOpen] = React.useState(false);
   const [composeTo, setComposeTo] = React.useState("");
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
   const [sending, setSending] = React.useState(false);
+
+  const [inbound, setInbound] = React.useState<MailInbound[]>([]);
+  const [inboundLoading, setInboundLoading] = React.useState(false);
+
+  async function fetchInboundMail() {
+    if (!isImapInboxConfigured(account)) {
+      setInbound([]);
+      return;
+    }
+    setInboundLoading(true);
+    try {
+      const res = await fetch("/api/email/imap-fetch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          limit: 50,
+          imap: {
+            host: account.imap.host,
+            port: account.imap.port,
+            secure: account.imap.secure,
+            user: account.imap.user,
+            pass: account.imap.password,
+          },
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        messages?: MailInbound[];
+      };
+      if (!data.ok) {
+        toast.error("Couldn’t refresh mail", {
+          description: data.error ?? "Unknown error from the mail server.",
+        });
+        return;
+      }
+      setInbound(Array.isArray(data.messages) ? data.messages : []);
+    } catch {
+      toast.error("Could not reach the server");
+    } finally {
+      setInboundLoading(false);
+    }
+  }
+
+  React.useEffect(() => {
+    if (inboxMode !== "email" || mailFolder !== "inbox") return;
+    if (!isImapInboxConfigured(account)) {
+      setInbound([]);
+      return;
+    }
+    void fetchInboundMail();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when switching back to IMAP inbox or credentials identity changes
+  }, [inboxMode, mailFolder, account.enabled, account.imap.host, account.imap.user]);
 
   const filtered = notifications.filter((n) => {
     if (tab === "unread") return !n.read;
@@ -231,28 +287,44 @@ export default function InboxPage() {
     toast.success("Draft saved");
   }
 
-  const mailListRows: { id: string; title: string; subtitle: string; at: string; row: MailDraft | MailSent }[] =
-    React.useMemo(() => {
-      if (mailFolder === "sent") {
-        return sent.map((m) => ({
-          id: m.id,
-          title: m.subject || "(no subject)",
-          subtitle: m.to,
-          at: m.sentAt,
-          row: m,
-        }));
-      }
-      if (mailFolder === "drafts") {
-        return drafts.map((m) => ({
-          id: m.id,
-          title: m.subject || "(no subject)",
-          subtitle: m.to || "No recipient",
-          at: m.updatedAt,
-          row: m,
-        }));
-      }
-      return [];
-    }, [mailFolder, sent, drafts]);
+  const mailListRows: {
+    id: string;
+    title: string;
+    subtitle: string;
+    at: string;
+    row: MailDraft | MailSent | MailInbound;
+    muted?: boolean;
+  }[] = React.useMemo(() => {
+    if (mailFolder === "inbox") {
+      return inbound.map((m) => ({
+        id: m.id,
+        title: m.subject || "(no subject)",
+        subtitle: m.from,
+        at: m.date,
+        row: m,
+        muted: m.seen,
+      }));
+    }
+    if (mailFolder === "sent") {
+      return sent.map((m) => ({
+        id: m.id,
+        title: m.subject || "(no subject)",
+        subtitle: m.to,
+        at: m.sentAt,
+        row: m,
+      }));
+    }
+    if (mailFolder === "drafts") {
+      return drafts.map((m) => ({
+        id: m.id,
+        title: m.subject || "(no subject)",
+        subtitle: m.to || "No recipient",
+        at: m.updatedAt,
+        row: m,
+      }));
+    }
+    return [];
+  }, [mailFolder, sent, drafts, inbound]);
 
   const pageActions =
     inboxMode === "workspace" ? (
@@ -262,7 +334,27 @@ export default function InboxPage() {
         </Button>
       ) : undefined
     ) : (
-      <div className="flex gap-2">
+      <div className="flex gap-2 flex-wrap">
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="gap-1.5"
+          disabled={inboundLoading || !isImapInboxConfigured(account)}
+          onClick={() => void fetchInboundMail()}
+          title={
+            isImapInboxConfigured(account)
+              ? "Reload messages from the server"
+              : "Configure IMAP in Email settings to refresh"
+          }
+        >
+          {inboundLoading ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="h-3.5 w-3.5" />
+          )}
+          Refresh mail
+        </Button>
         <Button size="sm" onClick={() => openCompose()}>
           <PenLine className="h-3.5 w-3.5" /> Compose
         </Button>
@@ -282,7 +374,7 @@ export default function InboxPage() {
         description={
           inboxMode === "workspace"
             ? "Mentions, assignments, and alerts across your pipeline."
-            : "Send and track mail from Nova using your connected mailbox."
+            : "Send and receive mail in Nova using the mailbox you connect in settings."
         }
         actions={pageActions}
       />
@@ -302,11 +394,20 @@ export default function InboxPage() {
           </Tabs>
           {inboxMode === "email" && !isEmailAccountConfigured(account) && (
             <p className="text-[11px] text-muted-foreground">
-              SMTP not fully configured, you can still compose;{" "}
+              SMTP not fully configured — you can still compose drafts;{" "}
               <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
                 open Email settings
               </Link>{" "}
               to send.
+            </p>
+          )}
+          {inboxMode === "email" && isEmailAccountConfigured(account) && !isImapInboxConfigured(account) && (
+            <p className="text-[11px] text-muted-foreground">
+              Add IMAP host and username in{" "}
+              <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
+                Email settings
+              </Link>{" "}
+              to load incoming mail.
             </p>
           )}
         </div>
@@ -469,6 +570,11 @@ export default function InboxPage() {
                   }}
                 >
                   {f.label}
+                  {f.id === "inbox" && inbound.length > 0 && (
+                    <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px]">
+                      {inbound.length}
+                    </Badge>
+                  )}
                   {f.id === "sent" && sent.length > 0 && (
                     <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px]">
                       {sent.length}
@@ -492,40 +598,52 @@ export default function InboxPage() {
             <div className="w-full max-w-md flex flex-col border-r">
               <div className="px-3 py-2 border-b text-xs font-medium text-muted-foreground capitalize">{mailFolder}</div>
               <div className="flex-1 overflow-y-auto divide-y">
-                {mailFolder === "inbox" && (
-                  <div className="p-4 space-y-3">
+                {mailFolder === "inbox" && !isImapInboxConfigured(account) && (
+                  <div className="p-4 space-y-2">
                     <p className="text-sm text-muted-foreground">
-                      Inbound sync via IMAP is not running yet. When it ships, new mail will appear here using the IMAP
-                      credentials in{" "}
+                      Enter your IMAP server, username, and password in{" "}
                       <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
                         Settings → Email
-                      </Link>
-                      .
-                    </p>
-                    <p className="text-xs text-muted-foreground">
-                      Until then, use Sent and Drafts for outbound mail composed in Nova.
+                      </Link>{" "}
+                      (along with SMTP for sending). Then return here to load your inbox.
                     </p>
                   </div>
                 )}
-                {mailFolder !== "inbox" && mailListRows.length === 0 && (
-                  <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
+                {mailFolder === "inbox" && isImapInboxConfigured(account) && inboundLoading && inbound.length === 0 && (
+                  <div className="p-8 flex justify-center text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
                 )}
-                {mailFolder !== "inbox" &&
-                  mailListRows.map((row) => (
-                    <button
-                      key={row.id}
-                      type="button"
-                      onClick={() => setSelectedMail(row.row)}
-                      className={cn(
-                        "w-full text-left px-3 py-2.5 hover:bg-muted/20 text-sm",
-                        selectedMail?.id === row.id && "bg-muted/30",
-                      )}
-                    >
-                      <div className="font-medium truncate">{row.title}</div>
-                      <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
-                      <div className="text-[11px] text-muted-foreground mt-0.5">{fmtRelative(row.at)}</div>
-                    </button>
-                  ))}
+                {mailFolder === "inbox" &&
+                  isImapInboxConfigured(account) &&
+                  !inboundLoading &&
+                  inbound.length === 0 && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">No messages in INBOX.</div>
+                  )}
+                {(mailFolder !== "inbox" || isImapInboxConfigured(account)) &&
+                  mailListRows.length === 0 &&
+                  !(mailFolder === "inbox" && inboundLoading) &&
+                  mailFolder !== "inbox" && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
+                  )}
+                {mailListRows.map((row) => (
+                  <button
+                    key={row.id}
+                    type="button"
+                    onClick={() => setSelectedMail(row.row)}
+                    className={cn(
+                      "w-full text-left px-3 py-2.5 hover:bg-muted/20 text-sm",
+                      selectedMail?.id === row.id && "bg-muted/30",
+                      row.muted && "opacity-80",
+                    )}
+                  >
+                    <div className={cn("truncate", !row.muted && mailFolder === "inbox" && "font-medium")}>
+                      {row.title}
+                    </div>
+                    <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
+                    <div className="text-[11px] text-muted-foreground mt-0.5">{fmtRelative(row.at)}</div>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -534,14 +652,37 @@ export default function InboxPage() {
                 <div className="space-y-4 max-w-xl">
                   <div>
                     <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
-                    <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
-                    <p className="text-xs text-muted-foreground">
-                      {fmtRelative("sentAt" in selectedMail ? selectedMail.sentAt : selectedMail.updatedAt)}
-                    </p>
+                    {"sentAt" in selectedMail ? (
+                      <>
+                        <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
+                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.sentAt)}</p>
+                      </>
+                    ) : "updatedAt" in selectedMail ? (
+                      <>
+                        <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
+                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.updatedAt)}</p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-muted-foreground mt-1">From: {selectedMail.from}</p>
+                        {selectedMail.to ? (
+                          <p className="text-xs text-muted-foreground">To: {selectedMail.to}</p>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.date)}</p>
+                      </>
+                    )}
                   </div>
-                  <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">{selectedMail.body}</div>
+                  {"sentAt" in selectedMail || "updatedAt" in selectedMail ? (
+                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">
+                      {selectedMail.body}
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">
+                      {selectedMail.bodyText}
+                    </div>
+                  )}
                   <div className="flex flex-wrap gap-2">
-                    {"sentAt" in selectedMail ? null : (
+                    {"sentAt" in selectedMail ? null : "updatedAt" in selectedMail ? (
                       <>
                         <Button
                           size="sm"
@@ -569,16 +710,40 @@ export default function InboxPage() {
                           <Trash2 className="h-3.5 w-3.5" /> Delete
                         </Button>
                       </>
+                    ) : (
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="gap-1.5"
+                        onClick={() => {
+                          const addr = extractReplyAddress(selectedMail.from);
+                          if (!addr) {
+                            toast.error("Could not read a reply address from this message.");
+                            return;
+                          }
+                          const subj = selectedMail.subject?.trim();
+                          const reSubj = subj?.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
+                          openCompose({
+                            to: addr,
+                            subject: reSubj,
+                            body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${selectedMail.bodyText.slice(0, 2000)}`,
+                          });
+                        }}
+                      >
+                        <Reply className="h-3.5 w-3.5" /> Reply
+                      </Button>
                     )}
                   </div>
                 </div>
               ) : (
                 <EmptyState
                   icon={Mail}
-                  title={mailFolder === "inbox" ? "IMAP inbox" : "Select a message"}
+                  title="Select a message"
                   description={
                     mailFolder === "inbox"
-                      ? "Configure IMAP in settings; sync will populate this folder."
+                      ? isImapInboxConfigured(account)
+                        ? "Choose a message from the list or refresh to load the latest mail."
+                        : "Configure IMAP in Email settings, then open Inbox to load messages."
                       : "Pick an item from the list or compose a new message."
                   }
                 />
@@ -633,4 +798,11 @@ function escapeHtml(s: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function extractReplyAddress(fromHeader: string): string {
+  const angle = fromHeader.match(/<([^>]+)>/);
+  if (angle?.[1]) return angle[1].trim();
+  const bare = fromHeader.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/);
+  return bare?.[0]?.trim() ?? "";
 }

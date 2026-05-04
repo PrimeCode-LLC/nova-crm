@@ -6,6 +6,7 @@ import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { findMembershipForUserServer } from "@/lib/platform/members-server";
+import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
@@ -35,8 +36,22 @@ export default async function AppLayout({
   const initialMode = parseWorkspaceMode(jar.get(WORKSPACE_MODE_COOKIE)?.value);
   const initialDemoPersonaId = parseDemoPersonaId(jar.get(DEMO_PERSONA_COOKIE)?.value);
 
+  let organizationName: string | undefined;
+  if (session.organizationId) {
+    try {
+      const org = await getOrganizationServer(session.organizationId);
+      if (org?.name?.trim()) organizationName = org.name.trim();
+    } catch {
+      /* ignore */
+    }
+  }
+
   return (
-    <WorkspaceModeProvider initialMode={initialMode} initialDemoPersonaId={initialDemoPersonaId}>
+    <WorkspaceModeProvider
+      initialMode={initialMode}
+      initialDemoPersonaId={initialDemoPersonaId}
+      organizationName={organizationName}
+    >
       <QuickAddLauncherProvider>
         <SidebarProvider>
           <AppSidebar showPlatformLink={showPlatformLink} />

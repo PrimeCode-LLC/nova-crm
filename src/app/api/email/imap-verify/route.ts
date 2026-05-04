@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
+import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 
 export async function POST(req: Request) {
   try {
@@ -18,19 +19,12 @@ export async function POST(req: Request) {
       );
     }
 
-    const client = new ImapFlow({
-      host,
-      port,
-      secure,
-      auth: { user, pass },
-      logger: false,
-    });
+    const client = new ImapFlow(imapFlowConnectionOptions({ host, port, secure, user, pass }));
 
     await client.connect();
     await client.logout();
     return NextResponse.json({ ok: true });
   } catch (e) {
-    const message = e instanceof Error ? e.message : "IMAP verification failed";
-    return NextResponse.json({ ok: false, error: message }, { status: 400 });
+    return NextResponse.json({ ok: false, error: formatImapError(e) }, { status: 400 });
   }
 }
