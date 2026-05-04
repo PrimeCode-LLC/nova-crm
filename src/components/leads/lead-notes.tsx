@@ -141,49 +141,58 @@ export function LeadNotes({
                   </AvatarFallback>
                 </Avatar>
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 text-xs mb-1">
-                    <span className="font-medium text-sm">{author?.displayName ?? "Unknown"}</span>
-                    <span className="text-muted-foreground" title={fmtDate(n.createdAt, "PPpp")}>
-                      {fmtRelative(n.createdAt)}
-                    </span>
-                    {n.pinned && (
-                      <Badge
-                        variant="outline"
-                        className="bg-warning/10 text-warning border-warning/20 text-[10px] gap-1"
-                      >
-                        <Pin className="h-2.5 w-2.5" /> Pinned
-                      </Badge>
-                    )}
-                    <div className="ml-auto flex opacity-0 hover:opacity-100 transition-opacity">
+                  <div className="flex flex-wrap items-start justify-between gap-2 gap-y-1 mb-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs min-w-0">
+                      <span className="font-medium text-sm">{author?.displayName ?? "Unknown"}</span>
+                      <span className="text-muted-foreground" title={fmtDate(n.createdAt, "PPpp")}>
+                        {fmtRelative(n.createdAt)}
+                      </span>
+                      {n.pinned && (
+                        <Badge
+                          variant="outline"
+                          className="bg-warning/10 text-warning border-warning/20 text-[10px] gap-1"
+                        >
+                          <Pin className="h-2.5 w-2.5" /> Pinned
+                        </Badge>
+                      )}
+                    </div>
+                    <div
+                      className="flex shrink-0 items-center gap-0.5 rounded-md border border-border/60 bg-muted/30 p-0.5"
+                      role="group"
+                      aria-label="Note actions"
+                    >
                       <Button
                         variant="ghost"
                         size="icon-xs"
                         type="button"
-                        aria-label="Toggle pin"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        aria-label={n.pinned ? "Unpin note" : "Pin note"}
                         onClick={() => {
                           updateLeadNote(n.id, { pinned: !n.pinned });
                           toast.success(n.pinned ? "Unpinned" : "Pinned");
                         }}
                       >
-                        <Pin className="h-3 w-3" />
+                        <Pin className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon-xs"
                         type="button"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
                         aria-label="Edit note"
                         onClick={() => openEdit(n)}
                       >
-                        <Pencil className="h-3 w-3" />
+                        <Pencil className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         variant="ghost"
                         size="icon-xs"
                         type="button"
+                        className="h-7 w-7 text-muted-foreground hover:text-destructive"
                         aria-label="Delete note"
                         onClick={() => setDeleteId(n.id)}
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
                   </div>
@@ -220,7 +229,9 @@ export function LeadNotes({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this note?</AlertDialogTitle>
-            <AlertDialogDescription>This cannot be undone for this session.</AlertDialogDescription>
+            <AlertDialogDescription>
+              This removes the note for everyone. This cannot be undone.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
