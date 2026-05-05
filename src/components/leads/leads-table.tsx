@@ -82,9 +82,24 @@ import {
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
+import { useChannelAdminStore } from "@/stores/channel-admin-store";
+
+function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
+  return [
+    ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
+    ...customChannels
+      .map((c) => ({ key: `custom_${c.id}`, label: c.name.trim() }))
+      .filter((c) => c.label.length > 0),
+  ];
+}
 
 function LeadChannelCell({ lead }: { lead: Lead }) {
   const { patchLead, bumpLeadActivity } = useWorkspace();
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const channelOptions = React.useMemo(
+    () => buildLeadsChannelOptions(customChannels),
+    [customChannels],
+  );
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -107,13 +122,13 @@ function LeadChannelCell({ lead }: { lead: Lead }) {
           <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Set channel</DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuGroup>
-          {CHANNEL_LIST.map((c) => (
+          {channelOptions.map((c) => (
             <DropdownMenuItem
               key={c.key}
               onClick={(e) => {
                 e.stopPropagation();
                 if (c.key === lead.channel) return;
-                patchLead(lead.id, { channel: c.key });
+                patchLead(lead.id, { channel: c.key as ChannelKey });
                 bumpLeadActivity(lead.id);
                 toast.success("Channel updated");
               }}
@@ -198,7 +213,7 @@ function initialColumnFiltersForPreset(preset: LeadsTablePreset | undefined): Co
 
 function mergeUrlColumnFilters(
   preset: LeadsTablePreset | undefined,
-  initialChannels: ChannelKey[],
+  initialChannels: string[],
   initialStages: PipelineStage[],
 ): ColumnFiltersState {
   const out = initialColumnFiltersForPreset(preset);
@@ -224,8 +239,13 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const router = useRouter();
   const { currentUserId, users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
   const { openQuickAdd } = useOpenQuickAdd();
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const leadsChannelFilterOptions = React.useMemo(
+    () => buildLeadsChannelOptions(customChannels),
+    [customChannels],
+  );
   const initialChannels = React.useMemo(
-    () => (urlChannelKey ? (urlChannelKey.split("|").filter(Boolean) as ChannelKey[]) : []),
+    () => (urlChannelKey ? urlChannelKey.split("|").filter(Boolean) : []),
     [urlChannelKey],
   );
   const initialStages = React.useMemo(
@@ -549,7 +569,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       : [...stageFilter, key];
     table.getColumn("stage")?.setFilterValue(next.length ? next : undefined);
   }
-  function toggleChannel(key: ChannelKey) {
+  function toggleChannel(key: string) {
     const next = channelFilter.includes(key)
       ? channelFilter.filter((s) => s !== key)
       : [...channelFilter, key];
@@ -623,7 +643,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             }
           />
           <DropdownMenuContent align="start" className="w-48">
-            {CHANNEL_LIST.map((c) => (
+            {leadsChannelFilterOptions.map((c) => (
               <DropdownMenuCheckboxItem
                 key={c.key}
                 checked={channelFilter.includes(c.key)}
