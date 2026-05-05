@@ -104,6 +104,23 @@ export async function sendSystemEmail(
       return { ok: true };
     } catch (e) {
       const error = e instanceof Error ? e.message : String(e);
+      if (resendKey) {
+        const from = systemFromAddress();
+        if (!from) {
+          return {
+            ok: false,
+            reason: "send_failed",
+            error: `SMTP failed (${error}) and Resend sender is missing`,
+          };
+        }
+        const resend = await sendViaResend(input, resendKey, from);
+        if (resend.ok) return resend;
+        return {
+          ok: false,
+          reason: "send_failed",
+          error: `SMTP failed (${error}); Resend failed (${resend.error})`,
+        };
+      }
       return { ok: false, reason: "send_failed", error };
     }
   }

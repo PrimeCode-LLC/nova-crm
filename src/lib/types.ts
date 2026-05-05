@@ -141,6 +141,30 @@ export type OrgMemberRole = "owner" | "admin" | "manager" | "member";
 
 export type OrgMemberStatus = "active" | "invited" | "disabled" | "pending";
 
+export type ScriptCategory =
+  | "pitch"
+  | "rebuttal"
+  | "email_template"
+  | "call_script"
+  | "meeting_agenda"
+  | "followup_template"
+  | "other";
+
+export interface ScriptLibraryItem {
+  id: string;
+  organizationId: string;
+  ownerUid: string;
+  ownerName?: string;
+  title: string;
+  category: ScriptCategory;
+  primaryText: string;
+  secondaryText?: string;
+  content: string;
+  tags: string[];
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
 export interface OrganizationMember {
   /** Same as the auth uid. Doc id = uid. */
   uid: string;

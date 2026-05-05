@@ -91,23 +91,49 @@ export async function POST(req: Request) {
     text: email.text,
   });
 
+  if (!send.ok) {
+    console.error("Invite email delivery failed", {
+      organizationId: g.ctx.session.organizationId,
+      to: result.invite.email,
+      reason: send.reason,
+      error: send.reason === "send_failed" ? send.error : undefined,
+    });
+    await revokeInviteServer(g.ctx.session.organizationId, result.invite.id);
+    await recordAudit({
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      event: "member.invited",
+      meta: {
+        email: result.invite.email,
+        role: result.invite.role,
+        delivered: false,
+        inviteReverted: true,
+        reason: send.reason,
+        error: send.reason === "send_failed" ? send.error : systemEmailConfigHint(),
+      },
+    });
+    return NextResponse.json(
+      {
+        error:
+          send.reason === "not_configured"
+            ? `Invite email is not configured. ${systemEmailConfigHint()}`
+            : `Failed to send invite email: ${send.error ?? "unknown error"}`,
+      },
+      { status: 502 },
+    );
+  }
+
   await recordAudit({
     organizationId: g.ctx.session.organizationId,
     actorUid: g.ctx.session.uid,
     event: "member.invited",
-    meta: { email: result.invite.email, role: result.invite.role, delivered: send.ok },
+    meta: { email: result.invite.email, role: result.invite.role, delivered: true },
   });
 
   return NextResponse.json({
     invite: result.invite,
     acceptUrl,
-    emailDelivered: send.ok,
-    deliveryNote:
-      send.ok === false && send.reason === "not_configured"
-        ? `${systemEmailConfigHint()} Copy the accept link below to share manually.`
-        : send.ok === false
-          ? send.error
-          : undefined,
+    emailDelivered: true,
   });
 }
 

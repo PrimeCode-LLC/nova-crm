@@ -41,7 +41,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ROLES } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
-import type { Role, User } from "@/lib/types";
+import type { OrgMemberRole, Role, User } from "@/lib/types";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
 import {
   Search,
@@ -94,15 +94,10 @@ function AdminUsersPageContent() {
   const [pendingEdits, setPendingEdits] = React.useState<
     Record<string, Partial<Omit<User, "id">>>
   >({});
-  const [invitedUsers, setInvitedUsers] = React.useState<User[]>([]);
-
-  const users = React.useMemo(() => {
-    const fromWorkspace = wsUsers.map((u) => ({ ...u, ...pendingEdits[u.id] }));
-    const fromInvites = canManage
-      ? invitedUsers.map((u) => ({ ...u, ...pendingEdits[u.id] }))
-      : [];
-    return [...fromWorkspace, ...fromInvites];
-  }, [wsUsers, invitedUsers, pendingEdits, canManage]);
+  const users = React.useMemo(
+    () => wsUsers.map((u) => ({ ...u, ...pendingEdits[u.id] })),
+    [wsUsers, pendingEdits],
+  );
 
   const [query, setQuery] = React.useState("");
   const [roleFilter, setRoleFilter] = React.useState("all");
@@ -115,7 +110,7 @@ function AdminUsersPageContent() {
 
   const [inviteEmail, setInviteEmail] = React.useState("");
   const [inviteName, setInviteName] = React.useState("");
-  const [inviteRole, setInviteRole] = React.useState("");
+  const [inviteRole, setInviteRole] = React.useState<OrgMemberRole | "">("");
   const [inviteDept, setInviteDept] = React.useState(NONE);
   const [inviteLoading, setInviteLoading] = React.useState(false);
 
@@ -252,28 +247,45 @@ function AdminUsersPageContent() {
     closeEdit();
   }
 
-  function handleInvite() {
+  async function handleInvite() {
     if (!inviteEmail.trim() || !inviteRole) {
       toast.error("Email and role are required");
       return;
     }
     setInviteLoading(true);
-    const email = inviteEmail.trim();
-    const displayName =
-      inviteName.trim() || titleFromEmail(email);
-    const newUser: User = {
-      id: `u-invited-${Date.now()}`,
-      email,
-      displayName,
-      roleId: inviteRole as Role,
-      departmentId: inviteDept === NONE ? undefined : inviteDept,
-      status: "active",
-      createdAt: new Date().toISOString(),
-    };
-    setInvitedUsers((prev) => [...prev, newUser]);
-    setInviteLoading(false);
-    toast.success(`Invite sent to ${email}`);
-    setInviteOpen(false);
+    try {
+      const email = inviteEmail.trim().toLowerCase();
+      const res = await fetch("/api/org/invites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, role: inviteRole }),
+      });
+      const data = (await res.json()) as {
+        error?: unknown;
+        emailDelivered?: boolean;
+        deliveryNote?: string;
+      };
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string"
+            ? data.error
+            : JSON.stringify(data.error ?? "Invite failed");
+        throw new Error(msg);
+      }
+      if (data.emailDelivered) {
+        toast.success(`Invitation sent to ${email}`);
+      } else {
+        toast.message(
+          data.deliveryNote ??
+            "Invite created, but email delivery failed. Share the invite link from Team.",
+        );
+      }
+      setInviteOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to send invite");
+    } finally {
+      setInviteLoading(false);
+    }
   }
 
   const userOverrides = selectedUser
@@ -301,7 +313,7 @@ function AdminUsersPageContent() {
             </a>
             {canManage ? (
               <Button size="sm" onClick={() => setInviteOpen(true)}>
-                <UserPlus className="h-3.5 w-3.5" /> Demo invite
+                <UserPlus className="h-3.5 w-3.5" /> Invite user
               </Button>
             ) : (
               <Button size="sm" variant="outline" disabled title="Only directors, founders, or super admins can invite users">
@@ -527,16 +539,10 @@ function AdminUsersPageContent() {
                   <SelectValue placeholder="Select role" />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.entries(ROLES).map(([k, v]) => (
-                    <SelectItem key={k} value={k}>
-                      <div>
-                        <div className="text-sm">{v.label}</div>
-                        <div className="text-xs text-muted-foreground">
-                          {v.description}
-                        </div>
-                      </div>
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="member">Member</SelectItem>
+                  <SelectItem value="manager">Manager</SelectItem>
+                  <SelectItem value="admin">Admin</SelectItem>
+                  <SelectItem value="owner">Owner</SelectItem>
                 </SelectContent>
               </Select>
             </div>

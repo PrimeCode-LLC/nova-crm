@@ -14,6 +14,7 @@ export const COLLECTIONS = {
   permissionOverrides: "permissionOverrides",
   activityCounters: "activityCounters",
   activityRecords: "activityRecords",
+  scriptLibrary: "scriptLibrary",
   ingestQueue: "ingestQueue",
   auditLog: "auditLog",
   /** SaaS tenants — read/write only through server (Admin SDK). */
@@ -46,5 +47,6 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.permissionOverrides,
   COLLECTIONS.activityCounters,
   COLLECTIONS.activityRecords,
+  COLLECTIONS.scriptLibrary,
   COLLECTIONS.auditLog,
 ] as const;
