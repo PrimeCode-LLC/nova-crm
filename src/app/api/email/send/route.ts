@@ -2,16 +2,34 @@ import { NextResponse } from "next/server";
 import nodemailer from "nodemailer";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { formatSmtpError, smtpTransportOptions } from "@/lib/email/smtp-client-options";
+import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 
 export async function POST(req: Request) {
   try {
+    const g = await guardTenantApi();
+    if (!g.ok) return g.response;
+
     const b = (await req.json()) as Record<string, unknown>;
     const smtp = b.smtp as Record<string, unknown> | undefined;
+    const mailboxId = String(b.mailboxId ?? "").trim();
     const host = normalizeMailHost(String(smtp?.host ?? ""));
     const port = Number(smtp?.port ?? 587);
     const secure = Boolean(smtp?.secure);
-    const user = String(smtp?.user ?? "").trim();
-    const pass = String(smtp?.pass ?? "");
+    let user = String(smtp?.user ?? "").trim();
+    let pass = String(smtp?.pass ?? "");
+    if (mailboxId) {
+      const secrets = await getMailboxSecretsServer({
+        organizationId: g.ctx.session.organizationId,
+        uid: g.ctx.session.uid,
+        mailboxId,
+      });
+      if (secrets) {
+        const fromVault = secrets.smtp.user.trim();
+        if (fromVault) user = fromVault;
+        if (secrets.smtp.password) pass = secrets.smtp.password;
+      }
+    }
     const from = String(b.from ?? "").trim();
     const displayName = String(b.displayName ?? "").trim();
     const replyTo = String(b.replyTo ?? "").trim();

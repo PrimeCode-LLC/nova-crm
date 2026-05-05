@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { REVENUE_RANGES } from "@/lib/constants";
+import { PIPELINE_STAGES, REVENUE_RANGES, STAGES_BY_KEY } from "@/lib/constants";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -28,7 +28,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { StageBadge } from "@/components/common/stage-badge";
+import { STAGE_TONE_CLASS } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { LeadTimeline } from "@/components/leads/lead-timeline";
@@ -45,10 +45,18 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
-import type { Lead } from "@/lib/types";
+import type { Lead, PipelineStage } from "@/lib/types";
+import { useEmailAccountStore } from "@/stores/email-account-store";
 
-const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups"] as const;
+const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "emails"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
 
 function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): LeadTab {
@@ -112,6 +120,29 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const notes = ws.notes.filter((n) => n.leadId === lead.id);
   const notesTabCount = notes.length + (lead.notes?.trim() ? 1 : 0);
   const followups = ws.followups.filter((f) => f.leadId === lead.id);
+  const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
+  const sent = useEmailAccountStore((s) => s.sent);
+  const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
+  const relatedEmails = React.useMemo(() => {
+    const own = (lead.contactEmail ?? "").toLowerCase();
+    const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
+    for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
+      for (const m of messages) {
+        const mid = `${mailboxId}:in:${m.id}`;
+        const manual = linkedLeadByMessageId[mid] === lead.id;
+        const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
+        if (!manual && !auto) continue;
+        rows.push({ id: mid, subject: m.subject, at: m.date, from: m.from, to: m.to, body: m.bodyText });
+      }
+    }
+    for (const m of sent) {
+      const manual = linkedLeadByMessageId[m.id] === lead.id;
+      const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
+      if (!manual && !auto) continue;
+      rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
+    }
+    return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
+  }, [inboundByMailbox, linkedLeadByMessageId, lead.contactEmail, lead.id, sent]);
 
   const pinned = ws.isLeadPinned(lead.id);
 
@@ -161,7 +192,37 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             <div>
               <div className="flex items-center gap-2">
                 <span className="truncate">{lead.contactName}</span>
-                <StageBadge stage={lead.stage} />
+                <Select
+                  value={lead.stage}
+                  onValueChange={(v) => {
+                    if (!v || v === lead.stage) return;
+                    const next = v as PipelineStage;
+                    handleSaveLead({ stage: next });
+                    toast.success(`Stage → ${STAGES_BY_KEY[next].label}`);
+                  }}
+                >
+                  <SelectTrigger
+                    size="sm"
+                    className={cn(
+                      "h-7 w-fit min-w-30 gap-1 rounded-md border font-medium capitalize shadow-none",
+                      STAGE_TONE_CLASS[STAGES_BY_KEY[lead.stage].tone],
+                    )}
+                  >
+                    <SelectValue>
+                      <span className="flex items-center gap-1.5">
+                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
+                        {STAGES_BY_KEY[lead.stage].label}
+                      </span>
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PIPELINE_STAGES.map((s) => (
+                      <SelectItem key={s.key} value={s.key}>
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <ChannelChip channel={lead.channel} />
               </div>
               <div className="text-xs text-muted-foreground font-normal mt-0.5">
@@ -252,6 +313,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     {followups.filter((f) => !f.completedAt).length}
                   </Badge>
                 </TabsTrigger>
+                <TabsTrigger value="emails">
+                  Emails
+                  <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                    {relatedEmails.length}
+                  </Badge>
+                </TabsTrigger>
               </TabsList>
 
               <div className="mt-4">
@@ -269,6 +336,36 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 </TabsContent>
                 <TabsContent value="followups">
                   <LeadFollowups followups={followups} lead={lead} />
+                </TabsContent>
+                <TabsContent value="emails">
+                  <Card>
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm">Email thread history</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-3">
+                      {relatedEmails.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          No linked emails yet. Open Inbox and link a message to this lead.
+                        </p>
+                      ) : (
+                        relatedEmails.map((m) => (
+                          <div key={m.id} className="rounded-md border p-3 space-y-1">
+                            <p className="text-sm font-medium">{m.subject || "(no subject)"}</p>
+                            <p className="text-xs text-muted-foreground">
+                              {fmtRelative(m.at)} - From {m.from} - To {m.to}
+                            </p>
+                            <p className="text-xs whitespace-pre-wrap text-muted-foreground">{m.body.slice(0, 3000)}</p>
+                          </div>
+                        ))
+                      )}
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        nativeButton={false}
+                        render={<Link href="/inbox">Open inbox</Link>}
+                      />
+                    </CardContent>
+                  </Card>
                 </TabsContent>
               </div>
             </Tabs>

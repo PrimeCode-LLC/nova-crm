@@ -133,6 +133,55 @@ function LeadChannelCell({ lead }: { lead: Lead }) {
   );
 }
 
+function LeadStageCell({ lead }: { lead: Lead }) {
+  const { updateLeadStage, bumpLeadActivity, currentUserId } = useWorkspace();
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            type="button"
+            size="sm"
+            className="h-auto gap-1 px-1 py-0 font-normal hover:bg-muted/60"
+            onClick={(e) => e.stopPropagation()}
+            aria-label="Change stage"
+          >
+            <StageBadge stage={lead.stage} />
+            <ChevronDown className="h-3 w-3 shrink-0 opacity-50" aria-hidden />
+          </Button>
+        }
+      />
+      <DropdownMenuContent align="start" className="min-w-44">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">Set stage</DropdownMenuLabel>
+        </DropdownMenuGroup>
+        <DropdownMenuGroup>
+          {PIPELINE_STAGES.map((s) => (
+            <DropdownMenuItem
+              key={s.key}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (s.key === lead.stage) return;
+                updateLeadStage(lead.id, s.key, lead.stage, currentUserId);
+                bumpLeadActivity(lead.id);
+                toast.success(`Stage → ${s.label}`);
+              }}
+            >
+              <span className="flex w-full min-w-0 items-center gap-2">
+                <span className="flex w-4 shrink-0 justify-center">
+                  {s.key === lead.stage ? <Check className="h-3.5 w-3.5" /> : null}
+                </span>
+                <StageBadge stage={s.key} className="shrink-0" />
+              </span>
+            </DropdownMenuItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export type LeadsTablePreset = "default" | "high-priority";
 
 export type LeadsTableRef = {
@@ -297,7 +346,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       id: "stage",
       accessorKey: "stage",
       header: "Stage",
-      cell: ({ row }) => <StageBadge stage={row.original.stage} />,
+      cell: ({ row }) => <LeadStageCell lead={row.original} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
     },

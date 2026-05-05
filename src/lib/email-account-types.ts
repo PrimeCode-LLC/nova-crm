@@ -32,6 +32,11 @@ export interface EmailAccountSettings {
   readReceipts: boolean;
 }
 
+export interface EmailMailboxSettings extends EmailAccountSettings {
+  id: string;
+  label: string;
+}
+
 export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
   enabled: false,
   displayName: "",
@@ -59,6 +64,7 @@ export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
 
 export interface MailDraft {
   id: string;
+  mailboxId: string;
   to: string;
   subject: string;
   body: string;
@@ -67,6 +73,8 @@ export interface MailDraft {
 
 export interface MailSent {
   id: string;
+  mailboxId: string;
+  from: string;
   to: string;
   subject: string;
   body: string;
@@ -85,4 +93,21 @@ export interface MailInbound {
   preview: string;
   bodyText: string;
   bodyHtml?: string;
+  /** Normalized RFC 5322 Message-ID without angle brackets (when available). */
+  messageId?: string;
+  inReplyTo?: string;
+  /** Ordered Message-IDs from References header (normalized). */
+  referenceIds?: string[];
+}
+
+export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettings>): EmailMailboxSettings {
+  const base = defaultEmailAccountSettings();
+  return {
+    id: partial?.id ?? `mb-${crypto.randomUUID()}`,
+    label: partial?.label ?? "Mailbox",
+    ...base,
+    ...partial,
+    smtp: { ...base.smtp, ...(partial?.smtp ?? {}) },
+    imap: { ...base.imap, ...(partial?.imap ?? {}) },
+  };
 }

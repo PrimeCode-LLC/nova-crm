@@ -25,7 +25,9 @@ import {
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
-import { CHANNELS, CHANNEL_FUNNELS } from "@/lib/constants";
+import { CHANNEL_FUNNELS, CHANNEL_LIST } from "@/lib/constants";
+import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import type { OrganizationCustomChannelRow } from "@/lib/types";
 import { fmtDate, fmtNumber, fmtRelative } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
@@ -38,6 +40,26 @@ import type { ActivityCounterRow, ChannelKey } from "@/lib/types";
 const PROFILE_NONE = "__none__";
 
 type ActivityTab = "rollup" | "counters" | "records";
+
+function buildRollupChannelOptions(customChannels: { id: string; name: string }[]) {
+  return [
+    ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
+    ...customChannels
+      .map((c) => ({ key: `custom_${c.id}`, label: c.name.trim() }))
+      .filter((c) => c.label.length > 0),
+  ];
+}
+
+function rollupFunnelStages(
+  channel: string,
+  customChannels: OrganizationCustomChannelRow[],
+): { key: string; label: string }[] {
+  if (channel.startsWith("custom_")) {
+    const id = channel.slice("custom_".length);
+    return customChannels.find((c) => c.id === id)?.stages ?? [];
+  }
+  return CHANNEL_FUNNELS[channel as ChannelKey] ?? [];
+}
 
 export default function ActivityPage() {
   const { isDemo, activityCounters, activityRecords, currentUserId } = useWorkspace();
@@ -129,11 +151,35 @@ function DailyRollupForm({
   upsertLocalRollup: (row: ActivityCounterRow) => void;
 }) {
   const { profiles } = useWorkspace();
-  const [channel, setChannel] = React.useState<ChannelKey>("cold_email");
-  const stages = CHANNEL_FUNNELS[channel];
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const channelOptions = React.useMemo(
+    () => buildRollupChannelOptions(customChannels),
+    [customChannels],
+  );
+  const [channel, setChannel] = React.useState<string>("cold_email");
+  const channelSelectLabel = React.useMemo(() => {
+    const fromList = channelOptions.find((o) => o.key === channel)?.label;
+    if (fromList) return fromList;
+    if (channel.startsWith("custom_")) {
+      const id = channel.slice("custom_".length);
+      const row = customChannels.find((c) => c.id === id);
+      if (row?.name.trim()) return row.name.trim();
+    }
+    return channel;
+  }, [channel, channelOptions, customChannels]);
+  const stages = React.useMemo(
+    () => rollupFunnelStages(channel, customChannels),
+    [channel, customChannels],
+  );
   const [counters, setCounters] = React.useState<Record<string, string>>({});
   const [date, setDate] = React.useState(() => new Date().toISOString().slice(0, 10));
   const [profileId, setProfileId] = React.useState<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    if (stages.length === 0) {
+      setChannel("cold_email");
+    }
+  }, [stages.length, channel]);
 
   React.useEffect(() => {
     setCounters({});
@@ -167,7 +213,7 @@ function DailyRollupForm({
     const row: ActivityCounterRow = {
       id: `local-ac-${Date.now()}`,
       userId: currentUserId,
-      channel,
+      channel: channel as ChannelKey,
       profileId: profileId || undefined,
       date: `${date}T12:00:00.000Z`,
       counters: numericCounters,
@@ -203,14 +249,19 @@ function DailyRollupForm({
           </div>
           <div className="space-y-1.5">
             <Label className="text-xs">Channel</Label>
-            <Select value={channel} onValueChange={(v) => setChannel(v as ChannelKey)}>
+            <Select
+              value={channel}
+              onValueChange={(v) => {
+                if (v) setChannel(v);
+              }}
+            >
               <SelectTrigger className="h-9">
-                <SelectValue />
+                <SelectValue placeholder="Channel">{channelSelectLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
-                {Object.entries(CHANNELS).map(([k, v]) => (
-                  <SelectItem key={k} value={k}>
-                    {v.label}
+                {channelOptions.map((opt) => (
+                  <SelectItem key={opt.key} value={opt.key}>
+                    {opt.label}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -243,6 +294,11 @@ function DailyRollupForm({
           <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">
             Funnel counters
           </div>
+          {stages.length === 0 ? (
+            <p className="text-sm text-muted-foreground">
+              No funnel stages for this channel. Configure stages under Admin → Channels, or pick another channel.
+            </p>
+          ) : null}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
             {stages.map((s) => (
               <div key={s.key} className="space-y-1.5">

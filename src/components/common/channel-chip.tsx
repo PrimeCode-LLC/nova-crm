@@ -6,11 +6,13 @@ import {
   Globe,
   Briefcase,
   FileText,
+  Radio,
   type LucideIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { CHANNELS } from "@/lib/constants";
 import type { ChannelKey } from "@/lib/types";
+import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { cn } from "@/lib/utils";
 
 const ICONS: Record<string, LucideIcon> = {
@@ -33,28 +35,55 @@ const channelTone: Record<ChannelKey, string> = {
   job_apply: "text-amber-700 dark:text-amber-300 bg-amber-500/10 border-amber-500/20",
 };
 
+const customChannelTone =
+  "text-muted-foreground bg-muted/40 border-border";
+
 export function ChannelChip({
   channel,
   compact,
   className,
 }: {
-  channel: ChannelKey;
+  channel: ChannelKey | string;
   compact?: boolean;
   className?: string;
 }) {
-  const meta = CHANNELS[channel];
-  const Icon = ICONS[meta.iconKey] ?? Mail;
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const meta = CHANNELS[channel as ChannelKey];
+  if (meta) {
+    const Icon = ICONS[meta.iconKey] ?? Mail;
+    return (
+      <Badge
+        variant="outline"
+        className={cn(
+          "rounded-md font-medium gap-1.5 px-1.5 py-0.5",
+          channelTone[channel as ChannelKey],
+          className,
+        )}
+      >
+        <Icon className="h-3 w-3" />
+        {!compact && <span>{meta.short}</span>}
+      </Badge>
+    );
+  }
+
+  let label = String(channel);
+  if (channel.startsWith("custom_")) {
+    const id = channel.slice("custom_".length);
+    const row = customChannels.find((c) => c.id === id);
+    if (row) label = row.name;
+  }
+
   return (
     <Badge
       variant="outline"
       className={cn(
         "rounded-md font-medium gap-1.5 px-1.5 py-0.5",
-        channelTone[channel],
+        customChannelTone,
         className,
       )}
     >
-      <Icon className="h-3 w-3" />
-      {!compact && <span>{meta.short}</span>}
+      <Radio className="h-3 w-3 shrink-0" />
+      {!compact && <span className="max-w-[10rem] truncate">{label}</span>}
     </Badge>
   );
 }

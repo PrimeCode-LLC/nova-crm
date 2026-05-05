@@ -3,7 +3,7 @@ import { STAGES_BY_KEY } from "@/lib/constants";
 import type { PipelineStage } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-const toneClass: Record<string, string> = {
+export const STAGE_TONE_CLASS: Record<string, string> = {
   neutral: "bg-muted text-muted-foreground border-transparent",
   blue: "bg-info/10 text-info border-info/20",
   cyan: "bg-cyan-500/10 text-cyan-700 dark:text-cyan-400 border-cyan-500/20",
@@ -25,7 +25,7 @@ export function StageBadge({
       variant="outline"
       className={cn(
         "rounded-md font-medium capitalize",
-        toneClass[s.tone],
+        STAGE_TONE_CLASS[s.tone],
         className,
       )}
     >
