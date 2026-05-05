@@ -14,10 +14,13 @@ import {
   Workflow,
   CalendarCheck,
   CalendarClock,
+  ListChecks,
+  ListTodo,
   Handshake,
   type LucideIcon,
 } from "lucide-react";
-import type { Lead, TimelineEvent, TimelineEventType } from "@/lib/types";
+import type { Lead, TimelineEvent, TimelineEventType, User } from "@/lib/types";
+import { leadTaskTimelineEventVisible } from "@/lib/lead-task-visibility";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { UserChip } from "@/components/common/user-chip";
@@ -36,6 +39,8 @@ const ICONS: Record<TimelineEventType, LucideIcon> = {
   note_added: NotebookPen,
   followup_created: CalendarClock,
   followup_completed: CalendarCheck,
+  lead_task_created: ListTodo,
+  lead_task_completed: ListChecks,
   deal_created: Handshake,
   assignment_changed: UserCog2,
   field_changed: FileEdit,
@@ -50,6 +55,8 @@ const TONES: Record<TimelineEventType, string> = {
   note_added: "bg-warning/10 text-warning border-warning/20",
   followup_created: "bg-warning/10 text-warning border-warning/20",
   followup_completed: "bg-success/10 text-success border-success/20",
+  lead_task_created: "bg-sky-500/10 text-sky-800 dark:text-sky-300 border-sky-500/20",
+  lead_task_completed: "bg-success/10 text-success border-success/20",
   deal_created: "bg-success/10 text-success border-success/20",
   assignment_changed: "bg-info/10 text-info border-info/20",
   field_changed: "bg-muted text-muted-foreground border-muted",
@@ -62,7 +69,15 @@ function newTeId() {
   return `te-local-${Date.now()}`;
 }
 
-export function LeadTimeline({ events, lead }: { events: TimelineEvent[]; lead: Lead }) {
+export function LeadTimeline({
+  events,
+  lead,
+  viewerForTasks,
+}: {
+  events: TimelineEvent[];
+  lead: Lead;
+  viewerForTasks: User;
+}) {
   const [note, setNote] = React.useState("");
   const [stageOpen, setStageOpen] = React.useState(false);
   const [followupOpen, setFollowupOpen] = React.useState(false);
@@ -73,9 +88,14 @@ export function LeadTimeline({ events, lead }: { events: TimelineEvent[]; lead: 
     bumpLeadActivity,
     currentUserId,
     leads,
+    leadTasks,
     addFollowup,
   } = useWorkspace();
-  const sorted = [...events].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const visibleEvents = React.useMemo(
+    () => events.filter((e) => leadTaskTimelineEventVisible(e, viewerForTasks, leadTasks)),
+    [events, viewerForTasks, leadTasks],
+  );
+  const sorted = [...visibleEvents].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
   function appendNoteFromComposer() {
     const t = note.trim();

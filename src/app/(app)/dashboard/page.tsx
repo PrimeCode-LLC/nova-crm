@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -27,7 +28,7 @@ import {
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
 import type { ChannelKey } from "@/lib/types";
-import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users } from "lucide-react";
+import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users, ListTodo } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -61,6 +62,7 @@ export default function DashboardPage() {
     currentUserId,
     getUserById,
     getOwnerDisplayName,
+    leadTasks,
   } = useWorkspace();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
@@ -144,6 +146,19 @@ export default function DashboardPage() {
   );
   const pipelineValue = pipelineMetrics.total;
   const closedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
+
+  const myOpenAssignedTasks = React.useMemo(
+    () =>
+      leadTasks.filter((t) => !t.completedAt && t.assigneeId === currentUserId),
+    [leadTasks, currentUserId],
+  );
+  const myOutgoingOpenTasks = React.useMemo(
+    () =>
+      leadTasks.filter(
+        (t) => !t.completedAt && t.createdById === currentUserId && t.assigneeId !== currentUserId,
+      ),
+    [leadTasks, currentUserId],
+  );
 
   const pipelineHint = React.useMemo(() => {
     const parts = [`${pipelineMetrics.openDealCount} open deal${pipelineMetrics.openDealCount === 1 ? "" : "s"}`];
@@ -341,6 +356,30 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
+            {(myOpenAssignedTasks.length > 0 || myOutgoingOpenTasks.length > 0) && (
+              <div className="mb-4 flex flex-col gap-2 rounded-lg border bg-muted/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
+                  {myOpenAssignedTasks.length > 0 && (
+                    <span className="flex items-center gap-2">
+                      <ListTodo className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
+                      <span>
+                        <strong className="tabular-nums">{myOpenAssignedTasks.length}</strong> team task
+                        {myOpenAssignedTasks.length === 1 ? "" : "s"} for you
+                      </span>
+                    </span>
+                  )}
+                  {myOutgoingOpenTasks.length > 0 && (
+                    <span className="text-muted-foreground">
+                      <strong className="tabular-nums text-foreground">{myOutgoingOpenTasks.length}</strong> waiting on
+                      others
+                    </span>
+                  )}
+                </div>
+                <Button size="sm" variant="outline" className="shrink-0" nativeButton={false} render={<Link href="/tasks" />}>
+                  View tasks
+                </Button>
+              </div>
+            )}
             {(channelScope.length > 0 || ownerScope !== "all-owners") && (
               <p className="text-xs text-muted-foreground mb-2">
                 {channelScope.length > 0 && (

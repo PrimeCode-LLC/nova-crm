@@ -36,6 +36,7 @@ import { LeadOverview } from "@/components/leads/lead-overview";
 import { LeadTouchpoints } from "@/components/leads/lead-touchpoints";
 import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
+import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -54,9 +55,10 @@ import {
 } from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
+import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
-const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "emails"] as const;
+const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "tasks", "emails"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
 
 function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): LeadTab {
@@ -120,6 +122,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const notes = ws.notes.filter((n) => n.leadId === lead.id);
   const notesTabCount = notes.length + (lead.notes?.trim() ? 1 : 0);
   const followups = ws.followups.filter((f) => f.leadId === lead.id);
+  const viewerForTasks = React.useMemo(
+    () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
+    [ws.currentUserId, ws.users, ws.getUserById],
+  );
+  const leadTasksForTab = React.useMemo(
+    () => filterLeadTasksForLeadDetail(ws.leadTasks, lead.id, viewerForTasks),
+    [ws.leadTasks, lead.id, viewerForTasks],
+  );
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const sent = useEmailAccountStore((s) => s.sent);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
@@ -313,6 +323,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     {followups.filter((f) => !f.completedAt).length}
                   </Badge>
                 </TabsTrigger>
+                <TabsTrigger value="tasks">
+                  Tasks
+                  <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                    {leadTasksForTab.filter((t) => !t.completedAt).length}
+                  </Badge>
+                </TabsTrigger>
                 <TabsTrigger value="emails">
                   Emails
                   <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
@@ -326,7 +342,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <LeadOverview lead={lead} />
                 </TabsContent>
                 <TabsContent value="timeline">
-                  <LeadTimeline events={timeline} lead={lead} />
+                  <LeadTimeline events={timeline} lead={lead} viewerForTasks={viewerForTasks} />
                 </TabsContent>
                 <TabsContent value="touchpoints">
                   <LeadTouchpoints touchpoints={touchpoints} lead={lead} />
@@ -336,6 +352,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 </TabsContent>
                 <TabsContent value="followups">
                   <LeadFollowups followups={followups} lead={lead} />
+                </TabsContent>
+                <TabsContent value="tasks">
+                  <LeadTasksPanel tasks={leadTasksForTab} lead={lead} />
                 </TabsContent>
                 <TabsContent value="emails">
                   <Card>

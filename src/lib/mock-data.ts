@@ -8,6 +8,7 @@ import type {
   Touchpoint,
   TimelineEvent,
   Followup,
+  LeadTask,
   Note,
   Profile,
   Campaign,
@@ -496,6 +497,51 @@ export const mockFollowups: Followup[] = mockLeads.slice(0, 15).map((l, i) => ({
   priority: l.priority,
   auto: i % 3 === 0,
 }));
+
+const L1 = mockLeads[0]!;
+const L2 = mockLeads[1]!;
+
+/** Cross-team requests (review, email, etc.) — scoped in `workspace-dataset` per persona. */
+export const mockLeadTasks: LeadTask[] = [
+  {
+    id: "lt-1",
+    leadId: L1.id,
+    title: "Review outbound email before send",
+    description: "Please sanity-check enterprise pricing wording.",
+    taskType: "review",
+    visibility: "on_lead",
+    assigneeId: "u-director",
+    createdById: "u-sales-01",
+    dueAt: isoDaysAgo(-1),
+    createdAt: isoDaysAgo(2),
+    contextCompany: L1.companyName,
+    contextContact: L1.contactName,
+  },
+  {
+    id: "lt-2",
+    leadId: L2.id,
+    title: "Draft founder intro for mutual LinkedIn contact",
+    taskType: "email",
+    visibility: "assignees_only",
+    assigneeId: "u-mgr-email",
+    createdById: "u-sales-02",
+    dueAt: isoDaysAgo(0),
+    createdAt: isoDaysAgo(1),
+    contextCompany: L2.companyName,
+    contextContact: L2.contactName,
+  },
+  {
+    id: "lt-3",
+    title: "Approve discount band for Q2 outbound experiment",
+    description: "No lead — ops decision.",
+    taskType: "other",
+    visibility: "assignees_only",
+    assigneeId: "u-director",
+    createdById: "u-mgr-email",
+    dueAt: isoDaysAgo(-2),
+    createdAt: isoDaysAgo(5),
+  },
+];
 
 // ───────────────────────── Notes ─────────────────────────
 export const mockNotes: Note[] = mockLeads.slice(0, 8).flatMap((l, i) => [

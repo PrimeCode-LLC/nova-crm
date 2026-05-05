@@ -28,6 +28,7 @@ import {
   type DemoNotification,
   type NotificationKind,
 } from "@/lib/inbox-demo-notifications";
+import { buildLeadTaskInboxNotifications } from "@/lib/inbox-lead-task-notifications";
 import {
   mergeNotificationSeed,
   useInboxNotificationOverrides,
@@ -94,11 +95,13 @@ type InboxMode = "workspace" | "email";
 type MailFolder = "inbox" | "sent" | "drafts";
 
 export default function InboxPage() {
-  const { leads, users, isDemo, demoPersonaId, addAccount, addContact, addLead, currentUserId } = useWorkspace();
-  const seed = React.useMemo(
-    () => (isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : []),
-    [isDemo, leads, users, demoPersonaId],
-  );
+  const { leads, users, isDemo, demoPersonaId, addAccount, addContact, addLead, currentUserId, leadTasks } =
+    useWorkspace();
+  const seed = React.useMemo(() => {
+    const demo = isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : [];
+    const fromTasks = buildLeadTaskInboxNotifications(leadTasks, currentUserId, users);
+    return [...demo, ...fromTasks].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  }, [isDemo, leads, users, demoPersonaId, leadTasks, currentUserId]);
   const readIds = useInboxNotificationOverrides((s) => s.readIds);
   const unreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
   const dismissedIds = useInboxNotificationOverrides((s) => s.dismissedIds);

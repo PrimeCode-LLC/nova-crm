@@ -1,5 +1,6 @@
 import type { User, Lead, TimelineEvent } from "./types";
 import type { WorkspaceSnapshot } from "./workspace-dataset";
+import { filterLeadTasksForViewer } from "./lead-task-visibility";
 
 /** Direct reports (recursive), excluding the root id. */
 export function collectDescendantUserIds(
@@ -109,6 +110,8 @@ export function applyLiveHierarchyScope(
       (f.dealId != null && visibleDealIds.has(f.dealId)),
   );
 
+  const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, viewer);
+
   const notes = snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
 
   const profiles =
@@ -141,6 +144,7 @@ export function applyLiveHierarchyScope(
     touchpoints,
     timelineByLead,
     followups,
+    leadTasks,
     notes,
     profiles,
     permissionOverrides,

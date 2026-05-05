@@ -10,6 +10,7 @@ import type {
   Department,
   Followup,
   Lead,
+  LeadTask,
   Note,
   OrganizationMember,
   PermissionOverride,
@@ -38,6 +39,8 @@ import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-clien
 import {
   persistFollowupCreate,
   persistFollowupSetCompleted,
+  persistLeadTaskCreate,
+  persistLeadTaskSetCompleted,
   persistLeadActivityBump,
   persistNoteCreate,
   persistNoteDelete,
@@ -83,6 +86,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     sessionHydrated: boolean;
     addFollowup: (f: Followup) => void;
     setFollowupCompleted: (id: string, completed: boolean) => void;
+    addLeadTask: (t: LeadTask) => void;
+    setLeadTaskCompleted: (id: string, completed: boolean) => void;
     addLeadNote: (leadId: string, body: string, authorId: string) => void;
     updateLeadNote: (noteId: string, patch: Partial<Pick<Note, "body" | "pinned">>) => void;
     deleteLeadNote: (noteId: string) => void;
@@ -402,6 +407,30 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId],
   );
 
+  const addLeadTask = React.useCallback(
+    (t: LeadTask) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistLeadTaskCreate(db, orgId, t);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save task", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        leadTasks: { ...s.leadTasks, extras: [...s.leadTasks.extras, t] },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
   const addLeadNote = React.useCallback(
     (leadId: string, body: string, authorId: string) => {
       const iso = new Date().toISOString();
@@ -698,6 +727,7 @@ export function WorkspaceModeProvider({
       deals: liveFs.deals,
       notes: liveFs.notes,
       followups: liveFs.followups,
+      leadTasks: liveFs.leadTasks,
       touchpoints: liveFs.touchpoints,
       timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
       currentUserId: uid,
@@ -725,6 +755,7 @@ export function WorkspaceModeProvider({
     liveFs.deals,
     liveFs.notes,
     liveFs.followups,
+    liveFs.leadTasks,
     liveFs.touchpoints,
     liveFs.timelineEvents,
   ]);
@@ -804,6 +835,39 @@ export function WorkspaceModeProvider({
     return { ...preSessionSnapshot, ...merged };
   }, [preSessionSnapshot, sessionV2]);
 
+  const snapshotRef = React.useRef(snapshot);
+  snapshotRef.current = snapshot;
+
+  const setLeadTaskCompleted = React.useCallback(
+    (id: string, completed: boolean) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistLeadTaskSetCompleted(db, id, completed);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update task", { description: msg });
+          }
+        })();
+      }
+      const iso = new Date().toISOString();
+      setSessionV2((s) => {
+        const completion = { ...s.leadTasks.completion };
+        if (completed) completion[id] = iso;
+        else completion[id] = null;
+        return {
+          ...s,
+          leadTasks: { ...s.leadTasks, completion },
+        };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
+
   const value = React.useMemo<WorkspaceContextValue>(() => {
     const lookup = createWorkspaceLookup(snapshot);
     const getOwnerDisplayName = (uid: string): string | undefined => {
@@ -836,6 +900,8 @@ export function WorkspaceModeProvider({
       sessionHydrated,
       addFollowup,
       setFollowupCompleted,
+      addLeadTask,
+      setLeadTaskCompleted,
       addLeadNote,
       updateLeadNote,
       deleteLeadNote,
@@ -870,6 +936,8 @@ export function WorkspaceModeProvider({
     sessionHydrated,
     addFollowup,
     setFollowupCompleted,
+    addLeadTask,
+    setLeadTaskCompleted,
     addLeadNote,
     updateLeadNote,
     deleteLeadNote,

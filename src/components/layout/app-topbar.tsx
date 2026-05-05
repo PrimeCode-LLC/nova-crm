@@ -30,6 +30,7 @@ import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildDemoNotifications } from "@/lib/inbox-demo-notifications";
+import { buildLeadTaskInboxNotifications } from "@/lib/inbox-lead-task-notifications";
 import { mergeNotificationSeed, useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
 import { useZustandPersistHydrated } from "@/hooks/use-zustand-persist-hydrated";
 
@@ -54,7 +55,7 @@ export function AppTopbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [cmdOpen, setCmdOpen] = React.useState(false);
-  const { leads, users, isDemo, demoPersonaId } = useWorkspace();
+  const { leads, users, isDemo, demoPersonaId, leadTasks, currentUserId } = useWorkspace();
   const inboxHydrated = useZustandPersistHydrated(useInboxNotificationOverrides);
   const readIds = useInboxNotificationOverrides((s) => s.readIds);
   const unreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
@@ -62,10 +63,12 @@ export function AppTopbar() {
   const markRead = useInboxNotificationOverrides((s) => s.markRead);
 
   const mergedNotifications = React.useMemo(() => {
-    if (!isDemo || !inboxHydrated) return [];
-    const seed = buildDemoNotifications(leads, users, demoPersonaId);
+    if (!inboxHydrated) return [];
+    const demoSeed = isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : [];
+    const taskSeed = buildLeadTaskInboxNotifications(leadTasks, currentUserId, users);
+    const seed = [...demoSeed, ...taskSeed].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     return mergeNotificationSeed(seed, { readIds, unreadIds, dismissedIds });
-  }, [isDemo, inboxHydrated, leads, users, demoPersonaId, readIds, unreadIds, dismissedIds]);
+  }, [isDemo, inboxHydrated, leads, users, demoPersonaId, leadTasks, currentUserId, readIds, unreadIds, dismissedIds]);
 
   const bellUnread = mergedNotifications.filter((n) => !n.read).length;
 

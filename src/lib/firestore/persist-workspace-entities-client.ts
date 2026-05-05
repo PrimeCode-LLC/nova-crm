@@ -9,7 +9,7 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import type { Followup, Note, Touchpoint, TimelineEvent } from "@/lib/types";
+import type { Followup, LeadTask, Note, Touchpoint, TimelineEvent } from "@/lib/types";
 
 export async function persistNoteCreate(
   db: Firestore,
@@ -73,6 +73,40 @@ export async function persistFollowupSetCompleted(
   completed: boolean,
 ): Promise<void> {
   await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
+    completedAt: completed ? serverTimestamp() : deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function persistLeadTaskCreate(
+  db: Firestore,
+  organizationId: string,
+  t: LeadTask,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    title: t.title,
+    taskType: t.taskType,
+    visibility: t.visibility,
+    assigneeId: t.assigneeId,
+    createdById: t.createdById,
+    createdAt: t.createdAt,
+  };
+  if (t.leadId) data.leadId = t.leadId;
+  if (t.description) data.description = t.description;
+  if (t.dueAt) data.dueAt = t.dueAt;
+  if (t.completedAt) data.completedAt = t.completedAt;
+  if (t.contextCompany) data.contextCompany = t.contextCompany;
+  if (t.contextContact) data.contextContact = t.contextContact;
+  await setDoc(doc(db, COLLECTIONS.leadTasks, t.id), data);
+}
+
+export async function persistLeadTaskSetCompleted(
+  db: Firestore,
+  taskId: string,
+  completed: boolean,
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTIONS.leadTasks, taskId), {
     completedAt: completed ? serverTimestamp() : deleteField(),
     updatedAt: serverTimestamp(),
   });

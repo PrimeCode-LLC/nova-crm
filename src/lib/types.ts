@@ -432,6 +432,34 @@ export interface Followup {
   auto: boolean;
 }
 
+/** Assigned work between teammates (review, email, etc.). Optional lead context + visibility. */
+export type LeadTaskType = "review" | "email" | "call" | "document" | "other";
+
+/**
+ * Controls how the task is **linked** in the UI, not who can read it: visibility is always limited to
+ * assignee, requester, and oversight roles (org owner/admin, CRM director, super-admin).
+ *
+ * `on_lead` — tied to the lead (Tasks tab, context); `assignees_only` — handoff-style link with the same privacy.
+ */
+export type LeadTaskVisibility = "on_lead" | "assignees_only";
+
+export interface LeadTask {
+  id: string;
+  leadId?: string;
+  title: string;
+  description?: string;
+  taskType: LeadTaskType;
+  visibility: LeadTaskVisibility;
+  assigneeId: string;
+  createdById: string;
+  dueAt?: ISODate;
+  completedAt?: ISODate;
+  createdAt: ISODate;
+  /** Denormalized when `leadId` is set so assignees still see company/contact without lead ACL. */
+  contextCompany?: string;
+  contextContact?: string;
+}
+
 export interface Note {
   id: string;
   leadId?: string;
@@ -453,6 +481,8 @@ export type TimelineEventType =
   | "note_added"
   | "followup_created"
   | "followup_completed"
+  | "lead_task_created"
+  | "lead_task_completed"
   | "deal_created"
   | "assignment_changed"
   | "field_changed";

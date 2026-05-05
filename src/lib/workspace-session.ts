@@ -1,4 +1,4 @@
-import type { Followup, Note, Touchpoint, TimelineEvent, Lead } from "@/lib/types";
+import type { Followup, LeadTask, Note, Touchpoint, TimelineEvent, Lead } from "@/lib/types";
 import type { WorkspaceSnapshot } from "@/lib/workspace-dataset";
 
 /** Unified session mutations (demo + local session until Firestore writes exist). */
@@ -10,6 +10,11 @@ export type FollowupSessionDelta = {
   completion: Record<string, string | null>;
 };
 
+export type LeadTaskSessionDelta = {
+  extras: LeadTask[];
+  completion: Record<string, string | null>;
+};
+
 export type NotesSessionDelta = {
   added: Note[];
   removedIds: string[];
@@ -18,6 +23,7 @@ export type NotesSessionDelta = {
 
 export type WorkspaceSessionV2 = {
   followups: FollowupSessionDelta;
+  leadTasks: LeadTaskSessionDelta;
   notes: NotesSessionDelta;
   touchpointsAdded: Touchpoint[];
   timelineAdded: TimelineEvent[];
@@ -30,6 +36,7 @@ export type WorkspaceSessionV2 = {
 export function emptyWorkspaceSession(): WorkspaceSessionV2 {
   return {
     followups: { extras: [], completion: {} },
+    leadTasks: { extras: [], completion: {} },
     notes: { added: [], removedIds: [], updates: {} },
     touchpointsAdded: [],
     timelineAdded: [],
@@ -44,6 +51,13 @@ function mergeFollowup(f: Followup, completion: Record<string, string | null>): 
   const c = completion[f.id];
   if (c === null) return { ...f, completedAt: undefined };
   return { ...f, completedAt: c };
+}
+
+function mergeLeadTask(t: LeadTask, completion: Record<string, string | null>): LeadTask {
+  if (!Object.prototype.hasOwnProperty.call(completion, t.id)) return t;
+  const c = completion[t.id];
+  if (c === null) return { ...t, completedAt: undefined };
+  return { ...t, completedAt: c };
 }
 
 export function readWorkspaceSession(): WorkspaceSessionV2 {
@@ -63,6 +77,7 @@ export function readWorkspaceSession(): WorkspaceSessionV2 {
           parsed && Array.isArray(parsed.extras) && typeof parsed.completion === "object"
             ? { extras: parsed.extras, completion: parsed.completion }
             : { extras: [], completion: {} },
+        leadTasks: { extras: [], completion: {} },
       };
       window.sessionStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify(migrated));
       return migrated;
@@ -81,6 +96,13 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
       completion:
         parsed.followups?.completion && typeof parsed.followups.completion === "object"
           ? parsed.followups.completion
+          : {},
+    },
+    leadTasks: {
+      extras: Array.isArray(parsed.leadTasks?.extras) ? parsed.leadTasks!.extras : [],
+      completion:
+        parsed.leadTasks?.completion && typeof parsed.leadTasks!.completion === "object"
+          ? parsed.leadTasks!.completion
           : {},
     },
     notes: {
@@ -116,7 +138,7 @@ export function mergeSessionIntoSnapshot(
   session: WorkspaceSessionV2,
 ): Pick<
   WorkspaceSnapshot,
-  "followups" | "notes" | "touchpoints" | "timelineByLead" | "leads"
+  "followups" | "leadTasks" | "notes" | "touchpoints" | "timelineByLead" | "leads"
 > {
   const visibleLeadIds = new Set(base.leads.map((l) => l.id));
   const visibleDealIds = new Set(base.deals.map((d) => d.id));
@@ -170,6 +192,15 @@ export function mergeSessionIntoSnapshot(
     .map((f) => mergeFollowup(f, session.followups.completion));
   const followups = [...mergedBaseFollowups, ...mergedExtras];
 
+  const mergedBaseLeadTasks = base.leadTasks.map((t) =>
+    mergeLeadTask(t, session.leadTasks.completion),
+  );
+  const baseLeadTaskIds = new Set(mergedBaseLeadTasks.map((t) => t.id));
+  const leadTaskExtrasFiltered = session.leadTasks.extras
+    .filter((t) => !baseLeadTaskIds.has(t.id))
+    .map((t) => mergeLeadTask(t, session.leadTasks.completion));
+  const leadTasks = [...mergedBaseLeadTasks, ...leadTaskExtrasFiltered];
+
   const leads = base.leads.map((l) => {
     const patch = session.leadPatches[l.id] ?? {};
     const act = session.leadActivity[l.id];
@@ -178,5 +209,5 @@ export function mergeSessionIntoSnapshot(
     return { ...l, ...patch, touches, lastActivityAt };
   });
 
-  return { followups, notes, touchpoints, timelineByLead, leads };
+  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads };
 }

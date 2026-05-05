@@ -116,6 +116,24 @@ service cloud.firestore {
               : (inCallerOrg(resource.data) && tenantUnchanged()));
     }
 
+    /** Team tasks: only assignee, requester, or oversight roles may read/update. */
+    function leadTaskElevated() {
+      return isOrgAtLeast('admin')
+        || userDoc().get('roleId', '') == 'director'
+        || userDoc().get('isSuperAdmin', false) == true;
+    }
+
+    function leadTaskParticipant(data) {
+      return data.assigneeId == request.auth.uid
+        || data.createdById == request.auth.uid;
+    }
+
+    function leadTaskCanRead(data) {
+      return signedIn()
+        && inCallerOrg(data)
+        && (leadTaskParticipant(data) || leadTaskElevated());
+    }
+
     match /leads/{id} {
       allow read: if tenantReadable();
       allow write: if tenantWritable();
@@ -129,6 +147,20 @@ service cloud.firestore {
     match /followups/{id} {
       allow read: if tenantReadable();
       allow write: if tenantWritable();
+    }
+
+    match /leadTasks/{id} {
+      allow read: if leadTaskCanRead(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.createdById == request.auth.uid;
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && (leadTaskParticipant(resource.data) || leadTaskElevated());
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && (leadTaskParticipant(resource.data) || leadTaskElevated());
     }
 
     match /touchpoints/{id} {

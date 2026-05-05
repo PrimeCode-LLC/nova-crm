@@ -18,6 +18,7 @@ import type {
   Deal,
   Followup,
   Lead,
+  LeadTask,
   Note,
   Role,
   Touchpoint,
@@ -35,6 +36,7 @@ export type LiveWorkspaceFirestoreState = {
   deals: Deal[];
   notes: Note[];
   followups: Followup[];
+  leadTasks: LeadTask[];
   touchpoints: Touchpoint[];
   timelineEvents: TimelineEvent[];
 };
@@ -49,6 +51,7 @@ const empty: LiveWorkspaceFirestoreState = {
   deals: [],
   notes: [],
   followups: [],
+  leadTasks: [],
   touchpoints: [],
   timelineEvents: [],
 };
@@ -154,6 +157,24 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
   };
 }
 
+function asLeadTask(id: string, raw: Record<string, unknown>): LeadTask {
+  return {
+    id,
+    leadId: optionalNonEmptyString(raw.leadId),
+    title: String(raw.title ?? ""),
+    description: typeof raw.description === "string" ? raw.description : undefined,
+    taskType: (raw.taskType as LeadTask["taskType"]) ?? "other",
+    visibility: (raw.visibility as LeadTask["visibility"]) ?? "on_lead",
+    assigneeId: String(raw.assigneeId ?? ""),
+    createdById: String(raw.createdById ?? ""),
+    dueAt: raw.dueAt ? firestoreValueToIso(raw.dueAt) : undefined,
+    completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
+    createdAt: firestoreValueToIso(raw.createdAt),
+    contextCompany: optionalNonEmptyString(raw.contextCompany),
+    contextContact: optionalNonEmptyString(raw.contextContact),
+  };
+}
+
 function asTouchpoint(id: string, raw: Record<string, unknown>): Touchpoint {
   return {
     id,
@@ -204,6 +225,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         deals: [],
         notes: [],
         followups: [],
+        leadTasks: [],
         touchpoints: [],
         timelineEvents: [],
       });
@@ -224,6 +246,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         deals: [],
         notes: [],
         followups: [],
+        leadTasks: [],
         touchpoints: [],
         timelineEvents: [],
       });
@@ -340,6 +363,23 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
             asFollowup(d.id, d.data() as Record<string, unknown>),
           );
           setState((prev) => ({ ...prev, followups, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qLeadTasks = query(
+      collection(db, COLLECTIONS.leadTasks),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qLeadTasks,
+        (snap) => {
+          const leadTasks = snap.docs.map((d) =>
+            asLeadTask(d.id, d.data() as Record<string, unknown>),
+          );
+          setState((prev) => ({ ...prev, leadTasks, loading: false }));
         },
         (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
       ),
