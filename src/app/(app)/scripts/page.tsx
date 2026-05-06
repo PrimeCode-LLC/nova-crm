@@ -5,7 +5,7 @@ import { Plus, Pencil, Trash2, Search, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,6 +24,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import type { ScriptCategory, ScriptLibraryItem } from "@/lib/types";
 
 type ScriptForm = {
@@ -286,53 +292,77 @@ export default function ScriptsPage() {
               </CardContent>
             </Card>
           ) : (
-            filtered.map((item) => (
-              <Card key={item.id}>
-                <CardHeader className="pb-2">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <CardTitle className="text-base">{item.title}</CardTitle>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        <Badge variant="outline">
-                          {CATEGORY_OPTIONS.find((c) => c.value === item.category)?.label ??
-                            "Other"}
-                        </Badge>
-                        {canViewAll && (
-                          <Badge variant="secondary">{item.ownerName || item.ownerUid}</Badge>
-                        )}
-                        {item.tags.map((tag) => (
-                          <Badge key={tag} variant="secondary">
-                            #{tag}
-                          </Badge>
-                        ))}
+            <Accordion defaultValue={[]} className="flex flex-col gap-3">
+              {filtered.map((item) => (
+                <AccordionItem key={item.id} value={item.id} className="border-0 p-0">
+                  <Card className="gap-0 overflow-hidden py-0" size="sm">
+                    <AccordionTrigger className="rounded-none border-0 px-4 py-3 hover:no-underline focus-visible:ring-offset-0 [&>svg]:shrink-0">
+                      <div className="flex min-w-0 flex-1 items-start justify-between gap-3 pr-1 text-left">
+                        <div className="min-w-0">
+                          <div className="text-base font-semibold leading-tight">{item.title}</div>
+                          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                            <Badge variant="outline">
+                              {CATEGORY_OPTIONS.find((c) => c.value === item.category)?.label ??
+                                "Other"}
+                            </Badge>
+                            {canViewAll && (
+                              <Badge variant="secondary">{item.ownerName || item.ownerUid}</Badge>
+                            )}
+                            {item.tags.map((tag) => (
+                              <Badge key={tag} variant="secondary">
+                                #{tag}
+                              </Badge>
+                            ))}
+                          </div>
+                        </div>
+                        <div
+                          className="flex shrink-0 gap-1"
+                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => e.stopPropagation()}
+                        >
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openEdit(item);
+                            }}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void removeItem(item.id);
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex gap-1">
-                      <Button size="icon" variant="ghost" onClick={() => openEdit(item)}>
-                        <Pencil className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button size="icon" variant="ghost" onClick={() => void removeItem(item.id)}>
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    <ScriptFieldBox
-                      label={fieldMeta(item.category).primaryLabel}
-                      value={item.primaryText || item.content}
-                    />
-                    {(item.secondaryText || "").trim() && (
-                      <ScriptFieldBox
-                        label={fieldMeta(item.category).secondaryLabel}
-                        value={item.secondaryText || ""}
-                      />
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            ))
+                    </AccordionTrigger>
+                    <AccordionContent className="border-t border-border/60 px-4 pb-4 pt-3">
+                      <div className="space-y-3">
+                        <ScriptFieldBox
+                          label={fieldMeta(item.category).primaryLabel}
+                          value={item.primaryText || item.content}
+                        />
+                        {(item.secondaryText || "").trim() && (
+                          <ScriptFieldBox
+                            label={fieldMeta(item.category).secondaryLabel}
+                            value={item.secondaryText || ""}
+                          />
+                        )}
+                      </div>
+                    </AccordionContent>
+                  </Card>
+                </AccordionItem>
+              ))}
+            </Accordion>
           )}
         </div>
       </PageBody>

@@ -78,6 +78,10 @@ export async function persistFollowupSetCompleted(
   });
 }
 
+export async function persistFollowupDelete(db: Firestore, followupId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.followups, followupId));
+}
+
 export async function persistLeadTaskCreate(
   db: Firestore,
   organizationId: string,
@@ -171,4 +175,12 @@ export async function persistActivityCounterCreate(
   if (row.profileId) data.profileId = row.profileId;
   if (row.campaignId) data.campaignId = row.campaignId;
   await setDoc(doc(db, COLLECTIONS.activityCounters, row.id), data);
+}
+
+export async function persistActivityCounterDelete(db: Firestore, counterId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.activityCounters, counterId));
+}
+
+export async function persistActivityRecordDelete(db: Firestore, recordId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.activityRecords, recordId));
 }

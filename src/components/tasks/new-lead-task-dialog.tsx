@@ -235,6 +235,7 @@ export function NewLeadTaskDialog({
                   if (v) setAssigneeId(v);
                 }}
                 disabled={assigneesLoading || assigneeOptions.length === 0}
+                items={assigneeOptions.map((o) => ({ value: o.id, label: o.label }))}
               >
                 <SelectTrigger>
                   <SelectValue placeholder={assigneesLoading ? "Loading team…" : "Teammate"} />
@@ -258,6 +259,13 @@ export function NewLeadTaskDialog({
                     if (!v || v === "__none__") setLeadId("");
                     else setLeadId(v);
                   }}
+                  items={[
+                    { value: "__none__", label: "No lead — internal task" },
+                    ...leads.map((l) => ({
+                      value: l.id,
+                      label: `${l.contactName} · ${l.companyName}`,
+                    })),
+                  ]}
                 >
                   <SelectTrigger id="task-lead">
                     <SelectValue placeholder="No lead — internal task" />

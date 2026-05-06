@@ -1,4 +1,4 @@
-import type { User, Lead, TimelineEvent } from "./types";
+import type { User, Lead, TimelineEvent, Followup } from "./types";
 import type { WorkspaceSnapshot } from "./workspace-dataset";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
 
@@ -91,6 +91,19 @@ export function activityActorUserIdsVisibleToViewer(
   return ids;
 }
 
+/** Followups on visible leads/deals, or standalone reminders whose owner is in the viewer's activity scope. */
+export function followupVisibleInHierarchyScope(
+  f: Followup,
+  visibleLeadIds: Set<string>,
+  visibleDealIds: Set<string>,
+  activityActorIds: Set<string>,
+): boolean {
+  if (f.leadId && visibleLeadIds.has(f.leadId)) return true;
+  if (f.dealId && visibleDealIds.has(f.dealId)) return true;
+  if (!f.leadId && !f.dealId && activityActorIds.has(f.ownerId)) return true;
+  return false;
+}
+
 /**
  * Applies org-chart style visibility to a loaded tenant snapshot (live Firestore data).
  * Directors and workspace owner/admin see the full org; managers/team leads see their subtree;
@@ -126,10 +139,10 @@ export function applyLiveHierarchyScope(
     if (te) timelineByLead[id] = te;
   }
 
-  const followups = snapshot.followups.filter(
-    (f) =>
-      (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
-      (f.dealId != null && visibleDealIds.has(f.dealId)),
+  const activityActorIds = activityActorUserIdsVisibleToViewer(viewer, orgUsers)!;
+
+  const followups = snapshot.followups.filter((f) =>
+    followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, activityActorIds),
   );
 
   const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, viewer);
@@ -143,19 +156,11 @@ export function applyLiveHierarchyScope(
     dirIds === null
       ? snapshot.permissionOverrides
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
+  const activityCounters = snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
 
-  const activityActorIds = activityActorUserIdsVisibleToViewer(viewer, orgUsers);
-  const activityCounters =
-    activityActorIds === null
-      ? snapshot.activityCounters
-      : snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
-
-  const activityRecords =
-    activityActorIds === null
-      ? snapshot.activityRecords
-      : snapshot.activityRecords.filter(
-          (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
-        );
+  const activityRecords = snapshot.activityRecords.filter(
+    (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+  );
 
   return {
     ...snapshot,

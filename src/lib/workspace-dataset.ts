@@ -38,7 +38,10 @@ import {
 import type { WorkspaceMode } from "./workspace-mode";
 import { parseDemoPersonaId } from "./demo-persona";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
-import { activityActorUserIdsVisibleToViewer } from "./workspace-hierarchy";
+import {
+  activityActorUserIdsVisibleToViewer,
+  followupVisibleInHierarchyScope,
+} from "./workspace-hierarchy";
 
 export type WorkspaceSnapshot = {
   users: User[];
@@ -184,10 +187,11 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     if (te) timelineByLead[id] = te;
   }
 
-  const followups = snapshot.followups.filter(
-    (f) =>
-      (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
-      (f.dealId != null && visibleDealIds.has(f.dealId)),
+  const activityActorIds = activityActorUserIdsVisibleToViewer(persona, mockUsers);
+  const standaloneActorIds = activityActorIds ?? new Set(users.map((u) => u.id));
+
+  const followups = snapshot.followups.filter((f) =>
+    followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, standaloneActorIds),
   );
 
   const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, persona);
@@ -201,8 +205,6 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     dirIds === null
       ? snapshot.permissionOverrides
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
-
-  const activityActorIds = activityActorUserIdsVisibleToViewer(persona, mockUsers);
   const activityCounters =
     activityActorIds === null
       ? snapshot.activityCounters

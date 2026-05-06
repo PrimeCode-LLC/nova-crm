@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,13 @@ import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
-import { CHANNEL_LIST } from "@/lib/constants";
+import { CHANNEL_LIST, ROLES } from "@/lib/constants";
+import {
+  getDashboardOverviewDescription,
+  getDashboardRoleFocusLine,
+  isFrontlineDashboardRole,
+} from "@/lib/dashboard-role-focus";
+import { DashboardPendingOverview } from "@/components/dashboard/dashboard-pending-overview";
 import {
   OWNER_SCOPE_PREFIX,
   buildPersonOwnerOptions,
@@ -28,7 +33,7 @@ import {
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
 import type { ChannelKey } from "@/lib/types";
-import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users, ListTodo } from "lucide-react";
+import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -63,6 +68,9 @@ export default function DashboardPage() {
     getUserById,
     getOwnerDisplayName,
     leadTasks,
+    followups,
+    setFollowupCompleted,
+    setLeadTaskCompleted,
   } = useWorkspace();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
@@ -147,18 +155,11 @@ export default function DashboardPage() {
   const pipelineValue = pipelineMetrics.total;
   const closedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
 
-  const myOpenAssignedTasks = React.useMemo(
-    () =>
-      leadTasks.filter((t) => !t.completedAt && t.assigneeId === currentUserId),
-    [leadTasks, currentUserId],
+  const viewer = React.useMemo(
+    () => (currentUserId ? getUserById(currentUserId) : undefined),
+    [currentUserId, getUserById],
   );
-  const myOutgoingOpenTasks = React.useMemo(
-    () =>
-      leadTasks.filter(
-        (t) => !t.completedAt && t.createdById === currentUserId && t.assigneeId !== currentUserId,
-      ),
-    [leadTasks, currentUserId],
-  );
+  const frontlineLayout = isFrontlineDashboardRole(viewer?.roleId);
 
   const pipelineHint = React.useMemo(() => {
     const parts = [`${pipelineMetrics.openDealCount} open deal${pipelineMetrics.openDealCount === 1 ? "" : "s"}`];
@@ -170,21 +171,34 @@ export default function DashboardPage() {
     return parts.join(" · ");
   }, [pipelineMetrics.leadEstimateContributors, pipelineMetrics.openDealCount]);
 
-  const coldEmailCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("cold_email", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
+  const funnelChannelKeys = React.useMemo(() => {
+    if (channelScope.length === 0) return CHANNEL_LIST.map((c) => c.key);
+    const order = new Map(CHANNEL_LIST.map((c, i) => [c.key, i]));
+    return [...channelScope].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  }, [channelScope]);
+
+  const funnelCharts = React.useMemo(
+    () =>
+      funnelChannelKeys.map((key) => {
+        const meta = CHANNEL_LIST.find((c) => c.key === key);
+        return {
+          channel: key,
+          title: meta?.label ?? key,
+          counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedLeads, scopedDeals),
+        };
+      }),
+    [funnelChannelKeys, scopedActivityCounters, scopedLeads, scopedDeals],
   );
-  const linkedinCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("linkedin_outbound", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
-  );
-  const upworkCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("upwork", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
-  );
-  const websiteCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("website_form", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
+
+  const pendingOverview = (
+    <DashboardPendingOverview
+      roleId={viewer?.roleId}
+      followups={followups}
+      leadTasks={leadTasks}
+      currentUserId={currentUserId}
+      setFollowupCompleted={setFollowupCompleted}
+      setLeadTaskCompleted={setLeadTaskCompleted}
+    />
   );
 
   function toggleDraft(ch: ChannelKey) {
@@ -231,7 +245,7 @@ export default function DashboardPage() {
     <>
       <PageHeader
         title="Overview"
-        description="Live pipeline state, team performance, and funnel diagnostics."
+        description={getDashboardOverviewDescription(viewer?.roleId)}
         actions={
           <>
             <Select defaultValue="30d">
@@ -356,30 +370,17 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {(myOpenAssignedTasks.length > 0 || myOutgoingOpenTasks.length > 0) && (
-              <div className="mb-4 flex flex-col gap-2 rounded-lg border bg-muted/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-                  {myOpenAssignedTasks.length > 0 && (
-                    <span className="flex items-center gap-2">
-                      <ListTodo className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
-                      <span>
-                        <strong className="tabular-nums">{myOpenAssignedTasks.length}</strong> team task
-                        {myOpenAssignedTasks.length === 1 ? "" : "s"} for you
-                      </span>
-                    </span>
-                  )}
-                  {myOutgoingOpenTasks.length > 0 && (
-                    <span className="text-muted-foreground">
-                      <strong className="tabular-nums text-foreground">{myOutgoingOpenTasks.length}</strong> waiting on
-                      others
-                    </span>
-                  )}
-                </div>
-                <Button size="sm" variant="outline" className="shrink-0" nativeButton={false} render={<Link href="/tasks" />}>
-                  View tasks
-                </Button>
+            {viewer && (
+              <div className="rounded-lg border border-border/80 bg-muted/15 px-4 py-3">
+                <p className="text-xs font-semibold text-foreground">
+                  {ROLES[viewer.roleId]?.label ?? "Member"} view
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {getDashboardRoleFocusLine(viewer.roleId)}
+                </p>
               </div>
             )}
+            {frontlineLayout && pendingOverview}
             {(channelScope.length > 0 || ownerScope !== "all-owners") && (
               <p className="text-xs text-muted-foreground mb-2">
                 {channelScope.length > 0 && (
@@ -443,6 +444,8 @@ export default function DashboardPage() {
               />
             </div>
 
+            {!frontlineLayout && pendingOverview}
+
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="min-w-0 lg:col-span-2">
                 <TrendChart
@@ -463,11 +466,10 @@ export default function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <FunnelChart channel="cold_email" title="Cold Email" counts={coldEmailCounts} />
-                <FunnelChart channel="linkedin_outbound" title="LinkedIn Outbound" counts={linkedinCounts} />
-                <FunnelChart channel="upwork" title="Upwork" counts={upworkCounts} />
-                <FunnelChart channel="website_form" title="Website Form" counts={websiteCounts} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {funnelCharts.map(({ channel, title, counts }) => (
+                  <FunnelChart key={channel} channel={channel} title={title} counts={counts} />
+                ))}
               </div>
             </div>
 

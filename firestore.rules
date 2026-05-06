@@ -146,7 +146,11 @@ service cloud.firestore {
 
     match /followups/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /leadTasks/{id} {
@@ -200,12 +204,20 @@ service cloud.firestore {
 
     match /activityCounters/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /activityRecords/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /auditLog/{id} {

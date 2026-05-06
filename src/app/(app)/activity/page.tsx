@@ -28,17 +28,32 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { CHANNEL_FUNNELS, CHANNEL_LIST } from "@/lib/constants";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import type { ActivityRecord, OrganizationCustomChannelRow, User } from "@/lib/types";
+import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import { fmtDate, fmtNumber, fmtRelative } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
-import { Plus, Save, Calendar, Filter } from "lucide-react";
+import { Plus, Save, Calendar, Filter, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import type { ActivityCounterRow, ChannelKey } from "@/lib/types";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { persistActivityCounterCreate } from "@/lib/firestore/persist-workspace-entities-client";
+import {
+  persistActivityCounterCreate,
+  persistActivityCounterDelete,
+  persistActivityRecordDelete,
+} from "@/lib/firestore/persist-workspace-entities-client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 const PROFILE_NONE = "__none__";
 const FILTER_ALL = "__all__";
@@ -83,7 +98,7 @@ export default function ActivityPage() {
     departments,
   } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const { localRollups, upsertLocalRollup } = useLocalActivityRollups();
+  const { localRollups, upsertLocalRollup, removeLocalRollupById } = useLocalActivityRollups();
 
   const persistRollupToFirestore = React.useCallback(
     async (row: ActivityCounterRow) => {
@@ -198,6 +213,59 @@ export default function ActivityPage() {
   const showPersonFilter = distinctActorCount > 1;
   const showDeptFilter = distinctDeptIds.size > 1;
   const showChannelFilter = distinctChannels.size > 1;
+
+  const currentMember = React.useMemo(
+    () => users.find((u) => u.id === currentUserId),
+    [users, currentUserId],
+  );
+  const canDeleteAnyActivity = viewerHasElevatedWorkspaceRole(currentMember);
+
+  const [deleteTarget, setDeleteTarget] = React.useState<
+    | { kind: "counter"; row: ActivityCounterRow }
+    | { kind: "record"; record: ActivityRecord }
+    | null
+  >(null);
+
+  const canDeleteCounterRow = React.useCallback(
+    (row: ActivityCounterRow) => {
+      if (!canDeleteAnyActivity) return false;
+      if (mode === "live" && !isDemo) return true;
+      return row.id.startsWith("local-ac");
+    },
+    [canDeleteAnyActivity, mode, isDemo],
+  );
+
+  const canDeleteActivityRecords = canDeleteAnyActivity && mode === "live" && !isDemo;
+
+  const confirmDeleteActivity = React.useCallback(async () => {
+    if (!deleteTarget) return;
+    try {
+      if (deleteTarget.kind === "counter") {
+        const row = deleteTarget.row;
+        if (row.id.startsWith("local-ac")) {
+          removeLocalRollupById(row.id);
+        } else {
+          if (!isFirebaseWebConfigured()) {
+            throw new Error("Firebase is not configured");
+          }
+          const db = getFirebaseDb();
+          await persistActivityCounterDelete(db, row.id);
+        }
+        toast.success("Rollup removed");
+      } else {
+        if (!isFirebaseWebConfigured()) {
+          throw new Error("Firebase is not configured");
+        }
+        const db = getFirebaseDb();
+        await persistActivityRecordDelete(db, deleteTarget.record.id);
+        toast.success("Activity record removed");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error("Could not delete", { description: msg });
+    }
+    setDeleteTarget(null);
+  }, [deleteTarget, removeLocalRollupById]);
 
   return (
     <>
@@ -318,13 +386,42 @@ export default function ActivityPage() {
           </TabsList>
 
           <TabsContent value="counters" className="mt-4">
-            <CountersTable rows={filteredCounters} />
+            <CountersTable
+              rows={filteredCounters}
+              canDeleteRow={canDeleteCounterRow}
+              onRequestDelete={(row) => setDeleteTarget({ kind: "counter", row })}
+            />
           </TabsContent>
 
           <TabsContent value="records" className="mt-4">
-            <RecordsTable records={filteredRecords} />
+            <RecordsTable
+              records={filteredRecords}
+              canDelete={canDeleteActivityRecords}
+              onRequestDelete={(record) => setDeleteTarget({ kind: "record", record })}
+            />
           </TabsContent>
         </Tabs>
+
+        <AlertDialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {deleteTarget?.kind === "counter" ? "Delete this rollup?" : "Delete this activity record?"}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {deleteTarget?.kind === "counter"
+                  ? "This removes the saved counter row for that person, date, and channel. Dashboard totals will update after the next sync."
+                  : "This permanently removes the per-record activity entry."}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction variant="destructive" onClick={() => void confirmDeleteActivity()}>
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </PageBody>
     </>
   );
@@ -537,7 +634,15 @@ function DailyRollupForm({
   );
 }
 
-function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
+function CountersTable({
+  rows,
+  canDeleteRow,
+  onRequestDelete,
+}: {
+  rows: ActivityCounterRow[];
+  canDeleteRow: (row: ActivityCounterRow) => boolean;
+  onRequestDelete: (row: ActivityCounterRow) => void;
+}) {
   return (
     <Card>
       <CardContent className="p-0">
@@ -548,12 +653,13 @@ function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
               <TableHead className="h-9">Person</TableHead>
               <TableHead className="h-9">Channel</TableHead>
               <TableHead className="h-9">Counters</TableHead>
+              <TableHead className="h-9 w-12 text-right sr-only">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
                   No counter rollups match your filters. Adjust filters or log a new rollup above.
                 </TableCell>
               </TableRow>
@@ -577,6 +683,20 @@ function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
                       ))}
                     </div>
                   </TableCell>
+                  <TableCell className="py-2 text-right align-middle">
+                    {canDeleteRow(a) ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        aria-label="Delete rollup"
+                        onClick={() => onRequestDelete(a)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
+                  </TableCell>
                 </TableRow>
               ))
             )}
@@ -587,7 +707,15 @@ function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
   );
 }
 
-function RecordsTable({ records }: { records: ActivityRecord[] }) {
+function RecordsTable({
+  records,
+  canDelete,
+  onRequestDelete,
+}: {
+  records: ActivityRecord[];
+  canDelete: boolean;
+  onRequestDelete: (record: ActivityRecord) => void;
+}) {
   const { getLeadById } = useWorkspace();
   return (
     <Card>
@@ -601,12 +729,13 @@ function RecordsTable({ records }: { records: ActivityRecord[] }) {
               <TableHead className="h-9">Summary</TableHead>
               <TableHead className="h-9">Lead</TableHead>
               <TableHead className="h-9">When</TableHead>
+              <TableHead className="h-9 w-12 text-right sr-only">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {records.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
                   No per-record activities match your filters.
                 </TableCell>
               </TableRow>
@@ -632,6 +761,20 @@ function RecordsTable({ records }: { records: ActivityRecord[] }) {
                   </TableCell>
                   <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">
                     {fmtRelative(a.occurredAt)}
+                  </TableCell>
+                  <TableCell className="py-2 text-right align-middle">
+                    {canDelete ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        aria-label="Delete activity record"
+                        onClick={() => onRequestDelete(a)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
                   </TableCell>
                 </TableRow>
               ))

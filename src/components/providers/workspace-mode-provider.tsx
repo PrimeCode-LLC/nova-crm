@@ -38,6 +38,7 @@ import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
 import {
   persistFollowupCreate,
+  persistFollowupDelete,
   persistFollowupSetCompleted,
   persistLeadTaskCreate,
   persistLeadTaskSetCompleted,
@@ -88,6 +89,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     sessionHydrated: boolean;
     addFollowup: (f: Followup) => void;
     setFollowupCompleted: (id: string, completed: boolean) => void;
+    removeFollowup: (id: string) => void;
     addLeadTask: (t: LeadTask) => void;
     setLeadTaskCompleted: (id: string, completed: boolean) => void;
     addLeadNote: (leadId: string, body: string, authorId: string) => void;
@@ -404,6 +406,37 @@ export function WorkspaceModeProvider({
         if (completed) completion[id] = new Date().toISOString();
         else completion[id] = null;
         return { ...s, followups: { ...s.followups, completion } };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const removeFollowup = React.useCallback(
+    (id: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupDelete(db, id);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not delete follow-up", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => {
+        const completion = { ...s.followups.completion };
+        delete completion[id];
+        return {
+          ...s,
+          followups: {
+            ...s.followups,
+            extras: s.followups.extras.filter((f) => f.id !== id),
+            completion,
+          },
+        };
       });
     },
     [mode, userDoc?.organizationId],
@@ -907,6 +940,7 @@ export function WorkspaceModeProvider({
       sessionHydrated,
       addFollowup,
       setFollowupCompleted,
+      removeFollowup,
       addLeadTask,
       setLeadTaskCompleted,
       addLeadNote,
@@ -944,6 +978,7 @@ export function WorkspaceModeProvider({
     sessionHydrated,
     addFollowup,
     setFollowupCompleted,
+    removeFollowup,
     addLeadTask,
     setLeadTaskCompleted,
     addLeadNote,

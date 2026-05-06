@@ -10,6 +10,7 @@ import {
   Clock,
   Plus,
   Sparkles,
+  Trash2,
 } from "lucide-react";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
@@ -25,8 +26,20 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead } from "@/lib/types";
+import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 function categorize(dueAt: string) {
   const d = new Date(dueAt);
@@ -44,10 +57,15 @@ type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
 export default function FollowupsPage() {
   const router = useRouter();
   const ws = useWorkspace();
-  const { followups, isDemo, leads, currentUserId, addFollowup, setFollowupCompleted } = ws;
+  const { followups, isDemo, leads, users, currentUserId, addFollowup, setFollowupCompleted, removeFollowup } =
+    ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [tab, setTab] = React.useState<"open" | "completed">("open");
   const [bucketFilter, setBucketFilter] = React.useState<BucketFilter>("all");
+  const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
+
+  const canDeleteFollowups =
+    !isDemo && viewerHasElevatedWorkspaceRole(users.find((u) => u.id === currentUserId));
 
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
@@ -93,6 +111,13 @@ export default function FollowupsPage() {
   }
 
   const showGroup = (bucket: BucketFilter) => bucketFilter === "all" || bucketFilter === bucket;
+
+  const confirmDeleteFollowup = React.useCallback(() => {
+    if (!deleteTarget) return;
+    removeFollowup(deleteTarget.id);
+    toast.success("Followup deleted");
+    setDeleteTarget(null);
+  }, [deleteTarget, removeFollowup]);
 
   return (
     <>
@@ -188,6 +213,8 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                      canDelete={canDeleteFollowups}
+                      onRequestDelete={setDeleteTarget}
                     />
                   </div>
                 )}
@@ -202,6 +229,8 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                      canDelete={canDeleteFollowups}
+                      onRequestDelete={setDeleteTarget}
                     />
                   </div>
                 )}
@@ -216,6 +245,8 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                      canDelete={canDeleteFollowups}
+                      onRequestDelete={setDeleteTarget}
                     />
                   </div>
                 )}
@@ -230,6 +261,8 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
+                      canDelete={canDeleteFollowups}
+                      onRequestDelete={setDeleteTarget}
                     />
                   </div>
                 )}
@@ -250,7 +283,8 @@ export default function FollowupsPage() {
                             lead && "cursor-pointer hover:bg-muted/50",
                           )}
                           onClick={(e) => {
-                            if ((e.target as HTMLElement).closest("[data-slot=checkbox]")) return;
+                            if ((e.target as HTMLElement).closest("[data-slot=checkbox], [data-followup-delete]"))
+                              return;
                             if (lead) router.push(`/leads/${lead.id}`);
                           }}
                           onKeyDown={(e) => {
@@ -283,6 +317,22 @@ export default function FollowupsPage() {
                           <span className="text-xs text-muted-foreground shrink-0">
                             {fmtRelative(f.completedAt)}
                           </span>
+                          {canDeleteFollowups ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                              data-followup-delete
+                              aria-label="Delete followup"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setDeleteTarget(f);
+                              }}
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          ) : null}
                         </div>
                       );
                     })}
@@ -298,6 +348,23 @@ export default function FollowupsPage() {
           </>
         )}
       </PageBody>
+
+      <AlertDialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this followup?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the reminder for everyone in the workspace. Linked lead activity is not changed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDeleteFollowup}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <NewFollowupDialog
         open={dialogOpen}
@@ -319,6 +386,8 @@ function FollowupGroup({
   getLeadById,
   onToggleComplete,
   onRowNavigate,
+  canDelete,
+  onRequestDelete,
 }: {
   title: string;
   description: string;
@@ -328,6 +397,8 @@ function FollowupGroup({
   getLeadById: (id: string) => Lead | undefined;
   onToggleComplete: (id: string, completed: boolean) => void;
   onRowNavigate: (leadId: string) => void;
+  canDelete: boolean;
+  onRequestDelete: (f: Followup) => void;
 }) {
   const toneRing =
     tone === "rose"
@@ -369,7 +440,8 @@ function FollowupGroup({
                   role={lead ? "button" : undefined}
                   tabIndex={lead ? 0 : undefined}
                   onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("[data-slot=checkbox], a")) return;
+                    if ((e.target as HTMLElement).closest("[data-slot=checkbox], a, [data-followup-delete]"))
+                      return;
                     if (f.leadId) onRowNavigate(f.leadId);
                   }}
                   onKeyDown={(e) => {
@@ -412,11 +484,27 @@ function FollowupGroup({
                       </Link>
                     )}
                   </div>
-                  <div className="flex items-center gap-3 shrink-0">
+                  <div className="flex items-center gap-2 shrink-0">
                     <UserChip userId={f.ownerId} size="xs" nameOnly />
                     <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                       {fmtDate(f.dueAt, "MMM d")} · {fmtRelative(f.dueAt)}
                     </span>
+                    {canDelete ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        data-followup-delete
+                        aria-label="Delete followup"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRequestDelete(f);
+                        }}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
                   </div>
                 </li>
               );
