@@ -70,6 +70,28 @@ function directoryUserIdsForLive(viewer: User, orgUsers: readonly User[]): Set<s
 }
 
 /**
+ * User IDs whose activity rollups / records the viewer may see.
+ * Includes the viewer, everyone in their manager-id subtree (so parents see reports even without manager role),
+ * and same-department peers when departmentId is set. Owners/directors/admins see all (null).
+ */
+export function activityActorUserIdsVisibleToViewer(
+  viewer: User,
+  orgUsers: readonly User[],
+): Set<string> | null {
+  if (seesAllLeadsInTenant(viewer)) return null;
+  const ids = new Set<string>([viewer.id]);
+  for (const id of collectDescendantUserIds(viewer.id, orgUsers)) {
+    ids.add(id);
+  }
+  if (viewer.departmentId) {
+    for (const u of orgUsers) {
+      if (u.departmentId === viewer.departmentId) ids.add(u.id);
+    }
+  }
+  return ids;
+}
+
+/**
  * Applies org-chart style visibility to a loaded tenant snapshot (live Firestore data).
  * Directors and workspace owner/admin see the full org; managers/team leads see their subtree;
  * same-department members see each other's pipeline when departmentId is set; otherwise own rows only.
@@ -122,16 +144,17 @@ export function applyLiveHierarchyScope(
       ? snapshot.permissionOverrides
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
 
+  const activityActorIds = activityActorUserIdsVisibleToViewer(viewer, orgUsers);
   const activityCounters =
-    dirIds === null
+    activityActorIds === null
       ? snapshot.activityCounters
-      : snapshot.activityCounters.filter((row) => dirIds.has(row.userId));
+      : snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
 
   const activityRecords =
-    dirIds === null
+    activityActorIds === null
       ? snapshot.activityRecords
       : snapshot.activityRecords.filter(
-          (r) => dirIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+          (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
         );
 
   return {

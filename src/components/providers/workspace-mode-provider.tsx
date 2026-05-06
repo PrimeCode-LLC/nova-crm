@@ -67,6 +67,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     mode: WorkspaceMode;
     isDemo: boolean;
     demoPersonaId: string;
+    /** Live mode: tenant id from the signed-in user doc (for writes / diagnostics). */
+    organizationId?: string;
     /** Display name for the signed-in tenant (from Firestore org). */
     organizationName: string;
     setMode: (next: WorkspaceMode) => Promise<void>;
@@ -730,6 +732,8 @@ export function WorkspaceModeProvider({
       leadTasks: liveFs.leadTasks,
       touchpoints: liveFs.touchpoints,
       timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
+      activityCounters: liveFs.activityCounters,
+      activityRecords: liveFs.activityRecords,
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
@@ -758,6 +762,8 @@ export function WorkspaceModeProvider({
     liveFs.leadTasks,
     liveFs.touchpoints,
     liveFs.timelineEvents,
+    liveFs.activityCounters,
+    liveFs.activityRecords,
   ]);
 
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {
@@ -883,6 +889,7 @@ export function WorkspaceModeProvider({
       mode,
       isDemo: mode === "demo",
       demoPersonaId,
+      organizationId: liveOrgId,
       organizationName,
       setMode,
       setDemoPersona,
@@ -919,6 +926,7 @@ export function WorkspaceModeProvider({
     orgMemberLabels,
     mode,
     demoPersonaId,
+    liveOrgId,
     organizationName,
     setMode,
     setDemoPersona,

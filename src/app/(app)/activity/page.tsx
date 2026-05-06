@@ -27,19 +27,23 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { CHANNEL_FUNNELS, CHANNEL_LIST } from "@/lib/constants";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
-import type { OrganizationCustomChannelRow } from "@/lib/types";
+import type { ActivityRecord, OrganizationCustomChannelRow, User } from "@/lib/types";
 import { fmtDate, fmtNumber, fmtRelative } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
-import { Plus, Save, Calendar } from "lucide-react";
+import { Plus, Save, Calendar, Filter } from "lucide-react";
 import { toast } from "sonner";
 import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import type { ActivityCounterRow, ChannelKey } from "@/lib/types";
+import { getFirebaseDb } from "@/lib/firebase/client";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { persistActivityCounterCreate } from "@/lib/firestore/persist-workspace-entities-client";
 
 const PROFILE_NONE = "__none__";
+const FILTER_ALL = "__all__";
 
-type ActivityTab = "rollup" | "counters" | "records";
+type ActivityTab = "counters" | "records";
 
 function buildRollupChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
@@ -61,9 +65,52 @@ function rollupFunnelStages(
   return CHANNEL_FUNNELS[channel as ChannelKey] ?? [];
 }
 
+function userByIdMap(users: readonly User[]): Map<string, User> {
+  const m = new Map<string, User>();
+  for (const u of users) m.set(u.id, u);
+  return m;
+}
+
 export default function ActivityPage() {
-  const { isDemo, activityCounters, activityRecords, currentUserId } = useWorkspace();
+  const {
+    mode,
+    isDemo,
+    organizationId,
+    activityCounters,
+    activityRecords,
+    currentUserId,
+    users,
+    departments,
+  } = useWorkspace();
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
   const { localRollups, upsertLocalRollup } = useLocalActivityRollups();
+
+  const persistRollupToFirestore = React.useCallback(
+    async (row: ActivityCounterRow) => {
+      if (!organizationId) {
+        toast.error("Missing organization", { description: "Try reloading the page." });
+        throw new Error("organizationId");
+      }
+      if (!isFirebaseWebConfigured()) {
+        toast.error("Firebase is not configured", { description: "Cannot save to the cloud." });
+        throw new Error("firebase");
+      }
+      const db = getFirebaseDb();
+      await persistActivityCounterCreate(db, organizationId, row);
+    },
+    [organizationId],
+  );
+
+  const channelLabelByKey = React.useMemo(() => {
+    const m = new Map<string, string>();
+    for (const c of CHANNEL_LIST) m.set(c.key, c.label);
+    for (const c of customChannels) {
+      const id = `custom_${c.id}`;
+      const name = c.name.trim();
+      if (name) m.set(id, name);
+    }
+    return m;
+  }, [customChannels]);
   const mergedCounters = React.useMemo(
     () => mergeActivityCounters(activityCounters, localRollups),
     [activityCounters, localRollups],
@@ -75,19 +122,82 @@ export default function ActivityPage() {
 
   const workspaceEmpty = !isDemo && activityCounters.length === 0 && activityRecords.length === 0;
 
-  const [tab, setTab] = React.useState<ActivityTab>("rollup");
-  const rollupAnchorRef = React.useRef<HTMLDivElement>(null);
+  const [tab, setTab] = React.useState<ActivityTab>("counters");
+  const formTopRef = React.useRef<HTMLDivElement>(null);
 
-  const goToRollupForm = React.useCallback(() => {
-    setTab("rollup");
+  const [personFilter, setPersonFilter] = React.useState(FILTER_ALL);
+  const [departmentFilter, setDepartmentFilter] = React.useState(FILTER_ALL);
+  const [channelFilter, setChannelFilter] = React.useState(FILTER_ALL);
+
+  const userMap = React.useMemo(() => userByIdMap(users), [users]);
+
+  const actorUserIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of sortedCounters) ids.add(r.userId);
+    for (const r of activityRecords) ids.add(r.userId);
+    return ids;
+  }, [sortedCounters, activityRecords]);
+
+  const distinctActorCount = actorUserIds.size;
+
+  const distinctDeptIds = React.useMemo(() => {
+    const d = new Set<string>();
+    for (const uid of actorUserIds) {
+      const dept = userMap.get(uid)?.departmentId;
+      if (dept) d.add(dept);
+    }
+    return d;
+  }, [actorUserIds, userMap]);
+
+  const distinctChannels = React.useMemo(() => {
+    const c = new Set<string>();
+    for (const r of sortedCounters) c.add(r.channel);
+    for (const r of activityRecords) c.add(r.channel);
+    return c;
+  }, [sortedCounters, activityRecords]);
+
+  const filteredCounters = React.useMemo(() => {
+    return sortedCounters.filter((row) => {
+      if (personFilter !== FILTER_ALL && row.userId !== personFilter) return false;
+      if (departmentFilter !== FILTER_ALL) {
+        const uidDept = userMap.get(row.userId)?.departmentId;
+        if (uidDept !== departmentFilter) return false;
+      }
+      if (channelFilter !== FILTER_ALL && row.channel !== channelFilter) return false;
+      return true;
+    });
+  }, [sortedCounters, personFilter, departmentFilter, channelFilter, userMap]);
+
+  const filteredRecords = React.useMemo(() => {
+    return activityRecords.filter((row) => {
+      if (personFilter !== FILTER_ALL && row.userId !== personFilter) return false;
+      if (departmentFilter !== FILTER_ALL) {
+        const uidDept = userMap.get(row.userId)?.departmentId;
+        if (uidDept !== departmentFilter) return false;
+      }
+      if (channelFilter !== FILTER_ALL && row.channel !== channelFilter) return false;
+      return true;
+    });
+  }, [activityRecords, personFilter, departmentFilter, channelFilter, userMap]);
+
+  const goToLogForm = React.useCallback(() => {
     requestAnimationFrame(() => {
-      rollupAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      const first = rollupAnchorRef.current?.querySelector<HTMLInputElement>(
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      const first = formTopRef.current?.querySelector<HTMLInputElement>(
         'input[type="number"], input[type="date"]',
       );
       first?.focus();
     });
   }, []);
+
+  const deptName = React.useCallback(
+    (id: string) => departments.find((d) => d.id === id)?.name ?? id,
+    [departments],
+  );
+
+  const showPersonFilter = distinctActorCount > 1;
+  const showDeptFilter = distinctDeptIds.size > 1;
+  const showChannelFilter = distinctChannels.size > 1;
 
   return (
     <>
@@ -95,45 +205,124 @@ export default function ActivityPage() {
         title="Activity"
         description="Daily counter rollups + per-record activities. Drives funnel diagnostics."
         actions={
-          <Button type="button" size="sm" onClick={goToRollupForm}>
+          <Button type="button" size="sm" onClick={goToLogForm}>
             <Plus className="h-3.5 w-3.5" /> Log activity
           </Button>
         }
       />
       <PageBody>
+        <div ref={formTopRef} id="activity-log-form" className="mb-6">
+          <DailyRollupForm
+            currentUserId={currentUserId || "local-user"}
+            onPersistLive={
+              mode === "live" && !isDemo && organizationId ? persistRollupToFirestore : undefined
+            }
+            onSaved={() => {
+              setTab("counters");
+              toast.success("Rollup saved", {
+                description:
+                  mode === "live" && !isDemo
+                    ? "Saved to your workspace in Firebase. It appears for you and your leadership based on visibility rules."
+                    : "Shown in Counters history and included in dashboard funnel totals this session.",
+              });
+            }}
+            upsertLocalRollup={upsertLocalRollup}
+          />
+        </div>
+
         {workspaceEmpty && (
           <div className="mb-4">
             <WorkspaceEmptyHint title="No activity history yet" />
           </div>
         )}
+
+        {(showPersonFilter || showDeptFilter || showChannelFilter) && (
+          <Card className="mb-4">
+            <CardHeader className="py-3 px-4">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Filter className="h-3.5 w-3.5 text-muted-foreground" />
+                History filters
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Narrow counters and per-record rows. Filters apply to both tabs.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0 px-4 pb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {showPersonFilter ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Person</Label>
+                    <Select value={personFilter} onValueChange={(v) => setPersonFilter(v || FILTER_ALL)}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="All people" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FILTER_ALL}>All people</SelectItem>
+                        {[...actorUserIds].sort().map((uid) => (
+                          <SelectItem key={uid} value={uid}>
+                            {userMap.get(uid)?.displayName ?? uid}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                {showDeptFilter ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Department</Label>
+                    <Select
+                      value={departmentFilter}
+                      onValueChange={(v) => setDepartmentFilter(v || FILTER_ALL)}
+                    >
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="All departments" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FILTER_ALL}>All departments</SelectItem>
+                        {[...distinctDeptIds].sort().map((id) => (
+                          <SelectItem key={id} value={id}>
+                            {deptName(id)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                {showChannelFilter ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Channel</Label>
+                    <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v || FILTER_ALL)}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="All channels" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FILTER_ALL}>All channels</SelectItem>
+                        {[...distinctChannels].sort().map((ch) => (
+                          <SelectItem key={ch} value={ch}>
+                            {channelLabelByKey.get(ch) ?? ch.replace(/_/g, " ")}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         <Tabs value={tab} onValueChange={(v) => setTab(v as ActivityTab)}>
           <TabsList>
-            <TabsTrigger value="rollup">Daily rollup</TabsTrigger>
             <TabsTrigger value="counters">Counters history</TabsTrigger>
             <TabsTrigger value="records">Per-record activities</TabsTrigger>
           </TabsList>
 
-          <TabsContent value="rollup" className="mt-4">
-            <div ref={rollupAnchorRef} id="activity-daily-rollup">
-              <DailyRollupForm
-                currentUserId={currentUserId || "local-user"}
-                onSaved={() => {
-                  setTab("counters");
-                  toast.success("Rollup saved", {
-                    description: "Shown in Counters history and included in dashboard funnel totals this session.",
-                  });
-                }}
-                upsertLocalRollup={upsertLocalRollup}
-              />
-            </div>
-          </TabsContent>
-
           <TabsContent value="counters" className="mt-4">
-            <CountersTable rows={sortedCounters} />
+            <CountersTable rows={filteredCounters} />
           </TabsContent>
 
           <TabsContent value="records" className="mt-4">
-            <RecordsTable />
+            <RecordsTable records={filteredRecords} />
           </TabsContent>
         </Tabs>
       </PageBody>
@@ -143,10 +332,13 @@ export default function ActivityPage() {
 
 function DailyRollupForm({
   currentUserId,
+  onPersistLive,
   onSaved,
   upsertLocalRollup,
 }: {
   currentUserId: string;
+  /** When set (live CRM), rollup is written to Firestore instead of session-only storage. */
+  onPersistLive?: (row: ActivityCounterRow) => Promise<void>;
   onSaved: () => void;
   upsertLocalRollup: (row: ActivityCounterRow) => void;
 }) {
@@ -193,7 +385,7 @@ function DailyRollupForm({
     setProfileId(undefined);
   }
 
-  function saveRollup() {
+  async function saveRollup() {
     const numericCounters: Record<string, number> = {};
     for (const s of stages) {
       const raw = counters[s.key];
@@ -206,21 +398,37 @@ function DailyRollupForm({
       if (n > 0) numericCounters[s.key] = n;
     }
     if (Object.keys(numericCounters).length === 0) {
-      toast.error("Add at least one non-zero count", { description: "Otherwise there is nothing to save." });
+      toast.error("Add at least one non-zero count", {
+        description: "Otherwise there is nothing to save.",
+      });
       return;
     }
 
+    const rowId = onPersistLive
+      ? typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `ac-${crypto.randomUUID()}`
+        : `ac-${Date.now()}`
+      : `local-ac-${Date.now()}`;
     const row: ActivityCounterRow = {
-      id: `local-ac-${Date.now()}`,
+      id: rowId,
       userId: currentUserId,
       channel: channel as ChannelKey,
       profileId: profileId || undefined,
       date: `${date}T12:00:00.000Z`,
       counters: numericCounters,
     };
-    upsertLocalRollup(row);
-    setCounters({});
-    onSaved();
+    try {
+      if (onPersistLive) {
+        await onPersistLive(row);
+      } else {
+        upsertLocalRollup(row);
+      }
+      setCounters({});
+      onSaved();
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast.error("Could not save rollup", { description: msg });
+    }
   }
 
   const profileOptions = profiles.filter((p) => p.channel === channel);
@@ -228,9 +436,10 @@ function DailyRollupForm({
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-sm">Log today's activity</CardTitle>
+        <CardTitle className="text-sm">Log today&apos;s activity</CardTitle>
         <CardDescription className="text-xs">
-          Enter counts for your channel (~30 seconds). Feeds into funnel analytics and scorecards.
+          Enter counts for your channel (~30 seconds). Feeds into funnel analytics and scorecards. Managers and
+          workspace owners see rollups from their team automatically.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -271,9 +480,7 @@ function DailyRollupForm({
             <Label className="text-xs">Profile (optional)</Label>
             <Select
               value={profileId ?? PROFILE_NONE}
-              onValueChange={(v) =>
-                setProfileId(!v || v === PROFILE_NONE ? undefined : v)
-              }
+              onValueChange={(v) => setProfileId(!v || v === PROFILE_NONE ? undefined : v)}
             >
               <SelectTrigger className="h-9">
                 <SelectValue placeholder="None" />
@@ -347,7 +554,7 @@ function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
             {rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={4} className="py-8 text-center text-sm text-muted-foreground">
-                  No counter rollups yet. Use Daily rollup to add your first entry.
+                  No counter rollups match your filters. Adjust filters or log a new rollup above.
                 </TableCell>
               </TableRow>
             ) : (
@@ -380,8 +587,8 @@ function CountersTable({ rows }: { rows: ActivityCounterRow[] }) {
   );
 }
 
-function RecordsTable() {
-  const { activityRecords, getLeadById } = useWorkspace();
+function RecordsTable({ records }: { records: ActivityRecord[] }) {
+  const { getLeadById } = useWorkspace();
   return (
     <Card>
       <CardContent className="p-0">
@@ -397,14 +604,14 @@ function RecordsTable() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {activityRecords.length === 0 ? (
+            {records.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
-                  No per-record activities yet.
+                  No per-record activities match your filters.
                 </TableCell>
               </TableRow>
             ) : (
-              activityRecords.map((a) => (
+              records.map((a) => (
                 <TableRow key={a.id}>
                   <TableCell className="py-2 text-xs font-mono text-muted-foreground">{a.type}</TableCell>
                   <TableCell className="py-2">

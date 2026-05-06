@@ -38,6 +38,7 @@ import {
 import type { WorkspaceMode } from "./workspace-mode";
 import { parseDemoPersonaId } from "./demo-persona";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
+import { activityActorUserIdsVisibleToViewer } from "./workspace-hierarchy";
 
 export type WorkspaceSnapshot = {
   users: User[];
@@ -201,16 +202,17 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
       ? snapshot.permissionOverrides
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
 
+  const activityActorIds = activityActorUserIdsVisibleToViewer(persona, mockUsers);
   const activityCounters =
-    dirIds === null
+    activityActorIds === null
       ? snapshot.activityCounters
-      : snapshot.activityCounters.filter((row) => dirIds.has(row.userId));
+      : snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
 
   const activityRecords =
-    dirIds === null
+    activityActorIds === null
       ? snapshot.activityRecords
       : snapshot.activityRecords.filter(
-          (r) => dirIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+          (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
         );
 
   return {

@@ -9,7 +9,7 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import type { Followup, LeadTask, Note, Touchpoint, TimelineEvent } from "@/lib/types";
+import type { ActivityCounterRow, Followup, LeadTask, Note, Touchpoint, TimelineEvent } from "@/lib/types";
 
 export async function persistNoteCreate(
   db: Firestore,
@@ -152,4 +152,23 @@ export async function persistLeadActivityBump(db: Firestore, leadId: string): Pr
     lastActivityAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+}
+
+/** Daily funnel counter rollup; visible to the org via hierarchy rules after sync. */
+export async function persistActivityCounterCreate(
+  db: Firestore,
+  organizationId: string,
+  row: ActivityCounterRow,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    userId: row.userId,
+    channel: row.channel,
+    date: row.date,
+    counters: row.counters,
+    createdAt: serverTimestamp(),
+  };
+  if (row.profileId) data.profileId = row.profileId;
+  if (row.campaignId) data.campaignId = row.campaignId;
+  await setDoc(doc(db, COLLECTIONS.activityCounters, row.id), data);
 }
