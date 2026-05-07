@@ -265,6 +265,7 @@ export default function DealsPage() {
         leads={ws.leads}
         users={ws.users}
         currentUserId={ws.currentUserId || ws.users[0]?.id || ""}
+        getOwnerDisplayName={ws.getOwnerDisplayName}
         onCreate={addLocalDeal}
       />
     </>
