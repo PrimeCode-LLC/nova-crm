@@ -368,7 +368,7 @@ export default function ScriptsPage() {
       </PageBody>
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-h-[min(90dvh,900px)] max-w-2xl overflow-y-auto overscroll-contain">
           <DialogHeader>
             <DialogTitle>{form.id ? "Edit script" : "New script"}</DialogTitle>
           </DialogHeader>

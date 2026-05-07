@@ -46,6 +46,8 @@ import {
   persistNoteCreate,
   persistNoteDelete,
   persistNoteUpdate,
+  persistProfileCreate,
+  persistProfileUpdate,
   persistTimelineEventCreate,
   persistTouchpointCreate,
 } from "@/lib/firestore/persist-workspace-entities-client";
@@ -276,16 +278,52 @@ export function WorkspaceModeProvider({
     setAddedDepartments((prev) => [...prev, dept]);
   }, []);
 
-  const updateProfile = React.useCallback((id: string, patch: Partial<Profile>) => {
-    setProfileDelta((d) => ({
-      ...d,
-      updates: { ...d.updates, [id]: { ...d.updates[id], ...patch } },
-    }));
-  }, []);
+  const updateProfile = React.useCallback(
+    (id: string, patch: Partial<Profile>) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistProfileUpdate(db, id, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save profile", { description: msg });
+          }
+        })();
+        return;
+      }
+      setProfileDelta((d) => ({
+        ...d,
+        updates: { ...d.updates, [id]: { ...d.updates[id], ...patch } },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addProfile = React.useCallback((profile: Profile) => {
-    setProfileDelta((d) => ({ ...d, added: [...d.added, profile] }));
-  }, []);
+  const addProfile = React.useCallback(
+    (profile: Profile) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistProfileCreate(db, orgId, profile);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save profile", { description: msg });
+          }
+        })();
+        return;
+      }
+      setProfileDelta((d) => ({ ...d, added: [...d.added, profile] }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
   const updateCampaign = React.useCallback((id: string, patch: Partial<Campaign>) => {
     setCampaignEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -767,6 +805,7 @@ export function WorkspaceModeProvider({
       timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
       activityCounters: liveFs.activityCounters,
       activityRecords: liveFs.activityRecords,
+      profiles: liveFs.profiles,
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
@@ -797,6 +836,7 @@ export function WorkspaceModeProvider({
     liveFs.timelineEvents,
     liveFs.activityCounters,
     liveFs.activityRecords,
+    liveFs.profiles,
   ]);
 
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {

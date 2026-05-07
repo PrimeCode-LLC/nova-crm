@@ -15,6 +15,7 @@ export const COLLECTIONS = {
   permissionOverrides: "permissionOverrides",
   activityCounters: "activityCounters",
   activityRecords: "activityRecords",
+  profiles: "profiles",
   scriptLibrary: "scriptLibrary",
   ingestQueue: "ingestQueue",
   auditLog: "auditLog",
@@ -49,6 +50,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.permissionOverrides,
   COLLECTIONS.activityCounters,
   COLLECTIONS.activityRecords,
+  COLLECTIONS.profiles,
   COLLECTIONS.scriptLibrary,
   COLLECTIONS.auditLog,
 ] as const;

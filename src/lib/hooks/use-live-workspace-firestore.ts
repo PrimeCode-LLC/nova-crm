@@ -27,6 +27,7 @@ import type {
   Touchpoint,
   TimelineEvent,
   User,
+  Profile,
 } from "@/lib/types";
 
 export type LiveWorkspaceFirestoreState = {
@@ -44,6 +45,7 @@ export type LiveWorkspaceFirestoreState = {
   timelineEvents: TimelineEvent[];
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
+  profiles: Profile[];
 };
 
 const empty: LiveWorkspaceFirestoreState = {
@@ -61,6 +63,7 @@ const empty: LiveWorkspaceFirestoreState = {
   timelineEvents: [],
   activityCounters: [],
   activityRecords: [],
+  profiles: [],
 };
 
 function asUser(id: string, raw: Record<string, unknown>): User {
@@ -132,6 +135,18 @@ function optionalNonEmptyString(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
   return t.length > 0 ? t : undefined;
+}
+
+function asProfile(id: string, raw: Record<string, unknown>): Profile {
+  return {
+    id,
+    name: String(raw.name ?? ""),
+    channel: (raw.channel as Profile["channel"]) ?? "cold_email",
+    type: (raw.type as Profile["type"]) ?? "email",
+    ownerId: String(raw.ownerId ?? ""),
+    active: raw.active !== false,
+    notes: optionalNonEmptyString(raw.notes),
+  };
 }
 
 function asNote(id: string, raw: Record<string, unknown>): Note {
@@ -275,6 +290,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         timelineEvents: [],
         activityCounters: [],
         activityRecords: [],
+        profiles: [],
       });
       return;
     }
@@ -298,6 +314,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         timelineEvents: [],
         activityCounters: [],
         activityRecords: [],
+        profiles: [],
       });
       return;
     }
@@ -497,6 +514,21 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
             asActivityRecord(d.id, d.data() as Record<string, unknown>),
           );
           setState((prev) => ({ ...prev, activityRecords, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qProfiles = query(
+      collection(db, COLLECTIONS.profiles),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qProfiles,
+        (snap) => {
+          const profiles = snap.docs.map((d) => asProfile(d.id, d.data() as Record<string, unknown>));
+          setState((prev) => ({ ...prev, profiles, loading: false }));
         },
         (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
       ),

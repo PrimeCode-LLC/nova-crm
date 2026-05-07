@@ -9,7 +9,15 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import type { ActivityCounterRow, Followup, LeadTask, Note, Touchpoint, TimelineEvent } from "@/lib/types";
+import type {
+  ActivityCounterRow,
+  Followup,
+  LeadTask,
+  Note,
+  Profile,
+  Touchpoint,
+  TimelineEvent,
+} from "@/lib/types";
 
 export async function persistNoteCreate(
   db: Firestore,
@@ -183,4 +191,40 @@ export async function persistActivityCounterDelete(db: Firestore, counterId: str
 
 export async function persistActivityRecordDelete(db: Firestore, recordId: string): Promise<void> {
   await deleteDoc(doc(db, COLLECTIONS.activityRecords, recordId));
+}
+
+export async function persistProfileCreate(
+  db: Firestore,
+  organizationId: string,
+  p: Profile,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    name: p.name,
+    channel: p.channel,
+    type: p.type,
+    ownerId: p.ownerId,
+    active: p.active ?? true,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (p.notes) data.notes = p.notes;
+  await setDoc(doc(db, COLLECTIONS.profiles, p.id), data);
+}
+
+export async function persistProfileUpdate(
+  db: Firestore,
+  profileId: string,
+  patch: Partial<Profile>,
+): Promise<void> {
+  const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.name !== undefined) payload.name = patch.name;
+  if (patch.channel !== undefined) payload.channel = patch.channel;
+  if (patch.type !== undefined) payload.type = patch.type;
+  if (patch.ownerId !== undefined) payload.ownerId = patch.ownerId;
+  if (patch.active !== undefined) payload.active = patch.active;
+  if (patch.notes !== undefined) {
+    payload.notes = patch.notes && patch.notes.trim() ? patch.notes : deleteField();
+  }
+  await updateDoc(doc(db, COLLECTIONS.profiles, profileId), payload);
 }

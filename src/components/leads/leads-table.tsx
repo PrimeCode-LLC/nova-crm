@@ -83,6 +83,11 @@ import {
 } from "@/lib/owner-scope";
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import {
+  DateRangeFilter,
+  isWithinRange,
+  type DateRange,
+} from "@/components/common/date-range-filter";
 
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
@@ -258,8 +263,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     mergeUrlColumnFilters(preset, initialChannels, initialStages),
   );
   const [rowSelection, setRowSelection] = React.useState({});
-  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({});
+  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
+    created: false,
+  });
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
+  const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
   const [reassignOpen, setReassignOpen] = React.useState(false);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
 
@@ -287,10 +296,18 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     [leads, users, getUserById, getOwnerDisplayName],
   );
 
-  const dataForTable = React.useMemo(
-    () => filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps),
-    [afterIdleFilter, ownerScope, ownerScopeDeps],
-  );
+  const dataForTable = React.useMemo(() => {
+    let rows = filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps);
+    if (createdRange?.from || createdRange?.to) {
+      rows = rows.filter((l) => isWithinRange(l.createdAt, createdRange));
+    }
+    if (activityRange?.from || activityRange?.to) {
+      rows = rows.filter((l) =>
+        isWithinRange(l.lastActivityAt ?? l.updatedAt, activityRange),
+      );
+    }
+    return rows;
+  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange]);
 
   const ownerFilterTriggerLabel = React.useMemo(
     () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
@@ -454,6 +471,16 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
           {fmtRelative(row.original.lastActivityAt ?? row.original.updatedAt)}
+        </span>
+      ),
+    },
+    {
+      id: "created",
+      accessorKey: "createdAt",
+      header: "Added",
+      cell: ({ row }) => (
+        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+          {fmtDate(row.original.createdAt)}
         </span>
       ),
     },
@@ -654,6 +681,17 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <DateRangeFilter
+          label="Added"
+          value={createdRange}
+          onChange={setCreatedRange}
+        />
+        <DateRangeFilter
+          label="Last activity"
+          value={activityRange}
+          onChange={setActivityRange}
+        />
 
         <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
           <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem]">
