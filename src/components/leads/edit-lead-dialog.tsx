@@ -38,6 +38,8 @@ import {
 import {
   PIPELINE_STAGES,
   CHANNEL_LIST,
+  CHANNELS_REQUIRING_OUTREACH_PROFILE,
+  outreachProfileFieldLabel,
   TEMPERATURE_TONE,
   PRIORITY_TONE,
   REVENUE_RANGES,
@@ -45,6 +47,7 @@ import {
   PUSH_STATUS_TONE,
 } from "@/lib/constants";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
 const UNSET = "__unset__" as const;
 type UnsetToken = typeof UNSET;
@@ -125,6 +128,14 @@ export function EditLeadDialog({
   const [bantNeed, setBantNeed] = React.useState("3");
   const [bantTimeline, setBantTimeline] = React.useState("3");
 
+  const [profileId, setProfileId] = React.useState("");
+  const { profiles } = useWorkspace();
+
+  const profileOptionsForChannel = React.useMemo(
+    () => profiles.filter((p) => p.channel === channel && p.active !== false),
+    [profiles, channel],
+  );
+
   React.useEffect(() => {
     if (!open || !lead) return;
     React.startTransition(() => {
@@ -157,12 +168,36 @@ export function EditLeadDialog({
       setBantAuthority(String(b?.authority ?? 3));
       setBantNeed(String(b?.need ?? 3));
       setBantTimeline(String(b?.timeline ?? 3));
+
+      const ch = lead.channel;
+      if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
+        const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+        const want = lead.profileId?.trim() ?? "";
+        if (want && opts.some((p) => p.id === want)) {
+          setProfileId(want);
+        } else if (opts.length === 1) {
+          setProfileId(opts[0]!.id);
+        } else {
+          setProfileId("");
+        }
+      } else {
+        setProfileId("");
+      }
     });
-  }, [open, lead]);
+  }, [open, lead, profiles]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!lead) return;
+    if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)) {
+      const opts = profiles.filter((p) => p.channel === channel && p.active !== false);
+      if (opts.length > 0 && !profileId.trim()) {
+        toast.error(
+          channel === "upwork" ? "Select an Upwork profile." : "Select a CV / apply profile.",
+        );
+        return;
+      }
+    }
     const evRaw = estimatedValue.trim();
     let estimatedValueNum: number | undefined;
     if (evRaw) {
@@ -187,7 +222,13 @@ export function EditLeadDialog({
       };
     }
 
+    const profileIdTrim = profileId.trim();
+    const profilePatch: Partial<Lead> = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)
+      ? { profileId: profileIdTrim || undefined }
+      : { profileId: undefined };
+
     onSave({
+      ...profilePatch,
       channel,
       stage,
       temperature,
@@ -307,7 +348,20 @@ export function EditLeadDialog({
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campaign routing</p>
               <div className="grid gap-2">
                 <Label>Channel</Label>
-                <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
+                <Select
+                  value={channel}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    const ch = v as ChannelKey;
+                    setChannel(ch);
+                    if (!CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
+                      setProfileId("");
+                      return;
+                    }
+                    const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+                    setProfileId(opts.length === 1 ? opts[0]!.id : "");
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
                   </SelectTrigger>
@@ -320,6 +374,36 @@ export function EditLeadDialog({
                   </SelectContent>
                 </Select>
               </div>
+              {CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel) && (
+                <div className="grid gap-2">
+                  <Label>{outreachProfileFieldLabel(channel)}</Label>
+                  {profileOptionsForChannel.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No active profiles for this channel. Add one under Admin → Profiles.
+                    </p>
+                  ) : (
+                    <Select
+                      value={profileId}
+                      onValueChange={(v) => {
+                        if (v != null) setProfileId(v);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select profile">
+                          {profileOptionsForChannel.find((p) => p.id === profileId)?.name ?? undefined}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {profileOptionsForChannel.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="edit-dnc"

@@ -89,6 +89,9 @@ import {
   type DateRange,
 } from "@/components/common/date-range-filter";
 
+/** Column filter token: leads with no outreach profile assigned. */
+const PROFILE_FILTER_NONE = "__none__";
+
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
     ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
@@ -242,7 +245,15 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   ref,
 ) {
   const router = useRouter();
-  const { currentUserId, users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
+  const {
+    currentUserId,
+    users,
+    getUserById,
+    getOwnerDisplayName,
+    getProfileById,
+    profiles,
+    isDemo,
+  } = useWorkspace();
   const { openQuickAdd } = useOpenQuickAdd();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const leadsChannelFilterOptions = React.useMemo(
@@ -263,7 +274,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     mergeUrlColumnFilters(preset, initialChannels, initialStages),
   );
   const [rowSelection, setRowSelection] = React.useState({});
-  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({});
+  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
+    profileId: false,
+  });
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
@@ -293,6 +306,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     () => buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName),
     [leads, users, getUserById, getOwnerDisplayName],
   );
+
+  const profileFilterOptions = React.useMemo(() => {
+    return [...profiles]
+      .filter((p) => p.active !== false)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }, [profiles]);
 
   const dataForTable = React.useMemo(() => {
     let rows = filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps);
@@ -376,6 +395,32 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => <LeadChannelCell lead={row.original} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
+    },
+    {
+      id: "profileId",
+      accessorKey: "profileId",
+      header: "Profile",
+      cell: ({ row }) => {
+        const p = getProfileById(row.original.profileId);
+        if (!p) {
+          return <span className="text-xs text-muted-foreground">—</span>;
+        }
+        return (
+          <span className="max-w-[10rem] truncate text-sm" title={p.name}>
+            {p.name}
+          </span>
+        );
+      },
+      filterFn: (row, _id, value: string[]) => {
+        const selected = value as string[];
+        if (!selected?.length) return true;
+        const pid = row.original.profileId;
+        const wantsNone = selected.includes(PROFILE_FILTER_NONE);
+        const profileIds = selected.filter((v) => v !== PROFILE_FILTER_NONE);
+        if (wantsNone && !pid) return true;
+        if (pid && profileIds.includes(pid)) return true;
+        return false;
+      },
     },
     {
       id: "stage",
@@ -536,7 +581,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, isDemo]);
+  ], [router, openReassignForIds, isDemo, getProfileById]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -590,6 +635,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
   const channelFilter = (columnFilters.find((f) => f.id === "channel")?.value as string[]) ?? [];
+  const profileFilter = (columnFilters.find((f) => f.id === "profileId")?.value as string[]) ?? [];
 
   function toggleStage(key: PipelineStage) {
     const next = stageFilter.includes(key)
@@ -602,6 +648,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ? channelFilter.filter((s) => s !== key)
       : [...channelFilter, key];
     table.getColumn("channel")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleProfile(key: string) {
+    const next = profileFilter.includes(key)
+      ? profileFilter.filter((s) => s !== key)
+      : [...profileFilter, key];
+    table.getColumn("profileId")?.setFilterValue(next.length ? next : undefined);
   }
 
   return (
@@ -680,6 +732,52 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 {c.label}
               </DropdownMenuCheckboxItem>
             ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Filter className="h-3.5 w-3.5" />
+                Profile
+                {profileFilter.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {profileFilter.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Outreach persona
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuCheckboxItem
+              checked={profileFilter.includes(PROFILE_FILTER_NONE)}
+              onCheckedChange={() => toggleProfile(PROFILE_FILTER_NONE)}
+            >
+              No profile
+            </DropdownMenuCheckboxItem>
+            {profileFilterOptions.length > 0 && <DropdownMenuSeparator />}
+            {profileFilterOptions.map((p) => {
+              const chLabel = CHANNEL_LIST.find((c) => c.key === p.channel)?.label ?? p.channel;
+              return (
+                <DropdownMenuCheckboxItem
+                  key={p.id}
+                  checked={profileFilter.includes(p.id)}
+                  onCheckedChange={() => toggleProfile(p.id)}
+                >
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate font-medium">{p.name}</span>
+                    <span className="truncate text-[10px] font-normal text-muted-foreground">{chLabel}</span>
+                  </span>
+                </DropdownMenuCheckboxItem>
+              );
+            })}
           </DropdownMenuContent>
         </DropdownMenu>
 

@@ -16,7 +16,16 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function LeadOverview({ lead }: { lead: Lead }) {
+export function LeadOverview({
+  lead,
+  outreachProfileSummary,
+  outreachProfileFieldLabel,
+}: {
+  lead: Lead;
+  /** When set (Upwork / job apply), show which workspace profile this lead uses. */
+  outreachProfileSummary?: string;
+  outreachProfileFieldLabel?: string;
+}) {
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {/* Research & personalization */}
@@ -128,6 +137,11 @@ export function LeadOverview({ lead }: { lead: Lead }) {
                 {lead.doNotContact ? "Yes" : "No"}
               </Badge>
             </Field>
+            {outreachProfileFieldLabel != null && outreachProfileSummary != null && (
+              <Field label={outreachProfileFieldLabel}>
+                <span>{outreachProfileSummary}</span>
+              </Field>
+            )}
             <Field label="Company size">{lead.companySize ?? "-"}</Field>
             <Field label="Revenue range">
               {lead.revenueRange ? REVENUE_RANGES[lead.revenueRange] : "-"}

@@ -19,7 +19,13 @@ import {
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { PIPELINE_STAGES, REVENUE_RANGES, STAGES_BY_KEY } from "@/lib/constants";
+import {
+  CHANNELS_REQUIRING_OUTREACH_PROFILE,
+  outreachProfileFieldLabel,
+  PIPELINE_STAGES,
+  REVENUE_RANGES,
+  STAGES_BY_KEY,
+} from "@/lib/constants";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -117,6 +123,16 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const contact = ws.getContactById(lead.contactId);
   const campaign = ws.getCampaignById(lead.campaignId);
   const profile = ws.getProfileById(lead.profileId);
+  const needsOutreachProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(lead.channel);
+  const outreachProfileSummary = needsOutreachProfile
+    ? profile?.name?.trim() ||
+      (lead.profileId
+        ? `Profile not found (id ${lead.profileId.length > 14 ? `${lead.profileId.slice(0, 12)}…` : lead.profileId})`
+        : "Not set — open Edit and choose a profile")
+    : undefined;
+  const showAttributionCard = Boolean(
+    campaign || profile || lead.profileId || needsOutreachProfile,
+  );
   const touchpoints = ws.touchpoints.filter((t) => t.leadId === lead.id);
   const timeline = ws.timelineByLead[lead.id] ?? [];
   const notes = ws.notes.filter((n) => n.leadId === lead.id);
@@ -234,6 +250,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   </SelectContent>
                 </Select>
                 <ChannelChip channel={lead.channel} />
+                {needsOutreachProfile && (
+                  <Badge
+                    variant="outline"
+                    className="h-7 max-w-[min(240px,46vw)] shrink truncate font-normal text-muted-foreground"
+                    title={outreachProfileSummary}
+                  >
+                    {profile?.name?.trim() || (lead.profileId ? "Profile (unresolved)" : "No profile")}
+                  </Badge>
+                )}
               </div>
               <div className="text-xs text-muted-foreground font-normal mt-0.5">
                 {lead.contactTitle} · {lead.companyName}
@@ -339,7 +364,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
               <div className="mt-4">
                 <TabsContent value="overview">
-                  <LeadOverview lead={lead} />
+                  <LeadOverview
+                    lead={lead}
+                    outreachProfileSummary={outreachProfileSummary}
+                    outreachProfileFieldLabel={needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : undefined}
+                  />
                 </TabsContent>
                 <TabsContent value="timeline">
                   <LeadTimeline events={timeline} lead={lead} viewerForTasks={viewerForTasks} />
@@ -509,7 +538,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               </Card>
             )}
 
-            {(campaign || profile) && (
+            {showAttributionCard && (
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">
@@ -523,10 +552,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       <span className="truncate">{campaign.name}</span>
                     </div>
                   )}
-                  {profile && (
+                  {(needsOutreachProfile || lead.profileId || profile) && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground text-xs">Profile</span>
-                      <span className="truncate">{profile.name}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : "Profile"}
+                      </span>
+                      <span className="truncate text-right" title={outreachProfileSummary}>
+                        {profile?.name?.trim() ||
+                          (lead.profileId
+                            ? `Not in workspace (${lead.profileId.length > 14 ? `${lead.profileId.slice(0, 12)}…` : lead.profileId})`
+                            : needsOutreachProfile
+                              ? (outreachProfileSummary ?? "—")
+                              : "—")}
+                      </span>
                     </div>
                   )}
                 </CardContent>

@@ -31,7 +31,15 @@ import {
 } from "@/components/ui/form";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { PIPELINE_STAGES, PRIORITY_TONE, TEMPERATURE_TONE, COMPANY_SIZES, REVENUE_RANGES, CHANNEL_LIST } from "@/lib/constants";
+import {
+  PIPELINE_STAGES,
+  PRIORITY_TONE,
+  TEMPERATURE_TONE,
+  COMPANY_SIZES,
+  REVENUE_RANGES,
+  CHANNEL_LIST,
+  CHANNELS_REQUIRING_OUTREACH_PROFILE,
+} from "@/lib/constants";
 import type {
   Account,
   ChannelKey,
@@ -76,9 +84,6 @@ const PILLS: { key: Pill; label: string; icon: React.ElementType }[] = [
   { key: "task", label: "Task", icon: CheckSquare },
   { key: "profile", label: "Profile", icon: User },
 ];
-
-/** Channels where a persona/profile should be recorded on the lead (matches admin Profiles). */
-const LEAD_CHANNEL_REQUIRES_PROFILE: readonly ChannelKey[] = ["upwork", "job_apply"];
 
 // ── Lead schema ──
 const leadSchema = z.object({
@@ -406,8 +411,9 @@ function LeadFormBody({
     [users, ownerPickerCurrentUser, getOwnerDisplayName, watchedOwnerId],
   );
 
-  const channelNeedsProfile =
-    selectedChannel === "upwork" || selectedChannel === "job_apply";
+  const channelNeedsProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(
+    selectedChannel as ChannelKey,
+  );
   const profileOptionsForChannel = React.useMemo(() => {
     if (!channelNeedsProfile || !selectedChannel) return [];
     return profiles.filter(
@@ -444,7 +450,7 @@ function LeadFormBody({
       return;
     }
     const ch = values.channel as ChannelKey;
-    if (LEAD_CHANNEL_REQUIRES_PROFILE.includes(ch)) {
+    if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
       const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
       if (opts.length > 0 && !values.profileId?.trim()) {
         form.setError("profileId", {

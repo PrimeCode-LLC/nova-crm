@@ -29,6 +29,15 @@ export const CHANNEL_LIST = Object.entries(CHANNELS).map(([key, v]) => ({
   ...v,
 }));
 
+/** Channels where the lead should record which workspace profile was used (Admin → Profiles). */
+export const CHANNELS_REQUIRING_OUTREACH_PROFILE: readonly ChannelKey[] = ["upwork", "job_apply"];
+
+export function outreachProfileFieldLabel(channel: ChannelKey): string {
+  if (channel === "upwork") return "Upwork profile";
+  if (channel === "job_apply") return "CV / apply profile";
+  return "Outreach profile";
+}
+
 export const PIPELINE_STAGES: {
   key: PipelineStage;
   label: string;
