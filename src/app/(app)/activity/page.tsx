@@ -60,6 +60,28 @@ const FILTER_ALL = "__all__";
 
 type ActivityTab = "counters" | "records";
 
+/** Local calendar YYYY-MM-DD for range filters; matches how dates render in the tables. */
+function localYmdFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function passesActivityDateRange(iso: string, fromYmd: string, toYmd: string): boolean {
+  if (!fromYmd && !toYmd) return true;
+  const rowYmd = localYmdFromIso(iso);
+  if (!rowYmd) return true;
+  let from = fromYmd;
+  let to = toYmd;
+  if (from && to && from > to) [from, to] = [to, from];
+  if (from && rowYmd < from) return false;
+  if (to && rowYmd > to) return false;
+  return true;
+}
+
 function buildRollupChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
     ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
@@ -136,6 +158,7 @@ export default function ActivityPage() {
   );
 
   const workspaceEmpty = !isDemo && activityCounters.length === 0 && activityRecords.length === 0;
+  const hasHistoryRows = sortedCounters.length > 0 || activityRecords.length > 0;
 
   const [tab, setTab] = React.useState<ActivityTab>("counters");
   const formTopRef = React.useRef<HTMLDivElement>(null);
@@ -143,6 +166,8 @@ export default function ActivityPage() {
   const [personFilter, setPersonFilter] = React.useState(FILTER_ALL);
   const [departmentFilter, setDepartmentFilter] = React.useState(FILTER_ALL);
   const [channelFilter, setChannelFilter] = React.useState(FILTER_ALL);
+  const [dateFromFilter, setDateFromFilter] = React.useState("");
+  const [dateToFilter, setDateToFilter] = React.useState("");
 
   const userMap = React.useMemo(() => userByIdMap(users), [users]);
 
@@ -179,9 +204,10 @@ export default function ActivityPage() {
         if (uidDept !== departmentFilter) return false;
       }
       if (channelFilter !== FILTER_ALL && row.channel !== channelFilter) return false;
+      if (!passesActivityDateRange(row.date, dateFromFilter, dateToFilter)) return false;
       return true;
     });
-  }, [sortedCounters, personFilter, departmentFilter, channelFilter, userMap]);
+  }, [sortedCounters, personFilter, departmentFilter, channelFilter, dateFromFilter, dateToFilter, userMap]);
 
   const filteredRecords = React.useMemo(() => {
     return activityRecords.filter((row) => {
@@ -191,9 +217,10 @@ export default function ActivityPage() {
         if (uidDept !== departmentFilter) return false;
       }
       if (channelFilter !== FILTER_ALL && row.channel !== channelFilter) return false;
+      if (!passesActivityDateRange(row.occurredAt, dateFromFilter, dateToFilter)) return false;
       return true;
     });
-  }, [activityRecords, personFilter, departmentFilter, channelFilter, userMap]);
+  }, [activityRecords, personFilter, departmentFilter, channelFilter, dateFromFilter, dateToFilter, userMap]);
 
   const goToLogForm = React.useCallback(() => {
     requestAnimationFrame(() => {
@@ -304,7 +331,7 @@ export default function ActivityPage() {
           </div>
         )}
 
-        {(showPersonFilter || showDeptFilter || showChannelFilter) && (
+        {hasHistoryRows && (
           <Card className="mb-4">
             <CardHeader className="py-3 px-4">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -312,11 +339,12 @@ export default function ActivityPage() {
                 History filters
               </CardTitle>
               <CardDescription className="text-xs">
-                Narrow counters and per-record rows. Filters apply to both tabs.
+                Narrow counters and per-record rows. Filters apply to both tabs. Leave dates empty to include all
+                days.
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-0 px-4 pb-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
                 {showPersonFilter ? (
                   <div className="space-y-1.5">
                     <Label className="text-xs">Person</Label>
@@ -374,6 +402,30 @@ export default function ActivityPage() {
                     </Select>
                   </div>
                 ) : null}
+                <div className="space-y-1.5">
+                  <Label className="text-xs">From date</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="date"
+                      value={dateFromFilter}
+                      onChange={(e) => setDateFromFilter(e.target.value)}
+                      className="pl-8 h-9"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">To date</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="date"
+                      value={dateToFilter}
+                      onChange={(e) => setDateToFilter(e.target.value)}
+                      className="pl-8 h-9"
+                    />
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

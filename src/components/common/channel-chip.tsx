@@ -70,7 +70,8 @@ export function ChannelChip({
   if (channel.startsWith("custom_")) {
     const id = channel.slice("custom_".length);
     const row = customChannels.find((c) => c.id === id);
-    if (row) label = row.name;
+    if (row?.name.trim()) label = row.name.trim();
+    else label = "Custom channel";
   }
 
   return (

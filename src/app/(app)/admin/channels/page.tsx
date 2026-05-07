@@ -16,6 +16,16 @@ import {
   parseStagesInput,
   type CustomChannelRow,
 } from "@/stores/channel-admin-store";
+import { pushChannelAdminConfigToServer } from "@/lib/channel-admin-server-sync";
+
+async function syncChannelsToWorkspace(): Promise<boolean> {
+  const r = await pushChannelAdminConfigToServer();
+  if (!r.ok) {
+    toast.error("Could not save channels to the workspace", { description: r.error });
+    return false;
+  }
+  return true;
+}
 import {
   Dialog,
   DialogContent,
@@ -92,7 +102,7 @@ export default function AdminChannelsPage() {
     setNewAuto(false);
   }, []);
 
-  const handleAddCustom = React.useCallback(() => {
+  const handleAddCustom = React.useCallback(async () => {
     const name = newName.trim();
     if (!name) {
       toast.error("Enter a channel name.");
@@ -109,7 +119,8 @@ export default function AdminChannelsPage() {
       stages,
       auto: newAuto,
     });
-    toast.success(`Custom channel “${name}” added.`);
+    const saved = await syncChannelsToWorkspace();
+    if (saved) toast.success(`Custom channel “${name}” added.`);
     setAddOpen(false);
     resetAddForm();
   }, [addCustomChannel, newDescription, newName, newStages, newAuto, resetAddForm]);
@@ -198,7 +209,9 @@ export default function AdminChannelsPage() {
               onConfigure={() => setConfigure({ kind: "custom", id: c.id })}
               onToggleAuto={(v) => {
                 updateCustomChannel(c.id, { auto: v });
-                toast.success(`${c.name}: auto ${v ? "enabled" : "disabled"}`);
+                void syncChannelsToWorkspace().then((ok) => {
+                  if (ok) toast.success(`${c.name}: auto ${v ? "enabled" : "disabled"}`);
+                });
               }}
               onDelete={() => setDeleteCustomId(c.id)}
             />
@@ -212,7 +225,9 @@ export default function AdminChannelsPage() {
             </div>
             <p className="text-sm text-muted-foreground">
               You can define custom channels with their own funnel stages and automation rules.
-              Custom channels appear here alongside built-in ones.
+              Custom channels appear here alongside built-in ones. They are saved to the workspace so
+              everyone sees the same list and Activity can show the channel name (not only on the
+              person who created it).
             </p>
             <Button variant="outline" size="sm" className="mt-3" onClick={() => openAddCustomDialog(setAddOpen)}>
               <Plus className="h-3.5 w-3.5" /> Add custom channel
@@ -315,7 +330,9 @@ export default function AdminChannelsPage() {
               onClick={() => {
                 if (deleteCustomId) {
                   removeCustomChannel(deleteCustomId);
-                  toast.success("Custom channel removed.");
+                  void syncChannelsToWorkspace().then((ok) => {
+                    if (ok) toast.success("Custom channel removed.");
+                  });
                   setDeleteCustomId(null);
                   setConfigure((cur) =>
                     cur?.kind === "custom" && cur.id === deleteCustomId ? null : cur,
@@ -573,7 +590,7 @@ function ConfigureCustomChannelForm({
   const [draftStages, setDraftStages] = React.useState(channel.stages.map((s) => s.label).join("\n"));
   const [draftAuto, setDraftAuto] = React.useState(channel.auto);
 
-  const handleSave = () => {
+  const handleSave = async () => {
     const stages = parseStagesInput(draftStages);
     if (stages.length === 0) {
       toast.error("Add at least one funnel stage.");
@@ -590,13 +607,15 @@ function ConfigureCustomChannelForm({
       stages,
       auto: draftAuto,
     });
-    toast.success("Custom channel updated.");
+    const ok = await syncChannelsToWorkspace();
+    if (ok) toast.success("Custom channel updated.");
     onClose();
   };
 
-  const handleDelete = () => {
+  const handleDelete = async () => {
     removeCustomChannel(channel.id);
-    toast.success("Custom channel removed.");
+    const ok = await syncChannelsToWorkspace();
+    if (ok) toast.success("Custom channel removed.");
     onClose();
   };
 

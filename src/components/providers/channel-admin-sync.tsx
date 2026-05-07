@@ -7,17 +7,29 @@ import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
+import {
+  getLastSentChannelAdminJson,
+  markChannelAdminJsonSent,
+} from "@/lib/channel-admin-server-sync";
 import type { OrganizationChannelAdminConfig } from "@/lib/types";
 import {
   getChannelAdminPersistedSnapshot,
   useChannelAdminStore,
 } from "@/stores/channel-admin-store";
+import { useZustandPersistHydrated } from "@/hooks/use-zustand-persist-hydrated";
 import { roleAtLeast } from "@/lib/platform/org-role";
+
+const channelAdminStoreWithPersist = useChannelAdminStore as {
+  persist: {
+    hasHydrated: () => boolean;
+    onFinishHydration: (fn: () => void) => () => void;
+  };
+};
 
 /**
  * Loads workspace channel admin config from Firestore (org.channelAdmin) and
- * keeps the zustand store in sync. Admins: debounced PUT on local edits.
- * Members: read-only hydration from GET.
+ * keeps the zustand store in sync. Any org member can edit (debounced PUT);
+ * use Admin → Channels for structured changes.
  */
 export function ChannelAdminSync() {
   const { user } = useAuth();
@@ -28,10 +40,10 @@ export function ChannelAdminSync() {
 
   const orgId = userDoc?.organizationId;
   const canEdit =
-    userDoc?.orgRole !== undefined && roleAtLeast(userDoc.orgRole, "admin");
+    userDoc?.orgRole !== undefined && roleAtLeast(userDoc.orgRole, "member");
 
   const [hydrated, setHydrated] = React.useState(false);
-  const lastSentJson = React.useRef<string>("");
+  const channelAdminLsHydrated = useZustandPersistHydrated(channelAdminStoreWithPersist);
 
   React.useEffect(() => {
     if (isAuthDisabled() || !isFirebaseWebConfigured() || mode === "demo") {
@@ -39,6 +51,11 @@ export function ChannelAdminSync() {
       return;
     }
     if (!orgId) {
+      setHydrated(false);
+      return;
+    }
+    /** Wait for localStorage rehydration so GET merge sees `customChannels` from this browser. */
+    if (!channelAdminLsHydrated) {
       setHydrated(false);
       return;
     }
@@ -68,8 +85,8 @@ export function ChannelAdminSync() {
           descriptionOverrides: merged.descriptionOverrides,
           customChannels,
         });
-        lastSentJson.current = JSON.stringify(
-          getChannelAdminPersistedSnapshot(useChannelAdminStore.getState()),
+        markChannelAdminJsonSent(
+          JSON.stringify(getChannelAdminPersistedSnapshot(useChannelAdminStore.getState())),
         );
         setHydrated(true);
       })
@@ -80,7 +97,7 @@ export function ChannelAdminSync() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, mode]);
+  }, [orgId, mode, channelAdminLsHydrated]);
 
   React.useEffect(() => {
     if (
@@ -99,11 +116,11 @@ export function ChannelAdminSync() {
     const unsub = useChannelAdminStore.subscribe((state) => {
       const snapshot = getChannelAdminPersistedSnapshot(state);
       const json = JSON.stringify(snapshot);
-      if (json === lastSentJson.current) return;
+      if (json === getLastSentChannelAdminJson()) return;
 
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (json === lastSentJson.current) return;
+        if (json === getLastSentChannelAdminJson()) return;
         void fetch("/api/org/channel-admin", {
           method: "PUT",
           credentials: "include",
@@ -111,7 +128,7 @@ export function ChannelAdminSync() {
           body: json,
         })
           .then((res) => {
-            if (res.ok) lastSentJson.current = json;
+            if (res.ok) markChannelAdminJsonSent(json);
           })
           .catch(() => {});
       }, 900);

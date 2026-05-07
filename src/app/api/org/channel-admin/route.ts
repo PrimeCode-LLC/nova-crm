@@ -5,7 +5,6 @@ import type { ChannelKey } from "@/lib/types";
 import type { OrganizationChannelAdminConfig } from "@/lib/types";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { roleAtLeast } from "@/lib/platform/org-role";
 import {
   getOrganizationServer,
   updateOrganizationChannelAdminServer,
@@ -74,13 +73,6 @@ export async function GET() {
 export async function PUT(req: Request) {
   const g = await guardTenantApi({ minRole: "member" });
   if (!g.ok) return g.response;
-
-  if (!roleAtLeast(g.ctx.role, "admin")) {
-    return NextResponse.json(
-      { error: "Only workspace admins can edit channel settings." },
-      { status: 403 },
-    );
-  }
 
   let json: unknown;
   try {
