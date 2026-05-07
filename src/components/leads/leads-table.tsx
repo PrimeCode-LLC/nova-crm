@@ -263,9 +263,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     mergeUrlColumnFilters(preset, initialChannels, initialStages),
   );
   const [rowSelection, setRowSelection] = React.useState({});
-  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
-    created: false,
-  });
+  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({});
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
@@ -443,6 +441,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ),
     },
     {
+      id: "created",
+      accessorKey: "createdAt",
+      header: "Added date",
+      cell: ({ row }) => (
+        <span
+          className="text-xs text-muted-foreground tabular-nums whitespace-nowrap"
+          title={fmtDate(row.original.createdAt, "PPpp")}
+        >
+          {fmtDate(row.original.createdAt)}
+        </span>
+      ),
+    },
+    {
       id: "idle",
       accessorKey: "idleDays",
       header: "Idle",
@@ -471,16 +482,6 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
           {fmtRelative(row.original.lastActivityAt ?? row.original.updatedAt)}
-        </span>
-      ),
-    },
-    {
-      id: "created",
-      accessorKey: "createdAt",
-      header: "Added",
-      cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-          {fmtDate(row.original.createdAt)}
         </span>
       ),
     },

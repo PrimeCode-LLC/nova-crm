@@ -46,6 +46,7 @@ import type {
   RevenueRange,
 } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
@@ -161,7 +162,7 @@ type TaskForm = z.infer<typeof taskSchema>;
 
 // ── Profile quick form (outreach persona) ──
 function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
-  const { users, addProfile } = useWorkspace();
+  const { users, currentUserId, getOwnerDisplayName, addProfile } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
     () => buildChannelOptions(customChannels),
@@ -173,6 +174,23 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
   const [ownerId, setOwnerId] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const ownerOptions = React.useMemo(
+    () =>
+      buildWorkspaceOwnerPickerOptions(
+        users,
+        currentUserId,
+        getOwnerDisplayName,
+        ownerId ? [ownerId] : [],
+      ),
+    [users, currentUserId, getOwnerDisplayName, ownerId],
+  );
+
+  React.useEffect(() => {
+    const def = currentUserId || users[0]?.id;
+    if (!def) return;
+    setOwnerId((prev) => prev || def);
+  }, [currentUserId, users]);
+
   const channelLabel = React.useMemo(
     () => channelLabelFromValue(channel, channelOptions),
     [channel, channelOptions],
@@ -258,9 +276,9 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
             <SelectValue placeholder="Owner" />
           </SelectTrigger>
           <SelectContent>
-            {users.map((u) => (
-              <SelectItem key={u.id} value={u.id}>
-                {u.displayName}
+            {ownerOptions.map((o) => (
+              <SelectItem key={o.id} value={o.id}>
+                {o.label}
               </SelectItem>
             ))}
           </SelectContent>

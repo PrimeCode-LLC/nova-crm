@@ -64,6 +64,51 @@ export function buildPersonOwnerOptions(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/**
+ * Labels for workspace-member owner `<Select>`s (profiles, quick-add, etc.).
+ * Ensures `currentUserId` and any `ensureIds` have a `SelectItem` with non-empty text so Radix does not
+ * fall back to showing the raw Firebase uid (happens when the viewer is in org auth but not in `users`).
+ */
+export function buildWorkspaceOwnerPickerOptions(
+  users: readonly User[],
+  currentUserId: string,
+  getOwnerDisplayName: (uid: string) => string | undefined,
+  ensureIds: readonly string[] = [],
+): { id: string; label: string }[] {
+  const byId = new Map<string, string>();
+  for (const u of users) {
+    if (u.status === "inactive") continue;
+    const label =
+      u.displayName?.trim() ||
+      getOwnerDisplayName(u.id)?.trim() ||
+      u.email.split("@")[0]?.trim() ||
+      u.id;
+    byId.set(u.id, label);
+  }
+  const uid = currentUserId?.trim();
+  if (uid && !byId.has(uid)) {
+    const label =
+      getOwnerDisplayName(uid)?.trim() ||
+      users.find((u) => u.id === uid)?.displayName?.trim() ||
+      "You";
+    byId.set(uid, label);
+  }
+  for (const raw of ensureIds) {
+    const id = raw?.trim();
+    if (!id || byId.has(id)) continue;
+    const u = users.find((x) => x.id === id);
+    const label =
+      u?.displayName?.trim() ||
+      getOwnerDisplayName(id)?.trim() ||
+      u?.email.split("@")[0]?.trim() ||
+      id;
+    byId.set(id, label);
+  }
+  return [...byId.entries()]
+    .map(([id, label]) => ({ id, label }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
+
 export function getOwnerFilterTriggerLabel(
   ownerScope: string,
   personOwnerOptions: readonly { id: string; label: string }[],

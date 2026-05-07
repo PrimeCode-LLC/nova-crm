@@ -35,6 +35,7 @@ import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { CHANNEL_LIST } from "@/lib/constants";
+import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import type { ChannelKey, Profile } from "@/lib/types";
 import { Plus, User } from "lucide-react";
 import { toast } from "sonner";
@@ -49,7 +50,15 @@ function newProfileId() {
 }
 
 export default function AdminProfilesPage() {
-  const { profiles, activityRecords, users, updateProfile, addProfile } = useWorkspace();
+  const {
+    profiles,
+    activityRecords,
+    users,
+    currentUserId,
+    getOwnerDisplayName,
+    updateProfile,
+    addProfile,
+  } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
@@ -70,6 +79,25 @@ export default function AdminProfilesPage() {
 
   const weekMs = 7 * 24 * 60 * 60 * 1000;
   const [weekCutoff] = React.useState(() => Date.now() - weekMs);
+
+  const newOwnerOptions = React.useMemo(
+    () =>
+      buildWorkspaceOwnerPickerOptions(
+        users,
+        currentUserId,
+        getOwnerDisplayName,
+        ownerId ? [ownerId] : [],
+      ),
+    [users, currentUserId, getOwnerDisplayName, ownerId],
+  );
+
+  const detailOwnerOptions = React.useMemo(
+    () =>
+      buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName, [
+        draftOwnerId,
+      ]),
+    [users, currentUserId, getOwnerDisplayName, draftOwnerId],
+  );
 
   const enriched = React.useMemo(
     () =>
@@ -229,7 +257,15 @@ export default function AdminProfilesPage() {
         </div>
       </PageBody>
 
-      <Dialog open={newOpen} onOpenChange={setNewOpen}>
+      <Dialog
+        open={newOpen}
+        onOpenChange={(open) => {
+          setNewOpen(open);
+          if (open && currentUserId) {
+            setOwnerId((prev) => prev || currentUserId);
+          }
+        }}
+      >
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
@@ -285,9 +321,9 @@ export default function AdminProfilesPage() {
                   <SelectValue placeholder="Select owner" />
                 </SelectTrigger>
                 <SelectContent>
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.displayName}
+                  {newOwnerOptions.map((o) => (
+                    <SelectItem key={o.id} value={o.id}>
+                      {o.label}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -386,9 +422,9 @@ export default function AdminProfilesPage() {
                     <SelectValue placeholder="Owner" />
                   </SelectTrigger>
                   <SelectContent>
-                    {users.map((u) => (
-                      <SelectItem key={u.id} value={u.id}>
-                        {u.displayName}
+                    {detailOwnerOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
