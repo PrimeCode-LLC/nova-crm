@@ -204,7 +204,6 @@ export async function persistProfileCreate(
     organizationId,
     name: p.name,
     channel: p.channel,
-    type: p.type,
     ownerId: p.ownerId,
     active: p.active ?? true,
     createdAt: serverTimestamp(),
@@ -222,7 +221,6 @@ export async function persistProfileUpdate(
   const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (patch.name !== undefined) payload.name = patch.name;
   if (patch.channel !== undefined) payload.channel = patch.channel;
-  if (patch.type !== undefined) payload.type = patch.type;
   if (patch.ownerId !== undefined) payload.ownerId = patch.ownerId;
   if (patch.active !== undefined) payload.active = patch.active;
   if (patch.notes !== undefined) {

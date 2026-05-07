@@ -278,7 +278,6 @@ export interface Profile {
   id: string;
   name: string;
   channel: ChannelKey;
-  type: "upwork" | "cv" | "email" | "linkedin";
   ownerId: string;
   active: boolean;
   notes?: string;

@@ -28,11 +28,8 @@ import {
 import { GlobalCommandMenu } from "./global-command";
 import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
-import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { buildDemoNotifications } from "@/lib/inbox-demo-notifications";
-import { buildLeadTaskInboxNotifications } from "@/lib/inbox-lead-task-notifications";
-import { mergeNotificationSeed, useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
-import { useZustandPersistHydrated } from "@/hooks/use-zustand-persist-hydrated";
+import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
+import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 
 function toLabel(segment: string) {
   return segment
@@ -55,20 +52,8 @@ export function AppTopbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [cmdOpen, setCmdOpen] = React.useState(false);
-  const { leads, users, isDemo, demoPersonaId, leadTasks, currentUserId } = useWorkspace();
-  const inboxHydrated = useZustandPersistHydrated(useInboxNotificationOverrides);
-  const readIds = useInboxNotificationOverrides((s) => s.readIds);
-  const unreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
-  const dismissedIds = useInboxNotificationOverrides((s) => s.dismissedIds);
+  const { notifications: mergedNotifications, inboxHydrated } = useWorkspaceInboxNotifications();
   const markRead = useInboxNotificationOverrides((s) => s.markRead);
-
-  const mergedNotifications = React.useMemo(() => {
-    if (!inboxHydrated) return [];
-    const demoSeed = isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : [];
-    const taskSeed = buildLeadTaskInboxNotifications(leadTasks, currentUserId, users);
-    const seed = [...demoSeed, ...taskSeed].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    return mergeNotificationSeed(seed, { readIds, unreadIds, dismissedIds });
-  }, [isDemo, inboxHydrated, leads, users, demoPersonaId, leadTasks, currentUserId, readIds, unreadIds, dismissedIds]);
 
   const bellUnread = mergedNotifications.filter((n) => !n.read).length;
 
@@ -165,14 +150,13 @@ export function AppTopbar() {
             <DropdownMenuContent align="end" className="w-80">
               <DropdownMenuLabel className="font-semibold">Notifications</DropdownMenuLabel>
               <DropdownMenuSeparator />
-              {!isDemo || !inboxHydrated ? (
-                <div className="px-2 py-3 text-sm text-muted-foreground">
-                  {isDemo && !inboxHydrated
-                    ? "Loading…"
-                    : "Turn on demo mode to see sample notifications, or open the inbox."}
-                </div>
+              {!inboxHydrated ? (
+                <div className="px-2 py-3 text-sm text-muted-foreground">Loading…</div>
               ) : sortedForMenu.length === 0 ? (
-                <div className="px-2 py-3 text-sm text-muted-foreground">You&apos;re all caught up.</div>
+                <div className="px-2 py-3 text-sm text-muted-foreground">
+                  You&apos;re all caught up. Turn on Demo in the toolbar for sample alerts, or open Inbox when you
+                  have tasks assigned to you.
+                </div>
               ) : (
                 sortedForMenu.slice(0, 8).map((n) => (
                   <DropdownMenuItem

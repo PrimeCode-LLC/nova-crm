@@ -239,7 +239,7 @@ export function NewDealDialog({
             <DialogTitle>New deal</DialogTitle>
             <DialogDescription>
               {leads.length === 0
-                ? "Add leads to your workspace first so each deal can link to an account and contact."
+                ? "Add leads to your workspace first so each deal can link to a company and contact."
                 : "Creates a deal for this browser session until your workspace is connected to live data."}
             </DialogDescription>
           </DialogHeader>

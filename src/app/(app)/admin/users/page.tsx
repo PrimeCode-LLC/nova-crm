@@ -129,18 +129,13 @@ function AdminUsersPageContent() {
     currentUserId,
     getUserById,
     getOwnerDisplayName,
+    patchUser,
   } = useWorkspace();
 
   const viewer = getUserById(currentUserId);
   const canManage = canManageOrgUsers(viewer);
 
-  const [pendingEdits, setPendingEdits] = React.useState<
-    Record<string, Partial<Omit<User, "id">>>
-  >({});
-  const users = React.useMemo(
-    () => wsUsers.map((u) => ({ ...u, ...pendingEdits[u.id] })),
-    [wsUsers, pendingEdits],
-  );
+  const users = wsUsers;
 
   const [query, setQuery] = React.useState("");
   const [roleFilter, setRoleFilter] = React.useState("all");
@@ -284,7 +279,7 @@ function AdminUsersPageContent() {
       managerId: editManager === NONE ? undefined : editManager,
       status: editStatus,
     };
-    setPendingEdits((prev) => ({ ...prev, [editUserId]: { ...prev[editUserId], ...patch } }));
+    patchUser(editUserId, patch);
     setEditSaving(false);
     toast.success("User updated");
     closeEdit();

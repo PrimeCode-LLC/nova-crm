@@ -21,6 +21,10 @@ import { dmChannelId, generalChannelId as buildGeneralChannelId, useTeamChatDemo
 
 const DEMO_CHAT_ORG = "demo-org";
 
+/** Stable fallbacks for Zustand selectors — `?? []` would allocate a new array each snapshot and break useSyncExternalStore. */
+const EMPTY_DEMO_CHANNELS: WorkspaceChatChannel[] = [];
+const EMPTY_DEMO_MESSAGES: WorkspaceChatMessage[] = [];
+
 function asChannel(id: string, raw: Record<string, unknown>): WorkspaceChatChannel {
   return {
     id,
@@ -48,6 +52,17 @@ function asMessage(id: string, raw: Record<string, unknown>): WorkspaceChatMessa
   };
 }
 
+/** Server rows win over optimistic rows with the same id. */
+function mergeMessagesDedupeSort(
+  server: WorkspaceChatMessage[],
+  pending: WorkspaceChatMessage[],
+): WorkspaceChatMessage[] {
+  const byId = new Map<string, WorkspaceChatMessage>();
+  for (const m of pending) byId.set(m.id, m);
+  for (const m of server) byId.set(m.id, m);
+  return Array.from(byId.values()).sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
 export type UseWorkspaceTeamChatOptions = {
   /** Live Firebase org id, or omitted in demo. */
   organizationId: string | undefined;
@@ -59,11 +74,20 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
   const [selectedChannelId, setSelectedChannelId] = React.useState<string | null>(null);
   const [liveChannels, setLiveChannels] = React.useState<WorkspaceChatChannel[]>([]);
   const [liveMessages, setLiveMessages] = React.useState<WorkspaceChatMessage[]>([]);
+  /** Outbox until Firestore snapshot includes the write (covers slow listeners / index issues). */
+  const [pendingMessagesByChannel, setPendingMessagesByChannel] = React.useState<
+    Record<string, WorkspaceChatMessage[]>
+  >({});
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<Error | null>(null);
+  const [messageSyncError, setMessageSyncError] = React.useState<Error | null>(null);
 
-  const demoChannels = useTeamChatDemoStore((s) => s.channelsByOrg[DEMO_CHAT_ORG] ?? []);
-  const demoMessages = useTeamChatDemoStore((s) => s.messagesByOrg[DEMO_CHAT_ORG] ?? []);
+  const demoChannels = useTeamChatDemoStore(
+    (s) => s.channelsByOrg[DEMO_CHAT_ORG] ?? EMPTY_DEMO_CHANNELS,
+  );
+  const demoMessages = useTeamChatDemoStore(
+    (s) => s.messagesByOrg[DEMO_CHAT_ORG] ?? EMPTY_DEMO_MESSAGES,
+  );
   const demoBootstrap = useTeamChatDemoStore((s) => s.bootstrapOrg);
   const demoUpsertChannel = useTeamChatDemoStore((s) => s.upsertChannel);
   const demoAppendMessage = useTeamChatDemoStore((s) => s.appendMessage);
@@ -148,6 +172,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
   React.useEffect(() => {
     if (isDemo || !organizationId || !selectedChannelId || !isFirebaseWebConfigured()) {
       setLiveMessages([]);
+      setMessageSyncError(null);
       return;
     }
 
@@ -156,8 +181,12 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       db = getFirebaseDb();
     } catch {
       setLiveMessages([]);
+      setMessageSyncError(null);
       return;
     }
+
+    setMessageSyncError(null);
+    setLiveMessages([]);
 
     const qMsg = query(
       collection(db, COLLECTIONS.workspaceChatMessages),
@@ -165,21 +194,38 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       where("channelId", "==", selectedChannelId),
       orderBy("createdAt", "asc"),
     );
+    const channelId = selectedChannelId;
     const unsub = onSnapshot(
       qMsg,
       (snap) => {
         const messages = snap.docs.map((d) => asMessage(d.id, d.data() as Record<string, unknown>));
         setLiveMessages(messages);
+        setMessageSyncError(null);
+        const serverIds = new Set(messages.map((m) => m.id));
+        setPendingMessagesByChannel((prev) => {
+          const pend = prev[channelId] ?? [];
+          const next = pend.filter((m) => !serverIds.has(m.id));
+          if (next.length === pend.length) return prev;
+          const out = { ...prev };
+          if (next.length) out[channelId] = next;
+          else delete out[channelId];
+          return out;
+        });
       },
-      () => setLiveMessages([]),
+      (err) => {
+        setMessageSyncError(err instanceof Error ? err : new Error(String(err)));
+      },
     );
     return () => unsub();
   }, [isDemo, organizationId, selectedChannelId]);
 
   const channels = isDemo ? demoChannels : liveChannels;
+  const pendingForSelected = selectedChannelId
+    ? (pendingMessagesByChannel[selectedChannelId] ?? EMPTY_DEMO_MESSAGES)
+    : EMPTY_DEMO_MESSAGES;
   const messages = isDemo
     ? demoMessages.filter((m) => m.channelId === selectedChannelId)
-    : liveMessages;
+    : mergeMessagesDedupeSort(liveMessages, pendingForSelected);
 
   React.useEffect(() => {
     if (!selectedChannelId && channels.length > 0) {
@@ -215,10 +261,12 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       if (!organizationId || !isFirebaseWebConfigured()) return;
       try {
         const db = getFirebaseDb();
-        await persistWorkspaceChatMessageCreate(db, organizationId, {
-          ...msg,
-          organizationId,
-        });
+        const toSave = { ...msg, organizationId };
+        await persistWorkspaceChatMessageCreate(db, organizationId, toSave);
+        setPendingMessagesByChannel((prev) => ({
+          ...prev,
+          [toSave.channelId]: [...(prev[toSave.channelId] ?? []), toSave],
+        }));
       } catch (e) {
         throw e instanceof Error ? e : new Error(String(e));
       }
@@ -330,6 +378,8 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
     openOrCreateDm,
     loading: !isDemo && loading,
     error,
+    /** Firestore listener error for the active channel (often missing composite index). */
+    messageSyncError,
     /** False when live org is missing or Firebase env is not set up. */
     liveChatAvailable: Boolean(!isDemo && organizationId && isFirebaseWebConfigured()),
   };

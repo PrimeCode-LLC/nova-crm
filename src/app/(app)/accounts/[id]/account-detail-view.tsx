@@ -34,8 +34,8 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
   if (!account) {
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
-        <p className="text-sm text-muted-foreground">Account not found.</p>
-        <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/accounts">Back to accounts</Link>} />
+        <p className="text-sm text-muted-foreground">Company not found.</p>
+        <Button size="sm" variant="outline" nativeButton={false} render={<Link href="/accounts">Back to companies</Link>} />
         {!ws.isDemo && <WorkspaceEmptyHint />}
       </PageBody>
     );
@@ -57,7 +57,7 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
               size="icon-sm"
               nativeButton={false}
               render={
-                <Link href="/accounts" aria-label="Back">
+                <Link href="/accounts" aria-label="Back to companies">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               }
@@ -250,7 +250,7 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
             <TabsContent value="activity" className="mt-4">
               <Card>
                 <CardContent className="p-6 text-sm text-muted-foreground">
-                  Aggregated activity across all contacts and leads for this account will render here.
+                  Aggregated activity across all contacts and leads for this company will render here.
                 </CardContent>
               </Card>
             </TabsContent>

@@ -142,7 +142,6 @@ function asProfile(id: string, raw: Record<string, unknown>): Profile {
     id,
     name: String(raw.name ?? ""),
     channel: (raw.channel as Profile["channel"]) ?? "cold_email",
-    type: (raw.type as Profile["type"]) ?? "email",
     ownerId: String(raw.ownerId ?? ""),
     active: raw.active !== false,
     notes: optionalNonEmptyString(raw.notes),

@@ -23,16 +23,9 @@ import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
-import {
-  buildDemoNotifications,
-  type DemoNotification,
-  type NotificationKind,
-} from "@/lib/inbox-demo-notifications";
-import { buildLeadTaskInboxNotifications } from "@/lib/inbox-lead-task-notifications";
-import {
-  mergeNotificationSeed,
-  useInboxNotificationOverrides,
-} from "@/stores/inbox-notification-overrides-store";
+import { type DemoNotification, type NotificationKind } from "@/lib/inbox-demo-notifications";
+import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
+import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import {
   Select,
   SelectContent,
@@ -102,31 +95,17 @@ export default function InboxPage() {
     leads,
     users,
     isDemo,
-    demoPersonaId,
     addAccount,
     addContact,
     addLead,
     currentUserId,
-    leadTasks,
     organizationId,
   } = useWorkspace();
-  const seed = React.useMemo(() => {
-    const demo = isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : [];
-    const fromTasks = buildLeadTaskInboxNotifications(leadTasks, currentUserId, users);
-    return [...demo, ...fromTasks].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  }, [isDemo, leads, users, demoPersonaId, leadTasks, currentUserId]);
-  const readIds = useInboxNotificationOverrides((s) => s.readIds);
-  const unreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
-  const dismissedIds = useInboxNotificationOverrides((s) => s.dismissedIds);
+  const { notifications, inboxHydrated } = useWorkspaceInboxNotifications();
   const markReadStore = useInboxNotificationOverrides((s) => s.markRead);
   const markUnreadStore = useInboxNotificationOverrides((s) => s.markUnread);
   const dismissStore = useInboxNotificationOverrides((s) => s.dismiss);
   const markAllReadStore = useInboxNotificationOverrides((s) => s.markAllRead);
-
-  const notifications = React.useMemo(
-    () => mergeNotificationSeed(seed, { readIds, unreadIds, dismissedIds }),
-    [seed, readIds, unreadIds, dismissedIds],
-  );
 
   const [selected, setSelected] = React.useState<DemoNotification | null>(null);
   const [tab, setTab] = React.useState<TabFilter>("all");
@@ -520,8 +499,8 @@ export default function InboxPage() {
         }
         actions={pageActions}
       />
-      <PageBody className="p-0 flex-1">
-        <div className="border-b px-4 pt-3 pb-2 flex flex-wrap items-center gap-2">
+      <PageBody className="flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden p-0">
+        <div className="shrink-0 border-b px-4 pt-3 pb-2 flex flex-wrap items-center gap-2">
           <Tabs value={inboxMode} onValueChange={(v) => setInboxMode(v as InboxMode)}>
             <TabsList className="h-8">
               <TabsTrigger value="workspace" className="text-xs px-3 h-7 gap-1.5">
@@ -578,8 +557,8 @@ export default function InboxPage() {
         </div>
 
         {inboxMode === "workspace" ? (
-          <div className="flex h-full min-h-0 flex-col">
-            <div className="border-b px-4 pt-2">
+          <div className="flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 border-b px-4 pt-2">
               <Tabs value={workspaceFeedTab} onValueChange={(v) => setWorkspaceFeedTab(v as WorkspaceFeedTab)}>
                 <TabsList className="h-8">
                   <TabsTrigger value="activity" className="text-xs px-3 h-7 gap-1.5">
@@ -630,13 +609,20 @@ export default function InboxPage() {
                     </Tabs>
                   </div>
                   <div className="flex-1 divide-y overflow-y-auto">
-                    {filtered.length === 0 && (
-                      <div className="space-y-4 p-6">
-                        <p className="text-center text-sm text-muted-foreground">No notifications here.</p>
-                        {!isDemo && <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />}
+                    {!inboxHydrated ? (
+                      <div className="flex flex-col items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
+                        <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                        Loading notifications…
                       </div>
-                    )}
-                    {filtered.map((n) => {
+                    ) : (
+                      <>
+                        {filtered.length === 0 && (
+                          <div className="space-y-4 p-6">
+                            <p className="text-center text-sm text-muted-foreground">No notifications here.</p>
+                            {!isDemo && <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />}
+                          </div>
+                        )}
+                        {filtered.map((n) => {
                       const Icon = KIND_ICONS[n.kind];
                       const sender = users.find((u) => u.id === n.sender);
                       const senderInitials =
@@ -678,11 +664,18 @@ export default function InboxPage() {
                         </button>
                       );
                     })}
+                      </>
+                    )}
                   </div>
                 </div>
 
                 <div className="flex min-w-0 flex-1 flex-col">
-                  {selected ? (
+                  {!inboxHydrated ? (
+                    <div className="flex flex-1 flex-col items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
+                      <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
+                      Loading…
+                    </div>
+                  ) : selected ? (
                     <div className="space-y-4 p-6">
                       <div className="flex items-start gap-3">
                         <div
@@ -742,7 +735,7 @@ export default function InboxPage() {
             )}
           </div>
         ) : (
-          <div className="flex h-full min-h-[420px] divide-x">
+          <div className="flex min-h-0 flex-1 divide-x">
             <div className="w-40 shrink-0 flex flex-col border-r p-2 gap-1">
               {(
                 [

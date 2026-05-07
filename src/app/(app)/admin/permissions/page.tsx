@@ -48,6 +48,19 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 
 const RESOURCES = ["leads", "deals", "accounts", "contacts", "activities"] as const;
+
+const RESOURCE_LABELS: Record<(typeof RESOURCES)[number], string> = {
+  leads: "Leads",
+  deals: "Deals",
+  accounts: "Companies",
+  contacts: "Contacts",
+  activities: "Activities",
+};
+
+function resourceLabel(resource: string): string {
+  return RESOURCE_LABELS[resource as keyof typeof RESOURCE_LABELS] ?? resource;
+}
+
 const ACTIONS = ["read", "write", "delete"] as const;
 const SCOPES = ["own", "team", "department", "all", "custom"] as const;
 
@@ -305,7 +318,7 @@ export default function AdminPermissionsPage() {
             <span className="text-muted-foreground">Table filter:</span>
             {columnFilter.resource && (
               <Badge variant="secondary" className="gap-1 font-normal">
-                resource: {columnFilter.resource}
+                resource: {resourceLabel(columnFilter.resource)}
                 <button
                   type="button"
                   className="rounded-sm hover:bg-muted p-0.5"
@@ -414,7 +427,7 @@ export default function AdminPermissionsPage() {
                               columnFilter.resource === po.resource && "ring-2 ring-primary/40",
                             )}
                           >
-                            {po.resource}
+                            {resourceLabel(po.resource)}
                           </Badge>
                         </button>
                       </TableCell>
@@ -590,7 +603,7 @@ export default function AdminPermissionsPage() {
                   <SelectContent>
                     {RESOURCES.map((r) => (
                       <SelectItem key={r} value={r}>
-                        {r}
+                        {RESOURCE_LABELS[r]}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -725,7 +738,7 @@ export default function AdminPermissionsPage() {
                 <div className="space-y-1.5 rounded-md border bg-muted/15 p-3">
                   <Label className="text-xs">Custom scope definition</Label>
                   <p className="text-[11px] text-muted-foreground leading-snug">
-                    {`Describe exactly what this person may or may not see (e.g. "only leads tagged Partner", "accounts in EU region"). Minimum 8 characters.`}
+                    {`Describe exactly what this person may or may not see (e.g. "only leads tagged Partner", "companies in EU region"). Minimum 8 characters.`}
                   </p>
                   <Textarea
                     value={scopeCustomDefinition}

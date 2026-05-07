@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { useRouter } from "next/navigation";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -50,7 +51,6 @@ import type {
   LeadPriority,
   LeadTemperature,
   PipelineStage,
-  Profile,
   RevenueRange,
 } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -61,26 +61,25 @@ import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
+import { findAccountByDomain, findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import {
-  capitalizeSelectToken,
   leadPickerTriggerLabel,
   selectTriggerLabelById,
   selectTriggerLabelByIdName,
   selectTriggerLabelByKey,
 } from "@/lib/base-ui-select-label";
+import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
 import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
 
 export type QuickAddPill = "lead" | "contact" | "account" | "task" | "profile";
 
 type Pill = QuickAddPill;
 
-const PROFILE_TYPES = ["upwork", "cv", "email", "linkedin"] as const;
-
 const PILLS: { key: Pill; label: string; icon: React.ElementType }[] = [
   { key: "lead", label: "Lead", icon: UserRound },
   { key: "contact", label: "Contact", icon: ContactIcon },
-  { key: "account", label: "Account", icon: Building2 },
+  { key: "account", label: "Company", icon: Building2 },
   { key: "task", label: "Task", icon: CheckSquare },
   { key: "profile", label: "Profile", icon: User },
 ];
@@ -116,7 +115,7 @@ const contactSchema = z
   .superRefine((data, ctx) => {
     if (data.accountMode === "existing") {
       if (!data.accountId.trim()) {
-        ctx.addIssue({ code: "custom", message: "Select an account", path: ["accountId"] });
+        ctx.addIssue({ code: "custom", message: "Select a company", path: ["accountId"] });
       }
     } else if (!data.newCompanyName.trim()) {
       ctx.addIssue({ code: "custom", message: "Company name required", path: ["newCompanyName"] });
@@ -134,27 +133,6 @@ function newEntityId(prefix: string): string {
 function isoFromDateInput(dateStr: string): string {
   const d = new Date(`${dateStr}T12:00:00`);
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-type ChannelOption = { key: string; label: string };
-
-function buildChannelOptions(
-  customChannels: { id: string; name: string }[],
-): ChannelOption[] {
-  return [
-    ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
-    ...customChannels
-      .map((c) => ({ key: `custom_${c.id}`, label: c.name.trim() }))
-      .filter((c) => c.label.length > 0),
-  ];
-}
-
-function channelLabelFromValue(
-  value: string | undefined,
-  options: ChannelOption[],
-): string {
-  if (!value) return "";
-  return options.find((o) => o.key === value)?.label ?? value;
 }
 
 // ── Account schema ──
@@ -186,7 +164,6 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
   );
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
-  const [type, setType] = React.useState("");
   const [ownerId, setOwnerId] = React.useState("");
   const [notes, setNotes] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
@@ -217,7 +194,6 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
     const missing: string[] = [];
     if (!name.trim()) missing.push("name");
     if (!channel) missing.push("channel");
-    if (!type) missing.push("type");
     if (!ownerId) missing.push("owner");
     if (missing.length) {
       toast.error(`Please add: ${missing.join(", ")}.`);
@@ -232,7 +208,6 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
       id,
       name: name.trim(),
       channel: channel as ChannelKey,
-      type: type as Profile["type"],
       ownerId,
       active: true,
       notes: notes.trim() || undefined,
@@ -253,37 +228,20 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
           onChange={(e) => setName(e.target.value)}
         />
       </div>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-foreground">Channel</label>
-          <Select value={channel} onValueChange={(v) => setChannel((v ?? "") as ChannelKey)}>
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="Channel">{channelLabel || undefined}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {channelOptions.map((c) => (
-                <SelectItem key={c.key} value={c.key}>
-                  {c.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1.5">
-          <label className="text-xs font-medium text-foreground">Type</label>
-          <Select value={type} onValueChange={(v) => setType(v ?? "")}>
-            <SelectTrigger className="h-9">
-              <SelectValue placeholder="Type">{capitalizeSelectToken(type) || undefined}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {PROFILE_TYPES.map((t) => (
-                <SelectItem key={t} value={t} className="capitalize">
-                  {t}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="space-y-1.5">
+        <label className="text-xs font-medium text-foreground">Channel</label>
+        <Select value={channel} onValueChange={(v) => setChannel((v ?? "") as ChannelKey)}>
+          <SelectTrigger className="h-9">
+            <SelectValue placeholder="Channel">{channelLabel || undefined}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            {channelOptions.map((c) => (
+              <SelectItem key={c.key} value={c.key}>
+                {c.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <div className="space-y-1.5">
         <label className="text-xs font-medium text-foreground">Owner</label>
@@ -343,11 +301,13 @@ function LeadFormBody({
     getOwnerDisplayName,
     getProfileById,
     profiles,
+    contacts,
     addAccount,
     addContact,
     addLead,
     isDemo,
   } = useWorkspace();
+  const router = useRouter();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
     () => buildChannelOptions(customChannels),
@@ -460,6 +420,29 @@ function LeadFormBody({
         return;
       }
     }
+    const emailTrim = values.email.trim();
+    form.clearErrors("email");
+    if (emailTrim) {
+      const existingContact = findContactByEmail(contacts, emailTrim);
+      if (existingContact) {
+        form.setError("email", {
+          type: "manual",
+          message: "A contact with this email already exists.",
+        });
+        toast.error("Contact already exists", {
+          description: `${existingContact.fullName || `${existingContact.firstName} ${existingContact.lastName}`.trim()}`,
+          action: {
+            label: "View contact",
+            onClick: () => {
+              router.push(`/contacts/${existingContact.id}`);
+              onClose();
+            },
+          },
+        });
+        return;
+      }
+    }
+
     const now = new Date().toISOString();
     const accountId = newEntityId("a");
     const contactId = newEntityId("ct");
@@ -468,7 +451,6 @@ function LeadFormBody({
     const firstName = nameParts[0] ?? values.contactName.trim();
     const lastName = nameParts.slice(1).join(" ") || firstName;
     const fullName = values.contactName.trim();
-    const emailTrim = values.email.trim();
     const estRaw = values.estimatedValue?.replace(/,/g, "").trim();
     const estimatedValue =
       estRaw && Number.isFinite(Number(estRaw)) && Number(estRaw) >= 0 ? Number(estRaw) : undefined;
@@ -704,7 +686,8 @@ function LeadFormBody({
 }
 
 function ContactFormBody({ onClose }: { onClose: () => void }) {
-  const { accounts, addAccount, addContact, currentUserId, users } = useWorkspace();
+  const { accounts, contacts, addAccount, addContact, currentUserId, users } = useWorkspace();
+  const router = useRouter();
   const form = useForm<ContactForm>({
     resolver: zodResolver(contactSchema),
     defaultValues: {
@@ -733,6 +716,60 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
       toast.error("Could not assign owner. Try again after refresh.");
       return;
     }
+    form.clearErrors(["email", "newCompanyDomain"]);
+
+    const emailTrim = values.email.trim();
+    if (emailTrim) {
+      const existingContact = findContactByEmail(contacts, emailTrim);
+      if (existingContact) {
+        form.setError("email", {
+          type: "manual",
+          message: "A contact with this email already exists.",
+        });
+        toast.error("Contact already exists", {
+          description: `${existingContact.fullName || `${existingContact.firstName} ${existingContact.lastName}`.trim()}`,
+          action: {
+            label: "View contact",
+            onClick: () => {
+              router.push(`/contacts/${existingContact.id}`);
+              onClose();
+            },
+          },
+        });
+        return;
+      }
+    }
+
+    if (values.accountMode === "new") {
+      const domainInput = values.newCompanyDomain?.trim() ?? "";
+      if (domainInput) {
+        const existingAccount = findAccountByDomain(accounts, domainInput);
+        if (existingAccount) {
+          form.setError("newCompanyDomain", {
+            type: "manual",
+            message: `Domain matches “${existingAccount.name}”. Use that company or change the domain.`,
+          });
+          toast.warning("Company already on file for this domain", {
+            description: `${existingAccount.name}${existingAccount.domain ? ` (${existingAccount.domain})` : ""}`,
+            action: {
+              label: "Use this company",
+              onClick: () => {
+                form.clearErrors(["newCompanyDomain", "accountId"]);
+                form.setValue("accountMode", "existing");
+                form.setValue("accountId", existingAccount.id);
+                form.setValue("newCompanyName", "");
+                form.setValue("newCompanyDomain", "");
+                toast.message("Switched to existing company", {
+                  description: "Submit again to create the contact.",
+                });
+              },
+            },
+          });
+          return;
+        }
+      }
+    }
+
     const now = new Date().toISOString();
     let accountId = values.accountId.trim();
     if (values.accountMode === "new") {
@@ -811,7 +848,7 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
                             }`
                       }`}
                     >
-                      Existing account
+                      Existing company
                     </Label>
                   </div>
                   <div>
@@ -840,11 +877,11 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
             name="accountId"
             render={({ field }) => (
               <FormItem>
-                <FormLabel className="text-xs">Account</FormLabel>
+                <FormLabel className="text-xs">Company</FormLabel>
                 <Select value={field.value} onValueChange={field.onChange}>
                   <FormControl>
                     <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Select account">
+                      <SelectValue placeholder="Select company">
                         {selectTriggerLabelByIdName(field.value, accounts) ?? undefined}
                       </SelectValue>
                     </SelectTrigger>
@@ -975,7 +1012,8 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
 }
 
 function AccountFormBody({ onClose }: { onClose: () => void }) {
-  const { addAccount, currentUserId, users } = useWorkspace();
+  const { accounts, addAccount, currentUserId, users } = useWorkspace();
+  const router = useRouter();
   const form = useForm<AccountForm>({
     resolver: zodResolver(accountSchema),
     defaultValues: { name: "", domain: "", industry: "", size: "", revenueRange: "" },
@@ -987,11 +1025,33 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
       toast.error("Could not assign owner. Try again after refresh.");
       return;
     }
+    form.clearErrors("domain");
+    const domainTrim = v.domain?.trim() ?? "";
+    if (domainTrim) {
+      const existing = findAccountByDomain(accounts, domainTrim);
+      if (existing) {
+        form.setError("domain", {
+          type: "manual",
+          message: "A company with this domain already exists.",
+        });
+        toast.error("Company domain already exists", {
+          description: existing.name,
+          action: {
+            label: "Open company",
+            onClick: () => {
+              router.push(`/accounts/${existing.id}`);
+              onClose();
+            },
+          },
+        });
+        return;
+      }
+    }
     const now = new Date().toISOString();
     addAccount({
       id: newEntityId("a"),
       name: v.name.trim(),
-      domain: v.domain?.trim() || undefined,
+      domain: domainTrim || undefined,
       industry: v.industry?.trim() || undefined,
       size: (v.size as CompanySize) || undefined,
       revenueRange: (v.revenueRange as RevenueRange) || undefined,
@@ -1002,7 +1062,7 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
       createdAt: now,
       updatedAt: now,
     });
-    toast.success("Account created");
+    toast.success("Company created");
     onClose();
   }
 
@@ -1057,7 +1117,7 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
         <div className="flex justify-end gap-2 pt-1">
           <Button type="button" variant="ghost" size="sm" onClick={onClose}>Cancel</Button>
           <Button type="submit" size="sm" disabled={form.formState.isSubmitting}>
-            {form.formState.isSubmitting ? "Creating…" : "Create account"}
+            {form.formState.isSubmitting ? "Creating…" : "Create company"}
           </Button>
         </div>
       </form>

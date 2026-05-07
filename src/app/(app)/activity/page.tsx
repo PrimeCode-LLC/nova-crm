@@ -57,6 +57,8 @@ import {
 
 const PROFILE_NONE = "__none__";
 const FILTER_ALL = "__all__";
+/** History filter: only rows with no profile selected */
+const FILTER_NO_PROFILE = "__no_profile__";
 
 type ActivityTab = "counters" | "records";
 
@@ -118,6 +120,7 @@ export default function ActivityPage() {
     currentUserId,
     users,
     departments,
+    getProfileById,
   } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const { localRollups, upsertLocalRollup, removeLocalRollupById } = useLocalActivityRollups();
@@ -166,6 +169,7 @@ export default function ActivityPage() {
   const [personFilter, setPersonFilter] = React.useState(FILTER_ALL);
   const [departmentFilter, setDepartmentFilter] = React.useState(FILTER_ALL);
   const [channelFilter, setChannelFilter] = React.useState(FILTER_ALL);
+  const [profileFilter, setProfileFilter] = React.useState(FILTER_ALL);
   const [dateFromFilter, setDateFromFilter] = React.useState("");
   const [dateToFilter, setDateToFilter] = React.useState("");
 
@@ -196,6 +200,28 @@ export default function ActivityPage() {
     return c;
   }, [sortedCounters, activityRecords]);
 
+  const profileFilterBuckets = React.useMemo(() => {
+    const buckets = new Set<string>();
+    for (const r of sortedCounters) {
+      buckets.add(r.profileId?.trim() ? r.profileId : FILTER_NO_PROFILE);
+    }
+    for (const r of activityRecords) {
+      buckets.add(r.profileId?.trim() ? r.profileId : FILTER_NO_PROFILE);
+    }
+    return buckets;
+  }, [sortedCounters, activityRecords]);
+
+  const distinctProfileIdsForFilter = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const r of sortedCounters) {
+      if (r.profileId?.trim()) ids.add(r.profileId);
+    }
+    for (const r of activityRecords) {
+      if (r.profileId?.trim()) ids.add(r.profileId);
+    }
+    return ids;
+  }, [sortedCounters, activityRecords]);
+
   const filteredCounters = React.useMemo(() => {
     return sortedCounters.filter((row) => {
       if (personFilter !== FILTER_ALL && row.userId !== personFilter) return false;
@@ -204,10 +230,25 @@ export default function ActivityPage() {
         if (uidDept !== departmentFilter) return false;
       }
       if (channelFilter !== FILTER_ALL && row.channel !== channelFilter) return false;
+      if (profileFilter !== FILTER_ALL) {
+        const rowPid = row.profileId?.trim() || "";
+        if (profileFilter === FILTER_NO_PROFILE) {
+          if (rowPid) return false;
+        } else if (rowPid !== profileFilter) return false;
+      }
       if (!passesActivityDateRange(row.date, dateFromFilter, dateToFilter)) return false;
       return true;
     });
-  }, [sortedCounters, personFilter, departmentFilter, channelFilter, dateFromFilter, dateToFilter, userMap]);
+  }, [
+    sortedCounters,
+    personFilter,
+    departmentFilter,
+    channelFilter,
+    profileFilter,
+    dateFromFilter,
+    dateToFilter,
+    userMap,
+  ]);
 
   const filteredRecords = React.useMemo(() => {
     return activityRecords.filter((row) => {
@@ -217,10 +258,25 @@ export default function ActivityPage() {
         if (uidDept !== departmentFilter) return false;
       }
       if (channelFilter !== FILTER_ALL && row.channel !== channelFilter) return false;
+      if (profileFilter !== FILTER_ALL) {
+        const rowPid = row.profileId?.trim() || "";
+        if (profileFilter === FILTER_NO_PROFILE) {
+          if (rowPid) return false;
+        } else if (rowPid !== profileFilter) return false;
+      }
       if (!passesActivityDateRange(row.occurredAt, dateFromFilter, dateToFilter)) return false;
       return true;
     });
-  }, [activityRecords, personFilter, departmentFilter, channelFilter, dateFromFilter, dateToFilter, userMap]);
+  }, [
+    activityRecords,
+    personFilter,
+    departmentFilter,
+    channelFilter,
+    profileFilter,
+    dateFromFilter,
+    dateToFilter,
+    userMap,
+  ]);
 
   const goToLogForm = React.useCallback(() => {
     requestAnimationFrame(() => {
@@ -240,6 +296,13 @@ export default function ActivityPage() {
   const showPersonFilter = distinctActorCount > 1;
   const showDeptFilter = distinctDeptIds.size > 1;
   const showChannelFilter = distinctChannels.size > 1;
+  const showProfileFilter = profileFilterBuckets.size > 1;
+
+  const profileFilterTriggerLabel = React.useMemo(() => {
+    if (profileFilter === FILTER_ALL) return "All profiles";
+    if (profileFilter === FILTER_NO_PROFILE) return "No profile";
+    return getProfileById(profileFilter)?.name?.trim() || profileFilter;
+  }, [profileFilter, getProfileById]);
 
   const currentMember = React.useMemo(
     () => users.find((u) => u.id === currentUserId),
@@ -344,7 +407,7 @@ export default function ActivityPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="pt-0 px-4 pb-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
                 {showPersonFilter ? (
                   <div className="space-y-1.5">
                     <Label className="text-xs">Person</Label>
@@ -406,6 +469,27 @@ export default function ActivityPage() {
                         {[...distinctChannels].sort().map((ch) => (
                           <SelectItem key={ch} value={ch}>
                             {channelLabelByKey.get(ch) ?? ch.replace(/_/g, " ")}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                {showProfileFilter ? (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Profile</Label>
+                    <Select value={profileFilter} onValueChange={(v) => setProfileFilter(v || FILTER_ALL)}>
+                      <SelectTrigger className="h-9">
+                        <SelectValue placeholder="All profiles">{profileFilterTriggerLabel}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value={FILTER_ALL}>All profiles</SelectItem>
+                        {profileFilterBuckets.has(FILTER_NO_PROFILE) ? (
+                          <SelectItem value={FILTER_NO_PROFILE}>No profile</SelectItem>
+                        ) : null}
+                        {[...distinctProfileIdsForFilter].sort().map((pid) => (
+                          <SelectItem key={pid} value={pid}>
+                            {getProfileById(pid)?.name?.trim() || pid}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -714,6 +798,7 @@ function CountersTable({
   canDeleteRow: (row: ActivityCounterRow) => boolean;
   onRequestDelete: (row: ActivityCounterRow) => void;
 }) {
+  const { getProfileById } = useWorkspace();
   return (
     <Card>
       <CardContent className="p-0">
@@ -723,6 +808,7 @@ function CountersTable({
               <TableHead className="h-9">Date</TableHead>
               <TableHead className="h-9">Person</TableHead>
               <TableHead className="h-9">Channel</TableHead>
+              <TableHead className="h-9">Profile</TableHead>
               <TableHead className="h-9">Counters</TableHead>
               <TableHead className="h-9 w-12 text-right sr-only">Actions</TableHead>
             </TableRow>
@@ -730,7 +816,7 @@ function CountersTable({
           <TableBody>
             {rows.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={6} className="py-8 text-center text-sm text-muted-foreground">
                   No counter rollups match your filters. Adjust filters or log a new rollup above.
                 </TableCell>
               </TableRow>
@@ -743,6 +829,11 @@ function CountersTable({
                   </TableCell>
                   <TableCell className="py-2">
                     <ChannelChip channel={a.channel} />
+                  </TableCell>
+                  <TableCell className="py-2 text-sm text-muted-foreground">
+                    {a.profileId?.trim()
+                      ? getProfileById(a.profileId)?.name?.trim() || a.profileId
+                      : "—"}
                   </TableCell>
                   <TableCell className="py-2 text-xs tabular-nums">
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5">
@@ -787,7 +878,7 @@ function RecordsTable({
   canDelete: boolean;
   onRequestDelete: (record: ActivityRecord) => void;
 }) {
-  const { getLeadById } = useWorkspace();
+  const { getLeadById, getProfileById } = useWorkspace();
   return (
     <Card>
       <CardContent className="p-0">
@@ -797,6 +888,7 @@ function RecordsTable({
               <TableHead className="h-9">Type</TableHead>
               <TableHead className="h-9">Person</TableHead>
               <TableHead className="h-9">Channel</TableHead>
+              <TableHead className="h-9">Profile</TableHead>
               <TableHead className="h-9">Summary</TableHead>
               <TableHead className="h-9">Lead</TableHead>
               <TableHead className="h-9">When</TableHead>
@@ -806,7 +898,7 @@ function RecordsTable({
           <TableBody>
             {records.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
                   No per-record activities match your filters.
                 </TableCell>
               </TableRow>
@@ -819,6 +911,11 @@ function RecordsTable({
                   </TableCell>
                   <TableCell className="py-2">
                     <ChannelChip channel={a.channel} />
+                  </TableCell>
+                  <TableCell className="py-2 text-sm text-muted-foreground">
+                    {a.profileId?.trim()
+                      ? getProfileById(a.profileId)?.name?.trim() || a.profileId
+                      : "—"}
                   </TableCell>
                   <TableCell className="py-2 text-sm">{a.summary ?? "-"}</TableCell>
                   <TableCell className="py-2 text-sm">

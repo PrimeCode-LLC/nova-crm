@@ -30,7 +30,7 @@ export function getDashboardOverviewDescription(role: Role | undefined): string 
 export function getDashboardRoleFocusLine(role: Role | undefined): string {
   switch (role) {
     case "director":
-      return "Prioritize idle accounts, channel mix, and revenue concentration — then drill into any rep.";
+      return "Prioritize idle companies, channel mix, and revenue concentration — then drill into any rep.";
     case "manager":
       return "Watch overdue follow-ups on the team, funnel drop-offs, and idle leads in your scope.";
     case "team_lead":

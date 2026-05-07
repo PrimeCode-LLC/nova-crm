@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Hash, Loader2, MessageCirclePlus, MessagesSquare, Send, UserPlus } from "lucide-react";
+import { Hash, Loader2, MessageCirclePlus, MessagesSquare, Search, Send, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -42,10 +42,25 @@ function initials(name: string) {
 }
 
 function channelTitle(ch: WorkspaceChatChannel, selfId: string, users: User[]) {
-  if (ch.kind !== "dm" || !ch.memberIds?.length) return `#${ch.name}`;
+  if (ch.kind !== "dm" || !ch.memberIds?.length) {
+    const n = ch.name?.trim() || ch.slug || "channel";
+    return n.startsWith("#") ? n.slice(1) : n;
+  }
   const other = ch.memberIds.find((id) => id !== selfId);
   const u = users.find((x) => x.id === other);
   return u?.displayName?.trim() ? u.displayName : "Direct message";
+}
+
+/** Firebase SDK embeds this URL when a composite index is missing. */
+function extractFirebaseIndexCreateUrl(message: string): string | null {
+  const m = message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/i);
+  if (!m) return null;
+  return m[0].replace(/[)\]"'.,;:]+$/, "");
+}
+
+function messageWithoutIndexUrl(message: string, url: string | null): string {
+  if (!url) return message;
+  return message.replace(url, "").replace(/\s{2,}/g, " ").trim();
 }
 
 type Props = {
@@ -62,6 +77,7 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
   const [newChOpen, setNewChOpen] = React.useState(false);
   const [newChName, setNewChName] = React.useState("");
   const [mentionOpen, setMentionOpen] = React.useState(false);
+  const [teammateQuery, setTeammateQuery] = React.useState("");
   const listEndRef = React.useRef<HTMLDivElement>(null);
 
   const usersById = React.useMemo(() => {
@@ -75,6 +91,31 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
   const dmChannels = chat.channels.filter((c) => c.kind === "dm");
 
   const others = users.filter((u) => u.id !== currentUserId);
+
+  const otherUserIdsWithDm = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const ch of dmChannels) {
+      if (ch.kind !== "dm" || !ch.memberIds?.length) continue;
+      const other = ch.memberIds.find((id) => id !== currentUserId);
+      if (other) ids.add(other);
+    }
+    return ids;
+  }, [dmChannels, currentUserId]);
+
+  const teammatesNotInDmList = React.useMemo(
+    () => others.filter((u) => !otherUserIdsWithDm.has(u.id)),
+    [others, otherUserIdsWithDm],
+  );
+
+  const teammateSearch = teammateQuery.trim().toLowerCase();
+  const filteredTeammates = React.useMemo(() => {
+    if (!teammateSearch) return teammatesNotInDmList;
+    return teammatesNotInDmList.filter((u) => {
+      const name = u.displayName.toLowerCase();
+      const email = u.email.toLowerCase();
+      return name.includes(teammateSearch) || email.includes(teammateSearch);
+    });
+  }, [teammatesNotInDmList, teammateSearch]);
 
   React.useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -138,8 +179,8 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
 
   return (
     <div className="flex min-h-0 min-w-0 flex-1 divide-x">
-      <div className="flex w-full max-w-[280px] shrink-0 flex-col border-r bg-muted/10">
-        <div className="border-b px-3 py-2">
+      <div className="flex min-h-0 w-full max-w-[280px] shrink-0 flex-col border-r bg-muted/10">
+        <div className="shrink-0 border-b px-3 py-2">
           <p className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Channels</p>
           <div className="mt-2 flex gap-1">
             <Button variant="outline" size="sm" className="h-7 flex-1 text-xs" onClick={() => setNewChOpen(true)}>
@@ -148,7 +189,7 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
             </Button>
           </div>
         </div>
-        <ScrollArea className="flex-1">
+        <ScrollArea className="min-h-0 flex-1">
           <div className="p-1.5 space-y-3">
             <div>
               {chat.loading && (
@@ -209,29 +250,49 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
               <p className="mb-1 px-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
                 Teammates
               </p>
+              <div className="relative mb-1.5">
+                <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  value={teammateQuery}
+                  onChange={(e) => setTeammateQuery(e.target.value)}
+                  placeholder="Search by name or email…"
+                  className="h-8 pl-7 text-xs"
+                  aria-label="Search teammates"
+                />
+              </div>
               <div className="space-y-0.5">
-                {others.map((u) => (
-                  <button
-                    key={u.id}
-                    type="button"
-                    onClick={() => void chat.openOrCreateDm(u.id)}
-                    className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
-                  >
-                    <Avatar className="h-6 w-6">
-                      <AvatarFallback className="text-[9px]">{initials(u.displayName)}</AvatarFallback>
-                    </Avatar>
-                    <span className="truncate">{u.displayName}</span>
-                    <UserPlus className="ml-auto h-3 w-3 opacity-50" />
-                  </button>
-                ))}
+                {filteredTeammates.length === 0 ? (
+                  <p className="px-2 py-2 text-xs text-muted-foreground">
+                    {teammateSearch
+                      ? "No matches. Try another name or email."
+                      : teammatesNotInDmList.length === 0
+                        ? "Everyone you DM appears under Direct messages."
+                        : "No teammates to show."}
+                  </p>
+                ) : (
+                  filteredTeammates.map((u) => (
+                    <button
+                      key={u.id}
+                      type="button"
+                      onClick={() => void chat.openOrCreateDm(u.id)}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground"
+                    >
+                      <Avatar className="h-6 w-6">
+                        <AvatarFallback className="text-[9px]">{initials(u.displayName)}</AvatarFallback>
+                      </Avatar>
+                      <span className="truncate">{u.displayName}</span>
+                      <UserPlus className="ml-auto h-3 w-3 opacity-50" />
+                    </button>
+                  ))
+                )}
               </div>
             </div>
           </div>
         </ScrollArea>
       </div>
 
-      <div className="flex min-w-0 flex-1 flex-col">
-        <div className="flex items-center gap-2 border-b px-4 py-2.5">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">
           {selected?.kind === "public" ? (
             <Hash className="h-4 w-4 text-muted-foreground" />
           ) : (
@@ -241,6 +302,43 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
             {selected ? channelTitle(selected, currentUserId, users) : "Select a channel"}
           </h2>
         </div>
+
+        {chat.messageSyncError && !isDemo && (
+          <div className="shrink-0 border-b border-destructive/30 bg-destructive/10 px-4 py-2 text-xs text-destructive">
+            <p className="font-medium">Could not load messages for this channel.</p>
+            {(() => {
+              const raw = chat.messageSyncError.message;
+              const indexUrl = extractFirebaseIndexCreateUrl(raw);
+              const summary = messageWithoutIndexUrl(raw, indexUrl);
+              return (
+                <>
+                  {summary ? (
+                    <p className="mt-1 text-destructive/90 whitespace-pre-wrap break-words">{summary}</p>
+                  ) : null}
+                  {indexUrl ? (
+                    <p className="mt-2">
+                      <a
+                        href={indexUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="font-medium text-primary underline-offset-2 hover:underline"
+                      >
+                        Create index in Firebase console
+                      </a>
+                    </p>
+                  ) : null}
+                  {/index/i.test(raw) && (
+                    <p className="mt-2 text-muted-foreground">
+                      Or deploy indexes from the <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">crm</code> folder:{" "}
+                      <code className="rounded bg-muted px-1 py-0.5 font-mono text-[10px]">firebase deploy --only firestore:indexes</code>
+                      , then wait until the index shows <span className="font-medium text-foreground">Enabled</span> in the Firebase console.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+          </div>
+        )}
 
         <ScrollArea className="min-h-0 flex-1">
           <div className="space-y-3 p-4">
@@ -255,11 +353,14 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
               chat.messages.map((m) => (
                 <MessageBubble key={m.id} message={m} usersById={usersById} currentUserId={currentUserId} />
               ))}
+            {selected && chat.messages.length === 0 && !chat.messageSyncError && (
+              <p className="py-10 text-center text-sm text-muted-foreground">No messages yet — send one below.</p>
+            )}
             <div ref={listEndRef} />
           </div>
         </ScrollArea>
 
-        <div className="border-t p-3 space-y-2 bg-muted/10">
+        <div className="shrink-0 border-t p-3 space-y-2 bg-muted/10">
           <div className="flex gap-2">
             <Popover open={mentionOpen} onOpenChange={setMentionOpen}>
               <PopoverTrigger
