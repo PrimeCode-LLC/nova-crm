@@ -18,6 +18,7 @@ import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, ROLES } from "@/lib/constants";
+import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
 import {
   getDashboardOverviewDescription,
   getDashboardRoleFocusLine,
@@ -450,7 +451,7 @@ export default function DashboardPage() {
               <KpiCard
                 label="Idle leads"
                 value={idleCount}
-                hint="Over stage threshold"
+                hint={`No activity in ${IDLE_LEAD_THRESHOLD_DAYS}+ days (excl. won/lost)`}
                 deltaType="positive-down"
                 icon={Inbox}
               />

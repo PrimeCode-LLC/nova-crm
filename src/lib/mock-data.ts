@@ -144,6 +144,7 @@ export const mockPermissionOverrides: PermissionOverride[] = [
     resource: "leads",
     action: "read",
     scope: "department",
+    scopeDepartmentId: "d-outbound",
     effect: "grant",
     note: "Chris mentors Emma and Ryan; needs to review their leads.",
     createdBy: "u-director",

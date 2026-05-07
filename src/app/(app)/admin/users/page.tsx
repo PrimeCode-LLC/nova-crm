@@ -41,7 +41,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ROLES } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
-import type { OrgMemberRole, Role, User } from "@/lib/types";
+import type { Department, OrgMemberRole, PermissionOverride, Role, User } from "@/lib/types";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import {
@@ -85,6 +85,40 @@ function titleFromEmail(email: string): string {
     .join(" ");
 }
 
+function userLabelShort(
+  u: User | undefined,
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): string {
+  if (!u) return "";
+  const fromLookup = getOwnerDisplayName(u.id)?.trim() || "";
+  const name = u.displayName?.trim() || fromLookup;
+  if (name && name !== u.id) return name;
+  if (u.email?.trim()) return u.email.trim();
+  if (u.id.length >= 16) return `${u.id.slice(0, 4)}…${u.id.slice(-4)}`;
+  return u.id;
+}
+
+function permissionOverrideScopeDetail(
+  po: PermissionOverride,
+  departments: readonly Department[],
+  users: readonly User[],
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): string | null {
+  if (po.scope === "department" && po.scopeDepartmentId) {
+    return departments.find((d) => d.id === po.scopeDepartmentId)?.name ?? po.scopeDepartmentId;
+  }
+  if (po.scope === "custom" && po.scopeCustomDefinition?.trim()) {
+    return po.scopeCustomDefinition.trim();
+  }
+  if (po.scope === "team" && po.scopeTeamAnchorUserId) {
+    const u = users.find((x) => x.id === po.scopeTeamAnchorUserId);
+    return u
+      ? `Subtree: ${userLabelShort(u, getOwnerDisplayName)}`
+      : `Subtree: ${po.scopeTeamAnchorUserId}`;
+  }
+  return null;
+}
+
 function AdminUsersPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -94,6 +128,7 @@ function AdminUsersPageContent() {
     permissionOverrides,
     currentUserId,
     getUserById,
+    getOwnerDisplayName,
   } = useWorkspace();
 
   const viewer = getUserById(currentUserId);
@@ -801,7 +836,14 @@ function AdminUsersPageContent() {
                       Permission overrides ({userOverrides.length})
                     </div>
                     <div className="space-y-2">
-                      {userOverrides.map((po) => (
+                      {userOverrides.map((po) => {
+                        const scopeDetail = permissionOverrideScopeDetail(
+                          po,
+                          departments,
+                          users,
+                          getOwnerDisplayName,
+                        );
+                        return (
                         <div
                           key={po.id}
                           className="rounded-md border p-3 space-y-1.5 bg-muted/20"
@@ -819,10 +861,15 @@ function AdminUsersPageContent() {
                             <Badge variant="outline" className="text-[10px]">
                               {po.action}
                             </Badge>
-                            <Badge variant="outline" className="text-[10px]">
+                            <Badge variant="outline" className="text-[10px] capitalize">
                               {po.scope}
                             </Badge>
                           </div>
+                          {scopeDetail ? (
+                            <p className="text-[11px] text-muted-foreground leading-snug">
+                              {scopeDetail}
+                            </p>
+                          ) : null}
                           {po.note && (
                             <p className="text-xs text-muted-foreground">
                               {po.note}
@@ -840,7 +887,8 @@ function AdminUsersPageContent() {
                             · {fmtRelative(po.createdAt)}
                           </p>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 )}

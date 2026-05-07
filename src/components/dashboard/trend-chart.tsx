@@ -40,7 +40,7 @@ export function TrendChart({
           <div>
             <CardTitle className="text-sm font-semibold">Activity trend</CardTitle>
             <CardDescription className="text-xs">
-              Replies · meetings · closed · last 30 days
+              New leads · replies · meetings · closed · last 30 days
             </CardDescription>
           </div>
         </div>
@@ -66,6 +66,10 @@ export function TrendChart({
                 <linearGradient id="gClosed" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--chart-3)" stopOpacity={0.35} />
                   <stop offset="100%" stopColor="var(--chart-3)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gNewLeads" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--chart-4)" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="var(--chart-4)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -116,10 +120,21 @@ export function TrendChart({
                 fill="url(#gClosed)"
                 isAnimationActive={false}
               />
+              <Area
+                type="monotone"
+                dataKey="newLeads"
+                stroke="var(--chart-4)"
+                strokeWidth={2}
+                fill="url(#gNewLeads)"
+                isAnimationActive={false}
+              />
             </AreaChart>
           </ResponsiveContainer>
         </div>
-        <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full" style={{ background: "var(--chart-4)" }} /> New leads
+          </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full" style={{ background: "var(--chart-1)" }} /> Replies
           </span>

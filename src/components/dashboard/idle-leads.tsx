@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -11,14 +12,19 @@ import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import type { Lead } from "@/lib/types";
+import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
 
 export function IdleLeads({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
   const ws = useWorkspace();
   const leads = leadsOverride ?? ws.leads;
-  const rows = [...leads]
-    .filter((l) => l.isIdle)
-    .sort((a, b) => (b.idleDays ?? 0) - (a.idleDays ?? 0))
-    .slice(0, 6);
+  const idleLeads = React.useMemo(
+    () =>
+      [...leads]
+        .filter((l) => l.isIdle)
+        .sort((a, b) => (b.idleDays ?? 0) - (a.idleDays ?? 0)),
+    [leads],
+  );
+  const rows = idleLeads.slice(0, 6);
 
   return (
     <Card>
@@ -30,7 +36,8 @@ export function IdleLeads({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
               Idle leads
             </CardTitle>
             <CardDescription className="text-xs">
-              {rows.length} leads with no activity over threshold
+              {idleLeads.length} {idleLeads.length === 1 ? "lead" : "leads"} with no activity in{" "}
+              {IDLE_LEAD_THRESHOLD_DAYS}+ days (open pipeline)
             </CardDescription>
           </div>
           <Button
@@ -47,6 +54,9 @@ export function IdleLeads({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
         </div>
       </CardHeader>
       <CardContent className="pt-0 divide-y">
+        {rows.length === 0 && (
+          <p className="text-xs text-muted-foreground py-6 text-center">No idle leads in this view.</p>
+        )}
         {rows.map((l) => (
           <Link
             key={l.id}

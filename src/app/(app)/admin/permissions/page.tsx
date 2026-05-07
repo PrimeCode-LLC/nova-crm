@@ -42,7 +42,7 @@ import {
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtDate } from "@/lib/format";
-import type { PermissionOverride } from "@/lib/types";
+import type { Department, PermissionOverride, User } from "@/lib/types";
 import { Plus, Shield, Trash2, Info, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -50,6 +50,38 @@ import { cn } from "@/lib/utils";
 const RESOURCES = ["leads", "deals", "accounts", "contacts", "activities"] as const;
 const ACTIONS = ["read", "write", "delete"] as const;
 const SCOPES = ["own", "team", "department", "all", "custom"] as const;
+
+const SCOPE_HELP: Record<(typeof SCOPES)[number], string> = {
+  own: "Only CRM rows assigned to this person (owner / assignee fields).",
+  team: "This person plus everyone in their reporting line below them (and optional anchor below).",
+  department: "Everyone who belongs to the department you pick (membership is on each user).",
+  all: "Everyone in the workspace (tenant-wide).",
+  custom: "Describe the boundary in writing until automated rules exist for this grant or deny.",
+};
+
+type OverrideIdentity = Pick<
+  PermissionOverride,
+  | "userId"
+  | "resource"
+  | "action"
+  | "scope"
+  | "scopeDepartmentId"
+  | "scopeTeamAnchorUserId"
+  | "scopeCustomDefinition"
+>;
+
+function sameOverrideIdentity(a: OverrideIdentity, b: OverrideIdentity): boolean {
+  return (
+    a.userId === b.userId &&
+    a.resource === b.resource &&
+    a.action === b.action &&
+    a.scope === b.scope &&
+    (a.scopeDepartmentId ?? "") === (b.scopeDepartmentId ?? "") &&
+    (a.scopeTeamAnchorUserId ?? "") === (b.scopeTeamAnchorUserId ?? "") &&
+    (a.scopeCustomDefinition ?? "").trim().toLowerCase() ===
+      (b.scopeCustomDefinition ?? "").trim().toLowerCase()
+  );
+}
 
 type ColumnFilterKey = "resource" | "action" | "scope" | "effect";
 
@@ -60,22 +92,62 @@ function newOverrideId(): string {
   return `po-${Date.now()}`;
 }
 
+/** Readable label when Firestore has no name yet (displayName falls back to uid). */
+function memberPickerLabel(
+  u: User,
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): string {
+  const fromLookup = getOwnerDisplayName(u.id)?.trim() || "";
+  const name = u.displayName?.trim() || fromLookup;
+  if (name && name !== u.id) return name;
+  const em = u.email?.trim();
+  if (em) return em;
+  if (u.id.length >= 16) return `Member ${u.id.slice(0, 4)}…${u.id.slice(-4)}`;
+  return u.id;
+}
+
+function formatScopeTargetLine(
+  po: PermissionOverride,
+  departments: readonly Department[],
+  users: readonly User[],
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): string | null {
+  if (po.scope === "department" && po.scopeDepartmentId) {
+    return departments.find((d) => d.id === po.scopeDepartmentId)?.name ?? po.scopeDepartmentId;
+  }
+  if (po.scope === "custom" && po.scopeCustomDefinition?.trim()) {
+    const t = po.scopeCustomDefinition.trim();
+    return t.length > 72 ? `${t.slice(0, 69)}…` : t;
+  }
+  if (po.scope === "team" && po.scopeTeamAnchorUserId) {
+    const u = users.find((x) => x.id === po.scopeTeamAnchorUserId);
+    return u
+      ? `Subtree: ${memberPickerLabel(u, getOwnerDisplayName)}`
+      : `Subtree: ${po.scopeTeamAnchorUserId}`;
+  }
+  return null;
+}
+
 export default function AdminPermissionsPage() {
   const {
     permissionOverrides,
     users,
+    departments,
     currentUserId,
     addPermissionOverride,
     removePermissionOverride,
+    getOwnerDisplayName,
   } = useWorkspace();
   const [newOpen, setNewOpen] = React.useState(false);
   const [userId, setUserId] = React.useState("");
   const [resource, setResource] = React.useState("");
   const [action, setAction] = React.useState("");
   const [scope, setScope] = React.useState("");
+  const [scopeDepartmentId, setScopeDepartmentId] = React.useState("");
+  const [scopeCustomDefinition, setScopeCustomDefinition] = React.useState("");
+  const [scopeTeamAnchorUserId, setScopeTeamAnchorUserId] = React.useState("");
   const [effect, setEffect] = React.useState<"grant" | "deny">("grant");
   const [note, setNote] = React.useState("");
-  const [loading, setLoading] = React.useState(false);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [columnFilter, setColumnFilter] = React.useState<Partial<
     Record<ColumnFilterKey, string>
@@ -86,9 +158,17 @@ export default function AdminPermissionsPage() {
     setResource("");
     setAction("");
     setScope("");
+    setScopeDepartmentId("");
+    setScopeCustomDefinition("");
+    setScopeTeamAnchorUserId("");
     setEffect("grant");
     setNote("");
   }
+
+  const usersWhoManageOthers = React.useMemo(() => {
+    const withReport = new Set(users.filter((u) => users.some((r) => r.managerId === u.id)).map((u) => u.id));
+    return users.filter((u) => withReport.has(u.id));
+  }, [users]);
 
   function toggleColumnFilter(key: ColumnFilterKey, value: string) {
     setColumnFilter((f) => {
@@ -112,25 +192,70 @@ export default function AdminPermissionsPage() {
 
   const hasColumnFilters = Object.keys(columnFilter).length > 0;
 
+  const formComplete = React.useMemo(() => {
+    if (!userId || !resource || !action || !scope) return false;
+    if (scope === "department") {
+      if (departments.length === 0) return false;
+      return Boolean(scopeDepartmentId);
+    }
+    if (scope === "custom") {
+      return scopeCustomDefinition.trim().length >= 8;
+    }
+    return true;
+  }, [
+    userId,
+    resource,
+    action,
+    scope,
+    departments.length,
+    scopeDepartmentId,
+    scopeCustomDefinition,
+  ]);
+
   function handleCreate() {
     if (!userId || !resource || !action || !scope) {
       toast.error("All fields are required");
       return;
     }
-    setLoading(true);
-    const row: PermissionOverride = {
-      id: newOverrideId(),
+    const draftIdentity: OverrideIdentity = {
       userId,
       resource: resource as PermissionOverride["resource"],
       action: action as PermissionOverride["action"],
       scope: scope as PermissionOverride["scope"],
+      scopeDepartmentId: scope === "department" ? scopeDepartmentId || undefined : undefined,
+      scopeTeamAnchorUserId:
+        scope === "team" && scopeTeamAnchorUserId ? scopeTeamAnchorUserId : undefined,
+      scopeCustomDefinition:
+        scope === "custom" ? scopeCustomDefinition.trim() || undefined : undefined,
+    };
+    const duplicate = permissionOverrides.some((p) => sameOverrideIdentity(p, draftIdentity));
+    if (duplicate) {
+      toast.error("This override already exists", {
+        description: "Remove the existing row or change scope details.",
+      });
+      return;
+    }
+    const row: PermissionOverride = {
+      id: newOverrideId(),
+      userId,
+      resource: draftIdentity.resource,
+      action: draftIdentity.action,
+      scope: draftIdentity.scope,
       effect,
+      ...(draftIdentity.scopeDepartmentId
+        ? { scopeDepartmentId: draftIdentity.scopeDepartmentId }
+        : {}),
+      ...(draftIdentity.scopeTeamAnchorUserId
+        ? { scopeTeamAnchorUserId: draftIdentity.scopeTeamAnchorUserId }
+        : {}),
+      ...(draftIdentity.scopeCustomDefinition
+        ? { scopeCustomDefinition: draftIdentity.scopeCustomDefinition }
+        : {}),
       note: note.trim() || undefined,
       createdBy: currentUserId || "u-director",
       createdAt: new Date().toISOString(),
     };
     addPermissionOverride(row);
-    setLoading(false);
     toast.success("Permission override created");
     setNewOpen(false);
     resetForm();
@@ -170,7 +295,7 @@ export default function AdminPermissionsPage() {
               </span>
             </div>
             <p className="text-muted-foreground text-xs">
-              A <em>deny</em> at any level blocks access, even if a lower layer grants it. Use sparingly; most access should flow from roles.
+              A <em>deny</em> for a given resource and action removes that permission for the person, even if their role would grant it. Use sparingly; most access should flow from roles.
             </p>
           </div>
         </div>
@@ -311,23 +436,38 @@ export default function AdminPermissionsPage() {
                           </Badge>
                         </button>
                       </TableCell>
-                      <TableCell className="py-2">
-                        <button
-                          type="button"
-                          className="inline-flex"
-                          title="Filter by this scope"
-                          onClick={() => toggleColumnFilter("scope", po.scope)}
-                        >
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-[10px] cursor-pointer transition-colors",
-                              columnFilter.scope === po.scope && "ring-2 ring-primary/40",
-                            )}
+                      <TableCell className="py-2 max-w-[200px]">
+                        <div className="flex flex-col gap-0.5 min-w-0">
+                          <button
+                            type="button"
+                            className="inline-flex self-start"
+                            title="Filter by this scope"
+                            onClick={() => toggleColumnFilter("scope", po.scope)}
                           >
-                            {po.scope}
-                          </Badge>
-                        </button>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[10px] cursor-pointer transition-colors capitalize",
+                                columnFilter.scope === po.scope && "ring-2 ring-primary/40",
+                              )}
+                            >
+                              {po.scope}
+                            </Badge>
+                          </button>
+                          {(() => {
+                            const line = formatScopeTargetLine(
+                              po,
+                              departments,
+                              users,
+                              getOwnerDisplayName,
+                            );
+                            return line ? (
+                              <span className="text-[10px] text-muted-foreground leading-snug line-clamp-3">
+                                {line}
+                              </span>
+                            ) : null;
+                          })()}
+                        </div>
                       </TableCell>
                       <TableCell className="py-2">
                         <button
@@ -403,7 +543,7 @@ export default function AdminPermissionsPage() {
           if (open) resetForm();
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <Shield className="h-4 w-4" /> New permission override
@@ -412,24 +552,39 @@ export default function AdminPermissionsPage() {
           <div className="space-y-3 py-1">
             <div className="space-y-1.5">
               <Label className="text-xs">User</Label>
-              <Select value={userId} onValueChange={(v) => setUserId(v ?? "")}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select user" />
+              <Select
+                value={userId}
+                onValueChange={(v) => setUserId(v ?? "")}
+                disabled={users.length === 0}
+              >
+                <SelectTrigger className="h-9 w-full min-w-0">
+                  <SelectValue placeholder="Select user">
+                    {(value) => {
+                      if (value == null || value === "") return "Select user";
+                      const u = users.find((x) => x.id === value);
+                      return u ? memberPickerLabel(u, getOwnerDisplayName) : String(value);
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {users.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
-                      {u.displayName}
+                      {memberPickerLabel(u, getOwnerDisplayName)}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {users.length === 0 ? (
+                <p className="text-[11px] text-muted-foreground">
+                  No workspace members loaded yet — check org membership or try refreshing.
+                </p>
+              ) : null}
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label className="text-xs">Resource</Label>
                 <Select value={resource} onValueChange={(v) => setResource(v ?? "")}>
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className="h-9 w-full min-w-0">
                     <SelectValue placeholder="Resource" />
                   </SelectTrigger>
                   <SelectContent>
@@ -444,7 +599,7 @@ export default function AdminPermissionsPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs">Action</Label>
                 <Select value={action} onValueChange={(v) => setAction(v ?? "")}>
-                  <SelectTrigger className="h-9">
+                  <SelectTrigger className="h-9 w-full min-w-0">
                     <SelectValue placeholder="Action" />
                   </SelectTrigger>
                   <SelectContent>
@@ -459,18 +614,127 @@ export default function AdminPermissionsPage() {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Scope</Label>
-              <Select value={scope} onValueChange={(v) => setScope(v ?? "")}>
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Scope" />
+              <Select
+                value={scope}
+                onValueChange={(v) => {
+                  const next = v ?? "";
+                  setScope(next);
+                  setScopeDepartmentId("");
+                  setScopeCustomDefinition("");
+                  setScopeTeamAnchorUserId("");
+                }}
+              >
+                <SelectTrigger className="h-auto min-h-9 w-full min-w-0 py-1.5">
+                  <SelectValue placeholder="Scope">
+                    {(value) =>
+                      value && SCOPES.includes(value as (typeof SCOPES)[number])
+                        ? (value as string).charAt(0).toUpperCase() + (value as string).slice(1)
+                        : "Scope"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {SCOPES.map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {s}
+                    <SelectItem key={s} value={s} className="items-start py-2">
+                      <span className="flex flex-col gap-0.5">
+                        <span className="font-medium capitalize leading-none">{s}</span>
+                        <span className="text-[11px] text-muted-foreground leading-snug whitespace-normal">
+                          {SCOPE_HELP[s]}
+                        </span>
+                      </span>
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {(scope === "own" || scope === "all") && (
+                <p className="text-[11px] text-muted-foreground leading-snug">
+                  {SCOPE_HELP[scope as "own" | "all"]}
+                </p>
+              )}
+
+              {scope === "department" && (
+                <div className="space-y-1.5 rounded-md border bg-muted/15 p-3">
+                  <Label className="text-xs">Department</Label>
+                  {departments.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      No departments in this workspace yet. Add them under{" "}
+                      <span className="font-medium text-foreground">Admin → Departments</span> before
+                      using department scope.
+                    </p>
+                  ) : (
+                    <Select
+                      value={scopeDepartmentId}
+                      onValueChange={(v) => setScopeDepartmentId(v ?? "")}
+                    >
+                      <SelectTrigger className="h-9 w-full min-w-0">
+                        <SelectValue placeholder="Select department" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {departments.map((d) => (
+                          <SelectItem key={d.id} value={d.id}>
+                            {d.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
+
+              {scope === "team" && (
+                <div className="space-y-1.5 rounded-md border bg-muted/15 p-3">
+                  <Label className="text-xs">Team anchor (optional)</Label>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {`Leave empty for "this user and everyone reporting to them." Pick a manager to mean "that person and their reporting subtree" instead.`}
+                  </p>
+                  {usersWhoManageOthers.length === 0 ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      No managers with direct reports in the roster — anchor is unavailable.
+                    </p>
+                  ) : (
+                    <Select
+                      value={scopeTeamAnchorUserId || "__none__"}
+                      onValueChange={(v) =>
+                        setScopeTeamAnchorUserId(v === "__none__" ? "" : (v ?? ""))
+                      }
+                    >
+                      <SelectTrigger className="h-9 w-full min-w-0">
+                        <SelectValue placeholder={"Default (this user's tree)"}>
+                          {(value) => {
+                            if (value == null || value === "" || value === "__none__") {
+                              return `Default (this user's tree)`;
+                            }
+                            const u = users.find((x) => x.id === value);
+                            return u ? memberPickerLabel(u, getOwnerDisplayName) : String(value);
+                          }}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">{`Default (this user's tree)`}</SelectItem>
+                        {usersWhoManageOthers.map((u) => (
+                          <SelectItem key={u.id} value={u.id}>
+                            {memberPickerLabel(u, getOwnerDisplayName)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
+
+              {scope === "custom" && (
+                <div className="space-y-1.5 rounded-md border bg-muted/15 p-3">
+                  <Label className="text-xs">Custom scope definition</Label>
+                  <p className="text-[11px] text-muted-foreground leading-snug">
+                    {`Describe exactly what this person may or may not see (e.g. "only leads tagged Partner", "accounts in EU region"). Minimum 8 characters.`}
+                  </p>
+                  <Textarea
+                    value={scopeCustomDefinition}
+                    onChange={(e) => setScopeCustomDefinition(e.target.value)}
+                    placeholder="e.g. Read-only on leads owned by the Upwork team, excluding archived…"
+                    className="min-h-[88px] text-sm resize-y"
+                  />
+                </div>
+              )}
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Effect</Label>
@@ -507,8 +771,8 @@ export default function AdminPermissionsPage() {
             <Button variant="ghost" size="sm" onClick={() => setNewOpen(false)}>
               Cancel
             </Button>
-            <Button size="sm" onClick={handleCreate} disabled={loading}>
-              {loading ? "Creating…" : "Create override"}
+            <Button size="sm" onClick={handleCreate} disabled={!formComplete}>
+              Create override
             </Button>
           </DialogFooter>
         </DialogContent>

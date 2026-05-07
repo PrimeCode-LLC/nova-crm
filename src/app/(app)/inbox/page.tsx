@@ -69,8 +69,10 @@ import {
   Reply,
   Send,
   Trash2,
+  MessagesSquare,
 } from "lucide-react";
 import { toast } from "sonner";
+import { WorkspaceTeamChatPanel } from "@/components/inbox/workspace-team-chat-panel";
 
 const KIND_ICONS: Record<NotificationKind, React.ElementType> = {
   mention: AtSign,
@@ -93,10 +95,21 @@ const KIND_COLORS: Record<NotificationKind, string> = {
 type TabFilter = "all" | "unread" | "mentions" | "assignments" | "alerts";
 type InboxMode = "workspace" | "email";
 type MailFolder = "inbox" | "sent" | "drafts";
+type WorkspaceFeedTab = "activity" | "team_chat";
 
 export default function InboxPage() {
-  const { leads, users, isDemo, demoPersonaId, addAccount, addContact, addLead, currentUserId, leadTasks } =
-    useWorkspace();
+  const {
+    leads,
+    users,
+    isDemo,
+    demoPersonaId,
+    addAccount,
+    addContact,
+    addLead,
+    currentUserId,
+    leadTasks,
+    organizationId,
+  } = useWorkspace();
   const seed = React.useMemo(() => {
     const demo = isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : [];
     const fromTasks = buildLeadTaskInboxNotifications(leadTasks, currentUserId, users);
@@ -118,6 +131,7 @@ export default function InboxPage() {
   const [selected, setSelected] = React.useState<DemoNotification | null>(null);
   const [tab, setTab] = React.useState<TabFilter>("all");
   const [inboxMode, setInboxMode] = React.useState<InboxMode>("workspace");
+  const [workspaceFeedTab, setWorkspaceFeedTab] = React.useState<WorkspaceFeedTab>("activity");
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -218,7 +232,7 @@ export default function InboxPage() {
   const totalCount = notifications.length;
 
   React.useEffect(() => {
-    if (inboxMode !== "workspace") return;
+    if (inboxMode !== "workspace" || workspaceFeedTab !== "activity") return;
     if (filtered.length === 0) {
       setSelected(null);
       return;
@@ -227,7 +241,7 @@ export default function InboxPage() {
       if (prev && filtered.some((n) => n.id === prev.id)) return prev;
       return filtered[0] ?? null;
     });
-  }, [filtered, inboxMode, tab]);
+  }, [filtered, inboxMode, tab, workspaceFeedTab]);
 
   function markAllRead() {
     markAllReadStore(notifications.map((n) => n.id));
@@ -372,7 +386,7 @@ export default function InboxPage() {
 
   const pageActions =
     inboxMode === "workspace" ? (
-      notifications.length > 0 ? (
+      workspaceFeedTab === "activity" && notifications.length > 0 ? (
         <Button variant="outline" size="sm" onClick={markAllRead} disabled={unreadCount === 0}>
           <CheckCheck className="h-3.5 w-3.5" /> Mark all read
         </Button>
@@ -499,7 +513,9 @@ export default function InboxPage() {
         title="Inbox"
         description={
           inboxMode === "workspace"
-            ? "Mentions, assignments, and alerts across your pipeline."
+            ? workspaceFeedTab === "team_chat"
+              ? "Channels and direct messages for your organization — like Slack, inside your CRM."
+              : "Mentions, assignments, and alerts across your pipeline."
             : "Threaded conversations (like Outlook) from the mailbox you connect in settings."
         }
         actions={pageActions}
@@ -562,141 +578,168 @@ export default function InboxPage() {
         </div>
 
         {inboxMode === "workspace" ? (
-          <div className="flex h-full min-h-0 divide-x">
-            <div className="w-full max-w-md flex flex-col border-r">
-              <div className="px-4 pt-3 pb-2 border-b">
-                <Tabs value={tab} onValueChange={(v) => setTab(v as TabFilter)}>
-                  <TabsList className="h-8 flex-wrap">
-                    <TabsTrigger value="all" className="text-xs px-2.5 h-7">
-                      All{" "}
-                      {totalCount > 0 && (
-                        <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
-                          {totalCount}
-                        </Badge>
-                      )}
-                    </TabsTrigger>
-                    <TabsTrigger value="unread" className="text-xs px-2.5 h-7">
-                      Unread
-                    </TabsTrigger>
-                    <TabsTrigger value="mentions" className="text-xs px-2.5 h-7">
-                      Mentions
-                    </TabsTrigger>
-                    <TabsTrigger value="assignments" className="text-xs px-2.5 h-7">
-                      Assigned
-                    </TabsTrigger>
-                    <TabsTrigger value="alerts" className="text-xs px-2.5 h-7">
-                      Alerts
-                    </TabsTrigger>
-                  </TabsList>
-                </Tabs>
-              </div>
-              <div className="flex-1 overflow-y-auto divide-y">
-                {filtered.length === 0 && (
-                  <div className="p-6 space-y-4">
-                    <p className="text-center text-sm text-muted-foreground">No notifications here.</p>
-                    {!isDemo && <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />}
+          <div className="flex h-full min-h-0 flex-col">
+            <div className="border-b px-4 pt-2">
+              <Tabs value={workspaceFeedTab} onValueChange={(v) => setWorkspaceFeedTab(v as WorkspaceFeedTab)}>
+                <TabsList className="h-8">
+                  <TabsTrigger value="activity" className="text-xs px-3 h-7 gap-1.5">
+                    <Bell className="h-3 w-3" />
+                    Activity
+                  </TabsTrigger>
+                  <TabsTrigger value="team_chat" className="text-xs px-3 h-7 gap-1.5">
+                    <MessagesSquare className="h-3 w-3" />
+                    Team chat
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
+            </div>
+            {workspaceFeedTab === "team_chat" ? (
+              <WorkspaceTeamChatPanel
+                users={users}
+                currentUserId={currentUserId}
+                isDemo={isDemo}
+                organizationId={organizationId}
+              />
+            ) : (
+              <div className="flex min-h-0 flex-1 divide-x">
+                <div className="flex w-full max-w-md flex-col border-r">
+                  <div className="border-b px-4 pt-3 pb-2">
+                    <Tabs value={tab} onValueChange={(v) => setTab(v as TabFilter)}>
+                      <TabsList className="h-8 flex-wrap">
+                        <TabsTrigger value="all" className="h-7 px-2.5 text-xs">
+                          All{" "}
+                          {totalCount > 0 && (
+                            <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                              {totalCount}
+                            </Badge>
+                          )}
+                        </TabsTrigger>
+                        <TabsTrigger value="unread" className="h-7 px-2.5 text-xs">
+                          Unread
+                        </TabsTrigger>
+                        <TabsTrigger value="mentions" className="h-7 px-2.5 text-xs">
+                          Mentions
+                        </TabsTrigger>
+                        <TabsTrigger value="assignments" className="h-7 px-2.5 text-xs">
+                          Assigned
+                        </TabsTrigger>
+                        <TabsTrigger value="alerts" className="h-7 px-2.5 text-xs">
+                          Alerts
+                        </TabsTrigger>
+                      </TabsList>
+                    </Tabs>
                   </div>
-                )}
-                {filtered.map((n) => {
-                  const Icon = KIND_ICONS[n.kind];
-                  const sender = users.find((u) => u.id === n.sender);
-                  const senderInitials =
-                    sender?.displayName
-                      .split(" ")
-                      .map((x) => x[0])
-                      .join("")
-                      .slice(0, 2) ?? "?";
-                  return (
-                    <button
-                      key={n.id}
-                      type="button"
-                      onClick={() => setSelected(n)}
-                      className={cn(
-                        "w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-muted/20 transition-colors",
-                        selected?.id === n.id && "bg-muted/30",
-                      )}
-                    >
-                      <div className="relative shrink-0">
-                        <Avatar className="h-8 w-8 rounded-full">
-                          <AvatarFallback className="bg-primary/15 text-primary text-[10px] font-semibold">
-                            {senderInitials}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div
+                  <div className="flex-1 divide-y overflow-y-auto">
+                    {filtered.length === 0 && (
+                      <div className="space-y-4 p-6">
+                        <p className="text-center text-sm text-muted-foreground">No notifications here.</p>
+                        {!isDemo && <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />}
+                      </div>
+                    )}
+                    {filtered.map((n) => {
+                      const Icon = KIND_ICONS[n.kind];
+                      const sender = users.find((u) => u.id === n.sender);
+                      const senderInitials =
+                        sender?.displayName
+                          .split(" ")
+                          .map((x) => x[0])
+                          .join("")
+                          .slice(0, 2) ?? "?";
+                      return (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => setSelected(n)}
                           className={cn(
-                            "absolute -right-0.5 -bottom-0.5 h-4 w-4 rounded-full flex items-center justify-center",
-                            KIND_COLORS[n.kind],
+                            "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/20",
+                            selected?.id === n.id && "bg-muted/30",
                           )}
                         >
-                          <Icon className="h-2.5 w-2.5" />
+                          <div className="relative shrink-0">
+                            <Avatar className="h-8 w-8 rounded-full">
+                              <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
+                                {senderInitials}
+                              </AvatarFallback>
+                            </Avatar>
+                            <div
+                              className={cn(
+                                "absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full",
+                                KIND_COLORS[n.kind],
+                              )}
+                            >
+                              <Icon className="h-2.5 w-2.5" />
+                            </div>
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <div className={cn("text-sm leading-snug", !n.read && "font-medium")}>{n.message}</div>
+                            <div className="mt-0.5 text-[11px] text-muted-foreground">{fmtRelative(n.timestamp)}</div>
+                          </div>
+                          {!n.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex min-w-0 flex-1 flex-col">
+                  {selected ? (
+                    <div className="space-y-4 p-6">
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={cn(
+                            "flex h-10 w-10 shrink-0 items-center justify-center rounded-lg",
+                            KIND_COLORS[selected.kind],
+                          )}
+                        >
+                          {React.createElement(KIND_ICONS[selected.kind], {
+                            className: "h-5 w-5",
+                          })}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium">{selected.message}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{fmtRelative(selected.timestamp)}</p>
                         </div>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className={cn("text-sm leading-snug", !n.read && "font-medium")}>{n.message}</div>
-                        <div className="text-[11px] text-muted-foreground mt-0.5">{fmtRelative(n.timestamp)}</div>
+
+                      <div className="space-y-2 rounded-lg border bg-muted/20 p-4">
+                        <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                          Related to
+                        </div>
+                        <Link
+                          href={selected.targetHref}
+                          className="flex items-center gap-1.5 text-sm font-medium hover:text-primary"
+                        >
+                          {selected.target}
+                          <span className="text-xs text-muted-foreground">→ View record</span>
+                        </Link>
                       </div>
-                      {!n.read && <span className="h-2 w-2 rounded-full bg-primary mt-1 shrink-0" />}
-                    </button>
-                  );
-                })}
+
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="sm" variant="outline" disabled={selected.read} onClick={markReadSelected}>
+                          Mark read
+                        </Button>
+                        {!selected.read && (
+                          <Button size="sm" variant="ghost" onClick={() => markUnreadStore(selected.id)}>
+                            Mark unread
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" onClick={dismissSelected}>
+                          Dismiss
+                        </Button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex flex-1 items-center justify-center">
+                      <EmptyState
+                        icon={Inbox}
+                        title="No notification selected"
+                        description="Choose a notification on the left to view details."
+                      />
+                    </div>
+                  )}
+                </div>
               </div>
-            </div>
-
-            <div className="flex-1 flex flex-col min-w-0">
-              {selected ? (
-                <div className="p-6 space-y-4">
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={cn(
-                        "flex h-10 w-10 items-center justify-center rounded-lg shrink-0",
-                        KIND_COLORS[selected.kind],
-                      )}
-                    >
-                      {React.createElement(KIND_ICONS[selected.kind], {
-                        className: "h-5 w-5",
-                      })}
-                    </div>
-                    <div>
-                      <p className="text-sm font-medium">{selected.message}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{fmtRelative(selected.timestamp)}</p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-lg border p-4 bg-muted/20 space-y-2">
-                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Related to</div>
-                    <Link
-                      href={selected.targetHref}
-                      className="text-sm font-medium hover:text-primary flex items-center gap-1.5"
-                    >
-                      {selected.target}
-                      <span className="text-xs text-muted-foreground">→ View record</span>
-                    </Link>
-                  </div>
-
-                  <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" disabled={selected.read} onClick={markReadSelected}>
-                      Mark read
-                    </Button>
-                    {!selected.read && (
-                      <Button size="sm" variant="ghost" onClick={() => markUnreadStore(selected.id)}>
-                        Mark unread
-                      </Button>
-                    )}
-                    <Button size="sm" variant="ghost" onClick={dismissSelected}>
-                      Dismiss
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex-1 flex items-center justify-center">
-                  <EmptyState
-                    icon={Inbox}
-                    title="No notification selected"
-                    description="Choose a notification on the left to view details."
-                  />
-                </div>
-              )}
-            </div>
+            )}
           </div>
         ) : (
           <div className="flex h-full min-h-[420px] divide-x">

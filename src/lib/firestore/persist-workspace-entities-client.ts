@@ -17,6 +17,8 @@ import type {
   Profile,
   Touchpoint,
   TimelineEvent,
+  WorkspaceChatChannel,
+  WorkspaceChatMessage,
 } from "@/lib/types";
 
 export async function persistNoteCreate(
@@ -227,4 +229,49 @@ export async function persistProfileUpdate(
     payload.notes = patch.notes && patch.notes.trim() ? patch.notes : deleteField();
   }
   await updateDoc(doc(db, COLLECTIONS.profiles, profileId), payload);
+}
+
+export async function persistWorkspaceChatChannelCreate(
+  db: Firestore,
+  organizationId: string,
+  ch: WorkspaceChatChannel,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    kind: ch.kind,
+    slug: ch.slug,
+    name: ch.name,
+    createdById: ch.createdById,
+    createdAt: ch.createdAt,
+    updatedAt: serverTimestamp(),
+  };
+  if (ch.memberIds?.length) data.memberIds = ch.memberIds;
+  await setDoc(doc(db, COLLECTIONS.workspaceChatChannels, ch.id), data);
+}
+
+export async function persistWorkspaceChatMessageCreate(
+  db: Firestore,
+  organizationId: string,
+  msg: WorkspaceChatMessage,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    channelId: msg.channelId,
+    authorId: msg.authorId,
+    body: msg.body,
+    createdAt: msg.createdAt,
+  };
+  if (msg.mentionUserIds?.length) data.mentionUserIds = msg.mentionUserIds;
+  await setDoc(doc(db, COLLECTIONS.workspaceChatMessages, msg.id), data);
+}
+
+export async function persistWorkspaceChatChannelUpdateName(
+  db: Firestore,
+  channelId: string,
+  name: string,
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTIONS.workspaceChatChannels, channelId), {
+    name,
+    updatedAt: serverTimestamp(),
+  });
 }

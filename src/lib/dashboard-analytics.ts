@@ -139,6 +139,7 @@ export type ActivityTrendPoint = {
   replies: number;
   meetings: number;
   closed: number;
+  newLeads: number;
 };
 
 /**
@@ -151,8 +152,8 @@ export function buildActivityTrendSeries(
   days = 30,
 ): ActivityTrendPoint[] {
   const keys = rollingDayKeys(days);
-  const byDay = new Map<string, { replies: number; meetings: number; closed: number }>();
-  for (const k of keys) byDay.set(k, { replies: 0, meetings: 0, closed: 0 });
+  const byDay = new Map<string, { replies: number; meetings: number; closed: number; newLeads: number }>();
+  for (const k of keys) byDay.set(k, { replies: 0, meetings: 0, closed: 0, newLeads: 0 });
 
   for (const r of activityRecords) {
     const k = dayKey(r.occurredAt);
@@ -170,6 +171,12 @@ export function buildActivityTrendSeries(
     const k = dayKey(d.wonAt);
     const b = byDay.get(k);
     if (b) b.closed += 1;
+  }
+
+  for (const l of leads) {
+    const k = dayKey(l.createdAt);
+    const b = byDay.get(k);
+    if (b) b.newLeads += 1;
   }
 
   return keys.map((k) => {

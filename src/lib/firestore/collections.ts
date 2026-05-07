@@ -19,6 +19,8 @@ export const COLLECTIONS = {
   scriptLibrary: "scriptLibrary",
   ingestQueue: "ingestQueue",
   auditLog: "auditLog",
+  workspaceChatChannels: "workspaceChatChannels",
+  workspaceChatMessages: "workspaceChatMessages",
   /** SaaS tenants — read/write only through server (Admin SDK). */
   organizations: "organizations",
   /** Product-level operators — read/write only through server (Admin SDK). */
@@ -53,4 +55,6 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.profiles,
   COLLECTIONS.scriptLibrary,
   COLLECTIONS.auditLog,
+  COLLECTIONS.workspaceChatChannels,
+  COLLECTIONS.workspaceChatMessages,
 ] as const;

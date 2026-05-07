@@ -116,6 +116,22 @@ service cloud.firestore {
               : (inCallerOrg(resource.data) && tenantUnchanged()));
     }
 
+    function workspaceChatChannelDoc(channelId) {
+      return get(/databases/$(database)/documents/workspaceChatChannels/$(channelId)).data;
+    }
+
+    function canAccessWorkspaceChatChannel(ch) {
+      return ch.organizationId == callerOrgId()
+        && (
+          ch.get('kind', 'public') == 'public'
+          || (
+            ch.get('kind', '') == 'dm'
+            && ch.get('memberIds', []) is list
+            && request.auth.uid in ch.memberIds
+          )
+        );
+    }
+
     /** Team tasks: only assignee, requester, or oversight roles may read/update. */
     function leadTaskElevated() {
       return isOrgAtLeast('admin')
@@ -229,6 +245,65 @@ service cloud.firestore {
       allow read: if tenantReadable() && isOrgAtLeast('admin');
       allow create: if tenantWritable();
       allow update, delete: if false;
+    }
+
+    match /workspaceChatChannels/{channelId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && canAccessWorkspaceChatChannel(resource.data);
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && (
+          request.resource.data.kind == 'public'
+          || (
+            request.resource.data.kind == 'dm'
+            && request.resource.data.memberIds is list
+            && request.resource.data.memberIds.size() == 2
+            && request.auth.uid in request.resource.data.memberIds
+          )
+        );
+
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.kind == resource.data.kind
+        && (
+          isOrgAtLeast('admin')
+          || resource.data.createdById == request.auth.uid
+        );
+
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && isOrgAtLeast('admin');
+    }
+
+    match /workspaceChatMessages/{messageId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && exists(/databases/$(database)/documents/workspaceChatChannels/$(resource.data.channelId))
+        && canAccessWorkspaceChatChannel(
+          workspaceChatChannelDoc(resource.data.channelId)
+        );
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.authorId == request.auth.uid
+        && exists(/databases/$(database)/documents/workspaceChatChannels/$(request.resource.data.channelId))
+        && canAccessWorkspaceChatChannel(
+          workspaceChatChannelDoc(request.resource.data.channelId)
+        );
+
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && tenantUnchanged()
+        && resource.data.authorId == request.auth.uid
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.channelId == resource.data.channelId;
+
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && resource.data.authorId == request.auth.uid;
     }
 
     // Server-only collections: admin SDK bypasses rules; no client access.

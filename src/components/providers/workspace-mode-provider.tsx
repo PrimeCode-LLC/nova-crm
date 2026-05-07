@@ -64,6 +64,7 @@ import {
   type WorkspaceSessionV2,
 } from "@/lib/workspace-session";
 import { STAGES_BY_KEY } from "@/lib/constants";
+import { enrichLeadsIdleState } from "@/lib/lead-idle";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
   WorkspaceLookup & {
@@ -948,16 +949,17 @@ export function WorkspaceModeProvider({
   );
 
   const value = React.useMemo<WorkspaceContextValue>(() => {
-    const lookup = createWorkspaceLookup(snapshot);
+    const snapshotWithIdle = { ...snapshot, leads: enrichLeadsIdleState(snapshot.leads) };
+    const lookup = createWorkspaceLookup(snapshotWithIdle);
     const getOwnerDisplayName = (uid: string): string | undefined => {
       const id = uid?.trim();
       if (!id) return undefined;
-      const fromUser = snapshot.users.find((u) => u.id === id)?.displayName?.trim();
+      const fromUser = snapshotWithIdle.users.find((u) => u.id === id)?.displayName?.trim();
       if (fromUser) return fromUser;
       return orgMemberLabels[id]?.trim() || undefined;
     };
     return {
-      ...snapshot,
+      ...snapshotWithIdle,
       ...lookup,
       mode,
       isDemo: mode === "demo",

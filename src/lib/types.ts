@@ -225,6 +225,12 @@ export interface PermissionOverride {
   action: "read" | "write" | "delete";
   scope: "own" | "team" | "department" | "all" | "custom";
   effect: "grant" | "deny";
+  /** When `scope` is `department`, which workspace department this rule refers to (audit trail; row rules still org-wide until enforced). */
+  scopeDepartmentId?: string;
+  /** When `scope` is `custom`, documents the intended boundary for admins and future policy work. */
+  scopeCustomDefinition?: string;
+  /** When `scope` is `team`, optionally anchor the subtree to a manager (that person + their reports). Omit for “this user’s team” default. */
+  scopeTeamAnchorUserId?: string;
   note?: string;
   createdBy: string;
   createdAt: ISODate;
@@ -494,5 +500,35 @@ export interface TimelineEvent {
   actorId?: string;
   summary: string;
   payload?: Record<string, unknown>;
+  createdAt: ISODate;
+}
+
+/** Org-wide Slack-style chat (Firestore `workspaceChatChannels`). */
+export type WorkspaceChatChannelKind = "public" | "dm";
+
+export interface WorkspaceChatChannel {
+  id: string;
+  organizationId: string;
+  kind: WorkspaceChatChannelKind;
+  /** Lowercase handle without # for public channels (e.g. general, sales). */
+  slug: string;
+  /** Display label (e.g. general, random-1, or other user's name for DMs). */
+  name: string;
+  /** For `dm`: exactly two Firebase user ids in the org. */
+  memberIds?: string[];
+  createdById: string;
+  createdAt: ISODate;
+  updatedAt?: ISODate;
+}
+
+/** One chat line (Firestore `workspaceChatMessages`). */
+export interface WorkspaceChatMessage {
+  id: string;
+  organizationId: string;
+  channelId: string;
+  authorId: string;
+  body: string;
+  /** Parsed from `@[uid]` tokens at send time for notifications/search. */
+  mentionUserIds?: string[];
   createdAt: ISODate;
 }
