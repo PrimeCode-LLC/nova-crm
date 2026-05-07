@@ -32,6 +32,7 @@ import {
   filterLeadsByOwnerScope,
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import type { ChannelKey } from "@/lib/types";
 import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users } from "lucide-react";
 import {
@@ -55,6 +56,14 @@ import {
 import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+
+const DASHBOARD_RANGE_OPTIONS = [
+  { key: "7d", label: "Last 7 days" },
+  { key: "30d", label: "Last 30 days" },
+  { key: "90d", label: "Last 90 days" },
+  { key: "qtd", label: "Quarter to date" },
+  { key: "ytd", label: "Year to date" },
+] as const;
 
 export default function DashboardPage() {
   const {
@@ -81,6 +90,7 @@ export default function DashboardPage() {
   const [channelScope, setChannelScope] = React.useState<ChannelKey[]>([]);
   const [draftChannels, setDraftChannels] = React.useState<ChannelKey[]>([]);
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [timeRange, setTimeRange] = React.useState("30d");
 
   const ownerScopeDeps = React.useMemo(
     () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
@@ -248,10 +258,12 @@ export default function DashboardPage() {
         description={getDashboardOverviewDescription(viewer?.roleId)}
         actions={
           <>
-            <Select defaultValue="30d">
+            <Select value={timeRange} onValueChange={(v) => v && setTimeRange(v)}>
               <SelectTrigger size="sm" className="w-32">
                 <Calendar className="h-3.5 w-3.5 mr-1" />
-                <SelectValue />
+                <SelectValue>
+                  {selectTriggerLabelByKey(timeRange, DASHBOARD_RANGE_OPTIONS) ?? undefined}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="7d">Last 7 days</SelectItem>

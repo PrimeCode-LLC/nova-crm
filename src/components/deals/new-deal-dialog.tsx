@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Deal, Lead, PipelineStage, User } from "@/lib/types";
 import { PIPELINE_STAGES } from "@/lib/constants";
+import {
+  leadPickerTriggerLabel,
+  selectTriggerLabelById,
+  selectTriggerLabelByKey,
+} from "@/lib/base-ui-select-label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -216,6 +221,16 @@ export function NewDealDialog({
 
   const canSubmit = leads.length > 0 && Boolean(leads.find((l) => l.id === resolvedLeadId));
 
+  const dealLeadTriggerLabel = leadPickerTriggerLabel(resolvedLeadId, leads);
+  const resolvedOwnerId =
+    ownerOptions.length === 0
+      ? form.ownerId
+      : ownerOptions.some((o) => o.id === form.ownerId)
+        ? form.ownerId
+        : ownerOptions[0]!.id;
+  const dealOwnerTriggerLabel = selectTriggerLabelById(resolvedOwnerId, ownerOptions);
+  const dealStageTriggerLabel = selectTriggerLabelByKey(form.stage, PIPELINE_STAGES);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" showCloseButton>
@@ -239,7 +254,7 @@ export function NewDealDialog({
                   }
                 >
                   <SelectTrigger id="deal-lead" className="w-full">
-                    <SelectValue placeholder="Select lead" />
+                    <SelectValue placeholder="Select lead">{dealLeadTriggerLabel ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {leads.map((l) => (
@@ -273,7 +288,7 @@ export function NewDealDialog({
                   onValueChange={(v) => handleStageChange(v as PipelineStage)}
                 >
                   <SelectTrigger id="deal-stage">
-                    <SelectValue />
+                    <SelectValue>{dealStageTriggerLabel ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {PIPELINE_STAGES.map((s) => (
@@ -298,7 +313,7 @@ export function NewDealDialog({
                     }
                   >
                     <SelectTrigger id="deal-owner">
-                      <SelectValue placeholder="Select owner" />
+                      <SelectValue placeholder="Select owner">{dealOwnerTriggerLabel ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {ownerOptions.map((o) => (

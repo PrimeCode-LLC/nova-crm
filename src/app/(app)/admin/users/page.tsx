@@ -43,6 +43,7 @@ import { ROLES } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import type { OrgMemberRole, Role, User } from "@/lib/types";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
+import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import {
   Search,
   UserPlus,
@@ -66,6 +67,13 @@ const STATUS_LABEL: Record<User["status"], string> = {
   active: "Active",
   inactive: "Inactive",
   pip: "PIP",
+};
+
+const INVITE_ORG_ROLE_LABEL: Record<string, string> = {
+  member: "Member",
+  manager: "Manager",
+  admin: "Admin",
+  owner: "Owner",
 };
 
 function titleFromEmail(email: string): string {
@@ -536,7 +544,9 @@ function AdminUsersPageContent() {
               <Label className="text-xs">Role</Label>
               <Select value={inviteRole || undefined} onValueChange={(v) => setInviteRole(v ?? "")}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select role" />
+                  <SelectValue placeholder="Select role">
+                    {inviteRole ? INVITE_ORG_ROLE_LABEL[inviteRole] ?? inviteRole : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="member">Member</SelectItem>
@@ -550,7 +560,9 @@ function AdminUsersPageContent() {
               <Label className="text-xs">Department (optional)</Label>
               <Select value={inviteDept} onValueChange={(v) => setInviteDept((v as typeof NONE) ?? NONE)}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="None" />
+                  <SelectValue placeholder="None">
+                    {inviteDept === NONE ? "None" : selectTriggerLabelByIdName(inviteDept, departments) ?? "Department"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>None</SelectItem>
@@ -618,7 +630,7 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Role</Label>
                 <Select value={editRole} onValueChange={(v) => setEditRole((v as Role) ?? "salesperson")}>
                   <SelectTrigger className="h-9">
-                    <SelectValue />
+                    <SelectValue>{ROLES[editRole]?.label ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(ROLES).map(([k, v]) => (
@@ -633,7 +645,9 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Department</Label>
                 <Select value={editDept} onValueChange={(v) => setEditDept(v ?? NONE)}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="None" />
+                    <SelectValue placeholder="None">
+                      {editDept === NONE ? "None" : selectTriggerLabelByIdName(editDept, departments) ?? "Department"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>None</SelectItem>
@@ -649,7 +663,11 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Reports to</Label>
                 <Select value={editManager} onValueChange={(v) => setEditManager(v ?? NONE)}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="None" />
+                    <SelectValue placeholder="None">
+                      {editManager === NONE
+                        ? "None"
+                        : managerCandidates.find((m) => m.id === editManager)?.displayName ?? "Manager"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>None</SelectItem>
@@ -665,7 +683,7 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Status</Label>
                 <Select value={editStatus} onValueChange={(v) => setEditStatus((v as User["status"]) ?? "active")}>
                   <SelectTrigger className="h-9">
-                    <SelectValue />
+                    <SelectValue>{STATUS_LABEL[editStatus]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">Active</SelectItem>

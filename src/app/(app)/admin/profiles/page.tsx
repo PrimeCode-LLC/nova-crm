@@ -36,6 +36,11 @@ import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { CHANNEL_LIST } from "@/lib/constants";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
+import {
+  capitalizeSelectToken,
+  selectTriggerLabelById,
+  selectTriggerLabelByKey,
+} from "@/lib/base-ui-select-label";
 import type { ChannelKey, Profile } from "@/lib/types";
 import { Plus, User } from "lucide-react";
 import { toast } from "sonner";
@@ -287,7 +292,9 @@ export default function AdminProfilesPage() {
                 <Label className="text-xs">Channel</Label>
                 <Select value={channel} onValueChange={(v) => setChannel((v ?? "") as ChannelKey)}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Channel" />
+                    <SelectValue placeholder="Channel">
+                      {selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {CHANNEL_LIST.map((c) => (
@@ -302,7 +309,7 @@ export default function AdminProfilesPage() {
                 <Label className="text-xs">Type</Label>
                 <Select value={type} onValueChange={(v) => setType(v ?? "")}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Type" />
+                    <SelectValue placeholder="Type">{capitalizeSelectToken(type) ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {PROFILE_TYPES.map((t) => (
@@ -318,7 +325,15 @@ export default function AdminProfilesPage() {
               <Label className="text-xs">Owner</Label>
               <Select value={ownerId} onValueChange={(v) => setOwnerId(v ?? "")}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select owner" />
+                  <SelectValue placeholder="Select owner">
+                    {selectTriggerLabelById(ownerId, newOwnerOptions) ??
+                      (ownerId
+                        ? getOwnerDisplayName(ownerId)?.trim() ||
+                          users.find((u) => u.id === ownerId)?.displayName?.trim() ||
+                          users.find((u) => u.id === ownerId)?.email?.split("@")[0]?.trim() ||
+                          undefined
+                        : undefined)}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {newOwnerOptions.map((o) => (
@@ -388,7 +403,9 @@ export default function AdminProfilesPage() {
                     onValueChange={(v) => setDraftChannel((v ?? "") as ChannelKey)}
                   >
                     <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Channel" />
+                      <SelectValue placeholder="Channel">
+                        {selectTriggerLabelByKey(draftChannel, CHANNEL_LIST) ?? undefined}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {CHANNEL_LIST.map((c) => (
@@ -403,7 +420,7 @@ export default function AdminProfilesPage() {
                   <Label className="text-xs">Type</Label>
                   <Select value={draftType} onValueChange={(v) => setDraftType(v ?? "")}>
                     <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Type" />
+                      <SelectValue placeholder="Type">{capitalizeSelectToken(draftType) ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {PROFILE_TYPES.map((t) => (
@@ -419,7 +436,15 @@ export default function AdminProfilesPage() {
                 <Label className="text-xs">Owner</Label>
                 <Select value={draftOwnerId} onValueChange={(v) => setDraftOwnerId(v ?? "")}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Owner" />
+                    <SelectValue placeholder="Owner">
+                      {selectTriggerLabelById(draftOwnerId, detailOwnerOptions) ??
+                        (draftOwnerId
+                          ? getOwnerDisplayName(draftOwnerId)?.trim() ||
+                            users.find((u) => u.id === draftOwnerId)?.displayName?.trim() ||
+                            users.find((u) => u.id === draftOwnerId)?.email?.split("@")[0]?.trim() ||
+                            undefined
+                          : undefined)}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {detailOwnerOptions.map((o) => (

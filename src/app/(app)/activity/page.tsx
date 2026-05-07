@@ -350,7 +350,11 @@ export default function ActivityPage() {
                     <Label className="text-xs">Person</Label>
                     <Select value={personFilter} onValueChange={(v) => setPersonFilter(v || FILTER_ALL)}>
                       <SelectTrigger className="h-9">
-                        <SelectValue placeholder="All people" />
+                        <SelectValue placeholder="All people">
+                          {personFilter === FILTER_ALL
+                            ? "All people"
+                            : userMap.get(personFilter)?.displayName?.trim() || "Person"}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={FILTER_ALL}>All people</SelectItem>
@@ -371,7 +375,9 @@ export default function ActivityPage() {
                       onValueChange={(v) => setDepartmentFilter(v || FILTER_ALL)}
                     >
                       <SelectTrigger className="h-9">
-                        <SelectValue placeholder="All departments" />
+                        <SelectValue placeholder="All departments">
+                          {departmentFilter === FILTER_ALL ? "All departments" : deptName(departmentFilter)}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={FILTER_ALL}>All departments</SelectItem>
@@ -389,7 +395,11 @@ export default function ActivityPage() {
                     <Label className="text-xs">Channel</Label>
                     <Select value={channelFilter} onValueChange={(v) => setChannelFilter(v || FILTER_ALL)}>
                       <SelectTrigger className="h-9">
-                        <SelectValue placeholder="All channels" />
+                        <SelectValue placeholder="All channels">
+                          {channelFilter === FILTER_ALL
+                            ? "All channels"
+                            : channelLabelByKey.get(channelFilter) ?? channelFilter.replace(/_/g, " ")}
+                        </SelectValue>
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value={FILTER_ALL}>All channels</SelectItem>
@@ -491,7 +501,7 @@ function DailyRollupForm({
   onSaved: () => void;
   upsertLocalRollup: (row: ActivityCounterRow) => void;
 }) {
-  const { profiles } = useWorkspace();
+  const { profiles, getProfileById } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
     () => buildRollupChannelOptions(customChannels),
@@ -582,6 +592,15 @@ function DailyRollupForm({
 
   const profileOptions = profiles.filter((p) => p.channel === channel);
 
+  const profileRollupTriggerLabel = React.useMemo(() => {
+    if (!profileId) return "None";
+    return (
+      profileOptions.find((p) => p.id === profileId)?.name ??
+      getProfileById(profileId)?.name ??
+      "Profile"
+    );
+  }, [profileId, profileOptions, getProfileById]);
+
   return (
     <Card>
       <CardHeader>
@@ -632,7 +651,7 @@ function DailyRollupForm({
               onValueChange={(v) => setProfileId(!v || v === PROFILE_NONE ? undefined : v)}
             >
               <SelectTrigger className="h-9">
-                <SelectValue placeholder="None" />
+                <SelectValue placeholder="None">{profileRollupTriggerLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value={PROFILE_NONE}>None</SelectItem>

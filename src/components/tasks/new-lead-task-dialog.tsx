@@ -26,6 +26,11 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import {
+  leadPickerTriggerLabelWithSentinel,
+  selectTriggerLabelById,
+  selectTriggerLabelByKey,
+} from "@/lib/base-ui-select-label";
 
 function isoFromDateInput(dateStr: string): string | undefined {
   if (!dateStr.trim()) return undefined;
@@ -78,6 +83,13 @@ const TASK_TYPES: { key: LeadTaskType; label: string }[] = [
   { key: "document", label: "Document" },
   { key: "other", label: "Other" },
 ];
+
+const LEAD_NONE = "__none__";
+
+const VISIBILITY_TRIGGER: Record<LeadTaskVisibility, string> = {
+  on_lead: "Linked to lead",
+  assignees_only: "Handoff style",
+};
 
 export function NewLeadTaskDialog({
   open,
@@ -238,7 +250,9 @@ export function NewLeadTaskDialog({
                 items={assigneeOptions.map((o) => ({ value: o.id, label: o.label }))}
               >
                 <SelectTrigger>
-                  <SelectValue placeholder={assigneesLoading ? "Loading team…" : "Teammate"} />
+                  <SelectValue placeholder={assigneesLoading ? "Loading team…" : "Teammate"}>
+                    {selectTriggerLabelById(assigneeId, assigneeOptions) ?? undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {assigneeOptions.map((o) => (
@@ -268,7 +282,14 @@ export function NewLeadTaskDialog({
                   ]}
                 >
                   <SelectTrigger id="task-lead">
-                    <SelectValue placeholder="No lead — internal task" />
+                    <SelectValue placeholder="No lead — internal task">
+                      {leadPickerTriggerLabelWithSentinel(
+                        leadId || LEAD_NONE,
+                        LEAD_NONE,
+                        "No lead — internal task",
+                        leads,
+                      ) ?? undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="__none__">No lead — internal task</SelectItem>
@@ -303,7 +324,7 @@ export function NewLeadTaskDialog({
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{selectTriggerLabelByKey(taskType, TASK_TYPES) ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {TASK_TYPES.map((x) => (
@@ -336,7 +357,7 @@ export function NewLeadTaskDialog({
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{VISIBILITY_TRIGGER[visibility]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="on_lead">

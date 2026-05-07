@@ -3,6 +3,8 @@
 import * as React from "react";
 import { toast } from "sonner";
 import type { Followup, Lead, LeadPriority } from "@/lib/types";
+import { PRIORITY_TONE } from "@/lib/constants";
+import { leadPickerTriggerLabel } from "@/lib/base-ui-select-label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -124,7 +126,9 @@ export function NewFollowupDialog({
                   disabled={leads.length === 0}
                 >
                   <SelectTrigger id="followup-lead">
-                    <SelectValue placeholder="Select a lead" />
+                    <SelectValue placeholder="Select a lead">
+                      {leadPickerTriggerLabel(leadId, leads) ?? undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {leads.map((l) => (
@@ -175,7 +179,7 @@ export function NewFollowupDialog({
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{PRIORITY_TONE[priority]?.label ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="low">Low</SelectItem>

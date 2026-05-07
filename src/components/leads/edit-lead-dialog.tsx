@@ -44,6 +44,7 @@ import {
   COMPANY_SIZES,
   PUSH_STATUS_TONE,
 } from "@/lib/constants";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 
 const UNSET = "__unset__" as const;
 type UnsetToken = typeof UNSET;
@@ -308,7 +309,7 @@ export function EditLeadDialog({
                 <Label>Channel</Label>
                 <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {CHANNEL_LIST.map((c) => (
@@ -337,7 +338,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setCompanySize(v as CompanySize | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {companySize === UNSET ? undefined : companySize}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -356,7 +359,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setRevenueRange(v as RevenueRange | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {revenueRange === UNSET ? undefined : REVENUE_RANGES[revenueRange as RevenueRange]}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -377,7 +382,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setPushToInstantly(v as PushStatus | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {pushToInstantly === UNSET ? undefined : PUSH_STATUS_TONE[pushToInstantly as PushStatus].label}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -396,7 +403,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setPushToLinkedIn(v as PushStatus | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {pushToLinkedIn === UNSET ? undefined : PUSH_STATUS_TONE[pushToLinkedIn as PushStatus].label}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -419,7 +428,7 @@ export function EditLeadDialog({
                 <Label>Stage</Label>
                 <Select value={stage} onValueChange={(v) => v && setStage(v as PipelineStage)}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{selectTriggerLabelByKey(stage, PIPELINE_STAGES) ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {PIPELINE_STAGES.map((s) => (
@@ -435,7 +444,7 @@ export function EditLeadDialog({
                   <Label>Temperature</Label>
                   <Select value={temperature} onValueChange={(v) => v && setTemperature(v as LeadTemperature)}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>{TEMPERATURE_TONE[temperature]?.label ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(Object.keys(TEMPERATURE_TONE) as LeadTemperature[]).map((k) => (
@@ -450,7 +459,7 @@ export function EditLeadDialog({
                   <Label>Priority</Label>
                   <Select value={priority} onValueChange={(v) => v && setPriority(v as LeadPriority)}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>{PRIORITY_TONE[priority]?.label ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(Object.keys(PRIORITY_TONE) as LeadPriority[]).map((k) => (
@@ -506,7 +515,7 @@ export function EditLeadDialog({
                       <Label>{label} (1–5)</Label>
                       <Select value={val} onValueChange={(v) => v && setVal(v)}>
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue>{val}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {[1, 2, 3, 4, 5].map((n) => (

@@ -54,6 +54,13 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import {
+  capitalizeSelectToken,
+  leadPickerTriggerLabel,
+  selectTriggerLabelById,
+  selectTriggerLabelByIdName,
+  selectTriggerLabelByKey,
+} from "@/lib/base-ui-select-label";
 import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
 
 export type QuickAddPill = "lead" | "contact" | "account" | "task" | "profile";
@@ -70,6 +77,9 @@ const PILLS: { key: Pill; label: string; icon: React.ElementType }[] = [
   { key: "profile", label: "Profile", icon: User },
 ];
 
+/** Channels where a persona/profile should be recorded on the lead (matches admin Profiles). */
+const LEAD_CHANNEL_REQUIRES_PROFILE: readonly ChannelKey[] = ["upwork", "job_apply"];
+
 // ── Lead schema ──
 const leadSchema = z.object({
   contactName: z.string().min(1, "Name required"),
@@ -78,6 +88,7 @@ const leadSchema = z.object({
   email: z.string().email("Invalid email").or(z.literal("")),
   stage: z.string().min(1, "Stage required"),
   ownerId: z.string().min(1, "Owner required"),
+  profileId: z.string().optional(),
   estimatedValue: z.string().optional(),
   priority: z.string().min(1, "Priority required"),
   temperature: z.string().min(1, "Temperature required"),
@@ -257,7 +268,7 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
           <label className="text-xs font-medium text-foreground">Type</label>
           <Select value={type} onValueChange={(v) => setType(v ?? "")}>
             <SelectTrigger className="h-9">
-              <SelectValue placeholder="Type" />
+              <SelectValue placeholder="Type">{capitalizeSelectToken(type) || undefined}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {PROFILE_TYPES.map((t) => (
@@ -273,7 +284,15 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
         <label className="text-xs font-medium text-foreground">Owner</label>
         <Select value={ownerId} onValueChange={(v) => setOwnerId(v ?? "")}>
           <SelectTrigger className="h-9">
-            <SelectValue placeholder="Owner" />
+            <SelectValue placeholder="Owner">
+              {selectTriggerLabelById(ownerId, ownerOptions) ??
+                (ownerId
+                  ? getOwnerDisplayName(ownerId)?.trim() ||
+                    users.find((u) => u.id === ownerId)?.displayName?.trim() ||
+                    users.find((u) => u.id === ownerId)?.email?.split("@")[0]?.trim() ||
+                    undefined
+                  : undefined)}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {ownerOptions.map((o) => (
@@ -313,7 +332,17 @@ function LeadFormBody({
   onClose: () => void;
   defaultStage?: PipelineStage;
 }) {
-  const { users, currentUserId, addAccount, addContact, addLead, isDemo } = useWorkspace();
+  const {
+    users,
+    currentUserId,
+    getOwnerDisplayName,
+    getProfileById,
+    profiles,
+    addAccount,
+    addContact,
+    addLead,
+    isDemo,
+  } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
     () => buildChannelOptions(customChannels),
@@ -325,7 +354,6 @@ function LeadFormBody({
   );
   /** Live workspace snapshot often has no `users` / `currentUserId`; session gives the signed-in uid for owner + picker. */
   const [sessionOwnerId, setSessionOwnerId] = React.useState<string | null>(null);
-  const [sessionOwnerLabel, setSessionOwnerLabel] = React.useState("");
 
   React.useEffect(() => {
     let cancelled = false;
@@ -337,32 +365,12 @@ function LeadFormBody({
         };
         if (cancelled || !data.user?.uid) return;
         setSessionOwnerId(data.user.uid);
-        const label =
-          data.user.name?.trim() ||
-          data.user.email?.split("@")[0]?.trim() ||
-          "You";
-        setSessionOwnerLabel(label);
       })
       .catch(() => {});
     return () => {
       cancelled = true;
     };
   }, []);
-
-  type OwnerOption = { id: string; label: string };
-  const ownerOptions = React.useMemo((): OwnerOption[] => {
-    const list: OwnerOption[] = users.map((u) => ({
-      id: u.id,
-      label: u.displayName,
-    }));
-    if (sessionOwnerId && !list.some((o) => o.id === sessionOwnerId)) {
-      list.push({
-        id: sessionOwnerId,
-        label: sessionOwnerLabel ? `${sessionOwnerLabel} (you)` : "You",
-      });
-    }
-    return list;
-  }, [users, sessionOwnerId, sessionOwnerLabel]);
 
   const form = useForm<LeadForm>({
     resolver: zodResolver(leadSchema),
@@ -373,16 +381,49 @@ function LeadFormBody({
       email: "",
       stage: defaultStage,
       ownerId: "",
+      profileId: "",
       estimatedValue: "",
       priority: "medium",
       temperature: "cold",
     },
   });
   const selectedChannel = form.watch("channel");
+  const watchedOwnerId = form.watch("ownerId");
   const selectedChannelLabel = React.useMemo(
     () => channelLabelFromValue(selectedChannel, channelOptions),
     [selectedChannel, channelOptions],
   );
+
+  const ownerPickerCurrentUser = (currentUserId || sessionOwnerId || "").trim();
+  const ownerOptions = React.useMemo(
+    () =>
+      buildWorkspaceOwnerPickerOptions(
+        users,
+        ownerPickerCurrentUser,
+        getOwnerDisplayName,
+        watchedOwnerId ? [watchedOwnerId] : [],
+      ),
+    [users, ownerPickerCurrentUser, getOwnerDisplayName, watchedOwnerId],
+  );
+
+  const channelNeedsProfile =
+    selectedChannel === "upwork" || selectedChannel === "job_apply";
+  const profileOptionsForChannel = React.useMemo(() => {
+    if (!channelNeedsProfile || !selectedChannel) return [];
+    return profiles.filter(
+      (p) => p.channel === selectedChannel && p.active !== false,
+    );
+  }, [profiles, selectedChannel, channelNeedsProfile]);
+
+  React.useEffect(() => {
+    if (!channelNeedsProfile) {
+      form.setValue("profileId", "");
+      return;
+    }
+    const cur = form.getValues("profileId")?.trim();
+    if (cur && profileOptionsForChannel.some((p) => p.id === cur)) return;
+    form.setValue("profileId", profileOptionsForChannel.length === 1 ? profileOptionsForChannel[0]!.id : "");
+  }, [channelNeedsProfile, profileOptionsForChannel, form]);
 
   const defaultOwnerId =
     currentUserId || sessionOwnerId || users[0]?.id || "";
@@ -401,6 +442,17 @@ function LeadFormBody({
     if (!ownerId) {
       toast.error("Could not assign owner. Try again after refresh.");
       return;
+    }
+    const ch = values.channel as ChannelKey;
+    if (LEAD_CHANNEL_REQUIRES_PROFILE.includes(ch)) {
+      const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+      if (opts.length > 0 && !values.profileId?.trim()) {
+        form.setError("profileId", {
+          type: "manual",
+          message: ch === "upwork" ? "Select an Upwork profile" : "Select a CV / apply profile",
+        });
+        return;
+      }
     }
     const now = new Date().toISOString();
     const accountId = newEntityId("a");
@@ -436,11 +488,13 @@ function LeadFormBody({
       createdAt: now,
       updatedAt: now,
     };
+    const profileIdTrim = values.profileId?.trim();
     const lead: Lead = {
       id: leadId,
       accountId,
       contactId,
       channel: values.channel as ChannelKey,
+      profileId: profileIdTrim || undefined,
       stage: values.stage as PipelineStage,
       temperature: values.temperature as LeadTemperature,
       priority: values.priority as LeadPriority,
@@ -514,11 +568,49 @@ function LeadFormBody({
               <FormMessage className="text-xs" />
             </FormItem>
           )} />
+          {channelNeedsProfile ? (
+            <FormField
+              control={form.control}
+              name="profileId"
+              render={({ field }) => (
+                <FormItem className="col-span-6 min-w-0">
+                  <FormLabel className="text-xs font-medium text-foreground">
+                    {selectedChannel === "upwork" ? "Upwork profile" : "CV / apply profile"}
+                  </FormLabel>
+                  {profileOptionsForChannel.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No active profiles for this channel. Add one under Admin → Profiles.
+                    </p>
+                  ) : (
+                    <Select value={field.value} onValueChange={field.onChange}>
+                      <FormControl>
+                        <SelectTrigger className="h-9 w-full min-w-0">
+                          <SelectValue placeholder="Select profile">
+                            {profileOptionsForChannel.find((p) => p.id === field.value)?.name ??
+                              getProfileById(field.value)?.name ??
+                              undefined}
+                          </SelectValue>
+                        </SelectTrigger>
+                      </FormControl>
+                      <SelectContent>
+                        {profileOptionsForChannel.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              )}
+            />
+          ) : null}
           <FormField control={form.control} name="stage" render={({ field }) => (
             <FormItem className="col-span-6 min-w-0 sm:col-span-2">
               <FormLabel className="text-xs font-medium text-foreground">Stage</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue /></SelectTrigger></FormControl>
+                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue>{selectTriggerLabelByKey(field.value, PIPELINE_STAGES) ?? undefined}</SelectValue></SelectTrigger></FormControl>
                 <SelectContent>{PIPELINE_STAGES.map((s) => <SelectItem key={s.key} value={s.key}>{s.label}</SelectItem>)}</SelectContent>
               </Select>
               <FormMessage className="text-xs" />
@@ -528,7 +620,7 @@ function LeadFormBody({
             <FormItem className="col-span-6 min-w-0 sm:col-span-2">
               <FormLabel className="text-xs font-medium text-foreground">Priority</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue /></SelectTrigger></FormControl>
+                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue>{PRIORITY_TONE[field.value as LeadPriority]?.label ?? undefined}</SelectValue></SelectTrigger></FormControl>
                 <SelectContent>{Object.entries(PRIORITY_TONE).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
               </Select>
               <FormMessage className="text-xs" />
@@ -538,34 +630,54 @@ function LeadFormBody({
             <FormItem className="col-span-6 min-w-0 sm:col-span-2">
               <FormLabel className="text-xs font-medium text-foreground">Temperature</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue /></SelectTrigger></FormControl>
+                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue>{TEMPERATURE_TONE[field.value as LeadTemperature]?.label ?? undefined}</SelectValue></SelectTrigger></FormControl>
                 <SelectContent>{Object.entries(TEMPERATURE_TONE).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
               </Select>
               <FormMessage className="text-xs" />
             </FormItem>
           )} />
-          <FormField control={form.control} name="ownerId" render={({ field }) => (
-            <FormItem className="col-span-6 min-w-0 sm:col-span-2">
-              <FormLabel className="text-xs font-medium text-foreground">Owner</FormLabel>
-              <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9 w-full min-w-0"><SelectValue placeholder="You (default)" /></SelectTrigger></FormControl>
-                <SelectContent>
-                  {ownerOptions.length === 0 ? (
-                    <div className="px-2 py-1.5 text-xs text-muted-foreground">
-                      Loading team…
-                    </div>
-                  ) : (
-                    ownerOptions.map((o) => (
-                      <SelectItem key={o.id} value={o.id}>
-                        {o.label}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              <FormMessage className="text-xs" />
-            </FormItem>
-          )} />
+          <FormField
+            control={form.control}
+            name="ownerId"
+            render={({ field }) => {
+              const ownerLabel =
+                ownerOptions.find((o) => o.id === field.value)?.label ??
+                (field.value
+                  ? getOwnerDisplayName(field.value)?.trim() ||
+                    users.find((u) => u.id === field.value)?.displayName?.trim() ||
+                    users.find((u) => u.id === field.value)?.email?.split("@")[0]?.trim() ||
+                    undefined
+                  : undefined);
+              return (
+                <FormItem className="col-span-6 min-w-0 sm:col-span-2">
+                  <FormLabel className="text-xs font-medium text-foreground">Owner</FormLabel>
+                  <Select value={field.value} onValueChange={field.onChange}>
+                    <FormControl>
+                      <SelectTrigger className="h-9 w-full min-w-0">
+                        <SelectValue placeholder="You (default)">
+                          {ownerLabel || undefined}
+                        </SelectValue>
+                      </SelectTrigger>
+                    </FormControl>
+                    <SelectContent>
+                      {ownerOptions.length === 0 ? (
+                        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+                          Loading team…
+                        </div>
+                      ) : (
+                        ownerOptions.map((o) => (
+                          <SelectItem key={o.id} value={o.id}>
+                            {o.label}
+                          </SelectItem>
+                        ))
+                      )}
+                    </SelectContent>
+                  </Select>
+                  <FormMessage className="text-xs" />
+                </FormItem>
+              );
+            }}
+          />
           <FormField control={form.control} name="estimatedValue" render={({ field }) => (
             <FormItem className="col-span-6 min-w-0 sm:col-span-4">
               <FormLabel className="text-xs font-medium text-foreground">Est. value (USD)</FormLabel>
@@ -726,7 +838,9 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
                 <Select value={field.value} onValueChange={field.onChange}>
                   <FormControl>
                     <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Select account" />
+                      <SelectValue placeholder="Select account">
+                        {selectTriggerLabelByIdName(field.value, accounts) ?? undefined}
+                      </SelectValue>
                     </SelectTrigger>
                   </FormControl>
                   <SelectContent>
@@ -991,7 +1105,15 @@ function TaskFormBody({ onClose }: { onClose: () => void }) {
           <FormItem>
             <FormLabel className="text-xs">Related lead (optional)</FormLabel>
             <Select value={field.value} onValueChange={field.onChange}>
-              <FormControl><SelectTrigger className="h-9"><SelectValue placeholder="No lead" /></SelectTrigger></FormControl>
+              <FormControl>
+                <SelectTrigger className="h-9">
+                  <SelectValue placeholder="No lead">
+                    {field.value?.trim()
+                      ? leadPickerTriggerLabel(field.value, leads)
+                      : "None"}
+                  </SelectValue>
+                </SelectTrigger>
+              </FormControl>
               <SelectContent>
                 <SelectItem value="">None</SelectItem>
                 {leads.slice(0, 15).map((l) => (
@@ -1016,7 +1138,11 @@ function TaskFormBody({ onClose }: { onClose: () => void }) {
             <FormItem>
               <FormLabel className="text-xs">Priority</FormLabel>
               <Select value={field.value} onValueChange={field.onChange}>
-                <FormControl><SelectTrigger className="h-9"><SelectValue /></SelectTrigger></FormControl>
+                <FormControl>
+                  <SelectTrigger className="h-9">
+                    <SelectValue>{PRIORITY_TONE[field.value as LeadPriority]?.label ?? undefined}</SelectValue>
+                  </SelectTrigger>
+                </FormControl>
                 <SelectContent>{Object.entries(PRIORITY_TONE).map(([k, v]) => <SelectItem key={k} value={k}>{v.label}</SelectItem>)}</SelectContent>
               </Select>
               <FormMessage className="text-xs" />

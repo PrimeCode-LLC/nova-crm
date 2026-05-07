@@ -40,6 +40,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent, fmtRelative } from "@/lib/format";
 import { campaignReplyRate, instantlyCampaignHref } from "@/lib/campaign-utils";
 import { CHANNEL_LIST } from "@/lib/constants";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import type { Campaign, ChannelKey } from "@/lib/types";
 import { ArrowUpDown, Check, Copy, ExternalLink, MoreHorizontal, Plus } from "lucide-react";
 import { toast } from "sonner";
@@ -436,7 +437,9 @@ export default function AdminCampaignsPage() {
                 <Label>Channel</Label>
                 <Select value={newChannel} onValueChange={(v) => setNewChannel((v ?? "cold_email") as ChannelKey)}>
                   <SelectTrigger className="h-9 w-full min-w-0">
-                    <SelectValue placeholder="Channel" />
+                    <SelectValue placeholder="Channel">
+                      {selectTriggerLabelByKey(newChannel, CHANNEL_LIST) ?? undefined}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {CHANNEL_LIST.map((ch) => (
