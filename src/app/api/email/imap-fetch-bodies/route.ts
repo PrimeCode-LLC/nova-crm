@@ -9,6 +9,7 @@ import {
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 const MAX_UIDS = 55;
 const SOURCE_MAX_LENGTH = 120_000;
@@ -68,7 +69,21 @@ export async function POST(req: Request) {
     client.on("error", () => undefined);
 
     await client.connect();
-    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+
+    const folderRaw = String((b as Record<string, unknown>).folder ?? "inbox").toLowerCase();
+    let mailboxPath = "INBOX";
+    if (folderRaw === "trash") {
+      const resolved = await resolveTrashMailboxPath(client);
+      if (!resolved) {
+        return NextResponse.json(
+          { ok: false, error: "Could not locate Trash folder on the server." },
+          { status: 400 },
+        );
+      }
+      mailboxPath = resolved;
+    }
+
+    const lock = await client.getMailboxLock(mailboxPath, { readOnly: true });
     try {
       const updates: Array<{
         uid: number;

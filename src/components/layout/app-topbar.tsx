@@ -30,6 +30,7 @@ import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
 import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
+import { cn } from "@/lib/utils";
 
 function toLabel(segment: string) {
   return segment
@@ -137,10 +138,20 @@ export function AppTopbar() {
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
-                <Button variant="ghost" size="icon" className="relative" aria-label="Notifications menu">
-                  <Bell className="h-4 w-4" />
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "relative",
+                    bellUnread > 0 && "text-primary hover:bg-primary/10 hover:text-primary",
+                  )}
+                  aria-label={
+                    bellUnread > 0 ? `Notifications, ${bellUnread} unread` : "Notifications, none unread"
+                  }
+                >
+                  <Bell className="h-4 w-4" aria-hidden />
                   {bellUnread > 0 && (
-                    <Badge className="absolute -right-1 -top-1 min-w-4 h-4 rounded-full px-0.5 p-0 text-[10px] tabular-nums">
+                    <Badge className="absolute -right-0.5 -top-0.5 min-h-4 min-w-4 rounded-full border-2 border-background px-1 py-0 text-[10px] tabular-nums leading-none">
                       {bellUnread > 99 ? "99+" : bellUnread}
                     </Badge>
                   )}
@@ -154,8 +165,8 @@ export function AppTopbar() {
                 <div className="px-2 py-3 text-sm text-muted-foreground">Loading…</div>
               ) : sortedForMenu.length === 0 ? (
                 <div className="px-2 py-3 text-sm text-muted-foreground">
-                  You&apos;re all caught up. Turn on Demo in the toolbar for sample alerts, or open Inbox when you
-                  have tasks assigned to you.
+                  You&apos;re all caught up. Turn on Demo in the toolbar for sample alerts, or open Notifications when
+                  you have tasks assigned to you.
                 </div>
               ) : (
                 sortedForMenu.slice(0, 8).map((n) => (
@@ -180,9 +191,9 @@ export function AppTopbar() {
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="justify-center font-medium text-primary"
-                onSelect={() => router.push("/inbox")}
+                onSelect={() => router.push("/notifications")}
               >
-                View all in Inbox
+                View all notifications
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>

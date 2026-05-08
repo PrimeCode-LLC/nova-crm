@@ -18,6 +18,8 @@ export interface EmailAccountStore {
   activeMailboxId: string;
   linkedLeadByMessageId: Record<string, string>;
   inboundByMailbox: Record<string, MailInbound[]>;
+  /** Messages shown in Email → Trash (loaded from server Trash folder or demo moves). */
+  trashInboundByMailbox: Record<string, MailInbound[]>;
   drafts: MailDraft[];
   sent: MailSent[];
   setEmailServerHydrated: (v: boolean) => void;
@@ -34,11 +36,24 @@ export interface EmailAccountStore {
   setSmtp: (mailboxId: string, patch: Partial<EmailMailboxSettings["smtp"]>) => void;
   setImap: (mailboxId: string, patch: Partial<EmailMailboxSettings["imap"]>) => void;
   setInbound: (mailboxId: string, messages: MailInbound[]) => void;
+  /** Append older INBOX rows (dedupe by IMAP `uid`). */
+  appendInbound: (mailboxId: string, messages: MailInbound[]) => void;
   /** Merge parsed body / headers into existing rows by IMAP `uid`. */
   mergeInboundBodies: (
     mailboxId: string,
     updates: Array<{ uid: number } & Partial<MailInbound>>,
   ) => void;
+  setTrashInbound: (mailboxId: string, messages: MailInbound[]) => void;
+  mergeTrashBodies: (
+    mailboxId: string,
+    updates: Array<{ uid: number } & Partial<MailInbound>>,
+  ) => void;
+  /** Remove rows from the in-memory INBOX list (after server move-to-trash). Cleans lead links keyed by inbox uid. */
+  removeInboundByUids: (mailboxId: string, uids: number[]) => void;
+  /** Move messages from local INBOX cache to local Trash cache (demo mode). */
+  moveInboundUidsToTrashLocal: (mailboxId: string, uids: number[]) => void;
+  /** Remove from local Trash cache after permanent delete (demo) or optimistic UI. */
+  removeTrashByUids: (mailboxId: string, uids: number[]) => void;
   upsertDraft: (draft: Omit<MailDraft, "id" | "updatedAt"> & { id?: string }) => string;
   deleteDraft: (id: string) => void;
   addSent: (item: Omit<MailSent, "id" | "sentAt">) => string;
@@ -77,6 +92,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   activeMailboxId: "",
   linkedLeadByMessageId: {},
   inboundByMailbox: {},
+  trashInboundByMailbox: {},
   drafts: [],
   sent: [],
   setEmailServerHydrated: (v) => set({ emailServerHydrated: v }),
@@ -125,6 +141,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
           mailboxes: [fallback],
           activeMailboxId: fallback.id,
           inboundByMailbox: {},
+          trashInboundByMailbox: {},
           drafts: s.drafts.filter((d) => d.mailboxId !== mailboxId),
           sent: s.sent.filter((m) => m.mailboxId !== mailboxId),
         };
@@ -136,6 +153,9 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
           s.activeMailboxId === mailboxId ? (rest[0]?.id ?? "") : s.activeMailboxId,
         inboundByMailbox: Object.fromEntries(
           Object.entries(s.inboundByMailbox).filter(([id]) => id !== mailboxId),
+        ),
+        trashInboundByMailbox: Object.fromEntries(
+          Object.entries(s.trashInboundByMailbox).filter(([id]) => id !== mailboxId),
         ),
         drafts: s.drafts.filter((d) => d.mailboxId !== mailboxId),
         sent: s.sent.filter((m) => m.mailboxId !== mailboxId),
@@ -170,6 +190,17 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     })),
   setInbound: (mailboxId, messages) =>
     set((s) => ({ inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: messages } })),
+  appendInbound: (mailboxId, messages) =>
+    set((s) => {
+      if (messages.length === 0) return s;
+      const prev = s.inboundByMailbox[mailboxId] ?? [];
+      const byUid = new Map<number, MailInbound>();
+      for (const m of prev) byUid.set(m.uid, m);
+      for (const m of messages) {
+        if (!byUid.has(m.uid)) byUid.set(m.uid, m);
+      }
+      return { inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: Array.from(byUid.values()) } };
+    }),
   mergeInboundBodies: (mailboxId, updates) =>
     set((s) => {
       const prev = s.inboundByMailbox[mailboxId] ?? [];
@@ -178,11 +209,75 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       const next = prev.map((m) => {
         const p = patch.get(m.uid);
         if (!p) return m;
-        const { uid: _u, ...rest } = p;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip uid before merge
+        const { uid, ...rest } = p;
         return { ...m, ...rest };
       });
       return { inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: next } };
     }),
+  setTrashInbound: (mailboxId, messages) =>
+    set((s) => ({ trashInboundByMailbox: { ...s.trashInboundByMailbox, [mailboxId]: messages } })),
+  mergeTrashBodies: (mailboxId, updates) =>
+    set((s) => {
+      const prev = s.trashInboundByMailbox[mailboxId] ?? [];
+      if (prev.length === 0 || updates.length === 0) return s;
+      const patch = new Map(updates.map((u) => [u.uid, u]));
+      const next = prev.map((m) => {
+        const p = patch.get(m.uid);
+        if (!p) return m;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars -- strip uid before merge
+        const { uid, ...rest } = p;
+        return { ...m, ...rest };
+      });
+      return { trashInboundByMailbox: { ...s.trashInboundByMailbox, [mailboxId]: next } };
+    }),
+  removeInboundByUids: (mailboxId, uids) => {
+    if (uids.length === 0) return;
+    const uidSet = new Set(uids);
+    set((s) => {
+      const prev = s.inboundByMailbox[mailboxId] ?? [];
+      const nextInbound = prev.filter((m) => !uidSet.has(m.uid));
+      const nextLinks = { ...s.linkedLeadByMessageId };
+      for (const uid of uids) {
+        delete nextLinks[`${mailboxId}:in:uid-${uid}`];
+      }
+      return {
+        inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: nextInbound },
+        linkedLeadByMessageId: nextLinks,
+      };
+    });
+    scheduleEmailMetaPersist(get);
+  },
+  moveInboundUidsToTrashLocal: (mailboxId, uids) => {
+    if (uids.length === 0) return;
+    const uidSet = new Set(uids);
+    set((s) => {
+      const prev = s.inboundByMailbox[mailboxId] ?? [];
+      const moving = prev.filter((m) => uidSet.has(m.uid));
+      const nextInbound = prev.filter((m) => !uidSet.has(m.uid));
+      const trashPrev = s.trashInboundByMailbox[mailboxId] ?? [];
+      return {
+        inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: nextInbound },
+        trashInboundByMailbox: {
+          ...s.trashInboundByMailbox,
+          [mailboxId]: [...moving, ...trashPrev],
+        },
+      };
+    });
+  },
+  removeTrashByUids: (mailboxId, uids) => {
+    if (uids.length === 0) return;
+    const uidSet = new Set(uids);
+    set((s) => {
+      const prev = s.trashInboundByMailbox[mailboxId] ?? [];
+      return {
+        trashInboundByMailbox: {
+          ...s.trashInboundByMailbox,
+          [mailboxId]: prev.filter((m) => !uidSet.has(m.uid)),
+        },
+      };
+    });
+  },
   upsertDraft: ({ id, mailboxId, to, subject, body }) => {
     const draftId = id ?? `d-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
@@ -218,7 +313,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     });
     scheduleEmailMetaPersist(get);
   },
-  clearLocalMail: () => set({ drafts: [], sent: [], inboundByMailbox: {} }),
+  clearLocalMail: () => set({ drafts: [], sent: [], inboundByMailbox: {}, trashInboundByMailbox: {} }),
   resetForDemoMode: () => {
     const seed = buildDemoEmailSeed();
     set({
@@ -226,6 +321,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       activeMailboxId: seed.activeMailboxId,
       linkedLeadByMessageId: seed.linkedLeadByMessageId,
       inboundByMailbox: seed.inboundByMailbox,
+      trashInboundByMailbox: {},
       drafts: seed.drafts,
       sent: seed.sent,
     });

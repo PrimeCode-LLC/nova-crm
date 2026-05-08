@@ -12,6 +12,7 @@ import {
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 /** Default number of newest INBOX messages to list in one refresh. */
 const DEFAULT_LIMIT = 600;
@@ -53,6 +54,12 @@ export async function POST(req: Request) {
         ? Math.min(MAX_LIMIT, Math.floor(requested))
         : DEFAULT_LIMIT;
 
+    const requestedOffset = Number(b.offset);
+    const offset =
+      Number.isFinite(requestedOffset) && requestedOffset > 0
+        ? Math.min(Math.floor(requestedOffset), 10_000_000)
+        : 0;
+
     if (!host || !user) {
       return NextResponse.json(
         { ok: false, error: "IMAP host and username are required." },
@@ -66,7 +73,25 @@ export async function POST(req: Request) {
     client.on("error", () => undefined);
 
     await client.connect();
-    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+
+    const folderRaw = String((b as Record<string, unknown>).folder ?? "inbox").toLowerCase();
+    let mailboxPath = "INBOX";
+    if (folderRaw === "trash") {
+      const resolved = await resolveTrashMailboxPath(client);
+      if (!resolved) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Could not find a Trash folder on this account. Trash sync requires a standard Trash / Deleted Items mailbox.",
+          },
+          { status: 400 },
+        );
+      }
+      mailboxPath = resolved;
+    }
+
+    const lock = await client.getMailboxLock(mailboxPath, { readOnly: true });
     try {
       const uids = await client.search({ all: true }, { uid: true });
       if (!uids || uids.length === 0) {
@@ -75,7 +100,16 @@ export async function POST(req: Request) {
 
       const sorted = [...uids].sort((a, b) => b - a);
       const mailboxTotal = sorted.length;
-      const slice = sorted.slice(0, limit);
+      if (offset >= sorted.length) {
+        return NextResponse.json({
+          ok: true,
+          messages: [] as unknown[],
+          mailboxTotal,
+          offset,
+          loadedThrough: sorted.length,
+        });
+      }
+      const slice = sorted.slice(offset, offset + limit);
 
       const envelopeRows = await client.fetchAll(
         slice,
@@ -172,6 +206,8 @@ export async function POST(req: Request) {
         ok: true,
         messages: messages.filter(Boolean),
         mailboxTotal,
+        offset,
+        loadedThrough: offset + slice.length,
       });
     } finally {
       try {

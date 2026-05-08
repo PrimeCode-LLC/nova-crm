@@ -9,6 +9,8 @@ import {
   CalendarClock,
   ListTodo,
   Inbox,
+  Bell,
+  MessagesSquare,
   Settings,
   Shield,
   UploadCloud,
@@ -74,6 +76,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/tasks", label: "Tasks", icon: ListTodo },
       { href: "/scripts", label: "Scripts", icon: FileCode2 },
       { href: "/inbox", label: "Inbox", icon: Inbox },
+      { href: "/notifications", label: "Notifications", icon: Bell },
+      { href: "/team-chat", label: "Team chat", icon: MessagesSquare },
     ],
   },
   {
