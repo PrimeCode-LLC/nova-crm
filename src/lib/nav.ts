@@ -146,7 +146,6 @@ export const NAV_SECTIONS: NavSection[] = [
         href: "/admin/labels",
         label: "Labels",
         icon: Tag,
-        minWorkspaceRole: "manager",
         adminCluster: "programs",
       },
       {

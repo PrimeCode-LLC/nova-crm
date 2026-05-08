@@ -20,7 +20,7 @@ import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-a
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
-import { Loader2, Mail, PlugZap, ShieldAlert, Plus, Trash2 } from "lucide-react";
+import { Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
 
 export function EmailInboxSettingsCard() {
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
@@ -39,6 +39,67 @@ export function EmailInboxSettingsCard() {
 
   const persistKey = React.useMemo(() => JSON.stringify(mailboxes), [mailboxes]);
 
+  /**
+   * Persists all mailboxes to the server.
+   * @param manual — when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
+   */
+  const persistMailboxesRemote = React.useCallback(async (manual?: boolean): Promise<boolean> => {
+    const s = useEmailAccountStore.getState();
+    if (!s.emailServerSyncEnabled || !s.emailServerHydrated) {
+      if (manual) {
+        toast.error("Could not save email settings", {
+          description: !s.emailServerHydrated
+            ? "Your mailboxes are still loading. Wait a moment, then try again."
+            : "Saving is unavailable—check your connection or sign in again. If this persists, reload the page.",
+        });
+      }
+      return false;
+    }
+    const all = s.mailboxes;
+    setSavingRemote(true);
+    try {
+      for (const mb of all) {
+        const res = await fetch("/api/email/mailboxes", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ mailbox: mb }),
+        });
+        let data: { ok?: boolean; error?: string } = {};
+        try {
+          data = (await res.json()) as { ok?: boolean; error?: string };
+        } catch {
+          data = {};
+        }
+        if (!res.ok || !data.ok) {
+          const msg =
+            data.error ??
+            (res.status >= 500
+              ? "Server error while saving."
+              : res.status === 401 || res.status === 403
+                ? "You are not allowed to save these settings."
+                : `Save failed (${res.status}).`);
+          toast.error(manual ? "Could not save email settings" : "Failed to save mailbox", {
+            description: msg,
+          });
+          return false;
+        }
+      }
+      if (manual) {
+        toast.success("Email settings saved");
+      }
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      toast.error(manual ? "Could not save email settings" : "Could not save mailbox", {
+        description: msg,
+      });
+      return false;
+    } finally {
+      setSavingRemote(false);
+    }
+  }, []);
+
   React.useEffect(() => {
     if (mailboxes.length === 0) {
       setOpenValues([]);
@@ -52,37 +113,31 @@ export function EmailInboxSettingsCard() {
     });
   }, [mailboxes, activeMailboxId]);
 
+  /** Debounced persist; flush when the timer is cancelled (refresh / route change) so edits are not lost. */
   React.useEffect(() => {
     if (!emailServerSyncEnabled || !emailServerHydrated) return;
 
+    let timerFired = false;
     const timer = window.setTimeout(() => {
-      setSavingRemote(true);
-      const all = useEmailAccountStore.getState().mailboxes;
-      void (async () => {
-        try {
-          for (const mb of all) {
-            const res = await fetch("/api/email/mailboxes", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify({ mailbox: mb }),
-            });
-            const data = (await res.json()) as { ok?: boolean; error?: string };
-            if (!data.ok) {
-              toast.error(data.error ?? "Failed to save mailbox");
-              break;
-            }
-          }
-        } catch {
-          toast.error("Could not save mailbox");
-        } finally {
-          setSavingRemote(false);
-        }
-      })();
+      timerFired = true;
+      void persistMailboxesRemote(false);
     }, 600);
 
-    return () => window.clearTimeout(timer);
-  }, [persistKey, emailServerHydrated, emailServerSyncEnabled]);
+    return () => {
+      window.clearTimeout(timer);
+      if (!timerFired) void persistMailboxesRemote(false);
+    };
+  }, [persistKey, emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
+
+  /** Hard refresh / tab close can tear down React before the debounced effect runs; flush once. */
+  React.useEffect(() => {
+    if (!emailServerSyncEnabled || !emailServerHydrated) return;
+    const onPageHide = () => {
+      void persistMailboxesRemote(false);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
 
   async function testConnectionsFor(mb: EmailMailboxSettings) {
     const smtpHost = normalizeMailHost(mb.smtp.host);
@@ -192,20 +247,37 @@ export function EmailInboxSettingsCard() {
               → Email tab. Open each mailbox below to edit. Use Test connection inside a mailbox to verify SMTP/IMAP.
             </CardDescription>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-1.5"
-            onClick={() => {
-              const id = addMailbox();
-              setActiveMailbox(id);
-              setOpenValues([id]);
-              toast.success("Mailbox added");
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" /> Add mailbox
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="gap-1.5"
+              disabled={savingRemote}
+              onClick={() => void persistMailboxesRemote(true)}
+            >
+              {savingRemote ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              Save settings
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                const id = addMailbox();
+                setActiveMailbox(id);
+                setOpenValues([id]);
+                toast.success("Mailbox added");
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add mailbox
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <Accordion
@@ -516,7 +588,9 @@ export function EmailInboxSettingsCard() {
           </Accordion>
 
           <p className="text-[11px] text-muted-foreground">
-            Non-sensitive fields sync to your workspace; credentials are encrypted on the server.
+            Non-sensitive fields sync to your workspace; credentials are encrypted on the server. Changes also save
+            automatically after you stop typing—use <span className="font-medium text-foreground">Save settings</span>{" "}
+            to write immediately and confirm the server accepted them.
             {savingRemote ? " Saving to workspace..." : ""} Use an app-specific password for Gmail / Microsoft when 2FA
             is on.
           </p>
