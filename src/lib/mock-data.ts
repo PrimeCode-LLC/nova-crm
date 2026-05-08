@@ -340,7 +340,8 @@ const triggers = [
 ];
 const owners = ["u-sales-01", "u-sales-02", "u-sales-03", "u-tl-inbound"];
 
-export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
+export const mockLeads: Lead[] = (
+  mockContacts.slice(0, 40).map((c, i) => {
   const account = mockAccounts.find((a) => a.id === c.accountId)!;
   const channel = pick(channels, i);
   const stage = pick(stages, i + 2);
@@ -403,7 +404,10 @@ export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
     createdAt: isoDaysAgo(60 - i),
     updatedAt: isoDaysAgo(idleDays),
   };
-});
+  }) as Lead[]
+).map((row, i): Lead =>
+  i === 1 ? { ...row, ownerId: "", intakeKind: "prospect", createdById: "u-director" } : row,
+);
 
 // ───────────────────────── Deals ─────────────────────────
 export const mockDeals: Deal[] = mockLeads

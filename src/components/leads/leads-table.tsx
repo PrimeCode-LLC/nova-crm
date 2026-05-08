@@ -239,10 +239,12 @@ export interface LeadsTableProps {
   /** Sorted `stage` query values joined with `|` (stable for effects). */
   urlStageKey?: string;
   idleOnly?: boolean;
+  /** Default intake filter (e.g. prospects-only page). */
+  initialIntakeScope?: "all" | "prospect" | "sales_lead";
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
-  { leads, preset = "default", urlChannelKey = "", urlStageKey = "", idleOnly = false },
+  { leads, preset = "default", urlChannelKey = "", urlStageKey = "", idleOnly = false, initialIntakeScope = "all" },
   ref,
 ) {
   const router = useRouter();
@@ -255,7 +257,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     profiles,
     isDemo,
   } = useWorkspace();
-  const { openQuickAdd } = useOpenQuickAdd();
+  const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const leadsChannelFilterOptions = React.useMemo(
     () => buildLeadsChannelOptions(customChannels),
@@ -281,8 +283,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
-  const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">("all");
+  const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">(initialIntakeScope);
   const [reassignOpen, setReassignOpen] = React.useState(false);
+
+  React.useEffect(() => {
+    setIntakeScope(initialIntakeScope);
+  }, [initialIntakeScope]);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
 
   const openReassignForIds = React.useCallback((ids: string[]) => {
@@ -455,7 +461,27 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       id: "owner",
       accessorKey: "ownerId",
       header: "Owner",
-      cell: ({ row }) => <UserChip userId={row.original.ownerId} size="xs" />,
+      cell: ({ row }) => {
+        const oid = row.original.ownerId?.trim();
+        if (!oid) {
+          return (
+            <Badge variant="secondary" className="text-[10px] font-normal">
+              Open queue
+            </Badge>
+          );
+        }
+        return <UserChip userId={oid} size="xs" />;
+      },
+    },
+    {
+      id: "addedBy",
+      accessorFn: (row) => row.createdById ?? "",
+      header: "Added by",
+      cell: ({ row }) => {
+        const id = row.original.createdById?.trim();
+        if (!id) return <span className="text-xs text-muted-foreground">—</span>;
+        return <UserChip userId={id} size="xs" />;
+      },
     },
     {
       id: "temperature",
@@ -837,7 +863,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               <SelectItem value="all-owners">All owners</SelectItem>
               <SelectItem value="me">Owned by me</SelectItem>
               <SelectItem value="team">My team</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
+              <SelectItem value="open-queue">Open queue</SelectItem>
+              <SelectItem value="unassigned">Orphan owner</SelectItem>
             </SelectGroup>
             {personOwnerOptions.length > 0 && (
               <>
@@ -885,10 +912,14 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
+            variant="outline"
             size="sm"
             type="button"
-            onClick={() => openQuickAdd({ initialPill: "lead" })}
+            onClick={() => openNewProspectForm()}
           >
+            <Plus className="h-3.5 w-3.5" /> New prospect
+          </Button>
+          <Button size="sm" type="button" onClick={() => openQuickAdd({ initialPill: "lead" })}>
             <Plus className="h-3.5 w-3.5" /> New lead
           </Button>
         </div>

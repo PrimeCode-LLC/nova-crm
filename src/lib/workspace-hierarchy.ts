@@ -34,6 +34,9 @@ export function leadVisibleForLiveViewer(
   viewer: User,
   orgUsers: readonly User[],
 ): boolean {
+  /** Open-queue rows: no owner yet — everyone in the org can see and claim. */
+  if (!lead.ownerId?.trim()) return true;
+
   if (seesAllLeadsInTenant(viewer)) return true;
 
   if (viewer.roleId === "manager" || viewer.roleId === "team_lead") {

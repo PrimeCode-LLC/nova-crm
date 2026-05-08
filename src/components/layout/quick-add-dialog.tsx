@@ -291,9 +291,12 @@ function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
 function LeadFormBody({
   onClose,
   defaultStage = "new",
+  forceIntakeProspect = false,
 }: {
   onClose: () => void;
   defaultStage?: PipelineStage;
+  /** When true, always save as intake prospect with you as Lead by (prospecting roles). */
+  forceIntakeProspect?: boolean;
 }) {
   const {
     users,
@@ -313,7 +316,7 @@ function LeadFormBody({
     [users, currentUserId],
   );
   const isProspectingIntakeRole =
-    viewerRoleId === "prospecting" || viewerRoleId === "data_scraper";
+    forceIntakeProspect || viewerRoleId === "prospecting" || viewerRoleId === "data_scraper";
   const router = useRouter();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
@@ -494,8 +497,11 @@ function LeadFormBody({
       temperature: values.temperature as LeadTemperature,
       priority: values.priority as LeadPriority,
       ownerId,
-      ...(isProspectingIntakeRole && currentUserId
-        ? { intakeKind: "prospect" as const, scraperId: currentUserId }
+      ...(isProspectingIntakeRole
+        ? {
+            intakeKind: "prospect" as const,
+            ...(currentUserId ? { scraperId: currentUserId } : {}),
+          }
         : {}),
       contactName: fullName,
       companyName: values.company.trim(),
@@ -511,7 +517,7 @@ function LeadFormBody({
       try {
         const db = getFirebaseDb();
         await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
-        toast.success("Lead created");
+        toast.success(isProspectingIntakeRole ? "Prospect created" : "Lead created");
         onClose();
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -523,13 +529,20 @@ function LeadFormBody({
     addAccount(account);
     addContact(contact);
     addLead(lead);
-    toast.success("Lead created");
+    toast.success(isProspectingIntakeRole ? "Prospect created" : "Lead created");
     onClose();
   }
 
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-0">
+        {forceIntakeProspect && (
+          <p className="mb-3 rounded-md border border-border/80 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            This row is saved as a <span className="font-medium text-foreground">prospect</span> (top-of-funnel
+            intake). You are set as <span className="font-medium text-foreground">Lead by</span>. See all prospects
+            under <span className="font-medium text-foreground">Prospects</span> in the sidebar.
+          </p>
+        )}
         {/*
           Single 6-column grid so field edges line up across rows:
           row1: 3+3 | row2: 2+4 | row3: 2+2+2 | row4: 2+4 (aligns with row2 & row3)
@@ -1269,7 +1282,7 @@ export function QuickAddDialog({
           <DialogTitle className="text-base font-semibold tracking-tight">Quick add</DialogTitle>
         </DialogHeader>
         <div
-          className="grid grid-cols-2 gap-1 rounded-lg border border-border/50 bg-muted/40 p-1 sm:grid-cols-5"
+          className="grid grid-cols-2 gap-1 rounded-lg border border-border/50 bg-muted/40 p-1 sm:grid-cols-3 lg:grid-cols-5"
           role="tablist"
           aria-label="Record type"
         >
@@ -1294,9 +1307,10 @@ export function QuickAddDialog({
         <div className="mt-1">
           {pill === "lead" && (
             <LeadFormBody
-              key={`${leadFormSession}-${initialLeadStage ?? ""}`}
+              key={`${leadFormSession}-${initialLeadStage ?? ""}-lead`}
               onClose={handleClose}
               defaultStage={initialLeadStage ?? "new"}
+              forceIntakeProspect={false}
             />
           )}
           {pill === "contact" && <ContactFormBody onClose={handleClose} />}

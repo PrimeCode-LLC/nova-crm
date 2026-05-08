@@ -197,10 +197,11 @@ export function ReassignLeadsDialog({
         } else {
           patchLead(id, { ownerId: owner });
         }
-        const fromName =
-          getUserById(lead.ownerId)?.displayName?.trim() ||
-          getOwnerDisplayName(lead.ownerId) ||
-          "Unassigned";
+        const fromName = !lead.ownerId?.trim()
+          ? "Open queue"
+          : getUserById(lead.ownerId)?.displayName?.trim() ||
+            getOwnerDisplayName(lead.ownerId) ||
+            "Unknown owner";
         const toName =
           ownerOptions.find((o) => o.id === owner)?.label ??
           getUserById(owner)?.displayName?.trim() ??

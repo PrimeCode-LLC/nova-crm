@@ -54,7 +54,7 @@ export const DEMO_ROLE_PRESETS: DemoRolePreset[] = [
   {
     userId: "u-scrape-01",
     title: "Prospecting & data",
-    subtitle: "Adds intake prospects; quick-add tags you as Lead by.",
+    subtitle: "Adds intake prospects; New prospect form or Quick add Lead tags you as Lead by.",
     permissionHint: "Intake card on lead detail; promote when replies show interest.",
   },
   {

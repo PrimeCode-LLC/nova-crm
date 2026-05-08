@@ -285,7 +285,8 @@ export default function FollowupsPage() {
                         <SelectItem value="all-owners">All owners</SelectItem>
                         <SelectItem value="me">Owned by me</SelectItem>
                         <SelectItem value="team">My team</SelectItem>
-                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                        <SelectItem value="open-queue">Open queue</SelectItem>
+                        <SelectItem value="unassigned">Orphan owner</SelectItem>
                       </SelectGroup>
                       {ownerPickerOptions.length > 0 ? (
                         <>

@@ -21,7 +21,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
-import { Plus, Sparkles, Target, Building2, User, IdCard } from "lucide-react";
+import { Plus, Sparkles, Target, Building2, User, IdCard, ScanSearch } from "lucide-react";
 
 export function GlobalCommandMenu({
   open,
@@ -48,7 +48,7 @@ export function GlobalCommandMenu({
     adminUsersNav != null && canAccessNavItem(adminUsersNav, navAccess);
   const showProfilesJumpList =
     adminProfilesNav != null && canAccessNavItem(adminProfilesNav, navAccess);
-  const { openQuickAdd } = useOpenQuickAdd();
+  const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const go = (href: string) => {
     onOpenChange(false);
     router.push(href);
@@ -68,6 +68,14 @@ export function GlobalCommandMenu({
             }}
           >
             <Plus className="mr-2 h-4 w-4" /> Add new lead
+          </CommandItem>
+          <CommandItem
+            onSelect={() => {
+              onOpenChange(false);
+              openNewProspectForm();
+            }}
+          >
+            <ScanSearch className="mr-2 h-4 w-4" /> Add new prospect
           </CommandItem>
           <CommandItem
             onSelect={() => {

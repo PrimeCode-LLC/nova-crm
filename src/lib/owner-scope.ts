@@ -18,6 +18,9 @@ export function filterLeadsByOwnerScope(
   const { currentUserId, users, getUserById, getOwnerDisplayName } = deps;
   if (ownerScope === "all-owners") return [...leads];
   if (ownerScope === "me") return leads.filter((l) => l.ownerId === currentUserId);
+  if (ownerScope === "open-queue") {
+    return leads.filter((l) => !l.ownerId?.trim());
+  }
   if (ownerScope === "unassigned") {
     return leads.filter((l) => {
       const oid = l.ownerId?.trim();
@@ -44,6 +47,7 @@ export function filterFollowupsByOwnerScope(
 ): Followup[] {
   const { currentUserId, users, getUserById, getOwnerDisplayName } = deps;
   if (ownerScope === "all-owners") return [...followups];
+  if (ownerScope === "open-queue") return [...followups];
   if (ownerScope === "me") return followups.filter((f) => f.ownerId === currentUserId);
   if (ownerScope === "unassigned") {
     return followups.filter((f) => {
@@ -91,6 +95,25 @@ export function buildPersonOwnerOptions(
     .sort((a, b) => a.label.localeCompare(b.label));
 }
 
+/** When CRM `users` rows lack names, avoid showing a long Firebase uid in `<Select>` triggers. */
+export function fallbackOwnerPickerLabel(uid: string): string {
+  const t = uid.trim();
+  if (!t) return "Unknown member";
+  if (t.length <= 14) return t;
+  return `Member (…${t.slice(-6)})`;
+}
+
+/** Resolve label for an owner `<Select>` trigger from built options (or short fallback). */
+export function ownerPickerTriggerLabel(
+  uid: string | undefined,
+  options: readonly { id: string; label: string }[],
+): string {
+  if (uid == null || uid === "") return "Open queue (anyone can claim)";
+  const hit = options.find((o) => o.id === uid);
+  if (hit) return hit.label === uid ? fallbackOwnerPickerLabel(uid) : hit.label;
+  return fallbackOwnerPickerLabel(uid);
+}
+
 /**
  * Labels for workspace-member owner `<Select>`s (profiles, quick-add, etc.).
  * Ensures `currentUserId` and any `ensureIds` have a `SelectItem` with non-empty text so Radix does not
@@ -101,6 +124,7 @@ export function buildWorkspaceOwnerPickerOptions(
   currentUserId: string,
   getOwnerDisplayName: (uid: string) => string | undefined,
   ensureIds: readonly string[] = [],
+  labelOverrides: Readonly<Record<string, string>> = {},
 ): { id: string; label: string }[] {
   const byId = new Map<string, string>();
   for (const u of users) {
@@ -109,7 +133,7 @@ export function buildWorkspaceOwnerPickerOptions(
       u.displayName?.trim() ||
       getOwnerDisplayName(u.id)?.trim() ||
       u.email.split("@")[0]?.trim() ||
-      u.id;
+      fallbackOwnerPickerLabel(u.id);
     byId.set(u.id, label);
   }
   const uid = currentUserId?.trim();
@@ -128,8 +152,13 @@ export function buildWorkspaceOwnerPickerOptions(
       u?.displayName?.trim() ||
       getOwnerDisplayName(id)?.trim() ||
       u?.email.split("@")[0]?.trim() ||
-      id;
+      fallbackOwnerPickerLabel(id);
     byId.set(id, label);
+  }
+  for (const [id, raw] of Object.entries(labelOverrides)) {
+    const idt = id?.trim();
+    const lab = raw?.trim();
+    if (idt && lab) byId.set(idt, lab);
   }
   return [...byId.entries()]
     .map(([id, label]) => ({ id, label }))
@@ -143,7 +172,8 @@ export function getOwnerFilterTriggerLabel(
   if (ownerScope === "all-owners") return "All owners";
   if (ownerScope === "me") return "Owned by me";
   if (ownerScope === "team") return "My team";
-  if (ownerScope === "unassigned") return "Unassigned";
+  if (ownerScope === "open-queue") return "Open queue";
+  if (ownerScope === "unassigned") return "Orphan owner";
   if (ownerScope.startsWith(OWNER_SCOPE_PREFIX)) {
     const uid = ownerScope.slice(OWNER_SCOPE_PREFIX.length);
     return personOwnerOptions.find((o) => o.id === uid)?.label ?? "One owner";
@@ -158,7 +188,7 @@ export function filterActivityCountersByOwnerScope(
   deps: OwnerScopeDeps,
 ): ActivityCounterRow[] {
   const { currentUserId, users } = deps;
-  if (ownerScope === "all-owners" || ownerScope === "unassigned") return [...rows];
+  if (ownerScope === "all-owners" || ownerScope === "unassigned" || ownerScope === "open-queue") return [...rows];
   if (ownerScope === "me") return rows.filter((r) => r.userId === currentUserId);
   if (ownerScope === "team") {
     const peerIds = new Set(users.filter((u) => u.id !== currentUserId).map((u) => u.id));
@@ -177,7 +207,7 @@ export function filterActivityRecordsByOwnerScope(
   deps: OwnerScopeDeps,
 ): ActivityRecord[] {
   const { currentUserId, users } = deps;
-  if (ownerScope === "all-owners" || ownerScope === "unassigned") return [...records];
+  if (ownerScope === "all-owners" || ownerScope === "unassigned" || ownerScope === "open-queue") return [...records];
   if (ownerScope === "me") return records.filter((r) => r.userId === currentUserId);
   if (ownerScope === "team") {
     const peerIds = new Set(users.filter((u) => u.id !== currentUserId).map((u) => u.id));

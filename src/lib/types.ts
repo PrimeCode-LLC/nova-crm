@@ -349,7 +349,10 @@ export interface Lead {
   stage: PipelineStage;
   temperature: LeadTemperature;
   priority: LeadPriority;
+  /** Sales owner; empty string = open queue (visible to whole org until someone claims). */
   ownerId: string;
+  /** Firebase uid of the user who created this lead (audit / performance reviews). */
+  createdById?: string;
   /** User who sourced / entered the row (prospecting team). */
   scraperId?: string;
   /**

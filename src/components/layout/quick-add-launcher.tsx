@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { QuickAddDialog, type QuickAddPill } from "@/components/layout/quick-add-dialog";
+import { NewProspectDialog } from "@/components/leads/new-prospect-dialog";
 import type { PipelineStage } from "@/lib/types";
 
 export type OpenQuickAddOpts = {
@@ -11,6 +12,7 @@ export type OpenQuickAddOpts = {
 
 type QuickAddLauncherContextValue = {
   openQuickAdd: (opts?: OpenQuickAddOpts) => void;
+  openNewProspectForm: () => void;
 };
 
 const QuickAddLauncherContext = React.createContext<QuickAddLauncherContextValue | null>(
@@ -20,13 +22,21 @@ const QuickAddLauncherContext = React.createContext<QuickAddLauncherContextValue
 export function QuickAddLauncherProvider({ children }: { children: React.ReactNode }) {
   const [open, setOpen] = React.useState(false);
   const [opts, setOpts] = React.useState<OpenQuickAddOpts>({});
+  const [newProspectOpen, setNewProspectOpen] = React.useState(false);
 
   const openQuickAdd = React.useCallback((next?: OpenQuickAddOpts) => {
     setOpts(next ?? {});
     setOpen(true);
   }, []);
 
-  const value = React.useMemo(() => ({ openQuickAdd }), [openQuickAdd]);
+  const openNewProspectForm = React.useCallback(() => {
+    setNewProspectOpen(true);
+  }, []);
+
+  const value = React.useMemo(
+    () => ({ openQuickAdd, openNewProspectForm }),
+    [openQuickAdd, openNewProspectForm],
+  );
 
   return (
     <QuickAddLauncherContext.Provider value={value}>
@@ -37,6 +47,7 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
         initialPill={opts.initialPill ?? "lead"}
         initialLeadStage={opts.initialLeadStage}
       />
+      <NewProspectDialog open={newProspectOpen} onOpenChange={setNewProspectOpen} />
     </QuickAddLauncherContext.Provider>
   );
 }

@@ -20,6 +20,7 @@ import {
   BarChart3,
   UsersRound,
   Network,
+  ScanSearch,
   type LucideIcon,
 } from "lucide-react";
 
@@ -62,6 +63,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Target },
+      { href: "/prospects", label: "Prospects", icon: ScanSearch },
       { href: "/pipeline", label: "Pipeline", icon: Kanban },
       { href: "/accounts", label: "Companies", icon: Building2 },
       { href: "/contacts", label: "Contacts", icon: Contact2 },

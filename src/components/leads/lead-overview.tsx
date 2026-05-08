@@ -1,3 +1,5 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -6,6 +8,7 @@ import { PUSH_STATUS_TONE, TEMPERATURE_TONE, PRIORITY_TONE, REVENUE_RANGES } fro
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
+import { UserChip } from "@/components/common/user-chip";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -26,8 +29,45 @@ export function LeadOverview({
   outreachProfileSummary?: string;
   outreachProfileFieldLabel?: string;
 }) {
+  const openQueue = !lead.ownerId?.trim();
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Intake & ownership</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <dl className="divide-y">
+            <Field label="Added by">
+              {lead.createdById?.trim() ? (
+                <UserChip userId={lead.createdById} size="sm" />
+              ) : (
+                <span className="text-muted-foreground">Not recorded (legacy)</span>
+              )}
+            </Field>
+            <Field label="Owner">
+              {openQueue ? (
+                <div className="flex flex-col gap-1">
+                  <Badge variant="secondary" className="w-fit text-[10px] font-normal">
+                    Open queue — unclaimed
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    Visible to everyone until someone claims it. Use the Timeline tab for stage changes and activity.
+                  </span>
+                </div>
+              ) : (
+                <UserChip userId={lead.ownerId} size="sm" />
+              )}
+            </Field>
+            {lead.scraperId?.trim() ? (
+              <Field label="Lead by (sourced by)">
+                <UserChip userId={lead.scraperId} size="sm" />
+              </Field>
+            ) : null}
+          </dl>
+        </CardContent>
+      </Card>
+
       {/* Research & personalization */}
       <Card className="lg:col-span-2">
         <CardHeader className="pb-3">

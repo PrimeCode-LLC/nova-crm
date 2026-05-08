@@ -17,6 +17,7 @@ import {
   Star,
   MoreHorizontal,
   Trash2,
+  UserPlus,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -339,6 +340,39 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         }
         actions={
           <>
+            {!lead.ownerId?.trim() && ws.currentUserId ? (
+              <Button
+                variant="default"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const uid = ws.currentUserId;
+                  if (!uid) return;
+                  const name =
+                    ws.getUserById(uid)?.displayName?.trim() ||
+                    ws.getOwnerDisplayName(uid)?.trim() ||
+                    "You";
+                  ws.patchLead(lead.id, { ownerId: uid });
+                  ws.patchAccount(lead.accountId, { ownerId: uid });
+                  ws.patchContact(lead.contactId, { ownerId: uid });
+                  ws.addTimelineEvent({
+                    id:
+                      typeof crypto !== "undefined" && "randomUUID" in crypto
+                        ? `te-${crypto.randomUUID()}`
+                        : `te-${Date.now()}`,
+                    leadId: lead.id,
+                    type: "assignment_changed",
+                    actorId: uid,
+                    summary: `${name} claimed this prospect from the open queue`,
+                    createdAt: new Date().toISOString(),
+                  });
+                  ws.bumpLeadActivity(lead.id);
+                  toast.success("You claimed this prospect");
+                }}
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Claim
+              </Button>
+            ) : null}
             <Button
               variant={pinned ? "default" : "outline"}
               size="sm"
