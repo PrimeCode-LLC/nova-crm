@@ -16,6 +16,19 @@ const nextConfig: NextConfig = {
       { protocol: "https", hostname: "firebasestorage.googleapis.com" },
     ],
   },
+  // Email-stack packages are CommonJS with Node-only deps (iconv-lite, native-ish
+  // CJS chains). Turbopack can't bundle them for server routes — externalize so
+  // they're require()'d at runtime from node_modules instead.
+  serverExternalPackages: [
+    "mailparser",
+    "@zone-eu/mailsplit",
+    "imapflow",
+    "nodemailer",
+    "iconv-lite",
+    "html-to-text",
+    "libmime",
+    "encoding-japanese",
+  ],
 };
 
 export default nextConfig;

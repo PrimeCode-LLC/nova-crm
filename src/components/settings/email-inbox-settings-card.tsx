@@ -37,6 +37,8 @@ export function EmailInboxSettingsCard() {
   const [savingRemote, setSavingRemote] = React.useState(false);
   const [testingMailboxId, setTestingMailboxId] = React.useState<string | null>(null);
   const [openValues, setOpenValues] = React.useState<string[]>([]);
+  /** `${mailboxId}:smtp` | `${mailboxId}:imap` → password field visible as plain text */
+  const [passwordFieldVisible, setPasswordFieldVisible] = React.useState<Record<string, boolean>>({});
 
   const persistKey = React.useMemo(() => JSON.stringify(mailboxes), [mailboxes]);
 
@@ -453,13 +455,37 @@ export function EmailInboxSettingsCard() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs">Password / app password</Label>
-                          <Input
-                            className="h-9"
-                            type="password"
-                            autoComplete="new-password"
-                            value={mb.smtp.password}
-                            onChange={(e) => setSmtp(mb.id, { password: e.target.value })}
-                          />
+                          <div className="relative">
+                            <Input
+                              className="h-9 pr-10"
+                              type={passwordFieldVisible[`${mb.id}:smtp`] ? "text" : "password"}
+                              autoComplete="new-password"
+                              value={mb.smtp.password}
+                              onChange={(e) => setSmtp(mb.id, { password: e.target.value })}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="absolute right-0.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              aria-label={
+                                passwordFieldVisible[`${mb.id}:smtp`]
+                                  ? "Hide SMTP password"
+                                  : "Show SMTP password"
+                              }
+                              aria-pressed={passwordFieldVisible[`${mb.id}:smtp`] ?? false}
+                              onClick={() => {
+                                const k = `${mb.id}:smtp`;
+                                setPasswordFieldVisible((prev) => ({ ...prev, [k]: !prev[k] }));
+                              }}
+                            >
+                              {passwordFieldVisible[`${mb.id}:smtp`] ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
                       <p className="mt-2 text-[11px] text-muted-foreground">
@@ -520,13 +546,37 @@ export function EmailInboxSettingsCard() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs">Password</Label>
-                          <Input
-                            className="h-9"
-                            type="password"
-                            autoComplete="new-password"
-                            value={mb.imap.password}
-                            onChange={(e) => setImap(mb.id, { password: e.target.value })}
-                          />
+                          <div className="relative">
+                            <Input
+                              className="h-9 pr-10"
+                              type={passwordFieldVisible[`${mb.id}:imap`] ? "text" : "password"}
+                              autoComplete="new-password"
+                              value={mb.imap.password}
+                              onChange={(e) => setImap(mb.id, { password: e.target.value })}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="absolute right-0.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              aria-label={
+                                passwordFieldVisible[`${mb.id}:imap`]
+                                  ? "Hide IMAP password"
+                                  : "Show IMAP password"
+                              }
+                              aria-pressed={passwordFieldVisible[`${mb.id}:imap`] ?? false}
+                              onClick={() => {
+                                const k = `${mb.id}:imap`;
+                                setPasswordFieldVisible((prev) => ({ ...prev, [k]: !prev[k] }));
+                              }}
+                            >
+                              {passwordFieldVisible[`${mb.id}:imap`] ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                         <div className="space-y-1.5 sm:col-span-2">
                           <Label className="text-xs">Sync interval (minutes)</Label>

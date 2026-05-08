@@ -63,9 +63,21 @@ import {
   Send,
   Trash2,
   MessagesSquare,
+  Search,
 } from "lucide-react";
 import { toast } from "sonner";
 import { WorkspaceTeamChatPanel } from "@/components/inbox/workspace-team-chat-panel";
+import type { User } from "@/lib/types";
+
+function mailboxDisplayLabel(mb: EmailMailboxSettings): string {
+  const label = mb.label?.trim();
+  if (label) return label;
+  const email = mb.emailAddress?.trim();
+  if (email) return email;
+  const name = mb.displayName?.trim();
+  if (name) return name;
+  return "Mailbox";
+}
 
 const KIND_ICONS: Record<NotificationKind, React.ElementType> = {
   mention: AtSign,
@@ -84,6 +96,49 @@ const KIND_COLORS: Record<NotificationKind, string> = {
   stage: "bg-success/10 text-success",
   form: "bg-violet-500/10 text-violet-400",
 };
+
+function normalizeInboxSearch(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+function notificationMatchesSearch(n: DemoNotification, q: string, users: User[]): boolean {
+  if (!q) return true;
+  const sender = users.find((u) => u.id === n.sender);
+  const senderLabel = (sender?.displayName ?? "").toLowerCase();
+  const blob = [n.message, n.target, senderLabel].join("\n").toLowerCase();
+  return blob.includes(q);
+}
+
+type MailListRow = {
+  id: string;
+  title: string;
+  subtitle: string;
+  at: string;
+  row: MailDraft | MailSent | MailInbound;
+  muted?: boolean;
+  thread?: MailThread;
+};
+
+function mailListRowMatchesSearch(row: MailListRow, q: string): boolean {
+  if (!q) return true;
+  const head = `${row.title}\n${row.subtitle}`.toLowerCase();
+  if (head.includes(q)) return true;
+  if (row.thread) {
+    for (const m of row.thread.messages) {
+      const t = [m.subject, m.from, m.to, m.preview, m.bodyText].filter(Boolean).join("\n").toLowerCase();
+      if (t.includes(q)) return true;
+    }
+    return false;
+  }
+  const item = row.row;
+  if ("body" in item && typeof item.body === "string" && item.body && item.body.toLowerCase().includes(q)) {
+    return true;
+  }
+  if ("bodyText" in item && item.bodyText && item.bodyText.toLowerCase().includes(q)) {
+    return true;
+  }
+  return false;
+}
 
 type TabFilter = "all" | "unread" | "mentions" | "assignments" | "alerts";
 type InboxMode = "workspace" | "email";
@@ -122,6 +177,8 @@ export default function InboxPage() {
 
   const [selected, setSelected] = React.useState<DemoNotification | null>(null);
   const [tab, setTab] = React.useState<TabFilter>("all");
+  /** Filters the visible list in Workspace → Activity and in Email mode. */
+  const [listSearchQuery, setListSearchQuery] = React.useState("");
   const [inboxMode, setInboxMode] = React.useState<InboxMode>("workspace");
   const [workspaceFeedTab, setWorkspaceFeedTab] = React.useState<WorkspaceFeedTab>("activity");
 
@@ -134,6 +191,7 @@ export default function InboxPage() {
   const setActiveMailbox = useEmailAccountStore((s) => s.setActiveMailbox);
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const setInbound = useEmailAccountStore((s) => s.setInbound);
+  const mergeInboundBodies = useEmailAccountStore((s) => s.mergeInboundBodies);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
   const linkMessageToLead = useEmailAccountStore((s) => s.linkMessageToLead);
   const drafts = useEmailAccountStore((s) => s.drafts);
@@ -143,7 +201,6 @@ export default function InboxPage() {
   const addSent = useEmailAccountStore((s) => s.addSent);
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
-  const mailboxTriggerLabel = mailboxSelectLabel(account);
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
   const [selectedThread, setSelectedThread] = React.useState<MailThread | null>(null);
@@ -156,8 +213,14 @@ export default function InboxPage() {
   const [sending, setSending] = React.useState(false);
 
   const [inboundLoading, setInboundLoading] = React.useState(false);
+  /** Total messages in INBOX on server (from last IMAP list); may exceed loaded rows. */
+  const [imapMailboxTotal, setImapMailboxTotal] = React.useState<number | null>(null);
   const inbound = inboundByMailbox[account.id] ?? [];
   const inboundThreads = React.useMemo(() => groupInboundIntoThreads(inbound), [inbound]);
+
+  React.useEffect(() => {
+    setImapMailboxTotal(null);
+  }, [account.id]);
 
   React.useEffect(() => {
     setSelectedThread((prev) => {
@@ -165,6 +228,90 @@ export default function InboxPage() {
       return inboundThreads.find((t) => t.threadId === prev.threadId) ?? null;
     });
   }, [inboundThreads]);
+
+  /** Load RFC822 bodies for older messages when a thread is opened (bulk sync only parses the newest chunk). */
+  React.useEffect(() => {
+    if (isDemo) return;
+    if (inboxMode !== "email" || mailFolder !== "inbox") return;
+    const threadId = selectedThread?.threadId;
+    if (!threadId) return;
+
+    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    if (!isImapInboxConfigured(acct)) return;
+
+    const resolveThread = () => {
+      const list = useEmailAccountStore.getState().inboundByMailbox[acct.id] ?? [];
+      return groupInboundIntoThreads(list).find((t) => t.threadId === threadId);
+    };
+
+    const ac = new AbortController();
+    let cancelled = false;
+
+    void (async () => {
+      const CHUNK = 50;
+      try {
+        for (;;) {
+          if (cancelled || ac.signal.aborted) return;
+          const thread = resolveThread();
+          if (!thread) return;
+          const need = thread.messages.filter((m) => m.bodySynced === false).map((m) => m.uid);
+          if (need.length === 0) return;
+          const part = need.slice(0, CHUNK);
+          const res = await fetch("/api/email/imap-fetch-bodies", {
+            method: "POST",
+            signal: ac.signal,
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mailboxId: acct.id,
+              uids: part,
+              imap: {
+                host: acct.imap.host,
+                port: acct.imap.port,
+                secure: acct.imap.secure,
+                user: acct.imap.user,
+                pass: acct.imap.password,
+              },
+            }),
+          });
+          const data = (await res.json()) as {
+            ok?: boolean;
+            error?: string;
+            updates?: Array<{ uid: number } & Partial<MailInbound>>;
+          };
+          if (!data.ok || !Array.isArray(data.updates)) {
+            if (!cancelled && data.error) {
+              toast.error("Couldn’t load message body", {
+                description: data.error.length > 280 ? `${data.error.slice(0, 280)}…` : data.error,
+              });
+            }
+            return;
+          }
+          mergeInboundBodies(acct.id, data.updates);
+        }
+      } catch {
+        if (!cancelled && !ac.signal.aborted) {
+          toast.error("Could not load full message text");
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [
+    isDemo,
+    inboxMode,
+    mailFolder,
+    selectedThread?.threadId,
+    mergeInboundBodies,
+    account.id,
+    account.imap.host,
+    account.imap.port,
+    account.imap.secure,
+    account.imap.user,
+    account.imap.password,
+  ]);
 
   const fetchInboundMail = React.useCallback(async () => {
     if (isDemo) {
@@ -183,7 +330,7 @@ export default function InboxPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mailboxId: acct.id,
-          limit: 50,
+          limit: 800,
           imap: {
             host: acct.imap.host,
             port: acct.imap.port,
@@ -197,14 +344,21 @@ export default function InboxPage() {
         ok?: boolean;
         error?: string;
         messages?: MailInbound[];
+        mailboxTotal?: number;
       };
       if (!data.ok) {
+        const err = data.error ?? "Unknown error from the mail server.";
         toast.error("Couldn’t refresh mail", {
-          description: data.error ?? "Unknown error from the mail server.",
+          description: err.length > 400 ? `${err.slice(0, 400)}…` : err,
         });
         return;
       }
       setInbound(acct.id, Array.isArray(data.messages) ? data.messages : []);
+      setImapMailboxTotal(
+        typeof data.mailboxTotal === "number" && Number.isFinite(data.mailboxTotal)
+          ? data.mailboxTotal
+          : null,
+      );
     } catch {
       toast.error("Could not reach the server");
     } finally {
@@ -238,13 +392,18 @@ export default function InboxPage() {
     fetchInboundMail,
   ]);
 
-  const filtered = notifications.filter((n) => {
-    if (tab === "unread") return !n.read;
-    if (tab === "mentions") return n.kind === "mention";
-    if (tab === "assignments") return n.kind === "assignment";
-    if (tab === "alerts") return n.kind === "idle" || n.kind === "followup";
-    return true;
-  });
+  const filtered = React.useMemo(() => {
+    const q = normalizeInboxSearch(listSearchQuery);
+    return notifications
+      .filter((n) => {
+        if (tab === "unread") return !n.read;
+        if (tab === "mentions") return n.kind === "mention";
+        if (tab === "assignments") return n.kind === "assignment";
+        if (tab === "alerts") return n.kind === "idle" || n.kind === "followup";
+        return true;
+      })
+      .filter((n) => notificationMatchesSearch(n, q, users));
+  }, [notifications, tab, listSearchQuery, users]);
 
   const unreadCount = notifications.filter((n) => !n.read).length;
   const totalCount = notifications.length;
@@ -425,6 +584,49 @@ export default function InboxPage() {
     return [];
   }, [mailFolder, sent, drafts, inboundThreads, account.id]);
 
+  const visibleMailRows = React.useMemo(() => {
+    const q = normalizeInboxSearch(listSearchQuery);
+    return mailListRows.filter((row) => mailListRowMatchesSearch(row, q));
+  }, [mailListRows, listSearchQuery]);
+
+  const mailSearchActive = normalizeInboxSearch(listSearchQuery).length > 0;
+
+  React.useEffect(() => {
+    if (inboxMode !== "email") return;
+    if (visibleMailRows.length === 0) {
+      if (mailSearchActive) {
+        setSelectedThread(null);
+        setSelectedMail(null);
+      }
+      return;
+    }
+    if (selectedThread) {
+      const ok = visibleMailRows.some((r) => r.thread?.threadId === selectedThread.threadId);
+      if (ok) return;
+      const pick = visibleMailRows[0]!;
+      if (pick.thread) {
+        setSelectedThread(pick.thread);
+        setSelectedMail(null);
+      } else {
+        setSelectedThread(null);
+        setSelectedMail(pick.row);
+      }
+      return;
+    }
+    if (selectedMail) {
+      const ok = visibleMailRows.some((r) => !r.thread && r.row.id === selectedMail.id);
+      if (ok) return;
+      const pick = visibleMailRows[0]!;
+      if (pick.thread) {
+        setSelectedThread(pick.thread);
+        setSelectedMail(null);
+      } else {
+        setSelectedThread(null);
+        setSelectedMail(pick.row);
+      }
+    }
+  }, [inboxMode, visibleMailRows, selectedThread, selectedMail, mailSearchActive]);
+
   const pageActions =
     inboxMode === "workspace" ? (
       workspaceFeedTab === "activity" && notifications.length > 0 ? (
@@ -570,6 +772,7 @@ export default function InboxPage() {
             onValueChange={(v) => {
               const next = v as InboxMode;
               setInboxMode(next);
+              setListSearchQuery("");
               try {
                 sessionStorage.setItem(INBOX_MODE_STORAGE_KEY, next);
               } catch {
@@ -615,14 +818,12 @@ export default function InboxPage() {
                 }}
               >
                 <SelectTrigger className="h-8 min-w-[200px] max-w-[min(100%,280px)]">
-                  <SelectValue placeholder="Select mailbox">
-                    <span className="truncate">{mailboxTriggerLabel}</span>
-                  </SelectValue>
+                  <SelectValue placeholder="Select mailbox">{mailboxDisplayLabel(account)}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {mailboxes.map((mb) => (
                     <SelectItem key={mb.id} value={mb.id}>
-                      {mb.label?.trim() || "Mailbox"}
+                      {mailboxDisplayLabel(mb)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -682,6 +883,19 @@ export default function InboxPage() {
                         </TabsTrigger>
                       </TabsList>
                     </Tabs>
+                    <div className="relative mt-2">
+                      <Search
+                        className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+                        aria-hidden
+                      />
+                      <Input
+                        value={listSearchQuery}
+                        onChange={(e) => setListSearchQuery(e.target.value)}
+                        placeholder="Search notifications…"
+                        className="h-8 pl-8 text-xs"
+                        aria-label="Search notifications"
+                      />
+                    </div>
                   </div>
                   <div className="flex-1 divide-y overflow-y-auto">
                     {!inboxHydrated ? (
@@ -693,8 +907,14 @@ export default function InboxPage() {
                       <>
                         {filtered.length === 0 && (
                           <div className="space-y-4 p-6">
-                            <p className="text-center text-sm text-muted-foreground">No notifications here.</p>
-                            {!isDemo && <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />}
+                            <p className="text-center text-sm text-muted-foreground">
+                              {normalizeInboxSearch(listSearchQuery)
+                                ? "No notifications match your search."
+                                : "No notifications here."}
+                            </p>
+                            {!isDemo && !normalizeInboxSearch(listSearchQuery) && (
+                              <WorkspaceEmptyHint title="Inbox is empty in workspace mode" />
+                            )}
                           </div>
                         )}
                         {filtered.map((n) => {
@@ -831,9 +1051,13 @@ export default function InboxPage() {
                   }}
                 >
                   {f.label}
-                  {f.id === "inbox" && inboundThreads.length > 0 && (
-                    <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px]">
-                      {inboundThreads.length}
+                  {f.id === "inbox" && (
+                    <Badge
+                      variant="outline"
+                      className="ml-auto h-5 max-w-[min(100%,5.75rem)] shrink-0 truncate px-1.5 text-[10px] font-normal"
+                      title={mailboxDisplayLabel(account)}
+                    >
+                      {mailboxDisplayLabel(account)}
                     </Badge>
                   )}
                   {f.id === "sent" && sent.length > 0 && (
@@ -857,7 +1081,29 @@ export default function InboxPage() {
             </div>
 
             <div className="w-full max-w-md flex flex-col border-r max-h-[calc(100vh-250px)] overflow-y-auto">
-              <div className="px-3 py-2 border-b text-xs font-medium text-muted-foreground capitalize">{mailFolder}</div>
+              <div className="px-3 py-2 border-b text-xs font-medium text-muted-foreground capitalize space-y-2">
+                <div>{mailFolder}</div>
+                {mailFolder === "inbox" &&
+                  imapMailboxTotal != null &&
+                  imapMailboxTotal > inbound.length && (
+                    <div className="font-normal text-[10px] leading-snug normal-case">
+                      Loaded newest {inbound.length} of {imapMailboxTotal} messages in INBOX
+                    </div>
+                  )}
+                <div className="relative normal-case">
+                  <Search
+                    className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <Input
+                    value={listSearchQuery}
+                    onChange={(e) => setListSearchQuery(e.target.value)}
+                    placeholder="Search subject, sender, body…"
+                    className="h-8 pl-8 text-xs font-normal"
+                    aria-label="Search mail"
+                  />
+                </div>
+              </div>
               <div className="flex-1 overflow-y-auto divide-y">
                 {mailFolder === "inbox" && !isImapInboxConfigured(account) && (
                   <div className="p-4 space-y-2">
@@ -887,7 +1133,10 @@ export default function InboxPage() {
                   mailFolder !== "inbox" && (
                     <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
                   )}
-                {mailListRows.map((row) => {
+                {mailSearchActive && mailListRows.length > 0 && visibleMailRows.length === 0 && (
+                  <div className="p-6 text-center text-sm text-muted-foreground">No messages match your search.</div>
+                )}
+                {visibleMailRows.map((row) => {
                   const isRowSelected = row.thread
                     ? selectedThread?.threadId === row.thread.threadId
                     : selectedMail?.id === row.row.id && selectedThread == null;
@@ -963,7 +1212,11 @@ export default function InboxPage() {
                           </span>
                         </div>
                         <p className="text-[11px] text-muted-foreground">{m.subject || "(no subject)"}</p>
-                        <div className="whitespace-pre-wrap overflow-x-auto">{m.bodyText}</div>
+                        {m.bodySynced === false && !m.bodyText?.trim() ? (
+                          <p className="text-xs text-muted-foreground">Loading full message…</p>
+                        ) : (
+                          <div className="whitespace-pre-wrap overflow-x-auto">{m.bodyText || m.preview}</div>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -984,7 +1237,7 @@ export default function InboxPage() {
                         openCompose({
                           to: addr,
                           subject: reSubj,
-                          body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${latest.bodyText.slice(0, 2000)}`,
+                          body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${(latest.bodyText || latest.preview || "").slice(0, 2000)}`,
                         });
                       }}
                     >
@@ -1090,7 +1343,7 @@ export default function InboxPage() {
                           openCompose({
                             to: addr,
                             subject: reSubj,
-                            body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${selectedMail.bodyText.slice(0, 2000)}`,
+                            body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 2000)}`,
                           });
                         }}
                       >
@@ -1176,10 +1429,6 @@ export default function InboxPage() {
       </Sheet>
     </>
   );
-}
-
-function mailboxSelectLabel(mb: EmailMailboxSettings): string {
-  return mb.label?.trim() || "Mailbox";
 }
 
 function escapeHtml(s: string) {

@@ -15,6 +15,13 @@ function errorSummary(e: Error | null | undefined): string {
   return "Unknown error";
 }
 
+/** Avoid dumping megabytes of vendor error text (or comma-separated lists) into the alert UI. */
+function sanitizeBannerDetailText(raw: string, maxLen = 900): string {
+  const t = raw.replace(/\s+/g, " ").trim();
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen)}…`;
+}
+
 export function WorkspaceStatusBanner() {
   const router = useRouter();
   const { mode, isDemo, liveFirestoreError, userProfileError } = useWorkspace();
@@ -61,17 +68,17 @@ export function WorkspaceStatusBanner() {
             <summary className="cursor-pointer select-none text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
               <span className="underline-offset-2 group-open/details:underline">Technical details</span>
             </summary>
-            <div className="mt-2 space-y-2 rounded-md border border-border/80 bg-background/80 p-2 font-mono text-[11px] leading-snug text-muted-foreground">
+            <div className="mt-2 max-h-48 overflow-y-auto space-y-2 rounded-md border border-border/80 bg-background/80 p-2 font-mono text-[11px] leading-snug text-muted-foreground">
               {liveErr ? (
                 <p className="break-words whitespace-pre-wrap">
                   <span className="font-sans font-medium text-foreground">Firestore: </span>
-                  {errorSummary(liveErr)}
+                  {sanitizeBannerDetailText(errorSummary(liveErr))}
                 </p>
               ) : null}
               {profileErr ? (
                 <p className="break-words whitespace-pre-wrap">
                   <span className="font-sans font-medium text-foreground">Profile: </span>
-                  {errorSummary(profileErr)}
+                  {sanitizeBannerDetailText(errorSummary(profileErr))}
                 </p>
               ) : null}
             </div>
