@@ -42,6 +42,7 @@ export const mockUsers: User[] = [
     email: "james.mitchell@nova.co",
     displayName: "James Mitchell",
     roleId: "director",
+    orgRole: "owner",
     title: "Founder & Director",
     isSuperAdmin: true,
     status: "active",

@@ -28,6 +28,8 @@ export type WorkspaceSessionV2 = {
   touchpointsAdded: Touchpoint[];
   timelineAdded: TimelineEvent[];
   leadPatches: Record<string, Partial<Lead>>;
+  /** Session-removed lead ids (demo / optimistic hide until Firestore listener catches up). */
+  deletedLeadIds: string[];
   pinnedLeadIds: string[];
   /** Increment touches + refresh lastActivityAt for session-scoped activity. */
   leadActivity: Record<string, { bump: number; lastAt?: string }>;
@@ -41,6 +43,7 @@ export function emptyWorkspaceSession(): WorkspaceSessionV2 {
     touchpointsAdded: [],
     timelineAdded: [],
     leadPatches: {},
+    deletedLeadIds: [],
     pinnedLeadIds: [],
     leadActivity: {},
   };
@@ -113,6 +116,7 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
     touchpointsAdded: Array.isArray(parsed.touchpointsAdded) ? parsed.touchpointsAdded : [],
     timelineAdded: Array.isArray(parsed.timelineAdded) ? parsed.timelineAdded : [],
     leadPatches: parsed.leadPatches && typeof parsed.leadPatches === "object" ? parsed.leadPatches : {},
+    deletedLeadIds: Array.isArray(parsed.deletedLeadIds) ? parsed.deletedLeadIds : [],
     pinnedLeadIds: Array.isArray(parsed.pinnedLeadIds) ? parsed.pinnedLeadIds : [],
     leadActivity: parsed.leadActivity && typeof parsed.leadActivity === "object" ? parsed.leadActivity : {},
   };
@@ -140,8 +144,22 @@ export function mergeSessionIntoSnapshot(
   WorkspaceSnapshot,
   "followups" | "leadTasks" | "notes" | "touchpoints" | "timelineByLead" | "leads"
 > {
-  const visibleLeadIds = new Set(base.leads.map((l) => l.id));
-  const visibleDealIds = new Set(base.deals.map((d) => d.id));
+  const deletedLeadIds = new Set(session.deletedLeadIds ?? []);
+
+  const leads = base.leads
+    .filter((l) => !deletedLeadIds.has(l.id))
+    .map((l) => {
+      const patch = session.leadPatches[l.id] ?? {};
+      const act = session.leadActivity[l.id];
+      const touches = act ? l.touches + act.bump : l.touches;
+      const lastActivityAt = act?.lastAt ?? l.lastActivityAt;
+      return { ...l, ...patch, touches, lastActivityAt };
+    });
+
+  const visibleLeadIds = new Set(leads.map((l) => l.id));
+  const visibleDealIds = new Set(
+    base.deals.filter((d) => visibleLeadIds.has(d.leadId)).map((d) => d.id),
+  );
 
   const removedNotes = new Set(session.notes.removedIds);
   const mergedBaseNotes = base.notes
@@ -149,7 +167,8 @@ export function mergeSessionIntoSnapshot(
     .map((n) => {
       const u = session.notes.updates[n.id];
       return u ? { ...n, ...u } : n;
-    });
+    })
+    .filter((n) => !n.leadId || visibleLeadIds.has(n.leadId));
   const baseNoteIds = new Set(mergedBaseNotes.map((n) => n.id));
   const notes = [
     ...mergedBaseNotes,
@@ -160,7 +179,7 @@ export function mergeSessionIntoSnapshot(
 
   const baseTouchpointIds = new Set(base.touchpoints.map((t) => t.id));
   const touchpoints = [
-    ...base.touchpoints,
+    ...base.touchpoints.filter((t) => visibleLeadIds.has(t.leadId)),
     ...session.touchpointsAdded.filter(
       (t) => visibleLeadIds.has(t.leadId) && !baseTouchpointIds.has(t.id),
     ),
@@ -168,6 +187,7 @@ export function mergeSessionIntoSnapshot(
 
   const timelineByLead: Record<string, TimelineEvent[]> = {};
   for (const [leadId, events] of Object.entries(base.timelineByLead)) {
+    if (!visibleLeadIds.has(leadId)) continue;
     timelineByLead[leadId] = [...events];
   }
   for (const e of session.timelineAdded) {
@@ -179,7 +199,9 @@ export function mergeSessionIntoSnapshot(
     timelineByLead[e.leadId] = list;
   }
 
-  const mergedBaseFollowups = base.followups.map((f) => mergeFollowup(f, session.followups.completion));
+  const mergedBaseFollowups = base.followups
+    .filter((f) => !f.leadId || visibleLeadIds.has(f.leadId))
+    .map((f) => mergeFollowup(f, session.followups.completion));
   const baseFollowupIds = new Set(mergedBaseFollowups.map((f) => f.id));
   const mergedExtras = session.followups.extras
     .filter(
@@ -192,22 +214,14 @@ export function mergeSessionIntoSnapshot(
     .map((f) => mergeFollowup(f, session.followups.completion));
   const followups = [...mergedBaseFollowups, ...mergedExtras];
 
-  const mergedBaseLeadTasks = base.leadTasks.map((t) =>
-    mergeLeadTask(t, session.leadTasks.completion),
-  );
+  const mergedBaseLeadTasks = base.leadTasks
+    .filter((t) => !t.leadId || visibleLeadIds.has(t.leadId))
+    .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const baseLeadTaskIds = new Set(mergedBaseLeadTasks.map((t) => t.id));
   const leadTaskExtrasFiltered = session.leadTasks.extras
     .filter((t) => !baseLeadTaskIds.has(t.id))
     .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const leadTasks = [...mergedBaseLeadTasks, ...leadTaskExtrasFiltered];
-
-  const leads = base.leads.map((l) => {
-    const patch = session.leadPatches[l.id] ?? {};
-    const act = session.leadActivity[l.id];
-    const touches = act ? l.touches + act.bump : l.touches;
-    const lastActivityAt = act?.lastAt ?? l.lastActivityAt;
-    return { ...l, ...patch, touches, lastActivityAt };
-  });
 
   return { followups, leadTasks, notes, touchpoints, timelineByLead, leads };
 }

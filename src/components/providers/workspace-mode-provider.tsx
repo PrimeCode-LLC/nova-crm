@@ -36,6 +36,7 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
+import { persistLeadDeleteClient } from "@/lib/firestore/persist-lead-delete-client";
 import {
   persistFollowupCreate,
   persistFollowupDelete,
@@ -101,6 +102,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addLeadTouchpoint: (t: Touchpoint) => void;
     addTimelineEvent: (e: TimelineEvent) => void;
     patchLead: (leadId: string, patch: Partial<Lead>) => void;
+    /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
+    deleteLead: (leadId: string) => Promise<boolean>;
+    /** Whether the active user may delete leads (org `owner` or `admin`). */
+    canDeleteLeads: boolean;
     updateLeadStage: (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => void;
     toggleLeadPin: (leadId: string) => void;
     isLeadPinned: (leadId: string) => boolean;
@@ -724,6 +729,78 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId],
   );
 
+  const deleteLead = React.useCallback(
+    async (leadId: string): Promise<boolean> => {
+      const snap = snapshotRef.current;
+      const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole;
+      const allowed = role === "owner" || role === "admin";
+      if (!allowed) {
+        toast.error("Only organization owners and admins can delete leads.");
+        return false;
+      }
+      const lead = snap.leads.find((l) => l.id === leadId);
+      if (!lead) return false;
+      const account = snap.accounts.find((a) => a.id === lead.accountId);
+      if (!account) {
+        toast.error("Could not delete lead: account not found.");
+        return false;
+      }
+
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        try {
+          const db = getFirebaseDb();
+          await persistLeadDeleteClient(db, {
+            leadId,
+            accountId: account.id,
+            accountLeadCount: account.leadCount,
+          });
+          toast.success("Lead deleted");
+          setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
+          setSessionV2((s) => {
+            if (s.deletedLeadIds.includes(leadId)) return s;
+            const leadPatches = { ...s.leadPatches };
+            delete leadPatches[leadId];
+            const leadActivity = { ...s.leadActivity };
+            delete leadActivity[leadId];
+            return {
+              ...s,
+              deletedLeadIds: [...s.deletedLeadIds, leadId],
+              leadPatches,
+              leadActivity,
+              pinnedLeadIds: s.pinnedLeadIds.filter((id) => id !== leadId),
+            };
+          });
+          return true;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not delete lead", { description: msg });
+          return false;
+        }
+      }
+
+      toast.success("Lead removed");
+      setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
+      setSessionV2((s) => {
+        if (s.deletedLeadIds.includes(leadId)) return s;
+        const leadPatches = { ...s.leadPatches };
+        delete leadPatches[leadId];
+        const leadActivity = { ...s.leadActivity };
+        delete leadActivity[leadId];
+        return {
+          ...s,
+          deletedLeadIds: [...s.deletedLeadIds, leadId],
+          leadPatches,
+          leadActivity,
+          pinnedLeadIds: s.pinnedLeadIds.filter((id) => id !== leadId),
+        };
+      });
+      return true;
+    },
+    [mode, userDoc?.organizationId],
+  );
+
   const updateLeadStage = React.useCallback(
     (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => {
       const iso = new Date().toISOString();
@@ -912,7 +989,9 @@ export function WorkspaceModeProvider({
 
   const snapshot = React.useMemo((): WorkspaceSnapshot => {
     const merged = mergeSessionIntoSnapshot(preSessionSnapshot, sessionV2);
-    return { ...preSessionSnapshot, ...merged };
+    const leadIdSet = new Set(merged.leads.map((l) => l.id));
+    const deals = preSessionSnapshot.deals.filter((d) => leadIdSet.has(d.leadId));
+    return { ...preSessionSnapshot, ...merged, deals };
   }, [preSessionSnapshot, sessionV2]);
 
   const snapshotRef = React.useRef(snapshot);
@@ -958,6 +1037,8 @@ export function WorkspaceModeProvider({
       if (fromUser) return fromUser;
       return orgMemberLabels[id]?.trim() || undefined;
     };
+    const viewerRole = snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole;
+    const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
     return {
       ...snapshotWithIdle,
       ...lookup,
@@ -991,6 +1072,8 @@ export function WorkspaceModeProvider({
       addLeadTouchpoint,
       addTimelineEvent,
       patchLead,
+      deleteLead,
+      canDeleteLeads,
       updateLeadStage,
       toggleLeadPin,
       isLeadPinned,
@@ -1029,6 +1112,7 @@ export function WorkspaceModeProvider({
     addLeadTouchpoint,
     addTimelineEvent,
     patchLead,
+    deleteLead,
     updateLeadStage,
     toggleLeadPin,
     isLeadPinned,

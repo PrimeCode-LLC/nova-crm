@@ -30,11 +30,15 @@ service cloud.firestore {
         : null;
     }
 
+    /**
+     * Prefer `orgRole` on the `/users/{uid}` document (server-maintained, matches the app)
+     * and fall back to the JWT claim only when the field is absent (e.g. before first sync).
+     * If we preferred the token whenever it was non-null, a stale token could block deletes
+     * after an owner/admin promotion until the next ID-token refresh.
+     */
     function callerOrgRole() {
       return signedIn()
-        ? (request.auth.token.orgRole != null
-            ? request.auth.token.orgRole
-            : userDoc().orgRole)
+        ? userDoc().get('orgRole', request.auth.token.orgRole)
         : null;
     }
 
@@ -152,7 +156,11 @@ service cloud.firestore {
 
     match /leads/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /notes/{id} {

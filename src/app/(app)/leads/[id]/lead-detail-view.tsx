@@ -16,6 +16,7 @@ import {
   Share2,
   Star,
   MoreHorizontal,
+  Trash2,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -50,8 +51,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -83,6 +95,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
   const [activeTab, setActiveTab] = React.useState<LeadTab>(tabFromUrl);
   const [editOpen, setEditOpen] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
   React.useEffect(() => {
     setActiveTab(tabFromUrl);
   }, [tabFromUrl]);
@@ -101,6 +115,62 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
   const backHref = searchParams.get("from") === "pipeline" ? "/pipeline" : "/leads";
   const lead = ws.getLeadById(leadId);
+
+  const viewerForTasks = React.useMemo(
+    () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
+    [ws.currentUserId, ws.users, ws.getUserById],
+  );
+  const leadTasksForTab = React.useMemo(
+    () => filterLeadTasksForLeadDetail(ws.leadTasks, leadId, viewerForTasks),
+    [ws.leadTasks, leadId, viewerForTasks],
+  );
+  const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
+  const sent = useEmailAccountStore((s) => s.sent);
+  const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
+
+  const touchpoints = React.useMemo(
+    () => (lead ? ws.touchpoints.filter((t) => t.leadId === lead.id) : []),
+    [lead, ws.touchpoints],
+  );
+  const timeline = React.useMemo(
+    () => (lead ? (ws.timelineByLead[lead.id] ?? []) : []),
+    [lead, ws.timelineByLead],
+  );
+  const notes = React.useMemo(
+    () => (lead ? ws.notes.filter((n) => n.leadId === lead.id) : []),
+    [lead, ws.notes],
+  );
+  const followups = React.useMemo(
+    () => (lead ? ws.followups.filter((f) => f.leadId === lead.id) : []),
+    [lead, ws.followups],
+  );
+  const notesTabCount = React.useMemo(
+    () => notes.length + (lead?.notes?.trim() ? 1 : 0),
+    [lead?.notes, notes.length],
+  );
+  const relatedEmails = React.useMemo(() => {
+    if (!lead) return [];
+    const own = (lead.contactEmail ?? "").toLowerCase();
+    const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
+    for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
+      for (const m of messages) {
+        const mid = `${mailboxId}:in:${m.id}`;
+        const manual = linkedLeadByMessageId[mid] === lead.id;
+        const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
+        if (!manual && !auto) continue;
+        rows.push({ id: mid, subject: m.subject, at: m.date, from: m.from, to: m.to, body: m.bodyText });
+      }
+    }
+    for (const m of sent) {
+      const manual = linkedLeadByMessageId[m.id] === lead.id;
+      const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
+      if (!manual && !auto) continue;
+      rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
+    }
+    return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
+  }, [inboundByMailbox, linkedLeadByMessageId, lead, sent]);
+
+  const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
     return (
@@ -133,44 +203,6 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const showAttributionCard = Boolean(
     campaign || profile || lead.profileId || needsOutreachProfile,
   );
-  const touchpoints = ws.touchpoints.filter((t) => t.leadId === lead.id);
-  const timeline = ws.timelineByLead[lead.id] ?? [];
-  const notes = ws.notes.filter((n) => n.leadId === lead.id);
-  const notesTabCount = notes.length + (lead.notes?.trim() ? 1 : 0);
-  const followups = ws.followups.filter((f) => f.leadId === lead.id);
-  const viewerForTasks = React.useMemo(
-    () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
-    [ws.currentUserId, ws.users, ws.getUserById],
-  );
-  const leadTasksForTab = React.useMemo(
-    () => filterLeadTasksForLeadDetail(ws.leadTasks, lead.id, viewerForTasks),
-    [ws.leadTasks, lead.id, viewerForTasks],
-  );
-  const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
-  const sent = useEmailAccountStore((s) => s.sent);
-  const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
-  const relatedEmails = React.useMemo(() => {
-    const own = (lead.contactEmail ?? "").toLowerCase();
-    const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
-    for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
-      for (const m of messages) {
-        const mid = `${mailboxId}:in:${m.id}`;
-        const manual = linkedLeadByMessageId[mid] === lead.id;
-        const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
-        if (!manual && !auto) continue;
-        rows.push({ id: mid, subject: m.subject, at: m.date, from: m.from, to: m.to, body: m.bodyText });
-      }
-    }
-    for (const m of sent) {
-      const manual = linkedLeadByMessageId[m.id] === lead.id;
-      const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
-      if (!manual && !auto) continue;
-      rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
-    }
-    return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
-  }, [inboundByMailbox, linkedLeadByMessageId, lead.contactEmail, lead.id, sent]);
-
-  const pinned = ws.isLeadPinned(lead.id);
 
   async function copyToClipboard(text: string, okMsg: string) {
     try {
@@ -197,6 +229,37 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
   return (
     <>
+      <AlertDialog open={deleteOpen} onOpenChange={(o) => !deleteBusy && setDeleteOpen(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this lead?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes {lead.contactName} at {lead.companyName} from your workspace. Notes and activity
+              for this lead will no longer appear. Only organization owners and admins can do this.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteBusy}
+              onClick={() => {
+                void (async () => {
+                  setDeleteBusy(true);
+                  const ok = await ws.deleteLead(lead.id);
+                  setDeleteBusy(false);
+                  if (ok) {
+                    setDeleteOpen(false);
+                    router.push(backHref);
+                  }
+                })();
+              }}
+            >
+              {deleteBusy ? "Deleting…" : "Delete lead"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <PageHeader
         title={
           <div className="flex items-center gap-3">
@@ -313,6 +376,21 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <DropdownMenuItem onSelect={() => void copyToClipboard(lead.id, "Lead ID copied")}>
                   Copy lead ID
                 </DropdownMenuItem>
+                {ws.canDeleteLeads ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete lead
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </>
