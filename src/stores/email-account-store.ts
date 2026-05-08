@@ -6,6 +6,7 @@ import {
   type MailInbound,
   defaultEmailMailboxSettings,
 } from "@/lib/email-account-types";
+import { buildDemoEmailSeed } from "@/lib/demo-email-seed";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 
 export interface EmailAccountStore {
@@ -200,15 +201,17 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     scheduleEmailMetaPersist(get);
   },
   clearLocalMail: () => set({ drafts: [], sent: [], inboundByMailbox: {} }),
-  resetForDemoMode: () =>
+  resetForDemoMode: () => {
+    const seed = buildDemoEmailSeed();
     set({
-      mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
-      activeMailboxId: "",
-      linkedLeadByMessageId: {},
-      inboundByMailbox: {},
-      drafts: [],
-      sent: [],
-    }),
+      mailboxes: seed.mailboxes,
+      activeMailboxId: seed.activeMailboxId,
+      linkedLeadByMessageId: seed.linkedLeadByMessageId,
+      inboundByMailbox: seed.inboundByMailbox,
+      drafts: seed.drafts,
+      sent: seed.sent,
+    });
+  },
 }));
 
 export function isEmailAccountConfigured(account: EmailMailboxSettings): boolean {

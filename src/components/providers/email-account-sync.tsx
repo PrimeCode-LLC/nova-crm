@@ -16,14 +16,19 @@ export function EmailAccountSync() {
   const setEmailServerSyncEnabled = useEmailAccountStore((s) => s.setEmailServerSyncEnabled);
   const setEmailServerHydrated = useEmailAccountStore((s) => s.setEmailServerHydrated);
   const resetForDemoMode = useEmailAccountStore((s) => s.resetForDemoMode);
+  const wasDemoRef = React.useRef(false);
 
   React.useEffect(() => {
     if (isDemo) {
-      resetForDemoMode();
+      if (!wasDemoRef.current) {
+        resetForDemoMode();
+      }
+      wasDemoRef.current = true;
       setEmailServerSyncEnabled(false);
       setEmailServerHydrated(true);
       return;
     }
+    wasDemoRef.current = false;
     if (!sessionHydrated || !currentUserId) return;
 
     let cancelled = false;

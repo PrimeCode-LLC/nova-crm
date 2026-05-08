@@ -69,21 +69,23 @@ export function EntityLabelPicker({
         )}
       </div>
       <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 gap-1.5"
-            disabled={disabled}
-          >
-            <Tag className="h-3.5 w-3.5" />
-            Labels
-            {sorted.length > 0 ? (
-              <span className="text-muted-foreground tabular-nums">({labelIds.length})</span>
-            ) : null}
-          </Button>
-        </PopoverTrigger>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5"
+              disabled={disabled}
+            >
+              <Tag className="h-3.5 w-3.5" />
+              Labels
+              {sorted.length > 0 ? (
+                <span className="text-muted-foreground tabular-nums">({labelIds.length})</span>
+              ) : null}
+            </Button>
+          }
+        />
         <PopoverContent className="w-72 p-3" align="start">
           {sorted.length === 0 ? (
             <div className="space-y-2 text-sm">

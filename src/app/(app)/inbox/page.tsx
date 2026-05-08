@@ -149,6 +149,10 @@ export default function InboxPage() {
   }, [inboundThreads]);
 
   async function fetchInboundMail() {
+    if (isDemo) {
+      toast.message("Demo inbox", { description: "Sample threads only — no IMAP server is used." });
+      return;
+    }
     if (!isImapInboxConfigured(account)) {
       setInbound(account.id, []);
       return;
@@ -191,13 +195,14 @@ export default function InboxPage() {
 
   React.useEffect(() => {
     if (inboxMode !== "email" || mailFolder !== "inbox") return;
+    if (isDemo) return;
     if (!isImapInboxConfigured(account)) {
       setInbound(account.id, []);
       return;
     }
     void fetchInboundMail();
     // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when switching back to IMAP inbox or credentials identity changes
-  }, [inboxMode, mailFolder, account.id, account.enabled, account.imap.host, account.imap.user]);
+  }, [inboxMode, mailFolder, account.id, account.enabled, account.imap.host, account.imap.user, isDemo]);
 
   const filtered = notifications.filter((n) => {
     if (tab === "unread") return !n.read;
@@ -251,6 +256,29 @@ export default function InboxPage() {
   async function handleSend() {
     if (!composeTo.trim()) {
       toast.error("Add a recipient");
+      return;
+    }
+    if (isDemo) {
+      setSending(true);
+      try {
+        addSent({
+          mailboxId: account.id,
+          from: account.emailAddress.trim() || "demo@nova.local",
+          to: composeTo.trim(),
+          subject: composeSubject.trim() || "(no subject)",
+          body: composeBody,
+        });
+        if (composeDraftId) deleteDraft(composeDraftId);
+        toast.success("Message saved to Sent (demo)", {
+          description: "SMTP is not used in demo mode.",
+        });
+        setComposeOpen(false);
+        setMailFolder("sent");
+        setSelectedMail(null);
+        setSelectedThread(null);
+      } finally {
+        setSending(false);
+      }
       return;
     }
     if (!isEmailAccountConfigured(account)) {
@@ -377,12 +405,14 @@ export default function InboxPage() {
           variant="outline"
           size="sm"
           className="gap-1.5"
-          disabled={inboundLoading || !isImapInboxConfigured(account)}
+          disabled={inboundLoading || (!isDemo && !isImapInboxConfigured(account))}
           onClick={() => void fetchInboundMail()}
           title={
-            isImapInboxConfigured(account)
-              ? "Reload messages from the server"
-              : "Configure IMAP in Email settings to refresh"
+            isDemo
+              ? "Sample inbox — refresh shows this reminder"
+              : isImapInboxConfigured(account)
+                ? "Reload messages from the server"
+                : "Configure IMAP in Email settings to refresh"
           }
         >
           {inboundLoading ? (
