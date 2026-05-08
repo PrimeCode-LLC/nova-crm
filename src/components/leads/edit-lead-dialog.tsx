@@ -205,10 +205,12 @@ export function EditLeadDialog({
       }
 
       setIntakeKind(lead.intakeKind ?? "sales_lead");
-      setScraperId(lead.scraperId?.trim() ? lead.scraperId : UNSET);
+      const existingScraper = lead.scraperId?.trim();
+      const me = currentUserId?.trim();
+      setScraperId(existingScraper || (me ? me : UNSET));
       setLabelIds(lead.labelIds ?? []);
     });
-  }, [open, lead, profiles]);
+  }, [open, lead, profiles, currentUserId]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

@@ -487,6 +487,7 @@ function LeadFormBody({
       updatedAt: now,
     };
     const profileIdTrim = values.profileId?.trim();
+    const sourcedBy = ownerPickerCurrentUser;
     const lead: Lead = {
       id: leadId,
       accountId,
@@ -497,12 +498,8 @@ function LeadFormBody({
       temperature: values.temperature as LeadTemperature,
       priority: values.priority as LeadPriority,
       ownerId,
-      ...(isProspectingIntakeRole
-        ? {
-            intakeKind: "prospect" as const,
-            ...(currentUserId ? { scraperId: currentUserId } : {}),
-          }
-        : {}),
+      ...(sourcedBy ? { scraperId: sourcedBy } : {}),
+      ...(isProspectingIntakeRole ? { intakeKind: "prospect" as const } : {}),
       contactName: fullName,
       companyName: values.company.trim(),
       contactEmail: emailTrim || undefined,
