@@ -90,6 +90,19 @@ type InboxMode = "workspace" | "email";
 type MailFolder = "inbox" | "sent" | "drafts";
 type WorkspaceFeedTab = "activity" | "team_chat";
 
+const INBOX_MODE_STORAGE_KEY = "crm-inbox-mode-v1";
+
+function readStoredInboxMode(): InboxMode {
+  if (typeof window === "undefined") return "workspace";
+  try {
+    const v = sessionStorage.getItem(INBOX_MODE_STORAGE_KEY);
+    if (v === "email" || v === "workspace") return v;
+  } catch {
+    /* ignore */
+  }
+  return "workspace";
+}
+
 export default function InboxPage() {
   const {
     leads,
@@ -112,6 +125,10 @@ export default function InboxPage() {
   const [inboxMode, setInboxMode] = React.useState<InboxMode>("workspace");
   const [workspaceFeedTab, setWorkspaceFeedTab] = React.useState<WorkspaceFeedTab>("activity");
 
+  React.useEffect(() => {
+    setInboxMode(readStoredInboxMode());
+  }, []);
+
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const setActiveMailbox = useEmailAccountStore((s) => s.setActiveMailbox);
@@ -124,6 +141,7 @@ export default function InboxPage() {
   const upsertDraft = useEmailAccountStore((s) => s.upsertDraft);
   const deleteDraft = useEmailAccountStore((s) => s.deleteDraft);
   const addSent = useEmailAccountStore((s) => s.addSent);
+  const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
   const mailboxTriggerLabel = mailboxSelectLabel(account);
 
@@ -148,13 +166,14 @@ export default function InboxPage() {
     });
   }, [inboundThreads]);
 
-  async function fetchInboundMail() {
+  const fetchInboundMail = React.useCallback(async () => {
     if (isDemo) {
       toast.message("Demo inbox", { description: "Sample threads only — no IMAP server is used." });
       return;
     }
-    if (!isImapInboxConfigured(account)) {
-      setInbound(account.id, []);
+    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    if (!isImapInboxConfigured(acct)) {
+      setInbound(acct.id, []);
       return;
     }
     setInboundLoading(true);
@@ -163,14 +182,14 @@ export default function InboxPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mailboxId: account.id,
+          mailboxId: acct.id,
           limit: 50,
           imap: {
-            host: account.imap.host,
-            port: account.imap.port,
-            secure: account.imap.secure,
-            user: account.imap.user,
-            pass: account.imap.password,
+            host: acct.imap.host,
+            port: acct.imap.port,
+            secure: acct.imap.secure,
+            user: acct.imap.user,
+            pass: acct.imap.password,
           },
         }),
       });
@@ -185,24 +204,39 @@ export default function InboxPage() {
         });
         return;
       }
-      setInbound(account.id, Array.isArray(data.messages) ? data.messages : []);
+      setInbound(acct.id, Array.isArray(data.messages) ? data.messages : []);
     } catch {
       toast.error("Could not reach the server");
     } finally {
       setInboundLoading(false);
     }
-  }
+  }, [isDemo, setInbound]);
 
+  /** Load INBOX after mail settings hydrate, when the Email tab is open (tab choice is restored from session). */
   React.useEffect(() => {
     if (inboxMode !== "email" || mailFolder !== "inbox") return;
     if (isDemo) return;
-    if (!isImapInboxConfigured(account)) {
-      setInbound(account.id, []);
+    if (!emailServerHydrated) return;
+
+    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    if (!isImapInboxConfigured(acct)) {
+      setInbound(acct.id, []);
       return;
     }
     void fetchInboundMail();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- refresh when switching back to IMAP inbox or credentials identity changes
-  }, [inboxMode, mailFolder, account.id, account.enabled, account.imap.host, account.imap.user, isDemo]);
+  }, [
+    inboxMode,
+    mailFolder,
+    isDemo,
+    emailServerHydrated,
+    activeMailboxId,
+    account.id,
+    account.imap.host,
+    account.imap.port,
+    account.imap.secure,
+    account.imap.user,
+    fetchInboundMail,
+  ]);
 
   const filtered = notifications.filter((n) => {
     if (tab === "unread") return !n.read;
@@ -531,7 +565,18 @@ export default function InboxPage() {
       />
       <PageBody className="flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden p-0">
         <div className="shrink-0 border-b px-4 pt-3 pb-2 flex flex-wrap items-center gap-2">
-          <Tabs value={inboxMode} onValueChange={(v) => setInboxMode(v as InboxMode)}>
+          <Tabs
+            value={inboxMode}
+            onValueChange={(v) => {
+              const next = v as InboxMode;
+              setInboxMode(next);
+              try {
+                sessionStorage.setItem(INBOX_MODE_STORAGE_KEY, next);
+              } catch {
+                /* ignore */
+              }
+            }}
+          >
             <TabsList className="h-8">
               <TabsTrigger value="workspace" className="text-xs px-3 h-7 gap-1.5">
                 <Bell className="h-3 w-3" />

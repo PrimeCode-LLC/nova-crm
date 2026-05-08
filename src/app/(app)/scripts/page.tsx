@@ -28,6 +28,7 @@ import {
   Accordion,
   AccordionContent,
   AccordionItem,
+  AccordionHeader,
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import type { ScriptCategory, ScriptLibraryItem } from "@/lib/types";
@@ -370,9 +371,9 @@ export default function ScriptsPage() {
               {filtered.map((item) => (
                 <AccordionItem key={item.id} value={item.id} className="border-0 p-0">
                   <Card className="gap-0 overflow-hidden py-0" size="sm">
-                    <AccordionTrigger className="rounded-none border-0 px-4 py-3 hover:no-underline focus-visible:ring-offset-0 [&>svg]:shrink-0">
-                      <div className="flex min-w-0 flex-1 items-start justify-between gap-3 pr-1 text-left">
-                        <div className="min-w-0">
+                    <AccordionHeader className="border-b border-border/50">
+                      <AccordionTrigger className="rounded-none border-0 px-4 py-3 hover:no-underline focus-visible:ring-offset-0 [&>svg]:shrink-0">
+                        <div className="min-w-0 flex-1 pr-2 text-left">
                           <div className="text-base font-semibold leading-tight">{item.title}</div>
                           <div className="mt-1 flex flex-wrap items-center gap-1.5">
                             <Badge variant="outline">
@@ -389,36 +390,30 @@ export default function ScriptsPage() {
                             ))}
                           </div>
                         </div>
-                        <div
-                          className="flex shrink-0 gap-1"
-                          onClick={(e) => e.stopPropagation()}
-                          onPointerDown={(e) => e.stopPropagation()}
+                      </AccordionTrigger>
+                      <div className="flex shrink-0 items-center gap-0.5 border-l border-border/60 bg-muted/10 px-1.5">
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          type="button"
+                          className="h-8 w-8 text-muted-foreground"
+                          aria-label={`Edit ${item.title}`}
+                          onClick={() => openEdit(item)}
                         >
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openEdit(item);
-                            }}
-                          >
-                            <Pencil className="h-3.5 w-3.5" />
-                          </Button>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void removeItem(item.id);
-                            }}
-                          >
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          type="button"
+                          className="h-8 w-8 text-muted-foreground"
+                          aria-label={`Delete ${item.title}`}
+                          onClick={() => void removeItem(item.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </div>
-                    </AccordionTrigger>
+                    </AccordionHeader>
                     <AccordionContent className="border-t border-border/60 px-4 pb-4 pt-3">
                       <div className="space-y-3">
                         <ScriptFieldBox

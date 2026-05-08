@@ -56,7 +56,7 @@ export default function RootLayout({
             <AuthProvider>
             <TooltipProvider delay={200}>
               {children}
-              <Toaster richColors closeButton position="bottom-right" />
+              <Toaster richColors closeButton expand={false} visibleToasts={4} position="bottom-right" />
             </TooltipProvider>
             </AuthProvider>
           </QueryProvider>

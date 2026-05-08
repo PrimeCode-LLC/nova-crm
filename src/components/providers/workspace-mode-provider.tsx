@@ -88,6 +88,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     organizationId?: string;
     /** Display name for the signed-in tenant (from Firestore org). */
     organizationName: string;
+    /** Live mode: Firestore workspace listeners hit an error (partial data may be stale). */
+    liveFirestoreError: Error | null;
+    /** Live mode: listener for the signed-in user document failed. */
+    userProfileError: Error | null;
     setMode: (next: WorkspaceMode) => Promise<void>;
     setDemoPersona: (userId: string) => Promise<void>;
     addPermissionOverride: (override: PermissionOverride) => void;
@@ -217,7 +221,7 @@ export function WorkspaceModeProvider({
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
 
   const { user: fbUser } = useAuth();
-  const { data: userDoc } = useUserDoc(
+  const { data: userDoc, error: userProfileLoadError } = useUserDoc(
     mode === "demo" || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
   );
   const liveOrgId =
@@ -1252,6 +1256,8 @@ export function WorkspaceModeProvider({
       demoPersonaId,
       organizationId: liveOrgId,
       organizationName,
+      liveFirestoreError: mode === "live" ? liveFs.error : null,
+      userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
       setMode,
       setDemoPersona,
       addPermissionOverride,
@@ -1298,6 +1304,9 @@ export function WorkspaceModeProvider({
     demoPersonaId,
     liveOrgId,
     organizationName,
+    liveFs.error,
+    userProfileLoadError,
+    fbUser,
     setMode,
     setDemoPersona,
     addPermissionOverride,

@@ -2,6 +2,7 @@ import { cookies } from "next/headers";
 import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
+import { WorkspaceStatusBanner } from "@/components/layout/workspace-status-banner";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
@@ -61,6 +62,7 @@ export default async function AppLayout({
           <AppSidebar showPlatformLink={showPlatformLink} />
           <SidebarInset>
             <AppTopbar />
+            <WorkspaceStatusBanner />
             <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
           </SidebarInset>
         </SidebarProvider>

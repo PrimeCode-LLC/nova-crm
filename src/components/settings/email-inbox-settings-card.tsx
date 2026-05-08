@@ -14,6 +14,7 @@ import {
   Accordion,
   AccordionContent,
   AccordionItem,
+  AccordionHeader,
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-account-store";
@@ -292,23 +293,25 @@ export function EmailInboxSettingsCard() {
           >
             {mailboxes.map((mb) => (
               <AccordionItem key={mb.id} value={mb.id} className="border-b-0 not-last:border-b">
-                <AccordionTrigger className="py-3 hover:no-underline">
-                  <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
-                    <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
-                    {mb.enabled ? (
-                      <Badge variant="secondary" className="shrink-0 text-[10px]">
-                        Enabled
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
-                        Off
-                      </Badge>
-                    )}
-                    {mb.emailAddress?.trim() ? (
-                      <span className="truncate text-xs font-normal text-muted-foreground">{mb.emailAddress.trim()}</span>
-                    ) : null}
-                  </div>
-                </AccordionTrigger>
+                <AccordionHeader>
+                  <AccordionTrigger className="py-3 hover:no-underline">
+                    <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
+                      <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
+                      {mb.enabled ? (
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">
+                          Enabled
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
+                          Off
+                        </Badge>
+                      )}
+                      {mb.emailAddress?.trim() ? (
+                        <span className="truncate text-xs font-normal text-muted-foreground">{mb.emailAddress.trim()}</span>
+                      ) : null}
+                    </div>
+                  </AccordionTrigger>
+                </AccordionHeader>
                 <AccordionContent className="pb-4 pt-0">
                   <div className="space-y-6 border-t pt-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">

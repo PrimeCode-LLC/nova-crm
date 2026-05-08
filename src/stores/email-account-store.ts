@@ -222,9 +222,12 @@ export function isEmailAccountConfigured(account: EmailMailboxSettings): boolean
   );
 }
 
-/** Enough IMAP settings to load the mailbox (password sent only when fetching). */
+/**
+ * True when an IMAP server host is set. Inbox fetch uses vault credentials server-side when `mailboxId`
+ * is sent, so this intentionally does not require the "Enable mail" toggle or a filled username in the client.
+ */
 export function isImapInboxConfigured(account: EmailMailboxSettings): boolean {
-  return account.enabled && !!normalizeMailHost(account.imap.host);
+  return !!normalizeMailHost(account.imap.host);
 }
 
 export function getActiveMailbox(state: Pick<EmailAccountStore, "mailboxes" | "activeMailboxId">) {
