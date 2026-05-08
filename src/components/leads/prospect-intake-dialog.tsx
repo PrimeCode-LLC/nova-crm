@@ -185,6 +185,7 @@ export function ProspectIntakeDialog({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (!account || !contact) return;
     const yf = yearFounded.trim();
     let yearFoundedNum: number | undefined;
     if (yf) {
