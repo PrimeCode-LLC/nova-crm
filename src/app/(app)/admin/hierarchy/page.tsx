@@ -3,7 +3,8 @@
 import * as React from "react";
 import Link from "next/link";
 import { PageBody, PageHeader } from "@/components/common/page-header";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { UserHierarchyPanel, type HierarchyPersistPayload } from "@/components/admin/user-hierarchy-panel";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
@@ -81,12 +82,13 @@ export default function AdminHierarchyPage() {
         title="Org hierarchy"
         description="Vertical or horizontal chart, drag-and-drop reporting lines, and quick edits for department and CRM role."
         actions={
-          <Button variant="outline" size="sm" asChild>
-            <Link href="/admin/users">
-              <Users className="h-3.5 w-3.5" />
-              Users table
-            </Link>
-          </Button>
+          <Link
+            href="/admin/users"
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+          >
+            <Users className="h-3.5 w-3.5" />
+            Users table
+          </Link>
         }
       />
       <PageBody>
