@@ -16,10 +16,11 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { useLocalDeals } from "@/hooks/use-local-deals";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 export function DealDetailView({ dealId }: { dealId: string }) {
   const ws = useWorkspace();
-  const { localDeals } = useLocalDeals();
+  const { localDeals, patchLocalDeal } = useLocalDeals();
   const deal = React.useMemo(
     () => ws.deals.find((d) => d.id === dealId) ?? localDeals.find((d) => d.id === dealId),
     [ws.deals, localDeals, dealId],
@@ -38,6 +39,7 @@ export function DealDetailView({ dealId }: { dealId: string }) {
   const account = ws.getAccountById(deal.accountId);
   const contact = ws.getContactById(deal.contactId);
   const lead = ws.getLeadById(deal.leadId);
+  const isLocalDeal = localDeals.some((d) => d.id === deal.id);
 
   return (
     <>
@@ -125,6 +127,21 @@ export function DealDetailView({ dealId }: { dealId: string }) {
           </Card>
 
           <aside className="space-y-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Labels</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <EntityLabelPicker
+                  labelIds={deal.labelIds ?? []}
+                  onChange={(next) => {
+                    const patch = { labelIds: next.length ? next : undefined };
+                    if (isLocalDeal) patchLocalDeal(deal.id, patch);
+                    else ws.patchDeal(deal.id, patch);
+                  }}
+                />
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Owner</CardTitle>

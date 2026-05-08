@@ -70,5 +70,13 @@ export function useLocalDeals() {
     notifyStoreChanged();
   }, []);
 
-  return { localDeals, addLocalDeal };
+  const patchLocalDeal = React.useCallback((dealId: string, patch: Partial<Deal>) => {
+    const next = readFromStorage().map((d) =>
+      d.id === dealId ? { ...d, ...patch, updatedAt: new Date().toISOString() } : d,
+    );
+    writeToStorage(next);
+    notifyStoreChanged();
+  }, []);
+
+  return { localDeals, addLocalDeal, patchLocalDeal };
 }

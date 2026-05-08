@@ -7,8 +7,10 @@ import type {
   Lead,
   Account,
   Contact,
+  Deal,
 } from "@/lib/types";
 import type { WorkspaceSnapshot } from "@/lib/workspace-dataset";
+import { mockLeads } from "./mock-data";
 
 /** Unified session mutations (demo + local session until Firestore writes exist). */
 export const WORKSPACE_SESSION_KEY = "nova-crm-workspace-session-v2";
@@ -39,6 +41,7 @@ export type WorkspaceSessionV2 = {
   leadPatches: Record<string, Partial<Lead>>;
   accountPatches: Record<string, Partial<Account>>;
   contactPatches: Record<string, Partial<Contact>>;
+  dealPatches: Record<string, Partial<Deal>>;
   /** Session-removed lead ids (demo / optimistic hide until Firestore listener catches up). */
   deletedLeadIds: string[];
   pinnedLeadIds: string[];
@@ -56,6 +59,7 @@ export function emptyWorkspaceSession(): WorkspaceSessionV2 {
     leadPatches: {},
     accountPatches: {},
     contactPatches: {},
+    dealPatches: {},
     deletedLeadIds: [],
     pinnedLeadIds: [],
     leadActivity: {},
@@ -133,6 +137,7 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
       parsed.accountPatches && typeof parsed.accountPatches === "object" ? parsed.accountPatches : {},
     contactPatches:
       parsed.contactPatches && typeof parsed.contactPatches === "object" ? parsed.contactPatches : {},
+    dealPatches: parsed.dealPatches && typeof parsed.dealPatches === "object" ? parsed.dealPatches : {},
     deletedLeadIds: Array.isArray(parsed.deletedLeadIds) ? parsed.deletedLeadIds : [],
     pinnedLeadIds: Array.isArray(parsed.pinnedLeadIds) ? parsed.pinnedLeadIds : [],
     leadActivity: parsed.leadActivity && typeof parsed.leadActivity === "object" ? parsed.leadActivity : {},
@@ -146,6 +151,30 @@ export function writeWorkspaceSession(session: WorkspaceSessionV2): void {
   } catch {
     /* quota */
   }
+}
+
+const MOCK_LEAD_IDS = new Set(mockLeads.map((l) => l.id));
+
+/**
+ * Strips session keys that reference ids outside the static demo lead catalog.
+ * Prevents stale tab/sessionStorage (e.g. deleted Firestore ids) from hiding all mock leads in Demo mode.
+ */
+export function sanitizeWorkspaceSessionForMockCatalog(session: WorkspaceSessionV2): WorkspaceSessionV2 {
+  const deletedLeadIds = session.deletedLeadIds.filter((id) => MOCK_LEAD_IDS.has(id));
+  const leadPatches = Object.fromEntries(
+    Object.entries(session.leadPatches).filter(([id]) => MOCK_LEAD_IDS.has(id)),
+  );
+  const leadActivity = Object.fromEntries(
+    Object.entries(session.leadActivity).filter(([id]) => MOCK_LEAD_IDS.has(id)),
+  );
+  const pinnedLeadIds = session.pinnedLeadIds.filter((id) => MOCK_LEAD_IDS.has(id));
+  return {
+    ...session,
+    deletedLeadIds,
+    leadPatches,
+    leadActivity,
+    pinnedLeadIds,
+  };
 }
 
 function leadVisible(id: string | undefined, visible: Set<string>): boolean {
@@ -167,6 +196,7 @@ export function mergeSessionIntoSnapshot(
   | "leads"
   | "accounts"
   | "contacts"
+  | "deals"
 > {
   const deletedLeadIds = new Set(session.deletedLeadIds ?? []);
 
@@ -257,5 +287,12 @@ export function mergeSessionIntoSnapshot(
     .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const leadTasks = [...mergedBaseLeadTasks, ...leadTaskExtrasFiltered];
 
-  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads, accounts, contacts };
+  const deals = base.deals
+    .filter((d) => visibleLeadIds.has(d.leadId))
+    .map((d) => {
+      const p = session.dealPatches[d.id];
+      return p ? { ...d, ...p } : d;
+    });
+
+  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads, accounts, contacts, deals };
 }

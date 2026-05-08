@@ -26,6 +26,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { REVENUE_RANGES } from "@/lib/constants";
 import { fmtCurrency, fmtRelative, fmtDate } from "@/lib/format";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 export function AccountDetailView({ accountId }: { accountId: string }) {
   const ws = useWorkspace();
@@ -257,6 +258,17 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
           </Tabs>
 
           <aside className="space-y-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Labels</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <EntityLabelPicker
+                  labelIds={account.labelIds ?? []}
+                  onChange={(next) => ws.patchAccount(account.id, { labelIds: next.length ? next : undefined })}
+                />
+              </CardContent>
+            </Card>
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Company</CardTitle>

@@ -31,6 +31,20 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import type { ScriptCategory, ScriptLibraryItem } from "@/lib/types";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import {
+  buildNewDemoScript,
+  demoScriptsCanViewAll,
+  listDemoScriptsForViewer,
+} from "@/lib/demo-script-library";
+import {
+  demoSessionAfterCreate,
+  demoSessionAfterDelete,
+  demoSessionAfterUpdate,
+  mergeDemoScriptsSession,
+  readDemoScriptsSession,
+  writeDemoScriptsSession,
+} from "@/lib/demo-scripts-session";
 
 type ScriptForm = {
   id?: string;
@@ -111,6 +125,9 @@ function fieldMeta(category: ScriptCategory): {
 }
 
 export default function ScriptsPage() {
+  const { isDemo, currentUserId, demoPersonaId } = useWorkspace();
+  const viewerId = (currentUserId || demoPersonaId || "u-director").trim() || "u-director";
+
   const [items, setItems] = React.useState<ScriptLibraryItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
@@ -120,28 +137,48 @@ export default function ScriptsPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [form, setForm] = React.useState<ScriptForm>(EMPTY_FORM);
 
-  const load = React.useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await fetch("/api/org/scripts", { cache: "no-store" });
-      const data = (await res.json()) as {
-        error?: string;
-        items?: ScriptLibraryItem[];
-        canViewAll?: boolean;
-      };
-      if (!res.ok) throw new Error(data.error ?? "Failed to load");
-      setItems(data.items ?? []);
-      setCanViewAll(Boolean(data.canViewAll));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to load scripts");
-    } finally {
-      setLoading(false);
-    }
+  const refreshDemoItems = React.useCallback((uid: string) => {
+    const base = listDemoScriptsForViewer(uid);
+    const merged = mergeDemoScriptsSession(base, readDemoScriptsSession());
+    setItems(merged);
+    setCanViewAll(demoScriptsCanViewAll(uid));
   }, []);
 
+  /** Demo scripts: local mock + session — never call the org API (avoids race with in-flight live fetches). */
   React.useEffect(() => {
-    void load();
-  }, [load]);
+    if (!isDemo) return;
+    setLoading(true);
+    refreshDemoItems(viewerId);
+    setLoading(false);
+  }, [isDemo, viewerId, refreshDemoItems]);
+
+  /** Live workspace: org API with abort so switching to Demo cannot be overwritten by a late response. */
+  React.useEffect(() => {
+    if (isDemo) return;
+    const ac = new AbortController();
+    setLoading(true);
+    void (async () => {
+      try {
+        const res = await fetch("/api/org/scripts", { cache: "no-store", signal: ac.signal });
+        const data = (await res.json()) as {
+          error?: string;
+          items?: ScriptLibraryItem[];
+          canViewAll?: boolean;
+        };
+        if (ac.signal.aborted) return;
+        if (!res.ok) throw new Error(data.error ?? "Failed to load");
+        setItems(data.items ?? []);
+        setCanViewAll(Boolean(data.canViewAll));
+      } catch (err) {
+        if (ac.signal.aborted) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        toast.error(err instanceof Error ? err.message : "Failed to load scripts");
+      } finally {
+        if (!ac.signal.aborted) setLoading(false);
+      }
+    })();
+    return () => ac.abort();
+  }, [isDemo]);
 
   function openCreate() {
     setForm(EMPTY_FORM);
@@ -177,30 +214,57 @@ export default function ScriptsPage() {
       .filter(Boolean);
     try {
       const isEdit = Boolean(form.id);
-      const res = await fetch("/api/org/scripts", {
-        method: isEdit ? "PATCH" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ...(isEdit ? { id: form.id } : null),
-          title: form.title.trim(),
-          category: form.category,
-          primaryText: form.primaryText.trim(),
-          secondaryText: form.secondaryText.trim(),
-          tags,
-        }),
-      });
-      const data = (await res.json()) as { error?: string; item?: ScriptLibraryItem };
-      if (!res.ok) throw new Error(data.error ?? "Save failed");
-      if (data.item) {
-        setItems((prev) => {
-          if (isEdit) {
-            return prev.map((i) => (i.id === data.item!.id ? data.item! : i));
-          }
-          return [data.item!, ...prev];
+      if (isDemo) {
+        if (isEdit && form.id) {
+          const session = demoSessionAfterUpdate(readDemoScriptsSession(), form.id, {
+            title: form.title.trim(),
+            category: form.category,
+            primaryText: form.primaryText.trim(),
+            secondaryText: form.secondaryText.trim(),
+            tags,
+          });
+          writeDemoScriptsSession(session);
+        } else {
+          const item = buildNewDemoScript({
+            viewerId,
+            title: form.title.trim(),
+            category: form.category,
+            primaryText: form.primaryText.trim(),
+            secondaryText: form.secondaryText.trim(),
+            tags,
+          });
+          const session = demoSessionAfterCreate(readDemoScriptsSession(), item);
+          writeDemoScriptsSession(session);
+        }
+        refreshDemoItems(viewerId);
+        setDialogOpen(false);
+        toast.success(isEdit ? "Script updated (demo)" : "Script saved (demo)");
+      } else {
+        const res = await fetch("/api/org/scripts", {
+          method: isEdit ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ...(isEdit ? { id: form.id } : null),
+            title: form.title.trim(),
+            category: form.category,
+            primaryText: form.primaryText.trim(),
+            secondaryText: form.secondaryText.trim(),
+            tags,
+          }),
         });
+        const data = (await res.json()) as { error?: string; item?: ScriptLibraryItem };
+        if (!res.ok) throw new Error(data.error ?? "Save failed");
+        if (data.item) {
+          setItems((prev) => {
+            if (isEdit) {
+              return prev.map((i) => (i.id === data.item!.id ? data.item! : i));
+            }
+            return [data.item!, ...prev];
+          });
+        }
+        setDialogOpen(false);
+        toast.success(isEdit ? "Script updated" : "Script saved");
       }
-      setDialogOpen(false);
-      toast.success(isEdit ? "Script updated" : "Script saved");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save");
     } finally {
@@ -211,13 +275,20 @@ export default function ScriptsPage() {
   async function removeItem(id: string) {
     if (!confirm("Delete this script/template?")) return;
     try {
-      const res = await fetch(`/api/org/scripts?id=${encodeURIComponent(id)}`, {
-        method: "DELETE",
-      });
-      const data = (await res.json()) as { error?: string };
-      if (!res.ok) throw new Error(data.error ?? "Delete failed");
-      setItems((prev) => prev.filter((i) => i.id !== id));
-      toast.success("Deleted");
+      if (isDemo) {
+        const session = demoSessionAfterDelete(readDemoScriptsSession(), id);
+        writeDemoScriptsSession(session);
+        refreshDemoItems(viewerId);
+        toast.success("Deleted (demo)");
+      } else {
+        const res = await fetch(`/api/org/scripts?id=${encodeURIComponent(id)}`, {
+          method: "DELETE",
+        });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) throw new Error(data.error ?? "Delete failed");
+        setItems((prev) => prev.filter((i) => i.id !== id));
+        toast.success("Deleted");
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to delete");
     }
@@ -241,9 +312,12 @@ export default function ScriptsPage() {
       <PageHeader
         title="Scripts library"
         description={
-          canViewAll
+          (isDemo
+            ? "Browse the full sample library in Demo (every role sees the same scripts); edits stay in this tab only. "
+            : "") +
+          (canViewAll
             ? "Manage pitches, rebuttals, templates, and scripts across the workspace."
-            : "Manage your own pitches, rebuttals, templates, and scripts."
+            : "Manage your own pitches, rebuttals, templates, and scripts.")
         }
         actions={
           <Button size="sm" onClick={openCreate}>

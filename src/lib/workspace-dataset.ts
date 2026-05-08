@@ -15,6 +15,7 @@ import type {
   ActivityCounterRow,
   ActivityRecord,
   PermissionOverride,
+  CrmLabel,
 } from "./types";
 import {
   mockUsers,
@@ -33,6 +34,7 @@ import {
   mockNotes,
   mockActivityCounters,
   mockActivityRecords,
+  mockCrmLabels,
   CURRENT_USER_ID,
 } from "./mock-data";
 import type { WorkspaceMode } from "./workspace-mode";
@@ -60,6 +62,7 @@ export type WorkspaceSnapshot = {
   notes: Note[];
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
+  crmLabels: CrmLabel[];
   currentUserId: string;
 };
 
@@ -80,6 +83,7 @@ export const DEMO_SNAPSHOT: WorkspaceSnapshot = {
   notes: mockNotes,
   activityCounters: mockActivityCounters,
   activityRecords: mockActivityRecords,
+  crmLabels: mockCrmLabels,
   currentUserId: CURRENT_USER_ID,
 };
 
@@ -102,6 +106,7 @@ export const LIVE_SNAPSHOT: WorkspaceSnapshot = {
   notes: [],
   activityCounters: [],
   activityRecords: [],
+  crmLabels: [],
   currentUserId: "",
 };
 
@@ -140,6 +145,8 @@ function directoryUserIdsFor(persona: User, allUsers: readonly User[]): Set<stri
 
 /** Whether a demo lead is visible to the active persona (org + ownership rules). */
 function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly User[]): boolean {
+  // Intake prospects are treated as an org-wide pool in demo so every tour persona sees sample rows.
+  if (lead.intakeKind === "prospect") return true;
   if (persona.roleId === "director") return true;
   if (persona.roleId === "manager") {
     const owners = new Set<string>([persona.id]);

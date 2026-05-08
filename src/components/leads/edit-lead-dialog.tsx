@@ -52,6 +52,7 @@ import {
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 const UNSET = "__unset__" as const;
 type UnsetToken = typeof UNSET;
@@ -135,6 +136,7 @@ export function EditLeadDialog({
   const [profileId, setProfileId] = React.useState("");
   const [intakeKind, setIntakeKind] = React.useState<LeadIntakeKind>("sales_lead");
   const [scraperId, setScraperId] = React.useState<string | UnsetToken>(UNSET);
+  const [labelIds, setLabelIds] = React.useState<string[]>([]);
   const { profiles, users, currentUserId, getOwnerDisplayName } = useWorkspace();
 
   const ownerPickerIds = React.useMemo(() => {
@@ -204,6 +206,7 @@ export function EditLeadDialog({
 
       setIntakeKind(lead.intakeKind ?? "sales_lead");
       setScraperId(lead.scraperId?.trim() ? lead.scraperId : UNSET);
+      setLabelIds(lead.labelIds ?? []);
     });
   }, [open, lead, profiles]);
 
@@ -276,6 +279,7 @@ export function EditLeadDialog({
       pushToLinkedIn: pushToLinkedIn === UNSET ? undefined : pushToLinkedIn,
 
       bant,
+      labelIds: labelIds.length ? labelIds : undefined,
     });
     toast.success("Lead updated");
     onOpenChange(false);
@@ -344,6 +348,13 @@ export function EditLeadDialog({
                   </Select>
                 </div>
               </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Labels</p>
+              <EntityLabelPicker labelIds={labelIds} onChange={setLabelIds} />
             </section>
 
             <Separator />

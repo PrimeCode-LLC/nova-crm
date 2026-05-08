@@ -119,6 +119,7 @@ function ProspectsPageInner() {
             urlStageKey=""
             idleOnly={false}
             initialIntakeScope="prospect"
+            lockedIntakeScope="prospect"
           />
         )}
       </PageBody>

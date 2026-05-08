@@ -9,6 +9,8 @@ import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -29,9 +31,22 @@ export function LeadOverview({
   outreachProfileSummary?: string;
   outreachProfileFieldLabel?: string;
 }) {
+  const ws = useWorkspace();
   const openQueue = !lead.ownerId?.trim();
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Labels</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <EntityLabelPicker
+            labelIds={lead.labelIds ?? []}
+            onChange={(next) => ws.patchLead(lead.id, { labelIds: next.length ? next : undefined })}
+          />
+        </CardContent>
+      </Card>
+
       <Card className="lg:col-span-2">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Intake & ownership</CardTitle>

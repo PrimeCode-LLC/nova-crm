@@ -226,6 +226,17 @@ export interface PlatformAdminRecord {
   createdAt: ISODate;
 }
 
+/** Workspace-defined tag for leads, deals, companies, and contacts. */
+export interface CrmLabel {
+  id: string;
+  organizationId: string;
+  name: string;
+  /** CSS color (e.g. hsl(...) or #rgb). */
+  color?: string;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
 export interface Department {
   id: string;
   name: string;
@@ -281,6 +292,8 @@ export interface Account {
   leadCount: number;
   openDealValue: number;
   ownerId: string;
+  /** Assigned workspace labels (`labels` collection ids). */
+  labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -304,6 +317,7 @@ export interface Contact {
   contactSource?: string;
   bestContactChannel?: BestContactChannel;
   ownerId: string;
+  labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -407,6 +421,8 @@ export interface Lead {
   // Channel-specific extensions (sparse)
   extensions?: Record<string, unknown>;
 
+  labelIds?: string[];
+
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -437,6 +453,7 @@ export interface Deal {
   ownerId: string;
   products?: string[];
   notes?: string;
+  labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
   wonAt?: ISODate;

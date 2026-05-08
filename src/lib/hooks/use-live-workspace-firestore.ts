@@ -28,6 +28,7 @@ import type {
   TimelineEvent,
   User,
   Profile,
+  CrmLabel,
 } from "@/lib/types";
 
 export type LiveWorkspaceFirestoreState = {
@@ -46,6 +47,7 @@ export type LiveWorkspaceFirestoreState = {
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
   profiles: Profile[];
+  crmLabels: CrmLabel[];
 };
 
 const empty: LiveWorkspaceFirestoreState = {
@@ -64,6 +66,7 @@ const empty: LiveWorkspaceFirestoreState = {
   activityCounters: [],
   activityRecords: [],
   profiles: [],
+  crmLabels: [],
 };
 
 function asUser(id: string, raw: Record<string, unknown>): User {
@@ -135,6 +138,17 @@ function optionalNonEmptyString(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
   return t.length > 0 ? t : undefined;
+}
+
+function asCrmLabel(id: string, raw: Record<string, unknown>): CrmLabel {
+  return {
+    id,
+    organizationId: String(raw.organizationId ?? ""),
+    name: String(raw.name ?? ""),
+    color: optionalNonEmptyString(raw.color),
+    createdAt: firestoreValueToIso(raw.createdAt),
+    updatedAt: firestoreValueToIso(raw.updatedAt),
+  };
 }
 
 function asProfile(id: string, raw: Record<string, unknown>): Profile {
@@ -290,6 +304,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         activityCounters: [],
         activityRecords: [],
         profiles: [],
+        crmLabels: [],
       });
       return;
     }
@@ -314,6 +329,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         activityCounters: [],
         activityRecords: [],
         profiles: [],
+        crmLabels: [],
       });
       return;
     }
@@ -528,6 +544,21 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         (snap) => {
           const profiles = snap.docs.map((d) => asProfile(d.id, d.data() as Record<string, unknown>));
           setState((prev) => ({ ...prev, profiles, loading: false }));
+        },
+        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+      ),
+    );
+
+    const qLabels = query(
+      collection(db, COLLECTIONS.labels),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qLabels,
+        (snap) => {
+          const crmLabels = snap.docs.map((d) => asCrmLabel(d.id, d.data() as Record<string, unknown>));
+          setState((prev) => ({ ...prev, crmLabels, loading: false }));
         },
         (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
       ),

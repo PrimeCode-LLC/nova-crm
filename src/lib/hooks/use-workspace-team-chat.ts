@@ -17,9 +17,10 @@ import {
   persistWorkspaceChatMessageCreate,
 } from "@/lib/firestore/persist-workspace-entities-client";
 import type { WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
+import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import { dmChannelId, generalChannelId as buildGeneralChannelId, useTeamChatDemoStore } from "@/stores/team-chat-demo-store";
 
-const DEMO_CHAT_ORG = "demo-org";
+const DEMO_CHAT_ORG = DEMO_WORKSPACE_ORG_ID;
 
 /** Stable fallbacks for Zustand selectors — `?? []` would allocate a new array each snapshot and break useSyncExternalStore. */
 const EMPTY_DEMO_CHANNELS: WorkspaceChatChannel[] = [];

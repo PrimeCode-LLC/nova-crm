@@ -17,6 +17,8 @@ export const COLLECTIONS = {
   activityRecords: "activityRecords",
   profiles: "profiles",
   scriptLibrary: "scriptLibrary",
+  /** Workspace-defined labels for leads, deals, accounts, contacts. */
+  labels: "labels",
   ingestQueue: "ingestQueue",
   auditLog: "auditLog",
   workspaceChatChannels: "workspaceChatChannels",
@@ -54,6 +56,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.activityRecords,
   COLLECTIONS.profiles,
   COLLECTIONS.scriptLibrary,
+  COLLECTIONS.labels,
   COLLECTIONS.auditLog,
   COLLECTIONS.workspaceChatChannels,
   COLLECTIONS.workspaceChatMessages,

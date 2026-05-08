@@ -19,6 +19,8 @@ import type {
   Touchpoint,
   TimelineEvent,
   User,
+  CrmLabel,
+  Deal,
 } from "@/lib/types";
 import {
   getWorkspaceSnapshot,
@@ -38,6 +40,12 @@ import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
 import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
 import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
+import { persistDealPatchClient } from "@/lib/firestore/persist-deal-patch-client";
+import {
+  persistCrmLabelCreate,
+  persistCrmLabelDelete,
+  persistCrmLabelUpdate,
+} from "@/lib/firestore/persist-crm-label-client";
 import { persistLeadDeleteClient } from "@/lib/firestore/persist-lead-delete-client";
 import {
   persistFollowupCreate,
@@ -63,6 +71,7 @@ import {
   emptyWorkspaceSession,
   mergeSessionIntoSnapshot,
   readWorkspaceSession,
+  sanitizeWorkspaceSessionForMockCatalog,
   writeWorkspaceSession,
   type WorkspaceSessionV2,
 } from "@/lib/workspace-session";
@@ -116,6 +125,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     bumpLeadActivity: (leadId: string) => void;
     /** Display name for CRM `ownerId` when the user exists in org members but not (yet) in Firestore `users`. */
     getOwnerDisplayName: (uid: string) => string | undefined;
+    addCrmLabel: (label: CrmLabel) => void;
+    updateCrmLabel: (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => void;
+    removeCrmLabel: (id: string) => void;
+    patchDeal: (dealId: string, patch: Partial<Deal>) => void;
   };
 
 const WorkspaceContext = React.createContext<WorkspaceContextValue | null>(null);
@@ -193,6 +206,12 @@ export function WorkspaceModeProvider({
   const [userPatches, setUserPatches] = React.useState<Record<string, Partial<Omit<User, "id">>>>({});
   const [accountContactBumps, setAccountContactBumps] = React.useState<Record<string, number>>({});
 
+  const [labelDelta, setLabelDelta] = React.useState<{
+    added: CrmLabel[];
+    removedIds: string[];
+    updates: Record<string, Partial<Pick<CrmLabel, "name" | "color">>>;
+  }>({ added: [], removedIds: [], updates: {} });
+
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
 
@@ -236,10 +255,13 @@ export function WorkspaceModeProvider({
 
   React.useEffect(() => {
     React.startTransition(() => {
-      setSessionV2(readWorkspaceSession());
+      const raw = readWorkspaceSession();
+      setSessionV2(
+        initialMode === "demo" ? sanitizeWorkspaceSessionForMockCatalog(raw) : raw,
+      );
       setSessionHydrated(true);
     });
-  }, []);
+  }, [initialMode]);
 
   React.useEffect(() => {
     if (!sessionHydrated || typeof window === "undefined") return;
@@ -252,6 +274,8 @@ export function WorkspaceModeProvider({
     const prev = prevModeRef.current;
     prevModeRef.current = mode;
     if (prev === "demo" && mode === "live") {
+      setSessionV2(emptyWorkspaceSession());
+    } else if (prev === "live" && mode === "demo") {
       setSessionV2(emptyWorkspaceSession());
     }
   }, [mode]);
@@ -267,6 +291,7 @@ export function WorkspaceModeProvider({
     setLeadsAdded([]);
     setUserPatches({});
     setAccountContactBumps({});
+    setLabelDelta({ added: [], removedIds: [], updates: {} });
   }, [mode, demoPersonaId]);
 
   const addPermissionOverride = React.useCallback((override: PermissionOverride) => {
@@ -787,6 +812,105 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId],
   );
 
+  const patchDeal = React.useCallback(
+    (dealId: string, patch: Partial<Deal>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistDealPatchClient(db, dealId, { ...patch, updatedAt: iso });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save deal", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        dealPatches: {
+          ...s.dealPatches,
+          [dealId]: { ...s.dealPatches[dealId], ...patch, updatedAt: iso },
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const addCrmLabel = React.useCallback(
+    (label: CrmLabel) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistCrmLabelCreate(db, orgId, label);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save label", { description: msg });
+          }
+        })();
+        return;
+      }
+      setLabelDelta((d) => ({ ...d, added: [...d.added, label] }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const updateCrmLabel = React.useCallback(
+    (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistCrmLabelUpdate(db, id, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update label", { description: msg });
+          }
+        })();
+        return;
+      }
+      setLabelDelta((d) => ({
+        ...d,
+        updates: { ...d.updates, [id]: { ...d.updates[id], ...patch } },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const removeCrmLabel = React.useCallback(
+    (id: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistCrmLabelDelete(db, id);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not delete label", { description: msg });
+          }
+        })();
+        return;
+      }
+      setLabelDelta((d) => ({
+        ...d,
+        added: d.added.filter((l) => l.id !== id),
+        removedIds: d.removedIds.includes(id) ? d.removedIds : [...d.removedIds, id],
+        updates: Object.fromEntries(Object.entries(d.updates).filter(([k]) => k !== id)),
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
   const deleteLead = React.useCallback(
     async (leadId: string): Promise<boolean> => {
       const snap = snapshotRef.current;
@@ -942,6 +1066,7 @@ export function WorkspaceModeProvider({
       activityCounters: liveFs.activityCounters,
       activityRecords: liveFs.activityRecords,
       profiles: liveFs.profiles,
+      crmLabels: liveFs.crmLabels,
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
@@ -973,6 +1098,7 @@ export function WorkspaceModeProvider({
     liveFs.activityCounters,
     liveFs.activityRecords,
     liveFs.profiles,
+    liveFs.crmLabels,
   ]);
 
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {
@@ -1020,6 +1146,20 @@ export function WorkspaceModeProvider({
       ...u,
       ...(userPatches[u.id] ?? {}),
     }));
+
+    const removedLabelIds = new Set(labelDelta.removedIds);
+    const mergedLabelBase = tenantBaseSnapshot.crmLabels
+      .filter((l) => !removedLabelIds.has(l.id))
+      .map((l) => ({ ...l, ...(labelDelta.updates[l.id] ?? {}) }));
+    const labelBaseIds = new Set(mergedLabelBase.map((l) => l.id));
+    const crmLabels = [
+      ...mergedLabelBase,
+      ...labelDelta.added
+        .filter((l) => !removedLabelIds.has(l.id))
+        .map((l) => ({ ...l, ...(labelDelta.updates[l.id] ?? {}) }))
+        .filter((l) => !labelBaseIds.has(l.id)),
+    ];
+
     return {
       ...tenantBaseSnapshot,
       permissionOverrides,
@@ -1030,6 +1170,7 @@ export function WorkspaceModeProvider({
       contacts: contactsMerged,
       leads: leadsMerged,
       users: usersMerged,
+      crmLabels,
     };
   }, [
     tenantBaseSnapshot,
@@ -1043,13 +1184,12 @@ export function WorkspaceModeProvider({
     leadsAdded,
     userPatches,
     accountContactBumps,
+    labelDelta,
   ]);
 
   const snapshot = React.useMemo((): WorkspaceSnapshot => {
     const merged = mergeSessionIntoSnapshot(preSessionSnapshot, sessionV2);
-    const leadIdSet = new Set(merged.leads.map((l) => l.id));
-    const deals = preSessionSnapshot.deals.filter((d) => leadIdSet.has(d.leadId));
-    return { ...preSessionSnapshot, ...merged, deals };
+    return { ...preSessionSnapshot, ...merged };
   }, [preSessionSnapshot, sessionV2]);
 
   const snapshotRef = React.useRef(snapshot);
@@ -1132,6 +1272,10 @@ export function WorkspaceModeProvider({
       patchLead,
       patchAccount,
       patchContact,
+      patchDeal,
+      addCrmLabel,
+      updateCrmLabel,
+      removeCrmLabel,
       deleteLead,
       canDeleteLeads,
       updateLeadStage,
@@ -1174,6 +1318,10 @@ export function WorkspaceModeProvider({
     patchLead,
     patchAccount,
     patchContact,
+    patchDeal,
+    addCrmLabel,
+    updateCrmLabel,
+    removeCrmLabel,
     deleteLead,
     updateLeadStage,
     toggleLeadPin,

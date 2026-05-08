@@ -241,10 +241,20 @@ export interface LeadsTableProps {
   idleOnly?: boolean;
   /** Default intake filter (e.g. prospects-only page). */
   initialIntakeScope?: "all" | "prospect" | "sales_lead";
+  /** When set, intake scope is fixed (toolbar control hidden) — e.g. Leads vs Prospects routes. */
+  lockedIntakeScope?: "all" | "prospect" | "sales_lead";
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
-  { leads, preset = "default", urlChannelKey = "", urlStageKey = "", idleOnly = false, initialIntakeScope = "all" },
+  {
+    leads,
+    preset = "default",
+    urlChannelKey = "",
+    urlStageKey = "",
+    idleOnly = false,
+    initialIntakeScope = "all",
+    lockedIntakeScope,
+  },
   ref,
 ) {
   const router = useRouter();
@@ -283,12 +293,20 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
-  const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">(initialIntakeScope);
+  const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">(
+    lockedIntakeScope ?? initialIntakeScope,
+  );
   const [reassignOpen, setReassignOpen] = React.useState(false);
 
+  const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
+
   React.useEffect(() => {
+    if (lockedIntakeScope) {
+      setIntakeScope(lockedIntakeScope);
+      return;
+    }
     setIntakeScope(initialIntakeScope);
-  }, [initialIntakeScope]);
+  }, [initialIntakeScope, lockedIntakeScope]);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
 
   const openReassignForIds = React.useCallback((ids: string[]) => {
@@ -323,9 +341,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   const dataForTable = React.useMemo(() => {
     let rows = filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps);
-    if (intakeScope === "prospect") {
+    if (effectiveIntakeScope === "prospect") {
       rows = rows.filter((l) => l.intakeKind === "prospect");
-    } else if (intakeScope === "sales_lead") {
+    } else if (effectiveIntakeScope === "sales_lead") {
       rows = rows.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead");
     }
     if (createdRange?.from || createdRange?.to) {
@@ -337,7 +355,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       );
     }
     return rows;
-  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange, intakeScope]);
+  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange, effectiveIntakeScope]);
 
   const ownerFilterTriggerLabel = React.useMemo(
     () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
@@ -677,7 +695,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   React.useEffect(() => {
     setRowSelection({});
-  }, [ownerScope, intakeScope]);
+  }, [ownerScope, effectiveIntakeScope]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
@@ -754,17 +772,31 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           </DropdownMenuContent>
         </DropdownMenu>
 
-        <Select value={intakeScope} onValueChange={(v) => v && setIntakeScope(v as typeof intakeScope)}>
-          <SelectTrigger size="sm" className="w-[min(168px,42vw)] min-w-0 gap-1.5">
-            <Filter className="h-3.5 w-3.5 shrink-0 opacity-60" />
-            <SelectValue placeholder="Intake" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All records</SelectItem>
-            <SelectItem value="prospect">Prospects only</SelectItem>
-            <SelectItem value="sales_lead">Sales leads only</SelectItem>
-          </SelectContent>
-        </Select>
+        {lockedIntakeScope ? (
+          <span
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-xs text-muted-foreground"
+            title="Intake filter is fixed on this page"
+          >
+            <Filter className="h-3.5 w-3.5" aria-hidden />
+            {lockedIntakeScope === "sales_lead"
+              ? "Sales leads"
+              : lockedIntakeScope === "prospect"
+                ? "Prospects"
+                : "All records"}
+          </span>
+        ) : (
+          <Select value={intakeScope} onValueChange={(v) => v && setIntakeScope(v as typeof intakeScope)}>
+            <SelectTrigger size="sm" className="w-[min(168px,42vw)] min-w-0 gap-1.5">
+              <Filter className="h-3.5 w-3.5 shrink-0 opacity-60" />
+              <SelectValue placeholder="Intake" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All records</SelectItem>
+              <SelectItem value="prospect">Prospects only</SelectItem>
+              <SelectItem value="sales_lead">Sales leads only</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
 
         <DropdownMenu>
           <DropdownMenuTrigger

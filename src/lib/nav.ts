@@ -18,6 +18,7 @@ import {
   Megaphone,
   Radio,
   BarChart3,
+  Tag,
   UsersRound,
   Network,
   ScanSearch,
@@ -139,6 +140,13 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Campaigns",
         icon: Megaphone,
         minWorkspaceRole: "team_lead",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/labels",
+        label: "Labels",
+        icon: Tag,
+        minWorkspaceRole: "manager",
         adminCluster: "programs",
       },
       {

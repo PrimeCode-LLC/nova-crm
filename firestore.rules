@@ -221,6 +221,11 @@ service cloud.firestore {
       allow write: if tenantWritable();
     }
 
+    match /labels/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
     match /departments/{id} {
       allow read: if tenantReadable();
       allow write: if tenantWritable() && isOrgAtLeast('admin');
