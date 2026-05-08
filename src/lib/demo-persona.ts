@@ -53,9 +53,9 @@ export const DEMO_ROLE_PRESETS: DemoRolePreset[] = [
   },
   {
     userId: "u-scrape-01",
-    title: "Data Researcher",
-    subtitle: "Sourced leads; lighter CRM surface.",
-    permissionHint: "See scraper attribution on lead detail right rail.",
+    title: "Prospecting & data",
+    subtitle: "Adds intake prospects; quick-add tags you as Lead by.",
+    permissionHint: "Intake card on lead detail; promote when replies show interest.",
   },
   {
     userId: "u-tl-inbound",

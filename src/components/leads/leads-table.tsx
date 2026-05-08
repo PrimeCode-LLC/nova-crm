@@ -66,6 +66,7 @@ import {
   TEMPERATURE_TONE,
   PRIORITY_TONE,
   PUSH_STATUS_TONE,
+  INTAKE_KIND_META,
 } from "@/lib/constants";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
@@ -280,6 +281,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
+  const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">("all");
   const [reassignOpen, setReassignOpen] = React.useState(false);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
 
@@ -315,6 +317,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   const dataForTable = React.useMemo(() => {
     let rows = filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps);
+    if (intakeScope === "prospect") {
+      rows = rows.filter((l) => l.intakeKind === "prospect");
+    } else if (intakeScope === "sales_lead") {
+      rows = rows.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead");
+    }
     if (createdRange?.from || createdRange?.to) {
       rows = rows.filter((l) => isWithinRange(l.createdAt, createdRange));
     }
@@ -324,7 +331,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       );
     }
     return rows;
-  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange]);
+  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange, intakeScope]);
 
   const ownerFilterTriggerLabel = React.useMemo(
     () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
@@ -387,6 +394,20 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           )}
         </div>
       ),
+    },
+    {
+      id: "intakeKind",
+      accessorFn: (row) => row.intakeKind ?? "sales_lead",
+      header: "Intake",
+      cell: ({ row }) => {
+        const k = row.original.intakeKind ?? "sales_lead";
+        const m = INTAKE_KIND_META[k];
+        return (
+          <Badge variant="outline" className={cn("text-[10px] font-normal", m.className)}>
+            {m.short}
+          </Badge>
+        );
+      },
     },
     {
       id: "channel",
@@ -630,7 +651,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   React.useEffect(() => {
     setRowSelection({});
-  }, [ownerScope]);
+  }, [ownerScope, intakeScope]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
@@ -706,6 +727,18 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             ))}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Select value={intakeScope} onValueChange={(v) => v && setIntakeScope(v as typeof intakeScope)}>
+          <SelectTrigger size="sm" className="w-[min(168px,42vw)] min-w-0 gap-1.5">
+            <Filter className="h-3.5 w-3.5 shrink-0 opacity-60" />
+            <SelectValue placeholder="Intake" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All records</SelectItem>
+            <SelectItem value="prospect">Prospects only</SelectItem>
+            <SelectItem value="sales_lead">Sales leads only</SelectItem>
+          </SelectContent>
+        </Select>
 
         <DropdownMenu>
           <DropdownMenuTrigger

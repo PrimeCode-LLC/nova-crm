@@ -307,6 +307,13 @@ function LeadFormBody({
     addLead,
     isDemo,
   } = useWorkspace();
+
+  const viewerRoleId = React.useMemo(
+    () => users.find((u) => u.id === currentUserId)?.roleId,
+    [users, currentUserId],
+  );
+  const isProspectingIntakeRole =
+    viewerRoleId === "prospecting" || viewerRoleId === "data_scraper";
   const router = useRouter();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
@@ -487,6 +494,9 @@ function LeadFormBody({
       temperature: values.temperature as LeadTemperature,
       priority: values.priority as LeadPriority,
       ownerId,
+      ...(isProspectingIntakeRole && currentUserId
+        ? { intakeKind: "prospect" as const, scraperId: currentUserId }
+        : {}),
       contactName: fullName,
       companyName: values.company.trim(),
       contactEmail: emailTrim || undefined,

@@ -49,7 +49,7 @@ export function leadVisibleForLiveViewer(
     return deptOwnerIds.has(lead.ownerId);
   }
 
-  if (viewer.roleId === "data_scraper") {
+  if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
     return lead.ownerId === viewer.id || lead.scraperId === viewer.id;
   }
 

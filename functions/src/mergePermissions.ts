@@ -5,7 +5,8 @@ export type Role =
   | "manager"
   | "team_lead"
   | "salesperson"
-  | "data_scraper";
+  | "data_scraper"
+  | "prospecting";
 
 export type ResourceKey =
   | "leads"
@@ -63,6 +64,13 @@ const ROLE_DEFAULT_SCOPE: Record<
     activities: "own",
   },
   data_scraper: {
+    leads: "own",
+    deals: "own",
+    accounts: "own",
+    contacts: "own",
+    activities: "own",
+  },
+  prospecting: {
     leads: "own",
     deals: "own",
     accounts: "own",

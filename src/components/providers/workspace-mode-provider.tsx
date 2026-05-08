@@ -36,6 +36,8 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
+import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
+import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
 import { persistLeadDeleteClient } from "@/lib/firestore/persist-lead-delete-client";
 import {
   persistFollowupCreate,
@@ -102,6 +104,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addLeadTouchpoint: (t: Touchpoint) => void;
     addTimelineEvent: (e: TimelineEvent) => void;
     patchLead: (leadId: string, patch: Partial<Lead>) => void;
+    patchAccount: (accountId: string, patch: Partial<Account>) => void;
+    patchContact: (contactId: string, patch: Partial<Contact>) => void;
     /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
     deleteLead: (leadId: string) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
@@ -729,6 +733,60 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId],
   );
 
+  const patchAccount = React.useCallback(
+    (accountId: string, patch: Partial<Account>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistAccountPatchClient(db, accountId, { ...patch, updatedAt: iso });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save company", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        accountPatches: {
+          ...s.accountPatches,
+          [accountId]: { ...s.accountPatches[accountId], ...patch, updatedAt: iso },
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const patchContact = React.useCallback(
+    (contactId: string, patch: Partial<Contact>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistContactPatchClient(db, contactId, { ...patch, updatedAt: iso });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save contact", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        contactPatches: {
+          ...s.contactPatches,
+          [contactId]: { ...s.contactPatches[contactId], ...patch, updatedAt: iso },
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
   const deleteLead = React.useCallback(
     async (leadId: string): Promise<boolean> => {
       const snap = snapshotRef.current;
@@ -1072,6 +1130,8 @@ export function WorkspaceModeProvider({
       addLeadTouchpoint,
       addTimelineEvent,
       patchLead,
+      patchAccount,
+      patchContact,
       deleteLead,
       canDeleteLeads,
       updateLeadStage,
@@ -1112,6 +1172,8 @@ export function WorkspaceModeProvider({
     addLeadTouchpoint,
     addTimelineEvent,
     patchLead,
+    patchAccount,
+    patchContact,
     deleteLead,
     updateLeadStage,
     toggleLeadPin,

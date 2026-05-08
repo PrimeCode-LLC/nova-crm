@@ -150,8 +150,7 @@ function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly Use
   if (persona.id === "u-sales-01") {
     return allUsers.some((u) => u.id === lead.ownerId && u.departmentId === "d-outbound");
   }
-  // Laura: sourced leads + any she owns.
-  if (persona.id === "u-scrape-01") {
+  if (persona.roleId === "prospecting" || persona.roleId === "data_scraper") {
     return lead.ownerId === persona.id || lead.scraperId === persona.id;
   }
   return lead.ownerId === persona.id;

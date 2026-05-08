@@ -8,7 +8,9 @@ export type Role =
   | "manager"
   | "team_lead"
   | "salesperson"
-  | "data_scraper";
+  /** @deprecated Prefer `prospecting`; kept for existing Firestore `roleId` values. */
+  | "data_scraper"
+  | "prospecting";
 
 export type ChannelKey =
   | "cold_email"
@@ -45,6 +47,7 @@ export type RevenueRange =
   | "unknown";
 
 export type CompanySize =
+  | "solo"
   | "1-10"
   | "11-50"
   | "51-200"
@@ -52,6 +55,19 @@ export type CompanySize =
   | "501-1000"
   | "1001-5000"
   | "5001+";
+
+/** Top-of-funnel rows from research/scraping before sales treats them as pipeline leads. */
+export type LeadIntakeKind = "prospect" | "sales_lead";
+
+export type BusinessStatus = "active" | "new" | "dormant";
+
+export type WebsiteStatus = "live" | "under_construction" | "none";
+
+export type OnlineActivityScore = "low" | "medium" | "high";
+
+export type EmailVerificationStatus = "not_verified" | "verified" | "bounced" | "catch_all";
+
+export type BestContactChannel = "email" | "phone" | "linkedin" | "form";
 
 export interface User {
   id: string;
@@ -241,13 +257,26 @@ export interface Account {
   name: string;
   domain?: string;
   industry?: string;
+  /** One-line positioning / description for outreach. */
+  businessDescription?: string;
   size?: CompanySize;
   revenueRange?: RevenueRange;
   location?: string;
+  city?: string;
+  state?: string;
+  country?: string;
   yearFounded?: number;
+  businessStatus?: BusinessStatus;
   website?: string;
+  websiteStatus?: WebsiteStatus;
   linkedin?: string;
   techStack?: string[];
+  onlineActivityScore?: OnlineActivityScore;
+  /** ISO date of last notable site change, if known. */
+  lastWebsiteActivityAt?: ISODate;
+  /** Free-text observation when date is unknown. */
+  lastWebsiteActivityNote?: string;
+  careersPageUrl?: string;
   contactCount: number;
   leadCount: number;
   openDealValue: number;
@@ -263,12 +292,17 @@ export interface Contact {
   lastName: string;
   fullName: string;
   email?: string;
+  personalEmail?: string;
   emailVerified?: boolean;
+  emailVerificationStatus?: EmailVerificationStatus;
   phone?: string;
   linkedin?: string;
   title?: string;
   seniority?: string;
   location?: string;
+  /** e.g. Website, LinkedIn, Google Maps, Crunchbase */
+  contactSource?: string;
+  bestContactChannel?: BestContactChannel;
   ownerId: string;
   createdAt: ISODate;
   updatedAt: ISODate;
@@ -316,7 +350,13 @@ export interface Lead {
   temperature: LeadTemperature;
   priority: LeadPriority;
   ownerId: string;
+  /** User who sourced / entered the row (prospecting team). */
   scraperId?: string;
+  /**
+   * `prospect` = intake only (lists, campaigns, integrations); becomes a tracked sales row when promoted.
+   * Omitted or `sales_lead` = normal pipeline lead.
+   */
+  intakeKind?: LeadIntakeKind;
 
   // Snapshot of contact & account for table rendering
   contactName: string;

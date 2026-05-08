@@ -1,4 +1,13 @@
-import type { Followup, LeadTask, Note, Touchpoint, TimelineEvent, Lead } from "@/lib/types";
+import type {
+  Followup,
+  LeadTask,
+  Note,
+  Touchpoint,
+  TimelineEvent,
+  Lead,
+  Account,
+  Contact,
+} from "@/lib/types";
 import type { WorkspaceSnapshot } from "@/lib/workspace-dataset";
 
 /** Unified session mutations (demo + local session until Firestore writes exist). */
@@ -28,6 +37,8 @@ export type WorkspaceSessionV2 = {
   touchpointsAdded: Touchpoint[];
   timelineAdded: TimelineEvent[];
   leadPatches: Record<string, Partial<Lead>>;
+  accountPatches: Record<string, Partial<Account>>;
+  contactPatches: Record<string, Partial<Contact>>;
   /** Session-removed lead ids (demo / optimistic hide until Firestore listener catches up). */
   deletedLeadIds: string[];
   pinnedLeadIds: string[];
@@ -43,6 +54,8 @@ export function emptyWorkspaceSession(): WorkspaceSessionV2 {
     touchpointsAdded: [],
     timelineAdded: [],
     leadPatches: {},
+    accountPatches: {},
+    contactPatches: {},
     deletedLeadIds: [],
     pinnedLeadIds: [],
     leadActivity: {},
@@ -116,6 +129,10 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
     touchpointsAdded: Array.isArray(parsed.touchpointsAdded) ? parsed.touchpointsAdded : [],
     timelineAdded: Array.isArray(parsed.timelineAdded) ? parsed.timelineAdded : [],
     leadPatches: parsed.leadPatches && typeof parsed.leadPatches === "object" ? parsed.leadPatches : {},
+    accountPatches:
+      parsed.accountPatches && typeof parsed.accountPatches === "object" ? parsed.accountPatches : {},
+    contactPatches:
+      parsed.contactPatches && typeof parsed.contactPatches === "object" ? parsed.contactPatches : {},
     deletedLeadIds: Array.isArray(parsed.deletedLeadIds) ? parsed.deletedLeadIds : [],
     pinnedLeadIds: Array.isArray(parsed.pinnedLeadIds) ? parsed.pinnedLeadIds : [],
     leadActivity: parsed.leadActivity && typeof parsed.leadActivity === "object" ? parsed.leadActivity : {},
@@ -142,7 +159,14 @@ export function mergeSessionIntoSnapshot(
   session: WorkspaceSessionV2,
 ): Pick<
   WorkspaceSnapshot,
-  "followups" | "leadTasks" | "notes" | "touchpoints" | "timelineByLead" | "leads"
+  | "followups"
+  | "leadTasks"
+  | "notes"
+  | "touchpoints"
+  | "timelineByLead"
+  | "leads"
+  | "accounts"
+  | "contacts"
 > {
   const deletedLeadIds = new Set(session.deletedLeadIds ?? []);
 
@@ -155,6 +179,16 @@ export function mergeSessionIntoSnapshot(
       const lastActivityAt = act?.lastAt ?? l.lastActivityAt;
       return { ...l, ...patch, touches, lastActivityAt };
     });
+
+  const accounts = base.accounts.map((a) => {
+    const p = session.accountPatches[a.id];
+    return p ? { ...a, ...p } : a;
+  });
+
+  const contacts = base.contacts.map((c) => {
+    const p = session.contactPatches[c.id];
+    return p ? { ...c, ...p } : c;
+  });
 
   const visibleLeadIds = new Set(leads.map((l) => l.id));
   const visibleDealIds = new Set(
@@ -223,5 +257,5 @@ export function mergeSessionIntoSnapshot(
     .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const leadTasks = [...mergedBaseLeadTasks, ...leadTaskExtrasFiltered];
 
-  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads };
+  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads, accounts, contacts };
 }

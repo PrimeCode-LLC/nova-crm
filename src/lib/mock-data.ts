@@ -107,7 +107,7 @@ export const mockUsers: User[] = [
     id: "u-scrape-01",
     email: "laura.bennett@nova.co",
     displayName: "Laura Bennett",
-    roleId: "data_scraper",
+    roleId: "prospecting",
     departmentId: "d-data",
     managerId: "u-mgr-email",
     title: "Data Researcher",
@@ -235,34 +235,54 @@ const accountSeeds = [
   { name: "Maple Media", domain: "maplemedia.tv", industry: "Media", size: "201-500" as CompanySize, rev: "50m_100m" as RevenueRange },
 ];
 
-export const mockAccounts: Account[] = accountSeeds.map((a, i) => ({
-  id: `a-${i + 1}`,
-  name: a.name,
-  domain: a.domain,
-  industry: a.industry,
-  size: a.size,
-  revenueRange: a.rev,
-  location: pick(["San Francisco, US", "New York, US", "London, UK", "Berlin, DE", "Singapore", "Toronto, CA", "Dubai, AE"], i),
-  yearFounded: 2010 + (i % 12),
-  website: `https://${a.domain}`,
-  linkedin: `https://linkedin.com/company/${a.domain?.split(".")[0]}`,
-  techStack: pick(
-    [
-      ["Next.js", "Postgres", "AWS"],
-      ["React", "Django", "GCP"],
-      ["Vue", "Go", "Azure"],
-      ["HubSpot", "Salesforce"],
-      ["Shopify", "Klaviyo"],
-    ],
-    i,
-  ),
-  contactCount: 1 + (i % 4),
-  leadCount: 1 + (i % 3),
-  openDealValue: i % 3 === 0 ? 12000 + i * 2400 : 0,
-  ownerId: pick(["u-sales-01", "u-sales-02", "u-sales-03", "u-tl-inbound"], i),
-  createdAt: isoDaysAgo(200 - i * 4),
-  updatedAt: isoDaysAgo(i % 30),
-}));
+export const mockAccounts: Account[] = accountSeeds.map((a, i) => {
+  const base: Account = {
+    id: `a-${i + 1}`,
+    name: a.name,
+    domain: a.domain,
+    industry: a.industry,
+    size: a.size,
+    revenueRange: a.rev,
+    location: pick(["San Francisco, US", "New York, US", "London, UK", "Berlin, DE", "Singapore", "Toronto, CA", "Dubai, AE"], i),
+    yearFounded: 2010 + (i % 12),
+    website: `https://${a.domain}`,
+    linkedin: `https://linkedin.com/company/${a.domain?.split(".")[0]}`,
+    techStack: pick(
+      [
+        ["Next.js", "Postgres", "AWS"],
+        ["React", "Django", "GCP"],
+        ["Vue", "Go", "Azure"],
+        ["HubSpot", "Salesforce"],
+        ["Shopify", "Klaviyo"],
+      ],
+      i,
+    ),
+    contactCount: 1 + (i % 4),
+    leadCount: 1 + (i % 3),
+    openDealValue: i % 3 === 0 ? 12000 + i * 2400 : 0,
+    ownerId: pick(["u-sales-01", "u-sales-02", "u-sales-03", "u-tl-inbound"], i),
+    createdAt: isoDaysAgo(200 - i * 4),
+    updatedAt: isoDaysAgo(i % 30),
+  };
+  if (i === 0) {
+    return {
+      ...base,
+      businessDescription: "Regional freight visibility and routing platform for mid-market shippers.",
+      city: "Austin",
+      state: "TX",
+      country: "USA",
+      location: "Austin, TX, USA",
+      yearFounded: 2016,
+      businessStatus: "active",
+      website: "https://northwind.io",
+      websiteStatus: "live",
+      onlineActivityScore: "high",
+      lastWebsiteActivityNote: "Blog + changelog active weekly",
+      careersPageUrl: "https://northwind.io/careers",
+    };
+  }
+  return base;
+});
 
 // ───────────────────────── Contacts ─────────────────────────
 const firstNames = ["Jordan", "Priya", "Sofia", "Marcus", "Avery", "Ethan", "Lucia", "Noah", "Isabela", "Kenji", "Fiona", "Liam", "Nadia", "Owen", "Mira", "Ross", "Chloe", "Diego", "Amaia", "Kai"];
@@ -283,6 +303,14 @@ export const mockContacts: Contact[] = mockAccounts.flatMap((acc, i) => {
       fullName: `${first} ${last}`,
       email: `${first.toLowerCase()}.${last.toLowerCase()}@${acc.domain}`,
       emailVerified: idx % 4 !== 0,
+      ...(acc.id === "a-1" && j === 0
+        ? {
+            personalEmail: "jordan.h.personal@gmail.com",
+            emailVerificationStatus: "verified" as const,
+            contactSource: "LinkedIn",
+            bestContactChannel: "email" as const,
+          }
+        : {}),
       phone: idx % 3 === 0 ? `+1 415-555-01${(10 + idx).toString().padStart(2, "0")}` : undefined,
       linkedin: `https://linkedin.com/in/${first.toLowerCase()}-${last.toLowerCase()}`,
       title: pick(titles, idx),
@@ -335,6 +363,7 @@ export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
     priority: pick(prios, i + 1),
     ownerId: pick(owners, i),
     scraperId: i % 5 === 0 ? "u-scrape-01" : undefined,
+    intakeKind: i === 0 ? "prospect" : undefined,
 
     contactName: c.fullName,
     contactTitle: c.title,

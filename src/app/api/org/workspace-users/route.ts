@@ -11,7 +11,14 @@ import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { managerAssignmentCreatesCycle } from "@/lib/user-hierarchy-tree";
 import type { Role, User } from "@/lib/types";
 
-const ROLE_IDS = ["director", "manager", "team_lead", "salesperson", "data_scraper"] as const;
+const ROLE_IDS = [
+  "director",
+  "manager",
+  "team_lead",
+  "salesperson",
+  "data_scraper",
+  "prospecting",
+] as const;
 
 const patchSchema = z
   .object({

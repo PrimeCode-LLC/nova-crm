@@ -26,6 +26,7 @@ import {
   PIPELINE_STAGES,
   REVENUE_RANGES,
   STAGES_BY_KEY,
+  INTAKE_KIND_META,
 } from "@/lib/constants";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
@@ -72,6 +73,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
@@ -95,6 +97,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
   const [activeTab, setActiveTab] = React.useState<LeadTab>(tabFromUrl);
   const [editOpen, setEditOpen] = React.useState(false);
+  const [prospectFieldsOpen, setProspectFieldsOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   React.useEffect(() => {
@@ -313,6 +316,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   </SelectContent>
                 </Select>
                 <ChannelChip channel={lead.channel} />
+                {lead.intakeKind === "prospect" && (
+                  <Badge variant="outline" className={cn("h-7 font-normal", INTAKE_KIND_META.prospect.className)}>
+                    {INTAKE_KIND_META.prospect.short}
+                  </Badge>
+                )}
                 {needsOutreachProfile && (
                   <Badge
                     variant="outline"
@@ -506,10 +514,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <UserChip userId={lead.ownerId} size="md" />
                 {lead.scraperId && (
                   <div className="text-xs text-muted-foreground flex items-center gap-2">
-                    <span>Sourced by</span>
+                    <span>Lead by</span>
                     <UserChip userId={lead.scraperId} size="xs" />
                   </div>
                 )}
+                <p className="text-[11px] text-muted-foreground">Added {fmtDate(lead.createdAt)}</p>
               </CardContent>
             </Card>
 
@@ -523,6 +532,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     <a href={`mailto:${contact.email}`} className="truncate hover:text-primary">
                       {contact.email}
+                    </a>
+                  </div>
+                )}
+                {contact?.personalEmail && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="shrink-0">Personal</span>
+                    <a href={`mailto:${contact.personalEmail}`} className="truncate hover:text-primary">
+                      {contact.personalEmail}
                     </a>
                   </div>
                 )}
@@ -551,6 +568,39 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <span>{contact.location}</span>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">
+                  Intake & prospecting
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Prospecting rows feed integrations and campaigns. When a contact responds with interest, promote to a
+                  sales lead for normal pipeline work.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {account && contact && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => setProspectFieldsOpen(true)}>
+                      Edit prospect fields
+                    </Button>
+                  )}
+                  {lead.intakeKind === "prospect" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        handleSaveLead({ intakeKind: undefined });
+                        toast.success("Promoted to sales lead");
+                      }}
+                    >
+                      Promote to sales lead
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -583,7 +633,17 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <dt className="text-muted-foreground">Founded</dt>
                     <dd>{account.yearFounded ?? "-"}</dd>
                     <dt className="text-muted-foreground">Location</dt>
-                    <dd>{account.location}</dd>
+                    <dd>
+                      {[account.city, account.state, account.country].filter(Boolean).join(", ") ||
+                        account.location ||
+                        "—"}
+                    </dd>
+                    {account.businessDescription && (
+                      <>
+                        <dt className="text-muted-foreground">Summary</dt>
+                        <dd className="line-clamp-3">{account.businessDescription}</dd>
+                      </>
+                    )}
                     <dt className="text-muted-foreground">Website</dt>
                     <dd>
                       {account.website ? (
@@ -687,6 +747,23 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         lead={lead}
         onSave={handleSaveLead}
       />
+      {account && contact && (
+        <ProspectIntakeDialog
+          open={prospectFieldsOpen}
+          onOpenChange={setProspectFieldsOpen}
+          lead={lead}
+          account={account}
+          contact={contact}
+          onSave={({ accountPatch, contactPatch, leadPatch }) => {
+            ws.patchAccount(account.id, accountPatch);
+            ws.patchContact(contact.id, contactPatch);
+            if (Object.keys(leadPatch).length > 0) {
+              ws.patchLead(lead.id, leadPatch);
+            }
+            ws.bumpLeadActivity(lead.id);
+          }}
+        />
+      )}
     </>
   );
 }

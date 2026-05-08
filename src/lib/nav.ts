@@ -162,6 +162,7 @@ const WORKSPACE_ROLE_RANK: Record<Role, number> = {
   team_lead: 20,
   salesperson: 10,
   data_scraper: 10,
+  prospecting: 10,
 };
 
 export type NavAccessContext = {

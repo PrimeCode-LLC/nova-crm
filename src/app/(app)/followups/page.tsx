@@ -11,7 +11,18 @@ import {
   Plus,
   Sparkles,
   Trash2,
+  Users,
 } from "lucide-react";
+import {
+  endOfDay,
+  endOfWeek,
+  format,
+  isAfter,
+  isBefore,
+  isSameDay,
+  isWithinInterval,
+  startOfDay,
+} from "date-fns";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -31,6 +42,24 @@ import { cn } from "@/lib/utils";
 import type { Followup, Lead } from "@/lib/types";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import {
+  buildWorkspaceOwnerPickerOptions,
+  filterFollowupsByOwnerScope,
+  getOwnerFilterTriggerLabel,
+  OWNER_SCOPE_PREFIX,
+} from "@/lib/owner-scope";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -41,14 +70,39 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
-function categorize(dueAt: string) {
-  const d = new Date(dueAt);
-  const now = Date.now();
-  const diff = d.getTime() - now;
-  const day = 86400_000;
-  if (diff < 0) return "overdue";
-  if (diff < day) return "today";
-  if (diff < day * 7) return "thisWeek";
+function todayYmdLocal(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function startOfLocalDayFromYmd(ymd: string): Date {
+  const parts = ymd.split("-").map((x) => Number(x));
+  const y = parts[0];
+  const mo = parts[1];
+  const da = parts[2];
+  if (!y || !mo || !da || Number.isNaN(y) || Number.isNaN(mo) || Number.isNaN(da)) {
+    return startOfDay(new Date());
+  }
+  return startOfDay(new Date(y, mo - 1, da));
+}
+
+/**
+ * Buckets relative to a chosen calendar day (local TZ) and the ISO week containing that day (Mon–Sun).
+ * Fixes “team due today” items being pushed into the wrong bucket by a rolling 24h window.
+ */
+function categorizeFollowupBucket(dueAt: string, anchorDay: Date): "overdue" | "today" | "thisWeek" | "later" {
+  const due = new Date(dueAt);
+  if (Number.isNaN(due.getTime())) return "later";
+  const dayStart = startOfDay(anchorDay);
+  const dayEnd = endOfDay(anchorDay);
+  const weekEnd = endOfWeek(anchorDay, { weekStartsOn: 1 });
+
+  if (isBefore(due, dayStart)) return "overdue";
+  if (isWithinInterval(due, { start: dayStart, end: dayEnd })) return "today";
+  if (isAfter(due, dayEnd) && !isAfter(due, weekEnd)) return "thisWeek";
   return "later";
 }
 
@@ -57,12 +111,58 @@ type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
 export default function FollowupsPage() {
   const router = useRouter();
   const ws = useWorkspace();
-  const { followups, isDemo, leads, users, currentUserId, addFollowup, setFollowupCompleted, removeFollowup } =
-    ws;
+  const {
+    followups: allFollowups,
+    isDemo,
+    leads,
+    users,
+    currentUserId,
+    addFollowup,
+    setFollowupCompleted,
+    removeFollowup,
+    getOwnerDisplayName,
+  } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [tab, setTab] = React.useState<"open" | "completed">("open");
   const [bucketFilter, setBucketFilter] = React.useState<BucketFilter>("all");
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
+  const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [viewDateYmd, setViewDateYmd] = React.useState(() => todayYmdLocal());
+
+  const followupOwnerIds = React.useMemo(
+    () => [...new Set(allFollowups.map((f) => f.ownerId).filter(Boolean))],
+    [allFollowups],
+  );
+
+  const ownerPickerOptions = React.useMemo(
+    () => buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName, followupOwnerIds),
+    [users, currentUserId, getOwnerDisplayName, followupOwnerIds],
+  );
+
+  const ownerScopeDeps = React.useMemo(
+    () => ({
+      currentUserId,
+      users,
+      getUserById: ws.getUserById,
+      getOwnerDisplayName,
+    }),
+    [currentUserId, users, ws.getUserById, getOwnerDisplayName],
+  );
+
+  const ownerFilterTriggerLabel = React.useMemo(
+    () => getOwnerFilterTriggerLabel(ownerScope, ownerPickerOptions),
+    [ownerScope, ownerPickerOptions],
+  );
+
+  const followups = React.useMemo(
+    () => filterFollowupsByOwnerScope(allFollowups, ownerScope, ownerScopeDeps),
+    [allFollowups, ownerScope, ownerScopeDeps],
+  );
+
+  const anchorDay = React.useMemo(() => startOfLocalDayFromYmd(viewDateYmd), [viewDateYmd]);
+  const isViewToday = isSameDay(anchorDay, new Date());
+  const dueAnchorBucketTitle = isViewToday ? "Due today" : `Due ${format(anchorDay, "MMM d")}`;
+  const dueAnchorKpiLabel = isViewToday ? "Due today" : `Due ${format(anchorDay, "MMM d")}`;
 
   const canDeleteFollowups =
     !isDemo && viewerHasElevatedWorkspaceRole(users.find((u) => u.id === currentUserId));
@@ -70,10 +170,10 @@ export default function FollowupsPage() {
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
 
-  const overdue = open.filter((f) => categorize(f.dueAt) === "overdue");
-  const today = open.filter((f) => categorize(f.dueAt) === "today");
-  const thisWeek = open.filter((f) => categorize(f.dueAt) === "thisWeek");
-  const later = open.filter((f) => categorize(f.dueAt) === "later");
+  const overdue = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "overdue");
+  const today = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "today");
+  const thisWeek = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "thisWeek");
+  const later = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "later");
 
   function toggleBucket(next: BucketFilter) {
     setTab("open");
@@ -123,7 +223,7 @@ export default function FollowupsPage() {
     <>
       <PageHeader
         title="Followups"
-        description="Your tasks and reminders, including auto-generated idle warnings."
+        description="Reminders for leads you can access in this workspace—filter by assignee and agenda date."
         actions={
           <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New followup
@@ -131,10 +231,87 @@ export default function FollowupsPage() {
         }
       />
       <PageBody>
-        {!isDemo && followups.length === 0 ? (
+        {!isDemo && allFollowups.length === 0 ? (
           <WorkspaceEmptyHint title="No followups in workspace" />
         ) : (
           <>
+            <div className="mb-4 flex flex-col gap-4 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+              <div className="space-y-1">
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Agenda date
+                </p>
+                <p className="text-lg font-semibold leading-tight">{format(anchorDay, "EEEE, MMMM d, yyyy")}</p>
+                <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:gap-3">
+                  {!isViewToday ? (
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs text-muted-foreground"
+                      onClick={() => setViewDateYmd(todayYmdLocal())}
+                    >
+                      Jump to today
+                    </Button>
+                  ) : null}
+                  <p className="text-xs text-muted-foreground max-w-xl">
+                    Buckets use this calendar day and the week that contains it. Owner matches followup
+                    assignee (often the lead owner). Except for director / org-wide roles, you only see
+                    followups linked to leads you can already open.
+                  </p>
+                </div>
+              </div>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
+                <div className="grid gap-1.5">
+                  <Label htmlFor="followups-view-date" className="text-xs text-muted-foreground">
+                    Date
+                  </Label>
+                  <Input
+                    id="followups-view-date"
+                    type="date"
+                    className="h-9 w-[11.5rem] bg-background"
+                    value={viewDateYmd}
+                    onChange={(e) => setViewDateYmd(e.target.value || todayYmdLocal())}
+                  />
+                </div>
+                <div className="grid min-w-0 gap-1.5 sm:min-w-[11rem]">
+                  <Label className="text-xs text-muted-foreground">Owner</Label>
+                  <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
+                    <SelectTrigger size="sm" className="min-w-0 max-w-full gap-1.5">
+                      <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                      <SelectValue placeholder="Owner">{ownerFilterTriggerLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="max-h-72">
+                      <SelectGroup>
+                        <SelectLabel className="text-[10px] uppercase tracking-wide">Quick</SelectLabel>
+                        <SelectItem value="all-owners">All owners</SelectItem>
+                        <SelectItem value="me">Owned by me</SelectItem>
+                        <SelectItem value="team">My team</SelectItem>
+                        <SelectItem value="unassigned">Unassigned</SelectItem>
+                      </SelectGroup>
+                      {ownerPickerOptions.length > 0 ? (
+                        <>
+                          <SelectSeparator />
+                          <SelectGroup>
+                            <SelectLabel className="text-[10px] uppercase tracking-wide">By teammate</SelectLabel>
+                            {ownerPickerOptions.map((o) => (
+                              <SelectItem key={o.id} value={`${OWNER_SCOPE_PREFIX}${o.id}`}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        </>
+                      ) : null}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {allFollowups.length > 0 && followups.length === 0 ? (
+              <p className="mb-4 text-sm text-muted-foreground">
+                No followups match this owner filter. Try &ldquo;All owners&rdquo; or pick a teammate.
+              </p>
+            ) : null}
+
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <KpiCard
                 label="Overdue"
@@ -144,7 +321,7 @@ export default function FollowupsPage() {
                 selected={tab === "open" && bucketFilter === "overdue"}
               />
               <KpiCard
-                label="Due today"
+                label={dueAnchorKpiLabel}
                 value={today.length}
                 icon={Clock}
                 onClick={handleKpiToday}
@@ -197,9 +374,12 @@ export default function FollowupsPage() {
                     {bucketFilter === "overdue"
                       ? "overdue"
                       : bucketFilter === "today"
-                        ? "due today"
+                        ? isViewToday
+                          ? "due today"
+                          : `due on ${format(anchorDay, "MMM d")}`
                         : "this week"}{" "}
-                    only. Click the same summary card again to show all open followups.
+                    only (for {format(anchorDay, "MMM d, yyyy")}). Click the same summary card again to show all
+                    open followups.
                   </p>
                 )}
                 {showGroup("overdue") && (
@@ -221,11 +401,17 @@ export default function FollowupsPage() {
                 {showGroup("today") && (
                   <div id="followups-bucket-today">
                     <FollowupGroup
-                      title="Due today"
-                      description="Let's knock these out today."
+                      title={dueAnchorBucketTitle}
+                      description={
+                        isViewToday
+                          ? "Let's knock these out today."
+                          : `Scheduled on ${format(anchorDay, "MMMM d, yyyy")}.`
+                      }
                       tone="amber"
                       items={today}
-                      empty="Nothing due today."
+                      empty={
+                        isViewToday ? "Nothing due today." : `Nothing due on ${format(anchorDay, "MMM d")}.`
+                      }
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}

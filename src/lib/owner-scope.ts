@@ -1,4 +1,4 @@
-import type { ActivityCounterRow, ActivityRecord, Lead, User } from "@/lib/types";
+import type { ActivityCounterRow, ActivityRecord, Followup, Lead, User } from "@/lib/types";
 
 /** `Select` value prefix for filtering to a single `ownerId` (Firebase uid). */
 export const OWNER_SCOPE_PREFIX = "owner:";
@@ -34,6 +34,33 @@ export function filterLeadsByOwnerScope(
     return leads.filter((l) => l.ownerId === uid);
   }
   return [...leads];
+}
+
+/** Narrow followups by assignee (`ownerId`), same semantics as `filterLeadsByOwnerScope`. */
+export function filterFollowupsByOwnerScope(
+  followups: readonly Followup[],
+  ownerScope: string,
+  deps: OwnerScopeDeps,
+): Followup[] {
+  const { currentUserId, users, getUserById, getOwnerDisplayName } = deps;
+  if (ownerScope === "all-owners") return [...followups];
+  if (ownerScope === "me") return followups.filter((f) => f.ownerId === currentUserId);
+  if (ownerScope === "unassigned") {
+    return followups.filter((f) => {
+      const oid = f.ownerId?.trim();
+      if (!oid) return true;
+      return !getUserById(oid) && !getOwnerDisplayName(oid);
+    });
+  }
+  if (ownerScope === "team") {
+    const peerIds = new Set(users.filter((u) => u.id !== currentUserId).map((u) => u.id));
+    return followups.filter((f) => peerIds.has(f.ownerId));
+  }
+  if (ownerScope.startsWith(OWNER_SCOPE_PREFIX)) {
+    const uid = ownerScope.slice(OWNER_SCOPE_PREFIX.length);
+    return followups.filter((f) => f.ownerId === uid);
+  }
+  return [...followups];
 }
 
 export function buildPersonOwnerOptions(

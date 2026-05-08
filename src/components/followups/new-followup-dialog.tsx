@@ -38,6 +38,10 @@ function todayInputValue(): string {
   return `${y}-${m}-${day}`;
 }
 
+function defaultFollowupTitle(lead: Lead | undefined): string {
+  return lead ? `Follow up with ${lead.contactName}` : "";
+}
+
 export function NewFollowupDialog({
   open,
   onOpenChange,
@@ -65,7 +69,7 @@ export function NewFollowupDialog({
     const lead = fixedLeadId ? leads.find((l) => l.id === fixedLeadId) : leads[0];
     React.startTransition(() => {
       setLeadId(fixedLeadId ?? lead?.id ?? "");
-      setTitle(lead ? `Follow up with ${lead.contactName}` : "");
+      setTitle(defaultFollowupTitle(lead));
       setDescription("");
       setDueDate(todayInputValue());
       setPriority("medium");
@@ -121,7 +125,16 @@ export function NewFollowupDialog({
                 <Select
                   value={leadId}
                   onValueChange={(v) => {
-                    if (v) setLeadId(v);
+                    if (!v) return;
+                    const prevLead = leads.find((l) => l.id === leadId);
+                    const nextLead = leads.find((l) => l.id === v);
+                    const prevDefault = defaultFollowupTitle(prevLead);
+                    const titleStillSynced =
+                      title.trim() === "" || title === prevDefault;
+                    if (nextLead && titleStillSynced) {
+                      setTitle(defaultFollowupTitle(nextLead));
+                    }
+                    setLeadId(v);
                   }}
                   disabled={leads.length === 0}
                 >

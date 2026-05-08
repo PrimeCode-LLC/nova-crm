@@ -2,7 +2,7 @@ import type { Role } from "./types";
 
 /** Sales + intake roles: surface personal follow-ups and tasks above org-wide KPIs. */
 export function isFrontlineDashboardRole(role: Role | undefined): boolean {
-  return role === "salesperson" || role === "data_scraper";
+  return role === "salesperson" || role === "data_scraper" || role === "prospecting";
 }
 
 /** Show a second bucket of teammates’ open follow-ups (workspace is already hierarchy-scoped). */
@@ -21,6 +21,7 @@ export function getDashboardOverviewDescription(role: Role | undefined): string 
     case "salesperson":
       return "Your next follow-ups and tasks first, then pipeline context for the leads you own.";
     case "data_scraper":
+    case "prospecting":
       return "Intake and handoff work in focus, plus pipeline context for leads you touch.";
     default:
       return "Live pipeline state, team performance, and funnel diagnostics.";
@@ -38,6 +39,7 @@ export function getDashboardRoleFocusLine(role: Role | undefined): string {
     case "salesperson":
       return "Clear due follow-ups and assigned tasks before diving into charts.";
     case "data_scraper":
+    case "prospecting":
       return "Keep source quality high: resolve follow-ups tied to your leads and handoffs.";
     default:
       return "Use filters to slice by channel or owner when you need a narrower view.";
