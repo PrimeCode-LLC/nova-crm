@@ -117,7 +117,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     [pathname, router, searchParams],
   );
 
-  const backHref = searchParams.get("from") === "pipeline" ? "/pipeline" : "/leads";
+  const backFrom = searchParams.get("from");
+  const backHref =
+    backFrom === "pipeline" ? "/pipeline" : backFrom === "prospects" ? "/prospects" : "/leads";
+  const backLabel =
+    backHref === "/pipeline"
+      ? "Back to pipeline"
+      : backHref === "/prospects"
+        ? "Back to prospects"
+        : "Back to leads";
   const lead = ws.getLeadById(leadId);
 
   const viewerForTasks = React.useMemo(
@@ -185,7 +193,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           variant="outline"
           nativeButton={false}
           render={
-            <Link href={backHref}>{backHref === "/pipeline" ? "Back to pipeline" : "Back to leads"}</Link>
+            <Link href={backHref}>{backLabel}</Link>
           }
         />
         {!ws.isDemo && <WorkspaceEmptyHint />}
@@ -272,7 +280,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               size="icon-sm"
               nativeButton={false}
               render={
-                <Link href={backHref} aria-label={backHref === "/pipeline" ? "Back to pipeline" : "Back to leads"}>
+                <Link href={backHref} aria-label={backLabel}>
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               }

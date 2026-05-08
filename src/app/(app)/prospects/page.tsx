@@ -120,6 +120,7 @@ function ProspectsPageInner() {
             idleOnly={false}
             initialIntakeScope="prospect"
             lockedIntakeScope="prospect"
+            linkFromKey="prospects"
           />
         )}
       </PageBody>

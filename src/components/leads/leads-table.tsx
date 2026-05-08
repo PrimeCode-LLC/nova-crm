@@ -246,6 +246,8 @@ export interface LeadsTableProps {
   initialIntakeScope?: "all" | "prospect" | "sales_lead";
   /** When set, intake scope is fixed (toolbar control hidden) — e.g. Leads vs Prospects routes. */
   lockedIntakeScope?: "all" | "prospect" | "sales_lead";
+  /** Origin route for lead-detail back navigation (appended as `?from=…`). */
+  linkFromKey?: "prospects" | "pipeline";
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
@@ -257,9 +259,24 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     idleOnly = false,
     initialIntakeScope = "all",
     lockedIntakeScope,
+    linkFromKey,
   },
   ref,
 ) {
+  const buildLeadHref = React.useCallback(
+    (id: string, extraQuery?: string) => {
+      const base = `/leads/${id}`;
+      if (!linkFromKey && !extraQuery) return base;
+      const params = new URLSearchParams();
+      if (linkFromKey) params.set("from", linkFromKey);
+      if (extraQuery) {
+        for (const [k, v] of new URLSearchParams(extraQuery)) params.set(k, v);
+      }
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    },
+    [linkFromKey],
+  );
   const router = useRouter();
   const {
     currentUserId,
@@ -400,7 +417,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => (
         <div className="min-w-0">
           <Link
-            href={`/leads/${row.original.id}`}
+            href={buildLeadHref(row.original.id)}
             className="text-sm font-medium hover:text-primary truncate block"
           >
             {row.original.contactName}
@@ -669,7 +686,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               }
             />
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => router.push(`/leads/${id}`)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push(buildLeadHref(id))}>Edit</DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => {
                   e.stopPropagation();
@@ -678,7 +695,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               >
                 Reassign
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push(`/leads/${id}?tab=notes`)}>
+              <DropdownMenuItem onClick={() => router.push(buildLeadHref(id, "tab=notes"))}>
                 Add note
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -706,6 +723,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const table = useReactTable({
     data: dataForTable,
     columns,
+    getRowId: (row) => row.id,
     state: { sorting, globalFilter, columnFilters, rowSelection, columnVisibility },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
@@ -1128,18 +1146,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                       key={h.id}
                       className="text-xs font-semibold uppercase tracking-wide text-muted-foreground h-9 whitespace-nowrap"
                     >
-                      {h.isPlaceholder ? null : (
+                      {h.isPlaceholder ? null : h.column.getCanSort() ? (
                         <button
                           type="button"
                           onClick={h.column.getToggleSortingHandler()}
                           className="flex items-center gap-1 hover:text-foreground transition-colors"
-                          disabled={!h.column.getCanSort()}
                         >
                           {flexRender(h.column.columnDef.header, h.getContext())}
-                          {h.column.getCanSort() && (
-                            <ArrowUpDown className="h-3 w-3 opacity-40" />
-                          )}
+                          <ArrowUpDown className="h-3 w-3 opacity-40" />
                         </button>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          {flexRender(h.column.columnDef.header, h.getContext())}
+                        </div>
                       )}
                     </TableHead>
                   ))}
@@ -1164,11 +1183,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                       if (el.closest("a, button, [data-slot='checkbox'], [data-slot='dropdown-menu-trigger']")) {
                         return;
                       }
-                      router.push(`/leads/${row.original.id}`);
+                      router.push(buildLeadHref(row.original.id));
                     }}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="py-2 whitespace-nowrap">
+                      <TableCell
+                        key={cell.id}
+                        className="py-2 whitespace-nowrap"
+                        onClick={
+                          cell.column.id === "select"
+                            ? (e) => e.stopPropagation()
+                            : undefined
+                        }
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}
