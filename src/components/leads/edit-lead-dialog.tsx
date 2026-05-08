@@ -354,7 +354,7 @@ export function EditLeadDialog({
 
             <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Labels</p>
-              <EntityLabelPicker labelIds={labelIds} onChange={setLabelIds} />
+              <EntityLabelPicker emphasizeAddAction labelIds={labelIds} onChange={setLabelIds} />
             </section>
 
             <Separator />

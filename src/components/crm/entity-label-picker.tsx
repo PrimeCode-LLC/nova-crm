@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Tag } from "lucide-react";
+import { Tag, PlusCircle } from "lucide-react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,11 +23,14 @@ export function EntityLabelPicker({
   onChange,
   disabled,
   className,
+  /** When true, show a stronger empty state for lead / record detail pages. */
+  emphasizeAddAction = false,
 }: {
   labelIds: string[];
   onChange: (next: string[]) => void;
   disabled?: boolean;
   className?: string;
+  emphasizeAddAction?: boolean;
 }) {
   const ws = useWorkspace();
   const sorted = React.useMemo(
@@ -43,11 +46,25 @@ export function EntityLabelPicker({
     onChange([...next]);
   };
 
+  const hasWorkspaceLabels = sorted.length > 0;
+  const emptyNoDefinitions = labelIds.length === 0 && !hasWorkspaceLabels;
+  const emptyButCanAdd = labelIds.length === 0 && hasWorkspaceLabels;
+
   return (
-    <div className={cn("space-y-2", className)}>
-      <div className="flex flex-wrap gap-1 min-h-[22px]">
+    <div className={cn("space-y-3", className)}>
+      {emphasizeAddAction && emptyButCanAdd ? (
+        <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
+          <span className="font-medium text-foreground">No labels on this lead yet.</span> Use{" "}
+          <span className="text-foreground">Add labels</span> below — you can select{" "}
+          <span className="text-foreground">multiple</span> tags for one lead.
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap gap-1 min-h-[24px] items-center">
         {labelIds.length === 0 ? (
-          <span className="text-xs text-muted-foreground">No labels</span>
+          <span className="text-xs text-muted-foreground">
+            {emptyNoDefinitions ? "No labels (create some under Configuration → Labels)" : "No labels selected"}
+          </span>
         ) : (
           labelIds.map((id) => {
             const def = labelById(ws.crmLabels, id);
@@ -73,16 +90,20 @@ export function EntityLabelPicker({
           render={
             <Button
               type="button"
-              variant="outline"
+              variant={emphasizeAddAction && labelIds.length === 0 && hasWorkspaceLabels ? "secondary" : "outline"}
               size="sm"
-              className="h-8 gap-1.5"
+              className={cn(
+                "h-9 gap-2",
+                emphasizeAddAction && labelIds.length === 0 && hasWorkspaceLabels && "font-medium",
+              )}
               disabled={disabled}
             >
-              <Tag className="h-3.5 w-3.5" />
-              Labels
-              {sorted.length > 0 ? (
-                <span className="text-muted-foreground tabular-nums">({labelIds.length})</span>
-              ) : null}
+              {labelIds.length === 0 ? (
+                <PlusCircle className="h-4 w-4 shrink-0 opacity-90" />
+              ) : (
+                <Tag className="h-3.5 w-3.5 shrink-0" />
+              )}
+              {labelIds.length === 0 ? "Add labels" : `Edit labels (${labelIds.length})`}
             </Button>
           }
         />
@@ -96,7 +117,9 @@ export function EntityLabelPicker({
             </div>
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
-              <p className="text-xs text-muted-foreground">Toggle labels for this record.</p>
+              <p className="text-xs text-muted-foreground">
+                Select any combination — all checked labels apply to this lead.
+              </p>
               {sorted.map((l) => (
                 <div key={l.id} className="flex items-center gap-2">
                   <Checkbox

@@ -93,6 +93,9 @@ import {
 /** Column filter token: leads with no outreach profile assigned. */
 const PROFILE_FILTER_NONE = "__none__";
 
+/** Column filter token: leads with no workspace labels. */
+const LABEL_FILTER_NONE = "__unlabeled__";
+
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
     ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
@@ -265,6 +268,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     getOwnerDisplayName,
     getProfileById,
     profiles,
+    crmLabels,
     isDemo,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
@@ -338,6 +342,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       .filter((p) => p.active !== false)
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
   }, [profiles]);
+
+  const labelFilterOptions = React.useMemo(
+    () => [...crmLabels].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [crmLabels],
+  );
 
   const dataForTable = React.useMemo(() => {
     let rows = filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps);
@@ -431,6 +440,52 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             {m.short}
           </Badge>
         );
+      },
+    },
+    {
+      id: "labelIds",
+      accessorFn: (row) => (row.labelIds ?? []).join(","),
+      header: "Labels",
+      cell: ({ row }) => {
+        const ids = row.original.labelIds ?? [];
+        if (!ids.length) {
+          return <span className="text-xs text-muted-foreground">—</span>;
+        }
+        return (
+          <div className="flex max-w-[148px] flex-wrap gap-0.5">
+            {ids.slice(0, 4).map((id) => {
+              const def = crmLabels.find((l) => l.id === id);
+              return (
+                <Badge
+                  key={id}
+                  variant="outline"
+                  className="max-w-[7rem] truncate text-[9px] font-normal"
+                  title={def?.name ?? id}
+                  style={
+                    def?.color
+                      ? { borderLeftWidth: 2, borderLeftColor: def.color, borderLeftStyle: "solid" as const }
+                      : undefined
+                  }
+                >
+                  {def?.name ?? id.slice(0, 8)}
+                </Badge>
+              );
+            })}
+            {ids.length > 4 ? (
+              <span className="self-center text-[10px] text-muted-foreground tabular-nums">+{ids.length - 4}</span>
+            ) : null}
+          </div>
+        );
+      },
+      filterFn: (row, _id, value: string[]) => {
+        const selected = value as string[];
+        if (!selected?.length) return true;
+        const leadIds = row.original.labelIds ?? [];
+        const wantsUnlabeled = selected.includes(LABEL_FILTER_NONE);
+        const labelIdsOnly = selected.filter((v) => v !== LABEL_FILTER_NONE);
+        const unlabeledMatch = wantsUnlabeled && leadIds.length === 0;
+        const tagMatch = labelIdsOnly.some((lid) => leadIds.includes(lid));
+        return unlabeledMatch || tagMatch;
       },
     },
     {
@@ -646,7 +701,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, isDemo, getProfileById]);
+  ], [router, openReassignForIds, isDemo, getProfileById, crmLabels]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -701,6 +756,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
   const channelFilter = (columnFilters.find((f) => f.id === "channel")?.value as string[]) ?? [];
   const profileFilter = (columnFilters.find((f) => f.id === "profileId")?.value as string[]) ?? [];
+  const labelFilter = (columnFilters.find((f) => f.id === "labelIds")?.value as string[]) ?? [];
 
   function toggleStage(key: PipelineStage) {
     const next = stageFilter.includes(key)
@@ -719,6 +775,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ? profileFilter.filter((s) => s !== key)
       : [...profileFilter, key];
     table.getColumn("profileId")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleLabelFilter(key: string) {
+    const next = labelFilter.includes(key)
+      ? labelFilter.filter((s) => s !== key)
+      : [...labelFilter, key];
+    table.getColumn("labelIds")?.setFilterValue(next.length ? next : undefined);
   }
 
   return (
@@ -869,6 +931,55 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 </DropdownMenuCheckboxItem>
               );
             })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Tag className="h-3.5 w-3.5" />
+                Labels
+                {labelFilter.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {labelFilter.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Show leads that match any selected tag
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuCheckboxItem
+              checked={labelFilter.includes(LABEL_FILTER_NONE)}
+              onCheckedChange={() => toggleLabelFilter(LABEL_FILTER_NONE)}
+            >
+              Unlabeled
+            </DropdownMenuCheckboxItem>
+            {labelFilterOptions.length > 0 && <DropdownMenuSeparator />}
+            {labelFilterOptions.map((l) => (
+              <DropdownMenuCheckboxItem
+                key={l.id}
+                checked={labelFilter.includes(l.id)}
+                onCheckedChange={() => toggleLabelFilter(l.id)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: l.color ?? "hsl(var(--muted-foreground))" }}
+                  />
+                  <span className="truncate">{l.name}</span>
+                </span>
+              </DropdownMenuCheckboxItem>
+            ))}
+            {labelFilterOptions.length === 0 && (
+              <div className="px-2 py-2 text-xs text-muted-foreground">No labels defined yet.</div>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 

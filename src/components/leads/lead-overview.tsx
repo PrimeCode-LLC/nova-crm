@@ -41,6 +41,7 @@ export function LeadOverview({
         </CardHeader>
         <CardContent className="pt-0">
           <EntityLabelPicker
+            emphasizeAddAction
             labelIds={lead.labelIds ?? []}
             onChange={(next) => ws.patchLead(lead.id, { labelIds: next.length ? next : undefined })}
           />

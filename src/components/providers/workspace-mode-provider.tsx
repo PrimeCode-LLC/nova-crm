@@ -35,6 +35,7 @@ import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseDb } from "@/lib/firebase/client";
+import { resolveOrganizationIdForFirestoreWrite } from "@/lib/firebase/resolve-organization-id-for-write";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
@@ -841,12 +842,18 @@ export function WorkspaceModeProvider({
 
   const addCrmLabel = React.useCallback(
     (label: CrmLabel) => {
-      const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
-      const orgId = userDoc?.organizationId;
-      if (writeFs && orgId) {
+      const canLiveWrite = mode === "live" && isFirebaseWebConfigured() && Boolean(fbUser);
+      if (canLiveWrite) {
         void (async () => {
           try {
+            const orgId = await resolveOrganizationIdForFirestoreWrite(userDoc?.organizationId);
+            if (!orgId) {
+              toast.error("Could not save label", {
+                description:
+                  "No organization id on your session. Try refreshing the page or signing out and back in.",
+              });
+              return;
+            }
             const db = getFirebaseDb();
             await persistCrmLabelCreate(db, orgId, label);
           } catch (e) {
@@ -858,7 +865,7 @@ export function WorkspaceModeProvider({
       }
       setLabelDelta((d) => ({ ...d, added: [...d.added, label] }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, fbUser, userDoc?.organizationId],
   );
 
   const updateCrmLabel = React.useCallback(
