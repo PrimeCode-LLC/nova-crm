@@ -285,9 +285,12 @@ function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRec
  */
 export function useLiveWorkspaceFirestore(organizationId: string | undefined): LiveWorkspaceFirestoreState {
   const [state, setState] = React.useState<LiveWorkspaceFirestoreState>(empty);
+  /** One entry per listener; cleared on that listener’s success so the banner can recover after transient errors. */
+  const listenerErrorsRef = React.useRef(new Map<string, Error>());
 
   React.useEffect(() => {
     if (!organizationId || !isFirebaseWebConfigured()) {
+      listenerErrorsRef.current.clear();
       setState({
         loading: false,
         error: null,
@@ -313,6 +316,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
     try {
       db = getFirebaseDb();
     } catch (e) {
+      listenerErrorsRef.current.clear();
       setState({
         loading: false,
         error: e instanceof Error ? e : new Error(String(e)),
@@ -334,7 +338,36 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       return;
     }
 
+    listenerErrorsRef.current.clear();
     setState((s) => ({ ...s, loading: true, error: null }));
+
+    const firstAggregateError = (): Error | null => {
+      const v = listenerErrorsRef.current.values().next();
+      return v.done ? null : v.value;
+    };
+
+    const applySnapshot = <K extends keyof LiveWorkspaceFirestoreState>(
+      listenerKey: string,
+      dataKey: K,
+      value: LiveWorkspaceFirestoreState[K],
+    ) => {
+      listenerErrorsRef.current.delete(listenerKey);
+      setState((prev) => ({
+        ...prev,
+        [dataKey]: value,
+        loading: false,
+        error: firstAggregateError(),
+      }));
+    };
+
+    const applyListenerError = (listenerKey: string, err: Error) => {
+      listenerErrorsRef.current.set(listenerKey, err);
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: firstAggregateError(),
+      }));
+    };
 
     const unsubs: Unsubscribe[] = [];
 
@@ -347,9 +380,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qUsers,
         (snap) => {
           const users = snap.docs.map((d) => asUser(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, users, loading: false }));
+          applySnapshot("users", "users", users);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("users", err),
       ),
     );
 
@@ -362,9 +395,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qLeads,
         (snap) => {
           const leads = snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, leads, loading: false }));
+          applySnapshot("leads", "leads", leads);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("leads", err),
       ),
     );
 
@@ -379,9 +412,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const accounts = snap.docs.map((d) =>
             asAccount(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, accounts, loading: false }));
+          applySnapshot("accounts", "accounts", accounts);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("accounts", err),
       ),
     );
 
@@ -396,9 +429,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const contacts = snap.docs.map((d) =>
             asContact(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, contacts, loading: false }));
+          applySnapshot("contacts", "contacts", contacts);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("contacts", err),
       ),
     );
 
@@ -411,9 +444,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qDeals,
         (snap) => {
           const deals = snap.docs.map((d) => asDeal(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, deals, loading: false }));
+          applySnapshot("deals", "deals", deals);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("deals", err),
       ),
     );
 
@@ -426,9 +459,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qNotes,
         (snap) => {
           const notes = snap.docs.map((d) => asNote(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, notes, loading: false }));
+          applySnapshot("notes", "notes", notes);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("notes", err),
       ),
     );
 
@@ -443,9 +476,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const followups = snap.docs.map((d) =>
             asFollowup(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, followups, loading: false }));
+          applySnapshot("followups", "followups", followups);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("followups", err),
       ),
     );
 
@@ -460,9 +493,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const leadTasks = snap.docs.map((d) =>
             asLeadTask(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, leadTasks, loading: false }));
+          applySnapshot("leadTasks", "leadTasks", leadTasks);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("leadTasks", err),
       ),
     );
 
@@ -477,9 +510,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const touchpoints = snap.docs.map((d) =>
             asTouchpoint(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, touchpoints, loading: false }));
+          applySnapshot("touchpoints", "touchpoints", touchpoints);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("touchpoints", err),
       ),
     );
 
@@ -494,9 +527,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const timelineEvents = snap.docs.map((d) =>
             asTimelineEvent(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, timelineEvents, loading: false }));
+          applySnapshot("timelineEvents", "timelineEvents", timelineEvents);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("timelineEvents", err),
       ),
     );
 
@@ -511,9 +544,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const activityCounters = snap.docs.map((d) =>
             asActivityCounterRow(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, activityCounters, loading: false }));
+          applySnapshot("activityCounters", "activityCounters", activityCounters);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("activityCounters", err),
       ),
     );
 
@@ -528,9 +561,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const activityRecords = snap.docs.map((d) =>
             asActivityRecord(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, activityRecords, loading: false }));
+          applySnapshot("activityRecords", "activityRecords", activityRecords);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("activityRecords", err),
       ),
     );
 
@@ -543,9 +576,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qProfiles,
         (snap) => {
           const profiles = snap.docs.map((d) => asProfile(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, profiles, loading: false }));
+          applySnapshot("profiles", "profiles", profiles);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("profiles", err),
       ),
     );
 
@@ -558,13 +591,14 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qLabels,
         (snap) => {
           const crmLabels = snap.docs.map((d) => asCrmLabel(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, crmLabels, loading: false }));
+          applySnapshot("crmLabels", "crmLabels", crmLabels);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("crmLabels", err),
       ),
     );
 
     return () => {
+      listenerErrorsRef.current.clear();
       for (const u of unsubs) u();
     };
   }, [organizationId]);

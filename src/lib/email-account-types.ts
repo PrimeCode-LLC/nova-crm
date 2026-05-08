@@ -98,6 +98,11 @@ export interface MailInbound {
   inReplyTo?: string;
   /** Ordered Message-IDs from References header (normalized). */
   referenceIds?: string[];
+  /**
+   * When false, only headers were loaded in bulk sync; opening the thread fetches the body.
+   * Omitted/true means `bodyText` is already synced.
+   */
+  bodySynced?: boolean;
 }
 
 export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettings>): EmailMailboxSettings {

@@ -21,7 +21,7 @@ import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-a
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
-import { Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
 
 export function EmailInboxSettingsCard() {
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);

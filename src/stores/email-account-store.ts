@@ -34,6 +34,11 @@ export interface EmailAccountStore {
   setSmtp: (mailboxId: string, patch: Partial<EmailMailboxSettings["smtp"]>) => void;
   setImap: (mailboxId: string, patch: Partial<EmailMailboxSettings["imap"]>) => void;
   setInbound: (mailboxId: string, messages: MailInbound[]) => void;
+  /** Merge parsed body / headers into existing rows by IMAP `uid`. */
+  mergeInboundBodies: (
+    mailboxId: string,
+    updates: Array<{ uid: number } & Partial<MailInbound>>,
+  ) => void;
   upsertDraft: (draft: Omit<MailDraft, "id" | "updatedAt"> & { id?: string }) => string;
   deleteDraft: (id: string) => void;
   addSent: (item: Omit<MailSent, "id" | "sentAt">) => string;
@@ -165,6 +170,19 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     })),
   setInbound: (mailboxId, messages) =>
     set((s) => ({ inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: messages } })),
+  mergeInboundBodies: (mailboxId, updates) =>
+    set((s) => {
+      const prev = s.inboundByMailbox[mailboxId] ?? [];
+      if (prev.length === 0 || updates.length === 0) return s;
+      const patch = new Map(updates.map((u) => [u.uid, u]));
+      const next = prev.map((m) => {
+        const p = patch.get(m.uid);
+        if (!p) return m;
+        const { uid: _u, ...rest } = p;
+        return { ...m, ...rest };
+      });
+      return { inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: next } };
+    }),
   upsertDraft: ({ id, mailboxId, to, subject, body }) => {
     const draftId = id ?? `d-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
