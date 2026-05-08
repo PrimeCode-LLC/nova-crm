@@ -142,6 +142,8 @@ export default function InboxPage() {
   const trashInboundByMailbox = useEmailAccountStore((s) => s.trashInboundByMailbox);
   const setInbound = useEmailAccountStore((s) => s.setInbound);
   const appendInbound = useEmailAccountStore((s) => s.appendInbound);
+  const reconcileInboundHeadFromSync = useEmailAccountStore((s) => s.reconcileInboundHeadFromSync);
+  const reconcileTrashHeadFromSync = useEmailAccountStore((s) => s.reconcileTrashHeadFromSync);
   const setTrashInbound = useEmailAccountStore((s) => s.setTrashInbound);
   const mergeInboundBodies = useEmailAccountStore((s) => s.mergeInboundBodies);
   const mergeTrashBodies = useEmailAccountStore((s) => s.mergeTrashBodies);
@@ -168,9 +170,12 @@ export default function InboxPage() {
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
   const [sending, setSending] = React.useState(false);
 
+  /** True only when there is no cached list yet (blocking empty state). */
   const [inboundLoading, setInboundLoading] = React.useState(false);
+  const [inboundSyncing, setInboundSyncing] = React.useState(false);
   const [inboundLoadingMore, setInboundLoadingMore] = React.useState(false);
   const [trashLoading, setTrashLoading] = React.useState(false);
+  const [trashSyncing, setTrashSyncing] = React.useState(false);
   /** Total messages in INBOX on server (from last IMAP list); may exceed loaded rows. */
   const [imapMailboxTotal, setImapMailboxTotal] = React.useState<number | null>(null);
   const [imapTrashTotal, setImapTrashTotal] = React.useState<number | null>(null);
@@ -311,8 +316,19 @@ export default function InboxPage() {
         else setTrashInbound(acct.id, []);
         return;
       }
-      if (folder === "inbox") setInboundLoading(true);
-      else setTrashLoading(true);
+      const stBefore = useEmailAccountStore.getState();
+      const cachedLen =
+        folder === "inbox"
+          ? (stBefore.inboundByMailbox[acct.id]?.length ?? 0)
+          : (stBefore.trashInboundByMailbox[acct.id]?.length ?? 0);
+      if (folder === "inbox") {
+        if (cachedLen > 0) setInboundSyncing(true);
+        else setInboundLoading(true);
+      } else if (cachedLen > 0) {
+        setTrashSyncing(true);
+      } else {
+        setTrashLoading(true);
+      }
       try {
         const res = await fetch("/api/email/imap-fetch", {
           method: "POST",
@@ -348,20 +364,25 @@ export default function InboxPage() {
         const total =
           typeof data.mailboxTotal === "number" && Number.isFinite(data.mailboxTotal) ? data.mailboxTotal : null;
         if (folder === "inbox") {
-          setInbound(acct.id, rows);
+          reconcileInboundHeadFromSync(acct.id, rows);
           setImapMailboxTotal(total);
         } else {
-          setTrashInbound(acct.id, rows);
+          reconcileTrashHeadFromSync(acct.id, rows);
           setImapTrashTotal(total);
         }
       } catch {
         toast.error("Could not reach the server");
       } finally {
-        if (folder === "inbox") setInboundLoading(false);
-        else setTrashLoading(false);
+        if (folder === "inbox") {
+          setInboundLoading(false);
+          setInboundSyncing(false);
+        } else {
+          setTrashLoading(false);
+          setTrashSyncing(false);
+        }
       }
     },
-    [isDemo, setInbound, setTrashInbound],
+    [isDemo, setInbound, setTrashInbound, reconcileInboundHeadFromSync, reconcileTrashHeadFromSync],
   );
 
   const fetchInboundMail = React.useCallback(() => fetchImapListFolder("inbox"), [fetchImapListFolder]);
@@ -835,7 +856,8 @@ export default function InboxPage() {
               : "Configure IMAP in Email settings to refresh"
         }
       >
-        {((mailFolder === "inbox" && inboundLoading) || (mailFolder === "trash" && trashLoading)) ? (
+        {((mailFolder === "inbox" && (inboundLoading || inboundSyncing)) ||
+          (mailFolder === "trash" && (trashLoading || trashSyncing))) ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : (
           <RefreshCw className="h-3.5 w-3.5" />
@@ -1056,6 +1078,12 @@ export default function InboxPage() {
                       Loaded newest {inbound.length} of {imapMailboxTotal} messages in INBOX
                     </div>
                   )}
+                {mailFolder === "inbox" && isImapInboxConfigured(account) && inboundSyncing && (
+                  <div className="flex items-center gap-1.5 font-normal text-[10px] text-muted-foreground normal-case">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden />
+                    Syncing with server…
+                  </div>
+                )}
                 {mailFolder === "trash" &&
                   imapTrashTotal != null &&
                   imapTrashTotal > trashInbound.length && (
@@ -1063,6 +1091,12 @@ export default function InboxPage() {
                       Loaded newest {trashInbound.length} of {imapTrashTotal} messages in Trash
                     </div>
                   )}
+                {mailFolder === "trash" && isImapInboxConfigured(account) && trashSyncing && (
+                  <div className="flex items-center gap-1.5 font-normal text-[10px] text-muted-foreground normal-case">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden />
+                    Syncing Trash…
+                  </div>
+                )}
                 {canUseTrashFeatures && emailFolderSupportsImapList && (
                   <div className="flex flex-wrap items-center gap-2 pt-1 normal-case">
                     <Button
@@ -1151,6 +1185,7 @@ export default function InboxPage() {
                 {mailFolder === "inbox" &&
                   isImapInboxConfigured(account) &&
                   !inboundLoading &&
+                  !inboundSyncing &&
                   inbound.length === 0 && (
                     <div className="p-6 text-center text-sm text-muted-foreground">No messages in INBOX.</div>
                   )}
@@ -1175,6 +1210,7 @@ export default function InboxPage() {
                   )}
                 {mailFolder === "trash" &&
                   !trashLoading &&
+                  !trashSyncing &&
                   trashInbound.length === 0 &&
                   (isImapInboxConfigured(account) || isDemo) && (
                     <div className="p-6 text-center text-sm text-muted-foreground">Trash is empty.</div>
@@ -1260,7 +1296,7 @@ export default function InboxPage() {
                         variant="secondary"
                         size="sm"
                         className="w-full gap-2 text-xs"
-                        disabled={inboundLoading || inboundLoadingMore}
+                        disabled={inboundLoading || inboundLoadingMore || inboundSyncing}
                         onClick={() => void loadMoreInboundMail()}
                       >
                         {inboundLoadingMore ? (

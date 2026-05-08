@@ -591,3 +591,10 @@ export interface WorkspaceChatMessage {
   mentionUserIds?: string[];
   createdAt: ISODate;
 }
+
+/** Firestore `workspaceChatReads/{organizationId}__{userId}` — per-channel last seen message time (ISO). */
+export interface WorkspaceChatReadState {
+  organizationId: string;
+  userId: string;
+  channels: Record<string, ISODate>;
+}

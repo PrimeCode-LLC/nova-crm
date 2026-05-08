@@ -25,10 +25,13 @@ export function dmChannelId(uidA: string, uidB: string) {
 export type TeamChatDemoState = {
   channelsByOrg: Record<string, WorkspaceChatChannel[]>;
   messagesByOrg: Record<string, WorkspaceChatMessage[]>;
+  /** org → userId → channelId → last read message time (ISO). */
+  channelLastReadByOrgUser: Record<string, Record<string, Record<string, string>>>;
   bootstrapOrg: (organizationId: string, currentUserId: string) => void;
   upsertChannel: (organizationId: string, ch: WorkspaceChatChannel) => void;
   appendMessage: (organizationId: string, msg: WorkspaceChatMessage) => void;
   renameChannel: (organizationId: string, channelId: string, name: string) => void;
+  setDemoChannelLastRead: (organizationId: string, userId: string, channelId: string, iso: string) => void;
 };
 
 export const useTeamChatDemoStore = create<TeamChatDemoState>()(
@@ -36,6 +39,19 @@ export const useTeamChatDemoStore = create<TeamChatDemoState>()(
     (set, get) => ({
       channelsByOrg: {},
       messagesByOrg: {},
+      channelLastReadByOrgUser: {},
+      setDemoChannelLastRead(organizationId, userId, channelId, iso) {
+        const orgMap = { ...(get().channelLastReadByOrgUser[organizationId] ?? {}) };
+        const userMap = { ...(orgMap[userId] ?? {}) };
+        userMap[channelId] = iso;
+        orgMap[userId] = userMap;
+        set({
+          channelLastReadByOrgUser: {
+            ...get().channelLastReadByOrgUser,
+            [organizationId]: orgMap,
+          },
+        });
+      },
       bootstrapOrg(organizationId, currentUserId) {
         const gid = generalChannelId(organizationId);
         const iso = new Date().toISOString();
@@ -96,7 +112,11 @@ export const useTeamChatDemoStore = create<TeamChatDemoState>()(
     {
       name: "sales-crm-team-chat-demo",
       storage: createJSONStorage(() => localStorage),
-      partialize: (s) => ({ channelsByOrg: s.channelsByOrg, messagesByOrg: s.messagesByOrg }),
+      partialize: (s) => ({
+        channelsByOrg: s.channelsByOrg,
+        messagesByOrg: s.messagesByOrg,
+        channelLastReadByOrgUser: s.channelLastReadByOrgUser,
+      }),
     },
   ),
 );

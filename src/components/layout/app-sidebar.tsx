@@ -32,6 +32,7 @@ import { ROLES, APP_NAME } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import type { Role } from "@/lib/types";
@@ -74,9 +75,11 @@ import { AppMark } from "@/components/brand/app-mark";
 function NavMenuLinks({
   items,
   pathname,
+  teamChatUnreadTotal,
 }: {
   items: NavItem[];
   pathname: string;
+  teamChatUnreadTotal: number;
 }) {
   return (
     <>
@@ -84,15 +87,26 @@ function NavMenuLinks({
         const isActive =
           pathname === item.href || pathname.startsWith(item.href + "/");
         const Icon = item.icon;
+        const chatBadge =
+          item.href === "/team-chat" && teamChatUnreadTotal > 0
+            ? teamChatUnreadTotal > 99
+              ? "99+"
+              : String(teamChatUnreadTotal)
+            : null;
         return (
           <SidebarMenuItem key={item.href}>
             <SidebarMenuButton
               isActive={isActive}
               tooltip={item.label}
               render={
-                <Link href={item.href}>
-                  <Icon />
-                  <span>{item.label}</span>
+                <Link href={item.href} className="flex min-w-0 flex-1 items-center gap-2">
+                  <Icon className="shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {chatBadge ? (
+                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-bold tabular-nums text-foreground ring-1 ring-border">
+                      {chatBadge}
+                    </span>
+                  ) : null}
                 </Link>
               }
             />
@@ -107,15 +121,17 @@ function ConfigurationNavGroups({
   items,
   pathname,
   flat,
+  teamChatUnreadTotal,
 }: {
   items: NavItem[];
   pathname: string;
   flat: boolean;
+  teamChatUnreadTotal: number;
 }) {
   if (flat) {
     return (
       <SidebarMenu>
-        <NavMenuLinks items={items} pathname={pathname} />
+        <NavMenuLinks items={items} pathname={pathname} teamChatUnreadTotal={teamChatUnreadTotal} />
       </SidebarMenu>
     );
   }
@@ -147,7 +163,11 @@ function ConfigurationNavGroups({
             </SidebarMenu>
             <CollapsibleContent>
               <SidebarMenu className="mt-0.5">
-                <NavMenuLinks items={cluster.items} pathname={pathname} />
+                <NavMenuLinks
+                  items={cluster.items}
+                  pathname={pathname}
+                  teamChatUnreadTotal={teamChatUnreadTotal}
+                />
               </SidebarMenu>
             </CollapsibleContent>
           </Collapsible>
@@ -237,6 +257,7 @@ export function AppSidebar({
     () => getVisibleNavSections(navAccess),
     [navAccess.roleId, navAccess.isSuperAdmin, navAccess.roleLoading],
   );
+  const { teamChatUnreadTotal } = useTeamChatUnread();
   const { state: sidebarState } = useSidebar();
   const sidebarIsCollapsed = sidebarState === "collapsed";
 
@@ -262,10 +283,15 @@ export function AppSidebar({
                   items={section.items}
                   pathname={pathname}
                   flat={sidebarIsCollapsed}
+                  teamChatUnreadTotal={teamChatUnreadTotal}
                 />
               ) : (
                 <SidebarMenu>
-                  <NavMenuLinks items={section.items} pathname={pathname} />
+                  <NavMenuLinks
+                    items={section.items}
+                    pathname={pathname}
+                    teamChatUnreadTotal={teamChatUnreadTotal}
+                  />
                 </SidebarMenu>
               )}
             </SidebarGroupContent>

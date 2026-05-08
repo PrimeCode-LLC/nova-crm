@@ -273,3 +273,23 @@ export async function persistWorkspaceChatChannelUpdateName(
     updatedAt: serverTimestamp(),
   });
 }
+
+/** Merge-updates last-read for one channel (and ensures parent doc fields exist). */
+export async function persistWorkspaceChatChannelLastRead(
+  db: Firestore,
+  organizationId: string,
+  userId: string,
+  channelId: string,
+  readThroughIso: string,
+): Promise<void> {
+  const readDocId = `${organizationId}__${userId}`;
+  await setDoc(
+    doc(db, COLLECTIONS.workspaceChatReads, readDocId),
+    {
+      organizationId,
+      userId,
+      channels: { [channelId]: readThroughIso },
+    },
+    { merge: true },
+  );
+}

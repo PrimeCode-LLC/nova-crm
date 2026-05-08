@@ -10,6 +10,7 @@ import { findMembershipForUserServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
+import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-provider";
 import { EmailAccountSync } from "@/components/providers/email-account-sync";
 import { ChannelAdminSync } from "@/components/providers/channel-admin-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
@@ -55,18 +56,20 @@ export default async function AppLayout({
       initialDemoPersonaId={initialDemoPersonaId}
       organizationName={organizationName}
     >
-      <EmailAccountSync />
-      <ChannelAdminSync />
-      <QuickAddLauncherProvider>
-        <SidebarProvider>
-          <AppSidebar showPlatformLink={showPlatformLink} />
-          <SidebarInset>
-            <AppTopbar />
-            <WorkspaceStatusBanner />
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
-          </SidebarInset>
-        </SidebarProvider>
-      </QuickAddLauncherProvider>
+      <TeamChatUnreadProvider>
+        <EmailAccountSync />
+        <ChannelAdminSync />
+        <QuickAddLauncherProvider>
+          <SidebarProvider>
+            <AppSidebar showPlatformLink={showPlatformLink} />
+            <SidebarInset>
+              <AppTopbar />
+              <WorkspaceStatusBanner />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+            </SidebarInset>
+          </SidebarProvider>
+        </QuickAddLauncherProvider>
+      </TeamChatUnreadProvider>
     </WorkspaceModeProvider>
   );
 }

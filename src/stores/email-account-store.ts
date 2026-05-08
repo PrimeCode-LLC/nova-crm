@@ -44,6 +44,11 @@ export interface EmailAccountStore {
     updates: Array<{ uid: number } & Partial<MailInbound>>,
   ) => void;
   setTrashInbound: (mailboxId: string, messages: MailInbound[]) => void;
+  /**
+   * Apply offset-0 IMAP list: upsert newest page, keep older “Load more” rows (UID below this page’s minimum).
+   */
+  reconcileInboundHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
+  reconcileTrashHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
   mergeTrashBodies: (
     mailboxId: string,
     updates: Array<{ uid: number } & Partial<MailInbound>>,
@@ -65,6 +70,21 @@ export interface EmailAccountStore {
 }
 
 let metaPersistTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Merge server list row with cached row so a header-only refresh does not wipe fetched bodies. */
+function mergeMailInboundRow(prev: MailInbound | undefined, server: MailInbound): MailInbound {
+  if (!prev) return server;
+  if (prev.bodySynced && server.bodySynced === false) {
+    return {
+      ...server,
+      bodyText: prev.bodyText,
+      bodyHtml: prev.bodyHtml,
+      bodySynced: true,
+      preview: prev.preview || server.preview,
+    };
+  }
+  return { ...prev, ...server };
+}
 
 function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
   if (typeof window === "undefined") return;
@@ -217,6 +237,48 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     }),
   setTrashInbound: (mailboxId, messages) =>
     set((s) => ({ trashInboundByMailbox: { ...s.trashInboundByMailbox, [mailboxId]: messages } })),
+  reconcileInboundHeadFromSync: (mailboxId, headRows) =>
+    set((s) => {
+      if (headRows.length === 0) {
+        return { inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: [] } };
+      }
+      const minHeadUid = Math.min(...headRows.map((m) => m.uid));
+      const prev = s.inboundByMailbox[mailboxId] ?? [];
+      const prevByUid = new Map(prev.map((m) => [m.uid, m]));
+      const mergedHead = headRows.map((server) => mergeMailInboundRow(prevByUid.get(server.uid), server));
+      const tailByUid = new Map<number, MailInbound>();
+      for (const m of prev) {
+        if (m.uid < minHeadUid) tailByUid.set(m.uid, m);
+      }
+      const tailSorted = [...tailByUid.values()].sort((a, b) => b.uid - a.uid);
+      return {
+        inboundByMailbox: {
+          ...s.inboundByMailbox,
+          [mailboxId]: [...mergedHead, ...tailSorted],
+        },
+      };
+    }),
+  reconcileTrashHeadFromSync: (mailboxId, headRows) =>
+    set((s) => {
+      if (headRows.length === 0) {
+        return { trashInboundByMailbox: { ...s.trashInboundByMailbox, [mailboxId]: [] } };
+      }
+      const minHeadUid = Math.min(...headRows.map((m) => m.uid));
+      const prev = s.trashInboundByMailbox[mailboxId] ?? [];
+      const prevByUid = new Map(prev.map((m) => [m.uid, m]));
+      const mergedHead = headRows.map((server) => mergeMailInboundRow(prevByUid.get(server.uid), server));
+      const tailByUid = new Map<number, MailInbound>();
+      for (const m of prev) {
+        if (m.uid < minHeadUid) tailByUid.set(m.uid, m);
+      }
+      const tailSorted = [...tailByUid.values()].sort((a, b) => b.uid - a.uid);
+      return {
+        trashInboundByMailbox: {
+          ...s.trashInboundByMailbox,
+          [mailboxId]: [...mergedHead, ...tailSorted],
+        },
+      };
+    }),
   mergeTrashBodies: (mailboxId, updates) =>
     set((s) => {
       const prev = s.trashInboundByMailbox[mailboxId] ?? [];

@@ -28,6 +28,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
 import { useWorkspaceTeamChat } from "@/lib/hooks/use-workspace-team-chat";
+import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { extractMentionUserIds, formatChatBodySegments } from "@/lib/team-chat-mentions";
 import type { User, WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
 import { toast } from "sonner";
@@ -63,6 +64,16 @@ function messageWithoutIndexUrl(message: string, url: string | null): string {
   return message.replace(url, "").replace(/\s{2,}/g, " ").trim();
 }
 
+function UnreadCountBadge({ count }: { count: number }) {
+  if (count < 1) return null;
+  const label = count > 99 ? "99+" : String(count);
+  return (
+    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-bold tabular-nums text-foreground ring-1 ring-border">
+      {label}
+    </span>
+  );
+}
+
 type Props = {
   users: User[];
   currentUserId: string;
@@ -72,6 +83,13 @@ type Props = {
 
 export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizationId }: Props) {
   const chat = useWorkspaceTeamChat({ organizationId, isDemo, currentUserId });
+  const { teamChatUnreadByChannel, markTeamChatChannelRead, registerTeamChatSelection } =
+    useTeamChatUnread();
+
+  React.useEffect(() => {
+    registerTeamChatSelection(chat.selectedChannelId);
+    return () => registerTeamChatSelection(null);
+  }, [chat.selectedChannelId, registerTeamChatSelection]);
   const [draft, setDraft] = React.useState("");
   const [sending, setSending] = React.useState(false);
   const [newChOpen, setNewChOpen] = React.useState(false);
@@ -120,6 +138,19 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
   React.useEffect(() => {
     listEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [chat.messages.length, chat.selectedChannelId]);
+
+  const lastMarkedRef = React.useRef<{ channelId: string; iso: string } | null>(null);
+  React.useEffect(() => {
+    if (!chat.selectedChannelId) return;
+    const readThrough =
+      chat.messages.length > 0
+        ? chat.messages[chat.messages.length - 1]!.createdAt
+        : new Date().toISOString();
+    const prev = lastMarkedRef.current;
+    if (prev?.channelId === chat.selectedChannelId && prev.iso === readThrough) return;
+    lastMarkedRef.current = { channelId: chat.selectedChannelId, iso: readThrough };
+    markTeamChatChannelRead(chat.selectedChannelId, readThrough);
+  }, [chat.selectedChannelId, chat.messages, markTeamChatChannelRead]);
 
   async function handleSend() {
     const ids = extractMentionUserIds(draft);
@@ -207,20 +238,26 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
                 </p>
               )}
               <div className="space-y-0.5">
-                {publicChannels.map((ch) => (
-                  <button
-                    key={ch.id}
-                    type="button"
-                    onClick={() => chat.setSelectedChannelId(ch.id)}
-                    className={cn(
-                      "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60",
-                      chat.selectedChannelId === ch.id && "bg-muted font-medium",
-                    )}
-                  >
-                    <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <span className="truncate">{ch.name}</span>
-                  </button>
-                ))}
+                {publicChannels.map((ch) => {
+                  const unread = teamChatUnreadByChannel[ch.id] ?? 0;
+                  const boldUnread = unread > 0 && chat.selectedChannelId !== ch.id;
+                  return (
+                    <button
+                      key={ch.id}
+                      type="button"
+                      onClick={() => chat.setSelectedChannelId(ch.id)}
+                      className={cn(
+                        "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60",
+                        chat.selectedChannelId === ch.id && "bg-muted font-medium",
+                        boldUnread && "font-semibold text-foreground",
+                      )}
+                    >
+                      <Hash className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate">{ch.name}</span>
+                      <UnreadCountBadge count={unread} />
+                    </button>
+                  );
+                })}
               </div>
             </div>
             {dmChannels.length > 0 && (
@@ -229,20 +266,28 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
                   Direct messages
                 </p>
                 <div className="space-y-0.5">
-                  {dmChannels.map((ch) => (
-                    <button
-                      key={ch.id}
-                      type="button"
-                      onClick={() => chat.setSelectedChannelId(ch.id)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60",
-                        chat.selectedChannelId === ch.id && "bg-muted font-medium",
-                      )}
-                    >
-                      <MessageCirclePlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      <span className="truncate">{channelTitle(ch, currentUserId, users)}</span>
-                    </button>
-                  ))}
+                  {dmChannels.map((ch) => {
+                    const unread = teamChatUnreadByChannel[ch.id] ?? 0;
+                    const boldUnread = unread > 0 && chat.selectedChannelId !== ch.id;
+                    return (
+                      <button
+                        key={ch.id}
+                        type="button"
+                        onClick={() => chat.setSelectedChannelId(ch.id)}
+                        className={cn(
+                          "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted/60",
+                          chat.selectedChannelId === ch.id && "bg-muted font-medium",
+                          boldUnread && "font-semibold text-foreground",
+                        )}
+                      >
+                        <MessageCirclePlus className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate">
+                          {channelTitle(ch, currentUserId, users)}
+                        </span>
+                        <UnreadCountBadge count={unread} />
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}

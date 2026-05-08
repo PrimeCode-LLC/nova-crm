@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -30,6 +31,7 @@ import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
 import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
+import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { cn } from "@/lib/utils";
 
 function toLabel(segment: string) {
@@ -53,10 +55,12 @@ export function AppTopbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [cmdOpen, setCmdOpen] = React.useState(false);
-  const { notifications: mergedNotifications, inboxHydrated } = useWorkspaceInboxNotifications();
+  const { notifications: mergedNotifications } = useWorkspaceInboxNotifications();
+  const { teamChatUnreadTotal } = useTeamChatUnread();
   const markRead = useInboxNotificationOverrides((s) => s.markRead);
 
-  const bellUnread = mergedNotifications.filter((n) => !n.read).length;
+  const bellUnread =
+    mergedNotifications.filter((n) => !n.read).length + teamChatUnreadTotal;
 
   const sortedForMenu = React.useMemo(() => {
     return [...mergedNotifications].sort((a, b) => {
@@ -142,59 +146,75 @@ export function AppTopbar() {
                   variant="ghost"
                   size="icon"
                   className={cn(
-                    "relative",
+                    "relative shrink-0 overflow-visible",
                     bellUnread > 0 && "text-primary hover:bg-primary/10 hover:text-primary",
                   )}
                   aria-label={
-                    bellUnread > 0 ? `Notifications, ${bellUnread} unread` : "Notifications, none unread"
+                    bellUnread > 0
+                      ? `Notifications and team chat, ${bellUnread} unread`
+                      : "Notifications, none unread"
                   }
                 >
                   <Bell className="h-4 w-4" aria-hidden />
                   {bellUnread > 0 && (
-                    <Badge className="absolute -right-0.5 -top-0.5 min-h-4 min-w-4 rounded-full border-2 border-background px-1 py-0 text-[10px] tabular-nums leading-none">
+                    <Badge
+                      variant="destructive"
+                      className="pointer-events-none absolute -right-1 -top-1 z-10 flex h-5 min-w-5 items-center justify-center rounded-full border-2 border-background px-1 text-[10px] font-semibold tabular-nums leading-none shadow-sm"
+                    >
                       {bellUnread > 99 ? "99+" : bellUnread}
                     </Badge>
                   )}
                 </Button>
               }
             />
-            <DropdownMenuContent align="end" className="w-80">
-              <DropdownMenuLabel className="font-semibold">Notifications</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="min-w-80 w-80 max-w-[min(20rem,calc(100vw-2rem))]">
+              <DropdownMenuGroup>
+                <DropdownMenuLabel className="font-semibold">Notifications</DropdownMenuLabel>
+              </DropdownMenuGroup>
               <DropdownMenuSeparator />
-              {!inboxHydrated ? (
-                <div className="px-2 py-3 text-sm text-muted-foreground">Loading…</div>
-              ) : sortedForMenu.length === 0 ? (
-                <div className="px-2 py-3 text-sm text-muted-foreground">
-                  You&apos;re all caught up. Turn on Demo in the toolbar for sample alerts, or open Notifications when
-                  you have tasks assigned to you.
-                </div>
-              ) : (
-                sortedForMenu.slice(0, 8).map((n) => (
+              <DropdownMenuGroup>
+                {sortedForMenu.length === 0 ? (
                   <DropdownMenuItem
-                    key={n.id}
-                    className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
-                    onSelect={() => {
-                      markRead(n.id);
-                      router.push(n.targetHref);
-                    }}
+                    disabled
+                    className="h-auto cursor-default flex-col items-stretch gap-0 whitespace-normal py-3 text-left text-sm leading-snug text-muted-foreground opacity-100 data-disabled:pointer-events-none data-disabled:opacity-100 [&>svg]:hidden"
                   >
-                    <span className="text-xs font-medium leading-tight text-foreground line-clamp-2">
-                      {n.message}
-                    </span>
-                    <span className="text-[10px] text-muted-foreground">
-                      {shortRelativeTime(n.timestamp)}
-                      {!n.read ? " · Unread" : ""}
+                    <span className="block w-full">
+                      You&apos;re all caught up. Turn on{" "}
+                      <span className="font-medium text-foreground">Demo</span> in the workspace menu for sample
+                      alerts, or open <span className="font-medium text-foreground">Notifications</span> when you have
+                      tasks assigned to you.
                     </span>
                   </DropdownMenuItem>
-                ))
-              )}
+                ) : (
+                  sortedForMenu.slice(0, 8).map((n) => (
+                    <DropdownMenuItem
+                      key={n.id}
+                      className="flex cursor-pointer flex-col items-start gap-0.5 py-2"
+                      onSelect={() => {
+                        markRead(n.id);
+                        router.push(n.targetHref);
+                      }}
+                    >
+                      <span className="text-xs font-medium leading-tight text-foreground line-clamp-2">
+                        {n.message}
+                      </span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {shortRelativeTime(n.timestamp)}
+                        {!n.read ? " · Unread" : ""}
+                      </span>
+                    </DropdownMenuItem>
+                  ))
+                )}
+              </DropdownMenuGroup>
               <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="justify-center font-medium text-primary"
-                onSelect={() => router.push("/notifications")}
-              >
-                View all notifications
-              </DropdownMenuItem>
+              <DropdownMenuGroup>
+                <DropdownMenuItem
+                  className="justify-center font-medium text-primary"
+                  onSelect={() => router.push("/notifications")}
+                >
+                  View all notifications
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
             </DropdownMenuContent>
           </DropdownMenu>
           <QuickAddButton />

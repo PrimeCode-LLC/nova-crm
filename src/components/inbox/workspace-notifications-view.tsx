@@ -23,7 +23,6 @@ import {
   AlertTriangle,
   TrendingUp,
   Globe,
-  Loader2,
   Search,
   CheckCheck,
 } from "lucide-react";
@@ -64,7 +63,7 @@ type TabFilter = "all" | "unread" | "mentions" | "assignments" | "alerts";
 
 export function WorkspaceNotificationsView() {
   const { users, isDemo } = useWorkspace();
-  const { notifications, inboxHydrated } = useWorkspaceInboxNotifications();
+  const { notifications } = useWorkspaceInboxNotifications();
   const markReadStore = useInboxNotificationOverrides((s) => s.markRead);
   const markUnreadStore = useInboxNotificationOverrides((s) => s.markUnread);
   const dismissStore = useInboxNotificationOverrides((s) => s.dismiss);
@@ -171,79 +170,65 @@ export function WorkspaceNotificationsView() {
             </div>
           </div>
           <div className="flex-1 divide-y overflow-y-auto">
-            {!inboxHydrated ? (
-              <div className="flex flex-col items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-                <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-                Loading notifications…
-              </div>
-            ) : (
-              <>
-                {filtered.length === 0 && (
-                  <div className="space-y-4 p-6">
-                    <p className="text-center text-sm text-muted-foreground">
-                      {normalizeListSearch(listSearchQuery)
-                        ? "No notifications match your search."
-                        : "No notifications here."}
-                    </p>
-                    {!isDemo && !normalizeListSearch(listSearchQuery) && (
-                      <WorkspaceEmptyHint title="No workspace notifications yet" />
-                    )}
-                  </div>
+            {filtered.length === 0 && (
+              <div className="space-y-4 p-6">
+                <p className="text-center text-sm text-muted-foreground">
+                  {normalizeListSearch(listSearchQuery)
+                    ? "No notifications match your search."
+                    : "No notifications here."}
+                </p>
+                {!isDemo && !normalizeListSearch(listSearchQuery) && (
+                  <WorkspaceEmptyHint title="No workspace notifications yet" />
                 )}
-                {filtered.map((n) => {
-                  const Icon = KIND_ICONS[n.kind];
-                  const sender = users.find((u) => u.id === n.sender);
-                  const senderInitials =
-                    sender?.displayName
-                      .split(" ")
-                      .map((x) => x[0])
-                      .join("")
-                      .slice(0, 2) ?? "?";
-                  return (
-                    <button
-                      key={n.id}
-                      type="button"
-                      onClick={() => setSelected(n)}
+              </div>
+            )}
+            {filtered.map((n) => {
+              const Icon = KIND_ICONS[n.kind];
+              const sender = users.find((u) => u.id === n.sender);
+              const senderInitials =
+                sender?.displayName
+                  .split(" ")
+                  .map((x) => x[0])
+                  .join("")
+                  .slice(0, 2) ?? "?";
+              return (
+                <button
+                  key={n.id}
+                  type="button"
+                  onClick={() => setSelected(n)}
+                  className={cn(
+                    "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/20",
+                    selected?.id === n.id && "bg-muted/30",
+                  )}
+                >
+                  <div className="relative shrink-0">
+                    <Avatar className="h-8 w-8 rounded-full">
+                      <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
+                        {senderInitials}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div
                       className={cn(
-                        "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/20",
-                        selected?.id === n.id && "bg-muted/30",
+                        "absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full",
+                        KIND_COLORS[n.kind],
                       )}
                     >
-                      <div className="relative shrink-0">
-                        <Avatar className="h-8 w-8 rounded-full">
-                          <AvatarFallback className="bg-primary/15 text-[10px] font-semibold text-primary">
-                            {senderInitials}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div
-                          className={cn(
-                            "absolute -right-0.5 -bottom-0.5 flex h-4 w-4 items-center justify-center rounded-full",
-                            KIND_COLORS[n.kind],
-                          )}
-                        >
-                          <Icon className="h-2.5 w-2.5" />
-                        </div>
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className={cn("text-sm leading-snug", !n.read && "font-medium")}>{n.message}</div>
-                        <div className="mt-0.5 text-[11px] text-muted-foreground">{fmtRelative(n.timestamp)}</div>
-                      </div>
-                      {!n.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />}
-                    </button>
-                  );
-                })}
-              </>
-            )}
+                      <Icon className="h-2.5 w-2.5" />
+                    </div>
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className={cn("text-sm leading-snug", !n.read && "font-medium")}>{n.message}</div>
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">{fmtRelative(n.timestamp)}</div>
+                  </div>
+                  {!n.read && <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" />}
+                </button>
+              );
+            })}
           </div>
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col">
-          {!inboxHydrated ? (
-            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-10 text-sm text-muted-foreground">
-              <Loader2 className="h-5 w-5 animate-spin" aria-hidden />
-              Loading…
-            </div>
-          ) : selected ? (
+          {selected ? (
             <div className="space-y-4 p-6">
               <div className="flex items-start gap-3">
                 <div

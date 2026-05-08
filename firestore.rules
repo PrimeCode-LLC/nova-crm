@@ -319,6 +319,27 @@ service cloud.firestore {
         && resource.data.authorId == request.auth.uid;
     }
 
+    /** Per-user read cursors for team chat (client merge-updates `channels` map). */
+    match /workspaceChatReads/{readDocId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.userId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.get('channels', {}) is map;
+
+      allow update: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.get('channels', {}) is map;
+
+      allow delete: if false;
+    }
+
     // Server-only collections: admin SDK bypasses rules; no client access.
     match /ingestQueue/{id} {
       allow read, write: if false;
