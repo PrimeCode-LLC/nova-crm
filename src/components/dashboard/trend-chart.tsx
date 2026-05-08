@@ -51,6 +51,7 @@ export function TrendChart({
             width="100%"
             height="100%"
             minWidth={0}
+            debounce={50}
             initialDimension={{ width: 320, height: 224 }}
           >
             <AreaChart data={data} margin={{ top: 6, right: 12, bottom: 0, left: -16 }}>

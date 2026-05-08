@@ -251,6 +251,8 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
   channelReadsRef.current = channelReads;
   const catchupBaselineRef = React.useRef(catchupBaseline);
   catchupBaselineRef.current = catchupBaseline;
+  const usersRef = React.useRef(users);
+  usersRef.current = users;
 
   React.useEffect(() => {
     seenNotifyIdsRef.current.clear();
@@ -289,8 +291,8 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
       const ch = channelsRef.current.find((c) => c.id === m.channelId);
       if (!ch || !channelAccessible(ch, currentUserId)) continue;
 
-      const author = users.find((u) => u.id === m.authorId);
-      const label = chatLabel(ch, currentUserId, users);
+      const author = usersRef.current.find((u) => u.id === m.authorId);
+      const label = chatLabel(ch, currentUserId, usersRef.current);
       const preview = m.body.trim().slice(0, 120) || "New message";
       const title = `${author?.displayName ?? "Teammate"} · ${label}`;
 
@@ -315,7 +317,7 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
     }
 
     notifyBootstrappedRef.current = true;
-  }, [recentMessages, channels, currentUserId, pathname, users, router]);
+  }, [recentMessages, channels, currentUserId, pathname, router]);
 
   const value = React.useMemo(
     () => ({
