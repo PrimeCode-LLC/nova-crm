@@ -428,18 +428,21 @@ export default function DashboardPage() {
                 value={totalOpen}
                 hint="Across channels you can access"
                 icon={Target}
+                href="/leads"
               />
               <KpiCard
                 label="Pipeline value"
                 value={`$${(pipelineValue / 1000).toFixed(0)}k`}
                 hint={pipelineHint}
                 icon={TrendingUp}
+                href="/deals"
               />
               <KpiCard
                 label="Closed (30d)"
                 value={`$${(closedValue / 1000).toFixed(0)}k`}
                 hint={`${scopedDeals.filter((d) => d.stage === "won").length} deals won`}
                 icon={DollarSign}
+                href="/deals"
               />
               <KpiCard
                 label="Avg response"
@@ -447,6 +450,7 @@ export default function DashboardPage() {
                 hint="Time to first outbound"
                 deltaType="positive-down"
                 icon={Clock}
+                href="/activity"
               />
               <KpiCard
                 label="Idle leads"
@@ -454,6 +458,7 @@ export default function DashboardPage() {
                 hint={`No activity in ${IDLE_LEAD_THRESHOLD_DAYS}+ days (excl. won/lost)`}
                 deltaType="positive-down"
                 icon={Inbox}
+                href="/leads?filter=idle"
               />
             </div>
 
