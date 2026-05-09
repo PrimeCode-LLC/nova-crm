@@ -10,6 +10,8 @@ import type { NextConfig } from "next";
  * app under a path with no ancestor lockfile, so the inferred root stays small.
  */
 const nextConfig: NextConfig = {
+  /** Temporarily surface readable component names in production error stacks while we diagnose runtime crashes (React #185). Safe to remove once stable. */
+  productionBrowserSourceMaps: true,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.googleusercontent.com" },
