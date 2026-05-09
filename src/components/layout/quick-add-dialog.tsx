@@ -362,6 +362,7 @@ function LeadFormBody({
       temperature: "cold",
     },
   });
+  const { setValue: setLeadFormValue, getValues: getLeadFormValues } = form;
   const selectedChannel = form.watch("channel");
   const watchedOwnerId = form.watch("ownerId");
   const selectedChannelLabel = React.useMemo(
@@ -393,25 +394,25 @@ function LeadFormBody({
 
   React.useEffect(() => {
     if (!channelNeedsProfile) {
-      form.setValue("profileId", "");
+      setLeadFormValue("profileId", "");
       return;
     }
-    const cur = form.getValues("profileId")?.trim();
+    const cur = getLeadFormValues("profileId")?.trim();
     if (cur && profileOptionsForChannel.some((p) => p.id === cur)) return;
-    form.setValue("profileId", profileOptionsForChannel.length === 1 ? profileOptionsForChannel[0]!.id : "");
-  }, [channelNeedsProfile, profileOptionsForChannel, form]);
+    setLeadFormValue("profileId", profileOptionsForChannel.length === 1 ? profileOptionsForChannel[0]!.id : "");
+  }, [channelNeedsProfile, profileOptionsForChannel, setLeadFormValue, getLeadFormValues]);
 
   const defaultOwnerId =
     currentUserId || sessionOwnerId || users[0]?.id || "";
 
   React.useEffect(() => {
     if (!defaultOwnerId) return;
-    const cur = form.getValues("ownerId");
+    const cur = getLeadFormValues("ownerId");
     const valid = ownerOptions.some((o) => o.id === cur);
     if (!cur || !valid) {
-      form.setValue("ownerId", defaultOwnerId);
+      setLeadFormValue("ownerId", defaultOwnerId);
     }
-  }, [defaultOwnerId, ownerOptions, form]);
+  }, [defaultOwnerId, ownerOptions, setLeadFormValue, getLeadFormValues]);
 
   async function onSubmit(values: LeadForm) {
     const ownerId = values.ownerId.trim();
@@ -722,13 +723,14 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
       title: "",
     },
   });
+  const { setValue: setContactFormValue } = form;
   const accountMode = form.watch("accountMode");
 
   React.useEffect(() => {
     if (accounts.length === 0) {
-      form.setValue("accountMode", "new");
+      setContactFormValue("accountMode", "new");
     }
-  }, [accounts.length, form]);
+  }, [accounts.length, setContactFormValue]);
 
   async function onSubmit(values: ContactForm) {
     const ownerId = currentUserId || users[0]?.id;

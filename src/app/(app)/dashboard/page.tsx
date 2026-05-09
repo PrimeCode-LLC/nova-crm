@@ -259,7 +259,13 @@ export default function DashboardPage() {
         description={getDashboardOverviewDescription(viewer?.roleId)}
         actions={
           <>
-            <Select value={timeRange} onValueChange={(v) => v && setTimeRange(v)}>
+            <Select
+              value={timeRange}
+              onValueChange={(v) => {
+                if (!v || v === timeRange) return;
+                setTimeRange(v);
+              }}
+            >
               <SelectTrigger size="sm" className="w-32">
                 <Calendar className="h-3.5 w-3.5 mr-1" />
                 <SelectValue>
@@ -274,7 +280,14 @@ export default function DashboardPage() {
                 <SelectItem value="ytd">Year to date</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
+            <Select
+              value={ownerScope}
+              onValueChange={(v) => {
+                const next = v ?? "all-owners";
+                if (next === ownerScope) return;
+                setOwnerScope(next);
+              }}
+            >
               <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem] gap-1.5">
                 <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
                 <SelectValue placeholder="Owner">
