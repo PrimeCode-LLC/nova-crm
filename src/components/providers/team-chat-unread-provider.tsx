@@ -16,6 +16,12 @@ import type { User, WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/typ
 
 const RECENT_MSG_LIMIT = 250;
 
+/** Stable fallbacks for Zustand selectors — `?? []` allocates a new array each snapshot, which makes `useSyncExternalStore` think the value changed every render and triggers React #185 (max update depth) in production builds. */
+const EMPTY_DEMO_CHANNELS: WorkspaceChatChannel[] = [];
+const EMPTY_DEMO_MESSAGES: WorkspaceChatMessage[] = [];
+const EMPTY_DEMO_LAST_READ_ROOT: Record<string, Record<string, Record<string, string>>> = {};
+const EMPTY_DEMO_READS: Record<string, string> = {};
+
 function asChannelRaw(id: string, raw: Record<string, unknown>): WorkspaceChatChannel {
   return {
     id,
@@ -128,11 +134,17 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
   const router = useRouter();
   const { organizationId, currentUserId, isDemo, users } = useWorkspace();
   const setDemoChannelLastRead = useTeamChatDemoStore((s) => s.setDemoChannelLastRead);
-  const demoChannels = useTeamChatDemoStore((s) => s.channelsByOrg[DEMO_WORKSPACE_ORG_ID] ?? []);
-  const demoMessages = useTeamChatDemoStore((s) => s.messagesByOrg[DEMO_WORKSPACE_ORG_ID] ?? []);
-  const demoLastReadRoot = useTeamChatDemoStore((s) => s.channelLastReadByOrgUser);
+  const demoChannels = useTeamChatDemoStore(
+    (s) => s.channelsByOrg[DEMO_WORKSPACE_ORG_ID] ?? EMPTY_DEMO_CHANNELS,
+  );
+  const demoMessages = useTeamChatDemoStore(
+    (s) => s.messagesByOrg[DEMO_WORKSPACE_ORG_ID] ?? EMPTY_DEMO_MESSAGES,
+  );
+  const demoLastReadRoot = useTeamChatDemoStore(
+    (s) => s.channelLastReadByOrgUser ?? EMPTY_DEMO_LAST_READ_ROOT,
+  );
   const demoReads = React.useMemo(
-    () => demoLastReadRoot[DEMO_WORKSPACE_ORG_ID]?.[currentUserId] ?? {},
+    () => demoLastReadRoot[DEMO_WORKSPACE_ORG_ID]?.[currentUserId] ?? EMPTY_DEMO_READS,
     [demoLastReadRoot, currentUserId],
   );
 
