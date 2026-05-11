@@ -85,11 +85,20 @@ export function buildDemoEmailSeed(): {
     subject: "Re: Pilot scope — security questionnaire",
     from: `"${L1.contactName ?? "Contact"}" <${L1mail}>`,
     to: "Sarah Chen <sarah.chen@nova.co>",
+    cc: "security@acmecorp-demo.io",
     date: isoMinutesAgo(120),
     seen: false,
     messageId: "demo-msg-a-root@nova.local",
     preview: "Attached our IT checklist. Can you confirm SSO + audit log export for the pilot?",
     bodyText: `Hi Sarah,\n\nAttached our IT checklist. Can you confirm SSO + audit log export for the 30-day pilot?\n\nThanks,\n${L1.contactName}`,
+    attachments: [
+      {
+        filename: "IT-checklist-demo.txt",
+        mimeType: "text/plain",
+        sizeBytes: 36,
+        contentBase64: Buffer.from("Demo checklist attachment (Nova CRM demo mode).").toString("base64"),
+      },
+    ],
   });
 
   const msgA2 = inbound({

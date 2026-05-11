@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
+import type { MailInboundAttachment } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import {
   normalizeMessageId,
@@ -138,7 +139,7 @@ export async function POST(req: Request) {
           if (!msg?.envelope) return null;
 
           const env = msg.envelope;
-          const { subj, from, to, envExt } = envelopeHeaderFields(env);
+          const { subj, from, to, cc: ccFromEnv, envExt } = envelopeHeaderFields(env);
           const date =
             (msg.internalDate instanceof Date
               ? msg.internalDate
@@ -157,6 +158,8 @@ export async function POST(req: Request) {
           let preview = "";
           let bodyText = "";
           let bodyHtml: string | undefined;
+          let cc = ccFromEnv.trim() ? ccFromEnv : undefined;
+          let attachments: MailInboundAttachment[] | undefined;
           let bodySynced: boolean;
 
           if (inBodyTier && src && src.length > 0) {
@@ -168,6 +171,8 @@ export async function POST(req: Request) {
               if (parsed.messageId) messageId = parsed.messageId ?? messageId;
               if (parsed.inReplyTo) inReplyTo = parsed.inReplyTo ?? inReplyTo;
               if (parsed.referenceIds?.length) referenceIds = parsed.referenceIds;
+              if (parsed.cc.trim()) cc = parsed.cc;
+              if (parsed.attachments.length > 0) attachments = parsed.attachments;
               bodySynced = true;
             } catch {
               preview = "";
@@ -189,11 +194,13 @@ export async function POST(req: Request) {
             subject: subj,
             from,
             to,
+            ...(cc ? { cc } : {}),
             date,
             seen: msg.flags?.has("\\Seen") ?? false,
             preview,
             bodyText: bodySynced ? bodyText || preview : "",
             bodyHtml,
+            ...(attachments && attachments.length > 0 ? { attachments } : {}),
             messageId,
             inReplyTo,
             referenceIds: referenceIds.length > 0 ? referenceIds : undefined,

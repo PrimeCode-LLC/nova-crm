@@ -1,3 +1,4 @@
+import type { MailInboundAttachment } from "@/lib/email-account-types";
 import { NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
@@ -12,7 +13,8 @@ import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 const MAX_UIDS = 55;
-const SOURCE_MAX_LENGTH = 120_000;
+/** Large enough for typical HTML bodies + PDF invoices when opening a thread. */
+const SOURCE_MAX_LENGTH = 3_500_000;
 const FETCH_BATCH = 25;
 
 export async function POST(req: Request) {
@@ -90,6 +92,8 @@ export async function POST(req: Request) {
         preview: string;
         bodyText: string;
         bodyHtml?: string;
+        cc?: string;
+        attachments?: MailInboundAttachment[];
         messageId?: string;
         inReplyTo?: string;
         referenceIds?: string[];
@@ -126,6 +130,8 @@ export async function POST(req: Request) {
             let messageId = parsed.messageId;
             let inReplyTo = parsed.inReplyTo;
             let referenceIds = parsed.referenceIds;
+            const envCc = row.envelope ? envelopeHeaderFields(row.envelope).cc.trim() : "";
+            const cc: string | undefined = parsed.cc.trim() ? parsed.cc : envCc ? envCc : undefined;
             if (row.envelope) {
               const envExt = row.envelope as {
                 messageId?: string;
@@ -141,11 +147,15 @@ export async function POST(req: Request) {
             }
             const preview = parsed.preview || subjFallback;
             const bodyText = parsed.bodyText || preview;
+            const attachments =
+              parsed.attachments.length > 0 ? parsed.attachments : undefined;
             updates.push({
               uid: row.uid,
               preview,
               bodyText,
               bodyHtml: parsed.bodyHtml,
+              cc,
+              attachments,
               messageId,
               inReplyTo,
               referenceIds,

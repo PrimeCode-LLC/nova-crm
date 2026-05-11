@@ -35,7 +35,13 @@ import {
   isImapInboxConfigured,
   useEmailAccountStore,
 } from "@/stores/email-account-store";
-import type { EmailMailboxSettings, MailDraft, MailInbound, MailSent } from "@/lib/email-account-types";
+import type {
+  EmailMailboxSettings,
+  MailDraft,
+  MailInbound,
+  MailInboundAttachment,
+  MailSent,
+} from "@/lib/email-account-types";
 import {
   conversationSubject,
   groupInboundIntoThreads,
@@ -47,10 +53,13 @@ import {
   PenLine,
   RefreshCw,
   Reply,
+  ReplyAll,
+  Forward,
   Send,
   Trash2,
   Search,
   ChevronDown,
+  Paperclip,
 } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -94,7 +103,10 @@ function mailListRowMatchesSearch(row: MailListRow, q: string): boolean {
   if (head.includes(q)) return true;
   if (row.thread) {
     for (const m of row.thread.messages) {
-      const t = [m.subject, m.from, m.to, m.preview, m.bodyText].filter(Boolean).join("\n").toLowerCase();
+      const t = [m.subject, m.from, m.to, m.cc, m.preview, m.bodyText, ...(m.attachments?.map((a) => a.filename) ?? [])]
+        .filter(Boolean)
+        .join("\n")
+        .toLowerCase();
       if (t.includes(q)) return true;
     }
     return false;
@@ -165,6 +177,7 @@ export default function InboxPage() {
   const [selectedMail, setSelectedMail] = React.useState<MailDraft | MailSent | MailInbound | null>(null);
   const [composeOpen, setComposeOpen] = React.useState(false);
   const [composeTo, setComposeTo] = React.useState("");
+  const [composeCc, setComposeCc] = React.useState("");
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
@@ -475,6 +488,7 @@ export default function InboxPage() {
 
   function openCompose(preset?: Partial<MailDraft>) {
     setComposeTo(preset?.to ?? "");
+    setComposeCc(preset?.cc?.trim() ? preset.cc.trim() : "");
     setComposeSubject(preset?.subject ?? "");
     setComposeBody(preset?.body ?? (account.signature ? `\n\n${account.signature}` : ""));
     setComposeDraftId(preset?.id);
@@ -526,6 +540,7 @@ export default function InboxPage() {
           displayName: account.displayName,
           replyTo: account.replyTo,
           to: composeTo.trim(),
+          cc: composeCc.trim() || undefined,
           subject: composeSubject.trim(),
           text,
           html,
@@ -568,6 +583,7 @@ export default function InboxPage() {
       id: composeDraftId,
       mailboxId: account.id,
       to: composeTo,
+      cc: composeCc.trim() || undefined,
       subject: composeSubject,
       body: composeBody,
     });
@@ -1268,7 +1284,17 @@ export default function InboxPage() {
                                 !row.muted && mailFolder === "inbox" && "font-medium",
                               )}
                             >
-                              {row.title}
+                              {row.thread?.messages.some((m) => (m.attachments?.length ?? 0) > 0) ? (
+                                <span className="inline-flex items-center gap-1.5">
+                                  <Paperclip
+                                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                                    aria-label="Has attachment"
+                                  />
+                                  <span className="truncate">{row.title}</span>
+                                </span>
+                              ) : (
+                                row.title
+                              )}
                             </div>
                             <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
                             <div className="text-[11px] text-muted-foreground mt-0.5">
@@ -1311,63 +1337,99 @@ export default function InboxPage() {
               </div>
             </div>
 
-            <div className="flex-1 flex flex-col min-w-0 p-6">
+            <div className="flex-1 flex flex-col min-h-0 min-w-0 p-6">
               {(mailFolder === "inbox" || mailFolder === "trash") && selectedThread ? (
-                <div className="space-y-4 max-w-2xl w-full">
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-sm font-semibold">{selectedThread.conversationSubject}</h3>
-                      {selectedThread.messages.length > 1 ? (
-                        <Badge variant="outline" className="text-[10px] shrink-0">
-                          {selectedThread.messages.length} messages
-                        </Badge>
-                      ) : null}
-                    </div>
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Latest {fmtRelative(selectedThread.latest.date)}
-                    </p>
-                  </div>
-                  <div className="space-y-3 max-h-[min(70vh,720px)] overflow-y-auto pr-1">
-                    {selectedThread.messages.map((m) => (
-                      <div key={m.uid} className="rounded-lg border bg-muted/10 p-4 text-sm space-y-2">
-                        <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/60 pb-2">
-                          <span className="text-xs font-medium">{m.from}</span>
-                          <span className="text-[11px] text-muted-foreground tabular-nums">
-                            {fmtRelative(m.date)}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">{m.subject || "(no subject)"}</p>
-                        {m.bodySynced === false && !m.bodyText?.trim() ? (
-                          <p className="text-xs text-muted-foreground">Loading full message…</p>
-                        ) : (
-                          <div className="whitespace-pre-wrap overflow-x-auto">{m.bodyText || m.preview}</div>
-                        )}
+                <div className="flex flex-col flex-1 min-h-0 max-w-3xl w-full">
+                  <div className="shrink-0 space-y-3 border-b pb-4">
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h3 className="text-base font-semibold leading-snug">{selectedThread.conversationSubject}</h3>
+                        {selectedThread.messages.length > 1 ? (
+                          <Badge variant="outline" className="text-[10px] shrink-0">
+                            {selectedThread.messages.length} messages
+                          </Badge>
+                        ) : null}
                       </div>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Latest {fmtRelative(selectedThread.latest.date)}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2" role="toolbar" aria-label="Message actions">
+                      <Button
+                        size="sm"
+                        className="gap-1.5"
+                        onClick={() => {
+                          const latest = selectedThread.latest;
+                          const addr = extractReplyAddress(latest.from);
+                          if (!addr) {
+                            toast.error("Could not read a reply address from this conversation.");
+                            return;
+                          }
+                          const subj = conversationSubject(latest.subject ?? "");
+                          const reSubj = subj.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
+                          openCompose({
+                            to: addr,
+                            subject: reSubj,
+                            body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${(latest.bodyText || latest.preview || "").slice(0, 4000)}`,
+                          });
+                        }}
+                      >
+                        <Reply className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        Reply
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="gap-1.5"
+                        onClick={() => {
+                          const latest = selectedThread.latest;
+                          const pack = replyAllRecipientLine(latest, account);
+                          if (!pack.to) {
+                            toast.error("Could not read a reply address from this conversation.");
+                            return;
+                          }
+                          const subj = conversationSubject(latest.subject ?? "");
+                          const reSubj = subj.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
+                          openCompose({
+                            to: pack.to,
+                            cc: pack.cc,
+                            subject: reSubj,
+                            body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${(latest.bodyText || latest.preview || "").slice(0, 4000)}`,
+                          });
+                        }}
+                      >
+                        <ReplyAll className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        Reply all
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="gap-1.5"
+                        onClick={() => {
+                          const latest = selectedThread.latest;
+                          const subj = conversationSubject(latest.subject ?? "");
+                          const fwd = subj.match(/^fwd:/i) ? subj : subj ? `Fwd: ${subj}` : "Fwd:";
+                          openCompose({
+                            to: "",
+                            cc: "",
+                            subject: fwd,
+                            body: `\n\n---------- Forwarded message ----------\nFrom: ${latest.from}\nDate: ${latest.date}\nSubject: ${latest.subject}\nTo: ${latest.to}${latest.cc ? `\nCc: ${latest.cc}` : ""}\n\n${(latest.bodyText || latest.preview || "").slice(0, 8000)}`,
+                          });
+                        }}
+                      >
+                        <Forward className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        Forward
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 min-h-0 overflow-y-auto space-y-3 py-4 pr-1">
+                    {selectedThread.messages.map((m) => (
+                      <InboundMessageCard key={m.uid} message={m} />
                     ))}
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      className="gap-1.5"
-                      onClick={() => {
-                        const latest = selectedThread.latest;
-                        const addr = extractReplyAddress(latest.from);
-                        if (!addr) {
-                          toast.error("Could not read a reply address from this conversation.");
-                          return;
-                        }
-                        const subj = conversationSubject(latest.subject ?? "");
-                        const reSubj = subj.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
-                        openCompose({
-                          to: addr,
-                          subject: reSubj,
-                          body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${(latest.bodyText || latest.preview || "").slice(0, 2000)}`,
-                        });
-                      }}
-                    >
-                      <Reply className="h-3.5 w-3.5" /> Reply
-                    </Button>
+
+                  <div className="shrink-0 flex flex-wrap gap-2 border-t pt-4 mt-2">
                     {mailFolder === "inbox" && canUseTrashFeatures && (
                       <Button
                         size="sm"
@@ -1415,7 +1477,7 @@ export default function InboxPage() {
                     )}
                   </div>
                   {selectedLead ? (
-                    <div className="rounded-lg border p-3 text-xs bg-muted/10">
+                    <div className="rounded-lg border p-3 text-xs bg-muted/10 shrink-0 mt-2">
                       Linked lead:{" "}
                       <Link className="text-primary hover:underline" href={`/leads/${selectedLead.id}?tab=emails`}>
                         {selectedLead.contactName} - {selectedLead.companyName}
@@ -1424,142 +1486,179 @@ export default function InboxPage() {
                   ) : null}
                 </div>
               ) : selectedMail ? (
-                <div className="space-y-4 max-w-xl">
-                  <div>
-                    <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
-                    {"sentAt" in selectedMail ? (
-                      <>
-                        <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
-                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.sentAt)}</p>
-                      </>
-                    ) : "updatedAt" in selectedMail ? (
-                      <>
-                        <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
-                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.updatedAt)}</p>
-                      </>
-                    ) : (
-                      <>
-                        <p className="text-xs text-muted-foreground mt-1">From: {selectedMail.from}</p>
-                        {selectedMail.to ? (
-                          <p className="text-xs text-muted-foreground">To: {selectedMail.to}</p>
-                        ) : null}
-                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.date)}</p>
-                      </>
-                    )}
+                "sentAt" in selectedMail ? (
+                  <div className="space-y-4 max-w-xl">
+                    <div>
+                      <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
+                      <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
+                      <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.sentAt)}</p>
+                    </div>
+                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">{selectedMail.body}</div>
                   </div>
-                  {"sentAt" in selectedMail || "updatedAt" in selectedMail ? (
-                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">
-                      {selectedMail.body}
+                ) : "updatedAt" in selectedMail ? (
+                  <div className="space-y-4 max-w-xl">
+                    <div>
+                      <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
+                      <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
+                      {selectedMail.cc ? (
+                        <p className="text-xs text-muted-foreground">Cc: {selectedMail.cc}</p>
+                      ) : null}
+                      <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.updatedAt)}</p>
                     </div>
-                  ) : (
-                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">
-                      {selectedMail.bodyText}
-                    </div>
-                  )}
-                  <div className="flex flex-wrap gap-2">
-                    {"sentAt" in selectedMail ? null : "updatedAt" in selectedMail ? (
-                      <>
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            openCompose({
-                              id: selectedMail.id,
-                              to: selectedMail.to,
-                              subject: selectedMail.subject,
-                              body: selectedMail.body,
-                            })
-                          }
-                        >
-                          Edit & send
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="text-destructive"
-                          onClick={() => {
-                            deleteDraft(selectedMail.id);
-                            setSelectedMail(null);
-                            toast.success("Draft deleted");
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" /> Delete
-                        </Button>
-                      </>
-                    ) : (
+                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">{selectedMail.body}</div>
+                    <div className="flex flex-wrap gap-2">
                       <Button
                         size="sm"
-                        variant="secondary"
-                        className="gap-1.5"
-                        onClick={() => {
-                          const addr = extractReplyAddress(selectedMail.from);
-                          if (!addr) {
-                            toast.error("Could not read a reply address from this message.");
-                            return;
-                          }
-                          const subj = selectedMail.subject?.trim();
-                          const reSubj = subj?.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
+                        onClick={() =>
                           openCompose({
-                            to: addr,
-                            subject: reSubj,
-                            body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 2000)}`,
-                          });
+                            id: selectedMail.id,
+                            to: selectedMail.to,
+                            cc: selectedMail.cc,
+                            subject: selectedMail.subject,
+                            body: selectedMail.body,
+                          })
+                        }
+                      >
+                        Edit & send
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive"
+                        onClick={() => {
+                          deleteDraft(selectedMail.id);
+                          setSelectedMail(null);
+                          toast.success("Draft deleted");
                         }}
                       >
-                        <Reply className="h-3.5 w-3.5" /> Reply
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
                       </Button>
-                    )}
-                    {mailFolder === "inbox" && canUseTrashFeatures && "uid" in selectedMail && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
-                        disabled={mailActionLoading}
-                        onClick={() => void moveInboxUidsToTrashNow([selectedMail.uid])}
-                      >
-                        {mailActionLoading ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex flex-col flex-1 min-h-0 max-w-3xl w-full">
+                    <div className="shrink-0 space-y-3 border-b pb-4">
+                      <h3 className="text-base font-semibold leading-snug">{selectedMail.subject || "(no subject)"}</h3>
+                      <div className="flex flex-wrap gap-2" role="toolbar" aria-label="Message actions">
+                        <Button
+                          size="sm"
+                          className="gap-1.5"
+                          onClick={() => {
+                            const addr = extractReplyAddress(selectedMail.from);
+                            if (!addr) {
+                              toast.error("Could not read a reply address from this message.");
+                              return;
+                            }
+                            const subj = selectedMail.subject?.trim();
+                            const reSubj = subj?.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
+                            openCompose({
+                              to: addr,
+                              subject: reSubj,
+                              body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 4000)}`,
+                            });
+                          }}
+                        >
+                          <Reply className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Reply
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="gap-1.5"
+                          onClick={() => {
+                            const pack = replyAllRecipientLine(selectedMail, account);
+                            if (!pack.to) {
+                              toast.error("Could not read a reply address from this message.");
+                              return;
+                            }
+                            const subj = selectedMail.subject?.trim();
+                            const reSubj = subj?.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
+                            openCompose({
+                              to: pack.to,
+                              cc: pack.cc,
+                              subject: reSubj,
+                              body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 4000)}`,
+                            });
+                          }}
+                        >
+                          <ReplyAll className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Reply all
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="gap-1.5"
+                          onClick={() => {
+                            const subj = selectedMail.subject?.trim() || "";
+                            const fwd = subj.match(/^fwd:/i) ? subj : subj ? `Fwd: ${subj}` : "Fwd:";
+                            openCompose({
+                              to: "",
+                              cc: "",
+                              subject: fwd,
+                              body: `\n\n---------- Forwarded message ----------\nFrom: ${selectedMail.from}\nDate: ${selectedMail.date}\nSubject: ${selectedMail.subject}\nTo: ${selectedMail.to}${selectedMail.cc ? `\nCc: ${selectedMail.cc}` : ""}\n\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 8000)}`,
+                            });
+                          }}
+                        >
+                          <Forward className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Forward
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="flex-1 min-h-0 overflow-y-auto py-4 pr-1">
+                      <InboundMessageCard message={selectedMail} />
+                    </div>
+                    <div className="shrink-0 flex flex-wrap gap-2 border-t pt-4 mt-2">
+                      {mailFolder === "inbox" && canUseTrashFeatures && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="gap-1.5 text-destructive border-destructive/40 hover:bg-destructive/10"
+                          disabled={mailActionLoading}
+                          onClick={() => void moveInboxUidsToTrashNow([selectedMail.uid])}
+                        >
+                          {mailActionLoading ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                          Move to trash
+                        </Button>
+                      )}
+                      {mailFolder === "trash" && canUseTrashFeatures && (
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="gap-1.5"
+                          disabled={mailActionLoading}
+                          onClick={() => void permanentlyDeleteTrashUidsNow([selectedMail.uid])}
+                        >
                           <Trash2 className="h-3.5 w-3.5" />
-                        )}
-                        Move to trash
-                      </Button>
-                    )}
-                    {mailFolder === "trash" && canUseTrashFeatures && "uid" in selectedMail && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="gap-1.5"
-                        disabled={mailActionLoading}
-                        onClick={() => void permanentlyDeleteTrashUidsNow([selectedMail.uid])}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete forever
-                      </Button>
-                    )}
-                    {selectedLead ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        nativeButton={false}
-                        render={<Link href={`/leads/${selectedLead.id}?tab=emails`}>Open lead</Link>}
-                      />
-                    ) : (
-                      !("updatedAt" in selectedMail) && (
+                          Delete forever
+                        </Button>
+                      )}
+                      {selectedLead ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          nativeButton={false}
+                          render={<Link href={`/leads/${selectedLead.id}?tab=emails`}>Open lead</Link>}
+                        />
+                      ) : (
                         <Button size="sm" variant="outline" onClick={createLeadFromSelectedMessage}>
                           Add to leads
                         </Button>
-                      )
-                    )}
-                  </div>
-                  {selectedLead ? (
-                    <div className="rounded-lg border p-3 text-xs bg-muted/10">
-                      Linked lead:{" "}
-                      <Link className="text-primary hover:underline" href={`/leads/${selectedLead.id}?tab=emails`}>
-                        {selectedLead.contactName} - {selectedLead.companyName}
-                      </Link>
+                      )}
                     </div>
-                  ) : null}
-                </div>
+                    {selectedLead ? (
+                      <div className="rounded-lg border p-3 text-xs bg-muted/10 shrink-0 mt-2">
+                        Linked lead:{" "}
+                        <Link className="text-primary hover:underline" href={`/leads/${selectedLead.id}?tab=emails`}>
+                          {selectedLead.contactName} - {selectedLead.companyName}
+                        </Link>
+                      </div>
+                    ) : null}
+                  </div>
+                )
               ) : (
                 <EmptyState
                   icon={Mail}
@@ -1631,6 +1730,14 @@ export default function InboxPage() {
               <Input value={composeTo} onChange={(e) => setComposeTo(e.target.value)} placeholder="name@company.com" />
             </div>
             <div className="space-y-1.5">
+              <Label className="text-xs">Cc</Label>
+              <Input
+                value={composeCc}
+                onChange={(e) => setComposeCc(e.target.value)}
+                placeholder="Optional — comma-separated addresses"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label className="text-xs">Subject</Label>
               <Input value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} />
             </div>
@@ -1658,6 +1765,126 @@ export default function InboxPage() {
   );
 }
 
+function formatBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function mailboxIdentityEmails(account: EmailMailboxSettings): Set<string> {
+  const s = new Set<string>();
+  for (const raw of [account.emailAddress, account.imap.user, account.replyTo]) {
+    const e = extractReplyAddress(String(raw ?? "")).toLowerCase();
+    if (e) s.add(e);
+  }
+  return s;
+}
+
+/** Reply-all: To = sender; Cc = other participants (To/Cc/From) minus you and the direct recipient. */
+function replyAllRecipientLine(m: MailInbound, account: EmailMailboxSettings): { to: string; cc: string } {
+  const sender = extractReplyAddress(m.from);
+  if (!sender) return { to: "", cc: "" };
+  const mine = mailboxIdentityEmails(account);
+  const pool = new Set<string>();
+  const collect = (header: string | undefined) => {
+    for (const x of (header ?? "").match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) ?? []) pool.add(x.toLowerCase());
+  };
+  collect(m.to);
+  collect(m.cc);
+  collect(m.from);
+  const sl = sender.toLowerCase();
+  pool.delete(sl);
+  for (const x of mine) pool.delete(x);
+  return { to: sender, cc: [...pool].join(", ") };
+}
+
+function InboundAttachmentRow({ att }: { att: MailInboundAttachment }) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className="h-auto max-w-full justify-start gap-2 py-2 px-3"
+      onClick={() => {
+        if (!att.contentBase64) {
+          toast.message("Cannot download in the browser", {
+            description:
+              "This file is larger than the inline limit or the message was truncated. Open the same message in Apple Mail or Outlook to download it, or ask your admin to raise the fetch size.",
+          });
+          return;
+        }
+        try {
+          const bin = atob(att.contentBase64);
+          const bytes = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+          const blob = new Blob([bytes], { type: att.mimeType || "application/octet-stream" });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = att.filename || "attachment";
+          a.click();
+          URL.revokeObjectURL(url);
+        } catch {
+          toast.error("Could not prepare download");
+        }
+      }}
+    >
+      <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="min-w-0 truncate text-left text-xs font-medium">{att.filename}</span>
+      <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">{formatBytes(att.sizeBytes)}</span>
+    </Button>
+  );
+}
+
+function InboundMessageCard({ message: m }: { message: MailInbound }) {
+  const html = m.bodyHtml?.trim();
+  const srcDoc =
+    html &&
+    `<!DOCTYPE html><html><head><meta charset="utf-8"><base target="_blank" rel="noopener noreferrer"><style>
+      body { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 14px; line-height: 1.55; color: #fafafa; background: #09090b; margin: 12px; overflow-wrap: anywhere; }
+      img { max-width: 100%; height: auto; }
+      a { color: #93c5fd; }
+      blockquote { border-left: 2px solid #3f3f46; margin: 0.5em 0; padding-left: 0.75em; color: #a1a1aa; }
+    </style></head><body>${html}</body></html>`;
+  return (
+    <div className="rounded-lg border bg-muted/10 p-4 text-sm space-y-2">
+      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/60 pb-2">
+        <span className="text-xs font-medium">{m.from}</span>
+        <span className="text-[11px] text-muted-foreground tabular-nums">{fmtRelative(m.date)}</span>
+      </div>
+      <p className="text-[11px] text-muted-foreground">{m.subject || "(no subject)"}</p>
+      {m.to ? <p className="text-[11px] text-muted-foreground">To: {m.to}</p> : null}
+      {m.cc ? <p className="text-[11px] text-muted-foreground">Cc: {m.cc}</p> : null}
+      {m.attachments && m.attachments.length > 0 ? (
+        <div className="space-y-1.5 rounded-md border border-border/60 bg-background/40 p-2">
+          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+            <Paperclip className="h-3 w-3 shrink-0" aria-hidden />
+            {m.attachments.length} attachment{m.attachments.length === 1 ? "" : "s"}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {m.attachments.map((att, idx) => (
+              <InboundAttachmentRow key={`${m.uid}-${att.filename}-${idx}`} att={att} />
+            ))}
+          </div>
+        </div>
+      ) : null}
+      {html && srcDoc ? (
+        <iframe
+          title={`HTML: ${m.subject || "message"}`}
+          className="w-full min-h-[280px] rounded-md border bg-background"
+          sandbox=""
+          srcDoc={srcDoc}
+        />
+      ) : m.bodySynced === false && !m.bodyText?.trim() ? (
+        <p className="text-xs text-muted-foreground">Loading full message…</p>
+      ) : (
+        <div className="whitespace-pre-wrap overflow-x-auto text-[13px] leading-relaxed">{m.bodyText || m.preview}</div>
+      )}
+    </div>
+  );
+}
+
 function escapeHtml(s: string) {
   return s
     .replace(/&/g, "&amp;")
@@ -1681,6 +1908,10 @@ function collectMessageEmails(message: MailDraft | MailSent | MailInbound) {
   }
   const toTokens = message.to.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) ?? [];
   for (const token of toTokens) values.add(token.toLowerCase());
+  if ("cc" in message && typeof message.cc === "string" && message.cc) {
+    const ccTokens = message.cc.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) ?? [];
+    for (const token of ccTokens) values.add(token.toLowerCase());
+  }
   return values;
 }
 

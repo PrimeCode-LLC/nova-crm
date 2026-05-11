@@ -81,9 +81,16 @@ function mergeMailInboundRow(prev: MailInbound | undefined, server: MailInbound)
       bodyHtml: prev.bodyHtml,
       bodySynced: true,
       preview: prev.preview || server.preview,
+      cc: prev.cc ?? server.cc,
+      attachments: prev.attachments ?? server.attachments,
     };
   }
-  return { ...prev, ...server };
+  return {
+    ...prev,
+    ...server,
+    cc: server.cc ?? prev.cc,
+    attachments: server.attachments ?? prev.attachments,
+  };
 }
 
 function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
@@ -340,12 +347,21 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       };
     });
   },
-  upsertDraft: ({ id, mailboxId, to, subject, body }) => {
+  upsertDraft: ({ id, mailboxId, to, cc, subject, body }) => {
     const draftId = id ?? `d-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const prev = get().drafts;
     const idx = prev.findIndex((d) => d.id === draftId);
-    const row: MailDraft = { id: draftId, mailboxId, to, subject, body, updatedAt: now };
+    const ccTrim = cc?.trim();
+    const row: MailDraft = {
+      id: draftId,
+      mailboxId,
+      to,
+      ...(ccTrim ? { cc: ccTrim } : {}),
+      subject,
+      body,
+      updatedAt: now,
+    };
     if (idx === -1) set({ drafts: [row, ...prev] });
     else {
       const next = [...prev];

@@ -62,10 +62,21 @@ export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
   readReceipts: false,
 });
 
+/** Parsed attachment from IMAP (small files may include base64 for download in the browser). */
+export interface MailInboundAttachment {
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  /** Present when small enough to ship in the API response for client-side download. */
+  contentBase64?: string;
+}
+
 export interface MailDraft {
   id: string;
   mailboxId: string;
   to: string;
+  /** Optional Cc line (comma-separated addresses). */
+  cc?: string;
   subject: string;
   body: string;
   updatedAt: string;
@@ -88,11 +99,13 @@ export interface MailInbound {
   subject: string;
   from: string;
   to: string;
+  cc?: string;
   date: string;
   seen: boolean;
   preview: string;
   bodyText: string;
   bodyHtml?: string;
+  attachments?: MailInboundAttachment[];
   /** Normalized RFC 5322 Message-ID without angle brackets (when available). */
   messageId?: string;
   inReplyTo?: string;
