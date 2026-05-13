@@ -1,5 +1,16 @@
-import type { Followup, LeadTask, Note, Touchpoint, TimelineEvent, Lead } from "@/lib/types";
+import type {
+  Followup,
+  LeadTask,
+  Note,
+  Touchpoint,
+  TimelineEvent,
+  Lead,
+  Account,
+  Contact,
+  Deal,
+} from "@/lib/types";
 import type { WorkspaceSnapshot } from "@/lib/workspace-dataset";
+import { mockLeads } from "./mock-data";
 
 /** Unified session mutations (demo + local session until Firestore writes exist). */
 export const WORKSPACE_SESSION_KEY = "nova-crm-workspace-session-v2";
@@ -28,6 +39,11 @@ export type WorkspaceSessionV2 = {
   touchpointsAdded: Touchpoint[];
   timelineAdded: TimelineEvent[];
   leadPatches: Record<string, Partial<Lead>>;
+  accountPatches: Record<string, Partial<Account>>;
+  contactPatches: Record<string, Partial<Contact>>;
+  dealPatches: Record<string, Partial<Deal>>;
+  /** Session-removed lead ids (demo / optimistic hide until Firestore listener catches up). */
+  deletedLeadIds: string[];
   pinnedLeadIds: string[];
   /** Increment touches + refresh lastActivityAt for session-scoped activity. */
   leadActivity: Record<string, { bump: number; lastAt?: string }>;
@@ -41,6 +57,10 @@ export function emptyWorkspaceSession(): WorkspaceSessionV2 {
     touchpointsAdded: [],
     timelineAdded: [],
     leadPatches: {},
+    accountPatches: {},
+    contactPatches: {},
+    dealPatches: {},
+    deletedLeadIds: [],
     pinnedLeadIds: [],
     leadActivity: {},
   };
@@ -113,6 +133,12 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
     touchpointsAdded: Array.isArray(parsed.touchpointsAdded) ? parsed.touchpointsAdded : [],
     timelineAdded: Array.isArray(parsed.timelineAdded) ? parsed.timelineAdded : [],
     leadPatches: parsed.leadPatches && typeof parsed.leadPatches === "object" ? parsed.leadPatches : {},
+    accountPatches:
+      parsed.accountPatches && typeof parsed.accountPatches === "object" ? parsed.accountPatches : {},
+    contactPatches:
+      parsed.contactPatches && typeof parsed.contactPatches === "object" ? parsed.contactPatches : {},
+    dealPatches: parsed.dealPatches && typeof parsed.dealPatches === "object" ? parsed.dealPatches : {},
+    deletedLeadIds: Array.isArray(parsed.deletedLeadIds) ? parsed.deletedLeadIds : [],
     pinnedLeadIds: Array.isArray(parsed.pinnedLeadIds) ? parsed.pinnedLeadIds : [],
     leadActivity: parsed.leadActivity && typeof parsed.leadActivity === "object" ? parsed.leadActivity : {},
   };
@@ -127,6 +153,30 @@ export function writeWorkspaceSession(session: WorkspaceSessionV2): void {
   }
 }
 
+const MOCK_LEAD_IDS = new Set(mockLeads.map((l) => l.id));
+
+/**
+ * Strips session keys that reference ids outside the static demo lead catalog.
+ * Prevents stale tab/sessionStorage (e.g. deleted Firestore ids) from hiding all mock leads in Demo mode.
+ */
+export function sanitizeWorkspaceSessionForMockCatalog(session: WorkspaceSessionV2): WorkspaceSessionV2 {
+  const deletedLeadIds = session.deletedLeadIds.filter((id) => MOCK_LEAD_IDS.has(id));
+  const leadPatches = Object.fromEntries(
+    Object.entries(session.leadPatches).filter(([id]) => MOCK_LEAD_IDS.has(id)),
+  );
+  const leadActivity = Object.fromEntries(
+    Object.entries(session.leadActivity).filter(([id]) => MOCK_LEAD_IDS.has(id)),
+  );
+  const pinnedLeadIds = session.pinnedLeadIds.filter((id) => MOCK_LEAD_IDS.has(id));
+  return {
+    ...session,
+    deletedLeadIds,
+    leadPatches,
+    leadActivity,
+    pinnedLeadIds,
+  };
+}
+
 function leadVisible(id: string | undefined, visible: Set<string>): boolean {
   if (!id) return false;
   return visible.has(id);
@@ -138,10 +188,42 @@ export function mergeSessionIntoSnapshot(
   session: WorkspaceSessionV2,
 ): Pick<
   WorkspaceSnapshot,
-  "followups" | "leadTasks" | "notes" | "touchpoints" | "timelineByLead" | "leads"
+  | "followups"
+  | "leadTasks"
+  | "notes"
+  | "touchpoints"
+  | "timelineByLead"
+  | "leads"
+  | "accounts"
+  | "contacts"
+  | "deals"
 > {
-  const visibleLeadIds = new Set(base.leads.map((l) => l.id));
-  const visibleDealIds = new Set(base.deals.map((d) => d.id));
+  const deletedLeadIds = new Set(session.deletedLeadIds ?? []);
+
+  const leads = base.leads
+    .filter((l) => !deletedLeadIds.has(l.id))
+    .map((l) => {
+      const patch = session.leadPatches[l.id] ?? {};
+      const act = session.leadActivity[l.id];
+      const touches = act ? l.touches + act.bump : l.touches;
+      const lastActivityAt = act?.lastAt ?? l.lastActivityAt;
+      return { ...l, ...patch, touches, lastActivityAt };
+    });
+
+  const accounts = base.accounts.map((a) => {
+    const p = session.accountPatches[a.id];
+    return p ? { ...a, ...p } : a;
+  });
+
+  const contacts = base.contacts.map((c) => {
+    const p = session.contactPatches[c.id];
+    return p ? { ...c, ...p } : c;
+  });
+
+  const visibleLeadIds = new Set(leads.map((l) => l.id));
+  const visibleDealIds = new Set(
+    base.deals.filter((d) => visibleLeadIds.has(d.leadId)).map((d) => d.id),
+  );
 
   const removedNotes = new Set(session.notes.removedIds);
   const mergedBaseNotes = base.notes
@@ -149,7 +231,8 @@ export function mergeSessionIntoSnapshot(
     .map((n) => {
       const u = session.notes.updates[n.id];
       return u ? { ...n, ...u } : n;
-    });
+    })
+    .filter((n) => !n.leadId || visibleLeadIds.has(n.leadId));
   const baseNoteIds = new Set(mergedBaseNotes.map((n) => n.id));
   const notes = [
     ...mergedBaseNotes,
@@ -160,7 +243,7 @@ export function mergeSessionIntoSnapshot(
 
   const baseTouchpointIds = new Set(base.touchpoints.map((t) => t.id));
   const touchpoints = [
-    ...base.touchpoints,
+    ...base.touchpoints.filter((t) => visibleLeadIds.has(t.leadId)),
     ...session.touchpointsAdded.filter(
       (t) => visibleLeadIds.has(t.leadId) && !baseTouchpointIds.has(t.id),
     ),
@@ -168,6 +251,7 @@ export function mergeSessionIntoSnapshot(
 
   const timelineByLead: Record<string, TimelineEvent[]> = {};
   for (const [leadId, events] of Object.entries(base.timelineByLead)) {
+    if (!visibleLeadIds.has(leadId)) continue;
     timelineByLead[leadId] = [...events];
   }
   for (const e of session.timelineAdded) {
@@ -179,7 +263,9 @@ export function mergeSessionIntoSnapshot(
     timelineByLead[e.leadId] = list;
   }
 
-  const mergedBaseFollowups = base.followups.map((f) => mergeFollowup(f, session.followups.completion));
+  const mergedBaseFollowups = base.followups
+    .filter((f) => !f.leadId || visibleLeadIds.has(f.leadId))
+    .map((f) => mergeFollowup(f, session.followups.completion));
   const baseFollowupIds = new Set(mergedBaseFollowups.map((f) => f.id));
   const mergedExtras = session.followups.extras
     .filter(
@@ -192,22 +278,21 @@ export function mergeSessionIntoSnapshot(
     .map((f) => mergeFollowup(f, session.followups.completion));
   const followups = [...mergedBaseFollowups, ...mergedExtras];
 
-  const mergedBaseLeadTasks = base.leadTasks.map((t) =>
-    mergeLeadTask(t, session.leadTasks.completion),
-  );
+  const mergedBaseLeadTasks = base.leadTasks
+    .filter((t) => !t.leadId || visibleLeadIds.has(t.leadId))
+    .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const baseLeadTaskIds = new Set(mergedBaseLeadTasks.map((t) => t.id));
   const leadTaskExtrasFiltered = session.leadTasks.extras
     .filter((t) => !baseLeadTaskIds.has(t.id))
     .map((t) => mergeLeadTask(t, session.leadTasks.completion));
   const leadTasks = [...mergedBaseLeadTasks, ...leadTaskExtrasFiltered];
 
-  const leads = base.leads.map((l) => {
-    const patch = session.leadPatches[l.id] ?? {};
-    const act = session.leadActivity[l.id];
-    const touches = act ? l.touches + act.bump : l.touches;
-    const lastActivityAt = act?.lastAt ?? l.lastActivityAt;
-    return { ...l, ...patch, touches, lastActivityAt };
-  });
+  const deals = base.deals
+    .filter((d) => visibleLeadIds.has(d.leadId))
+    .map((d) => {
+      const p = session.dealPatches[d.id];
+      return p ? { ...d, ...p } : d;
+    });
 
-  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads };
+  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads, accounts, contacts, deals };
 }

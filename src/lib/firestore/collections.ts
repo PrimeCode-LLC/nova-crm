@@ -15,9 +15,16 @@ export const COLLECTIONS = {
   permissionOverrides: "permissionOverrides",
   activityCounters: "activityCounters",
   activityRecords: "activityRecords",
+  profiles: "profiles",
   scriptLibrary: "scriptLibrary",
+  /** Workspace-defined labels for leads, deals, accounts, contacts. */
+  labels: "labels",
   ingestQueue: "ingestQueue",
   auditLog: "auditLog",
+  workspaceChatChannels: "workspaceChatChannels",
+  workspaceChatMessages: "workspaceChatMessages",
+  /** Per-user last-read timestamps per channel (`channels.{channelId}` → ISO string). */
+  workspaceChatReads: "workspaceChatReads",
   /** SaaS tenants — read/write only through server (Admin SDK). */
   organizations: "organizations",
   /** Product-level operators — read/write only through server (Admin SDK). */
@@ -49,6 +56,11 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.permissionOverrides,
   COLLECTIONS.activityCounters,
   COLLECTIONS.activityRecords,
+  COLLECTIONS.profiles,
   COLLECTIONS.scriptLibrary,
+  COLLECTIONS.labels,
   COLLECTIONS.auditLog,
+  COLLECTIONS.workspaceChatChannels,
+  COLLECTIONS.workspaceChatMessages,
+  COLLECTIONS.workspaceChatReads,
 ] as const;

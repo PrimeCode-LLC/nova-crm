@@ -41,8 +41,9 @@ import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ROLES } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
-import type { OrgMemberRole, Role, User } from "@/lib/types";
+import type { Department, OrgMemberRole, PermissionOverride, Role, User } from "@/lib/types";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
+import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import {
   Search,
   UserPlus,
@@ -68,6 +69,13 @@ const STATUS_LABEL: Record<User["status"], string> = {
   pip: "PIP",
 };
 
+const INVITE_ORG_ROLE_LABEL: Record<string, string> = {
+  member: "Member",
+  manager: "Manager",
+  admin: "Admin",
+  owner: "Owner",
+};
+
 function titleFromEmail(email: string): string {
   const local = email.split("@")[0] ?? "user";
   return local
@@ -75,6 +83,40 @@ function titleFromEmail(email: string): string {
     .filter(Boolean)
     .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
     .join(" ");
+}
+
+function userLabelShort(
+  u: User | undefined,
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): string {
+  if (!u) return "";
+  const fromLookup = getOwnerDisplayName(u.id)?.trim() || "";
+  const name = u.displayName?.trim() || fromLookup;
+  if (name && name !== u.id) return name;
+  if (u.email?.trim()) return u.email.trim();
+  if (u.id.length >= 16) return `${u.id.slice(0, 4)}…${u.id.slice(-4)}`;
+  return u.id;
+}
+
+function permissionOverrideScopeDetail(
+  po: PermissionOverride,
+  departments: readonly Department[],
+  users: readonly User[],
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): string | null {
+  if (po.scope === "department" && po.scopeDepartmentId) {
+    return departments.find((d) => d.id === po.scopeDepartmentId)?.name ?? po.scopeDepartmentId;
+  }
+  if (po.scope === "custom" && po.scopeCustomDefinition?.trim()) {
+    return po.scopeCustomDefinition.trim();
+  }
+  if (po.scope === "team" && po.scopeTeamAnchorUserId) {
+    const u = users.find((x) => x.id === po.scopeTeamAnchorUserId);
+    return u
+      ? `Subtree: ${userLabelShort(u, getOwnerDisplayName)}`
+      : `Subtree: ${po.scopeTeamAnchorUserId}`;
+  }
+  return null;
 }
 
 function AdminUsersPageContent() {
@@ -86,18 +128,14 @@ function AdminUsersPageContent() {
     permissionOverrides,
     currentUserId,
     getUserById,
+    getOwnerDisplayName,
+    patchUser,
   } = useWorkspace();
 
   const viewer = getUserById(currentUserId);
   const canManage = canManageOrgUsers(viewer);
 
-  const [pendingEdits, setPendingEdits] = React.useState<
-    Record<string, Partial<Omit<User, "id">>>
-  >({});
-  const users = React.useMemo(
-    () => wsUsers.map((u) => ({ ...u, ...pendingEdits[u.id] })),
-    [wsUsers, pendingEdits],
-  );
+  const users = wsUsers;
 
   const [query, setQuery] = React.useState("");
   const [roleFilter, setRoleFilter] = React.useState("all");
@@ -241,7 +279,7 @@ function AdminUsersPageContent() {
       managerId: editManager === NONE ? undefined : editManager,
       status: editStatus,
     };
-    setPendingEdits((prev) => ({ ...prev, [editUserId]: { ...prev[editUserId], ...patch } }));
+    patchUser(editUserId, patch);
     setEditSaving(false);
     toast.success("User updated");
     closeEdit();
@@ -536,7 +574,9 @@ function AdminUsersPageContent() {
               <Label className="text-xs">Role</Label>
               <Select value={inviteRole || undefined} onValueChange={(v) => setInviteRole(v ?? "")}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select role" />
+                  <SelectValue placeholder="Select role">
+                    {inviteRole ? INVITE_ORG_ROLE_LABEL[inviteRole] ?? inviteRole : undefined}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="member">Member</SelectItem>
@@ -550,7 +590,9 @@ function AdminUsersPageContent() {
               <Label className="text-xs">Department (optional)</Label>
               <Select value={inviteDept} onValueChange={(v) => setInviteDept((v as typeof NONE) ?? NONE)}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="None" />
+                  <SelectValue placeholder="None">
+                    {inviteDept === NONE ? "None" : selectTriggerLabelByIdName(inviteDept, departments) ?? "Department"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={NONE}>None</SelectItem>
@@ -618,7 +660,7 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Role</Label>
                 <Select value={editRole} onValueChange={(v) => setEditRole((v as Role) ?? "salesperson")}>
                   <SelectTrigger className="h-9">
-                    <SelectValue />
+                    <SelectValue>{ROLES[editRole]?.label ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {Object.entries(ROLES).map(([k, v]) => (
@@ -633,7 +675,9 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Department</Label>
                 <Select value={editDept} onValueChange={(v) => setEditDept(v ?? NONE)}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="None" />
+                    <SelectValue placeholder="None">
+                      {editDept === NONE ? "None" : selectTriggerLabelByIdName(editDept, departments) ?? "Department"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>None</SelectItem>
@@ -649,7 +693,11 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Reports to</Label>
                 <Select value={editManager} onValueChange={(v) => setEditManager(v ?? NONE)}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="None" />
+                    <SelectValue placeholder="None">
+                      {editManager === NONE
+                        ? "None"
+                        : managerCandidates.find((m) => m.id === editManager)?.displayName ?? "Manager"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={NONE}>None</SelectItem>
@@ -665,7 +713,7 @@ function AdminUsersPageContent() {
                 <Label className="text-xs">Status</Label>
                 <Select value={editStatus} onValueChange={(v) => setEditStatus((v as User["status"]) ?? "active")}>
                   <SelectTrigger className="h-9">
-                    <SelectValue />
+                    <SelectValue>{STATUS_LABEL[editStatus]}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">Active</SelectItem>
@@ -783,7 +831,14 @@ function AdminUsersPageContent() {
                       Permission overrides ({userOverrides.length})
                     </div>
                     <div className="space-y-2">
-                      {userOverrides.map((po) => (
+                      {userOverrides.map((po) => {
+                        const scopeDetail = permissionOverrideScopeDetail(
+                          po,
+                          departments,
+                          users,
+                          getOwnerDisplayName,
+                        );
+                        return (
                         <div
                           key={po.id}
                           className="rounded-md border p-3 space-y-1.5 bg-muted/20"
@@ -801,10 +856,15 @@ function AdminUsersPageContent() {
                             <Badge variant="outline" className="text-[10px]">
                               {po.action}
                             </Badge>
-                            <Badge variant="outline" className="text-[10px]">
+                            <Badge variant="outline" className="text-[10px] capitalize">
                               {po.scope}
                             </Badge>
                           </div>
+                          {scopeDetail ? (
+                            <p className="text-[11px] text-muted-foreground leading-snug">
+                              {scopeDetail}
+                            </p>
+                          ) : null}
                           {po.note && (
                             <p className="text-xs text-muted-foreground">
                               {po.note}
@@ -822,7 +882,8 @@ function AdminUsersPageContent() {
                             · {fmtRelative(po.createdAt)}
                           </p>
                         </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </section>
                 )}

@@ -14,13 +14,14 @@ import {
   Accordion,
   AccordionContent,
   AccordionItem,
+  AccordionHeader,
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-account-store";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
-import { Loader2, Mail, PlugZap, ShieldAlert, Plus, Trash2 } from "lucide-react";
+import { Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
 
 export function EmailInboxSettingsCard() {
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
@@ -36,8 +37,71 @@ export function EmailInboxSettingsCard() {
   const [savingRemote, setSavingRemote] = React.useState(false);
   const [testingMailboxId, setTestingMailboxId] = React.useState<string | null>(null);
   const [openValues, setOpenValues] = React.useState<string[]>([]);
+  /** `${mailboxId}:smtp` | `${mailboxId}:imap` → password field visible as plain text */
+  const [passwordFieldVisible, setPasswordFieldVisible] = React.useState<Record<string, boolean>>({});
 
   const persistKey = React.useMemo(() => JSON.stringify(mailboxes), [mailboxes]);
+
+  /**
+   * Persists all mailboxes to the server.
+   * @param manual — when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
+   */
+  const persistMailboxesRemote = React.useCallback(async (manual?: boolean): Promise<boolean> => {
+    const s = useEmailAccountStore.getState();
+    if (!s.emailServerSyncEnabled || !s.emailServerHydrated) {
+      if (manual) {
+        toast.error("Could not save email settings", {
+          description: !s.emailServerHydrated
+            ? "Your mailboxes are still loading. Wait a moment, then try again."
+            : "Saving is unavailable—check your connection or sign in again. If this persists, reload the page.",
+        });
+      }
+      return false;
+    }
+    const all = s.mailboxes;
+    setSavingRemote(true);
+    try {
+      for (const mb of all) {
+        const res = await fetch("/api/email/mailboxes", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ mailbox: mb }),
+        });
+        let data: { ok?: boolean; error?: string } = {};
+        try {
+          data = (await res.json()) as { ok?: boolean; error?: string };
+        } catch {
+          data = {};
+        }
+        if (!res.ok || !data.ok) {
+          const msg =
+            data.error ??
+            (res.status >= 500
+              ? "Server error while saving."
+              : res.status === 401 || res.status === 403
+                ? "You are not allowed to save these settings."
+                : `Save failed (${res.status}).`);
+          toast.error(manual ? "Could not save email settings" : "Failed to save mailbox", {
+            description: msg,
+          });
+          return false;
+        }
+      }
+      if (manual) {
+        toast.success("Email settings saved");
+      }
+      return true;
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Network error";
+      toast.error(manual ? "Could not save email settings" : "Could not save mailbox", {
+        description: msg,
+      });
+      return false;
+    } finally {
+      setSavingRemote(false);
+    }
+  }, []);
 
   React.useEffect(() => {
     if (mailboxes.length === 0) {
@@ -52,37 +116,31 @@ export function EmailInboxSettingsCard() {
     });
   }, [mailboxes, activeMailboxId]);
 
+  /** Debounced persist; flush when the timer is cancelled (refresh / route change) so edits are not lost. */
   React.useEffect(() => {
     if (!emailServerSyncEnabled || !emailServerHydrated) return;
 
+    let timerFired = false;
     const timer = window.setTimeout(() => {
-      setSavingRemote(true);
-      const all = useEmailAccountStore.getState().mailboxes;
-      void (async () => {
-        try {
-          for (const mb of all) {
-            const res = await fetch("/api/email/mailboxes", {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              credentials: "same-origin",
-              body: JSON.stringify({ mailbox: mb }),
-            });
-            const data = (await res.json()) as { ok?: boolean; error?: string };
-            if (!data.ok) {
-              toast.error(data.error ?? "Failed to save mailbox");
-              break;
-            }
-          }
-        } catch {
-          toast.error("Could not save mailbox");
-        } finally {
-          setSavingRemote(false);
-        }
-      })();
+      timerFired = true;
+      void persistMailboxesRemote(false);
     }, 600);
 
-    return () => window.clearTimeout(timer);
-  }, [persistKey, emailServerHydrated, emailServerSyncEnabled]);
+    return () => {
+      window.clearTimeout(timer);
+      if (!timerFired) void persistMailboxesRemote(false);
+    };
+  }, [persistKey, emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
+
+  /** Hard refresh / tab close can tear down React before the debounced effect runs; flush once. */
+  React.useEffect(() => {
+    if (!emailServerSyncEnabled || !emailServerHydrated) return;
+    const onPageHide = () => {
+      void persistMailboxesRemote(false);
+    };
+    window.addEventListener("pagehide", onPageHide);
+    return () => window.removeEventListener("pagehide", onPageHide);
+  }, [emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
 
   async function testConnectionsFor(mb: EmailMailboxSettings) {
     const smtpHost = normalizeMailHost(mb.smtp.host);
@@ -192,20 +250,37 @@ export function EmailInboxSettingsCard() {
               → Email tab. Open each mailbox below to edit. Use Test connection inside a mailbox to verify SMTP/IMAP.
             </CardDescription>
           </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0 gap-1.5"
-            onClick={() => {
-              const id = addMailbox();
-              setActiveMailbox(id);
-              setOpenValues([id]);
-              toast.success("Mailbox added");
-            }}
-          >
-            <Plus className="h-3.5 w-3.5" /> Add mailbox
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              className="gap-1.5"
+              disabled={savingRemote}
+              onClick={() => void persistMailboxesRemote(true)}
+            >
+              {savingRemote ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Save className="h-3.5 w-3.5" />
+              )}
+              Save settings
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => {
+                const id = addMailbox();
+                setActiveMailbox(id);
+                setOpenValues([id]);
+                toast.success("Mailbox added");
+              }}
+            >
+              <Plus className="h-3.5 w-3.5" /> Add mailbox
+            </Button>
+          </div>
         </CardHeader>
         <CardContent className="space-y-4">
           <Accordion
@@ -220,23 +295,25 @@ export function EmailInboxSettingsCard() {
           >
             {mailboxes.map((mb) => (
               <AccordionItem key={mb.id} value={mb.id} className="border-b-0 not-last:border-b">
-                <AccordionTrigger className="py-3 hover:no-underline">
-                  <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
-                    <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
-                    {mb.enabled ? (
-                      <Badge variant="secondary" className="shrink-0 text-[10px]">
-                        Enabled
-                      </Badge>
-                    ) : (
-                      <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
-                        Off
-                      </Badge>
-                    )}
-                    {mb.emailAddress?.trim() ? (
-                      <span className="truncate text-xs font-normal text-muted-foreground">{mb.emailAddress.trim()}</span>
-                    ) : null}
-                  </div>
-                </AccordionTrigger>
+                <AccordionHeader>
+                  <AccordionTrigger className="py-3 hover:no-underline">
+                    <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
+                      <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
+                      {mb.enabled ? (
+                        <Badge variant="secondary" className="shrink-0 text-[10px]">
+                          Enabled
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
+                          Off
+                        </Badge>
+                      )}
+                      {mb.emailAddress?.trim() ? (
+                        <span className="truncate text-xs font-normal text-muted-foreground">{mb.emailAddress.trim()}</span>
+                      ) : null}
+                    </div>
+                  </AccordionTrigger>
+                </AccordionHeader>
                 <AccordionContent className="pb-4 pt-0">
                   <div className="space-y-6 border-t pt-4">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -378,13 +455,37 @@ export function EmailInboxSettingsCard() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs">Password / app password</Label>
-                          <Input
-                            className="h-9"
-                            type="password"
-                            autoComplete="new-password"
-                            value={mb.smtp.password}
-                            onChange={(e) => setSmtp(mb.id, { password: e.target.value })}
-                          />
+                          <div className="relative">
+                            <Input
+                              className="h-9 pr-10"
+                              type={passwordFieldVisible[`${mb.id}:smtp`] ? "text" : "password"}
+                              autoComplete="new-password"
+                              value={mb.smtp.password}
+                              onChange={(e) => setSmtp(mb.id, { password: e.target.value })}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="absolute right-0.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              aria-label={
+                                passwordFieldVisible[`${mb.id}:smtp`]
+                                  ? "Hide SMTP password"
+                                  : "Show SMTP password"
+                              }
+                              aria-pressed={passwordFieldVisible[`${mb.id}:smtp`] ?? false}
+                              onClick={() => {
+                                const k = `${mb.id}:smtp`;
+                                setPasswordFieldVisible((prev) => ({ ...prev, [k]: !prev[k] }));
+                              }}
+                            >
+                              {passwordFieldVisible[`${mb.id}:smtp`] ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                       </div>
                       <p className="mt-2 text-[11px] text-muted-foreground">
@@ -445,13 +546,37 @@ export function EmailInboxSettingsCard() {
                         </div>
                         <div className="space-y-1.5">
                           <Label className="text-xs">Password</Label>
-                          <Input
-                            className="h-9"
-                            type="password"
-                            autoComplete="new-password"
-                            value={mb.imap.password}
-                            onChange={(e) => setImap(mb.id, { password: e.target.value })}
-                          />
+                          <div className="relative">
+                            <Input
+                              className="h-9 pr-10"
+                              type={passwordFieldVisible[`${mb.id}:imap`] ? "text" : "password"}
+                              autoComplete="new-password"
+                              value={mb.imap.password}
+                              onChange={(e) => setImap(mb.id, { password: e.target.value })}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon-sm"
+                              className="absolute right-0.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                              aria-label={
+                                passwordFieldVisible[`${mb.id}:imap`]
+                                  ? "Hide IMAP password"
+                                  : "Show IMAP password"
+                              }
+                              aria-pressed={passwordFieldVisible[`${mb.id}:imap`] ?? false}
+                              onClick={() => {
+                                const k = `${mb.id}:imap`;
+                                setPasswordFieldVisible((prev) => ({ ...prev, [k]: !prev[k] }));
+                              }}
+                            >
+                              {passwordFieldVisible[`${mb.id}:imap`] ? (
+                                <EyeOff className="h-4 w-4" />
+                              ) : (
+                                <Eye className="h-4 w-4" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
                         <div className="space-y-1.5 sm:col-span-2">
                           <Label className="text-xs">Sync interval (minutes)</Label>
@@ -516,7 +641,9 @@ export function EmailInboxSettingsCard() {
           </Accordion>
 
           <p className="text-[11px] text-muted-foreground">
-            Non-sensitive fields sync to your workspace; credentials are encrypted on the server.
+            Non-sensitive fields sync to your workspace; credentials are encrypted on the server. Changes also save
+            automatically after you stop typing—use <span className="font-medium text-foreground">Save settings</span>{" "}
+            to write immediately and confirm the server accepted them.
             {savingRemote ? " Saving to workspace..." : ""} Use an app-specific password for Gmail / Microsoft when 2FA
             is on.
           </p>

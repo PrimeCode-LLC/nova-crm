@@ -65,6 +65,7 @@ function SignupForm() {
     resolver: zodResolver(formSchema),
     defaultValues: { fullName: "", company: "", email: "", password: "" },
   });
+  const { setValue } = form;
 
   React.useEffect(() => {
     if (!inviteToken) return;
@@ -83,7 +84,7 @@ function SignupForm() {
           setInviteError(data.error);
         } else {
           setInvitePreview(data);
-          form.setValue("email", data.email);
+          setValue("email", data.email);
         }
       } catch {
         if (!cancelled) setInviteError("Could not verify invite.");
@@ -92,7 +93,7 @@ function SignupForm() {
     return () => {
       cancelled = true;
     };
-  }, [inviteToken, form]);
+  }, [inviteToken, setValue]);
 
   React.useEffect(() => {
     if (!joinToken || inviteToken) return;

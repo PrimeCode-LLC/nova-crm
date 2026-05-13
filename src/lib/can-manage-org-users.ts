@@ -13,3 +13,11 @@ export function canManageOrgUsers(viewer: User | undefined): boolean {
   if (titleIndicatesFounder(viewer.title ?? "")) return true;
   return false;
 }
+
+/** Who may change reporting lines / CRM workspace fields for other users (demo + live API). */
+export function canManageOrgHierarchy(viewer: User | undefined): boolean {
+  if (!viewer) return false;
+  if (canManageOrgUsers(viewer)) return true;
+  if (viewer.orgRole === "owner" || viewer.orgRole === "admin") return true;
+  return false;
+}

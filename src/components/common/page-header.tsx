@@ -16,7 +16,7 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2 border-b px-6 pt-5 pb-4 sm:flex-row sm:items-end sm:justify-between",
+        "flex shrink-0 flex-col gap-2 border-b px-6 pt-5 pb-4 sm:flex-row sm:items-end sm:justify-between",
         className,
       )}
     >
@@ -39,5 +39,7 @@ export function PageBody({
   className?: string;
   children: React.ReactNode;
 }) {
-  return <div className={cn("flex-1 p-6 space-y-6", className)}>{children}</div>;
+  return (
+    <div className={cn("flex min-h-0 flex-1 flex-col space-y-6 overflow-y-auto p-6", className)}>{children}</div>
+  );
 }

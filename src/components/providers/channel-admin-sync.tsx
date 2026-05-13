@@ -8,11 +8,20 @@ import { isAuthDisabled } from "@/lib/auth/flags";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import type { ChannelKey, OrganizationChannelAdminConfig } from "@/lib/types";
+import { markChannelAdminJsonSent } from "@/lib/channel-admin-server-sync";
 import {
   getChannelAdminPersistedSnapshot,
   useChannelAdminStore,
 } from "@/stores/channel-admin-store";
+import { useZustandPersistHydrated } from "@/hooks/use-zustand-persist-hydrated";
 import { roleAtLeast } from "@/lib/platform/org-role";
+
+const channelAdminStoreWithPersist = useChannelAdminStore as {
+  persist: {
+    hasHydrated: () => boolean;
+    onFinishHydration: (fn: () => void) => () => void;
+  };
+};
 
 /**
  * Loads workspace channel admin config from Firestore (org.channelAdmin) and
@@ -38,6 +47,7 @@ export function ChannelAdminSync() {
     autoMap: Record<ChannelKey, boolean>;
     descriptionOverrides: Partial<Record<ChannelKey, string>>;
   } | null>(null);
+  const channelAdminLsHydrated = useZustandPersistHydrated(channelAdminStoreWithPersist);
 
   React.useEffect(() => {
     if (isAuthDisabled() || !isFirebaseWebConfigured() || mode === "demo") {
@@ -45,6 +55,11 @@ export function ChannelAdminSync() {
       return;
     }
     if (!orgId) {
+      setHydrated(false);
+      return;
+    }
+    /** Wait for localStorage rehydration so GET merge sees `customChannels` from this browser. */
+    if (!channelAdminLsHydrated) {
       setHydrated(false);
       return;
     }
@@ -79,8 +94,10 @@ export function ChannelAdminSync() {
           descriptionOverrides: merged.descriptionOverrides,
         };
         const snap = getChannelAdminPersistedSnapshot(useChannelAdminStore.getState());
-        lastSentJson.current = JSON.stringify(snap);
+        const snapJson = JSON.stringify(snap);
+        lastSentJson.current = snapJson;
         lastSentCustomJson.current = JSON.stringify(snap.customChannels);
+        markChannelAdminJsonSent(snapJson);
         setHydrated(true);
       })
       .catch(() => {
@@ -90,7 +107,7 @@ export function ChannelAdminSync() {
     return () => {
       cancelled = true;
     };
-  }, [orgId, mode]);
+  }, [orgId, mode, channelAdminLsHydrated]);
 
   React.useEffect(() => {
     if (
@@ -123,7 +140,10 @@ export function ChannelAdminSync() {
             body: json,
           })
             .then((res) => {
-              if (res.ok) lastSentJson.current = json;
+              if (res.ok) {
+                lastSentJson.current = json;
+                markChannelAdminJsonSent(json);
+              }
             })
             .catch(() => {});
         }, 900);
@@ -152,7 +172,11 @@ export function ChannelAdminSync() {
           .then((res) => {
             if (res.ok) {
               lastSentCustomJson.current = customJson;
-              lastSentJson.current = JSON.stringify(getChannelAdminPersistedSnapshot(useChannelAdminStore.getState()));
+              const nextJson = JSON.stringify(
+                getChannelAdminPersistedSnapshot(useChannelAdminStore.getState()),
+              );
+              lastSentJson.current = nextJson;
+              markChannelAdminJsonSent(nextJson);
             }
           })
           .catch(() => {});

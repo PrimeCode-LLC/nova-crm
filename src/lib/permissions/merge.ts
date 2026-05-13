@@ -44,6 +44,13 @@ const ROLE_DEFAULT_SCOPE: Record<
     contacts: "own",
     activities: "own",
   },
+  prospecting: {
+    leads: "own",
+    deals: "own",
+    accounts: "own",
+    contacts: "own",
+    activities: "own",
+  },
 };
 
 const SCOPE_RANK: Record<ScopeKey, number> = {

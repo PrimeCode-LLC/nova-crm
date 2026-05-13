@@ -23,6 +23,7 @@ import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { initials, fmtRelative } from "@/lib/format";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 export function ContactDetailView({ contactId }: { contactId: string }) {
   const ws = useWorkspace();
@@ -166,6 +167,18 @@ export function ContactDetailView({ contactId }: { contactId: string }) {
                     {contact.seniority}
                   </Badge>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Labels</CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <EntityLabelPicker
+                  labelIds={contact.labelIds ?? []}
+                  onChange={(next) => ws.patchContact(contact.id, { labelIds: next.length ? next : undefined })}
+                />
               </CardContent>
             </Card>
 

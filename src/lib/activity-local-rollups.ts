@@ -26,6 +26,12 @@ export function upsertLocalActivityRollup(row: ActivityCounterRow): void {
   sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
 }
 
+export function removeLocalActivityRollupById(id: string): void {
+  const existing = readLocalActivityRollups();
+  const next = existing.filter((r) => r.id !== id);
+  sessionStorage.setItem(STORAGE_KEY, JSON.stringify(next));
+}
+
 /** Prefer locally saved rows over mock/server rows for the same day, channel, user, and profile. */
 export function mergeActivityCounters(
   base: readonly ActivityCounterRow[],

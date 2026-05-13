@@ -15,6 +15,8 @@ import type {
   ActivityCounterRow,
   ActivityRecord,
   PermissionOverride,
+  ScriptLibraryItem,
+  CrmLabel,
   ChannelKey,
   PipelineStage,
   BANT,
@@ -24,6 +26,7 @@ import type {
   LeadPriority,
   PushStatus,
 } from "./types";
+import { DEMO_WORKSPACE_ORG_ID } from "./demo-workspace-ids";
 
 function isoDaysAgo(d: number): string {
   const date = new Date();
@@ -42,6 +45,7 @@ export const mockUsers: User[] = [
     email: "james.mitchell@nova.co",
     displayName: "James Mitchell",
     roleId: "director",
+    orgRole: "owner",
     title: "Founder & Director",
     isSuperAdmin: true,
     status: "active",
@@ -106,7 +110,7 @@ export const mockUsers: User[] = [
     id: "u-scrape-01",
     email: "laura.bennett@nova.co",
     displayName: "Laura Bennett",
-    roleId: "data_scraper",
+    roleId: "prospecting",
     departmentId: "d-data",
     managerId: "u-mgr-email",
     title: "Data Researcher",
@@ -144,6 +148,7 @@ export const mockPermissionOverrides: PermissionOverride[] = [
     resource: "leads",
     action: "read",
     scope: "department",
+    scopeDepartmentId: "d-outbound",
     effect: "grant",
     note: "Chris mentors Emma and Ryan; needs to review their leads.",
     createdBy: "u-director",
@@ -164,11 +169,11 @@ export const mockPermissionOverrides: PermissionOverride[] = [
 
 // ───────────────────────── Profiles ─────────────────────────
 export const mockProfiles: Profile[] = [
-  { id: "p-upwork-main", name: "CompanyMain (Upwork)", channel: "upwork", type: "upwork", ownerId: "u-mgr-upwork", active: true },
-  { id: "p-upwork-personal", name: "Personal, Upwork (exec)", channel: "upwork", type: "upwork", ownerId: "u-director", active: true },
-  { id: "p-cv-backend", name: "CV-Backend-v3", channel: "job_apply", type: "cv", ownerId: "u-sales-03", active: true },
-  { id: "p-cv-fullstack", name: "CV-Fullstack-v2", channel: "job_apply", type: "cv", ownerId: "u-sales-03", active: true },
-  { id: "p-li-primary", name: "Executive, LinkedIn outbound", channel: "linkedin_outbound", type: "linkedin", ownerId: "u-director", active: true },
+  { id: "p-upwork-main", name: "CompanyMain (Upwork)", channel: "upwork", ownerId: "u-mgr-upwork", active: true },
+  { id: "p-upwork-personal", name: "Personal, Upwork (exec)", channel: "upwork", ownerId: "u-director", active: true },
+  { id: "p-cv-backend", name: "CV-Backend-v3", channel: "job_apply", ownerId: "u-sales-03", active: true },
+  { id: "p-cv-fullstack", name: "CV-Fullstack-v2", channel: "job_apply", ownerId: "u-sales-03", active: true },
+  { id: "p-li-primary", name: "Executive, LinkedIn outbound", channel: "linkedin_outbound", ownerId: "u-director", active: true },
 ];
 
 // ───────────────────────── Campaigns ─────────────────────────
@@ -209,6 +214,36 @@ export const mockCampaigns: Campaign[] = [
   },
 ];
 
+const labelDemoTs = isoDaysAgo(300);
+
+/** Demo workspace labels — assign via `labelIds` on leads, deals, accounts, contacts. */
+export const mockCrmLabels: CrmLabel[] = [
+  {
+    id: "lbl-demo-1",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    name: "Enterprise",
+    color: "hsl(221 83% 53%)",
+    createdAt: labelDemoTs,
+    updatedAt: labelDemoTs,
+  },
+  {
+    id: "lbl-demo-2",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    name: "Inbound",
+    color: "hsl(142 76% 36%)",
+    createdAt: labelDemoTs,
+    updatedAt: labelDemoTs,
+  },
+  {
+    id: "lbl-demo-3",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    name: "Follow up",
+    color: "hsl(38 92% 45%)",
+    createdAt: labelDemoTs,
+    updatedAt: labelDemoTs,
+  },
+];
+
 // ───────────────────────── Accounts ─────────────────────────
 const accountSeeds = [
   { name: "Northwind Logistics", domain: "northwind.io", industry: "Logistics", size: "201-500" as CompanySize, rev: "50m_100m" as RevenueRange },
@@ -233,34 +268,55 @@ const accountSeeds = [
   { name: "Maple Media", domain: "maplemedia.tv", industry: "Media", size: "201-500" as CompanySize, rev: "50m_100m" as RevenueRange },
 ];
 
-export const mockAccounts: Account[] = accountSeeds.map((a, i) => ({
-  id: `a-${i + 1}`,
-  name: a.name,
-  domain: a.domain,
-  industry: a.industry,
-  size: a.size,
-  revenueRange: a.rev,
-  location: pick(["San Francisco, US", "New York, US", "London, UK", "Berlin, DE", "Singapore", "Toronto, CA", "Dubai, AE"], i),
-  yearFounded: 2010 + (i % 12),
-  website: `https://${a.domain}`,
-  linkedin: `https://linkedin.com/company/${a.domain?.split(".")[0]}`,
-  techStack: pick(
-    [
-      ["Next.js", "Postgres", "AWS"],
-      ["React", "Django", "GCP"],
-      ["Vue", "Go", "Azure"],
-      ["HubSpot", "Salesforce"],
-      ["Shopify", "Klaviyo"],
-    ],
-    i,
-  ),
-  contactCount: 1 + (i % 4),
-  leadCount: 1 + (i % 3),
-  openDealValue: i % 3 === 0 ? 12000 + i * 2400 : 0,
-  ownerId: pick(["u-sales-01", "u-sales-02", "u-sales-03", "u-tl-inbound"], i),
-  createdAt: isoDaysAgo(200 - i * 4),
-  updatedAt: isoDaysAgo(i % 30),
-}));
+export const mockAccounts: Account[] = accountSeeds.map((a, i) => {
+  const base: Account = {
+    id: `a-${i + 1}`,
+    name: a.name,
+    domain: a.domain,
+    industry: a.industry,
+    size: a.size,
+    revenueRange: a.rev,
+    location: pick(["San Francisco, US", "New York, US", "London, UK", "Berlin, DE", "Singapore", "Toronto, CA", "Dubai, AE"], i),
+    yearFounded: 2010 + (i % 12),
+    website: `https://${a.domain}`,
+    linkedin: `https://linkedin.com/company/${a.domain?.split(".")[0]}`,
+    techStack: pick(
+      [
+        ["Next.js", "Postgres", "AWS"],
+        ["React", "Django", "GCP"],
+        ["Vue", "Go", "Azure"],
+        ["HubSpot", "Salesforce"],
+        ["Shopify", "Klaviyo"],
+      ],
+      i,
+    ),
+    contactCount: 1 + (i % 4),
+    leadCount: 1 + (i % 3),
+    openDealValue: i % 3 === 0 ? 12000 + i * 2400 : 0,
+    ownerId: pick(["u-sales-01", "u-sales-02", "u-sales-03", "u-tl-inbound"], i),
+    createdAt: isoDaysAgo(200 - i * 4),
+    updatedAt: isoDaysAgo(i % 30),
+  };
+  if (i === 0) {
+    return {
+      ...base,
+      businessDescription: "Regional freight visibility and routing platform for mid-market shippers.",
+      city: "Austin",
+      state: "TX",
+      country: "USA",
+      location: "Austin, TX, USA",
+      yearFounded: 2016,
+      businessStatus: "active",
+      website: "https://northwind.io",
+      websiteStatus: "live",
+      onlineActivityScore: "high",
+      lastWebsiteActivityNote: "Blog + changelog active weekly",
+      careersPageUrl: "https://northwind.io/careers",
+      labelIds: ["lbl-demo-1"],
+    };
+  }
+  return base;
+});
 
 // ───────────────────────── Contacts ─────────────────────────
 const firstNames = ["Jordan", "Priya", "Sofia", "Marcus", "Avery", "Ethan", "Lucia", "Noah", "Isabela", "Kenji", "Fiona", "Liam", "Nadia", "Owen", "Mira", "Ross", "Chloe", "Diego", "Amaia", "Kai"];
@@ -281,6 +337,15 @@ export const mockContacts: Contact[] = mockAccounts.flatMap((acc, i) => {
       fullName: `${first} ${last}`,
       email: `${first.toLowerCase()}.${last.toLowerCase()}@${acc.domain}`,
       emailVerified: idx % 4 !== 0,
+      ...(acc.id === "a-1" && j === 0
+        ? {
+            personalEmail: "jordan.h.personal@gmail.com",
+            emailVerificationStatus: "verified" as const,
+            contactSource: "LinkedIn",
+            bestContactChannel: "email" as const,
+            labelIds: ["lbl-demo-2", "lbl-demo-3"],
+          }
+        : {}),
       phone: idx % 3 === 0 ? `+1 415-555-01${(10 + idx).toString().padStart(2, "0")}` : undefined,
       linkedin: `https://linkedin.com/in/${first.toLowerCase()}-${last.toLowerCase()}`,
       title: pick(titles, idx),
@@ -310,7 +375,8 @@ const triggers = [
 ];
 const owners = ["u-sales-01", "u-sales-02", "u-sales-03", "u-tl-inbound"];
 
-export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
+export const mockLeads: Lead[] = (
+  mockContacts.slice(0, 40).map((c, i) => {
   const account = mockAccounts.find((a) => a.id === c.accountId)!;
   const channel = pick(channels, i);
   const stage = pick(stages, i + 2);
@@ -333,6 +399,7 @@ export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
     priority: pick(prios, i + 1),
     ownerId: pick(owners, i),
     scraperId: i % 5 === 0 ? "u-scrape-01" : undefined,
+    intakeKind: undefined,
 
     contactName: c.fullName,
     contactTitle: c.title,
@@ -371,7 +438,27 @@ export const mockLeads: Lead[] = mockContacts.slice(0, 40).map((c, i) => {
 
     createdAt: isoDaysAgo(60 - i),
     updatedAt: isoDaysAgo(idleDays),
+    ...(i % 9 === 0
+      ? { labelIds: ["lbl-demo-1"] as string[] }
+      : i % 13 === 0
+        ? { labelIds: ["lbl-demo-2", "lbl-demo-3"] as string[] }
+        : {}),
   };
+  }) as Lead[]
+).map((row, i): Lead => {
+  const PROSPECT_ROWS = new Set([0, 1, 3, 6, 9, 12, 15]);
+  if (!PROSPECT_ROWS.has(i)) return row;
+  const PROSPECT_OWNERS = [
+    "u-scrape-01",
+    "u-sales-01",
+    "u-sales-02",
+    "u-mgr-email",
+    "u-sales-03",
+    "u-tl-inbound",
+    "u-director",
+  ] as const;
+  const owner = PROSPECT_OWNERS[i % PROSPECT_OWNERS.length]!;
+  return { ...row, intakeKind: "prospect", ownerId: owner, createdById: owner };
 });
 
 // ───────────────────────── Deals ─────────────────────────
@@ -396,6 +483,7 @@ export const mockDeals: Deal[] = mockLeads
     wonAt: l.stage === "won" ? isoDaysAgo(i % 30) : undefined,
     lostAt: l.stage === "lost" ? isoDaysAgo(i % 30) : undefined,
     lostReason: l.stage === "lost" ? "Budget frozen" : undefined,
+    ...(i < 2 ? { labelIds: ["lbl-demo-1"] as string[] } : i === 2 ? { labelIds: ["lbl-demo-2"] as string[] } : {}),
   }));
 
 // ───────────────────────── Touchpoints ─────────────────────────
@@ -498,6 +586,119 @@ export const mockFollowups: Followup[] = mockLeads.slice(0, 15).map((l, i) => ({
   auto: i % 3 === 0,
 }));
 
+function demoScriptItem(
+  row: Omit<ScriptLibraryItem, "content">,
+): ScriptLibraryItem {
+  return {
+    ...row,
+    content: [row.primaryText, row.secondaryText ?? ""].filter(Boolean).join("\n\n"),
+  };
+}
+
+/** Demo scripts library — never read from Firestore in demo mode. */
+export const mockScriptLibrary: ScriptLibraryItem[] = [
+  demoScriptItem({
+    id: "scr-demo-1",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-mgr-email",
+    ownerName: "Sarah Chen",
+    title: "Outbound: SaaS founder opener",
+    category: "pitch",
+    primaryText:
+      "Noticed {{company}} is hiring AEs while still running outbound from spreadsheets — we help teams like yours keep Instantly + LinkedIn in one pipeline view.",
+    secondaryText:
+      "Nova is a lightweight CRM for outbound-first teams. Worth a 12-min walkthrough this week?\n\nEither way, congrats on the traction.",
+    tags: ["cold_email", "saas", "founders"],
+    createdAt: isoDaysAgo(40),
+    updatedAt: isoDaysAgo(3),
+  }),
+  demoScriptItem({
+    id: "scr-demo-2",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-sales-01",
+    ownerName: "Chris Sullivan",
+    title: "Rebuttal: “We already have HubSpot”",
+    category: "rebuttal",
+    primaryText: "Totally fair — HubSpot is great as a system of record.",
+    secondaryText:
+      "Teams usually keep HubSpot and use Nova on top for outbound execution: sequences, tasks, and rep activity in one place without ripping out CRM.",
+    tags: ["rebuttal", "competitor"],
+    createdAt: isoDaysAgo(25),
+    updatedAt: isoDaysAgo(5),
+  }),
+  demoScriptItem({
+    id: "scr-demo-3",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-director",
+    ownerName: "James Mitchell",
+    title: "Enterprise pilot — follow-up email",
+    category: "followup_template",
+    primaryText: "Subject: Nova pilot — security + rollout checklist",
+    secondaryText:
+      "Hi {{first_name}},\n\nFollowing up with the one-pager and our SOC2 summary. Happy to loop in your IT contact for SSO + audit logs.\n\nOpen to Thursday 2pm ET?\n\nJames",
+    tags: ["enterprise", "follow_up"],
+    createdAt: isoDaysAgo(60),
+    updatedAt: isoDaysAgo(1),
+  }),
+  demoScriptItem({
+    id: "scr-demo-4",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-sales-03",
+    ownerName: "Ryan Cooper",
+    title: "Upwork proposal — first message",
+    category: "email_template",
+    primaryText: "Subject: {{project_title}} — delivery plan + similar work",
+    secondaryText:
+      "Hi — I’m Ryan from Nova. I’ve shipped similar CRM integrations for three B2B teams on Upwork (see portfolio). Here’s a tight plan for week 1…",
+    tags: ["upwork", "proposal"],
+    createdAt: isoDaysAgo(18),
+    updatedAt: isoDaysAgo(2),
+  }),
+  demoScriptItem({
+    id: "scr-demo-5",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-mgr-email",
+    ownerName: "Sarah Chen",
+    title: "Discovery call — agenda",
+    category: "meeting_agenda",
+    primaryText: "20 min: goals, outbound stack, handoffs between SDR/AE.",
+    secondaryText:
+      "1) Current pipeline sources\n2) Where deals stall\n3) Nova fit + rollout\n4) Next steps + pilot scope",
+    tags: ["discovery", "agenda"],
+    createdAt: isoDaysAgo(12),
+    updatedAt: isoDaysAgo(12),
+  }),
+  demoScriptItem({
+    id: "scr-demo-6",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-sales-02",
+    ownerName: "Emma Walsh",
+    title: "Cold call — first 60 seconds",
+    category: "call_script",
+    primaryText:
+      "Hi {{first_name}}, this is Emma from Nova — did I catch you at an okay time? I’ll be brief.",
+    secondaryText:
+      "We work with outbound teams who outgrew spreadsheets but don’t want another heavy CRM. If nothing’s broken I’ll bow out — worth 20 seconds on what changed for you this quarter?",
+    tags: ["call", "sdr"],
+    createdAt: isoDaysAgo(8),
+    updatedAt: isoDaysAgo(8),
+  }),
+  demoScriptItem({
+    id: "scr-demo-7",
+    organizationId: DEMO_WORKSPACE_ORG_ID,
+    ownerUid: "u-tl-inbound",
+    ownerName: "Michael Hayes",
+    title: "Website demo request — reply",
+    category: "email_template",
+    primaryText: "Subject: Re: Demo request — Nova",
+    secondaryText:
+      "Thanks for reaching out! I’ve got {{slot_options}} open this week. Which works best on your side?\n\nMichael",
+    tags: ["inbound", "demo"],
+    createdAt: isoDaysAgo(5),
+    updatedAt: isoDaysAgo(4),
+  }),
+];
+
 const L1 = mockLeads[0]!;
 const L2 = mockLeads[1]!;
 
@@ -541,6 +742,72 @@ export const mockLeadTasks: LeadTask[] = [
     dueAt: isoDaysAgo(-2),
     createdAt: isoDaysAgo(5),
   },
+  (() => {
+    const Ls2 = mockLeads.find((l) => l.ownerId === "u-sales-02" && l.intakeKind !== "prospect") ?? L2;
+    return {
+      id: "lt-4",
+      leadId: Ls2.id,
+      title: "Send LinkedIn voice note after connection",
+      description: "Reference their post on pipeline hygiene.",
+      taskType: "other",
+      visibility: "on_lead",
+      assigneeId: "u-sales-02",
+      createdById: "u-mgr-email",
+      dueAt: isoDaysAgo(1),
+      createdAt: isoDaysAgo(3),
+      contextCompany: Ls2.companyName,
+      contextContact: Ls2.contactName,
+    } satisfies LeadTask;
+  })(),
+  (() => {
+    const Ls3 = mockLeads.find((l) => l.ownerId === "u-sales-03" && l.intakeKind !== "prospect") ?? L2;
+    return {
+      id: "lt-5",
+      leadId: Ls3.id,
+      title: "Refresh Upwork portfolio snippet for CRM builds",
+      taskType: "review",
+      visibility: "assignees_only",
+      assigneeId: "u-sales-03",
+      createdById: "u-mgr-upwork",
+      dueAt: isoDaysAgo(2),
+      createdAt: isoDaysAgo(4),
+      contextCompany: Ls3.companyName,
+      contextContact: Ls3.contactName,
+    } satisfies LeadTask;
+  })(),
+  (() => {
+    const Lp = mockLeads.find((l) => l.intakeKind === "prospect" && l.ownerId === "u-scrape-01") ?? L1;
+    return {
+      id: "lt-6",
+      leadId: Lp.id,
+      title: "Enrich prospect row before SDR handoff",
+      description: "Verify work email + employee range.",
+      taskType: "other",
+      visibility: "on_lead",
+      assigneeId: "u-scrape-01",
+      createdById: "u-scrape-01",
+      dueAt: isoDaysAgo(0),
+      createdAt: isoDaysAgo(1),
+      contextCompany: Lp.companyName,
+      contextContact: Lp.contactName,
+    } satisfies LeadTask;
+  })(),
+  (() => {
+    const Lm = mockLeads.find((l) => l.ownerId === "u-tl-inbound" && l.intakeKind !== "prospect") ?? L1;
+    return {
+      id: "lt-7",
+      leadId: Lm.id,
+      title: "Schedule solution demo with inbound champion",
+      taskType: "call",
+      visibility: "on_lead",
+      assigneeId: "u-tl-inbound",
+      createdById: "u-tl-inbound",
+      dueAt: isoDaysAgo(-1),
+      createdAt: isoDaysAgo(2),
+      contextCompany: Lm.companyName,
+      contextContact: Lm.contactName,
+    } satisfies LeadTask;
+  })(),
 ];
 
 // ───────────────────────── Notes ─────────────────────────

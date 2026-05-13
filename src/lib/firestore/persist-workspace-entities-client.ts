@@ -9,7 +9,17 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import type { Followup, LeadTask, Note, Touchpoint, TimelineEvent } from "@/lib/types";
+import type {
+  ActivityCounterRow,
+  Followup,
+  LeadTask,
+  Note,
+  Profile,
+  Touchpoint,
+  TimelineEvent,
+  WorkspaceChatChannel,
+  WorkspaceChatMessage,
+} from "@/lib/types";
 
 export async function persistNoteCreate(
   db: Firestore,
@@ -76,6 +86,10 @@ export async function persistFollowupSetCompleted(
     completedAt: completed ? serverTimestamp() : deleteField(),
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function persistFollowupDelete(db: Firestore, followupId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.followups, followupId));
 }
 
 export async function persistLeadTaskCreate(
@@ -152,4 +166,130 @@ export async function persistLeadActivityBump(db: Firestore, leadId: string): Pr
     lastActivityAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+}
+
+/** Daily funnel counter rollup; visible to the org via hierarchy rules after sync. */
+export async function persistActivityCounterCreate(
+  db: Firestore,
+  organizationId: string,
+  row: ActivityCounterRow,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    userId: row.userId,
+    channel: row.channel,
+    date: row.date,
+    counters: row.counters,
+    createdAt: serverTimestamp(),
+  };
+  if (row.profileId) data.profileId = row.profileId;
+  if (row.campaignId) data.campaignId = row.campaignId;
+  await setDoc(doc(db, COLLECTIONS.activityCounters, row.id), data);
+}
+
+export async function persistActivityCounterDelete(db: Firestore, counterId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.activityCounters, counterId));
+}
+
+export async function persistActivityRecordDelete(db: Firestore, recordId: string): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.activityRecords, recordId));
+}
+
+export async function persistProfileCreate(
+  db: Firestore,
+  organizationId: string,
+  p: Profile,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    name: p.name,
+    channel: p.channel,
+    ownerId: p.ownerId,
+    active: p.active ?? true,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+  if (p.notes) data.notes = p.notes;
+  await setDoc(doc(db, COLLECTIONS.profiles, p.id), data);
+}
+
+export async function persistProfileUpdate(
+  db: Firestore,
+  profileId: string,
+  patch: Partial<Profile>,
+): Promise<void> {
+  const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.name !== undefined) payload.name = patch.name;
+  if (patch.channel !== undefined) payload.channel = patch.channel;
+  if (patch.ownerId !== undefined) payload.ownerId = patch.ownerId;
+  if (patch.active !== undefined) payload.active = patch.active;
+  if (patch.notes !== undefined) {
+    payload.notes = patch.notes && patch.notes.trim() ? patch.notes : deleteField();
+  }
+  await updateDoc(doc(db, COLLECTIONS.profiles, profileId), payload);
+}
+
+export async function persistWorkspaceChatChannelCreate(
+  db: Firestore,
+  organizationId: string,
+  ch: WorkspaceChatChannel,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    kind: ch.kind,
+    slug: ch.slug,
+    name: ch.name,
+    createdById: ch.createdById,
+    createdAt: ch.createdAt,
+    updatedAt: serverTimestamp(),
+  };
+  if (ch.memberIds?.length) data.memberIds = ch.memberIds;
+  await setDoc(doc(db, COLLECTIONS.workspaceChatChannels, ch.id), data);
+}
+
+export async function persistWorkspaceChatMessageCreate(
+  db: Firestore,
+  organizationId: string,
+  msg: WorkspaceChatMessage,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    channelId: msg.channelId,
+    authorId: msg.authorId,
+    body: msg.body,
+    createdAt: msg.createdAt,
+  };
+  if (msg.mentionUserIds?.length) data.mentionUserIds = msg.mentionUserIds;
+  await setDoc(doc(db, COLLECTIONS.workspaceChatMessages, msg.id), data);
+}
+
+export async function persistWorkspaceChatChannelUpdateName(
+  db: Firestore,
+  channelId: string,
+  name: string,
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTIONS.workspaceChatChannels, channelId), {
+    name,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/** Merge-updates last-read for one channel (and ensures parent doc fields exist). */
+export async function persistWorkspaceChatChannelLastRead(
+  db: Firestore,
+  organizationId: string,
+  userId: string,
+  channelId: string,
+  readThroughIso: string,
+): Promise<void> {
+  const readDocId = `${organizationId}__${userId}`;
+  await setDoc(
+    doc(db, COLLECTIONS.workspaceChatReads, readDocId),
+    {
+      organizationId,
+      userId,
+      channels: { [channelId]: readThroughIso },
+    },
+    { merge: true },
+  );
 }

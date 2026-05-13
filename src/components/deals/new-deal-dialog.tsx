@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import type { Deal, Lead, PipelineStage, User } from "@/lib/types";
 import { PIPELINE_STAGES } from "@/lib/constants";
+import {
+  leadPickerTriggerLabel,
+  selectTriggerLabelById,
+  selectTriggerLabelByKey,
+} from "@/lib/base-ui-select-label";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -55,8 +60,43 @@ type DealFormState = {
   ownerId: string;
 };
 
-function initialFormState(leads: Lead[], users: User[], currentUserId: string): DealFormState {
+type OwnerOption = { id: string; label: string };
+
+function buildOwnerOptions(
+  users: User[],
+  currentUserId: string,
+  getOwnerDisplayName?: (uid: string) => string | undefined,
+): OwnerOption[] {
+  const list: OwnerOption[] = users.map((u) => ({
+    id: u.id,
+    label:
+      u.displayName?.trim() ||
+      getOwnerDisplayName?.(u.id)?.trim() ||
+      u.email?.trim() ||
+      u.id,
+  }));
+  const uid = currentUserId?.trim();
+  if (uid && !list.some((o) => o.id === uid)) {
+    const label =
+      getOwnerDisplayName?.(uid)?.trim() ||
+      users.find((u) => u.id === uid)?.displayName?.trim() ||
+      "You";
+    list.unshift({ id: uid, label });
+  }
+  return list;
+}
+
+function initialFormState(
+  leads: Lead[],
+  ownerOptions: OwnerOption[],
+  currentUserId: string,
+  leadOwnerFallback: string,
+): DealFormState {
   const lead = leads[0];
+  const defaultOwner =
+    ownerOptions.find((o) => o.id === currentUserId)?.id ??
+    ownerOptions[0]?.id ??
+    leadOwnerFallback;
   return {
     leadId: lead?.id ?? "",
     name: lead ? `${lead.companyName}: New opportunity` : "",
@@ -64,7 +104,7 @@ function initialFormState(leads: Lead[], users: User[], currentUserId: string): 
     value: "10000",
     probability: String(defaultProbability("qualified")),
     closeDate: todayInputValue(),
-    ownerId: users.length ? (currentUserId || users[0]!.id) : (lead?.ownerId ?? ""),
+    ownerId: defaultOwner,
   };
 }
 
@@ -74,6 +114,7 @@ export function NewDealDialog({
   leads,
   users,
   currentUserId,
+  getOwnerDisplayName,
   onCreate,
 }: {
   open: boolean;
@@ -81,12 +122,48 @@ export function NewDealDialog({
   leads: Lead[];
   users: User[];
   currentUserId: string;
+  /** When the signed-in user is not yet in `users`, resolves a label for the owner picker (workspace roster / org labels). */
+  getOwnerDisplayName?: (uid: string) => string | undefined;
   onCreate: (deal: Deal) => void;
 }) {
   const router = useRouter();
-  const [form, setForm] = React.useState(() => initialFormState(leads, users, currentUserId));
+  const ownerOptions = React.useMemo(
+    () => buildOwnerOptions(users, currentUserId, getOwnerDisplayName),
+    [users, currentUserId, getOwnerDisplayName],
+  );
 
-  const selectedLead = leads.find((l) => l.id === form.leadId);
+  const [form, setForm] = React.useState(() =>
+    initialFormState(leads, ownerOptions, currentUserId, leads[0]?.ownerId ?? ""),
+  );
+
+  React.useEffect(() => {
+    if (!open) return;
+    setForm((f) => {
+      if (leads.length === 0) return f;
+      if (leads.some((l) => l.id === f.leadId)) return f;
+      const first = leads[0]!;
+      return {
+        ...f,
+        leadId: first.id,
+        name: f.name.trim() ? f.name : `${first.companyName}: New opportunity`,
+      };
+    });
+  }, [open, leads]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    setForm((f) => {
+      if (ownerOptions.length === 0) return f;
+      if (ownerOptions.some((o) => o.id === f.ownerId)) return f;
+      const next =
+        ownerOptions.find((o) => o.id === currentUserId)?.id ?? ownerOptions[0]!.id;
+      return { ...f, ownerId: next };
+    });
+  }, [open, ownerOptions, currentUserId]);
+
+  const resolvedLeadId = leads.some((l) => l.id === form.leadId)
+    ? form.leadId
+    : (leads[0]?.id ?? "");
 
   function handleStageChange(next: PipelineStage) {
     setForm((f) => ({
@@ -98,7 +175,8 @@ export function NewDealDialog({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedLead) {
+    const leadForSubmit = leads.find((l) => l.id === resolvedLeadId);
+    if (!leadForSubmit) {
       toast.error("Add at least one lead before creating a deal.");
       return;
     }
@@ -115,16 +193,22 @@ export function NewDealDialog({
     const now = isoNow();
     const deal: Deal = {
       id: `local-${crypto.randomUUID()}`,
-      leadId: selectedLead.id,
-      accountId: selectedLead.accountId,
-      contactId: selectedLead.contactId,
+      leadId: leadForSubmit.id,
+      accountId: leadForSubmit.accountId,
+      contactId: leadForSubmit.contactId,
       name: form.name.trim(),
       stage: form.stage,
       value: v,
       currency: "USD",
       probability: Math.min(100, Math.max(0, Number.isFinite(p) ? p : 0)),
       expectedCloseDate: form.closeDate,
-      ownerId: users.length ? (form.ownerId || selectedLead.ownerId) : selectedLead.ownerId,
+      ownerId:
+        ownerOptions.length === 0
+          ? leadForSubmit.ownerId
+          : ownerOptions.some((o) => o.id === form.ownerId)
+            ? form.ownerId || leadForSubmit.ownerId
+            : (ownerOptions.find((o) => o.id === currentUserId)?.id ?? ownerOptions[0]!.id) ||
+              leadForSubmit.ownerId,
       products: ["Core Platform"],
       createdAt: now,
       updatedAt: now,
@@ -135,7 +219,17 @@ export function NewDealDialog({
     router.push(`/deals/${deal.id}`);
   }
 
-  const canSubmit = leads.length > 0 && Boolean(selectedLead);
+  const canSubmit = leads.length > 0 && Boolean(leads.find((l) => l.id === resolvedLeadId));
+
+  const dealLeadTriggerLabel = leadPickerTriggerLabel(resolvedLeadId, leads);
+  const resolvedOwnerId =
+    ownerOptions.length === 0
+      ? form.ownerId
+      : ownerOptions.some((o) => o.id === form.ownerId)
+        ? form.ownerId
+        : ownerOptions[0]!.id;
+  const dealOwnerTriggerLabel = selectTriggerLabelById(resolvedOwnerId, ownerOptions);
+  const dealStageTriggerLabel = selectTriggerLabelByKey(form.stage, PIPELINE_STAGES);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -145,7 +239,7 @@ export function NewDealDialog({
             <DialogTitle>New deal</DialogTitle>
             <DialogDescription>
               {leads.length === 0
-                ? "Add leads to your workspace first so each deal can link to an account and contact."
+                ? "Add leads to your workspace first so each deal can link to a company and contact."
                 : "Creates a deal for this browser session until your workspace is connected to live data."}
             </DialogDescription>
           </DialogHeader>
@@ -154,13 +248,13 @@ export function NewDealDialog({
               <Label htmlFor="deal-lead">Lead</Label>
               {leads.length > 0 ? (
                 <Select
-                  value={form.leadId}
+                  value={resolvedLeadId}
                   onValueChange={(leadId) =>
                     setForm((f) => ({ ...f, leadId: leadId ?? "" }))
                   }
                 >
                   <SelectTrigger id="deal-lead" className="w-full">
-                    <SelectValue placeholder="Select lead" />
+                    <SelectValue placeholder="Select lead">{dealLeadTriggerLabel ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {leads.map((l) => (
@@ -194,7 +288,7 @@ export function NewDealDialog({
                   onValueChange={(v) => handleStageChange(v as PipelineStage)}
                 >
                   <SelectTrigger id="deal-stage">
-                    <SelectValue />
+                    <SelectValue>{dealStageTriggerLabel ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {PIPELINE_STAGES.map((s) => (
@@ -207,20 +301,24 @@ export function NewDealDialog({
               </div>
               <div className="grid gap-1.5">
                 <Label htmlFor="deal-owner">Owner</Label>
-                {users.length > 0 ? (
+                {ownerOptions.length > 0 ? (
                   <Select
-                    value={form.ownerId || users[0]!.id}
+                    value={
+                      ownerOptions.some((o) => o.id === form.ownerId)
+                        ? form.ownerId
+                        : ownerOptions[0]!.id
+                    }
                     onValueChange={(ownerId) =>
                       setForm((f) => ({ ...f, ownerId: ownerId ?? "" }))
                     }
                   >
                     <SelectTrigger id="deal-owner">
-                      <SelectValue />
+                      <SelectValue placeholder="Select owner">{dealOwnerTriggerLabel ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {users.map((u) => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.displayName}
+                      {ownerOptions.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
                         </SelectItem>
                       ))}
                     </SelectContent>

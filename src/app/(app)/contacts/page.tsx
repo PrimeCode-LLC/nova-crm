@@ -75,7 +75,7 @@ export default function ContactsPage() {
     <>
       <PageHeader
         title="Contacts"
-        description="People at our accounts, deduped by email."
+        description="People at our companies, deduped by email."
         actions={
           <>
             <Button

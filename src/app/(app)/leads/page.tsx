@@ -33,6 +33,10 @@ function LeadsPageInner() {
   const idleOnly = searchParams.get("filter") === "idle";
 
   const { leads, isDemo } = useWorkspace();
+  const salesLeadCount = React.useMemo(
+    () => leads.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead").length,
+    [leads],
+  );
   const tableRef = React.useRef<LeadsTableRef>(null);
   const [tableSession, setTableSession] = React.useState<{
     key: number;
@@ -43,7 +47,7 @@ function LeadsPageInner() {
     <>
       <PageHeader
         title="Leads"
-        description="Every engagement we're working across all channels."
+        description="Pipeline and outreach across channels. Intake-only rows are listed under Prospects in the sidebar."
         actions={
           <>
             <DropdownMenu>
@@ -96,7 +100,7 @@ function LeadsPageInner() {
               variant="outline"
               size="sm"
               type="button"
-              disabled={leads.length === 0}
+              disabled={salesLeadCount === 0}
               onClick={() => tableRef.current?.exportFilteredCsv()}
             >
               <Download className="h-3.5 w-3.5" /> Export
@@ -105,7 +109,7 @@ function LeadsPageInner() {
         }
       />
       <PageBody>
-        {!isDemo && leads.length === 0 ? (
+        {!isDemo && salesLeadCount === 0 ? (
           <WorkspaceEmptyHint title="No leads in workspace" />
         ) : (
           <LeadsTable
@@ -116,6 +120,8 @@ function LeadsPageInner() {
             urlChannelKey={urlChannelKey}
             urlStageKey={urlStageKey}
             idleOnly={idleOnly}
+            initialIntakeScope="sales_lead"
+            lockedIntakeScope="sales_lead"
           />
         )}
       </PageBody>

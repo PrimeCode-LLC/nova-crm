@@ -14,6 +14,9 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import type {
   Account,
+  ActivityCounterRow,
+  ActivityRecord,
+  ChannelKey,
   Contact,
   Deal,
   Followup,
@@ -24,6 +27,8 @@ import type {
   Touchpoint,
   TimelineEvent,
   User,
+  Profile,
+  CrmLabel,
 } from "@/lib/types";
 
 export type LiveWorkspaceFirestoreState = {
@@ -39,6 +44,10 @@ export type LiveWorkspaceFirestoreState = {
   leadTasks: LeadTask[];
   touchpoints: Touchpoint[];
   timelineEvents: TimelineEvent[];
+  activityCounters: ActivityCounterRow[];
+  activityRecords: ActivityRecord[];
+  profiles: Profile[];
+  crmLabels: CrmLabel[];
 };
 
 const empty: LiveWorkspaceFirestoreState = {
@@ -54,6 +63,10 @@ const empty: LiveWorkspaceFirestoreState = {
   leadTasks: [],
   touchpoints: [],
   timelineEvents: [],
+  activityCounters: [],
+  activityRecords: [],
+  profiles: [],
+  crmLabels: [],
 };
 
 function asUser(id: string, raw: Record<string, unknown>): User {
@@ -125,6 +138,28 @@ function optionalNonEmptyString(v: unknown): string | undefined {
   if (typeof v !== "string") return undefined;
   const t = v.trim();
   return t.length > 0 ? t : undefined;
+}
+
+function asCrmLabel(id: string, raw: Record<string, unknown>): CrmLabel {
+  return {
+    id,
+    organizationId: String(raw.organizationId ?? ""),
+    name: String(raw.name ?? ""),
+    color: optionalNonEmptyString(raw.color),
+    createdAt: firestoreValueToIso(raw.createdAt),
+    updatedAt: firestoreValueToIso(raw.updatedAt),
+  };
+}
+
+function asProfile(id: string, raw: Record<string, unknown>): Profile {
+  return {
+    id,
+    name: String(raw.name ?? ""),
+    channel: (raw.channel as Profile["channel"]) ?? "cold_email",
+    ownerId: String(raw.ownerId ?? ""),
+    active: raw.active !== false,
+    notes: optionalNonEmptyString(raw.notes),
+  };
 }
 
 function asNote(id: string, raw: Record<string, unknown>): Note {
@@ -207,14 +242,55 @@ function asTimelineEvent(id: string, raw: Record<string, unknown>): TimelineEven
   };
 }
 
+function asActivityCounterRow(id: string, raw: Record<string, unknown>): ActivityCounterRow {
+  const countersRaw = raw.counters;
+  const counters: Record<string, number> = {};
+  if (countersRaw && typeof countersRaw === "object" && !Array.isArray(countersRaw)) {
+    for (const [k, v] of Object.entries(countersRaw as Record<string, unknown>)) {
+      const n = typeof v === "number" ? v : Number(v);
+      if (Number.isFinite(n)) counters[k] = n;
+    }
+  }
+  return {
+    id,
+    userId: String(raw.userId ?? ""),
+    channel: String(raw.channel ?? "cold_email") as ChannelKey,
+    profileId: optionalNonEmptyString(raw.profileId),
+    campaignId: optionalNonEmptyString(raw.campaignId),
+    date: firestoreValueToIso(raw.date),
+    counters,
+  };
+}
+
+function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRecord {
+  const metadataRaw = raw.metadata;
+  return {
+    id,
+    userId: String(raw.userId ?? ""),
+    channel: String(raw.channel ?? "cold_email") as ChannelKey,
+    profileId: optionalNonEmptyString(raw.profileId),
+    leadId: optionalNonEmptyString(raw.leadId),
+    type: String(raw.type ?? "activity"),
+    occurredAt: firestoreValueToIso(raw.occurredAt),
+    summary: typeof raw.summary === "string" ? raw.summary : undefined,
+    metadata:
+      metadataRaw && typeof metadataRaw === "object" && !Array.isArray(metadataRaw)
+        ? (metadataRaw as Record<string, unknown>)
+        : undefined,
+  };
+}
+
 /**
  * Real-time tenant CRM documents for live workspace mode.
  */
 export function useLiveWorkspaceFirestore(organizationId: string | undefined): LiveWorkspaceFirestoreState {
   const [state, setState] = React.useState<LiveWorkspaceFirestoreState>(empty);
+  /** One entry per listener; cleared on that listener’s success so the banner can recover after transient errors. */
+  const listenerErrorsRef = React.useRef(new Map<string, Error>());
 
   React.useEffect(() => {
     if (!organizationId || !isFirebaseWebConfigured()) {
+      listenerErrorsRef.current.clear();
       setState({
         loading: false,
         error: null,
@@ -228,6 +304,10 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         leadTasks: [],
         touchpoints: [],
         timelineEvents: [],
+        activityCounters: [],
+        activityRecords: [],
+        profiles: [],
+        crmLabels: [],
       });
       return;
     }
@@ -236,6 +316,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
     try {
       db = getFirebaseDb();
     } catch (e) {
+      listenerErrorsRef.current.clear();
       setState({
         loading: false,
         error: e instanceof Error ? e : new Error(String(e)),
@@ -249,11 +330,44 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         leadTasks: [],
         touchpoints: [],
         timelineEvents: [],
+        activityCounters: [],
+        activityRecords: [],
+        profiles: [],
+        crmLabels: [],
       });
       return;
     }
 
+    listenerErrorsRef.current.clear();
     setState((s) => ({ ...s, loading: true, error: null }));
+
+    const firstAggregateError = (): Error | null => {
+      const v = listenerErrorsRef.current.values().next();
+      return v.done ? null : v.value;
+    };
+
+    const applySnapshot = <K extends keyof LiveWorkspaceFirestoreState>(
+      listenerKey: string,
+      dataKey: K,
+      value: LiveWorkspaceFirestoreState[K],
+    ) => {
+      listenerErrorsRef.current.delete(listenerKey);
+      setState((prev) => ({
+        ...prev,
+        [dataKey]: value,
+        loading: false,
+        error: firstAggregateError(),
+      }));
+    };
+
+    const applyListenerError = (listenerKey: string, err: Error) => {
+      listenerErrorsRef.current.set(listenerKey, err);
+      setState((prev) => ({
+        ...prev,
+        loading: false,
+        error: firstAggregateError(),
+      }));
+    };
 
     const unsubs: Unsubscribe[] = [];
 
@@ -266,9 +380,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qUsers,
         (snap) => {
           const users = snap.docs.map((d) => asUser(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, users, loading: false }));
+          applySnapshot("users", "users", users);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("users", err),
       ),
     );
 
@@ -281,9 +395,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qLeads,
         (snap) => {
           const leads = snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, leads, loading: false }));
+          applySnapshot("leads", "leads", leads);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("leads", err),
       ),
     );
 
@@ -298,9 +412,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const accounts = snap.docs.map((d) =>
             asAccount(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, accounts, loading: false }));
+          applySnapshot("accounts", "accounts", accounts);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("accounts", err),
       ),
     );
 
@@ -315,9 +429,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const contacts = snap.docs.map((d) =>
             asContact(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, contacts, loading: false }));
+          applySnapshot("contacts", "contacts", contacts);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("contacts", err),
       ),
     );
 
@@ -330,9 +444,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qDeals,
         (snap) => {
           const deals = snap.docs.map((d) => asDeal(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, deals, loading: false }));
+          applySnapshot("deals", "deals", deals);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("deals", err),
       ),
     );
 
@@ -345,9 +459,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
         qNotes,
         (snap) => {
           const notes = snap.docs.map((d) => asNote(d.id, d.data() as Record<string, unknown>));
-          setState((prev) => ({ ...prev, notes, loading: false }));
+          applySnapshot("notes", "notes", notes);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("notes", err),
       ),
     );
 
@@ -362,9 +476,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const followups = snap.docs.map((d) =>
             asFollowup(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, followups, loading: false }));
+          applySnapshot("followups", "followups", followups);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("followups", err),
       ),
     );
 
@@ -379,9 +493,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const leadTasks = snap.docs.map((d) =>
             asLeadTask(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, leadTasks, loading: false }));
+          applySnapshot("leadTasks", "leadTasks", leadTasks);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("leadTasks", err),
       ),
     );
 
@@ -396,9 +510,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const touchpoints = snap.docs.map((d) =>
             asTouchpoint(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, touchpoints, loading: false }));
+          applySnapshot("touchpoints", "touchpoints", touchpoints);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("touchpoints", err),
       ),
     );
 
@@ -413,13 +527,78 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
           const timelineEvents = snap.docs.map((d) =>
             asTimelineEvent(d.id, d.data() as Record<string, unknown>),
           );
-          setState((prev) => ({ ...prev, timelineEvents, loading: false }));
+          applySnapshot("timelineEvents", "timelineEvents", timelineEvents);
         },
-        (err) => setState((prev) => ({ ...prev, error: err, loading: false })),
+        (err) => applyListenerError("timelineEvents", err),
+      ),
+    );
+
+    const qActivityCounters = query(
+      collection(db, COLLECTIONS.activityCounters),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qActivityCounters,
+        (snap) => {
+          const activityCounters = snap.docs.map((d) =>
+            asActivityCounterRow(d.id, d.data() as Record<string, unknown>),
+          );
+          applySnapshot("activityCounters", "activityCounters", activityCounters);
+        },
+        (err) => applyListenerError("activityCounters", err),
+      ),
+    );
+
+    const qActivityRecords = query(
+      collection(db, COLLECTIONS.activityRecords),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qActivityRecords,
+        (snap) => {
+          const activityRecords = snap.docs.map((d) =>
+            asActivityRecord(d.id, d.data() as Record<string, unknown>),
+          );
+          applySnapshot("activityRecords", "activityRecords", activityRecords);
+        },
+        (err) => applyListenerError("activityRecords", err),
+      ),
+    );
+
+    const qProfiles = query(
+      collection(db, COLLECTIONS.profiles),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qProfiles,
+        (snap) => {
+          const profiles = snap.docs.map((d) => asProfile(d.id, d.data() as Record<string, unknown>));
+          applySnapshot("profiles", "profiles", profiles);
+        },
+        (err) => applyListenerError("profiles", err),
+      ),
+    );
+
+    const qLabels = query(
+      collection(db, COLLECTIONS.labels),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qLabels,
+        (snap) => {
+          const crmLabels = snap.docs.map((d) => asCrmLabel(d.id, d.data() as Record<string, unknown>));
+          applySnapshot("crmLabels", "crmLabels", crmLabels);
+        },
+        (err) => applyListenerError("crmLabels", err),
       ),
     );
 
     return () => {
+      listenerErrorsRef.current.clear();
       for (const u of unsubs) u();
     };
   }, [organizationId]);

@@ -38,7 +38,10 @@ function newEntityId(prefix: string): string {
 function parseCompanySize(raw: string | undefined): CompanySize | undefined {
   if (!raw) return undefined;
   const t = raw.trim();
-  return COMPANY_SIZES.includes(t as CompanySize) ? (t as CompanySize) : undefined;
+  if (COMPANY_SIZES.includes(t as CompanySize)) return t as CompanySize;
+  const lower = t.toLowerCase();
+  if (lower === "solo") return "solo";
+  return undefined;
 }
 
 /** Returns false if the row has no usable identity (skip silently). */

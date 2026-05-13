@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from "lucide-react";
@@ -10,6 +11,7 @@ export function KpiCard({
   icon: Icon,
   deltaType = "auto",
   className,
+  href,
   onClick,
   selected,
 }: {
@@ -20,6 +22,8 @@ export function KpiCard({
   icon?: LucideIcon;
   deltaType?: "auto" | "positive-up" | "positive-down";
   className?: string;
+  /** When set, the whole card navigates (preferred over onClick for dashboard KPI drill-down). */
+  href?: string;
   onClick?: () => void;
   selected?: boolean;
 }) {
@@ -34,9 +38,9 @@ export function KpiCard({
       : trend === "up";
   const TrendIcon = trend === "up" ? ArrowUpRight : trend === "down" ? ArrowDownRight : Minus;
 
-  const interactive = Boolean(onClick);
+  const interactive = Boolean(href || onClick);
 
-  return (
+  const card = (
     <Card
       className={cn(
         "relative overflow-hidden transition-colors",
@@ -44,11 +48,11 @@ export function KpiCard({
         selected && "ring-2 ring-primary/60 border-primary/40",
         className,
       )}
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onClick={onClick}
+      role={interactive && !href ? "button" : undefined}
+      tabIndex={interactive && !href ? 0 : undefined}
+      onClick={href ? undefined : onClick}
       onKeyDown={
-        interactive
+        interactive && !href
           ? (e) => {
               if (e.key === "Enter" || e.key === " ") {
                 e.preventDefault();
@@ -91,4 +95,17 @@ export function KpiCard({
       </CardContent>
     </Card>
   );
+
+  if (href) {
+    return (
+      <Link
+        href={href}
+        className="block rounded-xl text-inherit no-underline outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+      >
+        {card}
+      </Link>
+    );
+  }
+
+  return card;
 }

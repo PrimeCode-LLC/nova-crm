@@ -4,7 +4,17 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
-import { CalendarClock, Clock, Plus, Sparkles } from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { CalendarClock, Clock, Plus, Sparkles, Trash2 } from "lucide-react";
 import type { Followup, Lead } from "@/lib/types";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
@@ -12,12 +22,26 @@ import { cn } from "@/lib/utils";
 import { UserChip } from "@/components/common/user-chip";
 import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { toast } from "sonner";
 
 export function LeadFollowups({ followups, lead }: { followups: Followup[]; lead: Lead }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
-  const { addFollowup, setFollowupCompleted, currentUserId, leads } = useWorkspace();
+  const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
+  const { addFollowup, setFollowupCompleted, removeFollowup, currentUserId, leads, users, isDemo } =
+    useWorkspace();
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
+
+  const canDelete =
+    !isDemo && viewerHasElevatedWorkspaceRole(users.find((u) => u.id === currentUserId));
+
+  function confirmDelete() {
+    if (!deleteTarget) return;
+    removeFollowup(deleteTarget.id);
+    toast.success("Followup deleted");
+    setDeleteTarget(null);
+  }
 
   return (
     <div className="space-y-4">
@@ -64,7 +88,12 @@ export function LeadFollowups({ followups, lead }: { followups: Followup[]; lead
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-medium truncate">{f.title}</span>
-                  <Badge className={cn("rounded-md border-transparent text-[10px]", PRIORITY_TONE[f.priority].className)}>
+                  <Badge
+                    className={cn(
+                      "rounded-md border-transparent text-[10px]",
+                      PRIORITY_TONE[f.priority].className,
+                    )}
+                  >
                     {PRIORITY_TONE[f.priority].label}
                   </Badge>
                   {f.auto && (
@@ -77,7 +106,7 @@ export function LeadFollowups({ followups, lead }: { followups: Followup[]; lead
                   <p className="text-xs text-muted-foreground truncate mt-0.5">{f.description}</p>
                 )}
               </div>
-              <div className="flex items-center gap-3 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 <UserChip userId={f.ownerId} size="xs" nameOnly />
                 <span
                   className={cn(
@@ -88,6 +117,18 @@ export function LeadFollowups({ followups, lead }: { followups: Followup[]; lead
                   <Clock className="h-3 w-3" />
                   {fmtDate(f.dueAt, "MMM d")} · {fmtRelative(f.dueAt)}
                 </span>
+                {canDelete ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    aria-label="Delete followup"
+                    onClick={() => setDeleteTarget(f)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
               </div>
             </li>
           );
@@ -121,14 +162,41 @@ export function LeadFollowups({ followups, lead }: { followups: Followup[]; lead
                 <span className="text-sm line-through text-muted-foreground truncate flex-1">
                   {f.title}
                 </span>
-                <span className="text-xs text-muted-foreground">
-                  {fmtRelative(f.completedAt)}
-                </span>
+                <span className="text-xs text-muted-foreground">{fmtRelative(f.completedAt)}</span>
+                {canDelete ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                    aria-label="Delete followup"
+                    onClick={() => setDeleteTarget(f)}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </Button>
+                ) : null}
               </li>
             ))}
           </ul>
         </div>
       )}
+
+      <AlertDialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this followup?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes the reminder from the workspace for everyone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

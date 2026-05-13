@@ -10,12 +10,27 @@ import type { NextConfig } from "next";
  * app under a path with no ancestor lockfile, so the inferred root stays small.
  */
 const nextConfig: NextConfig = {
+  /** Temporarily surface readable component names in production error stacks while we diagnose runtime crashes (React #185). Safe to remove once stable. */
+  productionBrowserSourceMaps: true,
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.googleusercontent.com" },
       { protocol: "https", hostname: "firebasestorage.googleapis.com" },
     ],
   },
+  // Email-stack packages are CommonJS with Node-only deps (iconv-lite, native-ish
+  // CJS chains). Turbopack can't bundle them for server routes — externalize so
+  // they're require()'d at runtime from node_modules instead.
+  serverExternalPackages: [
+    "mailparser",
+    "@zone-eu/mailsplit",
+    "imapflow",
+    "nodemailer",
+    "iconv-lite",
+    "html-to-text",
+    "libmime",
+    "encoding-japanese",
+  ],
 };
 
 export default nextConfig;

@@ -22,6 +22,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CHANNEL_LIST } from "@/lib/constants";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 
 function newId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -95,7 +96,7 @@ export function LogTouchpointDialog({
               <Label>Channel</Label>
               <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
                 <SelectTrigger>
-                  <SelectValue />
+                  <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   {CHANNEL_LIST.map((c) => (

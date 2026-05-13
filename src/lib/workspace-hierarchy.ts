@@ -1,4 +1,4 @@
-import type { User, Lead, TimelineEvent } from "./types";
+import type { User, Lead, TimelineEvent, Followup } from "./types";
 import type { WorkspaceSnapshot } from "./workspace-dataset";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
 
@@ -34,6 +34,9 @@ export function leadVisibleForLiveViewer(
   viewer: User,
   orgUsers: readonly User[],
 ): boolean {
+  /** Open-queue rows: no owner yet — everyone in the org can see and claim. */
+  if (!lead.ownerId?.trim()) return true;
+
   if (seesAllLeadsInTenant(viewer)) return true;
 
   if (viewer.roleId === "manager" || viewer.roleId === "team_lead") {
@@ -49,7 +52,7 @@ export function leadVisibleForLiveViewer(
     return deptOwnerIds.has(lead.ownerId);
   }
 
-  if (viewer.roleId === "data_scraper") {
+  if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
     return lead.ownerId === viewer.id || lead.scraperId === viewer.id;
   }
 
@@ -67,6 +70,41 @@ function directoryUserIdsForLive(viewer: User, orgUsers: readonly User[]): Set<s
     return new Set(orgUsers.filter((u) => u.departmentId === viewer.departmentId).map((u) => u.id));
   }
   return new Set([viewer.id]);
+}
+
+/**
+ * User IDs whose activity rollups / records the viewer may see.
+ * Includes the viewer, everyone in their manager-id subtree (so parents see reports even without manager role),
+ * and same-department peers when departmentId is set. Owners/directors/admins see all (null).
+ */
+export function activityActorUserIdsVisibleToViewer(
+  viewer: User,
+  orgUsers: readonly User[],
+): Set<string> | null {
+  if (seesAllLeadsInTenant(viewer)) return null;
+  const ids = new Set<string>([viewer.id]);
+  for (const id of collectDescendantUserIds(viewer.id, orgUsers)) {
+    ids.add(id);
+  }
+  if (viewer.departmentId) {
+    for (const u of orgUsers) {
+      if (u.departmentId === viewer.departmentId) ids.add(u.id);
+    }
+  }
+  return ids;
+}
+
+/** Followups on visible leads/deals, or standalone reminders whose owner is in the viewer's activity scope. */
+export function followupVisibleInHierarchyScope(
+  f: Followup,
+  visibleLeadIds: Set<string>,
+  visibleDealIds: Set<string>,
+  activityActorIds: Set<string>,
+): boolean {
+  if (f.leadId && visibleLeadIds.has(f.leadId)) return true;
+  if (f.dealId && visibleDealIds.has(f.dealId)) return true;
+  if (!f.leadId && !f.dealId && activityActorIds.has(f.ownerId)) return true;
+  return false;
 }
 
 /**
@@ -104,10 +142,10 @@ export function applyLiveHierarchyScope(
     if (te) timelineByLead[id] = te;
   }
 
-  const followups = snapshot.followups.filter(
-    (f) =>
-      (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
-      (f.dealId != null && visibleDealIds.has(f.dealId)),
+  const activityActorIds = activityActorUserIdsVisibleToViewer(viewer, orgUsers)!;
+
+  const followups = snapshot.followups.filter((f) =>
+    followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, activityActorIds),
   );
 
   const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, viewer);
@@ -121,18 +159,11 @@ export function applyLiveHierarchyScope(
     dirIds === null
       ? snapshot.permissionOverrides
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
+  const activityCounters = snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
 
-  const activityCounters =
-    dirIds === null
-      ? snapshot.activityCounters
-      : snapshot.activityCounters.filter((row) => dirIds.has(row.userId));
-
-  const activityRecords =
-    dirIds === null
-      ? snapshot.activityRecords
-      : snapshot.activityRecords.filter(
-          (r) => dirIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
-        );
+  const activityRecords = snapshot.activityRecords.filter(
+    (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+  );
 
   return {
     ...snapshot,

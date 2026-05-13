@@ -19,6 +19,8 @@ export default function robots(): MetadataRoute.Robots {
           "/followups",
           "/tasks",
           "/inbox",
+          "/notifications",
+          "/team-chat",
           "/admin",
           "/settings",
           "/login",

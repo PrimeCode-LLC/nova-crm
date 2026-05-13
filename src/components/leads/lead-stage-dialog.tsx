@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { PIPELINE_STAGES } from "@/lib/constants";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 
 export function LeadStageDialog({
   open,
@@ -49,7 +50,7 @@ export function LeadStageDialog({
         <div className="py-2">
           <Select value={next} onValueChange={(v) => v && setNext(v as PipelineStage)}>
             <SelectTrigger>
-              <SelectValue />
+              <SelectValue>{selectTriggerLabelByKey(next, PIPELINE_STAGES) ?? undefined}</SelectValue>
             </SelectTrigger>
             <SelectContent>
               {PIPELINE_STAGES.map((s) => (

@@ -1,3 +1,5 @@
+"use client";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
@@ -6,6 +8,9 @@ import { PUSH_STATUS_TONE, TEMPERATURE_TONE, PRIORITY_TONE, REVENUE_RANGES } fro
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
+import { UserChip } from "@/components/common/user-chip";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -16,9 +21,69 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-export function LeadOverview({ lead }: { lead: Lead }) {
+export function LeadOverview({
+  lead,
+  outreachProfileSummary,
+  outreachProfileFieldLabel,
+}: {
+  lead: Lead;
+  /** When set (Upwork / job apply), show which workspace profile this lead uses. */
+  outreachProfileSummary?: string;
+  outreachProfileFieldLabel?: string;
+}) {
+  const ws = useWorkspace();
+  const openQueue = !lead.ownerId?.trim();
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Labels</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <EntityLabelPicker
+            emphasizeAddAction
+            labelIds={lead.labelIds ?? []}
+            onChange={(next) => ws.patchLead(lead.id, { labelIds: next.length ? next : undefined })}
+          />
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Intake & ownership</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <dl className="divide-y">
+            <Field label="Added by">
+              {lead.createdById?.trim() ? (
+                <UserChip userId={lead.createdById} size="sm" />
+              ) : (
+                <span className="text-muted-foreground">Not recorded (legacy)</span>
+              )}
+            </Field>
+            <Field label="Owner">
+              {openQueue ? (
+                <div className="flex flex-col gap-1">
+                  <Badge variant="secondary" className="w-fit text-[10px] font-normal">
+                    Open queue — unclaimed
+                  </Badge>
+                  <span className="text-xs text-muted-foreground">
+                    Visible to everyone until someone claims it. Use the Timeline tab for stage changes and activity.
+                  </span>
+                </div>
+              ) : (
+                <UserChip userId={lead.ownerId} size="sm" />
+              )}
+            </Field>
+            {lead.scraperId?.trim() ? (
+              <Field label="Lead by (sourced by)">
+                <UserChip userId={lead.scraperId} size="sm" />
+              </Field>
+            ) : null}
+          </dl>
+        </CardContent>
+      </Card>
+
       {/* Research & personalization */}
       <Card className="lg:col-span-2">
         <CardHeader className="pb-3">
@@ -128,6 +193,11 @@ export function LeadOverview({ lead }: { lead: Lead }) {
                 {lead.doNotContact ? "Yes" : "No"}
               </Badge>
             </Field>
+            {outreachProfileFieldLabel != null && outreachProfileSummary != null && (
+              <Field label={outreachProfileFieldLabel}>
+                <span>{outreachProfileSummary}</span>
+              </Field>
+            )}
             <Field label="Company size">{lead.companySize ?? "-"}</Field>
             <Field label="Revenue range">
               {lead.revenueRange ? REVENUE_RANGES[lead.revenueRange] : "-"}

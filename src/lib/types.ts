@@ -8,7 +8,9 @@ export type Role =
   | "manager"
   | "team_lead"
   | "salesperson"
-  | "data_scraper";
+  /** @deprecated Prefer `prospecting`; kept for existing Firestore `roleId` values. */
+  | "data_scraper"
+  | "prospecting";
 
 export type ChannelKey =
   | "cold_email"
@@ -45,6 +47,7 @@ export type RevenueRange =
   | "unknown";
 
 export type CompanySize =
+  | "solo"
   | "1-10"
   | "11-50"
   | "51-200"
@@ -52,6 +55,19 @@ export type CompanySize =
   | "501-1000"
   | "1001-5000"
   | "5001+";
+
+/** Top-of-funnel rows from research/scraping before sales treats them as pipeline leads. */
+export type LeadIntakeKind = "prospect" | "sales_lead";
+
+export type BusinessStatus = "active" | "new" | "dormant";
+
+export type WebsiteStatus = "live" | "under_construction" | "none";
+
+export type OnlineActivityScore = "low" | "medium" | "high";
+
+export type EmailVerificationStatus = "not_verified" | "verified" | "bounced" | "catch_all";
+
+export type BestContactChannel = "email" | "phone" | "linkedin" | "form";
 
 export interface User {
   id: string;
@@ -210,6 +226,17 @@ export interface PlatformAdminRecord {
   createdAt: ISODate;
 }
 
+/** Workspace-defined tag for leads, deals, companies, and contacts. */
+export interface CrmLabel {
+  id: string;
+  organizationId: string;
+  name: string;
+  /** CSS color (e.g. hsl(...) or #rgb). */
+  color?: string;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
 export interface Department {
   id: string;
   name: string;
@@ -225,6 +252,12 @@ export interface PermissionOverride {
   action: "read" | "write" | "delete";
   scope: "own" | "team" | "department" | "all" | "custom";
   effect: "grant" | "deny";
+  /** When `scope` is `department`, which workspace department this rule refers to (audit trail; row rules still org-wide until enforced). */
+  scopeDepartmentId?: string;
+  /** When `scope` is `custom`, documents the intended boundary for admins and future policy work. */
+  scopeCustomDefinition?: string;
+  /** When `scope` is `team`, optionally anchor the subtree to a manager (that person + their reports). Omit for “this user’s team” default. */
+  scopeTeamAnchorUserId?: string;
   note?: string;
   createdBy: string;
   createdAt: ISODate;
@@ -235,17 +268,32 @@ export interface Account {
   name: string;
   domain?: string;
   industry?: string;
+  /** One-line positioning / description for outreach. */
+  businessDescription?: string;
   size?: CompanySize;
   revenueRange?: RevenueRange;
   location?: string;
+  city?: string;
+  state?: string;
+  country?: string;
   yearFounded?: number;
+  businessStatus?: BusinessStatus;
   website?: string;
+  websiteStatus?: WebsiteStatus;
   linkedin?: string;
   techStack?: string[];
+  onlineActivityScore?: OnlineActivityScore;
+  /** ISO date of last notable site change, if known. */
+  lastWebsiteActivityAt?: ISODate;
+  /** Free-text observation when date is unknown. */
+  lastWebsiteActivityNote?: string;
+  careersPageUrl?: string;
   contactCount: number;
   leadCount: number;
   openDealValue: number;
   ownerId: string;
+  /** Assigned workspace labels (`labels` collection ids). */
+  labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -257,13 +305,19 @@ export interface Contact {
   lastName: string;
   fullName: string;
   email?: string;
+  personalEmail?: string;
   emailVerified?: boolean;
+  emailVerificationStatus?: EmailVerificationStatus;
   phone?: string;
   linkedin?: string;
   title?: string;
   seniority?: string;
   location?: string;
+  /** e.g. Website, LinkedIn, Google Maps, Crunchbase */
+  contactSource?: string;
+  bestContactChannel?: BestContactChannel;
   ownerId: string;
+  labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -272,7 +326,6 @@ export interface Profile {
   id: string;
   name: string;
   channel: ChannelKey;
-  type: "upwork" | "cv" | "email" | "linkedin";
   ownerId: string;
   active: boolean;
   notes?: string;
@@ -310,8 +363,17 @@ export interface Lead {
   stage: PipelineStage;
   temperature: LeadTemperature;
   priority: LeadPriority;
+  /** Sales owner; empty string = open queue (visible to whole org until someone claims). */
   ownerId: string;
+  /** Firebase uid of the user who created this lead (audit / performance reviews). */
+  createdById?: string;
+  /** User who sourced / entered the row (prospecting team). */
   scraperId?: string;
+  /**
+   * `prospect` = intake only (lists, campaigns, integrations); becomes a tracked sales row when promoted.
+   * Omitted or `sales_lead` = normal pipeline lead.
+   */
+  intakeKind?: LeadIntakeKind;
 
   // Snapshot of contact & account for table rendering
   contactName: string;
@@ -359,6 +421,8 @@ export interface Lead {
   // Channel-specific extensions (sparse)
   extensions?: Record<string, unknown>;
 
+  labelIds?: string[];
+
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -389,6 +453,7 @@ export interface Deal {
   ownerId: string;
   products?: string[];
   notes?: string;
+  labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
   wonAt?: ISODate;
@@ -495,4 +560,41 @@ export interface TimelineEvent {
   summary: string;
   payload?: Record<string, unknown>;
   createdAt: ISODate;
+}
+
+/** Org-wide Slack-style chat (Firestore `workspaceChatChannels`). */
+export type WorkspaceChatChannelKind = "public" | "dm";
+
+export interface WorkspaceChatChannel {
+  id: string;
+  organizationId: string;
+  kind: WorkspaceChatChannelKind;
+  /** Lowercase handle without # for public channels (e.g. general, sales). */
+  slug: string;
+  /** Display label (e.g. general, random-1, or other user's name for DMs). */
+  name: string;
+  /** For `dm`: exactly two Firebase user ids in the org. */
+  memberIds?: string[];
+  createdById: string;
+  createdAt: ISODate;
+  updatedAt?: ISODate;
+}
+
+/** One chat line (Firestore `workspaceChatMessages`). */
+export interface WorkspaceChatMessage {
+  id: string;
+  organizationId: string;
+  channelId: string;
+  authorId: string;
+  body: string;
+  /** Parsed from `@[uid]` tokens at send time for notifications/search. */
+  mentionUserIds?: string[];
+  createdAt: ISODate;
+}
+
+/** Firestore `workspaceChatReads/{organizationId}__{userId}` — per-channel last seen message time (ISO). */
+export interface WorkspaceChatReadState {
+  organizationId: string;
+  userId: string;
+  channels: Record<string, ISODate>;
 }

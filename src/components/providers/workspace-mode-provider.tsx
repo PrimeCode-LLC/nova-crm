@@ -19,6 +19,8 @@ import type {
   Touchpoint,
   TimelineEvent,
   User,
+  CrmLabel,
+  Deal,
 } from "@/lib/types";
 import {
   getWorkspaceSnapshot,
@@ -33,11 +35,22 @@ import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseDb } from "@/lib/firebase/client";
+import { resolveOrganizationIdForFirestoreWrite } from "@/lib/firebase/resolve-organization-id-for-write";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
+import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
+import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
+import { persistDealPatchClient } from "@/lib/firestore/persist-deal-patch-client";
+import {
+  persistCrmLabelCreate,
+  persistCrmLabelDelete,
+  persistCrmLabelUpdate,
+} from "@/lib/firestore/persist-crm-label-client";
+import { persistLeadDeleteClient } from "@/lib/firestore/persist-lead-delete-client";
 import {
   persistFollowupCreate,
+  persistFollowupDelete,
   persistFollowupSetCompleted,
   persistLeadTaskCreate,
   persistLeadTaskSetCompleted,
@@ -45,6 +58,8 @@ import {
   persistNoteCreate,
   persistNoteDelete,
   persistNoteUpdate,
+  persistProfileCreate,
+  persistProfileUpdate,
   persistTimelineEventCreate,
   persistTouchpointCreate,
 } from "@/lib/firestore/persist-workspace-entities-client";
@@ -57,18 +72,26 @@ import {
   emptyWorkspaceSession,
   mergeSessionIntoSnapshot,
   readWorkspaceSession,
+  sanitizeWorkspaceSessionForMockCatalog,
   writeWorkspaceSession,
   type WorkspaceSessionV2,
 } from "@/lib/workspace-session";
 import { STAGES_BY_KEY } from "@/lib/constants";
+import { enrichLeadsIdleState } from "@/lib/lead-idle";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
   WorkspaceLookup & {
     mode: WorkspaceMode;
     isDemo: boolean;
     demoPersonaId: string;
+    /** Live mode: tenant id from the signed-in user doc (for writes / diagnostics). */
+    organizationId?: string;
     /** Display name for the signed-in tenant (from Firestore org). */
     organizationName: string;
+    /** Live mode: Firestore workspace listeners hit an error (partial data may be stale). */
+    liveFirestoreError: Error | null;
+    /** Live mode: listener for the signed-in user document failed. */
+    userProfileError: Error | null;
     setMode: (next: WorkspaceMode) => Promise<void>;
     setDemoPersona: (userId: string) => Promise<void>;
     addPermissionOverride: (override: PermissionOverride) => void;
@@ -86,6 +109,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     sessionHydrated: boolean;
     addFollowup: (f: Followup) => void;
     setFollowupCompleted: (id: string, completed: boolean) => void;
+    removeFollowup: (id: string) => void;
     addLeadTask: (t: LeadTask) => void;
     setLeadTaskCompleted: (id: string, completed: boolean) => void;
     addLeadNote: (leadId: string, body: string, authorId: string) => void;
@@ -94,12 +118,22 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addLeadTouchpoint: (t: Touchpoint) => void;
     addTimelineEvent: (e: TimelineEvent) => void;
     patchLead: (leadId: string, patch: Partial<Lead>) => void;
+    patchAccount: (accountId: string, patch: Partial<Account>) => void;
+    patchContact: (contactId: string, patch: Partial<Contact>) => void;
+    /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
+    deleteLead: (leadId: string) => Promise<boolean>;
+    /** Whether the active user may delete leads (org `owner` or `admin`). */
+    canDeleteLeads: boolean;
     updateLeadStage: (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => void;
     toggleLeadPin: (leadId: string) => void;
     isLeadPinned: (leadId: string) => boolean;
     bumpLeadActivity: (leadId: string) => void;
     /** Display name for CRM `ownerId` when the user exists in org members but not (yet) in Firestore `users`. */
     getOwnerDisplayName: (uid: string) => string | undefined;
+    addCrmLabel: (label: CrmLabel) => void;
+    updateCrmLabel: (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => void;
+    removeCrmLabel: (id: string) => void;
+    patchDeal: (dealId: string, patch: Partial<Deal>) => void;
   };
 
 const WorkspaceContext = React.createContext<WorkspaceContextValue | null>(null);
@@ -177,11 +211,17 @@ export function WorkspaceModeProvider({
   const [userPatches, setUserPatches] = React.useState<Record<string, Partial<Omit<User, "id">>>>({});
   const [accountContactBumps, setAccountContactBumps] = React.useState<Record<string, number>>({});
 
+  const [labelDelta, setLabelDelta] = React.useState<{
+    added: CrmLabel[];
+    removedIds: string[];
+    updates: Record<string, Partial<Pick<CrmLabel, "name" | "color">>>;
+  }>({ added: [], removedIds: [], updates: {} });
+
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
 
   const { user: fbUser } = useAuth();
-  const { data: userDoc } = useUserDoc(
+  const { data: userDoc, error: userProfileLoadError } = useUserDoc(
     mode === "demo" || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
   );
   const liveOrgId =
@@ -220,10 +260,13 @@ export function WorkspaceModeProvider({
 
   React.useEffect(() => {
     React.startTransition(() => {
-      setSessionV2(readWorkspaceSession());
+      const raw = readWorkspaceSession();
+      setSessionV2(
+        initialMode === "demo" ? sanitizeWorkspaceSessionForMockCatalog(raw) : raw,
+      );
       setSessionHydrated(true);
     });
-  }, []);
+  }, [initialMode]);
 
   React.useEffect(() => {
     if (!sessionHydrated || typeof window === "undefined") return;
@@ -236,6 +279,8 @@ export function WorkspaceModeProvider({
     const prev = prevModeRef.current;
     prevModeRef.current = mode;
     if (prev === "demo" && mode === "live") {
+      setSessionV2(emptyWorkspaceSession());
+    } else if (prev === "live" && mode === "demo") {
       setSessionV2(emptyWorkspaceSession());
     }
   }, [mode]);
@@ -251,6 +296,7 @@ export function WorkspaceModeProvider({
     setLeadsAdded([]);
     setUserPatches({});
     setAccountContactBumps({});
+    setLabelDelta({ added: [], removedIds: [], updates: {} });
   }, [mode, demoPersonaId]);
 
   const addPermissionOverride = React.useCallback((override: PermissionOverride) => {
@@ -272,16 +318,52 @@ export function WorkspaceModeProvider({
     setAddedDepartments((prev) => [...prev, dept]);
   }, []);
 
-  const updateProfile = React.useCallback((id: string, patch: Partial<Profile>) => {
-    setProfileDelta((d) => ({
-      ...d,
-      updates: { ...d.updates, [id]: { ...d.updates[id], ...patch } },
-    }));
-  }, []);
+  const updateProfile = React.useCallback(
+    (id: string, patch: Partial<Profile>) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistProfileUpdate(db, id, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save profile", { description: msg });
+          }
+        })();
+        return;
+      }
+      setProfileDelta((d) => ({
+        ...d,
+        updates: { ...d.updates, [id]: { ...d.updates[id], ...patch } },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addProfile = React.useCallback((profile: Profile) => {
-    setProfileDelta((d) => ({ ...d, added: [...d.added, profile] }));
-  }, []);
+  const addProfile = React.useCallback(
+    (profile: Profile) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistProfileCreate(db, orgId, profile);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save profile", { description: msg });
+          }
+        })();
+        return;
+      }
+      setProfileDelta((d) => ({ ...d, added: [...d.added, profile] }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
   const updateCampaign = React.useCallback((id: string, patch: Partial<Campaign>) => {
     setCampaignEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
@@ -402,6 +484,37 @@ export function WorkspaceModeProvider({
         if (completed) completion[id] = new Date().toISOString();
         else completion[id] = null;
         return { ...s, followups: { ...s.followups, completion } };
+      });
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const removeFollowup = React.useCallback(
+    (id: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupDelete(db, id);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not delete follow-up", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => {
+        const completion = { ...s.followups.completion };
+        delete completion[id];
+        return {
+          ...s,
+          followups: {
+            ...s.followups,
+            extras: s.followups.extras.filter((f) => f.id !== id),
+            completion,
+          },
+        };
       });
     },
     [mode, userDoc?.organizationId],
@@ -650,6 +763,237 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId],
   );
 
+  const patchAccount = React.useCallback(
+    (accountId: string, patch: Partial<Account>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistAccountPatchClient(db, accountId, { ...patch, updatedAt: iso });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save company", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        accountPatches: {
+          ...s.accountPatches,
+          [accountId]: { ...s.accountPatches[accountId], ...patch, updatedAt: iso },
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const patchContact = React.useCallback(
+    (contactId: string, patch: Partial<Contact>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistContactPatchClient(db, contactId, { ...patch, updatedAt: iso });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save contact", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        contactPatches: {
+          ...s.contactPatches,
+          [contactId]: { ...s.contactPatches[contactId], ...patch, updatedAt: iso },
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const patchDeal = React.useCallback(
+    (dealId: string, patch: Partial<Deal>) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistDealPatchClient(db, dealId, { ...patch, updatedAt: iso });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save deal", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        dealPatches: {
+          ...s.dealPatches,
+          [dealId]: { ...s.dealPatches[dealId], ...patch, updatedAt: iso },
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const addCrmLabel = React.useCallback(
+    (label: CrmLabel) => {
+      const canLiveWrite = mode === "live" && isFirebaseWebConfigured() && Boolean(fbUser);
+      if (canLiveWrite) {
+        void (async () => {
+          try {
+            const orgId = await resolveOrganizationIdForFirestoreWrite(userDoc?.organizationId);
+            if (!orgId) {
+              toast.error("Could not save label", {
+                description:
+                  "No organization id on your session. Try refreshing the page or signing out and back in.",
+              });
+              return;
+            }
+            const db = getFirebaseDb();
+            await persistCrmLabelCreate(db, orgId, label);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save label", { description: msg });
+          }
+        })();
+        return;
+      }
+      setLabelDelta((d) => ({ ...d, added: [...d.added, label] }));
+    },
+    [mode, fbUser, userDoc?.organizationId],
+  );
+
+  const updateCrmLabel = React.useCallback(
+    (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistCrmLabelUpdate(db, id, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update label", { description: msg });
+          }
+        })();
+        return;
+      }
+      setLabelDelta((d) => ({
+        ...d,
+        updates: { ...d.updates, [id]: { ...d.updates[id], ...patch } },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const removeCrmLabel = React.useCallback(
+    (id: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistCrmLabelDelete(db, id);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not delete label", { description: msg });
+          }
+        })();
+        return;
+      }
+      setLabelDelta((d) => ({
+        ...d,
+        added: d.added.filter((l) => l.id !== id),
+        removedIds: d.removedIds.includes(id) ? d.removedIds : [...d.removedIds, id],
+        updates: Object.fromEntries(Object.entries(d.updates).filter(([k]) => k !== id)),
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const deleteLead = React.useCallback(
+    async (leadId: string): Promise<boolean> => {
+      const snap = snapshotRef.current;
+      const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole;
+      const allowed = role === "owner" || role === "admin";
+      if (!allowed) {
+        toast.error("Only organization owners and admins can delete leads.");
+        return false;
+      }
+      const lead = snap.leads.find((l) => l.id === leadId);
+      if (!lead) return false;
+      const account = snap.accounts.find((a) => a.id === lead.accountId);
+      if (!account) {
+        toast.error("Could not delete lead: account not found.");
+        return false;
+      }
+
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        try {
+          const db = getFirebaseDb();
+          await persistLeadDeleteClient(db, {
+            leadId,
+            accountId: account.id,
+            accountLeadCount: account.leadCount,
+          });
+          toast.success("Lead deleted");
+          setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
+          setSessionV2((s) => {
+            if (s.deletedLeadIds.includes(leadId)) return s;
+            const leadPatches = { ...s.leadPatches };
+            delete leadPatches[leadId];
+            const leadActivity = { ...s.leadActivity };
+            delete leadActivity[leadId];
+            return {
+              ...s,
+              deletedLeadIds: [...s.deletedLeadIds, leadId],
+              leadPatches,
+              leadActivity,
+              pinnedLeadIds: s.pinnedLeadIds.filter((id) => id !== leadId),
+            };
+          });
+          return true;
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not delete lead", { description: msg });
+          return false;
+        }
+      }
+
+      toast.success("Lead removed");
+      setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
+      setSessionV2((s) => {
+        if (s.deletedLeadIds.includes(leadId)) return s;
+        const leadPatches = { ...s.leadPatches };
+        delete leadPatches[leadId];
+        const leadActivity = { ...s.leadActivity };
+        delete leadActivity[leadId];
+        return {
+          ...s,
+          deletedLeadIds: [...s.deletedLeadIds, leadId],
+          leadPatches,
+          leadActivity,
+          pinnedLeadIds: s.pinnedLeadIds.filter((id) => id !== leadId),
+        };
+      });
+      return true;
+    },
+    [mode, userDoc?.organizationId],
+  );
+
   const updateLeadStage = React.useCallback(
     (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => {
       const iso = new Date().toISOString();
@@ -730,6 +1074,10 @@ export function WorkspaceModeProvider({
       leadTasks: liveFs.leadTasks,
       touchpoints: liveFs.touchpoints,
       timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
+      activityCounters: liveFs.activityCounters,
+      activityRecords: liveFs.activityRecords,
+      profiles: liveFs.profiles,
+      crmLabels: liveFs.crmLabels,
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
@@ -758,6 +1106,10 @@ export function WorkspaceModeProvider({
     liveFs.leadTasks,
     liveFs.touchpoints,
     liveFs.timelineEvents,
+    liveFs.activityCounters,
+    liveFs.activityRecords,
+    liveFs.profiles,
+    liveFs.crmLabels,
   ]);
 
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {
@@ -805,6 +1157,20 @@ export function WorkspaceModeProvider({
       ...u,
       ...(userPatches[u.id] ?? {}),
     }));
+
+    const removedLabelIds = new Set(labelDelta.removedIds);
+    const mergedLabelBase = tenantBaseSnapshot.crmLabels
+      .filter((l) => !removedLabelIds.has(l.id))
+      .map((l) => ({ ...l, ...(labelDelta.updates[l.id] ?? {}) }));
+    const labelBaseIds = new Set(mergedLabelBase.map((l) => l.id));
+    const crmLabels = [
+      ...mergedLabelBase,
+      ...labelDelta.added
+        .filter((l) => !removedLabelIds.has(l.id))
+        .map((l) => ({ ...l, ...(labelDelta.updates[l.id] ?? {}) }))
+        .filter((l) => !labelBaseIds.has(l.id)),
+    ];
+
     return {
       ...tenantBaseSnapshot,
       permissionOverrides,
@@ -815,6 +1181,7 @@ export function WorkspaceModeProvider({
       contacts: contactsMerged,
       leads: leadsMerged,
       users: usersMerged,
+      crmLabels,
     };
   }, [
     tenantBaseSnapshot,
@@ -828,6 +1195,7 @@ export function WorkspaceModeProvider({
     leadsAdded,
     userPatches,
     accountContactBumps,
+    labelDelta,
   ]);
 
   const snapshot = React.useMemo((): WorkspaceSnapshot => {
@@ -869,21 +1237,27 @@ export function WorkspaceModeProvider({
   );
 
   const value = React.useMemo<WorkspaceContextValue>(() => {
-    const lookup = createWorkspaceLookup(snapshot);
+    const snapshotWithIdle = { ...snapshot, leads: enrichLeadsIdleState(snapshot.leads) };
+    const lookup = createWorkspaceLookup(snapshotWithIdle);
     const getOwnerDisplayName = (uid: string): string | undefined => {
       const id = uid?.trim();
       if (!id) return undefined;
-      const fromUser = snapshot.users.find((u) => u.id === id)?.displayName?.trim();
+      const fromUser = snapshotWithIdle.users.find((u) => u.id === id)?.displayName?.trim();
       if (fromUser) return fromUser;
       return orgMemberLabels[id]?.trim() || undefined;
     };
+    const viewerRole = snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole;
+    const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
     return {
-      ...snapshot,
+      ...snapshotWithIdle,
       ...lookup,
       mode,
       isDemo: mode === "demo",
       demoPersonaId,
+      organizationId: liveOrgId,
       organizationName,
+      liveFirestoreError: mode === "live" ? liveFs.error : null,
+      userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
       setMode,
       setDemoPersona,
       addPermissionOverride,
@@ -900,6 +1274,7 @@ export function WorkspaceModeProvider({
       sessionHydrated,
       addFollowup,
       setFollowupCompleted,
+      removeFollowup,
       addLeadTask,
       setLeadTaskCompleted,
       addLeadNote,
@@ -908,6 +1283,14 @@ export function WorkspaceModeProvider({
       addLeadTouchpoint,
       addTimelineEvent,
       patchLead,
+      patchAccount,
+      patchContact,
+      patchDeal,
+      addCrmLabel,
+      updateCrmLabel,
+      removeCrmLabel,
+      deleteLead,
+      canDeleteLeads,
       updateLeadStage,
       toggleLeadPin,
       isLeadPinned,
@@ -919,7 +1302,11 @@ export function WorkspaceModeProvider({
     orgMemberLabels,
     mode,
     demoPersonaId,
+    liveOrgId,
     organizationName,
+    liveFs.error,
+    userProfileLoadError,
+    fbUser,
     setMode,
     setDemoPersona,
     addPermissionOverride,
@@ -936,6 +1323,7 @@ export function WorkspaceModeProvider({
     sessionHydrated,
     addFollowup,
     setFollowupCompleted,
+    removeFollowup,
     addLeadTask,
     setLeadTaskCompleted,
     addLeadNote,
@@ -944,6 +1332,13 @@ export function WorkspaceModeProvider({
     addLeadTouchpoint,
     addTimelineEvent,
     patchLead,
+    patchAccount,
+    patchContact,
+    patchDeal,
+    addCrmLabel,
+    updateCrmLabel,
+    removeCrmLabel,
+    deleteLead,
     updateLeadStage,
     toggleLeadPin,
     isLeadPinned,

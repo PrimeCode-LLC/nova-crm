@@ -12,6 +12,7 @@ import type {
   PushStatus,
   BANT,
   ChannelKey,
+  LeadIntakeKind,
 } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,12 +39,20 @@ import {
 import {
   PIPELINE_STAGES,
   CHANNEL_LIST,
+  CHANNELS_REQUIRING_OUTREACH_PROFILE,
+  outreachProfileFieldLabel,
   TEMPERATURE_TONE,
   PRIORITY_TONE,
   REVENUE_RANGES,
   COMPANY_SIZES,
+  COMPANY_SIZE_LABELS,
   PUSH_STATUS_TONE,
+  INTAKE_KIND_META,
 } from "@/lib/constants";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
+import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
 const UNSET = "__unset__" as const;
 type UnsetToken = typeof UNSET;
@@ -124,6 +133,29 @@ export function EditLeadDialog({
   const [bantNeed, setBantNeed] = React.useState("3");
   const [bantTimeline, setBantTimeline] = React.useState("3");
 
+  const [profileId, setProfileId] = React.useState("");
+  const [intakeKind, setIntakeKind] = React.useState<LeadIntakeKind>("sales_lead");
+  const [scraperId, setScraperId] = React.useState<string | UnsetToken>(UNSET);
+  const [labelIds, setLabelIds] = React.useState<string[]>([]);
+  const { profiles, users, currentUserId, getOwnerDisplayName } = useWorkspace();
+
+  const ownerPickerIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    if (lead?.ownerId) ids.add(lead.ownerId);
+    if (lead?.scraperId) ids.add(lead.scraperId);
+    return [...ids];
+  }, [lead?.ownerId, lead?.scraperId]);
+
+  const scraperOptions = React.useMemo(
+    () => buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName, ownerPickerIds),
+    [users, currentUserId, getOwnerDisplayName, ownerPickerIds],
+  );
+
+  const profileOptionsForChannel = React.useMemo(
+    () => profiles.filter((p) => p.channel === channel && p.active !== false),
+    [profiles, channel],
+  );
+
   React.useEffect(() => {
     if (!open || !lead) return;
     React.startTransition(() => {
@@ -156,12 +188,42 @@ export function EditLeadDialog({
       setBantAuthority(String(b?.authority ?? 3));
       setBantNeed(String(b?.need ?? 3));
       setBantTimeline(String(b?.timeline ?? 3));
+
+      const ch = lead.channel;
+      if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
+        const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+        const want = lead.profileId?.trim() ?? "";
+        if (want && opts.some((p) => p.id === want)) {
+          setProfileId(want);
+        } else if (opts.length === 1) {
+          setProfileId(opts[0]!.id);
+        } else {
+          setProfileId("");
+        }
+      } else {
+        setProfileId("");
+      }
+
+      setIntakeKind(lead.intakeKind ?? "sales_lead");
+      const existingScraper = lead.scraperId?.trim();
+      const me = currentUserId?.trim();
+      setScraperId(existingScraper || (me ? me : UNSET));
+      setLabelIds(lead.labelIds ?? []);
     });
-  }, [open, lead]);
+  }, [open, lead, profiles, currentUserId]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!lead) return;
+    if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)) {
+      const opts = profiles.filter((p) => p.channel === channel && p.active !== false);
+      if (opts.length > 0 && !profileId.trim()) {
+        toast.error(
+          channel === "upwork" ? "Select an Upwork profile." : "Select a CV / apply profile.",
+        );
+        return;
+      }
+    }
     const evRaw = estimatedValue.trim();
     let estimatedValueNum: number | undefined;
     if (evRaw) {
@@ -186,7 +248,15 @@ export function EditLeadDialog({
       };
     }
 
+    const profileIdTrim = profileId.trim();
+    const profilePatch: Partial<Lead> = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)
+      ? { profileId: profileIdTrim || undefined }
+      : { profileId: undefined };
+
     onSave({
+      ...profilePatch,
+      intakeKind: intakeKind === "sales_lead" ? undefined : "prospect",
+      scraperId: scraperId === UNSET ? undefined : scraperId,
       channel,
       stage,
       temperature,
@@ -211,6 +281,7 @@ export function EditLeadDialog({
       pushToLinkedIn: pushToLinkedIn === UNSET ? undefined : pushToLinkedIn,
 
       bant,
+      labelIds: labelIds.length ? labelIds : undefined,
     });
     toast.success("Lead updated");
     onOpenChange(false);
@@ -230,6 +301,66 @@ export function EditLeadDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 max-h-[min(78vh,640px)] overflow-y-auto pr-1">
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Intake & attribution
+              </p>
+              <div className="grid sm:grid-cols-2 gap-3">
+                <div className="grid gap-2">
+                  <Label>Record type</Label>
+                  <Select
+                    value={intakeKind}
+                    onValueChange={(v) => v && setIntakeKind(v as LeadIntakeKind)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue>
+                        {INTAKE_KIND_META[intakeKind]?.label ?? undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="prospect">{INTAKE_KIND_META.prospect.label}</SelectItem>
+                      <SelectItem value="sales_lead">{INTAKE_KIND_META.sales_lead.label}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[11px] text-muted-foreground">
+                    Prospects are top-of-funnel intake; promote when the contact shows real interest.
+                  </p>
+                </div>
+                <div className="grid gap-2">
+                  <Label>Lead by (sourced by)</Label>
+                  <Select
+                    value={scraperId}
+                    onValueChange={(v) => v && setScraperId(v as string | UnsetToken)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Not set">
+                        {scraperId === UNSET
+                          ? undefined
+                          : scraperOptions.find((o) => o.id === scraperId)?.label}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSET}>Not set</SelectItem>
+                      {scraperOptions.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Labels</p>
+              <EntityLabelPicker emphasizeAddAction labelIds={labelIds} onChange={setLabelIds} />
+            </section>
+
+            <Separator />
+
             <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Research & personalization
@@ -306,9 +437,22 @@ export function EditLeadDialog({
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campaign routing</p>
               <div className="grid gap-2">
                 <Label>Channel</Label>
-                <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
+                <Select
+                  value={channel}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    const ch = v as ChannelKey;
+                    setChannel(ch);
+                    if (!CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
+                      setProfileId("");
+                      return;
+                    }
+                    const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+                    setProfileId(opts.length === 1 ? opts[0]!.id : "");
+                  }}
+                >
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {CHANNEL_LIST.map((c) => (
@@ -319,6 +463,36 @@ export function EditLeadDialog({
                   </SelectContent>
                 </Select>
               </div>
+              {CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel) && (
+                <div className="grid gap-2">
+                  <Label>{outreachProfileFieldLabel(channel)}</Label>
+                  {profileOptionsForChannel.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">
+                      No active profiles for this channel. Add one under Admin → Profiles.
+                    </p>
+                  ) : (
+                    <Select
+                      value={profileId}
+                      onValueChange={(v) => {
+                        if (v != null) setProfileId(v);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select profile">
+                          {profileOptionsForChannel.find((p) => p.id === profileId)?.name ?? undefined}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {profileOptionsForChannel.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                </div>
+              )}
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="edit-dnc"
@@ -337,13 +511,15 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setCompanySize(v as CompanySize | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {companySize === UNSET ? undefined : companySize}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
                       {COMPANY_SIZES.map((s) => (
                         <SelectItem key={s} value={s}>
-                          {s}
+                          {COMPANY_SIZE_LABELS[s]}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -356,7 +532,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setRevenueRange(v as RevenueRange | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {revenueRange === UNSET ? undefined : REVENUE_RANGES[revenueRange as RevenueRange]}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -377,7 +555,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setPushToInstantly(v as PushStatus | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {pushToInstantly === UNSET ? undefined : PUSH_STATUS_TONE[pushToInstantly as PushStatus].label}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -396,7 +576,9 @@ export function EditLeadDialog({
                     onValueChange={(v) => v && setPushToLinkedIn(v as PushStatus | UnsetToken)}
                   >
                     <SelectTrigger>
-                      <SelectValue placeholder="Not set" />
+                      <SelectValue placeholder="Not set">
+                        {pushToLinkedIn === UNSET ? undefined : PUSH_STATUS_TONE[pushToLinkedIn as PushStatus].label}
+                      </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
@@ -419,7 +601,7 @@ export function EditLeadDialog({
                 <Label>Stage</Label>
                 <Select value={stage} onValueChange={(v) => v && setStage(v as PipelineStage)}>
                   <SelectTrigger>
-                    <SelectValue />
+                    <SelectValue>{selectTriggerLabelByKey(stage, PIPELINE_STAGES) ?? undefined}</SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {PIPELINE_STAGES.map((s) => (
@@ -435,7 +617,7 @@ export function EditLeadDialog({
                   <Label>Temperature</Label>
                   <Select value={temperature} onValueChange={(v) => v && setTemperature(v as LeadTemperature)}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>{TEMPERATURE_TONE[temperature]?.label ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(Object.keys(TEMPERATURE_TONE) as LeadTemperature[]).map((k) => (
@@ -450,7 +632,7 @@ export function EditLeadDialog({
                   <Label>Priority</Label>
                   <Select value={priority} onValueChange={(v) => v && setPriority(v as LeadPriority)}>
                     <SelectTrigger>
-                      <SelectValue />
+                      <SelectValue>{PRIORITY_TONE[priority]?.label ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {(Object.keys(PRIORITY_TONE) as LeadPriority[]).map((k) => (
@@ -506,7 +688,7 @@ export function EditLeadDialog({
                       <Label>{label} (1–5)</Label>
                       <Select value={val} onValueChange={(v) => v && setVal(v)}>
                         <SelectTrigger>
-                          <SelectValue />
+                          <SelectValue>{val}</SelectValue>
                         </SelectTrigger>
                         <SelectContent>
                           {[1, 2, 3, 4, 5].map((n) => (

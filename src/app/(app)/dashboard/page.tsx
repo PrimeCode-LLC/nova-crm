@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -18,7 +17,14 @@ import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
-import { CHANNEL_LIST } from "@/lib/constants";
+import { CHANNEL_LIST, ROLES } from "@/lib/constants";
+import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
+import {
+  getDashboardOverviewDescription,
+  getDashboardRoleFocusLine,
+  isFrontlineDashboardRole,
+} from "@/lib/dashboard-role-focus";
+import { DashboardPendingOverview } from "@/components/dashboard/dashboard-pending-overview";
 import {
   OWNER_SCOPE_PREFIX,
   buildPersonOwnerOptions,
@@ -27,8 +33,9 @@ import {
   filterLeadsByOwnerScope,
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import type { ChannelKey } from "@/lib/types";
-import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users, ListTodo } from "lucide-react";
+import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -51,6 +58,14 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 
+const DASHBOARD_RANGE_OPTIONS = [
+  { key: "7d", label: "Last 7 days" },
+  { key: "30d", label: "Last 30 days" },
+  { key: "90d", label: "Last 90 days" },
+  { key: "qtd", label: "Quarter to date" },
+  { key: "ytd", label: "Year to date" },
+] as const;
+
 export default function DashboardPage() {
   const {
     leads,
@@ -63,6 +78,9 @@ export default function DashboardPage() {
     getUserById,
     getOwnerDisplayName,
     leadTasks,
+    followups,
+    setFollowupCompleted,
+    setLeadTaskCompleted,
   } = useWorkspace();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
@@ -73,6 +91,7 @@ export default function DashboardPage() {
   const [channelScope, setChannelScope] = React.useState<ChannelKey[]>([]);
   const [draftChannels, setDraftChannels] = React.useState<ChannelKey[]>([]);
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [timeRange, setTimeRange] = React.useState("30d");
 
   const ownerScopeDeps = React.useMemo(
     () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
@@ -147,18 +166,11 @@ export default function DashboardPage() {
   const pipelineValue = pipelineMetrics.total;
   const closedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
 
-  const myOpenAssignedTasks = React.useMemo(
-    () =>
-      leadTasks.filter((t) => !t.completedAt && t.assigneeId === currentUserId),
-    [leadTasks, currentUserId],
+  const viewer = React.useMemo(
+    () => (currentUserId ? getUserById(currentUserId) : undefined),
+    [currentUserId, getUserById],
   );
-  const myOutgoingOpenTasks = React.useMemo(
-    () =>
-      leadTasks.filter(
-        (t) => !t.completedAt && t.createdById === currentUserId && t.assigneeId !== currentUserId,
-      ),
-    [leadTasks, currentUserId],
-  );
+  const frontlineLayout = isFrontlineDashboardRole(viewer?.roleId);
 
   const pipelineHint = React.useMemo(() => {
     const parts = [`${pipelineMetrics.openDealCount} open deal${pipelineMetrics.openDealCount === 1 ? "" : "s"}`];
@@ -170,21 +182,34 @@ export default function DashboardPage() {
     return parts.join(" · ");
   }, [pipelineMetrics.leadEstimateContributors, pipelineMetrics.openDealCount]);
 
-  const coldEmailCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("cold_email", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
+  const funnelChannelKeys = React.useMemo(() => {
+    if (channelScope.length === 0) return CHANNEL_LIST.map((c) => c.key);
+    const order = new Map(CHANNEL_LIST.map((c, i) => [c.key, i]));
+    return [...channelScope].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  }, [channelScope]);
+
+  const funnelCharts = React.useMemo(
+    () =>
+      funnelChannelKeys.map((key) => {
+        const meta = CHANNEL_LIST.find((c) => c.key === key);
+        return {
+          channel: key,
+          title: meta?.label ?? key,
+          counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedLeads, scopedDeals),
+        };
+      }),
+    [funnelChannelKeys, scopedActivityCounters, scopedLeads, scopedDeals],
   );
-  const linkedinCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("linkedin_outbound", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
-  );
-  const upworkCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("upwork", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
-  );
-  const websiteCounts = React.useMemo(
-    () => aggregateChannelFunnelCounts("website_form", scopedActivityCounters, scopedLeads, scopedDeals),
-    [scopedActivityCounters, scopedLeads, scopedDeals],
+
+  const pendingOverview = (
+    <DashboardPendingOverview
+      roleId={viewer?.roleId}
+      followups={followups}
+      leadTasks={leadTasks}
+      currentUserId={currentUserId}
+      setFollowupCompleted={setFollowupCompleted}
+      setLeadTaskCompleted={setLeadTaskCompleted}
+    />
   );
 
   function toggleDraft(ch: ChannelKey) {
@@ -231,13 +256,21 @@ export default function DashboardPage() {
     <>
       <PageHeader
         title="Overview"
-        description="Live pipeline state, team performance, and funnel diagnostics."
+        description={getDashboardOverviewDescription(viewer?.roleId)}
         actions={
           <>
-            <Select defaultValue="30d">
+            <Select
+              value={timeRange}
+              onValueChange={(v) => {
+                if (!v || v === timeRange) return;
+                setTimeRange(v);
+              }}
+            >
               <SelectTrigger size="sm" className="w-32">
                 <Calendar className="h-3.5 w-3.5 mr-1" />
-                <SelectValue />
+                <SelectValue>
+                  {selectTriggerLabelByKey(timeRange, DASHBOARD_RANGE_OPTIONS) ?? undefined}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="7d">Last 7 days</SelectItem>
@@ -247,7 +280,14 @@ export default function DashboardPage() {
                 <SelectItem value="ytd">Year to date</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
+            <Select
+              value={ownerScope}
+              onValueChange={(v) => {
+                const next = v ?? "all-owners";
+                if (next === ownerScope) return;
+                setOwnerScope(next);
+              }}
+            >
               <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem] gap-1.5">
                 <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
                 <SelectValue placeholder="Owner">
@@ -260,7 +300,8 @@ export default function DashboardPage() {
                   <SelectItem value="all-owners">All owners</SelectItem>
                   <SelectItem value="me">Owned by me</SelectItem>
                   <SelectItem value="team">My team</SelectItem>
-                  <SelectItem value="unassigned">Unassigned</SelectItem>
+                  <SelectItem value="open-queue">Open queue</SelectItem>
+                  <SelectItem value="unassigned">Orphan owner</SelectItem>
                 </SelectGroup>
                 {personOwnerOptions.length > 0 && (
                   <>
@@ -356,30 +397,17 @@ export default function DashboardPage() {
           </div>
         ) : (
           <>
-            {(myOpenAssignedTasks.length > 0 || myOutgoingOpenTasks.length > 0) && (
-              <div className="mb-4 flex flex-col gap-2 rounded-lg border bg-muted/25 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <div className="flex flex-wrap items-center gap-x-6 gap-y-1 text-sm">
-                  {myOpenAssignedTasks.length > 0 && (
-                    <span className="flex items-center gap-2">
-                      <ListTodo className="h-4 w-4 text-muted-foreground shrink-0" aria-hidden />
-                      <span>
-                        <strong className="tabular-nums">{myOpenAssignedTasks.length}</strong> team task
-                        {myOpenAssignedTasks.length === 1 ? "" : "s"} for you
-                      </span>
-                    </span>
-                  )}
-                  {myOutgoingOpenTasks.length > 0 && (
-                    <span className="text-muted-foreground">
-                      <strong className="tabular-nums text-foreground">{myOutgoingOpenTasks.length}</strong> waiting on
-                      others
-                    </span>
-                  )}
-                </div>
-                <Button size="sm" variant="outline" className="shrink-0" nativeButton={false} render={<Link href="/tasks" />}>
-                  View tasks
-                </Button>
+            {viewer && (
+              <div className="rounded-lg border border-border/80 bg-muted/15 px-4 py-3">
+                <p className="text-xs font-semibold text-foreground">
+                  {ROLES[viewer.roleId]?.label ?? "Member"} view
+                </p>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+                  {getDashboardRoleFocusLine(viewer.roleId)}
+                </p>
               </div>
             )}
+            {frontlineLayout && pendingOverview}
             {(channelScope.length > 0 || ownerScope !== "all-owners") && (
               <p className="text-xs text-muted-foreground mb-2">
                 {channelScope.length > 0 && (
@@ -414,18 +442,21 @@ export default function DashboardPage() {
                 value={totalOpen}
                 hint="Across channels you can access"
                 icon={Target}
+                href="/leads"
               />
               <KpiCard
                 label="Pipeline value"
                 value={`$${(pipelineValue / 1000).toFixed(0)}k`}
                 hint={pipelineHint}
                 icon={TrendingUp}
+                href="/deals"
               />
               <KpiCard
                 label="Closed (30d)"
                 value={`$${(closedValue / 1000).toFixed(0)}k`}
                 hint={`${scopedDeals.filter((d) => d.stage === "won").length} deals won`}
                 icon={DollarSign}
+                href="/deals"
               />
               <KpiCard
                 label="Avg response"
@@ -433,15 +464,19 @@ export default function DashboardPage() {
                 hint="Time to first outbound"
                 deltaType="positive-down"
                 icon={Clock}
+                href="/activity"
               />
               <KpiCard
                 label="Idle leads"
                 value={idleCount}
-                hint="Over stage threshold"
+                hint={`No activity in ${IDLE_LEAD_THRESHOLD_DAYS}+ days (excl. won/lost)`}
                 deltaType="positive-down"
                 icon={Inbox}
+                href="/leads?filter=idle"
               />
             </div>
+
+            {!frontlineLayout && pendingOverview}
 
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="min-w-0 lg:col-span-2">
@@ -463,11 +498,10 @@ export default function DashboardPage() {
                   </p>
                 </div>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-                <FunnelChart channel="cold_email" title="Cold Email" counts={coldEmailCounts} />
-                <FunnelChart channel="linkedin_outbound" title="LinkedIn Outbound" counts={linkedinCounts} />
-                <FunnelChart channel="upwork" title="Upwork" counts={upworkCounts} />
-                <FunnelChart channel="website_form" title="Website Form" counts={websiteCounts} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+                {funnelCharts.map(({ channel, title, counts }) => (
+                  <FunnelChart key={channel} channel={channel} title={title} counts={counts} />
+                ))}
               </div>
             </div>
 

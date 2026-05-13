@@ -2,15 +2,7 @@
 
 import * as React from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-} from "recharts";
+import { AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from "recharts";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildActivityTrendSeries } from "@/lib/dashboard-analytics";
 import type { ActivityRecord, Deal, Lead } from "@/lib/types";
@@ -33,6 +25,34 @@ export function TrendChart({
     [activityRecords, deals, leads],
   );
 
+  /** Avoid Recharts `ResponsiveContainer` here: its ResizeObserver + flex parents can thrash and hit React max update depth in production. */
+  const wrapRef = React.useRef<HTMLDivElement>(null);
+  const [chartSize, setChartSize] = React.useState({ w: 320, h: 224 });
+  React.useLayoutEffect(() => {
+    const el = wrapRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    let raf = 0;
+    const commit = (w: number, h: number) => {
+      const nw = Math.max(1, Math.floor(w));
+      const nh = Math.max(1, Math.floor(h));
+      setChartSize((d) => (d.w === nw && d.h === nh ? d : { w: nw, h: nh }));
+    };
+    const ro = new ResizeObserver((entries) => {
+      const cr = entries[0]?.contentRect;
+      if (!cr) return;
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        commit(cr.width, cr.height);
+      });
+    });
+    ro.observe(el);
+    commit(el.clientWidth, el.clientHeight);
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
+
   return (
     <Card className="min-w-0">
       <CardHeader className="pb-3">
@@ -40,20 +60,20 @@ export function TrendChart({
           <div>
             <CardTitle className="text-sm font-semibold">Activity trend</CardTitle>
             <CardDescription className="text-xs">
-              Replies · meetings · closed · last 30 days
+              New leads · replies · meetings · closed · last 30 days
             </CardDescription>
           </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">
-        <div className="h-56 w-full min-w-0 shrink-0">
-          <ResponsiveContainer
-            width="100%"
-            height="100%"
-            minWidth={0}
-            initialDimension={{ width: 320, height: 224 }}
-          >
-            <AreaChart data={data} margin={{ top: 6, right: 12, bottom: 0, left: -16 }}>
+        <div ref={wrapRef} className="h-56 w-full min-w-0 shrink-0">
+          {chartSize.w > 0 && chartSize.h > 0 ? (
+            <AreaChart
+              width={chartSize.w}
+              height={chartSize.h}
+              data={data}
+              margin={{ top: 6, right: 12, bottom: 0, left: -16 }}
+            >
               <defs>
                 <linearGradient id="gReplies" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.45} />
@@ -66,6 +86,10 @@ export function TrendChart({
                 <linearGradient id="gClosed" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--chart-3)" stopOpacity={0.35} />
                   <stop offset="100%" stopColor="var(--chart-3)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gNewLeads" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--chart-4)" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="var(--chart-4)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -116,10 +140,21 @@ export function TrendChart({
                 fill="url(#gClosed)"
                 isAnimationActive={false}
               />
+              <Area
+                type="monotone"
+                dataKey="newLeads"
+                stroke="var(--chart-4)"
+                strokeWidth={2}
+                fill="url(#gNewLeads)"
+                isAnimationActive={false}
+              />
             </AreaChart>
-          </ResponsiveContainer>
+          ) : null}
         </div>
-        <div className="mt-2 flex items-center gap-4 text-[11px] text-muted-foreground">
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 rounded-full" style={{ background: "var(--chart-4)" }} /> New leads
+          </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 rounded-full" style={{ background: "var(--chart-1)" }} /> Replies
           </span>

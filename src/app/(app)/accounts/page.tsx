@@ -178,7 +178,7 @@ export default function AccountsPage() {
   return (
     <>
       <PageHeader
-        title="Accounts"
+        title="Companies"
         description="Companies we're selling into, deduped by domain."
         actions={
           <>
@@ -193,14 +193,14 @@ export default function AccountsPage() {
               }
             />
             <Button size="sm" onClick={() => openQuickAdd({ initialPill: "account" })}>
-              <Plus className="h-3.5 w-3.5" /> New account
+              <Plus className="h-3.5 w-3.5" /> New company
             </Button>
           </>
         }
       />
       <PageBody>
         {!isDemo && accounts.length === 0 ? (
-          <WorkspaceEmptyHint title="No accounts in workspace" />
+          <WorkspaceEmptyHint title="No companies in workspace" />
         ) : (
           <>
             <div className="flex items-center gap-2">
@@ -209,7 +209,7 @@ export default function AccountsPage() {
                 <Input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
-                  placeholder="Search accounts…"
+                  placeholder="Search companies…"
                   className="pl-8 h-8"
                 />
               </div>
@@ -359,7 +359,7 @@ export default function AccountsPage() {
 
             <div className="text-xs text-muted-foreground">
               Showing <span className="tabular-nums font-medium text-foreground">{fmtNumber(sortedRows.length)}</span> of{" "}
-              <span className="tabular-nums">{fmtNumber(accounts.length)}</span> accounts
+              <span className="tabular-nums">{fmtNumber(accounts.length)}</span> companies
             </div>
           </>
         )}

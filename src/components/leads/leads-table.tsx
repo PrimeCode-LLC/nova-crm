@@ -66,6 +66,7 @@ import {
   TEMPERATURE_TONE,
   PRIORITY_TONE,
   PUSH_STATUS_TONE,
+  INTAKE_KIND_META,
 } from "@/lib/constants";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
@@ -83,6 +84,17 @@ import {
 } from "@/lib/owner-scope";
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import {
+  DateRangeFilter,
+  isWithinRange,
+  type DateRange,
+} from "@/components/common/date-range-filter";
+
+/** Column filter token: leads with no outreach profile assigned. */
+const PROFILE_FILTER_NONE = "__none__";
+
+/** Column filter token: leads with no workspace labels. */
+const LABEL_FILTER_NONE = "__unlabeled__";
 
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
@@ -230,15 +242,53 @@ export interface LeadsTableProps {
   /** Sorted `stage` query values joined with `|` (stable for effects). */
   urlStageKey?: string;
   idleOnly?: boolean;
+  /** Default intake filter (e.g. prospects-only page). */
+  initialIntakeScope?: "all" | "prospect" | "sales_lead";
+  /** When set, intake scope is fixed (toolbar control hidden) — e.g. Leads vs Prospects routes. */
+  lockedIntakeScope?: "all" | "prospect" | "sales_lead";
+  /** Origin route for lead-detail back navigation (appended as `?from=…`). */
+  linkFromKey?: "prospects" | "pipeline";
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
-  { leads, preset = "default", urlChannelKey = "", urlStageKey = "", idleOnly = false },
+  {
+    leads,
+    preset = "default",
+    urlChannelKey = "",
+    urlStageKey = "",
+    idleOnly = false,
+    initialIntakeScope = "all",
+    lockedIntakeScope,
+    linkFromKey,
+  },
   ref,
 ) {
+  const buildLeadHref = React.useCallback(
+    (id: string, extraQuery?: string) => {
+      const base = `/leads/${id}`;
+      if (!linkFromKey && !extraQuery) return base;
+      const params = new URLSearchParams();
+      if (linkFromKey) params.set("from", linkFromKey);
+      if (extraQuery) {
+        for (const [k, v] of new URLSearchParams(extraQuery)) params.set(k, v);
+      }
+      const qs = params.toString();
+      return qs ? `${base}?${qs}` : base;
+    },
+    [linkFromKey],
+  );
   const router = useRouter();
-  const { currentUserId, users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
-  const { openQuickAdd } = useOpenQuickAdd();
+  const {
+    currentUserId,
+    users,
+    getUserById,
+    getOwnerDisplayName,
+    getProfileById,
+    profiles,
+    crmLabels,
+    isDemo,
+  } = useWorkspace();
+  const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const leadsChannelFilterOptions = React.useMemo(
     () => buildLeadsChannelOptions(customChannels),
@@ -258,9 +308,26 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     mergeUrlColumnFilters(preset, initialChannels, initialStages),
   );
   const [rowSelection, setRowSelection] = React.useState({});
-  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({});
+  const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
+    profileId: false,
+  });
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
+  const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
+  const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">(
+    lockedIntakeScope ?? initialIntakeScope,
+  );
   const [reassignOpen, setReassignOpen] = React.useState(false);
+
+  const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
+
+  React.useEffect(() => {
+    if (lockedIntakeScope) {
+      setIntakeScope(lockedIntakeScope);
+      return;
+    }
+    setIntakeScope(initialIntakeScope);
+  }, [initialIntakeScope, lockedIntakeScope]);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
 
   const openReassignForIds = React.useCallback((ids: string[]) => {
@@ -287,10 +354,34 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     [leads, users, getUserById, getOwnerDisplayName],
   );
 
-  const dataForTable = React.useMemo(
-    () => filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps),
-    [afterIdleFilter, ownerScope, ownerScopeDeps],
+  const profileFilterOptions = React.useMemo(() => {
+    return [...profiles]
+      .filter((p) => p.active !== false)
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+  }, [profiles]);
+
+  const labelFilterOptions = React.useMemo(
+    () => [...crmLabels].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" })),
+    [crmLabels],
   );
+
+  const dataForTable = React.useMemo(() => {
+    let rows = filterLeadsByOwnerScope(afterIdleFilter, ownerScope, ownerScopeDeps);
+    if (effectiveIntakeScope === "prospect") {
+      rows = rows.filter((l) => l.intakeKind === "prospect");
+    } else if (effectiveIntakeScope === "sales_lead") {
+      rows = rows.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead");
+    }
+    if (createdRange?.from || createdRange?.to) {
+      rows = rows.filter((l) => isWithinRange(l.createdAt, createdRange));
+    }
+    if (activityRange?.from || activityRange?.to) {
+      rows = rows.filter((l) =>
+        isWithinRange(l.lastActivityAt ?? l.updatedAt, activityRange),
+      );
+    }
+    return rows;
+  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange, effectiveIntakeScope]);
 
   const ownerFilterTriggerLabel = React.useMemo(
     () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
@@ -326,7 +417,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => (
         <div className="min-w-0">
           <Link
-            href={`/leads/${row.original.id}`}
+            href={buildLeadHref(row.original.id)}
             className="text-sm font-medium hover:text-primary truncate block"
           >
             {row.original.contactName}
@@ -355,12 +446,98 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ),
     },
     {
+      id: "intakeKind",
+      accessorFn: (row) => row.intakeKind ?? "sales_lead",
+      header: "Intake",
+      cell: ({ row }) => {
+        const k = row.original.intakeKind ?? "sales_lead";
+        const m = INTAKE_KIND_META[k];
+        return (
+          <Badge variant="outline" className={cn("text-[10px] font-normal", m.className)}>
+            {m.short}
+          </Badge>
+        );
+      },
+    },
+    {
+      id: "labelIds",
+      accessorFn: (row) => (row.labelIds ?? []).join(","),
+      header: "Labels",
+      cell: ({ row }) => {
+        const ids = row.original.labelIds ?? [];
+        if (!ids.length) {
+          return <span className="text-xs text-muted-foreground">—</span>;
+        }
+        return (
+          <div className="flex max-w-[148px] flex-wrap gap-0.5">
+            {ids.slice(0, 4).map((id) => {
+              const def = crmLabels.find((l) => l.id === id);
+              return (
+                <Badge
+                  key={id}
+                  variant="outline"
+                  className="max-w-[7rem] truncate text-[9px] font-normal"
+                  title={def?.name ?? id}
+                  style={
+                    def?.color
+                      ? { borderLeftWidth: 2, borderLeftColor: def.color, borderLeftStyle: "solid" as const }
+                      : undefined
+                  }
+                >
+                  {def?.name ?? id.slice(0, 8)}
+                </Badge>
+              );
+            })}
+            {ids.length > 4 ? (
+              <span className="self-center text-[10px] text-muted-foreground tabular-nums">+{ids.length - 4}</span>
+            ) : null}
+          </div>
+        );
+      },
+      filterFn: (row, _id, value: string[]) => {
+        const selected = value as string[];
+        if (!selected?.length) return true;
+        const leadIds = row.original.labelIds ?? [];
+        const wantsUnlabeled = selected.includes(LABEL_FILTER_NONE);
+        const labelIdsOnly = selected.filter((v) => v !== LABEL_FILTER_NONE);
+        const unlabeledMatch = wantsUnlabeled && leadIds.length === 0;
+        const tagMatch = labelIdsOnly.some((lid) => leadIds.includes(lid));
+        return unlabeledMatch || tagMatch;
+      },
+    },
+    {
       id: "channel",
       accessorKey: "channel",
       header: "Channel",
       cell: ({ row }) => <LeadChannelCell lead={row.original} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
+    },
+    {
+      id: "profileId",
+      accessorKey: "profileId",
+      header: "Profile",
+      cell: ({ row }) => {
+        const p = getProfileById(row.original.profileId);
+        if (!p) {
+          return <span className="text-xs text-muted-foreground">—</span>;
+        }
+        return (
+          <span className="max-w-[10rem] truncate text-sm" title={p.name}>
+            {p.name}
+          </span>
+        );
+      },
+      filterFn: (row, _id, value: string[]) => {
+        const selected = value as string[];
+        if (!selected?.length) return true;
+        const pid = row.original.profileId;
+        const wantsNone = selected.includes(PROFILE_FILTER_NONE);
+        const profileIds = selected.filter((v) => v !== PROFILE_FILTER_NONE);
+        if (wantsNone && !pid) return true;
+        if (pid && profileIds.includes(pid)) return true;
+        return false;
+      },
     },
     {
       id: "stage",
@@ -374,7 +551,27 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       id: "owner",
       accessorKey: "ownerId",
       header: "Owner",
-      cell: ({ row }) => <UserChip userId={row.original.ownerId} size="xs" />,
+      cell: ({ row }) => {
+        const oid = row.original.ownerId?.trim();
+        if (!oid) {
+          return (
+            <Badge variant="secondary" className="text-[10px] font-normal">
+              Open queue
+            </Badge>
+          );
+        }
+        return <UserChip userId={oid} size="xs" />;
+      },
+    },
+    {
+      id: "addedBy",
+      accessorFn: (row) => row.createdById ?? "",
+      header: "Added by",
+      cell: ({ row }) => {
+        const id = row.original.createdById?.trim();
+        if (!id) return <span className="text-xs text-muted-foreground">—</span>;
+        return <UserChip userId={id} size="xs" />;
+      },
     },
     {
       id: "temperature",
@@ -422,6 +619,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => (
         <span className="tabular-nums text-right block">
           {fmtCurrency(row.original.estimatedValue)}
+        </span>
+      ),
+    },
+    {
+      id: "created",
+      accessorKey: "createdAt",
+      header: "Added date",
+      cell: ({ row }) => (
+        <span
+          className="text-xs text-muted-foreground tabular-nums whitespace-nowrap"
+          title={fmtDate(row.original.createdAt, "PPpp")}
+        >
+          {fmtDate(row.original.createdAt)}
         </span>
       ),
     },
@@ -476,7 +686,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               }
             />
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => router.push(`/leads/${id}`)}>Edit</DropdownMenuItem>
+              <DropdownMenuItem onClick={() => router.push(buildLeadHref(id))}>Edit</DropdownMenuItem>
               <DropdownMenuItem
                 onClick={(e) => {
                   e.stopPropagation();
@@ -485,7 +695,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               >
                 Reassign
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => router.push(`/leads/${id}?tab=notes`)}>
+              <DropdownMenuItem onClick={() => router.push(buildLeadHref(id, "tab=notes"))}>
                 Add note
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -508,11 +718,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, isDemo]);
+  ], [router, openReassignForIds, isDemo, getProfileById, crmLabels]);
 
   const table = useReactTable({
     data: dataForTable,
     columns,
+    getRowId: (row) => row.id,
     state: { sorting, globalFilter, columnFilters, rowSelection, columnVisibility },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
@@ -557,11 +768,13 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   React.useEffect(() => {
     setRowSelection({});
-  }, [ownerScope]);
+  }, [ownerScope, effectiveIntakeScope]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
   const channelFilter = (columnFilters.find((f) => f.id === "channel")?.value as string[]) ?? [];
+  const profileFilter = (columnFilters.find((f) => f.id === "profileId")?.value as string[]) ?? [];
+  const labelFilter = (columnFilters.find((f) => f.id === "labelIds")?.value as string[]) ?? [];
 
   function toggleStage(key: PipelineStage) {
     const next = stageFilter.includes(key)
@@ -574,6 +787,18 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ? channelFilter.filter((s) => s !== key)
       : [...channelFilter, key];
     table.getColumn("channel")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleProfile(key: string) {
+    const next = profileFilter.includes(key)
+      ? profileFilter.filter((s) => s !== key)
+      : [...profileFilter, key];
+    table.getColumn("profileId")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleLabelFilter(key: string) {
+    const next = labelFilter.includes(key)
+      ? labelFilter.filter((s) => s !== key)
+      : [...labelFilter, key];
+    table.getColumn("labelIds")?.setFilterValue(next.length ? next : undefined);
   }
 
   return (
@@ -627,6 +852,32 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {lockedIntakeScope ? (
+          <span
+            className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2.5 text-xs text-muted-foreground"
+            title="Intake filter is fixed on this page"
+          >
+            <Filter className="h-3.5 w-3.5" aria-hidden />
+            {lockedIntakeScope === "sales_lead"
+              ? "Sales leads"
+              : lockedIntakeScope === "prospect"
+                ? "Prospects"
+                : "All records"}
+          </span>
+        ) : (
+          <Select value={intakeScope} onValueChange={(v) => v && setIntakeScope(v as typeof intakeScope)}>
+            <SelectTrigger size="sm" className="w-[min(168px,42vw)] min-w-0 gap-1.5">
+              <Filter className="h-3.5 w-3.5 shrink-0 opacity-60" />
+              <SelectValue placeholder="Intake" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All records</SelectItem>
+              <SelectItem value="prospect">Prospects only</SelectItem>
+              <SelectItem value="sales_lead">Sales leads only</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
+
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -655,6 +906,112 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           </DropdownMenuContent>
         </DropdownMenu>
 
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Filter className="h-3.5 w-3.5" />
+                Profile
+                {profileFilter.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {profileFilter.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Outreach persona
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuCheckboxItem
+              checked={profileFilter.includes(PROFILE_FILTER_NONE)}
+              onCheckedChange={() => toggleProfile(PROFILE_FILTER_NONE)}
+            >
+              No profile
+            </DropdownMenuCheckboxItem>
+            {profileFilterOptions.length > 0 && <DropdownMenuSeparator />}
+            {profileFilterOptions.map((p) => {
+              const chLabel = CHANNEL_LIST.find((c) => c.key === p.channel)?.label ?? p.channel;
+              return (
+                <DropdownMenuCheckboxItem
+                  key={p.id}
+                  checked={profileFilter.includes(p.id)}
+                  onCheckedChange={() => toggleProfile(p.id)}
+                >
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    <span className="truncate font-medium">{p.name}</span>
+                    <span className="truncate text-[10px] font-normal text-muted-foreground">{chLabel}</span>
+                  </span>
+                </DropdownMenuCheckboxItem>
+              );
+            })}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Tag className="h-3.5 w-3.5" />
+                Labels
+                {labelFilter.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {labelFilter.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Show leads that match any selected tag
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            <DropdownMenuCheckboxItem
+              checked={labelFilter.includes(LABEL_FILTER_NONE)}
+              onCheckedChange={() => toggleLabelFilter(LABEL_FILTER_NONE)}
+            >
+              Unlabeled
+            </DropdownMenuCheckboxItem>
+            {labelFilterOptions.length > 0 && <DropdownMenuSeparator />}
+            {labelFilterOptions.map((l) => (
+              <DropdownMenuCheckboxItem
+                key={l.id}
+                checked={labelFilter.includes(l.id)}
+                onCheckedChange={() => toggleLabelFilter(l.id)}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full"
+                    style={{ background: l.color ?? "hsl(var(--muted-foreground))" }}
+                  />
+                  <span className="truncate">{l.name}</span>
+                </span>
+              </DropdownMenuCheckboxItem>
+            ))}
+            {labelFilterOptions.length === 0 && (
+              <div className="px-2 py-2 text-xs text-muted-foreground">No labels defined yet.</div>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DateRangeFilter
+          label="Added"
+          value={createdRange}
+          onChange={setCreatedRange}
+        />
+        <DateRangeFilter
+          label="Last activity"
+          value={activityRange}
+          onChange={setActivityRange}
+        />
+
         <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
           <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem]">
             <SelectValue placeholder="Owner filter">
@@ -667,7 +1024,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               <SelectItem value="all-owners">All owners</SelectItem>
               <SelectItem value="me">Owned by me</SelectItem>
               <SelectItem value="team">My team</SelectItem>
-              <SelectItem value="unassigned">Unassigned</SelectItem>
+              <SelectItem value="open-queue">Open queue</SelectItem>
+              <SelectItem value="unassigned">Orphan owner</SelectItem>
             </SelectGroup>
             {personOwnerOptions.length > 0 && (
               <>
@@ -715,10 +1073,14 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             </DropdownMenuContent>
           </DropdownMenu>
           <Button
+            variant="outline"
             size="sm"
             type="button"
-            onClick={() => openQuickAdd({ initialPill: "lead" })}
+            onClick={() => openNewProspectForm()}
           >
+            <Plus className="h-3.5 w-3.5" /> New prospect
+          </Button>
+          <Button size="sm" type="button" onClick={() => openQuickAdd({ initialPill: "lead" })}>
             <Plus className="h-3.5 w-3.5" /> New lead
           </Button>
         </div>
@@ -784,18 +1146,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                       key={h.id}
                       className="text-xs font-semibold uppercase tracking-wide text-muted-foreground h-9 whitespace-nowrap"
                     >
-                      {h.isPlaceholder ? null : (
+                      {h.isPlaceholder ? null : h.column.getCanSort() ? (
                         <button
                           type="button"
                           onClick={h.column.getToggleSortingHandler()}
                           className="flex items-center gap-1 hover:text-foreground transition-colors"
-                          disabled={!h.column.getCanSort()}
                         >
                           {flexRender(h.column.columnDef.header, h.getContext())}
-                          {h.column.getCanSort() && (
-                            <ArrowUpDown className="h-3 w-3 opacity-40" />
-                          )}
+                          <ArrowUpDown className="h-3 w-3 opacity-40" />
                         </button>
+                      ) : (
+                        <div className="flex items-center gap-1">
+                          {flexRender(h.column.columnDef.header, h.getContext())}
+                        </div>
                       )}
                     </TableHead>
                   ))}
@@ -820,11 +1183,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                       if (el.closest("a, button, [data-slot='checkbox'], [data-slot='dropdown-menu-trigger']")) {
                         return;
                       }
-                      router.push(`/leads/${row.original.id}`);
+                      router.push(buildLeadHref(row.original.id));
                     }}
                   >
                     {row.getVisibleCells().map((cell) => (
-                      <TableCell key={cell.id} className="py-2 whitespace-nowrap">
+                      <TableCell
+                        key={cell.id}
+                        className="py-2 whitespace-nowrap"
+                        onClick={
+                          cell.column.id === "select"
+                            ? (e) => e.stopPropagation()
+                            : undefined
+                        }
+                      >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
                       </TableCell>
                     ))}

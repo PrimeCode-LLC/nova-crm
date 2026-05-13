@@ -15,17 +15,24 @@ import {
   Monitor,
   Palette,
   ShieldCheck,
+  ChevronDown,
 } from "lucide-react";
 import { useOpenQuickAdd } from "./quick-add-launcher";
 import { useTheme } from "next-themes";
 
-import { NAV_SECTIONS } from "@/lib/nav";
+import {
+  clusterConfigurationItems,
+  getVisibleNavSections,
+  type NavAccessContext,
+  type NavItem,
+} from "@/lib/nav";
 import { mockUsers } from "@/lib/mock-data";
 import { DEMO_ROLE_PRESETS } from "@/lib/demo-persona";
 import { ROLES, APP_NAME } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import type { Role } from "@/lib/types";
@@ -42,7 +49,13 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -58,6 +71,111 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
 import { AppMark } from "@/components/brand/app-mark";
+
+function NavMenuLinks({
+  items,
+  pathname,
+  teamChatUnreadTotal,
+}: {
+  items: NavItem[];
+  pathname: string;
+  teamChatUnreadTotal: number;
+}) {
+  return (
+    <>
+      {items.map((item) => {
+        const isActive =
+          pathname === item.href || pathname.startsWith(item.href + "/");
+        const Icon = item.icon;
+        const chatBadge =
+          item.href === "/team-chat" && teamChatUnreadTotal > 0
+            ? teamChatUnreadTotal > 99
+              ? "99+"
+              : String(teamChatUnreadTotal)
+            : null;
+        return (
+          <SidebarMenuItem key={item.href}>
+            <SidebarMenuButton
+              isActive={isActive}
+              tooltip={item.label}
+              render={
+                <Link href={item.href} className="flex min-w-0 flex-1 items-center gap-2">
+                  <Icon className="shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{item.label}</span>
+                  {chatBadge ? (
+                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-bold tabular-nums text-foreground ring-1 ring-border">
+                      {chatBadge}
+                    </span>
+                  ) : null}
+                </Link>
+              }
+            />
+          </SidebarMenuItem>
+        );
+      })}
+    </>
+  );
+}
+
+function ConfigurationNavGroups({
+  items,
+  pathname,
+  flat,
+  teamChatUnreadTotal,
+}: {
+  items: NavItem[];
+  pathname: string;
+  flat: boolean;
+  teamChatUnreadTotal: number;
+}) {
+  if (flat) {
+    return (
+      <SidebarMenu>
+        <NavMenuLinks items={items} pathname={pathname} teamChatUnreadTotal={teamChatUnreadTotal} />
+      </SidebarMenu>
+    );
+  }
+  const clusters = clusterConfigurationItems(items);
+  return (
+    <div className="flex flex-col gap-0.5">
+      {clusters.map((cluster) => {
+        const defaultOpen = cluster.items.some(
+          (item) =>
+            pathname === item.href || pathname.startsWith(item.href + "/"),
+        );
+        return (
+          <Collapsible
+            key={cluster.clusterId}
+            defaultOpen={defaultOpen}
+            className="group/cluster"
+          >
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <CollapsibleTrigger
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted-foreground outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 group-data-open/cluster:bg-sidebar-accent/40",
+                  )}
+                >
+                  <span className="min-w-0 flex-1 truncate">{cluster.label}</span>
+                  <ChevronDown className="size-3.5 shrink-0 opacity-70 transition-transform group-data-open/cluster:rotate-180" />
+                </CollapsibleTrigger>
+              </SidebarMenuItem>
+            </SidebarMenu>
+            <CollapsibleContent>
+              <SidebarMenu className="mt-0.5">
+                <NavMenuLinks
+                  items={cluster.items}
+                  pathname={pathname}
+                  teamChatUnreadTotal={teamChatUnreadTotal}
+                />
+              </SidebarMenu>
+            </CollapsibleContent>
+          </Collapsible>
+        );
+      })}
+    </div>
+  );
+}
 
 function workspaceRoleSubtitle(
   roleId: Role | undefined,
@@ -120,6 +238,29 @@ export function AppSidebar({
         .slice(0, 2)
         .toUpperCase();
 
+  const navAccess = React.useMemo<NavAccessContext>(
+    () => ({
+      roleId: useMockPersona ? mockUser.roleId : userDoc?.roleId,
+      isSuperAdmin: !useMockPersona && Boolean(userDoc?.isSuperAdmin),
+      roleLoading: !useMockPersona && userDocLoading && userDoc == null,
+    }),
+    [
+      useMockPersona,
+      mockUser.roleId,
+      userDoc?.roleId,
+      userDoc?.isSuperAdmin,
+      userDocLoading,
+      userDoc,
+    ],
+  );
+  const sections = React.useMemo(
+    () => getVisibleNavSections(navAccess),
+    [navAccess.roleId, navAccess.isSuperAdmin, navAccess.roleLoading],
+  );
+  const { teamChatUnreadTotal } = useTeamChatUnread();
+  const { state: sidebarState } = useSidebar();
+  const sidebarIsCollapsed = sidebarState === "collapsed";
+
   return (
     <Sidebar collapsible="icon" className="border-r">
       <SidebarHeader>
@@ -133,31 +274,26 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        {NAV_SECTIONS.map((section) => (
+        {sections.map((section) => (
           <SidebarGroup key={section.label}>
             <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
             <SidebarGroupContent>
-              <SidebarMenu>
-                {section.items.map((item) => {
-                  const isActive =
-                    pathname === item.href || pathname.startsWith(item.href + "/");
-                  const Icon = item.icon;
-                  return (
-                    <SidebarMenuItem key={item.href}>
-                      <SidebarMenuButton
-                        isActive={isActive}
-                        tooltip={item.label}
-                        render={
-                          <Link href={item.href}>
-                            <Icon />
-                            <span>{item.label}</span>
-                          </Link>
-                        }
-                      />
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
+              {section.label === "Configuration" ? (
+                <ConfigurationNavGroups
+                  items={section.items}
+                  pathname={pathname}
+                  flat={sidebarIsCollapsed}
+                  teamChatUnreadTotal={teamChatUnreadTotal}
+                />
+              ) : (
+                <SidebarMenu>
+                  <NavMenuLinks
+                    items={section.items}
+                    pathname={pathname}
+                    teamChatUnreadTotal={teamChatUnreadTotal}
+                  />
+                </SidebarMenu>
+              )}
             </SidebarGroupContent>
           </SidebarGroup>
         ))}

@@ -14,6 +14,8 @@ const APP_PROTECTED_PREFIXES = [
   "/activity",
   "/followups",
   "/inbox",
+  "/notifications",
+  "/team-chat",
   "/admin",
   "/settings",
   "/actions",

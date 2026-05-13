@@ -15,6 +15,7 @@ import type {
   ActivityCounterRow,
   ActivityRecord,
   PermissionOverride,
+  CrmLabel,
 } from "./types";
 import {
   mockUsers,
@@ -33,11 +34,16 @@ import {
   mockNotes,
   mockActivityCounters,
   mockActivityRecords,
+  mockCrmLabels,
   CURRENT_USER_ID,
 } from "./mock-data";
 import type { WorkspaceMode } from "./workspace-mode";
 import { parseDemoPersonaId } from "./demo-persona";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
+import {
+  activityActorUserIdsVisibleToViewer,
+  followupVisibleInHierarchyScope,
+} from "./workspace-hierarchy";
 
 export type WorkspaceSnapshot = {
   users: User[];
@@ -56,6 +62,7 @@ export type WorkspaceSnapshot = {
   notes: Note[];
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
+  crmLabels: CrmLabel[];
   currentUserId: string;
 };
 
@@ -76,6 +83,7 @@ export const DEMO_SNAPSHOT: WorkspaceSnapshot = {
   notes: mockNotes,
   activityCounters: mockActivityCounters,
   activityRecords: mockActivityRecords,
+  crmLabels: mockCrmLabels,
   currentUserId: CURRENT_USER_ID,
 };
 
@@ -98,6 +106,7 @@ export const LIVE_SNAPSHOT: WorkspaceSnapshot = {
   notes: [],
   activityCounters: [],
   activityRecords: [],
+  crmLabels: [],
   currentUserId: "",
 };
 
@@ -136,6 +145,8 @@ function directoryUserIdsFor(persona: User, allUsers: readonly User[]): Set<stri
 
 /** Whether a demo lead is visible to the active persona (org + ownership rules). */
 function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly User[]): boolean {
+  // Intake prospects are treated as an org-wide pool in demo so every tour persona sees sample rows.
+  if (lead.intakeKind === "prospect") return true;
   if (persona.roleId === "director") return true;
   if (persona.roleId === "manager") {
     const owners = new Set<string>([persona.id]);
@@ -146,8 +157,7 @@ function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly Use
   if (persona.id === "u-sales-01") {
     return allUsers.some((u) => u.id === lead.ownerId && u.departmentId === "d-outbound");
   }
-  // Laura: sourced leads + any she owns.
-  if (persona.id === "u-scrape-01") {
+  if (persona.roleId === "prospecting" || persona.roleId === "data_scraper") {
     return lead.ownerId === persona.id || lead.scraperId === persona.id;
   }
   return lead.ownerId === persona.id;
@@ -183,10 +193,11 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     if (te) timelineByLead[id] = te;
   }
 
-  const followups = snapshot.followups.filter(
-    (f) =>
-      (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
-      (f.dealId != null && visibleDealIds.has(f.dealId)),
+  const activityActorIds = activityActorUserIdsVisibleToViewer(persona, mockUsers);
+  const standaloneActorIds = activityActorIds ?? new Set(users.map((u) => u.id));
+
+  const followups = snapshot.followups.filter((f) =>
+    followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, standaloneActorIds),
   );
 
   const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, persona);
@@ -200,17 +211,16 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     dirIds === null
       ? snapshot.permissionOverrides
       : snapshot.permissionOverrides.filter((po) => dirIds.has(po.userId));
-
   const activityCounters =
-    dirIds === null
+    activityActorIds === null
       ? snapshot.activityCounters
-      : snapshot.activityCounters.filter((row) => dirIds.has(row.userId));
+      : snapshot.activityCounters.filter((row) => activityActorIds.has(row.userId));
 
   const activityRecords =
-    dirIds === null
+    activityActorIds === null
       ? snapshot.activityRecords
       : snapshot.activityRecords.filter(
-          (r) => dirIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
+          (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
         );
 
   return {

@@ -16,10 +16,19 @@ import {
   Share2,
   Star,
   MoreHorizontal,
+  Trash2,
+  UserPlus,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { PIPELINE_STAGES, REVENUE_RANGES, STAGES_BY_KEY } from "@/lib/constants";
+import {
+  CHANNELS_REQUIRING_OUTREACH_PROFILE,
+  outreachProfileFieldLabel,
+  PIPELINE_STAGES,
+  REVENUE_RANGES,
+  STAGES_BY_KEY,
+  INTAKE_KIND_META,
+} from "@/lib/constants";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -44,8 +53,19 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -54,6 +74,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
@@ -77,6 +98,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
   const [activeTab, setActiveTab] = React.useState<LeadTab>(tabFromUrl);
   const [editOpen, setEditOpen] = React.useState(false);
+  const [prospectFieldsOpen, setProspectFieldsOpen] = React.useState(false);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
   React.useEffect(() => {
     setActiveTab(tabFromUrl);
   }, [tabFromUrl]);
@@ -93,47 +117,51 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     [pathname, router, searchParams],
   );
 
-  const backHref = searchParams.get("from") === "pipeline" ? "/pipeline" : "/leads";
+  const backFrom = searchParams.get("from");
+  const backHref =
+    backFrom === "pipeline" ? "/pipeline" : backFrom === "prospects" ? "/prospects" : "/leads";
+  const backLabel =
+    backHref === "/pipeline"
+      ? "Back to pipeline"
+      : backHref === "/prospects"
+        ? "Back to prospects"
+        : "Back to leads";
   const lead = ws.getLeadById(leadId);
 
-  if (!lead) {
-    return (
-      <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
-        <p className="text-sm text-muted-foreground">This lead was not found in your current workspace.</p>
-        <Button
-          size="sm"
-          variant="outline"
-          nativeButton={false}
-          render={
-            <Link href={backHref}>{backHref === "/pipeline" ? "Back to pipeline" : "Back to leads"}</Link>
-          }
-        />
-        {!ws.isDemo && <WorkspaceEmptyHint />}
-      </PageBody>
-    );
-  }
-
-  const account = ws.getAccountById(lead.accountId);
-  const contact = ws.getContactById(lead.contactId);
-  const campaign = ws.getCampaignById(lead.campaignId);
-  const profile = ws.getProfileById(lead.profileId);
-  const touchpoints = ws.touchpoints.filter((t) => t.leadId === lead.id);
-  const timeline = ws.timelineByLead[lead.id] ?? [];
-  const notes = ws.notes.filter((n) => n.leadId === lead.id);
-  const notesTabCount = notes.length + (lead.notes?.trim() ? 1 : 0);
-  const followups = ws.followups.filter((f) => f.leadId === lead.id);
   const viewerForTasks = React.useMemo(
     () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
     [ws.currentUserId, ws.users, ws.getUserById],
   );
   const leadTasksForTab = React.useMemo(
-    () => filterLeadTasksForLeadDetail(ws.leadTasks, lead.id, viewerForTasks),
-    [ws.leadTasks, lead.id, viewerForTasks],
+    () => filterLeadTasksForLeadDetail(ws.leadTasks, leadId, viewerForTasks),
+    [ws.leadTasks, leadId, viewerForTasks],
   );
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const sent = useEmailAccountStore((s) => s.sent);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
+
+  const touchpoints = React.useMemo(
+    () => (lead ? ws.touchpoints.filter((t) => t.leadId === lead.id) : []),
+    [lead, ws.touchpoints],
+  );
+  const timeline = React.useMemo(
+    () => (lead ? (ws.timelineByLead[lead.id] ?? []) : []),
+    [lead, ws.timelineByLead],
+  );
+  const notes = React.useMemo(
+    () => (lead ? ws.notes.filter((n) => n.leadId === lead.id) : []),
+    [lead, ws.notes],
+  );
+  const followups = React.useMemo(
+    () => (lead ? ws.followups.filter((f) => f.leadId === lead.id) : []),
+    [lead, ws.followups],
+  );
+  const notesTabCount = React.useMemo(
+    () => notes.length + (lead?.notes?.trim() ? 1 : 0),
+    [lead?.notes, notes.length],
+  );
   const relatedEmails = React.useMemo(() => {
+    if (!lead) return [];
     const own = (lead.contactEmail ?? "").toLowerCase();
     const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
     for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
@@ -152,9 +180,41 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
     }
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
-  }, [inboundByMailbox, linkedLeadByMessageId, lead.contactEmail, lead.id, sent]);
+  }, [inboundByMailbox, linkedLeadByMessageId, lead, sent]);
 
-  const pinned = ws.isLeadPinned(lead.id);
+  const pinned = lead ? ws.isLeadPinned(lead.id) : false;
+
+  if (!lead) {
+    return (
+      <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
+        <p className="text-sm text-muted-foreground">This lead was not found in your current workspace.</p>
+        <Button
+          size="sm"
+          variant="outline"
+          nativeButton={false}
+          render={
+            <Link href={backHref}>{backLabel}</Link>
+          }
+        />
+        {!ws.isDemo && <WorkspaceEmptyHint />}
+      </PageBody>
+    );
+  }
+
+  const account = ws.getAccountById(lead.accountId);
+  const contact = ws.getContactById(lead.contactId);
+  const campaign = ws.getCampaignById(lead.campaignId);
+  const profile = ws.getProfileById(lead.profileId);
+  const needsOutreachProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(lead.channel);
+  const outreachProfileSummary = needsOutreachProfile
+    ? profile?.name?.trim() ||
+      (lead.profileId
+        ? `Profile not found (id ${lead.profileId.length > 14 ? `${lead.profileId.slice(0, 12)}…` : lead.profileId})`
+        : "Not set — open Edit and choose a profile")
+    : undefined;
+  const showAttributionCard = Boolean(
+    campaign || profile || lead.profileId || needsOutreachProfile,
+  );
 
   async function copyToClipboard(text: string, okMsg: string) {
     try {
@@ -181,6 +241,37 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
   return (
     <>
+      <AlertDialog open={deleteOpen} onOpenChange={(o) => !deleteBusy && setDeleteOpen(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this lead?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This removes {lead.contactName} at {lead.companyName} from your workspace. Notes and activity
+              for this lead will no longer appear. Only organization owners and admins can do this.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={deleteBusy}
+              onClick={() => {
+                void (async () => {
+                  setDeleteBusy(true);
+                  const ok = await ws.deleteLead(lead.id);
+                  setDeleteBusy(false);
+                  if (ok) {
+                    setDeleteOpen(false);
+                    router.push(backHref);
+                  }
+                })();
+              }}
+            >
+              {deleteBusy ? "Deleting…" : "Delete lead"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <PageHeader
         title={
           <div className="flex items-center gap-3">
@@ -189,7 +280,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               size="icon-sm"
               nativeButton={false}
               render={
-                <Link href={backHref} aria-label={backHref === "/pipeline" ? "Back to pipeline" : "Back to leads"}>
+                <Link href={backHref} aria-label={backLabel}>
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               }
@@ -234,6 +325,20 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   </SelectContent>
                 </Select>
                 <ChannelChip channel={lead.channel} />
+                {lead.intakeKind === "prospect" && (
+                  <Badge variant="outline" className={cn("h-7 font-normal", INTAKE_KIND_META.prospect.className)}>
+                    {INTAKE_KIND_META.prospect.short}
+                  </Badge>
+                )}
+                {needsOutreachProfile && (
+                  <Badge
+                    variant="outline"
+                    className="h-7 max-w-[min(240px,46vw)] shrink truncate font-normal text-muted-foreground"
+                    title={outreachProfileSummary}
+                  >
+                    {profile?.name?.trim() || (lead.profileId ? "Profile (unresolved)" : "No profile")}
+                  </Badge>
+                )}
               </div>
               <div className="text-xs text-muted-foreground font-normal mt-0.5">
                 {lead.contactTitle} · {lead.companyName}
@@ -243,6 +348,39 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         }
         actions={
           <>
+            {!lead.ownerId?.trim() && ws.currentUserId ? (
+              <Button
+                variant="default"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const uid = ws.currentUserId;
+                  if (!uid) return;
+                  const name =
+                    ws.getUserById(uid)?.displayName?.trim() ||
+                    ws.getOwnerDisplayName(uid)?.trim() ||
+                    "You";
+                  ws.patchLead(lead.id, { ownerId: uid });
+                  ws.patchAccount(lead.accountId, { ownerId: uid });
+                  ws.patchContact(lead.contactId, { ownerId: uid });
+                  ws.addTimelineEvent({
+                    id:
+                      typeof crypto !== "undefined" && "randomUUID" in crypto
+                        ? `te-${crypto.randomUUID()}`
+                        : `te-${Date.now()}`,
+                    leadId: lead.id,
+                    type: "assignment_changed",
+                    actorId: uid,
+                    summary: `${name} claimed this prospect from the open queue`,
+                    createdAt: new Date().toISOString(),
+                  });
+                  ws.bumpLeadActivity(lead.id);
+                  toast.success("You claimed this prospect");
+                }}
+              >
+                <UserPlus className="h-3.5 w-3.5" /> Claim
+              </Button>
+            ) : null}
             <Button
               variant={pinned ? "default" : "outline"}
               size="sm"
@@ -288,6 +426,21 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <DropdownMenuItem onSelect={() => void copyToClipboard(lead.id, "Lead ID copied")}>
                   Copy lead ID
                 </DropdownMenuItem>
+                {ws.canDeleteLeads ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setDeleteOpen(true);
+                      }}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete lead
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
               </DropdownMenuContent>
             </DropdownMenu>
           </>
@@ -339,7 +492,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
               <div className="mt-4">
                 <TabsContent value="overview">
-                  <LeadOverview lead={lead} />
+                  <LeadOverview
+                    lead={lead}
+                    outreachProfileSummary={outreachProfileSummary}
+                    outreachProfileFieldLabel={needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : undefined}
+                  />
                 </TabsContent>
                 <TabsContent value="timeline">
                   <LeadTimeline events={timeline} lead={lead} viewerForTasks={viewerForTasks} />
@@ -399,10 +556,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <UserChip userId={lead.ownerId} size="md" />
                 {lead.scraperId && (
                   <div className="text-xs text-muted-foreground flex items-center gap-2">
-                    <span>Sourced by</span>
+                    <span>Lead by</span>
                     <UserChip userId={lead.scraperId} size="xs" />
                   </div>
                 )}
+                <p className="text-[11px] text-muted-foreground">Added {fmtDate(lead.createdAt)}</p>
               </CardContent>
             </Card>
 
@@ -416,6 +574,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
                     <a href={`mailto:${contact.email}`} className="truncate hover:text-primary">
                       {contact.email}
+                    </a>
+                  </div>
+                )}
+                {contact?.personalEmail && (
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <span className="shrink-0">Personal</span>
+                    <a href={`mailto:${contact.personalEmail}`} className="truncate hover:text-primary">
+                      {contact.personalEmail}
                     </a>
                   </div>
                 )}
@@ -444,6 +610,39 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <span>{contact.location}</span>
                   </div>
                 )}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">
+                  Intake & prospecting
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Prospecting rows feed integrations and campaigns. When a contact responds with interest, promote to a
+                  sales lead for normal pipeline work.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {account && contact && (
+                    <Button type="button" size="sm" variant="outline" onClick={() => setProspectFieldsOpen(true)}>
+                      Edit prospect fields
+                    </Button>
+                  )}
+                  {lead.intakeKind === "prospect" && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => {
+                        handleSaveLead({ intakeKind: undefined });
+                        toast.success("Promoted to sales lead");
+                      }}
+                    >
+                      Promote to sales lead
+                    </Button>
+                  )}
+                </div>
               </CardContent>
             </Card>
 
@@ -476,7 +675,17 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <dt className="text-muted-foreground">Founded</dt>
                     <dd>{account.yearFounded ?? "-"}</dd>
                     <dt className="text-muted-foreground">Location</dt>
-                    <dd>{account.location}</dd>
+                    <dd>
+                      {[account.city, account.state, account.country].filter(Boolean).join(", ") ||
+                        account.location ||
+                        "—"}
+                    </dd>
+                    {account.businessDescription && (
+                      <>
+                        <dt className="text-muted-foreground">Summary</dt>
+                        <dd className="line-clamp-3">{account.businessDescription}</dd>
+                      </>
+                    )}
                     <dt className="text-muted-foreground">Website</dt>
                     <dd>
                       {account.website ? (
@@ -509,7 +718,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               </Card>
             )}
 
-            {(campaign || profile) && (
+            {showAttributionCard && (
               <Card>
                 <CardHeader className="pb-2">
                   <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">
@@ -523,10 +732,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       <span className="truncate">{campaign.name}</span>
                     </div>
                   )}
-                  {profile && (
+                  {(needsOutreachProfile || lead.profileId || profile) && (
                     <div className="flex items-center justify-between gap-2">
-                      <span className="text-muted-foreground text-xs">Profile</span>
-                      <span className="truncate">{profile.name}</span>
+                      <span className="text-muted-foreground text-xs">
+                        {needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : "Profile"}
+                      </span>
+                      <span className="truncate text-right" title={outreachProfileSummary}>
+                        {profile?.name?.trim() ||
+                          (lead.profileId
+                            ? `Not in workspace (${lead.profileId.length > 14 ? `${lead.profileId.slice(0, 12)}…` : lead.profileId})`
+                            : needsOutreachProfile
+                              ? (outreachProfileSummary ?? "—")
+                              : "—")}
+                      </span>
                     </div>
                   )}
                 </CardContent>
@@ -571,6 +789,23 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         lead={lead}
         onSave={handleSaveLead}
       />
+      {account && contact && (
+        <ProspectIntakeDialog
+          open={prospectFieldsOpen}
+          onOpenChange={setProspectFieldsOpen}
+          lead={lead}
+          account={account}
+          contact={contact}
+          onSave={({ accountPatch, contactPatch, leadPatch }) => {
+            ws.patchAccount(account.id, accountPatch);
+            ws.patchContact(contact.id, contactPatch);
+            if (Object.keys(leadPatch).length > 0) {
+              ws.patchLead(lead.id, leadPatch);
+            }
+            ws.bumpLeadActivity(lead.id);
+          }}
+        />
+      )}
     </>
   );
 }

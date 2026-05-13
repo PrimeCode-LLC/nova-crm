@@ -1,33 +1,28 @@
 import { NextResponse } from "next/server";
 import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
+import type { MailInboundAttachment } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import {
   normalizeMessageId,
   parseReferencesField,
 } from "@/lib/email/thread-inbound";
+import {
+  envelopeHeaderFields,
+  parseMailSourceFields,
+} from "@/lib/email/parse-imap-fetched-message";
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
-const DEFAULT_LIMIT = 50;
-const MAX_LIMIT = 100;
-
-function formatAddressList(
-  list: { name?: string; address?: string }[] | undefined,
-): string {
-  if (!list?.length) return "";
-  return list
-    .map((a) => {
-      const addr = a.address?.trim() ?? "";
-      if (a.name?.trim()) {
-        return `${a.name.replace(/"/g, "")} <${addr}>`;
-      }
-      return addr;
-    })
-    .filter(Boolean)
-    .join(", ");
-}
+/** Default number of newest INBOX messages to list in one refresh. */
+const DEFAULT_LIMIT = 600;
+/** Hard cap per request (large mailboxes: bodies for the newest subset only). */
+const MAX_LIMIT = 2_000;
+/** Download RFC822 for the newest N messages in this request; older rows load on thread open. */
+const FULL_BODY_SYNC_CAP = 320;
+const SOURCE_MAX_LENGTH = 88_000;
+const BODY_FETCH_BATCH = 45;
 
 export async function POST(req: Request) {
   try {
@@ -60,6 +55,12 @@ export async function POST(req: Request) {
         ? Math.min(MAX_LIMIT, Math.floor(requested))
         : DEFAULT_LIMIT;
 
+    const requestedOffset = Number(b.offset);
+    const offset =
+      Number.isFinite(requestedOffset) && requestedOffset > 0
+        ? Math.min(Math.floor(requestedOffset), 10_000_000)
+        : 0;
+
     if (!host || !user) {
       return NextResponse.json(
         { ok: false, error: "IMAP host and username are required." },
@@ -70,93 +71,122 @@ export async function POST(req: Request) {
     const client = new ImapFlow(
       imapFlowConnectionOptions({ host, port, secure, user, pass, purpose: "fetch" }),
     );
-    /* imapflow may emit socket "error" after a timeout; without a listener Node treats it as uncaught. */
     client.on("error", () => undefined);
 
     await client.connect();
-    const lock = await client.getMailboxLock("INBOX", { readOnly: true });
+
+    const folderRaw = String((b as Record<string, unknown>).folder ?? "inbox").toLowerCase();
+    let mailboxPath = "INBOX";
+    if (folderRaw === "trash") {
+      const resolved = await resolveTrashMailboxPath(client);
+      if (!resolved) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Could not find a Trash folder on this account. Trash sync requires a standard Trash / Deleted Items mailbox.",
+          },
+          { status: 400 },
+        );
+      }
+      mailboxPath = resolved;
+    }
+
+    const lock = await client.getMailboxLock(mailboxPath, { readOnly: true });
     try {
       const uids = await client.search({ all: true }, { uid: true });
       if (!uids || uids.length === 0) {
-        return NextResponse.json({ ok: true, messages: [] as unknown[] });
+        return NextResponse.json({ ok: true, messages: [] as unknown[], mailboxTotal: 0 });
       }
 
       const sorted = [...uids].sort((a, b) => b - a);
-      const slice = sorted.slice(0, limit);
+      const mailboxTotal = sorted.length;
+      if (offset >= sorted.length) {
+        return NextResponse.json({
+          ok: true,
+          messages: [] as unknown[],
+          mailboxTotal,
+          offset,
+          loadedThrough: sorted.length,
+        });
+      }
+      const slice = sorted.slice(offset, offset + limit);
 
-      const raw = await client.fetchAll(
+      const envelopeRows = await client.fetchAll(
         slice,
-        {
-          uid: true,
-          flags: true,
-          envelope: true,
-          internalDate: true,
-          source: { maxLength: 512_000 },
-        },
+        { uid: true, flags: true, envelope: true, internalDate: true },
         { uid: true },
       );
+      const envByUid = new Map(envelopeRows.map((r) => [r.uid, r]));
+
+      const uidsForBody = slice.slice(0, Math.min(FULL_BODY_SYNC_CAP, slice.length));
+      const sourceByUid = new Map<number, Buffer>();
+      for (let i = 0; i < uidsForBody.length; i += BODY_FETCH_BATCH) {
+        const batch = uidsForBody.slice(i, i + BODY_FETCH_BATCH);
+        const rows = await client.fetchAll(
+          batch,
+          { uid: true, source: { maxLength: SOURCE_MAX_LENGTH } },
+          { uid: true },
+        );
+        for (const r of rows) {
+          if (r.source && r.source.length > 0) sourceByUid.set(r.uid, r.source);
+        }
+      }
 
       const messages = await Promise.all(
-        raw.map(async (msg) => {
+        slice.map(async (uid) => {
+          const msg = envByUid.get(uid);
+          if (!msg?.envelope) return null;
+
           const env = msg.envelope;
-          const subj = env?.subject?.trim() || "(no subject)";
-          const from = formatAddressList(env?.from) || "Unknown";
-          const to = formatAddressList(env?.to);
+          const { subj, from, to, cc: ccFromEnv, envExt } = envelopeHeaderFields(env);
           const date =
             (msg.internalDate instanceof Date
               ? msg.internalDate
-              : env?.date
+              : env.date
                 ? new Date(env.date)
                 : new Date()
             ).toISOString();
 
-          const envExt = env as
-            | { messageId?: string; inReplyTo?: string; references?: string | string[] }
-            | undefined;
+          let messageId = normalizeMessageId(envExt?.messageId);
+          let inReplyTo = normalizeMessageId(envExt?.inReplyTo);
+          let referenceIds = parseReferencesField(envExt?.references);
+
+          const inBodyTier = uidsForBody.includes(uid);
+          const src = sourceByUid.get(uid);
 
           let preview = "";
           let bodyText = "";
           let bodyHtml: string | undefined;
-          let messageId = normalizeMessageId(envExt?.messageId);
-          let inReplyTo = normalizeMessageId(envExt?.inReplyTo);
-          let referenceIds = parseReferencesField(envExt?.references);
-          if (msg.source && msg.source.length > 0) {
+          let cc = ccFromEnv.trim() ? ccFromEnv : undefined;
+          let attachments: MailInboundAttachment[] | undefined;
+          let bodySynced: boolean;
+
+          if (inBodyTier && src && src.length > 0) {
             try {
-              const parsed = await simpleParser(msg.source);
-              bodyText = (parsed.text || "").trim();
-              if (typeof parsed.html === "string" && parsed.html.length > 0) {
-                bodyHtml = parsed.html;
-              }
-              const p = bodyText.replace(/\s+/g, " ").trim();
-              preview = p.length > 220 ? `${p.slice(0, 220)}…` : p;
-              const mid =
-                normalizeMessageId(
-                  typeof parsed.messageId === "string"
-                    ? parsed.messageId
-                    : parsed.messageId && typeof parsed.messageId === "object" && "value" in parsed.messageId
-                      ? String((parsed.messageId as { value?: string }).value ?? "")
-                      : undefined,
-                ) ?? messageId;
-              messageId = mid ?? messageId;
-              const irt =
-                normalizeMessageId(
-                  typeof parsed.inReplyTo === "string"
-                    ? parsed.inReplyTo
-                    : parsed.inReplyTo && typeof parsed.inReplyTo === "object" && "value" in parsed.inReplyTo
-                      ? String((parsed.inReplyTo as { value?: string }).value ?? "")
-                      : undefined,
-                ) ?? inReplyTo;
-              inReplyTo = irt ?? inReplyTo;
-              const refParsed = parseReferencesField(parsed.references);
-              if (refParsed.length > 0) referenceIds = refParsed;
+              const parsed = await parseMailSourceFields(src);
+              bodyText = parsed.bodyText;
+              bodyHtml = parsed.bodyHtml;
+              preview = parsed.preview;
+              if (parsed.messageId) messageId = parsed.messageId ?? messageId;
+              if (parsed.inReplyTo) inReplyTo = parsed.inReplyTo ?? inReplyTo;
+              if (parsed.referenceIds?.length) referenceIds = parsed.referenceIds;
+              if (parsed.cc.trim()) cc = parsed.cc;
+              if (parsed.attachments.length > 0) attachments = parsed.attachments;
+              bodySynced = true;
             } catch {
               preview = "";
+              bodyText = "";
+              bodySynced = true;
             }
+          } else if (inBodyTier) {
+            bodySynced = true;
+          } else {
+            bodySynced = false;
           }
 
-          if (!preview) {
-            preview = subj;
-          }
+          if (!preview) preview = subj;
+          if (!bodyText && bodySynced) bodyText = preview;
 
           return {
             id: `uid-${msg.uid}`,
@@ -164,19 +194,28 @@ export async function POST(req: Request) {
             subject: subj,
             from,
             to,
+            ...(cc ? { cc } : {}),
             date,
             seen: msg.flags?.has("\\Seen") ?? false,
             preview,
-            bodyText: bodyText || preview,
+            bodyText: bodySynced ? bodyText || preview : "",
             bodyHtml,
+            ...(attachments && attachments.length > 0 ? { attachments } : {}),
             messageId,
             inReplyTo,
             referenceIds: referenceIds.length > 0 ? referenceIds : undefined,
+            bodySynced,
           };
         }),
       );
 
-      return NextResponse.json({ ok: true, messages });
+      return NextResponse.json({
+        ok: true,
+        messages: messages.filter(Boolean),
+        mailboxTotal,
+        offset,
+        loadedThrough: offset + slice.length,
+      });
     } finally {
       try {
         lock.release();

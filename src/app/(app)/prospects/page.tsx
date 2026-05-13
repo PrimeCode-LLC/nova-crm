@@ -1,0 +1,146 @@
+"use client";
+
+import * as React from "react";
+import { Suspense } from "react";
+import Link from "next/link";
+import { Bookmark, Download, Kanban, Upload, ChevronDown, Target } from "lucide-react";
+
+import { PageBody, PageHeader } from "@/components/common/page-header";
+import { LeadsTable, type LeadsTableRef, type LeadsTablePreset } from "@/components/leads/leads-table";
+import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
+
+function ProspectsPageInner() {
+  const { leads, isDemo } = useWorkspace();
+  const { openNewProspectForm } = useOpenQuickAdd();
+  const tableRef = React.useRef<LeadsTableRef>(null);
+  const [tableSession, setTableSession] = React.useState<{
+    key: number;
+    preset: LeadsTablePreset;
+  }>({ key: 0, preset: "default" });
+
+  const prospectCount = React.useMemo(() => leads.filter((l) => l.intakeKind === "prospect").length, [leads]);
+
+  return (
+    <>
+      <PageHeader
+        title="Prospects"
+        description="Intake records from research and scraping. Promote to a sales lead when someone shows interest."
+        actions={
+          <>
+            <Button size="sm" type="button" onClick={() => openNewProspectForm()}>
+              New prospect
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <Bookmark className="h-3.5 w-3.5" /> Saved views
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem
+                  onClick={() => setTableSession((s) => ({ key: s.key + 1, preset: "default" }))}
+                >
+                  Default view
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() => setTableSession((s) => ({ key: s.key + 1, preset: "high-priority" }))}
+                >
+                  High priority
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/leads">
+                  <Target className="h-3.5 w-3.5" /> All leads
+                </Link>
+              }
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/pipeline">
+                  <Kanban className="h-3.5 w-3.5" /> Kanban
+                </Link>
+              }
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/admin/import">
+                  <Upload className="h-3.5 w-3.5" /> Import
+                </Link>
+              }
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              disabled={prospectCount === 0}
+              onClick={() => tableRef.current?.exportFilteredCsv()}
+            >
+              <Download className="h-3.5 w-3.5" /> Export
+            </Button>
+          </>
+        }
+      />
+      <PageBody>
+        {!isDemo && prospectCount === 0 ? (
+          <WorkspaceEmptyHint
+            title="No prospects yet"
+            description="Use New prospect (full form) or ask your admin about imports to add intake rows. They stay here until you promote them to sales leads."
+          />
+        ) : (
+          <LeadsTable
+            ref={tableRef}
+            key={`${tableSession.key}-${tableSession.preset}-prospects`}
+            leads={leads}
+            preset={tableSession.preset}
+            urlChannelKey=""
+            urlStageKey=""
+            idleOnly={false}
+            initialIntakeScope="prospect"
+            lockedIntakeScope="prospect"
+            linkFromKey="prospects"
+          />
+        )}
+      </PageBody>
+    </>
+  );
+}
+
+export default function ProspectsPage() {
+  return (
+    <Suspense
+      fallback={
+        <>
+          <PageHeader title="Prospects" description="Loading…" />
+          <PageBody>
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          </PageBody>
+        </>
+      }
+    >
+      <ProspectsPageInner />
+    </Suspense>
+  );
+}

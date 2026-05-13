@@ -20,7 +20,8 @@ export type AuditEvent =
   | "deal.won"
   | "deal.lost"
   | "settings.updated"
-  | "channel_admin.updated";
+  | "channel_admin.updated"
+  | "user.hierarchy_updated";
 
 /**
  * Append-only per-tenant audit log. Always-on side-channel — failures

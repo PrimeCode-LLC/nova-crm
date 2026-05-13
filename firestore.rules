@@ -30,11 +30,15 @@ service cloud.firestore {
         : null;
     }
 
+    /**
+     * Prefer `orgRole` on the `/users/{uid}` document (server-maintained, matches the app)
+     * and fall back to the JWT claim only when the field is absent (e.g. before first sync).
+     * If we preferred the token whenever it was non-null, a stale token could block deletes
+     * after an owner/admin promotion until the next ID-token refresh.
+     */
     function callerOrgRole() {
       return signedIn()
-        ? (request.auth.token.orgRole != null
-            ? request.auth.token.orgRole
-            : userDoc().orgRole)
+        ? userDoc().get('orgRole', request.auth.token.orgRole)
         : null;
     }
 
@@ -116,6 +120,22 @@ service cloud.firestore {
               : (inCallerOrg(resource.data) && tenantUnchanged()));
     }
 
+    function workspaceChatChannelDoc(channelId) {
+      return get(/databases/$(database)/documents/workspaceChatChannels/$(channelId)).data;
+    }
+
+    function canAccessWorkspaceChatChannel(ch) {
+      return ch.organizationId == callerOrgId()
+        && (
+          ch.get('kind', 'public') == 'public'
+          || (
+            ch.get('kind', '') == 'dm'
+            && ch.get('memberIds', []) is list
+            && request.auth.uid in ch.memberIds
+          )
+        );
+    }
+
     /** Team tasks: only assignee, requester, or oversight roles may read/update. */
     function leadTaskElevated() {
       return isOrgAtLeast('admin')
@@ -136,7 +156,11 @@ service cloud.firestore {
 
     match /leads/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /notes/{id} {
@@ -146,7 +170,11 @@ service cloud.firestore {
 
     match /followups/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /leadTasks/{id} {
@@ -188,6 +216,16 @@ service cloud.firestore {
       allow write: if tenantWritable();
     }
 
+    match /profiles/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /labels/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
     match /departments/{id} {
       allow read: if tenantReadable();
       allow write: if tenantWritable() && isOrgAtLeast('admin');
@@ -200,18 +238,106 @@ service cloud.firestore {
 
     match /activityCounters/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /activityRecords/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
     match /auditLog/{id} {
       allow read: if tenantReadable() && isOrgAtLeast('admin');
       allow create: if tenantWritable();
       allow update, delete: if false;
+    }
+
+    match /workspaceChatChannels/{channelId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && canAccessWorkspaceChatChannel(resource.data);
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && (
+          request.resource.data.kind == 'public'
+          || (
+            request.resource.data.kind == 'dm'
+            && request.resource.data.memberIds is list
+            && request.resource.data.memberIds.size() == 2
+            && request.auth.uid in request.resource.data.memberIds
+          )
+        );
+
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.kind == resource.data.kind
+        && (
+          isOrgAtLeast('admin')
+          || resource.data.createdById == request.auth.uid
+        );
+
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && isOrgAtLeast('admin');
+    }
+
+    match /workspaceChatMessages/{messageId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && exists(/databases/$(database)/documents/workspaceChatChannels/$(resource.data.channelId))
+        && canAccessWorkspaceChatChannel(
+          workspaceChatChannelDoc(resource.data.channelId)
+        );
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.authorId == request.auth.uid
+        && exists(/databases/$(database)/documents/workspaceChatChannels/$(request.resource.data.channelId))
+        && canAccessWorkspaceChatChannel(
+          workspaceChatChannelDoc(request.resource.data.channelId)
+        );
+
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && tenantUnchanged()
+        && resource.data.authorId == request.auth.uid
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.channelId == resource.data.channelId;
+
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    /** Per-user read cursors for team chat (client merge-updates `channels` map). */
+    match /workspaceChatReads/{readDocId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.userId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.get('channels', {}) is map;
+
+      allow update: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.get('channels', {}) is map;
+
+      allow delete: if false;
     }
 
     // Server-only collections: admin SDK bypasses rules; no client access.

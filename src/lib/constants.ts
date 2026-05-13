@@ -7,6 +7,7 @@ import type {
   LeadTemperature,
   LeadPriority,
   PushStatus,
+  LeadIntakeKind,
 } from "./types";
 
 export const APP_NAME = "Nova CRM";
@@ -28,6 +29,15 @@ export const CHANNEL_LIST = Object.entries(CHANNELS).map(([key, v]) => ({
   key: key as ChannelKey,
   ...v,
 }));
+
+/** Channels where the lead should record which workspace profile was used (Admin → Profiles). */
+export const CHANNELS_REQUIRING_OUTREACH_PROFILE: readonly ChannelKey[] = ["upwork", "job_apply"];
+
+export function outreachProfileFieldLabel(channel: ChannelKey): string {
+  if (channel === "upwork") return "Upwork profile";
+  if (channel === "job_apply") return "CV / apply profile";
+  return "Outreach profile";
+}
 
 export const PIPELINE_STAGES: {
   key: PipelineStage;
@@ -69,7 +79,30 @@ export const ROLES: Record<Role, { label: string; description: string }> = {
   manager: { label: "Manager", description: "Sees department; writes own + team" },
   team_lead: { label: "Team Lead", description: "Sees team; writes own + team" },
   salesperson: { label: "Salesperson", description: "Sees + writes own leads" },
-  data_scraper: { label: "Data Scraper", description: "Writes leads they create" },
+  data_scraper: {
+    label: "Data scraper (legacy)",
+    description: "Same as Prospecting — use Prospecting for new members",
+  },
+  prospecting: {
+    label: "Prospecting & data",
+    description: "Adds top-of-funnel prospects; sees rows they sourced or own until handoff",
+  },
+};
+
+export const INTAKE_KIND_META: Record<
+  LeadIntakeKind,
+  { label: string; short: string; className: string }
+> = {
+  prospect: {
+    label: "Prospect (intake)",
+    short: "Prospect",
+    className: "bg-muted text-muted-foreground border-border",
+  },
+  sales_lead: {
+    label: "Sales lead",
+    short: "Lead",
+    className: "bg-primary/10 text-primary border-primary/20",
+  },
 };
 
 export const REVENUE_RANGES: Record<RevenueRange, string> = {
@@ -84,6 +117,7 @@ export const REVENUE_RANGES: Record<RevenueRange, string> = {
 };
 
 export const COMPANY_SIZES: CompanySize[] = [
+  "solo",
   "1-10",
   "11-50",
   "51-200",
@@ -92,6 +126,17 @@ export const COMPANY_SIZES: CompanySize[] = [
   "1001-5000",
   "5001+",
 ];
+
+export const COMPANY_SIZE_LABELS: Record<CompanySize, string> = {
+  solo: "Solo",
+  "1-10": "2–10",
+  "11-50": "11–50",
+  "51-200": "51–200",
+  "201-500": "201–500",
+  "501-1000": "501–1,000",
+  "1001-5000": "1,001–5,000",
+  "5001+": "5,000+",
+};
 
 export const TEMPERATURE_TONE: Record<
   LeadTemperature,

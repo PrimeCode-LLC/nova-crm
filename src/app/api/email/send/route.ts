@@ -34,6 +34,7 @@ export async function POST(req: Request) {
     const displayName = String(b.displayName ?? "").trim();
     const replyTo = String(b.replyTo ?? "").trim();
     const to = String(b.to ?? "").trim();
+    const cc = String(b.cc ?? "").trim();
     const subject = String(b.subject ?? "").trim();
     const text = String(b.text ?? "");
     const html = String(b.html ?? "");
@@ -54,6 +55,7 @@ export async function POST(req: Request) {
     await transporter.sendMail({
       from: fromHeader,
       to,
+      cc: cc || undefined,
       subject: subject || "(no subject)",
       text: text || undefined,
       html: html || undefined,
