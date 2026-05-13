@@ -129,7 +129,6 @@ export const NAV_SECTIONS: NavSection[] = [
         href: "/admin/channels",
         label: "Channels",
         icon: Radio,
-        minWorkspaceRole: "team_lead",
         adminCluster: "access",
       },
       {
