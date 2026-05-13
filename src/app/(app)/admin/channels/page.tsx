@@ -46,6 +46,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/components/providers/auth-provider";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import { isAuthDisabled } from "@/lib/auth/flags";
+import { roleAtLeast } from "@/lib/platform/org-role";
 
 const CHANNEL_DESCRIPTIONS: Record<ChannelKey, string> = {
   cold_email: "Mass outbound email campaigns via Instantly. High volume, low personalization.",
@@ -67,6 +72,15 @@ function openAddCustomDialog(setOpen: (v: boolean) => void) {
 }
 
 export default function AdminChannelsPage() {
+  const { user } = useAuth();
+  const { isDemo } = useWorkspace();
+  const { data: userDoc } = useUserDoc(
+    isDemo || isAuthDisabled() || !user ? undefined : user.uid,
+  );
+  const isWorkspaceAdmin =
+    isDemo ||
+    (userDoc?.orgRole !== undefined && roleAtLeast(userDoc.orgRole, "admin"));
+
   const autoMap = useChannelAdminStore((s) => s.autoMap);
   const setAuto = useChannelAdminStore((s) => s.setAuto);
   const descriptionOverrides = useChannelAdminStore((s) => s.descriptionOverrides);
@@ -172,6 +186,8 @@ export default function AdminChannelsPage() {
                     <span className="text-xs text-muted-foreground">Auto</span>
                     <Switch
                       checked={autoMap[ch.key]}
+                      disabled={!isWorkspaceAdmin}
+                      title={!isWorkspaceAdmin ? "Only workspace admins can change built-in channels." : undefined}
                       onCheckedChange={(v) => {
                         setAuto(ch.key, !!v);
                         toast.success(`${ch.label}: auto ${v ? "enabled" : "disabled"}`);
@@ -181,6 +197,8 @@ export default function AdminChannelsPage() {
                       variant="outline"
                       size="sm"
                       className="h-7 ml-auto sm:ml-0"
+                      disabled={!isWorkspaceAdmin}
+                      title={!isWorkspaceAdmin ? "Only workspace admins can configure built-in channels." : undefined}
                       onClick={() => setConfigure({ kind: "builtin", key: ch.key })}
                     >
                       <Settings className="h-3.5 w-3.5" /> Configure
@@ -201,6 +219,7 @@ export default function AdminChannelsPage() {
                 toast.success(`${c.name}: auto ${v ? "enabled" : "disabled"}`);
               }}
               onDelete={() => setDeleteCustomId(c.id)}
+              canDelete={isWorkspaceAdmin}
             />
           ))}
         </div>
@@ -298,9 +317,10 @@ export default function AdminChannelsPage() {
         customChannels={customChannels}
         updateCustomChannel={updateCustomChannel}
         removeCustomChannel={removeCustomChannel}
+        canDeleteCustomChannels={isWorkspaceAdmin}
       />
 
-      <AlertDialog open={!!deleteCustomId} onOpenChange={(open) => !open && setDeleteCustomId(null)}>
+      <AlertDialog open={!!deleteCustomId && isWorkspaceAdmin} onOpenChange={(open) => !open && setDeleteCustomId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this channel?</AlertDialogTitle>
@@ -337,11 +357,13 @@ function CustomChannelListRow({
   onConfigure,
   onToggleAuto,
   onDelete,
+  canDelete,
 }: {
   channel: CustomChannelRow;
   onConfigure: () => void;
   onToggleAuto: (v: boolean) => void;
   onDelete: () => void;
+  canDelete: boolean;
 }) {
   return (
     <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 hover:bg-muted/20 transition-colors">
@@ -394,15 +416,17 @@ function CustomChannelListRow({
           <Button variant="outline" size="sm" className="h-7 ml-auto sm:ml-0" onClick={onConfigure}>
             <Settings className="h-3.5 w-3.5" /> Configure
           </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            className="text-muted-foreground hover:text-destructive shrink-0"
-            aria-label={`Delete ${channel.name}`}
-            onClick={onDelete}
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </Button>
+          {canDelete ? (
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="text-muted-foreground hover:text-destructive shrink-0"
+              aria-label={`Delete ${channel.name}`}
+              onClick={onDelete}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          ) : null}
         </div>
       </div>
     </div>
@@ -420,6 +444,7 @@ function ChannelConfigureSheet({
   customChannels,
   updateCustomChannel,
   removeCustomChannel,
+  canDeleteCustomChannels,
 }: {
   target: ConfigureTarget;
   onOpenChange: (open: boolean) => void;
@@ -431,6 +456,7 @@ function ChannelConfigureSheet({
   customChannels: CustomChannelRow[];
   updateCustomChannel: (id: string, patch: Partial<Omit<CustomChannelRow, "id">>) => void;
   removeCustomChannel: (id: string) => void;
+  canDeleteCustomChannels: boolean;
 }) {
   const open = target != null;
   const customRow =
@@ -466,6 +492,7 @@ function ChannelConfigureSheet({
             onClose={() => onOpenChange(false)}
             updateCustomChannel={updateCustomChannel}
             removeCustomChannel={removeCustomChannel}
+            canDelete={canDeleteCustomChannels}
           />
         )}
       </SheetContent>
@@ -562,11 +589,13 @@ function ConfigureCustomChannelForm({
   onClose,
   updateCustomChannel,
   removeCustomChannel,
+  canDelete,
 }: {
   channel: CustomChannelRow;
   onClose: () => void;
   updateCustomChannel: (id: string, patch: Partial<Omit<CustomChannelRow, "id">>) => void;
   removeCustomChannel: (id: string) => void;
+  canDelete: boolean;
 }) {
   const [draftName, setDraftName] = React.useState(channel.name);
   const [draftDesc, setDraftDesc] = React.useState(channel.description);
@@ -636,9 +665,11 @@ function ConfigureCustomChannelForm({
           <span className="text-sm">Auto</span>
           <Switch checked={draftAuto} onCheckedChange={setDraftAuto} />
         </div>
-        <Button type="button" variant="outline" className="text-destructive" onClick={handleDelete}>
-          Delete channel
-        </Button>
+        {canDelete ? (
+          <Button type="button" variant="outline" className="text-destructive" onClick={handleDelete}>
+            Delete channel
+          </Button>
+        ) : null}
       </div>
 
       <SheetFooter className="border-t pt-4 sm:flex-row sm:justify-end gap-2">

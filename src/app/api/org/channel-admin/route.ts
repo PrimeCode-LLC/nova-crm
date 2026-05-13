@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { CHANNELS } from "@/lib/constants";
-import type { ChannelKey } from "@/lib/types";
-import type { OrganizationChannelAdminConfig } from "@/lib/types";
+import type {
+  ChannelKey,
+  OrganizationChannelAdminConfig,
+  OrganizationCustomChannelRow,
+} from "@/lib/types";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { roleAtLeast } from "@/lib/platform/org-role";
@@ -57,6 +60,53 @@ function sanitizeChannelAdminInput(
   });
 }
 
+function mergeMemberChannelAdminPut(
+  base: OrganizationChannelAdminConfig,
+  incoming: OrganizationChannelAdminConfig,
+): { ok: true; merged: OrganizationChannelAdminConfig } | { ok: false; status: 403 | 400; error: string } {
+  const seenIds = new Set<string>();
+  for (const c of incoming.customChannels) {
+    if (seenIds.has(c.id)) {
+      return { ok: false, status: 400, error: "Duplicate custom channel id in request." };
+    }
+    seenIds.add(c.id);
+  }
+
+  const baseById = new Map(base.customChannels.map((c) => [c.id, c]));
+  for (const id of baseById.keys()) {
+    if (!seenIds.has(id)) {
+      return {
+        ok: false,
+        status: 403,
+        error: "Only workspace admins can remove custom channels.",
+      };
+    }
+  }
+
+  const incomingById = new Map(incoming.customChannels.map((c) => [c.id, c]));
+  const mergedCustom: OrganizationCustomChannelRow[] = [];
+  for (const c of base.customChannels) {
+    const next = incomingById.get(c.id);
+    if (next) mergedCustom.push(next);
+  }
+  for (const c of incoming.customChannels) {
+    if (!baseById.has(c.id)) mergedCustom.push(c);
+  }
+
+  if (mergedCustom.length > 50) {
+    return { ok: false, status: 400, error: "Too many custom channels (max 50)." };
+  }
+
+  return {
+    ok: true,
+    merged: {
+      autoMap: base.autoMap,
+      descriptionOverrides: base.descriptionOverrides,
+      customChannels: mergedCustom,
+    },
+  };
+}
+
 export async function GET() {
   const g = await guardTenantApi({ minRole: "member" });
   if (!g.ok) return g.response;
@@ -75,13 +125,6 @@ export async function PUT(req: Request) {
   const g = await guardTenantApi({ minRole: "member" });
   if (!g.ok) return g.response;
 
-  if (!roleAtLeast(g.ctx.role, "admin")) {
-    return NextResponse.json(
-      { error: "Only workspace admins can edit channel settings." },
-      { status: 403 },
-    );
-  }
-
   let json: unknown;
   try {
     json = await req.json();
@@ -98,7 +141,24 @@ export async function PUT(req: Request) {
   }
 
   const orgId = g.ctx.session.organizationId;
-  const normalized = sanitizeChannelAdminInput(parsed.data);
+  const org = await getOrganizationServer(orgId);
+  if (!org) {
+    return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+  }
+
+  const incoming = sanitizeChannelAdminInput(parsed.data);
+  const base = mergeChannelAdminConfig(org.channelAdmin);
+
+  let normalized: OrganizationChannelAdminConfig;
+  if (roleAtLeast(g.ctx.role, "admin")) {
+    normalized = incoming;
+  } else {
+    const m = mergeMemberChannelAdminPut(base, incoming);
+    if (!m.ok) {
+      return NextResponse.json({ error: m.error }, { status: m.status });
+    }
+    normalized = m.merged;
+  }
 
   const result = await updateOrganizationChannelAdminServer(orgId, normalized);
   if ("error" in result) {

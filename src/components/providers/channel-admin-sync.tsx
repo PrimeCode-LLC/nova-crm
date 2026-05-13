@@ -7,7 +7,7 @@ import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
-import type { OrganizationChannelAdminConfig } from "@/lib/types";
+import type { ChannelKey, OrganizationChannelAdminConfig } from "@/lib/types";
 import {
   getChannelAdminPersistedSnapshot,
   useChannelAdminStore,
@@ -16,8 +16,9 @@ import { roleAtLeast } from "@/lib/platform/org-role";
 
 /**
  * Loads workspace channel admin config from Firestore (org.channelAdmin) and
- * keeps the zustand store in sync. Admins: debounced PUT on local edits.
- * Members: read-only hydration from GET.
+ * keeps the zustand store in sync. Debounced PUT on local edits: admins sync
+ * the full snapshot; members sync custom channels only (built-ins stay
+ * server-controlled on the wire).
  */
 export function ChannelAdminSync() {
   const { user } = useAuth();
@@ -27,11 +28,16 @@ export function ChannelAdminSync() {
   );
 
   const orgId = userDoc?.organizationId;
-  const canEdit =
-    userDoc?.orgRole !== undefined && roleAtLeast(userDoc.orgRole, "admin");
+  const orgRole = userDoc?.orgRole;
+  const isAdmin = orgRole !== undefined && roleAtLeast(orgRole, "admin");
 
   const [hydrated, setHydrated] = React.useState(false);
   const lastSentJson = React.useRef<string>("");
+  const lastSentCustomJson = React.useRef<string>("");
+  const hydratedBuiltins = React.useRef<{
+    autoMap: Record<ChannelKey, boolean>;
+    descriptionOverrides: Partial<Record<ChannelKey, string>>;
+  } | null>(null);
 
   React.useEffect(() => {
     if (isAuthDisabled() || !isFirebaseWebConfigured() || mode === "demo") {
@@ -68,9 +74,13 @@ export function ChannelAdminSync() {
           descriptionOverrides: merged.descriptionOverrides,
           customChannels,
         });
-        lastSentJson.current = JSON.stringify(
-          getChannelAdminPersistedSnapshot(useChannelAdminStore.getState()),
-        );
+        hydratedBuiltins.current = {
+          autoMap: merged.autoMap,
+          descriptionOverrides: merged.descriptionOverrides,
+        };
+        const snap = getChannelAdminPersistedSnapshot(useChannelAdminStore.getState());
+        lastSentJson.current = JSON.stringify(snap);
+        lastSentCustomJson.current = JSON.stringify(snap.customChannels);
         setHydrated(true);
       })
       .catch(() => {
@@ -89,7 +99,7 @@ export function ChannelAdminSync() {
       mode === "demo" ||
       !orgId ||
       !hydrated ||
-      !canEdit
+      orgRole === undefined
     ) {
       return;
     }
@@ -98,20 +108,52 @@ export function ChannelAdminSync() {
 
     const unsub = useChannelAdminStore.subscribe((state) => {
       const snapshot = getChannelAdminPersistedSnapshot(state);
-      const json = JSON.stringify(snapshot);
-      if (json === lastSentJson.current) return;
+
+      if (isAdmin) {
+        const json = JSON.stringify(snapshot);
+        if (json === lastSentJson.current) return;
+
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          if (json === lastSentJson.current) return;
+          void fetch("/api/org/channel-admin", {
+            method: "PUT",
+            credentials: "include",
+            headers: { "Content-Type": "application/json" },
+            body: json,
+          })
+            .then((res) => {
+              if (res.ok) lastSentJson.current = json;
+            })
+            .catch(() => {});
+        }, 900);
+        return;
+      }
+
+      const customJson = JSON.stringify(snapshot.customChannels);
+      if (customJson === lastSentCustomJson.current) return;
+      if (!hydratedBuiltins.current) return;
+
+      const body = JSON.stringify({
+        autoMap: hydratedBuiltins.current.autoMap,
+        descriptionOverrides: hydratedBuiltins.current.descriptionOverrides,
+        customChannels: snapshot.customChannels,
+      });
 
       clearTimeout(timer);
       timer = setTimeout(() => {
-        if (json === lastSentJson.current) return;
+        if (customJson === lastSentCustomJson.current) return;
         void fetch("/api/org/channel-admin", {
           method: "PUT",
           credentials: "include",
           headers: { "Content-Type": "application/json" },
-          body: json,
+          body,
         })
           .then((res) => {
-            if (res.ok) lastSentJson.current = json;
+            if (res.ok) {
+              lastSentCustomJson.current = customJson;
+              lastSentJson.current = JSON.stringify(getChannelAdminPersistedSnapshot(useChannelAdminStore.getState()));
+            }
           })
           .catch(() => {});
       }, 900);
@@ -121,7 +163,7 @@ export function ChannelAdminSync() {
       clearTimeout(timer);
       unsub();
     };
-  }, [orgId, hydrated, canEdit, mode]);
+  }, [orgId, hydrated, isAdmin, orgRole, mode]);
 
   return null;
 }
