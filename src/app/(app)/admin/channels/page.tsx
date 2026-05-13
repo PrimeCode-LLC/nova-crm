@@ -151,7 +151,7 @@ export default function AdminChannelsPage() {
         }
       />
       <PageBody>
-        <div className="rounded-md border overflow-hidden divide-y">
+        <div className="rounded-md border overflow-y-auto divide-y">
           {CHANNEL_LIST.map((ch) => {
             const funnelStages = CHANNEL_FUNNELS[ch.key];
             const description =
