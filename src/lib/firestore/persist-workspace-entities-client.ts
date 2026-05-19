@@ -25,6 +25,7 @@ export async function persistNoteCreate(
   db: Firestore,
   organizationId: string,
   note: Note,
+  opts?: { leadOwnerId?: string },
 ): Promise<void> {
   /** Omit optional string fields instead of writing `null` — Firestore `null` was deserialized so `asNote` dropped `leadId` and notes disappeared from the lead tab. */
   const data: Record<string, unknown> = {
@@ -38,6 +39,9 @@ export async function persistNoteCreate(
   if (note.contactId) data.contactId = note.contactId;
   if (note.accountId) data.accountId = note.accountId;
   if (note.dealId) data.dealId = note.dealId;
+  if (note.leadId) {
+    data.leadOwnerId = opts?.leadOwnerId ?? "";
+  }
   await setDoc(doc(db, COLLECTIONS.notes, note.id), data);
 }
 
@@ -130,10 +134,12 @@ export async function persistTouchpointCreate(
   db: Firestore,
   organizationId: string,
   t: Touchpoint,
+  leadOwnerId: string,
 ): Promise<void> {
   await setDoc(doc(db, COLLECTIONS.touchpoints, t.id), {
     organizationId,
     leadId: t.leadId,
+    leadOwnerId,
     channel: t.channel,
     state: t.state,
     stepNumber: t.stepNumber ?? null,
@@ -148,10 +154,12 @@ export async function persistTimelineEventCreate(
   db: Firestore,
   organizationId: string,
   e: TimelineEvent,
+  leadOwnerId: string,
 ): Promise<void> {
   await setDoc(doc(db, COLLECTIONS.timelineEvents, e.id), {
     organizationId,
     leadId: e.leadId,
+    leadOwnerId,
     type: e.type,
     actorId: e.actorId ?? null,
     summary: e.summary,

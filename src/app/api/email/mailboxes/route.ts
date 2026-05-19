@@ -7,6 +7,7 @@ import {
   listMailboxesForMemberServer,
   upsertMailboxWithSecretsMerged,
 } from "@/lib/email/mailbox-profiles-server";
+import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
 
 const mailboxSchema = z.object({
   id: z.string().min(1),
@@ -35,18 +36,32 @@ const mailboxSchema = z.object({
   readReceipts: z.boolean(),
 });
 
-export async function GET() {
+export async function GET(req: Request) {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
-  const { organizationId, uid } = g.ctx.session;
+  const forUser = new URL(req.url).searchParams.get("forUser");
+  const resolved = await resolveMailboxDataOwnerUid({
+    organizationId: g.ctx.session.organizationId,
+    viewerUid: g.ctx.session.uid,
+    viewerRole: g.ctx.role,
+    forUserParam: forUser,
+  });
+  if (!resolved.ok) {
+    return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+  }
+
+  const { organizationId } = g.ctx.session;
+  const { dataOwnerUid, viewerIsMailboxOwner } = resolved;
   const [mailboxes, meta] = await Promise.all([
-    listMailboxesForMemberServer({ organizationId, uid }),
-    getEmailAccountMetaServer({ organizationId, uid }),
+    listMailboxesForMemberServer({ organizationId, uid: dataOwnerUid }),
+    getEmailAccountMetaServer({ organizationId, uid: dataOwnerUid }),
   ]);
 
   return NextResponse.json({
     ok: true,
+    dataOwnerUid,
+    mailboxReadOnly: !viewerIsMailboxOwner,
     mailboxes,
     activeMailboxId: meta.activeMailboxId,
     linkedLeadByMessageId: meta.linkedLeadByMessageId,

@@ -14,6 +14,16 @@ export interface EmailAccountStore {
   emailServerHydrated: boolean;
   /** When true, PATCH mailboxes + meta to API (live workspace only). */
   emailServerSyncEnabled: boolean;
+  /**
+   * Live workspace: viewing another member’s mailbox (admin). Link/import actions that persist
+   * to that member’s Firestore meta must not run.
+   */
+  mailboxDataReadOnly: boolean;
+  /**
+   * Live workspace: Firebase uid of the member whose mailbox list/meta is loaded (`null` = signed-in user).
+   * Admins set this to open another active member’s inbox (read-only).
+   */
+  mailViewAsUid: string | null;
   mailboxes: EmailMailboxSettings[];
   activeMailboxId: string;
   linkedLeadByMessageId: Record<string, string>;
@@ -28,7 +38,10 @@ export interface EmailAccountStore {
     mailboxes: EmailMailboxSettings[];
     activeMailboxId: string;
     linkedLeadByMessageId: Record<string, string>;
+    mailboxReadOnly?: boolean;
   }) => void;
+  /** Live: switch inbox subject (admin). Clears cached threads until the next mailbox hydrate. */
+  setMailViewAsUid: (uid: string | null) => void;
   setActiveMailbox: (mailboxId: string) => void;
   addMailbox: () => string;
   removeMailbox: (mailboxId: string) => void;
@@ -115,6 +128,8 @@ function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
 export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   emailServerHydrated: false,
   emailServerSyncEnabled: false,
+  mailboxDataReadOnly: false,
+  mailViewAsUid: null,
   mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
   activeMailboxId: "",
   linkedLeadByMessageId: {},
@@ -138,8 +153,26 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       mailboxes,
       activeMailboxId: active,
       linkedLeadByMessageId: payload.linkedLeadByMessageId,
+      mailboxDataReadOnly: Boolean(payload.mailboxReadOnly),
     });
   },
+  setMailViewAsUid: (uid) =>
+    set((s) => {
+      const next = !uid?.trim() ? null : uid.trim();
+      if (next === s.mailViewAsUid) return s;
+      return {
+        mailViewAsUid: next,
+        mailboxDataReadOnly: next != null,
+        emailServerHydrated: false,
+        inboundByMailbox: {},
+        trashInboundByMailbox: {},
+        drafts: [],
+        sent: [],
+        linkedLeadByMessageId: {},
+        mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
+        activeMailboxId: "",
+      };
+    }),
   setActiveMailbox: (mailboxId) => {
     set({ activeMailboxId: mailboxId });
     scheduleEmailMetaPersist(get);
@@ -378,12 +411,14 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     return id;
   },
   linkMessageToLead: (messageId, leadId) => {
+    if (get().mailboxDataReadOnly) return;
     set((s) => ({
       linkedLeadByMessageId: { ...s.linkedLeadByMessageId, [messageId]: leadId },
     }));
     scheduleEmailMetaPersist(get);
   },
   unlinkMessageToLead: (messageId) => {
+    if (get().mailboxDataReadOnly) return;
     set((s) => {
       const next = { ...s.linkedLeadByMessageId };
       delete next[messageId];
@@ -402,6 +437,8 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       trashInboundByMailbox: {},
       drafts: seed.drafts,
       sent: seed.sent,
+      mailViewAsUid: null,
+      mailboxDataReadOnly: false,
     });
   },
 }));

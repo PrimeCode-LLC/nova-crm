@@ -25,7 +25,9 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -47,6 +49,7 @@ import {
   groupInboundIntoThreads,
   type MailThread,
 } from "@/lib/email/thread-inbound";
+import type { Lead } from "@/lib/types";
 import {
   Mail,
   Loader2,
@@ -72,6 +75,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
 
 function mailboxDisplayLabel(mb: EmailMailboxSettings): string {
   const label = mb.label?.trim();
@@ -96,6 +100,22 @@ type MailListRow = {
   muted?: boolean;
   thread?: MailThread;
 };
+
+const LEAD_MAIL_FILTER_ALL = "__all__";
+const LEAD_MAIL_FILTER_LINKED = "__linked__";
+const LEAD_MAIL_FILTER_UNLINKED = "__unlinked__";
+const INBOX_VIEW_SELF = "__inbox_view_self__";
+
+function formatLeadMailFilterTriggerLabel(value: unknown, leadList: Lead[]): string {
+  const v = typeof value === "string" ? value : null;
+  if (v == null || v === LEAD_MAIL_FILTER_ALL) return "All conversations";
+  if (v === LEAD_MAIL_FILTER_LINKED) return "With a matched lead";
+  if (v === LEAD_MAIL_FILTER_UNLINKED) return "Without a matched lead";
+  const l = leadList.find((x) => x.id === v);
+  if (!l) return "Unknown lead";
+  const name = l.contactName?.trim() || l.contactEmail || l.id;
+  return l.companyName?.trim() ? `${name} · ${l.companyName.trim()}` : name;
+}
 
 function mailListRowMatchesSearch(row: MailListRow, q: string): boolean {
   if (!q) return true;
@@ -130,7 +150,17 @@ const INBOX_IMAP_PAGE_LIMIT = 800;
 export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { leads, isDemo, addAccount, addContact, addLead, currentUserId } = useWorkspace();
+  const {
+    leads,
+    isDemo,
+    addAccount,
+    addContact,
+    addLead,
+    currentUserId,
+    users,
+    canViewMemberMailboxes,
+    getOwnerDisplayName,
+  } = useWorkspace();
 
   /** Legacy deep links from the old combined Inbox screen. */
   React.useEffect(() => {
@@ -146,6 +176,7 @@ export default function InboxPage() {
 
   /** Search mail list / threads. */
   const [listSearchQuery, setListSearchQuery] = React.useState("");
+  const [leadMailFilter, setLeadMailFilter] = React.useState<string>(LEAD_MAIL_FILTER_ALL);
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -170,7 +201,41 @@ export default function InboxPage() {
   const deleteDraft = useEmailAccountStore((s) => s.deleteDraft);
   const addSent = useEmailAccountStore((s) => s.addSent);
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
+  const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
+  const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
+  const mailboxDataReadOnly = useEmailAccountStore((s) => s.mailboxDataReadOnly);
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
+
+  const inboxReadOnly = !isDemo && mailboxDataReadOnly;
+
+  const memberPickerUsers = React.useMemo(
+    () =>
+      [...users]
+        .filter((u) => u.status === "active" && u.id && u.id !== currentUserId)
+        .sort((a, b) =>
+          (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "", undefined, {
+            sensitivity: "base",
+          }),
+        ),
+    [users, currentUserId],
+  );
+
+  const leadsSortedForMailFilter = React.useMemo(
+    () =>
+      [...leads].sort((a, b) =>
+        (a.contactName?.trim() || a.contactEmail || "").localeCompare(
+          b.contactName?.trim() || b.contactEmail || "",
+          undefined,
+          { sensitivity: "base" },
+        ),
+      ),
+    [leads],
+  );
+
+  const leadMailFilterTriggerLabel = React.useMemo(
+    () => formatLeadMailFilterTriggerLabel(leadMailFilter, leads),
+    [leadMailFilter, leads],
+  );
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
   const [selectedThread, setSelectedThread] = React.useState<MailThread | null>(null);
@@ -209,6 +274,8 @@ export default function InboxPage() {
 
   const emailFolderSupportsImapList = mailFolder === "inbox" || mailFolder === "trash";
   const canUseTrashFeatures = isDemo || isImapInboxConfigured(account);
+  /** Bulk move/delete and row checkboxes require IMAP and must not run on another member’s mailbox. */
+  const showImapBulkMailActions = canUseTrashFeatures && (isDemo || !inboxReadOnly);
 
   React.useEffect(() => {
     setImapMailboxTotal(null);
@@ -222,6 +289,10 @@ export default function InboxPage() {
       return threads.find((t) => t.threadId === prev.threadId) ?? null;
     });
   }, [inboundThreads, trashThreads, mailFolder]);
+
+  React.useEffect(() => {
+    setLeadMailFilter(LEAD_MAIL_FILTER_ALL);
+  }, [activeMailboxId]);
 
   /** Load RFC822 bodies for older messages when a thread is opened (bulk sync only parses the newest chunk). */
   React.useEffect(() => {
@@ -257,7 +328,8 @@ export default function InboxPage() {
           const need = thread.messages.filter((m) => m.bodySynced === false).map((m) => m.uid);
           if (need.length === 0) return;
           const part = need.slice(0, CHUNK);
-          const res = await fetch("/api/email/imap-fetch-bodies", {
+          const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailViewAsUid, currentUserId);
+          const res = await fetch(url, {
             method: "POST",
             signal: ac.signal,
             headers: { "Content-Type": "application/json" },
@@ -313,6 +385,8 @@ export default function InboxPage() {
     account.imap.secure,
     account.imap.user,
     account.imap.password,
+    mailViewAsUid,
+    currentUserId,
   ]);
 
   const fetchImapListFolder = React.useCallback(
@@ -343,7 +417,8 @@ export default function InboxPage() {
         setTrashLoading(true);
       }
       try {
-        const res = await fetch("/api/email/imap-fetch", {
+        const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailViewAsUid, currentUserId);
+        const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -395,7 +470,7 @@ export default function InboxPage() {
         }
       }
     },
-    [isDemo, setInbound, setTrashInbound, reconcileInboundHeadFromSync, reconcileTrashHeadFromSync],
+    [isDemo, setInbound, setTrashInbound, reconcileInboundHeadFromSync, reconcileTrashHeadFromSync, mailViewAsUid, currentUserId],
   );
 
   const fetchInboundMail = React.useCallback(() => fetchImapListFolder("inbox"), [fetchImapListFolder]);
@@ -410,7 +485,8 @@ export default function InboxPage() {
 
     setInboundLoadingMore(true);
     try {
-      const res = await fetch("/api/email/imap-fetch", {
+      const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -455,7 +531,7 @@ export default function InboxPage() {
     } finally {
       setInboundLoadingMore(false);
     }
-  }, [isDemo, inboundLoadingMore, imapMailboxTotal, appendInbound]);
+  }, [isDemo, inboundLoadingMore, imapMailboxTotal, appendInbound, mailViewAsUid, currentUserId]);
 
   /** Load INBOX or Trash from IMAP when the Email tab opens that folder (session-restored tab). */
   React.useEffect(() => {
@@ -484,9 +560,15 @@ export default function InboxPage() {
     fetchImapListFolder,
     setInbound,
     setTrashInbound,
+    mailViewAsUid,
+    currentUserId,
   ]);
 
   function openCompose(preset?: Partial<MailDraft>) {
+    if (inboxReadOnly) {
+      toast.error("Compose is disabled while viewing another member’s mailbox.");
+      return;
+    }
     setComposeTo(preset?.to ?? "");
     setComposeCc(preset?.cc?.trim() ? preset.cc.trim() : "");
     setComposeSubject(preset?.subject ?? "");
@@ -527,11 +609,16 @@ export default function InboxPage() {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
+    if (inboxReadOnly) {
+      toast.error("Sending is disabled while viewing another member’s mailbox.");
+      return;
+    }
     setSending(true);
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const res = await fetch("/api/email/send", {
+      const url = appendMailDataOwnerParam("/api/email/send", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -622,7 +709,8 @@ export default function InboxPage() {
     const CHUNK = 60;
     for (let i = 0; i < uids.length; i += CHUNK) {
       const part = uids.slice(i, i + CHUNK);
-      const res = await fetch("/api/email/imap-mutate", {
+      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -650,7 +738,8 @@ export default function InboxPage() {
     const CHUNK = 60;
     for (let i = 0; i < uids.length; i += CHUNK) {
       const part = uids.slice(i, i + CHUNK);
-      const res = await fetch("/api/email/imap-mutate", {
+      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -797,10 +886,20 @@ export default function InboxPage() {
 
   const visibleMailRows = React.useMemo(() => {
     const q = normalizeInboxSearch(listSearchQuery);
-    return mailListRows.filter((row) => mailListRowMatchesSearch(row, q));
-  }, [mailListRows, listSearchQuery]);
+    let rows = mailListRows;
+    if (leadMailFilter !== LEAD_MAIL_FILTER_ALL) {
+      rows = rows.filter((row) => {
+        const hit = resolveLeadForMailListRow(row, account.id, linkedLeadByMessageId, leads);
+        if (leadMailFilter === LEAD_MAIL_FILTER_LINKED) return hit != null;
+        if (leadMailFilter === LEAD_MAIL_FILTER_UNLINKED) return hit == null;
+        return hit?.id === leadMailFilter;
+      });
+    }
+    return rows.filter((row) => mailListRowMatchesSearch(row, q));
+  }, [mailListRows, listSearchQuery, leadMailFilter, account.id, linkedLeadByMessageId, leads]);
 
   const mailSearchActive = normalizeInboxSearch(listSearchQuery).length > 0;
+  const leadMailFilterActive = leadMailFilter !== LEAD_MAIL_FILTER_ALL;
 
   const selectAllVisibleMailRows = React.useCallback(() => {
     setSelectedMailRowIds(new Set(visibleMailRows.map((r) => r.id)));
@@ -813,7 +912,7 @@ export default function InboxPage() {
 
   React.useEffect(() => {
     if (visibleMailRows.length === 0) {
-      if (mailSearchActive) {
+      if (mailSearchActive || leadMailFilterActive) {
         setSelectedThread(null);
         setSelectedMail(null);
       }
@@ -844,7 +943,7 @@ export default function InboxPage() {
         setSelectedMail(pick.row);
       }
     }
-  }, [visibleMailRows, selectedThread, selectedMail, mailSearchActive]);
+  }, [visibleMailRows, selectedThread, selectedMail, mailSearchActive, leadMailFilterActive]);
 
   const pageActions = (
     <div className="flex gap-2 flex-wrap">
@@ -880,7 +979,7 @@ export default function InboxPage() {
         )}
         Refresh mail
       </Button>
-      <Button size="sm" onClick={() => openCompose()}>
+      <Button size="sm" onClick={() => openCompose()} disabled={inboxReadOnly}>
         <PenLine className="h-3.5 w-3.5" /> Compose
       </Button>
       <Button
@@ -914,6 +1013,10 @@ export default function InboxPage() {
   }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads]);
 
   function createLeadFromSelectedMessage() {
+    if (inboxReadOnly) {
+      toast.error("You can’t add leads from another member’s inbox.");
+      return;
+    }
     const target =
       (mailFolder === "inbox" || mailFolder === "trash") && selectedThread
         ? selectedThread.latest
@@ -980,11 +1083,21 @@ export default function InboxPage() {
     <>
       <PageHeader
         title="Inbox"
-        description="Threaded conversations (like Outlook) from the mailbox you connect in settings."
+        description={
+          !isDemo && mailViewAsUid
+            ? `Viewing mail for ${getOwnerDisplayName(mailViewAsUid) ?? "a teammate"} — read only.`
+            : "Threaded conversations (like Outlook) from the mailbox you connect in settings."
+        }
         actions={pageActions}
       />
       <PageBody className="flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden p-0">
         <div className="shrink-0 border-b px-4 pt-3 pb-2 flex flex-wrap items-center gap-2">
+          {inboxReadOnly ? (
+            <p className="text-[11px] text-amber-700 dark:text-amber-500 max-w-[42rem]">
+              You are viewing another member&apos;s connected inbox. Messages load read-only; compose, trash, bulk
+              actions, and linking threads to leads are disabled.
+            </p>
+          ) : null}
           {!isEmailAccountConfigured(account) && (
             <p className="text-[11px] text-muted-foreground">
               SMTP not fully configured — you can still compose drafts;{" "}
@@ -1003,7 +1116,30 @@ export default function InboxPage() {
               to load incoming mail.
             </p>
           )}
-          <div className="ml-auto min-w-[220px]">
+          <div className="ml-auto flex flex-wrap items-center gap-2 justify-end">
+            {canViewMemberMailboxes && !isDemo ? (
+              <Select
+                value={mailViewAsUid ?? INBOX_VIEW_SELF}
+                onValueChange={(v) => {
+                  if (!v || v === INBOX_VIEW_SELF) setMailViewAsUid(null);
+                  else setMailViewAsUid(v);
+                }}
+              >
+                <SelectTrigger className="h-8 min-w-[200px] max-w-[min(100%,280px)] text-xs">
+                  <SelectValue placeholder="Whose inbox?" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={INBOX_VIEW_SELF}>My mailbox</SelectItem>
+                  {memberPickerUsers.map((u) => (
+                    <SelectItem key={u.id} value={u.id}>
+                      {`${u.displayName?.trim() || u.email || u.id}${
+                        u.orgRole && u.orgRole !== "member" ? ` · ${u.orgRole}` : ""
+                      }`}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             <Select
               value={account.id}
               onValueChange={(v) => {
@@ -1077,7 +1213,7 @@ export default function InboxPage() {
                 </Button>
               ))}
               <div className="mt-auto pt-2 border-t">
-                <Button variant="outline" size="sm" className="w-full text-xs" onClick={() => openCompose()}>
+                <Button variant="outline" size="sm" className="w-full text-xs" disabled={inboxReadOnly} onClick={() => openCompose()}>
                   <PenLine className="h-3 w-3 mr-1" />
                   Compose
                 </Button>
@@ -1113,7 +1249,7 @@ export default function InboxPage() {
                     Syncing Trash…
                   </div>
                 )}
-                {canUseTrashFeatures && emailFolderSupportsImapList && (
+                {showImapBulkMailActions && emailFolderSupportsImapList && (
                   <div className="flex flex-wrap items-center gap-2 pt-1 normal-case">
                     <Button
                       type="button"
@@ -1167,18 +1303,57 @@ export default function InboxPage() {
                     )}
                   </div>
                 )}
-                <div className="relative normal-case">
-                  <Search
-                    className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
-                    aria-hidden
-                  />
-                  <Input
-                    value={listSearchQuery}
-                    onChange={(e) => setListSearchQuery(e.target.value)}
-                    placeholder="Search subject, sender, body…"
-                    className="h-8 pl-8 text-xs font-normal"
-                    aria-label="Search mail"
-                  />
+                <div className="space-y-2 normal-case">
+                  <div className="space-y-1">
+                    <Label htmlFor="inbox-lead-filter" className="text-[10px] text-muted-foreground font-normal">
+                      Lead filter
+                    </Label>
+                    <Select
+                      value={leadMailFilter}
+                      onValueChange={(v) => {
+                        if (v) setLeadMailFilter(v);
+                      }}
+                    >
+                      <SelectTrigger id="inbox-lead-filter" className="h-8 w-full min-w-0 max-w-full text-xs font-normal">
+                        <SelectValue placeholder="All conversations">{leadMailFilterTriggerLabel}</SelectValue>
+                      </SelectTrigger>
+                      <SelectContent className="max-h-72">
+                        <SelectGroup>
+                          <SelectItem value={LEAD_MAIL_FILTER_ALL}>All conversations</SelectItem>
+                          <SelectItem value={LEAD_MAIL_FILTER_LINKED}>With a matched lead</SelectItem>
+                          <SelectItem value={LEAD_MAIL_FILTER_UNLINKED}>Without a matched lead</SelectItem>
+                        </SelectGroup>
+                        {leadsSortedForMailFilter.length > 0 ? (
+                          <SelectGroup>
+                            <SelectLabel className="text-[10px]">Specific lead</SelectLabel>
+                            {leadsSortedForMailFilter.map((l) => (
+                              <SelectItem key={l.id} value={l.id}>
+                                <span className="truncate">
+                                  {l.contactName?.trim() || l.contactEmail || l.id}
+                                  {l.companyName?.trim() ? (
+                                    <span className="text-muted-foreground"> · {l.companyName.trim()}</span>
+                                  ) : null}
+                                </span>
+                              </SelectItem>
+                            ))}
+                          </SelectGroup>
+                        ) : null}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="relative normal-case">
+                    <Search
+                      className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+                      aria-hidden
+                    />
+                    <Input
+                      value={listSearchQuery}
+                      onChange={(e) => setListSearchQuery(e.target.value)}
+                      placeholder="Search subject, sender, body…"
+                      className="h-8 pl-8 text-xs font-normal"
+                      aria-label="Search mail"
+                    />
+                  </div>
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto divide-y">
@@ -1234,14 +1409,22 @@ export default function InboxPage() {
                 {(mailFolder === "sent" || mailFolder === "drafts") && mailListRows.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
                 )}
-                {mailSearchActive && mailListRows.length > 0 && visibleMailRows.length === 0 && (
-                  <div className="p-6 text-center text-sm text-muted-foreground">No messages match your search.</div>
-                )}
+                {(mailSearchActive || leadMailFilterActive) &&
+                  mailListRows.length > 0 &&
+                  visibleMailRows.length === 0 && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      {mailSearchActive && leadMailFilterActive
+                        ? "No messages match your search and lead filter."
+                        : mailSearchActive
+                          ? "No messages match your search."
+                          : "No messages match this lead filter."}
+                    </div>
+                  )}
                 {visibleMailRows.map((row) => {
                   const isRowSelected = row.thread
                     ? selectedThread?.threadId === row.thread.threadId
                     : selectedMail?.id === row.row.id && selectedThread == null;
-                  const showSelect = canUseTrashFeatures && emailFolderSupportsImapList;
+                  const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
                   const bulkChecked = selectedMailRowIds.has(row.id);
                   return (
                     <div key={row.id} className="flex items-stretch gap-0 border-b border-border/60 last:border-b-0">
@@ -1358,6 +1541,7 @@ export default function InboxPage() {
                       <Button
                         size="sm"
                         className="gap-1.5"
+                        disabled={inboxReadOnly}
                         onClick={() => {
                           const latest = selectedThread.latest;
                           const addr = extractReplyAddress(latest.from);
@@ -1381,6 +1565,7 @@ export default function InboxPage() {
                         size="sm"
                         variant="secondary"
                         className="gap-1.5"
+                        disabled={inboxReadOnly}
                         onClick={() => {
                           const latest = selectedThread.latest;
                           const pack = replyAllRecipientLine(latest, account);
@@ -1405,6 +1590,7 @@ export default function InboxPage() {
                         size="sm"
                         variant="secondary"
                         className="gap-1.5"
+                        disabled={inboxReadOnly}
                         onClick={() => {
                           const latest = selectedThread.latest;
                           const subj = conversationSubject(latest.subject ?? "");
@@ -1430,7 +1616,7 @@ export default function InboxPage() {
                   </div>
 
                   <div className="shrink-0 flex flex-wrap gap-2 border-t pt-4 mt-2">
-                    {mailFolder === "inbox" && canUseTrashFeatures && (
+                    {mailFolder === "inbox" && canUseTrashFeatures && !inboxReadOnly && (
                       <Button
                         size="sm"
                         variant="outline"
@@ -1448,7 +1634,7 @@ export default function InboxPage() {
                         Move to trash
                       </Button>
                     )}
-                    {mailFolder === "trash" && canUseTrashFeatures && (
+                    {mailFolder === "trash" && canUseTrashFeatures && !inboxReadOnly && (
                       <Button
                         size="sm"
                         variant="destructive"
@@ -1471,7 +1657,12 @@ export default function InboxPage() {
                         render={<Link href={`/leads/${selectedLead.id}?tab=emails`}>Open lead</Link>}
                       />
                     ) : (
-                      <Button size="sm" variant="outline" onClick={createLeadFromSelectedMessage}>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={inboxReadOnly}
+                        onClick={createLeadFromSelectedMessage}
+                      >
                         Add to leads
                       </Button>
                     )}
@@ -1509,6 +1700,7 @@ export default function InboxPage() {
                     <div className="flex flex-wrap gap-2">
                       <Button
                         size="sm"
+                        disabled={inboxReadOnly}
                         onClick={() =>
                           openCompose({
                             id: selectedMail.id,
@@ -1525,6 +1717,7 @@ export default function InboxPage() {
                         size="sm"
                         variant="ghost"
                         className="text-destructive"
+                        disabled={inboxReadOnly}
                         onClick={() => {
                           deleteDraft(selectedMail.id);
                           setSelectedMail(null);
@@ -1543,6 +1736,7 @@ export default function InboxPage() {
                         <Button
                           size="sm"
                           className="gap-1.5"
+                          disabled={inboxReadOnly}
                           onClick={() => {
                             const addr = extractReplyAddress(selectedMail.from);
                             if (!addr) {
@@ -1565,6 +1759,7 @@ export default function InboxPage() {
                           size="sm"
                           variant="secondary"
                           className="gap-1.5"
+                          disabled={inboxReadOnly}
                           onClick={() => {
                             const pack = replyAllRecipientLine(selectedMail, account);
                             if (!pack.to) {
@@ -1588,6 +1783,7 @@ export default function InboxPage() {
                           size="sm"
                           variant="secondary"
                           className="gap-1.5"
+                          disabled={inboxReadOnly}
                           onClick={() => {
                             const subj = selectedMail.subject?.trim() || "";
                             const fwd = subj.match(/^fwd:/i) ? subj : subj ? `Fwd: ${subj}` : "Fwd:";
@@ -1608,7 +1804,7 @@ export default function InboxPage() {
                       <InboundMessageCard message={selectedMail} />
                     </div>
                     <div className="shrink-0 flex flex-wrap gap-2 border-t pt-4 mt-2">
-                      {mailFolder === "inbox" && canUseTrashFeatures && (
+                      {mailFolder === "inbox" && canUseTrashFeatures && !inboxReadOnly && (
                         <Button
                           size="sm"
                           variant="outline"
@@ -1624,7 +1820,7 @@ export default function InboxPage() {
                           Move to trash
                         </Button>
                       )}
-                      {mailFolder === "trash" && canUseTrashFeatures && (
+                      {mailFolder === "trash" && canUseTrashFeatures && !inboxReadOnly && (
                         <Button
                           size="sm"
                           variant="destructive"
@@ -1644,7 +1840,12 @@ export default function InboxPage() {
                           render={<Link href={`/leads/${selectedLead.id}?tab=emails`}>Open lead</Link>}
                         />
                       ) : (
-                        <Button size="sm" variant="outline" onClick={createLeadFromSelectedMessage}>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          disabled={inboxReadOnly}
+                          onClick={createLeadFromSelectedMessage}
+                        >
                           Add to leads
                         </Button>
                       )}
@@ -1883,6 +2084,49 @@ function InboundMessageCard({ message: m }: { message: MailInbound }) {
       )}
     </div>
   );
+}
+
+function resolveLeadForMailListRow(
+  row: MailListRow,
+  mailboxId: string,
+  linkedLeadByMessageId: Record<string, string>,
+  leads: Lead[],
+): Lead | null {
+  const byId = (id: string) => leads.find((l) => l.id === id) ?? null;
+
+  const matchInbound = (msg: MailInbound) => {
+    const mid = `${mailboxId}:in:${msg.id}`;
+    const manual = linkedLeadByMessageId[mid];
+    if (manual) return byId(manual);
+    const emails = collectMessageEmails(msg);
+    return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+  };
+
+  if (row.thread) {
+    for (let i = row.thread.messages.length - 1; i >= 0; i--) {
+      const hit = matchInbound(row.thread.messages[i]!);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  const item = row.row;
+  if ("uid" in item) {
+    return matchInbound(item);
+  }
+  if ("sentAt" in item) {
+    const manual = linkedLeadByMessageId[item.id];
+    if (manual) return byId(manual);
+    const emails = collectMessageEmails(item);
+    return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+  }
+  if ("updatedAt" in item) {
+    const manual = linkedLeadByMessageId[item.id];
+    if (manual) return byId(manual);
+    const emails = collectMessageEmails(item);
+    return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+  }
+  return null;
 }
 
 function escapeHtml(s: string) {

@@ -5,6 +5,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { defaultEmailMailboxSettings } from "@/lib/email-account-types";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
+import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
 
 /**
  * Loads saved SMTP/IMAP mailboxes from Firestore after login (live workspace).
@@ -16,7 +17,17 @@ export function EmailAccountSync() {
   const setEmailServerSyncEnabled = useEmailAccountStore((s) => s.setEmailServerSyncEnabled);
   const setEmailServerHydrated = useEmailAccountStore((s) => s.setEmailServerHydrated);
   const resetForDemoMode = useEmailAccountStore((s) => s.resetForDemoMode);
+  const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
+  const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
   const wasDemoRef = React.useRef(false);
+  const prevUserIdRef = React.useRef<string | undefined>(undefined);
+
+  React.useEffect(() => {
+    if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId) {
+      setMailViewAsUid(null);
+    }
+    prevUserIdRef.current = currentUserId;
+  }, [currentUserId, setMailViewAsUid]);
 
   React.useEffect(() => {
     if (isDemo) {
@@ -34,12 +45,15 @@ export function EmailAccountSync() {
     let cancelled = false;
     void (async () => {
       try {
-        const res = await fetch("/api/email/mailboxes", { credentials: "same-origin", cache: "no-store" });
+        const url = appendMailDataOwnerParam("/api/email/mailboxes", mailViewAsUid, currentUserId);
+        const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
         const data = (await res.json()) as {
           ok?: boolean;
           mailboxes?: EmailMailboxSettings[];
           activeMailboxId?: string;
           linkedLeadByMessageId?: Record<string, string>;
+          mailboxReadOnly?: boolean;
+          dataOwnerUid?: string;
         };
         if (cancelled) return;
         if (!res.ok || !data.ok || !Array.isArray(data.mailboxes)) {
@@ -60,8 +74,10 @@ export function EmailAccountSync() {
           mailboxes,
           activeMailboxId: active,
           linkedLeadByMessageId: data.linkedLeadByMessageId ?? {},
+          mailboxReadOnly: data.mailboxReadOnly,
         });
-        setEmailServerSyncEnabled(true);
+        const readOnly = Boolean(data.mailboxReadOnly);
+        setEmailServerSyncEnabled(!readOnly);
         setEmailServerHydrated(true);
       } catch {
         if (!cancelled) {
@@ -78,6 +94,7 @@ export function EmailAccountSync() {
     isDemo,
     sessionHydrated,
     currentUserId,
+    mailViewAsUid,
     hydrateFromServer,
     resetForDemoMode,
     setEmailServerHydrated,

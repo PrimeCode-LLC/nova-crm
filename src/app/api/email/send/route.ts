@@ -1,14 +1,36 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
-import { formatSmtpError, smtpTransportOptions } from "@/lib/email/smtp-client-options";
+import { formatSmtpError } from "@/lib/email/smtp-client-options";
+import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
 
 export async function POST(req: Request) {
   try {
     const g = await guardTenantApi();
     if (!g.ok) return g.response;
+
+    const forUser = new URL(req.url).searchParams.get("forUser");
+    const resolved = await resolveMailboxDataOwnerUid({
+      organizationId: g.ctx.session.organizationId,
+      viewerUid: g.ctx.session.uid,
+      viewerRole: g.ctx.role,
+      forUserParam: forUser,
+    });
+    if (!resolved.ok) {
+      return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+    }
+    if (!resolved.viewerIsMailboxOwner) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "You can view this mailbox but cannot send mail on behalf of another member.",
+        },
+        { status: 403 },
+      );
+    }
+    const dataOwnerUid = resolved.dataOwnerUid;
 
     const b = (await req.json()) as Record<string, unknown>;
     const smtp = b.smtp as Record<string, unknown> | undefined;
@@ -21,7 +43,7 @@ export async function POST(req: Request) {
     if (mailboxId) {
       const secrets = await getMailboxSecretsServer({
         organizationId: g.ctx.session.organizationId,
-        uid: g.ctx.session.uid,
+        uid: dataOwnerUid,
         mailboxId,
       });
       if (secrets) {
@@ -46,21 +68,22 @@ export async function POST(req: Request) {
       );
     }
 
-    const transporter = nodemailer.createTransport(
-      smtpTransportOptions({ host, port, secure, user, pass }),
-    );
-
     const fromHeader = displayName ? `"${displayName.replace(/"/g, "")}" <${from}>` : from;
 
-    await transporter.sendMail({
-      from: fromHeader,
-      to,
-      cc: cc || undefined,
-      subject: subject || "(no subject)",
-      text: text || undefined,
-      html: html || undefined,
-      replyTo: replyTo || undefined,
-    });
+    await runWithSmtpTransporter(
+      host,
+      { port, secure, user, pass },
+      async (transporter) =>
+        transporter.sendMail({
+          from: fromHeader,
+          to,
+          cc: cc || undefined,
+          subject: subject || "(no subject)",
+          text: text || undefined,
+          html: html || undefined,
+          replyTo: replyTo || undefined,
+        }),
+    );
 
     return NextResponse.json({ ok: true });
   } catch (e) {

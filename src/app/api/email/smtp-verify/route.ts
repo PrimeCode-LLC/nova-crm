@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import nodemailer from "nodemailer";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
-import { formatSmtpError, smtpTransportOptions } from "@/lib/email/smtp-client-options";
+import { formatSmtpError } from "@/lib/email/smtp-client-options";
+import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 
@@ -37,11 +37,9 @@ export async function POST(req: Request) {
       );
     }
 
-    const transporter = nodemailer.createTransport(
-      smtpTransportOptions({ host, port, secure, user, pass }),
+    await runWithSmtpTransporter(host, { port, secure, user, pass }, async (transporter) =>
+      transporter.verify(),
     );
-
-    await transporter.verify();
     return NextResponse.json({ ok: true });
   } catch (e) {
     return NextResponse.json({ ok: false, error: formatSmtpError(e) }, { status: 400 });

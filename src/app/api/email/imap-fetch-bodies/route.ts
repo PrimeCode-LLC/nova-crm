@@ -10,6 +10,7 @@ import {
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
 import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 const MAX_UIDS = 55;
@@ -21,6 +22,18 @@ export async function POST(req: Request) {
   try {
     const g = await guardTenantApi();
     if (!g.ok) return g.response;
+
+    const forUser = new URL(req.url).searchParams.get("forUser");
+    const resolved = await resolveMailboxDataOwnerUid({
+      organizationId: g.ctx.session.organizationId,
+      viewerUid: g.ctx.session.uid,
+      viewerRole: g.ctx.role,
+      forUserParam: forUser,
+    });
+    if (!resolved.ok) {
+      return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+    }
+    const dataOwnerUid = resolved.dataOwnerUid;
 
     const b = (await req.json()) as Record<string, unknown>;
     const imap = b.imap as Record<string, unknown> | undefined;
@@ -48,7 +61,7 @@ export async function POST(req: Request) {
     if (mailboxId) {
       const secrets = await getMailboxSecretsServer({
         organizationId: g.ctx.session.organizationId,
-        uid: g.ctx.session.uid,
+        uid: dataOwnerUid,
         mailboxId,
       });
       if (secrets) {

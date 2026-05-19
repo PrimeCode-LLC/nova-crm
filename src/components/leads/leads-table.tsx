@@ -58,6 +58,7 @@ import {
   Trash2,
   Tag,
   UserCog,
+  Mail,
 } from "lucide-react";
 import type { Lead, PipelineStage, ChannelKey, LeadTemperature } from "@/lib/types";
 import {
@@ -84,6 +85,8 @@ import {
 } from "@/lib/owner-scope";
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import { useEmailAccountStore } from "@/stores/email-account-store";
+import { buildInboxSyncedLeadIds } from "@/lib/email/lead-inbox-sync";
 import {
   DateRangeFilter,
   isWithinRange,
@@ -95,6 +98,10 @@ const PROFILE_FILTER_NONE = "__none__";
 
 /** Column filter token: leads with no workspace labels. */
 const LABEL_FILTER_NONE = "__unlabeled__";
+
+const INBOX_MAIL_LEAD_FILTER_ALL = "all";
+const INBOX_MAIL_LEAD_FILTER_SYNCED = "synced";
+const INBOX_MAIL_LEAD_FILTER_NONE = "none";
 
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
@@ -290,6 +297,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
+  const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
+  const emailSent = useEmailAccountStore((s) => s.sent);
   const leadsChannelFilterOptions = React.useMemo(
     () => buildLeadsChannelOptions(customChannels),
     [customChannels],
@@ -318,6 +328,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     lockedIntakeScope ?? initialIntakeScope,
   );
   const [reassignOpen, setReassignOpen] = React.useState(false);
+  const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
 
   const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
 
@@ -343,6 +354,17 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     () => (idleOnly ? leads.filter((l) => l.isIdle) : leads),
     [leads, idleOnly],
   );
+
+  const inboxSyncedLeadIds = React.useMemo(
+    () => buildInboxSyncedLeadIds(leads, linkedLeadByMessageId, inboundByMailbox, emailSent),
+    [leads, linkedLeadByMessageId, inboundByMailbox, emailSent],
+  );
+
+  const inboxMailFilterTriggerLabel = React.useMemo(() => {
+    if (inboxMailLeadFilter === INBOX_MAIL_LEAD_FILTER_SYNCED) return "With inbox mail";
+    if (inboxMailLeadFilter === INBOX_MAIL_LEAD_FILTER_NONE) return "Without inbox mail";
+    return "Inbox mail (any)";
+  }, [inboxMailLeadFilter]);
 
   const ownerScopeDeps = React.useMemo(
     () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
@@ -380,8 +402,22 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         isWithinRange(l.lastActivityAt ?? l.updatedAt, activityRange),
       );
     }
+    if (inboxMailLeadFilter === INBOX_MAIL_LEAD_FILTER_SYNCED) {
+      rows = rows.filter((l) => inboxSyncedLeadIds.has(l.id));
+    } else if (inboxMailLeadFilter === INBOX_MAIL_LEAD_FILTER_NONE) {
+      rows = rows.filter((l) => !inboxSyncedLeadIds.has(l.id));
+    }
     return rows;
-  }, [afterIdleFilter, ownerScope, ownerScopeDeps, createdRange, activityRange, effectiveIntakeScope]);
+  }, [
+    afterIdleFilter,
+    ownerScope,
+    ownerScopeDeps,
+    createdRange,
+    activityRange,
+    effectiveIntakeScope,
+    inboxMailLeadFilter,
+    inboxSyncedLeadIds,
+  ]);
 
   const ownerFilterTriggerLabel = React.useMemo(
     () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
@@ -630,6 +666,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         <span
           className="text-xs text-muted-foreground tabular-nums whitespace-nowrap"
           title={fmtDate(row.original.createdAt, "PPpp")}
+          suppressHydrationWarning
         >
           {fmtDate(row.original.createdAt)}
         </span>
@@ -662,7 +699,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       accessorKey: "updatedAt",
       header: "Last activity",
       cell: ({ row }) => (
-        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+        <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap" suppressHydrationWarning>
           {fmtRelative(row.original.lastActivityAt ?? row.original.updatedAt)}
         </span>
       ),
@@ -768,7 +805,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   React.useEffect(() => {
     setRowSelection({});
-  }, [ownerScope, effectiveIntakeScope]);
+  }, [ownerScope, effectiveIntakeScope, inboxMailLeadFilter]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
@@ -1011,6 +1048,23 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           value={activityRange}
           onChange={setActivityRange}
         />
+
+        <Select
+          value={inboxMailLeadFilter}
+          onValueChange={(v) => {
+            if (v) setInboxMailLeadFilter(v);
+          }}
+        >
+          <SelectTrigger size="sm" className="w-[min(200px,48vw)] min-w-0 gap-1.5" title="Filter by mail visible in Inbox">
+            <Mail className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+            <SelectValue placeholder="Inbox mail">{inboxMailFilterTriggerLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={INBOX_MAIL_LEAD_FILTER_ALL}>Inbox mail (any)</SelectItem>
+            <SelectItem value={INBOX_MAIL_LEAD_FILTER_SYNCED}>With inbox mail</SelectItem>
+            <SelectItem value={INBOX_MAIL_LEAD_FILTER_NONE}>Without inbox mail</SelectItem>
+          </SelectContent>
+        </Select>
 
         <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
           <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem]">

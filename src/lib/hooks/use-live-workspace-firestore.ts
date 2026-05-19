@@ -2,8 +2,10 @@
 
 import * as React from "react";
 import {
+  and,
   collection,
   onSnapshot,
+  or,
   query,
   where,
   type Unsubscribe,
@@ -282,8 +284,15 @@ function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRec
 
 /**
  * Real-time tenant CRM documents for live workspace mode.
+ *
+ * @param narrowToMemberCrm When true (workspace `orgRole == "member"`), queries only rows the user may read
+ *   under tightened Firestore rules (own `ownerId` / `leadOwnerId` / task participation, etc.).
  */
-export function useLiveWorkspaceFirestore(organizationId: string | undefined): LiveWorkspaceFirestoreState {
+export function useLiveWorkspaceFirestore(
+  organizationId: string | undefined,
+  viewerUid: string | undefined,
+  narrowToMemberCrm: boolean,
+): LiveWorkspaceFirestoreState {
   const [state, setState] = React.useState<LiveWorkspaceFirestoreState>(empty);
   /** One entry per listener; cleared on that listener’s success so the banner can recover after transient errors. */
   const listenerErrorsRef = React.useRef(new Map<string, Error>());
@@ -341,6 +350,9 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
     listenerErrorsRef.current.clear();
     setState((s) => ({ ...s, loading: true, error: null }));
 
+    const memberScope = Boolean(narrowToMemberCrm && viewerUid);
+    const uid = viewerUid ?? "";
+
     const firstAggregateError = (): Error | null => {
       const v = listenerErrorsRef.current.values().next();
       return v.done ? null : v.value;
@@ -386,10 +398,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qLeads = query(
-      collection(db, COLLECTIONS.leads),
-      where("organizationId", "==", organizationId),
-    );
+    const qLeads = memberScope
+      ? query(
+          collection(db, COLLECTIONS.leads),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qLeads,
@@ -401,10 +416,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qAccounts = query(
-      collection(db, COLLECTIONS.accounts),
-      where("organizationId", "==", organizationId),
-    );
+    const qAccounts = memberScope
+      ? query(
+          collection(db, COLLECTIONS.accounts),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.accounts), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qAccounts,
@@ -418,10 +436,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qContacts = query(
-      collection(db, COLLECTIONS.contacts),
-      where("organizationId", "==", organizationId),
-    );
+    const qContacts = memberScope
+      ? query(
+          collection(db, COLLECTIONS.contacts),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.contacts), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qContacts,
@@ -435,10 +456,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qDeals = query(
-      collection(db, COLLECTIONS.deals),
-      where("organizationId", "==", organizationId),
-    );
+    const qDeals = memberScope
+      ? query(
+          collection(db, COLLECTIONS.deals),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.deals), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qDeals,
@@ -450,10 +474,15 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qNotes = query(
-      collection(db, COLLECTIONS.notes),
-      where("organizationId", "==", organizationId),
-    );
+    const qNotes = memberScope
+      ? query(
+          collection(db, COLLECTIONS.notes),
+          or(
+            and(where("organizationId", "==", organizationId), where("authorId", "==", uid)),
+            and(where("organizationId", "==", organizationId), where("leadOwnerId", "==", uid)),
+          ),
+        )
+      : query(collection(db, COLLECTIONS.notes), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qNotes,
@@ -465,10 +494,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qFollowups = query(
-      collection(db, COLLECTIONS.followups),
-      where("organizationId", "==", organizationId),
-    );
+    const qFollowups = memberScope
+      ? query(
+          collection(db, COLLECTIONS.followups),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.followups), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qFollowups,
@@ -482,10 +514,15 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qLeadTasks = query(
-      collection(db, COLLECTIONS.leadTasks),
-      where("organizationId", "==", organizationId),
-    );
+    const qLeadTasks = memberScope
+      ? query(
+          collection(db, COLLECTIONS.leadTasks),
+          or(
+            and(where("organizationId", "==", organizationId), where("assigneeId", "==", uid)),
+            and(where("organizationId", "==", organizationId), where("createdById", "==", uid)),
+          ),
+        )
+      : query(collection(db, COLLECTIONS.leadTasks), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qLeadTasks,
@@ -499,10 +536,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qTouchpoints = query(
-      collection(db, COLLECTIONS.touchpoints),
-      where("organizationId", "==", organizationId),
-    );
+    const qTouchpoints = memberScope
+      ? query(
+          collection(db, COLLECTIONS.touchpoints),
+          where("organizationId", "==", organizationId),
+          where("leadOwnerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.touchpoints), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qTouchpoints,
@@ -516,10 +556,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qTimeline = query(
-      collection(db, COLLECTIONS.timelineEvents),
-      where("organizationId", "==", organizationId),
-    );
+    const qTimeline = memberScope
+      ? query(
+          collection(db, COLLECTIONS.timelineEvents),
+          where("organizationId", "==", organizationId),
+          where("leadOwnerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.timelineEvents), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qTimeline,
@@ -533,10 +576,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qActivityCounters = query(
-      collection(db, COLLECTIONS.activityCounters),
-      where("organizationId", "==", organizationId),
-    );
+    const qActivityCounters = memberScope
+      ? query(
+          collection(db, COLLECTIONS.activityCounters),
+          where("organizationId", "==", organizationId),
+          where("userId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.activityCounters), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qActivityCounters,
@@ -550,10 +596,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qActivityRecords = query(
-      collection(db, COLLECTIONS.activityRecords),
-      where("organizationId", "==", organizationId),
-    );
+    const qActivityRecords = memberScope
+      ? query(
+          collection(db, COLLECTIONS.activityRecords),
+          where("organizationId", "==", organizationId),
+          where("userId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.activityRecords), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qActivityRecords,
@@ -567,10 +616,13 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       ),
     );
 
-    const qProfiles = query(
-      collection(db, COLLECTIONS.profiles),
-      where("organizationId", "==", organizationId),
-    );
+    const qProfiles = memberScope
+      ? query(
+          collection(db, COLLECTIONS.profiles),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.profiles), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qProfiles,
@@ -601,7 +653,7 @@ export function useLiveWorkspaceFirestore(organizationId: string | undefined): L
       listenerErrorsRef.current.clear();
       for (const u of unsubs) u();
     };
-  }, [organizationId]);
+  }, [organizationId, viewerUid, narrowToMemberCrm]);
 
   return state;
 }

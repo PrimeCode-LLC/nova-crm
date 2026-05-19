@@ -120,6 +120,18 @@ service cloud.firestore {
               : (inCallerOrg(resource.data) && tenantUnchanged()));
     }
 
+    /**
+     * CRM read scope: workspace owner / admin / manager may load all org CRM docs.
+     * Members (`orgRole == 'member'`) are restricted to their own rows in rules + client queries.
+     */
+    function crmTenantReadAll() {
+      return isOrgAtLeast('manager');
+    }
+
+    function ownsCrmDoc(data) {
+      return data.get('ownerId', '') == request.auth.uid;
+    }
+
     function workspaceChatChannelDoc(channelId) {
       return get(/databases/$(database)/documents/workspaceChatChannels/$(channelId)).data;
     }
@@ -155,7 +167,7 @@ service cloud.firestore {
     }
 
     match /leads/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
@@ -164,12 +176,17 @@ service cloud.firestore {
     }
 
     match /notes/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable()
+        && (
+          crmTenantReadAll()
+          || resource.data.authorId == request.auth.uid
+          || resource.data.get('leadOwnerId', '') == request.auth.uid
+        );
       allow write: if tenantWritable();
     }
 
     match /followups/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
@@ -178,7 +195,13 @@ service cloud.firestore {
     }
 
     match /leadTasks/{id} {
-      allow read: if leadTaskCanRead(resource.data);
+      allow read: if signedIn()
+        && inCallerOrg(resource.data)
+        && (
+          crmTenantReadAll()
+          || leadTaskParticipant(resource.data)
+          || leadTaskElevated()
+        );
       allow create: if signedIn()
         && request.resource.data.organizationId == callerOrgId()
         && request.resource.data.createdById == request.auth.uid;
@@ -192,32 +215,40 @@ service cloud.firestore {
     }
 
     match /touchpoints/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable()
+        && (
+          crmTenantReadAll()
+          || resource.data.get('leadOwnerId', '') == request.auth.uid
+        );
       allow write: if tenantWritable();
     }
 
     match /timelineEvents/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable()
+        && (
+          crmTenantReadAll()
+          || resource.data.get('leadOwnerId', '') == request.auth.uid
+        );
       allow write: if tenantWritable();
     }
 
     match /accounts/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow write: if tenantWritable();
     }
 
     match /contacts/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow write: if tenantWritable();
     }
 
     match /deals/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow write: if tenantWritable();
     }
 
     match /profiles/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow write: if tenantWritable();
     }
 
@@ -237,7 +268,11 @@ service cloud.firestore {
     }
 
     match /activityCounters/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable()
+        && (
+          crmTenantReadAll()
+          || resource.data.userId == request.auth.uid
+        );
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
@@ -246,7 +281,11 @@ service cloud.firestore {
     }
 
     match /activityRecords/{id} {
-      allow read: if tenantReadable();
+      allow read: if tenantReadable()
+        && (
+          crmTenantReadAll()
+          || resource.data.userId == request.auth.uid
+        );
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)

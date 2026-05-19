@@ -1,3 +1,5 @@
+import net from "node:net";
+
 /** Shared timeouts so verify/send fail fast with predictable latency. */
 const CONNECTION_MS = 12_000;
 const GREETING_MS = 12_000;
@@ -13,6 +15,8 @@ export function smtpTransportOptions(input: {
   secure: boolean;
   user: string;
   pass: string;
+  /** When `host` is an IPv4 literal, set SNI / cert hostname to the mail server name. */
+  tlsServername?: string;
 }): {
   host: string;
   port: number;
@@ -21,7 +25,15 @@ export function smtpTransportOptions(input: {
   connectionTimeout: number;
   greetingTimeout: number;
   socketTimeout: number;
+  tls?: { servername: string };
 } {
+  const sni =
+    input.tlsServername &&
+    net.isIP(input.host) &&
+    !net.isIP(input.tlsServername)
+      ? { servername: input.tlsServername }
+      : undefined;
+
   return {
     host: input.host,
     port: input.port,
@@ -30,6 +42,7 @@ export function smtpTransportOptions(input: {
     connectionTimeout: CONNECTION_MS,
     greetingTimeout: GREETING_MS,
     socketTimeout: SOCKET_MS,
+    ...(sni ? { tls: sni } : {}),
   };
 }
 
@@ -41,7 +54,7 @@ export function formatSmtpError(err: unknown): string {
   const msg = err.message || "";
 
   if (code === "ETIMEDOUT" || /timeout/i.test(msg)) {
-    return "Connection timed out — check the hostname and port, your network, and whether TLS should be on (465) or off with STARTTLS (587).";
+    return "Outgoing mail (SMTP) could not connect in time — receiving inbox uses IMAP, which is separate. Check the SMTP host/port and TLS mode (587 + implicit TLS off, or 465 + on), firewall/VPN blocking ports 587/465, and your provider’s outgoing-server docs.";
   }
   if (code === "ECONNREFUSED") {
     return "Connection refused — wrong port or the server is not accepting SMTP on this address.";

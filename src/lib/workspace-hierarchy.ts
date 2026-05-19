@@ -24,7 +24,9 @@ export function collectDescendantUserIds(
 function seesAllLeadsInTenant(viewer: User): boolean {
   if (viewer.roleId === "director") return true;
   if (viewer.isSuperAdmin) return true;
-  if (viewer.orgRole === "owner" || viewer.orgRole === "admin") return true;
+  if (viewer.orgRole === "owner" || viewer.orgRole === "admin" || viewer.orgRole === "manager") {
+    return true;
+  }
   return false;
 }
 
@@ -34,10 +36,10 @@ export function leadVisibleForLiveViewer(
   viewer: User,
   orgUsers: readonly User[],
 ): boolean {
-  /** Open-queue rows: no owner yet — everyone in the org can see and claim. */
-  if (!lead.ownerId?.trim()) return true;
-
   if (seesAllLeadsInTenant(viewer)) return true;
+
+  /** Unassigned leads are only visible to owner / admin / manager (see Firestore `crmTenantReadAll`). */
+  if (!lead.ownerId?.trim()) return false;
 
   if (viewer.roleId === "manager" || viewer.roleId === "team_lead") {
     const owners = new Set<string>([viewer.id]);

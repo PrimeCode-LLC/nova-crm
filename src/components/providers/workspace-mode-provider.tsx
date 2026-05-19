@@ -21,6 +21,7 @@ import type {
   User,
   CrmLabel,
   Deal,
+  OrgMemberRole,
 } from "@/lib/types";
 import {
   getWorkspaceSnapshot,
@@ -78,6 +79,7 @@ import {
 } from "@/lib/workspace-session";
 import { STAGES_BY_KEY } from "@/lib/constants";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
+import { roleAtLeast } from "@/lib/platform/org-role";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
   WorkspaceLookup & {
@@ -124,6 +126,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     deleteLead: (leadId: string) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
     canDeleteLeads: boolean;
+    /** Org role for the signed-in user (defaults to member when missing on the user row). */
+    viewerOrgRole: OrgMemberRole;
+    /** Org owner or admin: may open another member’s linked inbox (read-only). */
+    canViewMemberMailboxes: boolean;
     updateLeadStage: (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => void;
     toggleLeadPin: (leadId: string) => void;
     isLeadPinned: (leadId: string) => boolean;
@@ -226,7 +232,17 @@ export function WorkspaceModeProvider({
   );
   const liveOrgId =
     mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
-  const liveFs = useLiveWorkspaceFirestore(liveOrgId);
+  const narrowMemberCrm = userDoc?.orgRole === "member";
+  const liveFs = useLiveWorkspaceFirestore(liveOrgId, fbUser?.uid, narrowMemberCrm);
+
+  const liveLeadsForPersistRef = React.useRef<Lead[]>([]);
+  React.useEffect(() => {
+    liveLeadsForPersistRef.current = liveFs.leads;
+  }, [liveFs.leads]);
+
+  const leadOwnerIdForFirestore = React.useCallback((leadId: string) => {
+    return liveLeadsForPersistRef.current.find((l) => l.id === leadId)?.ownerId?.trim() ?? "";
+  }, []);
 
   const [orgMemberLabels, setOrgMemberLabels] = React.useState<Record<string, string>>({});
   React.useEffect(() => {
@@ -571,8 +587,10 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = getFirebaseDb();
-            await persistNoteCreate(db, orgId, note);
-            await persistTimelineEventCreate(db, orgId, timeline);
+            await persistNoteCreate(db, orgId, note, {
+              leadOwnerId: leadOwnerIdForFirestore(leadId),
+            });
+            await persistTimelineEventCreate(db, orgId, timeline, leadOwnerIdForFirestore(leadId));
             await persistLeadActivityBump(db, leadId);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -595,7 +613,7 @@ export function WorkspaceModeProvider({
             },
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const updateLeadNote = React.useCallback(
@@ -679,8 +697,8 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = getFirebaseDb();
-            await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso });
-            await persistTimelineEventCreate(db, orgId, event);
+            await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso }, leadOwnerIdForFirestore(t.leadId));
+            await persistTimelineEventCreate(db, orgId, event, leadOwnerIdForFirestore(t.leadId));
             await persistLeadActivityBump(db, t.leadId);
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
@@ -703,7 +721,7 @@ export function WorkspaceModeProvider({
             },
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const addTimelineEvent = React.useCallback(
@@ -715,7 +733,7 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = getFirebaseDb();
-            await persistTimelineEventCreate(db, orgId, e);
+            await persistTimelineEventCreate(db, orgId, e, leadOwnerIdForFirestore(e.leadId));
           } catch (err) {
             const msg = err instanceof Error ? err.message : String(err);
             toast.error("Could not save timeline event", { description: msg });
@@ -736,7 +754,7 @@ export function WorkspaceModeProvider({
             },
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const patchLead = React.useCallback(
@@ -1016,7 +1034,7 @@ export function WorkspaceModeProvider({
               stage: nextStage,
               updatedAt: serverTimestamp(),
             });
-            await persistTimelineEventCreate(db, orgId, ev);
+            await persistTimelineEventCreate(db, orgId, ev, leadOwnerIdForFirestore(leadId));
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save stage", { description: msg });
@@ -1032,7 +1050,7 @@ export function WorkspaceModeProvider({
         timelineAdded: [...s.timelineAdded, ev],
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const toggleLeadPin = React.useCallback((leadId: string) => {
@@ -1246,8 +1264,10 @@ export function WorkspaceModeProvider({
       if (fromUser) return fromUser;
       return orgMemberLabels[id]?.trim() || undefined;
     };
-    const viewerRole = snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole;
+    const viewerRole: OrgMemberRole =
+      snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
     const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
+    const canViewMemberMailboxes = roleAtLeast(viewerRole, "admin");
     return {
       ...snapshotWithIdle,
       ...lookup,
@@ -1291,6 +1311,8 @@ export function WorkspaceModeProvider({
       removeCrmLabel,
       deleteLead,
       canDeleteLeads,
+      viewerOrgRole: viewerRole,
+      canViewMemberMailboxes,
       updateLeadStage,
       toggleLeadPin,
       isLeadPinned,
