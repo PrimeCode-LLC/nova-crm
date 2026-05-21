@@ -11,7 +11,7 @@ import {
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import { workspaceChatChannelsForUserQuery } from "@/lib/firestore/workspace-chat-queries";
+import { subscribeWorkspaceChatChannelsForUser } from "@/lib/firestore/workspace-chat-channel-subscribe";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import {
   persistWorkspaceChatChannelCreate,
@@ -123,13 +123,14 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
     setLoading(true);
     setError(null);
-    const qCh = workspaceChatChannelsForUserQuery(db, organizationId, currentUserId);
-    const unsub = onSnapshot(
-      qCh,
-      (snap) => {
-        const channels = snap.docs.map((d) => asChannel(d.id, d.data() as Record<string, unknown>));
-        channels.sort((a, b) => a.name.localeCompare(b.name));
+    const unsub = subscribeWorkspaceChatChannelsForUser(
+      db,
+      organizationId,
+      currentUserId,
+      asChannel,
+      (channels) => {
         setLiveChannels(channels);
+        setError(null);
         setLoading(false);
       },
       (err) => {

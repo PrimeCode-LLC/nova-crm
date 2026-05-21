@@ -32,6 +32,10 @@ import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provi
 import { extractMentionUserIds, formatChatBodySegments } from "@/lib/team-chat-mentions";
 import type { User, WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
 import { toast } from "sonner";
+import {
+  extractFirebaseIndexCreateUrl,
+  teamChatFirestoreErrorHint,
+} from "@/lib/firestore/team-chat-firestore-error";
 
 function initials(name: string) {
   return name
@@ -50,13 +54,6 @@ function channelTitle(ch: WorkspaceChatChannel, selfId: string, users: User[]) {
   const other = ch.memberIds.find((id) => id !== selfId);
   const u = users.find((x) => x.id === other);
   return u?.displayName?.trim() ? u.displayName : "Direct message";
-}
-
-/** Firebase SDK embeds this URL when a composite index is missing. */
-function extractFirebaseIndexCreateUrl(message: string): string | null {
-  const m = message.match(/https:\/\/console\.firebase\.google\.com[^\s]+/i);
-  if (!m) return null;
-  return m[0].replace(/[)\]"'.,;:]+$/, "");
 }
 
 function messageWithoutIndexUrl(message: string, url: string | null): string {
@@ -230,12 +227,29 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
                 </div>
               )}
               {chat.error && (
-                <p className="px-2 py-2 text-xs text-destructive">
-                  {chat.error.message}
-                  <Link href="/settings" className="ml-1 underline">
-                    Settings
-                  </Link>
-                </p>
+                <div className="space-y-1 px-2 py-2 text-xs text-destructive">
+                  <p className="font-medium">
+                    {messageWithoutIndexUrl(
+                      chat.error.message,
+                      extractFirebaseIndexCreateUrl(chat.error.message),
+                    )}
+                  </p>
+                  {teamChatFirestoreErrorHint(chat.error.message) ? (
+                    <p className="text-[11px] leading-snug text-destructive/90">
+                      {teamChatFirestoreErrorHint(chat.error.message)}
+                    </p>
+                  ) : null}
+                  {extractFirebaseIndexCreateUrl(chat.error.message) ? (
+                    <a
+                      href={extractFirebaseIndexCreateUrl(chat.error.message)!}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-block text-[11px] underline"
+                    >
+                      Create Firestore index
+                    </a>
+                  ) : null}
+                </div>
               )}
               <div className="space-y-0.5">
                 {publicChannels.map((ch) => {

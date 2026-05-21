@@ -17,7 +17,7 @@ import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import { workspaceChatChannelsForUserQuery } from "@/lib/firestore/workspace-chat-queries";
+import { subscribeWorkspaceChatChannelsForUser } from "@/lib/firestore/workspace-chat-channel-subscribe";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import { persistWorkspaceChatChannelLastRead } from "@/lib/firestore/persist-workspace-entities-client";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -182,14 +182,12 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
       return;
     }
 
-    const qCh = workspaceChatChannelsForUserQuery(db, organizationId, currentUserId);
-    const unsubCh = onSnapshot(
-      qCh,
-      (snap) => {
-        const list = snap.docs.map((d) => asChannelRaw(d.id, d.data() as Record<string, unknown>));
-        list.sort((a, b) => a.name.localeCompare(b.name));
-        setLiveChannels(list);
-      },
+    const unsubCh = subscribeWorkspaceChatChannelsForUser(
+      db,
+      organizationId,
+      currentUserId,
+      asChannelRaw,
+      (list) => setLiveChannels(list),
       () => setLiveChannels([]),
     );
 

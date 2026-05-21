@@ -7,13 +7,14 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { diffAddedUnreadUids, snapshotUnreadMailUids } from "@/lib/email/snapshot-unread-mail-uids";
 import { syncImapInboxHead } from "@/lib/email/sync-imap-inbox-head";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
+import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import {
   getActiveMailbox,
   isImapInboxConfigured,
   useEmailAccountStore,
 } from "@/stores/email-account-store";
 
-function syncIntervalMs(mailboxes: { id: string; syncIntervalMinutes: number }[], activeMailboxId: string): number {
+function syncIntervalMs(mailboxes: EmailMailboxSettings[], activeMailboxId: string): number {
   const acct = getActiveMailbox({ mailboxes, activeMailboxId });
   const minutes = Math.max(5, Math.min(120, acct.syncIntervalMinutes || 15));
   return minutes * 60 * 1000;
