@@ -649,7 +649,8 @@ export function EmailInboxSettingsCard() {
                             }
                           />
                           <p className="text-[11px] text-muted-foreground">
-                            Reserved for automatic polling later; today use Refresh on Inbox → Email to fetch mail.
+                            Inbox syncs automatically in the background on this interval while you use the CRM (any
+                            screen). Use Refresh on Inbox → Email for an immediate pull.
                           </p>
                         </div>
                       </div>

@@ -37,5 +37,10 @@ export function useWorkspaceInboxNotifications() {
     return mergeNotificationSeed(seed, { readIds, unreadIds, dismissedIds });
   }, [seed, readIds, unreadIds, dismissedIds]);
 
-  return { notifications };
+  const unreadCount = React.useMemo(
+    () => notifications.filter((n) => !n.read).length,
+    [notifications],
+  );
+
+  return { notifications, unreadCount };
 }

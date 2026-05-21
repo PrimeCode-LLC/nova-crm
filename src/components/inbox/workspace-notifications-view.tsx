@@ -68,6 +68,7 @@ export function WorkspaceNotificationsView() {
   const markUnreadStore = useInboxNotificationOverrides((s) => s.markUnread);
   const dismissStore = useInboxNotificationOverrides((s) => s.dismiss);
   const markAllReadStore = useInboxNotificationOverrides((s) => s.markAllRead);
+  const forcedUnreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
 
   const [selected, setSelected] = React.useState<DemoNotification | null>(null);
   const [tab, setTab] = React.useState<TabFilter>("all");
@@ -89,6 +90,14 @@ export function WorkspaceNotificationsView() {
   const unreadCount = notifications.filter((n) => !n.read).length;
   const totalCount = notifications.length;
 
+  const selectNotification = React.useCallback(
+    (n: DemoNotification) => {
+      setSelected(n);
+      if (!n.read) markReadStore(n.id);
+    },
+    [markReadStore],
+  );
+
   React.useEffect(() => {
     if (filtered.length === 0) {
       setSelected(null);
@@ -99,6 +108,11 @@ export function WorkspaceNotificationsView() {
       return filtered[0] ?? null;
     });
   }, [filtered]);
+
+  React.useEffect(() => {
+    if (!selected || selected.read || forcedUnreadIds.includes(selected.id)) return;
+    markReadStore(selected.id);
+  }, [selected, forcedUnreadIds, markReadStore]);
 
   function markAllRead() {
     markAllReadStore(notifications.map((n) => n.id));
@@ -195,7 +209,7 @@ export function WorkspaceNotificationsView() {
                 <button
                   key={n.id}
                   type="button"
-                  onClick={() => setSelected(n)}
+                  onClick={() => selectNotification(n)}
                   className={cn(
                     "flex w-full items-start gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/20",
                     selected?.id === n.id && "bg-muted/30",

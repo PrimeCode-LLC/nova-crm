@@ -12,7 +12,9 @@ import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
 import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-provider";
 import { EmailAccountSync } from "@/components/providers/email-account-sync";
-import { InboxMailUnreadSync } from "@/components/providers/inbox-mail-unread-sync";
+import { AlertSoundUnlock } from "@/components/providers/alert-sound-unlock";
+import { InboxBackgroundSync } from "@/components/providers/inbox-background-sync";
+import { PlatformNotificationsAlertSync } from "@/components/providers/platform-notifications-alert-sync";
 import { ChannelAdminSync } from "@/components/providers/channel-admin-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
@@ -59,7 +61,9 @@ export default async function AppLayout({
     >
       <TeamChatUnreadProvider>
         <EmailAccountSync />
-        <InboxMailUnreadSync />
+        <AlertSoundUnlock />
+        <InboxBackgroundSync />
+        <PlatformNotificationsAlertSync />
         <ChannelAdminSync />
         <QuickAddLauncherProvider>
           <SidebarProvider>

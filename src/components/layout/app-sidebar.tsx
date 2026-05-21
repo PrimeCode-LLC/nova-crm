@@ -34,6 +34,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { useInboxMailUnreadTotal } from "@/hooks/use-inbox-mail-unread-total";
+import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import { formatUnreadBadgeCount } from "@/lib/email/inbox-unread-count";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
@@ -79,11 +80,13 @@ function NavMenuLinks({
   pathname,
   teamChatUnreadTotal,
   inboxMailUnreadTotal,
+  notificationsUnreadTotal,
 }: {
   items: NavItem[];
   pathname: string;
   teamChatUnreadTotal: number;
   inboxMailUnreadTotal: number;
+  notificationsUnreadTotal: number;
 }) {
   return (
     <>
@@ -91,12 +94,14 @@ function NavMenuLinks({
         const isActive =
           pathname === item.href || pathname.startsWith(item.href + "/");
         const Icon = item.icon;
-        const chatBadge =
-          item.href === "/team-chat" ? formatUnreadBadgeCount(teamChatUnreadTotal) : null;
-        const inboxBadge =
-          item.href === "/inbox" ? formatUnreadBadgeCount(inboxMailUnreadTotal) : null;
-        const badge = inboxBadge ?? chatBadge;
-        const badgeIsInbox = Boolean(inboxBadge);
+        const badge =
+          item.href === "/inbox"
+            ? formatUnreadBadgeCount(inboxMailUnreadTotal)
+            : item.href === "/notifications"
+              ? formatUnreadBadgeCount(notificationsUnreadTotal)
+              : item.href === "/team-chat"
+                ? formatUnreadBadgeCount(teamChatUnreadTotal)
+                : null;
         return (
           <SidebarMenuItem key={item.href}>
             <SidebarMenuButton
@@ -107,14 +112,7 @@ function NavMenuLinks({
                   <Icon className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
                   {badge ? (
-                    <span
-                      className={cn(
-                        "flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
-                        badgeIsInbox
-                          ? "bg-red-600 text-white"
-                          : "bg-muted text-foreground ring-1 ring-border",
-                      )}
-                    >
+                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-bold tabular-nums text-white">
                       {badge}
                     </span>
                   ) : null}
@@ -134,12 +132,14 @@ function ConfigurationNavGroups({
   flat,
   teamChatUnreadTotal,
   inboxMailUnreadTotal,
+  notificationsUnreadTotal,
 }: {
   items: NavItem[];
   pathname: string;
   flat: boolean;
   teamChatUnreadTotal: number;
   inboxMailUnreadTotal: number;
+  notificationsUnreadTotal: number;
 }) {
   if (flat) {
     return (
@@ -149,6 +149,7 @@ function ConfigurationNavGroups({
           pathname={pathname}
           teamChatUnreadTotal={teamChatUnreadTotal}
           inboxMailUnreadTotal={inboxMailUnreadTotal}
+          notificationsUnreadTotal={notificationsUnreadTotal}
         />
       </SidebarMenu>
     );
@@ -209,6 +210,7 @@ function ConfigurationNavGroups({
                   pathname={pathname}
                   teamChatUnreadTotal={teamChatUnreadTotal}
                   inboxMailUnreadTotal={inboxMailUnreadTotal}
+                  notificationsUnreadTotal={notificationsUnreadTotal}
                 />
               </SidebarMenu>
             </CollapsibleContent>
@@ -301,6 +303,7 @@ export function AppSidebar({
   );
   const { teamChatUnreadTotal } = useTeamChatUnread();
   const inboxMailUnreadTotal = useInboxMailUnreadTotal();
+  const { unreadCount: notificationsUnreadTotal } = useWorkspaceInboxNotifications();
   const { state: sidebarState } = useSidebar();
   const sidebarIsCollapsed = sidebarState === "collapsed";
 
@@ -328,6 +331,7 @@ export function AppSidebar({
                   flat={sidebarIsCollapsed}
                   teamChatUnreadTotal={teamChatUnreadTotal}
                   inboxMailUnreadTotal={inboxMailUnreadTotal}
+                  notificationsUnreadTotal={notificationsUnreadTotal}
                 />
               ) : (
                 <SidebarMenu>
@@ -336,6 +340,7 @@ export function AppSidebar({
                     pathname={pathname}
                     teamChatUnreadTotal={teamChatUnreadTotal}
                     inboxMailUnreadTotal={inboxMailUnreadTotal}
+                    notificationsUnreadTotal={notificationsUnreadTotal}
                   />
                 </SidebarMenu>
               )}

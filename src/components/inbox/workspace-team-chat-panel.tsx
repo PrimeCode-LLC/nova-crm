@@ -68,7 +68,7 @@ function UnreadCountBadge({ count }: { count: number }) {
   if (count < 1) return null;
   const label = count > 99 ? "99+" : String(count);
   return (
-    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-bold tabular-nums text-foreground ring-1 ring-border">
+    <span className="ml-auto flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-red-600 px-1.5 text-[10px] font-bold tabular-nums text-white">
       {label}
     </span>
   );

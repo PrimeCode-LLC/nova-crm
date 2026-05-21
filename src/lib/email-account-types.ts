@@ -24,7 +24,7 @@ export interface EmailAccountSettings {
   imap: ImapConfig;
   /** Default signature appended to outbound mail */
   signature: string;
-  /** Reserved for background sync (IMAP IDLE / polling) */
+  /** Background IMAP poll interval (minutes) while the app is open */
   syncIntervalMinutes: number;
   /** Future: move thread to archive folder on send */
   archiveOnSend: boolean;

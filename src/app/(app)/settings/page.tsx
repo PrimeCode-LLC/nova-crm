@@ -50,19 +50,17 @@ import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
 import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import {
+  DEFAULT_USER_NOTIFICATION_SETTINGS,
+  LS_USER_NOTIFICATION_SETTINGS,
+  type UserNotificationSettings,
+} from "@/lib/notifications/alert-preferences";
 
 const LS_PROFILE = "nova-crm-settings-profile-v1";
 const LS_ACCOUNT = "nova-crm-settings-account-v1";
-const LS_NOTIFS = "nova-crm-settings-notifications-v1";
 const LS_DENSITY = "nova-crm-settings-density-v1";
 
-const DEFAULT_NOTIFICATIONS = {
-  emailNotifs: true,
-  slackNotifs: false,
-  leadAssigned: true,
-  dailyDigest: true,
-  weeklyScorecard: false,
-} as const;
+const DEFAULT_NOTIFICATIONS = DEFAULT_USER_NOTIFICATION_SETTINGS;
 
 /**
  * Mini theme preview, a tiny faux-app rendered with the literal hex/oklch
@@ -230,7 +228,9 @@ function SettingsPage() {
   const [changingPassword, setChangingPassword] = React.useState(false);
   const [sendingResetEmail, setSendingResetEmail] = React.useState(false);
 
-  const [notifications, setNotifications] = React.useState({ ...DEFAULT_NOTIFICATIONS });
+  const [notifications, setNotifications] = React.useState<UserNotificationSettings>({
+    ...DEFAULT_NOTIFICATIONS,
+  });
   const [aiTone, setAiTone] = React.useState<"professional" | "friendly" | "concise">("professional");
   const [aiExtra, setAiExtra] = React.useState("");
   const [aiSaveToTimeline, setAiSaveToTimeline] = React.useState(true);
@@ -254,9 +254,10 @@ function SettingsPage() {
 
   React.useEffect(() => {
     try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem(LS_NOTIFS) : null;
+      const raw =
+        typeof window !== "undefined" ? localStorage.getItem(LS_USER_NOTIFICATION_SETTINGS) : null;
       if (!raw) return;
-      const j = JSON.parse(raw) as Partial<typeof DEFAULT_NOTIFICATIONS>;
+      const j = JSON.parse(raw) as Partial<UserNotificationSettings>;
       setNotifications((prev) => ({ ...prev, ...j }));
     } catch {
       /* ignore */
@@ -293,10 +294,10 @@ function SettingsPage() {
     }
   }, []);
 
-  function persistNotifications(next: typeof DEFAULT_NOTIFICATIONS) {
+  function persistNotifications(next: UserNotificationSettings) {
     try {
       if (typeof window !== "undefined") {
-        localStorage.setItem(LS_NOTIFS, JSON.stringify(next));
+        localStorage.setItem(LS_USER_NOTIFICATION_SETTINGS, JSON.stringify(next));
       }
     } catch {
       /* ignore */
@@ -669,6 +670,11 @@ function SettingsPage() {
               <CardContent className="space-y-1 divide-y">
                 {(
                   [
+                    {
+                      key: "soundAlerts",
+                      label: "In-app alert sounds",
+                      desc: "Play a short chime for new mail, team chat messages, and CRM notifications.",
+                    },
                     { key: "emailNotifs", label: "Email notifications", desc: "Receive activity summaries via email." },
                     { key: "slackNotifs", label: "Slack notifications", desc: "Get pinged in your Slack workspace." },
                     { key: "leadAssigned", label: "Lead assigned", desc: "When a lead is assigned or reassigned to you." },

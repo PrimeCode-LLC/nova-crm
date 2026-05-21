@@ -69,6 +69,7 @@ import {
   ArchiveRestore,
   Search,
   ChevronDown,
+  ChevronRight,
   Paperclip,
   Sparkles,
   Ban,
@@ -429,6 +430,8 @@ export default function InboxPage() {
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
   const [selectedThread, setSelectedThread] = React.useState<MailThread | null>(null);
+  /** Expanded message UIDs when viewing a multi-message thread. */
+  const [expandedThreadUids, setExpandedThreadUids] = React.useState<Set<number>>(() => new Set());
   const [selectedMail, setSelectedMail] = React.useState<MailDraft | MailSent | MailInbound | null>(null);
   const [composeOpen, setComposeOpen] = React.useState(false);
   const [composeTo, setComposeTo] = React.useState("");
@@ -494,6 +497,28 @@ export default function InboxPage() {
       return threads.find((t) => t.threadId === prev.threadId) ?? null;
     });
   }, [inboundThreads, trashThreads, mailFolder]);
+
+  React.useEffect(() => {
+    if (!selectedThread) {
+      setExpandedThreadUids(new Set());
+      return;
+    }
+    if (selectedThread.messages.length <= 1) {
+      setExpandedThreadUids(new Set(selectedThread.messages.map((m) => m.uid)));
+      return;
+    }
+    const latest = selectedThread.messages[selectedThread.messages.length - 1];
+    setExpandedThreadUids(latest ? new Set([latest.uid]) : new Set());
+  }, [selectedThread?.threadId, selectedThread?.messages.length]);
+
+  const toggleThreadMessageExpanded = React.useCallback((uid: number) => {
+    setExpandedThreadUids((prev) => {
+      const next = new Set(prev);
+      if (next.has(uid)) next.delete(uid);
+      else next.add(uid);
+      return next;
+    });
+  }, []);
 
   React.useEffect(() => {
     setEntityMailFilter(ENTITY_MAIL_FILTER_ALL);
@@ -978,7 +1003,11 @@ export default function InboxPage() {
     });
   }, []);
 
+  /** Anchor row index for Shift+click / Shift+Space range selection (Apple Mail style). */
+  const bulkSelectAnchorIndexRef = React.useRef<number | null>(null);
+
   const clearMailRowSelection = React.useCallback(() => {
+    bulkSelectAnchorIndexRef.current = null;
     setSelectedMailRowIds(new Set());
   }, []);
 
@@ -1480,6 +1509,24 @@ export default function InboxPage() {
     contacts,
   ]);
 
+  const selectMailRowRange = React.useCallback((anchorIdx: number, endIdx: number) => {
+    const lo = Math.min(anchorIdx, endIdx);
+    const hi = Math.max(anchorIdx, endIdx);
+    setSelectedMailRowIds(new Set(visibleMailRows.slice(lo, hi + 1).map((r) => r.id)));
+  }, [visibleMailRows]);
+
+  const handleMailRowBulkSelect = React.useCallback(
+    (rowId: string, rowIndex: number, shiftKey: boolean) => {
+      if (shiftKey && bulkSelectAnchorIndexRef.current !== null) {
+        selectMailRowRange(bulkSelectAnchorIndexRef.current, rowIndex);
+        return;
+      }
+      toggleRowSelected(rowId, !selectedMailRowIds.has(rowId));
+      bulkSelectAnchorIndexRef.current = rowIndex;
+    },
+    [selectMailRowRange, selectedMailRowIds, toggleRowSelected],
+  );
+
   const showEntitySubFilter =
     entityMailFilter === ENTITY_LEAD_LINKED || entityMailFilter === ENTITY_CONTACT_LINKED;
 
@@ -1538,6 +1585,7 @@ export default function InboxPage() {
 
   const selectAllVisibleMailRows = React.useCallback(() => {
     setSelectedMailRowIds(new Set(visibleMailRows.map((r) => r.id)));
+    bulkSelectAnchorIndexRef.current = visibleMailRows.length > 0 ? 0 : null;
   }, [visibleMailRows]);
 
   async function handleMoveInboxSelectionToTrash() {
@@ -1804,7 +1852,7 @@ export default function InboxPage() {
         if (idx < 0) idx = 0;
         const row = visibleMailRows[idx];
         if (!row) return;
-        toggleRowSelected(row.id, !selectedMailRowIds.has(row.id));
+        handleMailRowBulkSelect(row.id, idx, e.shiftKey);
         return;
       }
 
@@ -1846,9 +1894,9 @@ export default function InboxPage() {
     resolveVisibleMailRowIndex,
     scrollMailRowIntoView,
     selectVisibleMailRow,
+    handleMailRowBulkSelect,
     selectedMailRowIds,
     showImapBulkMailActions,
-    toggleRowSelected,
     visibleMailRows,
   ]);
 
@@ -2129,7 +2177,7 @@ export default function InboxPage() {
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-1 divide-x">
+        <div className="flex min-h-0 flex-1 divide-x h-[calc(100vh-12rem)] max-h-[calc(100vh-12rem)]">
             <div className="w-52 shrink-0 flex flex-col border-r p-2 gap-1 overflow-y-auto max-h-[calc(100vh-250px)]">
               <div className="space-y-2 pb-2 border-b border-border/60">
                 <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -2554,8 +2602,8 @@ export default function InboxPage() {
                   {emailFolderSupportsImapList && showImapBulkMailActions && visibleMailRows.length > 0 ? (
                     <p className="text-[10px] text-muted-foreground font-normal leading-snug">
                       {mailFolder === "trash"
-                        ? "↑↓ move · Space select · Delete delete forever"
-                        : "↑↓ move · Space select · Delete trash"}
+                        ? "↑↓ move · Space select · Shift+Space range · Delete delete forever"
+                        : "↑↓ move · Space select · Shift+Space range · Delete trash"}
                     </p>
                   ) : null}
                 </div>
@@ -2621,7 +2669,7 @@ export default function InboxPage() {
                         : null}
                     </div>
                   )}
-                {visibleMailRows.map((row) => {
+                {visibleMailRows.map((row, rowIndex) => {
                   const isRowSelected = row.thread
                     ? selectedThread?.threadId === row.thread.threadId
                     : selectedMail?.id === row.row.id && selectedThread == null;
@@ -2639,13 +2687,17 @@ export default function InboxPage() {
                       {showSelect ? (
                         <div
                           className="flex w-9 shrink-0 items-center justify-center border-r border-border/60 bg-muted/5"
-                          onClick={(e) => e.stopPropagation()}
+                          onPointerDown={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            handleMailRowBulkSelect(row.id, rowIndex, e.shiftKey);
+                          }}
                           onKeyDown={(e) => e.stopPropagation()}
                           role="presentation"
                         >
                           <Checkbox
                             checked={bulkChecked}
-                            onCheckedChange={(v) => toggleRowSelected(row.id, v === true)}
+                            tabIndex={-1}
                             aria-label={row.thread ? "Select conversation" : "Select message"}
                           />
                         </div>
@@ -2721,9 +2773,9 @@ export default function InboxPage() {
               </div>
             </div>
 
-            <div className="flex-1 flex flex-col min-h-0 min-w-0 p-6">
+            <div className="flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden p-4 lg:p-5">
               {(mailFolder === "inbox" || mailFolder === "trash") && selectedThread ? (
-                <div className="flex flex-col flex-1 min-h-0 max-w-3xl w-full">
+                <div className="flex h-full min-h-0 w-full flex-col">
                   <div className="shrink-0 space-y-3 border-b pb-4">
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
@@ -2841,9 +2893,16 @@ export default function InboxPage() {
                     </div>
                   </div>
 
-                  <div className="flex-1 min-h-0 overflow-y-auto space-y-3 py-4 pr-1">
-                    {selectedThread.messages.map((m) => (
-                      <InboundMessageCard key={m.uid} message={m} />
+                  <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto py-3 pr-1">
+                    {selectedThread.messages.map((m, msgIndex) => (
+                      <ThreadInboundMessage
+                        key={m.uid}
+                        message={m}
+                        expanded={expandedThreadUids.has(m.uid)}
+                        collapsible={selectedThread.messages.length > 1}
+                        isLatest={msgIndex === selectedThread.messages.length - 1}
+                        onToggle={() => toggleThreadMessageExpanded(m.uid)}
+                      />
                     ))}
                   </div>
 
@@ -2979,7 +3038,7 @@ export default function InboxPage() {
                     </div>
                   </div>
                 ) : (
-                  <div className="flex flex-col flex-1 min-h-0 max-w-3xl w-full">
+                  <div className="flex h-full min-h-0 w-full flex-col">
                     <div className="shrink-0 space-y-3 border-b pb-4">
                       <h3 className="text-base font-semibold leading-snug">{selectedMail.subject || "(no subject)"}</h3>
                       <div className="flex flex-wrap gap-2" role="toolbar" aria-label="Message actions">
@@ -3057,8 +3116,8 @@ export default function InboxPage() {
                         />
                       </div>
                     </div>
-                    <div className="flex-1 min-h-0 overflow-y-auto py-4 pr-1">
-                      <InboundMessageCard message={selectedMail} />
+                    <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-3 pr-1">
+                      <InboundMessageCard message={selectedMail} fillHeight />
                     </div>
                     <div className="shrink-0 flex flex-wrap gap-2 border-t pt-4 mt-2">
                       {mailFolder === "inbox" && canUseTrashFeatures && !inboxReadOnly && (
@@ -3451,7 +3510,64 @@ function InboundAttachmentRow({ att }: { att: MailInboundAttachment }) {
   );
 }
 
-function InboundMessageCard({ message: m }: { message: MailInbound }) {
+function senderDisplayLabel(from: string): string {
+  const angle = from.match(/^([^<]+)</);
+  if (angle) return angle[1]!.trim().replace(/^["']|["']$/g, "");
+  return from.trim();
+}
+
+function messagePreviewSnippet(m: MailInbound, maxLen = 180): string {
+  const raw = (m.bodyText || m.preview || "").replace(/\s+/g, " ").trim();
+  if (!raw) return "No preview";
+  return raw.length > maxLen ? `${raw.slice(0, maxLen)}…` : raw;
+}
+
+function useInboundHtmlIframeHeight(html: string | undefined, srcDoc: string | undefined) {
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const [heightPx, setHeightPx] = React.useState(360);
+
+  React.useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !srcDoc) return;
+
+    const measure = () => {
+      try {
+        const doc = iframe.contentDocument;
+        const h = doc?.documentElement?.scrollHeight ?? doc?.body?.scrollHeight;
+        if (h && h > 0) {
+          setHeightPx(Math.min(Math.max(h + 24, 320), 1400));
+        }
+      } catch {
+        /* sandbox / cross-origin */
+      }
+    };
+
+    iframe.addEventListener("load", measure);
+    const t = window.setTimeout(measure, 120);
+    return () => {
+      iframe.removeEventListener("load", measure);
+      window.clearTimeout(t);
+    };
+  }, [html, srcDoc]);
+
+  return { iframeRef, heightPx };
+}
+
+type InboundMessageCardProps = {
+  message: MailInbound;
+  /** Use available column height for single-message reading. */
+  fillHeight?: boolean;
+  /** Hide header when embedded under a thread collapse row. */
+  showHeader?: boolean;
+  className?: string;
+};
+
+function InboundMessageCard({
+  message: m,
+  fillHeight = false,
+  showHeader = true,
+  className,
+}: InboundMessageCardProps) {
   const html = m.bodyHtml?.trim();
   const srcDoc =
     html &&
@@ -3461,40 +3577,133 @@ function InboundMessageCard({ message: m }: { message: MailInbound }) {
       a { color: #93c5fd; }
       blockquote { border-left: 2px solid #3f3f46; margin: 0.5em 0; padding-left: 0.75em; color: #a1a1aa; }
     </style></head><body>${html}</body></html>`;
+  const { iframeRef, heightPx } = useInboundHtmlIframeHeight(html, srcDoc || undefined);
+  const textMinH = fillHeight ? "min-h-[min(70vh,720px)]" : "min-h-[200px]";
+
   return (
-    <div className="rounded-lg border bg-muted/10 p-4 text-sm space-y-2">
-      <div className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border/60 pb-2">
-        <span className="text-xs font-medium">{m.from}</span>
-        <span className="text-[11px] text-muted-foreground tabular-nums">{fmtRelative(m.date)}</span>
-      </div>
-      <p className="text-[11px] text-muted-foreground">{m.subject || "(no subject)"}</p>
-      {m.to ? <p className="text-[11px] text-muted-foreground">To: {m.to}</p> : null}
-      {m.cc ? <p className="text-[11px] text-muted-foreground">Cc: {m.cc}</p> : null}
-      {m.attachments && m.attachments.length > 0 ? (
-        <div className="space-y-1.5 rounded-md border border-border/60 bg-background/40 p-2">
-          <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
-            <Paperclip className="h-3 w-3 shrink-0" aria-hidden />
-            {m.attachments.length} attachment{m.attachments.length === 1 ? "" : "s"}
-          </p>
-          <div className="flex flex-wrap gap-2">
-            {m.attachments.map((att, idx) => (
-              <InboundAttachmentRow key={`${m.uid}-${att.filename}-${idx}`} att={att} />
-            ))}
+    <div
+      className={cn(
+        "flex flex-col rounded-lg border bg-card text-sm shadow-sm",
+        fillHeight && "min-h-0 flex-1",
+        className,
+      )}
+    >
+      {showHeader ? (
+        <div className="shrink-0 space-y-1 border-b border-border/60 bg-muted/20 px-4 py-3">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-sm font-medium">{senderDisplayLabel(m.from)}</span>
+            <span className="text-[11px] text-muted-foreground tabular-nums">{fmtRelative(m.date)}</span>
           </div>
+          <p className="text-xs text-muted-foreground break-all">{m.from}</p>
+          {m.to ? <p className="text-[11px] text-muted-foreground">To: {m.to}</p> : null}
+          {m.cc ? <p className="text-[11px] text-muted-foreground">Cc: {m.cc}</p> : null}
         </div>
       ) : null}
-      {html && srcDoc ? (
-        <iframe
-          title={`HTML: ${m.subject || "message"}`}
-          className="w-full min-h-[280px] rounded-md border bg-background"
-          sandbox=""
-          srcDoc={srcDoc}
-        />
-      ) : m.bodySynced === false && !m.bodyText?.trim() ? (
-        <p className="text-xs text-muted-foreground">Loading full message…</p>
-      ) : (
-        <div className="whitespace-pre-wrap overflow-x-auto text-[13px] leading-relaxed">{m.bodyText || m.preview}</div>
+      <div className={cn("flex flex-col gap-3 p-4", fillHeight && "min-h-0 flex-1", !showHeader && "pt-3")}>
+        {m.attachments && m.attachments.length > 0 ? (
+          <div className="shrink-0 space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
+            <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
+              <Paperclip className="h-3 w-3 shrink-0" aria-hidden />
+              {m.attachments.length} attachment{m.attachments.length === 1 ? "" : "s"}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {m.attachments.map((att, idx) => (
+                <InboundAttachmentRow key={`${m.uid}-${att.filename}-${idx}`} att={att} />
+              ))}
+            </div>
+          </div>
+        ) : null}
+        {html && srcDoc ? (
+          <iframe
+            ref={iframeRef}
+            title={`HTML: ${m.subject || "message"}`}
+            className="w-full shrink-0 rounded-md border bg-background"
+            style={{ height: fillHeight ? Math.max(heightPx, 480) : heightPx }}
+            sandbox=""
+            srcDoc={srcDoc}
+          />
+        ) : m.bodySynced === false && !m.bodyText?.trim() ? (
+          <p className="text-xs text-muted-foreground">Loading full message…</p>
+        ) : (
+          <div
+            className={cn(
+              "whitespace-pre-wrap overflow-x-auto text-[13px] leading-relaxed rounded-md border bg-muted/5 p-4",
+              textMinH,
+              fillHeight && "flex-1",
+            )}
+          >
+            {m.bodyText || m.preview}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+type ThreadInboundMessageProps = {
+  message: MailInbound;
+  expanded: boolean;
+  collapsible: boolean;
+  isLatest: boolean;
+  onToggle: () => void;
+};
+
+function ThreadInboundMessage({
+  message: m,
+  expanded,
+  collapsible,
+  isLatest,
+  onToggle,
+}: ThreadInboundMessageProps) {
+  if (!collapsible) {
+    return <InboundMessageCard message={m} fillHeight className="min-h-0 flex-1" />;
+  }
+
+  return (
+    <div
+      className={cn(
+        "rounded-lg border bg-card shadow-sm transition-colors",
+        expanded ? "ring-1 ring-border" : "hover:bg-muted/15",
+        isLatest && !expanded && "border-primary/30",
       )}
+    >
+      <button
+        type="button"
+        onClick={onToggle}
+        className="flex w-full items-start gap-2 px-3 py-2.5 text-left"
+        aria-expanded={expanded}
+      >
+        {expanded ? (
+          <ChevronDown className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        ) : (
+          <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+        )}
+        <div className="min-w-0 flex-1 space-y-0.5">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <span className="text-sm font-medium truncate">{senderDisplayLabel(m.from)}</span>
+            <span className="shrink-0 text-[11px] text-muted-foreground tabular-nums">{fmtRelative(m.date)}</span>
+          </div>
+          {!expanded ? (
+            <p className="text-xs text-muted-foreground line-clamp-2">{messagePreviewSnippet(m)}</p>
+          ) : (
+            <p className="text-[11px] text-muted-foreground">
+              {isLatest ? "Latest in thread" : "Click header to collapse"}
+            </p>
+          )}
+        </div>
+        {!m.seen ? (
+          <span className="mt-1 h-2 w-2 shrink-0 rounded-full bg-primary" aria-label="Unread" />
+        ) : null}
+      </button>
+      {expanded ? (
+        <div className="border-t border-border/60">
+          <InboundMessageCard
+            message={m}
+            showHeader={false}
+            className="border-0 shadow-none rounded-none bg-transparent"
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

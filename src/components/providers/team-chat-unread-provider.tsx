@@ -13,6 +13,7 @@ import {
   type Unsubscribe,
 } from "firebase/firestore";
 import { toast } from "sonner";
+import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
@@ -379,6 +380,8 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
       const label = chatLabel(ch, currentUserId, usersRef.current);
       const preview = m.body.trim().slice(0, 120) || "New message";
       const title = `${author?.displayName ?? "Teammate"} · ${label}`;
+
+      playAlertSound("chat");
 
       toast.message(title, {
         description: preview,
