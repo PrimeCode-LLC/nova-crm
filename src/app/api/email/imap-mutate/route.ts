@@ -52,6 +52,7 @@ export async function POST(req: Request) {
 
     const validActions = new Set([
       "moveInboxToTrash",
+      "moveTrashToInbox",
       "permanentDeleteTrash",
       "markSeen",
       "markUnseen",
@@ -61,7 +62,7 @@ export async function POST(req: Request) {
         {
           ok: false,
           error:
-            "Invalid action. Use moveInboxToTrash, permanentDeleteTrash, markSeen, or markUnseen.",
+            "Invalid action. Use moveInboxToTrash, moveTrashToInbox, permanentDeleteTrash, markSeen, or markUnseen.",
         },
         { status: 400 },
       );
@@ -149,6 +150,29 @@ export async function POST(req: Request) {
             if (moved === false) {
               return NextResponse.json(
                 { ok: false, error: "The mail server rejected moving one or more messages to Trash." },
+                { status: 400 },
+              );
+            }
+          }
+        } finally {
+          try {
+            lock.release();
+          } catch {
+            /* ignore */
+          }
+        }
+        return NextResponse.json({ ok: true, trashPath });
+      }
+
+      if (action === "moveTrashToInbox") {
+        const lock = await client.getMailboxLock(trashPath, { readOnly: false });
+        try {
+          for (let i = 0; i < uids.length; i += CHUNK) {
+            const part = uids.slice(i, i + CHUNK);
+            const moved = await client.messageMove(part, "INBOX", { uid: true });
+            if (moved === false) {
+              return NextResponse.json(
+                { ok: false, error: "The mail server rejected restoring one or more messages to Inbox." },
                 { status: 400 },
               );
             }

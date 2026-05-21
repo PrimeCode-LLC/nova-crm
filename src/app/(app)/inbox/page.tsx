@@ -66,6 +66,7 @@ import {
   Forward,
   Send,
   Trash2,
+  ArchiveRestore,
   Search,
   ChevronDown,
   Paperclip,
@@ -113,6 +114,15 @@ function mailboxDisplayLabel(mb: EmailMailboxSettings): string {
 
 function normalizeInboxSearch(raw: string): string {
   return raw.trim().toLowerCase();
+}
+
+/** Skip list shortcuts while typing in fields or editable regions. */
+function shouldIgnoreMailListKeyboardTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tag = target.tagName;
+  if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return true;
+  return Boolean(target.closest("[role='dialog'], [role='combobox'], [data-radix-popper-content-wrapper]"));
 }
 
 type MailListRow = {
@@ -361,6 +371,7 @@ export default function InboxPage() {
   const mergeInboundBodies = useEmailAccountStore((s) => s.mergeInboundBodies);
   const mergeTrashBodies = useEmailAccountStore((s) => s.mergeTrashBodies);
   const removeInboundByUids = useEmailAccountStore((s) => s.removeInboundByUids);
+  const moveTrashUidsToInboxLocal = useEmailAccountStore((s) => s.moveTrashUidsToInboxLocal);
   const moveInboundUidsToTrashLocal = useEmailAccountStore((s) => s.moveInboundUidsToTrashLocal);
   const removeTrashByUids = useEmailAccountStore((s) => s.removeTrashByUids);
   const patchInboundSeen = useEmailAccountStore((s) => s.patchInboundSeen);
@@ -1049,6 +1060,35 @@ export default function InboxPage() {
     }
   }
 
+  async function moveUidsFromTrashToServerInbox(uids: number[]) {
+    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    const CHUNK = 60;
+    for (let i = 0; i < uids.length; i += CHUNK) {
+      const part = uids.slice(i, i + CHUNK);
+      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "moveTrashToInbox",
+          mailboxId: acct.id,
+          uids: part,
+          imap: {
+            host: acct.imap.host,
+            port: acct.imap.port,
+            secure: acct.imap.secure,
+            user: acct.imap.user,
+            pass: acct.imap.password,
+          },
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) {
+        throw new Error(data.error ?? "Restore to Inbox failed");
+      }
+    }
+  }
+
   async function permanentlyDeleteUidsOnServer(uids: number[]) {
     const acct = getActiveMailbox(useEmailAccountStore.getState());
     const CHUNK = 60;
@@ -1160,6 +1200,40 @@ export default function InboxPage() {
         description: msg.length > 220 ? `${msg.slice(0, 220)}…` : msg,
       });
       if (!isDemo) void fetchImapListFolder("inbox");
+    } finally {
+      setMailActionLoading(false);
+    }
+  }
+
+  async function restoreTrashUidsToInboxNow(uids: number[]) {
+    if (uids.length === 0) return;
+    setMailActionLoading(true);
+    try {
+      if (isDemo) {
+        moveTrashUidsToInboxLocal(account.id, uids);
+        toast.success(
+          uids.length === 1 ? "Message restored to Inbox" : `${uids.length} messages restored to Inbox`,
+        );
+      } else {
+        await moveUidsFromTrashToServerInbox(uids);
+        moveTrashUidsToInboxLocal(account.id, uids);
+        toast.success(
+          uids.length === 1
+            ? "Restored to Inbox on the server"
+            : `${uids.length} conversations restored to Inbox`,
+        );
+        void fetchImapListFolder("inbox");
+        void fetchImapListFolder("trash");
+      }
+      clearMailRowSelection();
+      setSelectedThread(null);
+      setSelectedMail(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      toast.error("Could not restore to Inbox", {
+        description: msg.length > 220 ? `${msg.slice(0, 220)}…` : msg,
+      });
+      if (!isDemo) void fetchImapListFolder("trash");
     } finally {
       setMailActionLoading(false);
     }
@@ -1471,6 +1545,11 @@ export default function InboxPage() {
     await moveInboxUidsToTrashNow(uids);
   }
 
+  async function handleRestoreTrashSelection() {
+    const uids = collectUidsFromMailRows(selectedMailRowIds, visibleMailRows);
+    await restoreTrashUidsToInboxNow(uids);
+  }
+
   const selectedUnreadUids = React.useMemo(
     () => collectUnreadUidsFromMailRows(selectedMailRowIds, visibleMailRows),
     [collectUnreadUidsFromMailRows, selectedMailRowIds, visibleMailRows],
@@ -1586,6 +1665,10 @@ export default function InboxPage() {
       autoReadConversationRef.current = null;
       return;
     }
+    /** Unread tab: user marks read manually (Reply / trash / Mark as read) — no open-on-select auto-read. */
+    if (readStatusFilter === READ_STATUS_UNREAD) {
+      return;
+    }
     if (selectedThread) {
       const key = `thread:${selectedThread.threadId}`;
       if (autoReadConversationRef.current === key) return;
@@ -1603,6 +1686,7 @@ export default function InboxPage() {
     autoReadConversationRef.current = null;
   }, [
     mailFolder,
+    readStatusFilter,
     selectedThread?.threadId,
     selectedMail && "uid" in selectedMail ? selectedMail.uid : null,
     markThreadAsRead,
@@ -1610,7 +1694,12 @@ export default function InboxPage() {
   ]);
 
   React.useEffect(() => {
+    const unreadFilterActive = readStatusFilter === READ_STATUS_UNREAD;
+
     if (visibleMailRows.length === 0) {
+      if (unreadFilterActive && (selectedThread || selectedMail)) {
+        return;
+      }
       if (listFilterActive) {
         setSelectedThread(null);
         setSelectedMail(null);
@@ -1620,6 +1709,7 @@ export default function InboxPage() {
     if (selectedThread) {
       const ok = visibleMailRows.some((r) => r.thread?.threadId === selectedThread.threadId);
       if (ok) return;
+      if (unreadFilterActive) return;
       const pick = visibleMailRows[0]!;
       if (pick.thread) {
         setSelectedThread(pick.thread);
@@ -1633,6 +1723,7 @@ export default function InboxPage() {
     if (selectedMail) {
       const ok = visibleMailRows.some((r) => !r.thread && r.row.id === selectedMail.id);
       if (ok) return;
+      if (unreadFilterActive) return;
       const pick = visibleMailRows[0]!;
       if (pick.thread) {
         setSelectedThread(pick.thread);
@@ -1642,7 +1733,124 @@ export default function InboxPage() {
         setSelectedMail(pick.row);
       }
     }
-  }, [visibleMailRows, selectedThread, selectedMail, listFilterActive]);
+  }, [visibleMailRows, selectedThread, selectedMail, listFilterActive, readStatusFilter]);
+
+  const mailRowElByIdRef = React.useRef<Map<string, HTMLElement>>(new Map());
+
+  const selectVisibleMailRow = React.useCallback((row: MailListRow) => {
+    if (row.thread) {
+      setSelectedThread(row.thread);
+      setSelectedMail(null);
+    } else {
+      setSelectedThread(null);
+      setSelectedMail(row.row);
+    }
+  }, []);
+
+  const resolveVisibleMailRowIndex = React.useCallback(() => {
+    if (selectedThread) {
+      const i = visibleMailRows.findIndex((r) => r.thread?.threadId === selectedThread.threadId);
+      if (i >= 0) return i;
+    }
+    if (selectedMail && selectedThread == null) {
+      const i = visibleMailRows.findIndex((r) => !r.thread && r.row.id === selectedMail.id);
+      if (i >= 0) return i;
+    }
+    return visibleMailRows.length > 0 ? 0 : -1;
+  }, [visibleMailRows, selectedThread, selectedMail]);
+
+  const scrollMailRowIntoView = React.useCallback((rowId: string) => {
+    mailRowElByIdRef.current.get(rowId)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, []);
+
+  React.useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (composeOpen || purgeTrashOpen || blockDomainOpen) return;
+      if (shouldIgnoreMailListKeyboardTarget(e.target)) return;
+      if (visibleMailRows.length === 0) return;
+      if (mailFolder !== "inbox" && mailFolder !== "trash" && mailFolder !== "sent" && mailFolder !== "drafts") {
+        return;
+      }
+
+      let idx = resolveVisibleMailRowIndex();
+
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        idx = idx < 0 ? 0 : Math.min(idx + 1, visibleMailRows.length - 1);
+        const row = visibleMailRows[idx];
+        if (row) {
+          selectVisibleMailRow(row);
+          scrollMailRowIntoView(row.id);
+        }
+        return;
+      }
+
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        idx = idx < 0 ? 0 : Math.max(idx - 1, 0);
+        const row = visibleMailRows[idx];
+        if (row) {
+          selectVisibleMailRow(row);
+          scrollMailRowIntoView(row.id);
+        }
+        return;
+      }
+
+      if (e.key === " " || e.code === "Space") {
+        if (!showImapBulkMailActions) return;
+        const t = e.target;
+        if (t instanceof HTMLButtonElement && !t.closest("[data-mail-list-row]")) return;
+        e.preventDefault();
+        if (idx < 0) idx = 0;
+        const row = visibleMailRows[idx];
+        if (!row) return;
+        toggleRowSelected(row.id, !selectedMailRowIds.has(row.id));
+        return;
+      }
+
+      if (e.key === "Delete" || e.key === "Backspace") {
+        if (mailActionLoading || !showImapBulkMailActions) return;
+
+        if (mailFolder === "inbox") {
+          e.preventDefault();
+          let uids = collectUidsFromMailRows(selectedMailRowIds, visibleMailRows);
+          if (uids.length === 0 && idx >= 0) {
+            const row = visibleMailRows[idx];
+            if (row) uids = collectUidsFromMailRows(new Set([row.id]), visibleMailRows);
+          }
+          if (uids.length > 0) void moveInboxUidsToTrashNow(uids);
+          return;
+        }
+
+        if (mailFolder === "trash") {
+          e.preventDefault();
+          let uids = collectUidsFromMailRows(selectedMailRowIds, visibleMailRows);
+          if (uids.length === 0 && idx >= 0) {
+            const row = visibleMailRows[idx];
+            if (row) uids = collectUidsFromMailRows(new Set([row.id]), visibleMailRows);
+          }
+          if (uids.length > 0) setPurgeTrashOpen(true);
+        }
+      }
+    }
+
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [
+    blockDomainOpen,
+    collectUidsFromMailRows,
+    composeOpen,
+    mailActionLoading,
+    mailFolder,
+    purgeTrashOpen,
+    resolveVisibleMailRowIndex,
+    scrollMailRowIntoView,
+    selectVisibleMailRow,
+    selectedMailRowIds,
+    showImapBulkMailActions,
+    toggleRowSelected,
+    visibleMailRows,
+  ]);
 
   const pageActions = (
     <div className="flex gap-2 flex-wrap">
@@ -2176,22 +2384,40 @@ export default function InboxPage() {
                       </Button>
                     )}
                     {mailFolder === "trash" && (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="sm"
-                        className="h-7 text-[10px] px-2 gap-1"
-                        disabled={selectedMailRowIds.size === 0 || mailActionLoading}
-                        onClick={() => setPurgeTrashOpen(true)}
-                      >
-                        <Trash2 className="h-3 w-3" />
-                        Delete forever ({selectedMailRowIds.size})
-                      </Button>
+                      <>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          size="sm"
+                          className="h-7 text-[10px] px-2 gap-1"
+                          disabled={selectedMailRowIds.size === 0 || mailActionLoading}
+                          onClick={() => void handleRestoreTrashSelection()}
+                        >
+                          {mailActionLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <ArchiveRestore className="h-3 w-3" />
+                          )}
+                          Restore to inbox ({selectedMailRowIds.size})
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="destructive"
+                          size="sm"
+                          className="h-7 text-[10px] px-2 gap-1"
+                          disabled={selectedMailRowIds.size === 0 || mailActionLoading}
+                          onClick={() => setPurgeTrashOpen(true)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Delete forever ({selectedMailRowIds.size})
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}
                 <div className="space-y-2 normal-case">
                   {(mailFolder === "inbox" || mailFolder === "trash") && (
+                    <div className="space-y-1">
                     <div
                       className="flex flex-wrap gap-1"
                       role="group"
@@ -2235,6 +2461,12 @@ export default function InboxPage() {
                         Read
                         <span className="tabular-nums text-muted-foreground">{readFilterStats.read}</span>
                       </Button>
+                    </div>
+                    {readStatusFilter === READ_STATUS_UNREAD ? (
+                      <p className="text-[10px] text-muted-foreground font-normal leading-snug">
+                        Opening a message does not mark it read. Use Mark as read when you are done, or switch to All.
+                      </p>
+                    ) : null}
                     </div>
                   )}
                   {listFilterActive ? (
@@ -2319,6 +2551,13 @@ export default function InboxPage() {
                       aria-label="Search mail"
                     />
                   </div>
+                  {emailFolderSupportsImapList && showImapBulkMailActions && visibleMailRows.length > 0 ? (
+                    <p className="text-[10px] text-muted-foreground font-normal leading-snug">
+                      {mailFolder === "trash"
+                        ? "↑↓ move · Space select · Delete delete forever"
+                        : "↑↓ move · Space select · Delete trash"}
+                    </p>
+                  ) : null}
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto divide-y">
@@ -2389,7 +2628,14 @@ export default function InboxPage() {
                   const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
                   const bulkChecked = selectedMailRowIds.has(row.id);
                   return (
-                    <div key={row.id} className="flex items-stretch gap-0 border-b border-border/60 last:border-b-0">
+                    <div
+                      key={row.id}
+                      ref={(el) => {
+                        if (el) mailRowElByIdRef.current.set(row.id, el);
+                        else mailRowElByIdRef.current.delete(row.id);
+                      }}
+                      className="flex items-stretch gap-0 border-b border-border/60 last:border-b-0"
+                    >
                       {showSelect ? (
                         <div
                           className="flex w-9 shrink-0 items-center justify-center border-r border-border/60 bg-muted/5"
@@ -2406,15 +2652,8 @@ export default function InboxPage() {
                       ) : null}
                       <button
                         type="button"
-                        onClick={() => {
-                          if (row.thread) {
-                            setSelectedThread(row.thread);
-                            setSelectedMail(null);
-                          } else {
-                            setSelectedThread(null);
-                            setSelectedMail(row.row);
-                          }
-                        }}
+                        data-mail-list-row
+                        onClick={() => selectVisibleMailRow(row)}
                         className={cn(
                           "min-w-0 flex-1 text-left px-3 py-2.5 hover:bg-muted/20 text-sm",
                           isRowSelected && "bg-muted/30",
@@ -2628,19 +2867,37 @@ export default function InboxPage() {
                       </Button>
                     )}
                     {mailFolder === "trash" && canUseTrashFeatures && !inboxReadOnly && (
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        className="gap-1.5"
-                        disabled={mailActionLoading}
-                        onClick={() => {
-                          clearMailRowSelection();
-                          setPurgeTrashOpen(true);
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Delete forever
-                      </Button>
+                      <>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="gap-1.5"
+                          disabled={mailActionLoading}
+                          onClick={() =>
+                            void restoreTrashUidsToInboxNow(selectedThread.messages.map((m) => m.uid))
+                          }
+                        >
+                          {mailActionLoading ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <ArchiveRestore className="h-3.5 w-3.5" />
+                          )}
+                          Restore to inbox
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          className="gap-1.5"
+                          disabled={mailActionLoading}
+                          onClick={() => {
+                            clearMailRowSelection();
+                            setPurgeTrashOpen(true);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Delete forever
+                        </Button>
+                      </>
                     )}
                     {selectedLead ? (
                       <Button
@@ -2821,16 +3078,32 @@ export default function InboxPage() {
                         </Button>
                       )}
                       {mailFolder === "trash" && canUseTrashFeatures && !inboxReadOnly && (
-                        <Button
-                          size="sm"
-                          variant="destructive"
-                          className="gap-1.5"
-                          disabled={mailActionLoading}
-                          onClick={() => void permanentlyDeleteTrashUidsNow([selectedMail.uid])}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Delete forever
-                        </Button>
+                        <>
+                          <Button
+                            size="sm"
+                            variant="secondary"
+                            className="gap-1.5"
+                            disabled={mailActionLoading}
+                            onClick={() => void restoreTrashUidsToInboxNow([selectedMail.uid])}
+                          >
+                            {mailActionLoading ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : (
+                              <ArchiveRestore className="h-3.5 w-3.5" />
+                            )}
+                            Restore to inbox
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            className="gap-1.5"
+                            disabled={mailActionLoading}
+                            onClick={() => void permanentlyDeleteTrashUidsNow([selectedMail.uid])}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete forever
+                          </Button>
+                        </>
                       )}
                       {selectedLead ? (
                         <Button

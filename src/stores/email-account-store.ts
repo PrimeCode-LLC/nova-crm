@@ -76,6 +76,8 @@ export interface EmailAccountStore {
   removeInboundByUids: (mailboxId: string, uids: number[]) => void;
   /** Move messages from local INBOX cache to local Trash cache (demo mode). */
   moveInboundUidsToTrashLocal: (mailboxId: string, uids: number[]) => void;
+  /** Move messages from local Trash cache back to INBOX (demo or optimistic UI after restore). */
+  moveTrashUidsToInboxLocal: (mailboxId: string, uids: number[]) => void;
   /** Remove from local Trash cache after permanent delete (demo) or optimistic UI. */
   removeTrashByUids: (mailboxId: string, uids: number[]) => void;
   /** Update \\Seen for INBOX rows by IMAP uid (optimistic UI + after IMAP STORE). */
@@ -402,6 +404,21 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         },
       };
     });
+  },
+  moveTrashUidsToInboxLocal: (mailboxId, uids) => {
+    if (uids.length === 0) return;
+    const uidSet = new Set(uids);
+    set((s) => {
+      const trashPrev = s.trashInboundByMailbox[mailboxId] ?? [];
+      const moving = trashPrev.filter((m) => uidSet.has(m.uid));
+      const nextTrash = trashPrev.filter((m) => !uidSet.has(m.uid));
+      const inboundPrev = s.inboundByMailbox[mailboxId] ?? [];
+      return {
+        trashInboundByMailbox: { ...s.trashInboundByMailbox, [mailboxId]: nextTrash },
+        inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: [...moving, ...inboundPrev] },
+      };
+    });
+    scheduleEmailMetaPersist(get);
   },
   patchInboundSeen: (mailboxId, uids, seen) => {
     if (uids.length === 0) return;
