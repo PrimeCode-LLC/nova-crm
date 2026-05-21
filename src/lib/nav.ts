@@ -24,6 +24,7 @@ import {
   UsersRound,
   Network,
   ScanSearch,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 
@@ -143,6 +144,13 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Campaigns",
         icon: Megaphone,
         minWorkspaceRole: "team_lead",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/ai",
+        label: "AI & knowledge",
+        icon: Sparkles,
+        minWorkspaceRole: "director",
         adminCluster: "programs",
       },
       {

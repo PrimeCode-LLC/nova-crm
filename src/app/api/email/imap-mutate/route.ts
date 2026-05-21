@@ -50,9 +50,19 @@ export async function POST(req: Request) {
     const mailboxId = String(b.mailboxId ?? "").trim();
     const uids = normalizeUids(b.uids);
 
-    if (!action || (action !== "moveInboxToTrash" && action !== "permanentDeleteTrash")) {
+    const validActions = new Set([
+      "moveInboxToTrash",
+      "permanentDeleteTrash",
+      "markSeen",
+      "markUnseen",
+    ]);
+    if (!action || !validActions.has(action)) {
       return NextResponse.json(
-        { ok: false, error: "Invalid action. Use moveInboxToTrash or permanentDeleteTrash." },
+        {
+          ok: false,
+          error:
+            "Invalid action. Use moveInboxToTrash, permanentDeleteTrash, markSeen, or markUnseen.",
+        },
         { status: 400 },
       );
     }
@@ -103,6 +113,31 @@ export async function POST(req: Request) {
           },
           { status: 400 },
         );
+      }
+
+      const folder = String(b.folder ?? "inbox").trim().toLowerCase();
+      const useTrash = folder === "trash";
+
+      if (action === "markSeen" || action === "markUnseen") {
+        const mailboxPath = useTrash ? trashPath : "INBOX";
+        const lock = await client.getMailboxLock(mailboxPath, { readOnly: false });
+        try {
+          for (let i = 0; i < uids.length; i += CHUNK) {
+            const part = uids.slice(i, i + CHUNK);
+            if (action === "markSeen") {
+              await client.messageFlagsAdd(part, ["\\Seen"], { uid: true });
+            } else {
+              await client.messageFlagsRemove(part, ["\\Seen"], { uid: true });
+            }
+          }
+        } finally {
+          try {
+            lock.release();
+          } catch {
+            /* ignore */
+          }
+        }
+        return NextResponse.json({ ok: true, folder: useTrash ? "trash" : "inbox" });
       }
 
       if (action === "moveInboxToTrash") {

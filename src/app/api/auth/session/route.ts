@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
 import { SESSION_COOKIE_NAME, SESSION_MAX_AGE_MS } from "@/lib/auth/constants";
-import { setAppClaims } from "@/lib/auth/claims";
+import { readAppClaims, setAppClaims } from "@/lib/auth/claims";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import {
   claimPendingOrgOwnerServer,
@@ -362,12 +362,21 @@ export async function POST(req: Request) {
     expiresIn: SESSION_MAX_AGE_MS,
   });
 
+  const tokenClaims = readAppClaims(decoded as Record<string, unknown>);
+  const claimsOutOfSync =
+    !membershipPending &&
+    Boolean(
+      organizationId &&
+        (tokenClaims.organizationId !== organizationId ||
+          (orgRole != null && tokenClaims.orgRole !== orgRole)),
+    );
+
   const res = NextResponse.json({
     ok: true,
     organizationId: membershipPending ? null : (organizationId ?? null),
     orgRole: membershipPending ? null : (orgRole ?? null),
     membershipPending,
-    needsClaimRefresh: isFreshSignup || membershipPending,
+    needsClaimRefresh: isFreshSignup || membershipPending || claimsOutOfSync,
   });
   res.cookies.set(SESSION_COOKIE_NAME, sessionCookie, {
     httpOnly: true,

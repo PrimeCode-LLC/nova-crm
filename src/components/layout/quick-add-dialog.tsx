@@ -524,11 +524,15 @@ function LeadFormBody({
       return;
     }
 
-    addAccount(account);
-    addContact(contact);
-    addLead(lead);
-    toast.success(isProspectingIntakeRole ? "Prospect created" : "Lead created");
-    onClose();
+    try {
+      await addAccount(account);
+      await addContact(contact);
+      await addLead(lead);
+      toast.success(isProspectingIntakeRole ? "Prospect created" : "Lead created");
+      onClose();
+    } catch {
+      /* toast shown in workspace provider */
+    }
   }
 
   return (
@@ -794,37 +798,41 @@ function ContactFormBody({ onClose }: { onClose: () => void }) {
 
     const now = new Date().toISOString();
     let accountId = values.accountId.trim();
-    if (values.accountMode === "new") {
-      accountId = newEntityId("a");
-      addAccount({
-        id: accountId,
-        name: values.newCompanyName.trim(),
-        domain: values.newCompanyDomain?.trim() || undefined,
-        contactCount: 0,
-        leadCount: 0,
-        openDealValue: 0,
+    try {
+      if (values.accountMode === "new") {
+        accountId = newEntityId("a");
+        await addAccount({
+          id: accountId,
+          name: values.newCompanyName.trim(),
+          domain: values.newCompanyDomain?.trim() || undefined,
+          contactCount: 0,
+          leadCount: 0,
+          openDealValue: 0,
+          ownerId,
+          createdAt: now,
+          updatedAt: now,
+        });
+      }
+      const fn = values.firstName.trim();
+      const ln = values.lastName.trim();
+      await addContact({
+        id: newEntityId("ct"),
+        accountId,
+        firstName: fn,
+        lastName: ln,
+        fullName: `${fn} ${ln}`.trim(),
+        email: values.email.trim() || undefined,
+        phone: values.phone?.trim() || undefined,
+        title: values.title?.trim() || undefined,
         ownerId,
         createdAt: now,
         updatedAt: now,
       });
+      toast.success("Contact created");
+      onClose();
+    } catch {
+      /* toast shown in workspace provider */
     }
-    const fn = values.firstName.trim();
-    const ln = values.lastName.trim();
-    addContact({
-      id: newEntityId("ct"),
-      accountId,
-      firstName: fn,
-      lastName: ln,
-      fullName: `${fn} ${ln}`.trim(),
-      email: values.email.trim() || undefined,
-      phone: values.phone?.trim() || undefined,
-      title: values.title?.trim() || undefined,
-      ownerId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    toast.success("Contact created");
-    onClose();
   }
 
   return (
@@ -1041,7 +1049,7 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
     defaultValues: { name: "", domain: "", industry: "", size: "", revenueRange: "" },
   });
 
-  function onSubmit(v: AccountForm) {
+  async function onSubmit(v: AccountForm) {
     const ownerId = currentUserId || users[0]?.id;
     if (!ownerId) {
       toast.error("Could not assign owner. Try again after refresh.");
@@ -1070,22 +1078,26 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
       }
     }
     const now = new Date().toISOString();
-    addAccount({
-      id: newEntityId("a"),
-      name: v.name.trim(),
-      domain: domainTrim || undefined,
-      industry: v.industry?.trim() || undefined,
-      size: (v.size as CompanySize) || undefined,
-      revenueRange: (v.revenueRange as RevenueRange) || undefined,
-      contactCount: 0,
-      leadCount: 0,
-      openDealValue: 0,
-      ownerId,
-      createdAt: now,
-      updatedAt: now,
-    });
-    toast.success("Company created");
-    onClose();
+    try {
+      await addAccount({
+        id: newEntityId("a"),
+        name: v.name.trim(),
+        domain: domainTrim || undefined,
+        industry: v.industry?.trim() || undefined,
+        size: (v.size as CompanySize) || undefined,
+        revenueRange: (v.revenueRange as RevenueRange) || undefined,
+        contactCount: 0,
+        leadCount: 0,
+        openDealValue: 0,
+        ownerId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      toast.success("Company created");
+      onClose();
+    } catch {
+      /* toast shown in workspace provider */
+    }
   }
 
   return (

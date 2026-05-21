@@ -116,6 +116,8 @@ export interface MailInbound {
    * Omitted/true means `bodyText` is already synced.
    */
   bodySynced?: boolean;
+  /** Raw List-Unsubscribe header when available (RFC 2369). */
+  listUnsubscribe?: string;
 }
 
 export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettings>): EmailMailboxSettings {

@@ -9,6 +9,7 @@ import {
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { syncFirebaseAuthClaimsClient } from "@/lib/auth/client-session";
 
 type AuthContextValue = {
   user: User | null;
@@ -43,6 +44,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       (u) => {
         setUser(u);
         setLoading(false);
+        if (u) void syncFirebaseAuthClaimsClient(u);
       },
       () => setLoading(false),
     );

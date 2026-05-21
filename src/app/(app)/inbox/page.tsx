@@ -49,9 +49,15 @@ import {
   groupInboundIntoThreads,
   type MailThread,
 } from "@/lib/email/thread-inbound";
-import type { Lead } from "@/lib/types";
+import type { Contact, Lead } from "@/lib/types";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Mail,
+  MailOpen,
   Loader2,
   PenLine,
   RefreshCw,
@@ -63,7 +69,20 @@ import {
   Search,
   ChevronDown,
   Paperclip,
+  Sparkles,
+  Ban,
+  ExternalLink,
 } from "lucide-react";
+import {
+  collectBlockedUidsFromInbound,
+  extractSenderDomain,
+  normalizeBlockedSenderDomain,
+} from "@/lib/email/blocked-sender-domains";
+import { extractUnsubscribeUrl } from "@/lib/email/mail-unsubscribe";
+import {
+  filterInboxBatchAndTrashBlocked,
+  trashBlockedUidsInCachedInbox,
+} from "@/lib/email/trash-blocked-inbox-uids";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -76,6 +95,11 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
+import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
+import {
+  fallbackOwnerPickerLabel,
+  workspaceMemberPickerLabel,
+} from "@/lib/owner-scope";
 
 function mailboxDisplayLabel(mb: EmailMailboxSettings): string {
   const label = mb.label?.trim();
@@ -101,20 +125,161 @@ type MailListRow = {
   thread?: MailThread;
 };
 
-const LEAD_MAIL_FILTER_ALL = "__all__";
-const LEAD_MAIL_FILTER_LINKED = "__linked__";
-const LEAD_MAIL_FILTER_UNLINKED = "__unlinked__";
+const ENTITY_MAIL_FILTER_ALL = "__all__";
+const ENTITY_LEAD_LINKED = "lead:__linked__";
+const ENTITY_LEAD_UNLINKED = "lead:__unlinked__";
+const ENTITY_CONTACT_LINKED = "contact:__linked__";
+const ENTITY_CONTACT_UNLINKED = "contact:__unlinked__";
+const ENTITY_SUB_FILTER_ALL = "__sub_all__";
+const READ_STATUS_FILTER_ALL = "__read_all__";
+const READ_STATUS_UNREAD = "__read_unread__";
+const READ_STATUS_READ = "__read_read__";
 const INBOX_VIEW_SELF = "__inbox_view_self__";
 
-function formatLeadMailFilterTriggerLabel(value: unknown, leadList: Lead[]): string {
-  const v = typeof value === "string" ? value : null;
-  if (v == null || v === LEAD_MAIL_FILTER_ALL) return "All conversations";
-  if (v === LEAD_MAIL_FILTER_LINKED) return "With a matched lead";
-  if (v === LEAD_MAIL_FILTER_UNLINKED) return "Without a matched lead";
-  const l = leadList.find((x) => x.id === v);
-  if (!l) return "Unknown lead";
-  const name = l.contactName?.trim() || l.contactEmail || l.id;
-  return l.companyName?.trim() ? `${name} · ${l.companyName.trim()}` : name;
+type MailFilterStats = { total: number; unread: number };
+
+const EMPTY_MAIL_FILTER_STATS: MailFilterStats = { total: 0, unread: 0 };
+
+function isEntityMailFilterActive(filter: string): boolean {
+  return filter !== ENTITY_MAIL_FILTER_ALL;
+}
+
+function entityMailFilterLabel(
+  filter: string,
+  leads: Lead[],
+  contacts: Contact[],
+): string {
+  if (filter === ENTITY_MAIL_FILTER_ALL) return "All";
+  if (filter === ENTITY_LEAD_LINKED) return "Matched lead";
+  if (filter === ENTITY_LEAD_UNLINKED) return "No lead match";
+  if (filter === ENTITY_CONTACT_LINKED) return "Matched contact";
+  if (filter === ENTITY_CONTACT_UNLINKED) return "No contact match";
+  if (filter.startsWith("lead:")) {
+    const id = filter.slice("lead:".length);
+    const l = leads.find((x) => x.id === id);
+    if (!l) return "Lead";
+    const name = l.contactName?.trim() || l.contactEmail || l.id;
+    return l.companyName?.trim() ? `${name} · ${l.companyName.trim()}` : name;
+  }
+  if (filter.startsWith("contact:")) {
+    const id = filter.slice("contact:".length);
+    const c = contacts.find((x) => x.id === id);
+    return c?.fullName?.trim() || c?.email || "Contact";
+  }
+  return "Filter";
+}
+
+function rowIsUnread(row: MailListRow): boolean {
+  return row.thread?.hasUnread === true;
+}
+
+function rowMatchesReadStatusFilter(row: MailListRow, filter: string): boolean {
+  if (filter === READ_STATUS_FILTER_ALL) return true;
+  const unread = rowIsUnread(row);
+  if (filter === READ_STATUS_UNREAD) return unread;
+  if (filter === READ_STATUS_READ) return !unread;
+  return true;
+}
+
+function readStatusFilterLabel(filter: string): string {
+  if (filter === READ_STATUS_UNREAD) return "Unread";
+  if (filter === READ_STATUS_READ) return "Read";
+  return "All";
+}
+
+function bumpMailFilterStats(stats: MailFilterStats, row: MailListRow): MailFilterStats {
+  return {
+    total: stats.total + 1,
+    unread: stats.unread + (rowIsUnread(row) ? 1 : 0),
+  };
+}
+
+function contactEmailSet(contact: Contact): Set<string> {
+  const out = new Set<string>();
+  const primary = contact.email?.trim().toLowerCase();
+  const personal = contact.personalEmail?.trim().toLowerCase();
+  if (primary) out.add(primary);
+  if (personal) out.add(personal);
+  return out;
+}
+
+function rowMatchesEntityMailFilter(
+  row: MailListRow,
+  filter: string,
+  subFilter: string,
+  mailboxId: string,
+  linkedLeadByMessageId: Record<string, string>,
+  leads: Lead[],
+  contacts: Contact[],
+): boolean {
+  if (filter === ENTITY_MAIL_FILTER_ALL) return true;
+
+  const lead = resolveLeadForMailListRow(row, mailboxId, linkedLeadByMessageId, leads);
+  const contact = resolveContactForMailListRow(row, contacts);
+
+  if (filter === ENTITY_LEAD_LINKED) {
+    if (lead == null) return false;
+    if (subFilter !== ENTITY_SUB_FILTER_ALL) return lead.id === subFilter;
+    return true;
+  }
+  if (filter === ENTITY_LEAD_UNLINKED) return lead == null;
+  if (filter === ENTITY_CONTACT_LINKED) {
+    if (contact == null) return false;
+    if (subFilter !== ENTITY_SUB_FILTER_ALL) return contact.id === subFilter;
+    return true;
+  }
+  if (filter === ENTITY_CONTACT_UNLINKED) return contact == null;
+  return true;
+}
+
+function entitySubFilterLabel(
+  filter: string,
+  subFilter: string,
+  leads: Lead[],
+  contacts: Contact[],
+): string | null {
+  if (subFilter === ENTITY_SUB_FILTER_ALL) return null;
+  if (filter === ENTITY_LEAD_LINKED) {
+    const l = leads.find((x) => x.id === subFilter);
+    if (!l) return null;
+    const name = l.contactName?.trim() || l.contactEmail || l.id;
+    return l.companyName?.trim() ? `${name} · ${l.companyName.trim()}` : name;
+  }
+  if (filter === ENTITY_CONTACT_LINKED) {
+    const c = contacts.find((x) => x.id === subFilter);
+    return c?.fullName?.trim() || c?.email || null;
+  }
+  return null;
+}
+
+function FilterCountBadge({
+  stats,
+  className,
+}: {
+  stats: MailFilterStats;
+  className?: string;
+}) {
+  if (stats.total === 0 && stats.unread === 0) return null;
+  return (
+    <span className={cn("ml-auto flex shrink-0 items-center gap-1", className)}>
+      {stats.total > 0 ? (
+        <span
+          className="text-[10px] tabular-nums text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100"
+          title={`${stats.total} conversation${stats.total === 1 ? "" : "s"}`}
+        >
+          {stats.total}
+        </span>
+      ) : null}
+      {stats.unread > 0 ? (
+        <span
+          className="flex h-4 min-w-4 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+          title={`${stats.unread} unread`}
+        >
+          {stats.unread > 99 ? "99+" : stats.unread}
+        </span>
+      ) : null}
+    </span>
+  );
 }
 
 function mailListRowMatchesSearch(row: MailListRow, q: string): boolean {
@@ -145,13 +310,14 @@ type MailFolder = "inbox" | "sent" | "drafts" | "trash";
 type ImapListFolder = "inbox" | "trash";
 
 /** Matches server-side IMAP list batching; older messages load via “Load more”. */
-const INBOX_IMAP_PAGE_LIMIT = 800;
+const INBOX_IMAP_PAGE_LIMIT = INBOX_IMAP_HEAD_LIMIT;
 
 export default function InboxPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const {
     leads,
+    contacts,
     isDemo,
     addAccount,
     addContact,
@@ -176,7 +342,11 @@ export default function InboxPage() {
 
   /** Search mail list / threads. */
   const [listSearchQuery, setListSearchQuery] = React.useState("");
-  const [leadMailFilter, setLeadMailFilter] = React.useState<string>(LEAD_MAIL_FILTER_ALL);
+  const [readStatusFilter, setReadStatusFilter] = React.useState<string>(READ_STATUS_FILTER_ALL);
+  const [entityMailFilter, setEntityMailFilter] = React.useState<string>(ENTITY_MAIL_FILTER_ALL);
+  const [entitySubFilter, setEntitySubFilter] = React.useState<string>(ENTITY_SUB_FILTER_ALL);
+  const [leadsFilterOpen, setLeadsFilterOpen] = React.useState(true);
+  const [contactsFilterOpen, setContactsFilterOpen] = React.useState(true);
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -193,7 +363,11 @@ export default function InboxPage() {
   const removeInboundByUids = useEmailAccountStore((s) => s.removeInboundByUids);
   const moveInboundUidsToTrashLocal = useEmailAccountStore((s) => s.moveInboundUidsToTrashLocal);
   const removeTrashByUids = useEmailAccountStore((s) => s.removeTrashByUids);
+  const patchInboundSeen = useEmailAccountStore((s) => s.patchInboundSeen);
+  const patchTrashSeen = useEmailAccountStore((s) => s.patchTrashSeen);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
+  const blockedSenderDomains = useEmailAccountStore((s) => s.blockedSenderDomains);
+  const addBlockedSenderDomain = useEmailAccountStore((s) => s.addBlockedSenderDomain);
   const linkMessageToLead = useEmailAccountStore((s) => s.linkMessageToLead);
   const drafts = useEmailAccountStore((s) => s.drafts);
   const sent = useEmailAccountStore((s) => s.sent);
@@ -232,9 +406,14 @@ export default function InboxPage() {
     [leads],
   );
 
-  const leadMailFilterTriggerLabel = React.useMemo(
-    () => formatLeadMailFilterTriggerLabel(leadMailFilter, leads),
-    [leadMailFilter, leads],
+  const contactsSortedForMailFilter = React.useMemo(
+    () =>
+      [...contacts].sort((a, b) =>
+        (a.fullName?.trim() || a.email || "").localeCompare(b.fullName?.trim() || b.email || "", undefined, {
+          sensitivity: "base",
+        }),
+      ),
+    [contacts],
   );
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
@@ -246,6 +425,9 @@ export default function InboxPage() {
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
+  const [aiReplyGenerating, setAiReplyGenerating] = React.useState(false);
+  const [aiReplyTone, setAiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
+  const [aiReplyGoal, setAiReplyGoal] = React.useState("follow up");
   const [sending, setSending] = React.useState(false);
 
   /** True only when there is no cached list yet (blocking empty state). */
@@ -270,7 +452,19 @@ export default function InboxPage() {
   /** Row ids for bulk delete (inbox → trash, or permanent delete in trash). */
   const [selectedMailRowIds, setSelectedMailRowIds] = React.useState<Set<string>>(() => new Set());
   const [purgeTrashOpen, setPurgeTrashOpen] = React.useState(false);
+  const [blockDomainOpen, setBlockDomainOpen] = React.useState(false);
+  const [blockDomainTarget, setBlockDomainTarget] = React.useState("");
   const [mailActionLoading, setMailActionLoading] = React.useState(false);
+
+  const blockDomainPendingStats = React.useMemo(() => {
+    const domain = normalizeBlockedSenderDomain(blockDomainTarget);
+    if (!domain) return { messages: 0, conversations: 0 };
+    const messageUids = collectBlockedUidsFromInbound(inbound, [domain]);
+    const conversations = inboundThreads.filter((t) =>
+      t.messages.some((m) => extractSenderDomain(m.from) === domain),
+    ).length;
+    return { messages: messageUids.length, conversations };
+  }, [blockDomainTarget, inbound, inboundThreads]);
 
   const emailFolderSupportsImapList = mailFolder === "inbox" || mailFolder === "trash";
   const canUseTrashFeatures = isDemo || isImapInboxConfigured(account);
@@ -291,8 +485,17 @@ export default function InboxPage() {
   }, [inboundThreads, trashThreads, mailFolder]);
 
   React.useEffect(() => {
-    setLeadMailFilter(LEAD_MAIL_FILTER_ALL);
+    setEntityMailFilter(ENTITY_MAIL_FILTER_ALL);
+    setEntitySubFilter(ENTITY_SUB_FILTER_ALL);
   }, [activeMailboxId]);
+
+  React.useEffect(() => {
+    setEntitySubFilter(ENTITY_SUB_FILTER_ALL);
+  }, [entityMailFilter]);
+
+  React.useEffect(() => {
+    setReadStatusFilter(READ_STATUS_FILTER_ALL);
+  }, [mailFolder]);
 
   /** Load RFC822 bodies for older messages when a thread is opened (bulk sync only parses the newest chunk). */
   React.useEffect(() => {
@@ -448,7 +651,17 @@ export default function InboxPage() {
           });
           return;
         }
-        const rows = Array.isArray(data.messages) ? data.messages : [];
+        let rows = Array.isArray(data.messages) ? data.messages : [];
+        if (folder === "inbox") {
+          rows = await filterInboxBatchAndTrashBlocked({
+            messages: rows,
+            blockedDomains: useEmailAccountStore.getState().blockedSenderDomains,
+            isDemo,
+            inboxReadOnly,
+            mailViewAsUid,
+            currentUserId,
+          });
+        }
         const total =
           typeof data.mailboxTotal === "number" && Number.isFinite(data.mailboxTotal) ? data.mailboxTotal : null;
         if (folder === "inbox") {
@@ -470,7 +683,16 @@ export default function InboxPage() {
         }
       }
     },
-    [isDemo, setInbound, setTrashInbound, reconcileInboundHeadFromSync, reconcileTrashHeadFromSync, mailViewAsUid, currentUserId],
+    [
+      isDemo,
+      inboxReadOnly,
+      setInbound,
+      setTrashInbound,
+      reconcileInboundHeadFromSync,
+      reconcileTrashHeadFromSync,
+      mailViewAsUid,
+      currentUserId,
+    ],
   );
 
   const fetchInboundMail = React.useCallback(() => fetchImapListFolder("inbox"), [fetchImapListFolder]);
@@ -516,7 +738,15 @@ export default function InboxPage() {
         });
         return;
       }
-      const batch = Array.isArray(data.messages) ? data.messages : [];
+      let batch = Array.isArray(data.messages) ? data.messages : [];
+      batch = await filterInboxBatchAndTrashBlocked({
+        messages: batch,
+        blockedDomains: useEmailAccountStore.getState().blockedSenderDomains,
+        isDemo,
+        inboxReadOnly,
+        mailViewAsUid,
+        currentUserId,
+      });
       appendInbound(acct.id, batch);
       const total =
         typeof data.mailboxTotal === "number" && Number.isFinite(data.mailboxTotal) ? data.mailboxTotal : null;
@@ -531,7 +761,57 @@ export default function InboxPage() {
     } finally {
       setInboundLoadingMore(false);
     }
-  }, [isDemo, inboundLoadingMore, imapMailboxTotal, appendInbound, mailViewAsUid, currentUserId]);
+  }, [
+    isDemo,
+    inboxReadOnly,
+    inboundLoadingMore,
+    imapMailboxTotal,
+    appendInbound,
+    mailViewAsUid,
+    currentUserId,
+  ]);
+
+  /** Sweep cached INBOX for newly blocked domains (e.g. after block or settings sync). */
+  React.useEffect(() => {
+    if (inboxReadOnly) return;
+    if (!emailServerHydrated || mailFolder !== "inbox") return;
+    if (blockedSenderDomains.length === 0) return;
+    if (!isImapInboxConfigured(account) && !isDemo) return;
+
+    let cancelled = false;
+    void (async () => {
+      const moved = await trashBlockedUidsInCachedInbox({
+        mailboxId: account.id,
+        messages: inbound,
+        blockedDomains: blockedSenderDomains,
+        isDemo,
+        inboxReadOnly,
+        mailViewAsUid,
+        currentUserId,
+      });
+      if (cancelled || moved === 0) return;
+      toast.message(
+        moved === 1 ? "1 blocked message moved to Trash" : `${moved} blocked messages moved to Trash`,
+        { description: "Open Trash to review. Nothing is deleted until you delete forever." },
+      );
+      if (!isDemo) void fetchTrashMail();
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    blockedSenderDomains,
+    inbound,
+    isDemo,
+    inboxReadOnly,
+    emailServerHydrated,
+    mailFolder,
+    account.id,
+    mailViewAsUid,
+    currentUserId,
+    fetchTrashMail,
+  ]);
 
   /** Load INBOX or Trash from IMAP when the Email tab opens that folder (session-restored tab). */
   React.useEffect(() => {
@@ -704,6 +984,42 @@ export default function InboxPage() {
     [],
   );
 
+  const collectUnreadUidsFromMailRows = React.useCallback(
+    (rowIds: Set<string>, rows: MailListRow[]) => {
+      const uidSet = new Set<number>();
+      for (const row of rows) {
+        if (!rowIds.has(row.id)) continue;
+        if (row.thread) {
+          for (const m of row.thread.messages) {
+            if (!m.seen) uidSet.add(m.uid);
+          }
+        } else if ("uid" in row.row && !row.row.seen) {
+          uidSet.add(row.row.uid);
+        }
+      }
+      return [...uidSet];
+    },
+    [],
+  );
+
+  const collectSeenUidsFromMailRows = React.useCallback(
+    (rowIds: Set<string>, rows: MailListRow[]) => {
+      const uidSet = new Set<number>();
+      for (const row of rows) {
+        if (!rowIds.has(row.id)) continue;
+        if (row.thread) {
+          for (const m of row.thread.messages) {
+            if (m.seen) uidSet.add(m.uid);
+          }
+        } else if ("uid" in row.row && row.row.seen) {
+          uidSet.add(row.row.uid);
+        }
+      }
+      return [...uidSet];
+    },
+    [],
+  );
+
   async function moveUidsToServerTrash(uids: number[]) {
     const acct = getActiveMailbox(useEmailAccountStore.getState());
     const CHUNK = 60;
@@ -759,6 +1075,59 @@ export default function InboxPage() {
       if (!data.ok) {
         throw new Error(data.error ?? "Permanent delete failed");
       }
+    }
+  }
+
+  function openBlockDomainDialog(domain: string) {
+    const key = normalizeBlockedSenderDomain(domain);
+    if (!key) {
+      toast.error("Could not read a domain from this sender.");
+      return;
+    }
+    setBlockDomainTarget(key);
+    setBlockDomainOpen(true);
+  }
+
+  async function confirmBlockSenderDomain() {
+    const domain = normalizeBlockedSenderDomain(blockDomainTarget);
+    if (!domain) {
+      setBlockDomainOpen(false);
+      return;
+    }
+    setMailActionLoading(true);
+    try {
+      addBlockedSenderDomain(domain);
+      const nextBlocked = [...new Set([...blockedSenderDomains, domain])];
+      const uids = collectBlockedUidsFromInbound(inbound, nextBlocked);
+      if (uids.length > 0) {
+        if (isDemo) {
+          moveInboundUidsToTrashLocal(account.id, uids);
+        } else {
+          await moveUidsToServerTrash(uids);
+          removeInboundByUids(account.id, uids);
+        }
+      }
+      setBlockDomainOpen(false);
+      setSelectedThread(null);
+      setSelectedMail(null);
+      clearMailRowSelection();
+      toast.success(`Blocked ${domain}`, {
+        description:
+          uids.length > 0
+            ? `${uids.length} message${uids.length === 1 ? "" : "s"} moved to Trash. Future mail from this domain will go to Trash automatically.`
+            : "Future mail from this domain will be moved to Trash automatically.",
+      });
+      if (!isDemo) {
+        void fetchImapListFolder("inbox");
+        void fetchImapListFolder("trash");
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Unknown error";
+      toast.error("Could not block domain", {
+        description: msg.length > 220 ? `${msg.slice(0, 220)}…` : msg,
+      });
+    } finally {
+      setMailActionLoading(false);
     }
   }
 
@@ -884,22 +1253,214 @@ export default function InboxPage() {
     return [];
   }, [mailFolder, sent, drafts, inboundThreads, trashThreads, account.id]);
 
+  const inboxMailListRows = React.useMemo((): MailListRow[] => {
+    return inboundThreads.map((t) => ({
+      id: `${account.id}:thread:${t.threadId}`,
+      title: t.conversationSubject,
+      subtitle:
+        t.messages.length > 1
+          ? `${t.latest.from} · ${t.messages.length} messages`
+          : t.latest.from,
+      at: t.latest.date,
+      row: t.latest,
+      muted: !t.hasUnread,
+      thread: t,
+    }));
+  }, [inboundThreads, account.id]);
+
+  const inboxMailFilterStats = React.useMemo(() => {
+    const all = { ...EMPTY_MAIL_FILTER_STATS };
+    const leadLinked = { ...EMPTY_MAIL_FILTER_STATS };
+    const leadUnlinked = { ...EMPTY_MAIL_FILTER_STATS };
+    const contactLinked = { ...EMPTY_MAIL_FILTER_STATS };
+    const contactUnlinked = { ...EMPTY_MAIL_FILTER_STATS };
+    const byLeadId = new Map<string, MailFilterStats>();
+    const byContactId = new Map<string, MailFilterStats>();
+
+    for (const row of inboxMailListRows) {
+      all.total += 1;
+      if (rowIsUnread(row)) all.unread += 1;
+
+      const lead = resolveLeadForMailListRow(row, account.id, linkedLeadByMessageId, leads);
+      const contact = resolveContactForMailListRow(row, contacts);
+
+      if (lead) {
+        leadLinked.total += 1;
+        if (rowIsUnread(row)) leadLinked.unread += 1;
+        const prev = byLeadId.get(lead.id) ?? { ...EMPTY_MAIL_FILTER_STATS };
+        byLeadId.set(lead.id, bumpMailFilterStats(prev, row));
+      } else {
+        leadUnlinked.total += 1;
+        if (rowIsUnread(row)) leadUnlinked.unread += 1;
+      }
+
+      if (contact) {
+        contactLinked.total += 1;
+        if (rowIsUnread(row)) contactLinked.unread += 1;
+        const prev = byContactId.get(contact.id) ?? { ...EMPTY_MAIL_FILTER_STATS };
+        byContactId.set(contact.id, bumpMailFilterStats(prev, row));
+      } else {
+        contactUnlinked.total += 1;
+        if (rowIsUnread(row)) contactUnlinked.unread += 1;
+      }
+    }
+
+    const leadsWithMail = leadsSortedForMailFilter
+      .filter((l) => byLeadId.has(l.id))
+      .map((l) => ({ lead: l, stats: byLeadId.get(l.id)! }))
+      .sort((a, b) => b.stats.unread - a.stats.unread || b.stats.total - a.stats.total);
+
+    const contactsWithMail = contactsSortedForMailFilter
+      .filter((c) => byContactId.has(c.id))
+      .map((c) => ({ contact: c, stats: byContactId.get(c.id)! }))
+      .sort((a, b) => b.stats.unread - a.stats.unread || b.stats.total - a.stats.total);
+
+    return {
+      all,
+      leadLinked,
+      leadUnlinked,
+      contactLinked,
+      contactUnlinked,
+      leadsWithMail,
+      contactsWithMail,
+      leadStats: (id: string) => byLeadId.get(id) ?? EMPTY_MAIL_FILTER_STATS,
+      contactStats: (id: string) => byContactId.get(id) ?? EMPTY_MAIL_FILTER_STATS,
+    };
+  }, [
+    inboxMailListRows,
+    account.id,
+    linkedLeadByMessageId,
+    leads,
+    contacts,
+    leadsSortedForMailFilter,
+    contactsSortedForMailFilter,
+  ]);
+
+  const readFilterScopeRows = React.useMemo(() => {
+    if (mailFolder !== "inbox" && mailFolder !== "trash") return [] as MailListRow[];
+    let rows = mailListRows;
+    if (entityMailFilter !== ENTITY_MAIL_FILTER_ALL) {
+      rows = rows.filter((row) =>
+        rowMatchesEntityMailFilter(
+          row,
+          entityMailFilter,
+          entitySubFilter,
+          account.id,
+          linkedLeadByMessageId,
+          leads,
+          contacts,
+        ),
+      );
+    }
+    return rows;
+  }, [
+    mailFolder,
+    mailListRows,
+    entityMailFilter,
+    entitySubFilter,
+    account.id,
+    linkedLeadByMessageId,
+    leads,
+    contacts,
+  ]);
+
+  const readFilterStats = React.useMemo(() => {
+    let unread = 0;
+    for (const row of readFilterScopeRows) {
+      if (rowIsUnread(row)) unread += 1;
+    }
+    const total = readFilterScopeRows.length;
+    return { total, unread, read: total - unread };
+  }, [readFilterScopeRows]);
+
   const visibleMailRows = React.useMemo(() => {
     const q = normalizeInboxSearch(listSearchQuery);
     let rows = mailListRows;
-    if (leadMailFilter !== LEAD_MAIL_FILTER_ALL) {
-      rows = rows.filter((row) => {
-        const hit = resolveLeadForMailListRow(row, account.id, linkedLeadByMessageId, leads);
-        if (leadMailFilter === LEAD_MAIL_FILTER_LINKED) return hit != null;
-        if (leadMailFilter === LEAD_MAIL_FILTER_UNLINKED) return hit == null;
-        return hit?.id === leadMailFilter;
-      });
+    if (entityMailFilter !== ENTITY_MAIL_FILTER_ALL) {
+      rows = rows.filter((row) =>
+        rowMatchesEntityMailFilter(
+          row,
+          entityMailFilter,
+          entitySubFilter,
+          account.id,
+          linkedLeadByMessageId,
+          leads,
+          contacts,
+        ),
+      );
+    }
+    if (mailFolder === "inbox" || mailFolder === "trash") {
+      rows = rows.filter((row) => rowMatchesReadStatusFilter(row, readStatusFilter));
     }
     return rows.filter((row) => mailListRowMatchesSearch(row, q));
-  }, [mailListRows, listSearchQuery, leadMailFilter, account.id, linkedLeadByMessageId, leads]);
+  }, [
+    mailListRows,
+    mailFolder,
+    listSearchQuery,
+    readStatusFilter,
+    entityMailFilter,
+    entitySubFilter,
+    account.id,
+    linkedLeadByMessageId,
+    leads,
+    contacts,
+  ]);
+
+  const showEntitySubFilter =
+    entityMailFilter === ENTITY_LEAD_LINKED || entityMailFilter === ENTITY_CONTACT_LINKED;
+
+  const entitySubFilterOptions = React.useMemo(() => {
+    if (entityMailFilter === ENTITY_LEAD_LINKED) {
+      return inboxMailFilterStats.leadsWithMail.map(({ lead: l, stats }) => {
+        const name = l.contactName?.trim() || l.contactEmail || l.id;
+        const label = l.companyName?.trim() ? `${name} · ${l.companyName.trim()}` : name;
+        return { id: l.id, label, stats };
+      });
+    }
+    if (entityMailFilter === ENTITY_CONTACT_LINKED) {
+      return inboxMailFilterStats.contactsWithMail.map(({ contact: c, stats }) => ({
+        id: c.id,
+        label: c.fullName?.trim() || c.email || c.id,
+        stats,
+      }));
+    }
+    return [];
+  }, [entityMailFilter, inboxMailFilterStats.leadsWithMail, inboxMailFilterStats.contactsWithMail]);
 
   const mailSearchActive = normalizeInboxSearch(listSearchQuery).length > 0;
-  const leadMailFilterActive = leadMailFilter !== LEAD_MAIL_FILTER_ALL;
+  const entitySubFilterActive = entitySubFilter !== ENTITY_SUB_FILTER_ALL;
+  const entityMailFilterActive =
+    isEntityMailFilterActive(entityMailFilter) || entitySubFilterActive;
+  const readStatusFilterActive =
+    (mailFolder === "inbox" || mailFolder === "trash") &&
+    readStatusFilter !== READ_STATUS_FILTER_ALL;
+  const listFilterActive = mailSearchActive || entityMailFilterActive || readStatusFilterActive;
+  const activeEntityFilterLabel = React.useMemo(() => {
+    const base = entityMailFilterLabel(entityMailFilter, leads, contacts);
+    const sub = entitySubFilterLabel(entityMailFilter, entitySubFilter, leads, contacts);
+    return sub ? `${base} · ${sub}` : base;
+  }, [entityMailFilter, entitySubFilter, leads, contacts]);
+  const activeListFilterSummary = React.useMemo(() => {
+    const parts: string[] = [];
+    if (readStatusFilterActive) parts.push(readStatusFilterLabel(readStatusFilter));
+    if (entityMailFilterActive) parts.push(activeEntityFilterLabel);
+    if (mailSearchActive) parts.push(`Search “${listSearchQuery.trim()}”`);
+    return parts.join(" · ");
+  }, [
+    readStatusFilterActive,
+    readStatusFilter,
+    entityMailFilterActive,
+    activeEntityFilterLabel,
+    mailSearchActive,
+    listSearchQuery,
+  ]);
+
+  function clearAllListFilters() {
+    setReadStatusFilter(READ_STATUS_FILTER_ALL);
+    setEntityMailFilter(ENTITY_MAIL_FILTER_ALL);
+    setEntitySubFilter(ENTITY_SUB_FILTER_ALL);
+    setListSearchQuery("");
+  }
 
   const selectAllVisibleMailRows = React.useCallback(() => {
     setSelectedMailRowIds(new Set(visibleMailRows.map((r) => r.id)));
@@ -910,9 +1471,147 @@ export default function InboxPage() {
     await moveInboxUidsToTrashNow(uids);
   }
 
+  const selectedUnreadUids = React.useMemo(
+    () => collectUnreadUidsFromMailRows(selectedMailRowIds, visibleMailRows),
+    [collectUnreadUidsFromMailRows, selectedMailRowIds, visibleMailRows],
+  );
+
+  const selectedSeenUids = React.useMemo(
+    () => collectSeenUidsFromMailRows(selectedMailRowIds, visibleMailRows),
+    [collectSeenUidsFromMailRows, selectedMailRowIds, visibleMailRows],
+  );
+
+  const applySeenToUids = React.useCallback(
+    async (uids: number[], seen: boolean) => {
+      if (uids.length === 0) return;
+      if (mailFolder !== "inbox" && mailFolder !== "trash") return;
+
+      const folder = mailFolder === "trash" ? "trash" : "inbox";
+      const patchLocal = folder === "trash" ? patchTrashSeen : patchInboundSeen;
+      patchLocal(account.id, uids, seen);
+
+      if (isDemo || inboxReadOnly) return;
+
+      const acct = getActiveMailbox(useEmailAccountStore.getState());
+      const action = seen ? "markSeen" : "markUnseen";
+      const CHUNK = 60;
+      try {
+        for (let i = 0; i < uids.length; i += CHUNK) {
+          const part = uids.slice(i, i + CHUNK);
+          const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+          const res = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              action,
+              folder,
+              mailboxId: acct.id,
+              uids: part,
+              imap: {
+                host: acct.imap.host,
+                port: acct.imap.port,
+                secure: acct.imap.secure,
+                user: acct.imap.user,
+                pass: acct.imap.password,
+              },
+            }),
+          });
+          const data = (await res.json()) as { ok?: boolean; error?: string };
+          if (!data.ok) {
+            throw new Error(data.error ?? (seen ? "Mark as read failed" : "Mark as unread failed"));
+          }
+        }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Unknown error";
+        toast.error(seen ? "Could not mark as read" : "Could not mark as unread", {
+          description: msg.length > 220 ? `${msg.slice(0, 220)}…` : msg,
+        });
+        void fetchImapListFolder(folder);
+      }
+    },
+    [
+      mailFolder,
+      account.id,
+      patchInboundSeen,
+      patchTrashSeen,
+      isDemo,
+      inboxReadOnly,
+      mailViewAsUid,
+      currentUserId,
+      fetchImapListFolder,
+    ],
+  );
+
+  const markThreadAsRead = React.useCallback(
+    (thread: MailThread) => {
+      const uids = thread.messages.filter((m) => !m.seen).map((m) => m.uid);
+      void applySeenToUids(uids, true);
+    },
+    [applySeenToUids],
+  );
+
+  const markThreadAsUnread = React.useCallback(
+    (thread: MailThread) => {
+      const uids = thread.messages.filter((m) => m.seen).map((m) => m.uid);
+      void applySeenToUids(uids, false);
+    },
+    [applySeenToUids],
+  );
+
+  async function handleMarkSelectionAsRead() {
+    if (selectedUnreadUids.length === 0) return;
+    setMailActionLoading(true);
+    try {
+      await applySeenToUids(selectedUnreadUids, true);
+    } finally {
+      setMailActionLoading(false);
+    }
+  }
+
+  async function handleMarkSelectionAsUnread() {
+    if (selectedSeenUids.length === 0) return;
+    setMailActionLoading(true);
+    try {
+      await applySeenToUids(selectedSeenUids, false);
+    } finally {
+      setMailActionLoading(false);
+    }
+  }
+
+  /** Mark read once when a conversation is opened — not when the user marks it unread again. */
+  const autoReadConversationRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (mailFolder !== "inbox" && mailFolder !== "trash") {
+      autoReadConversationRef.current = null;
+      return;
+    }
+    if (selectedThread) {
+      const key = `thread:${selectedThread.threadId}`;
+      if (autoReadConversationRef.current === key) return;
+      autoReadConversationRef.current = key;
+      if (selectedThread.hasUnread) markThreadAsRead(selectedThread);
+      return;
+    }
+    if (selectedMail && "uid" in selectedMail) {
+      const key = `uid:${selectedMail.uid}`;
+      if (autoReadConversationRef.current === key) return;
+      autoReadConversationRef.current = key;
+      if (!selectedMail.seen) void applySeenToUids([selectedMail.uid], true);
+      return;
+    }
+    autoReadConversationRef.current = null;
+  }, [
+    mailFolder,
+    selectedThread?.threadId,
+    selectedMail && "uid" in selectedMail ? selectedMail.uid : null,
+    markThreadAsRead,
+    applySeenToUids,
+  ]);
+
   React.useEffect(() => {
     if (visibleMailRows.length === 0) {
-      if (mailSearchActive || leadMailFilterActive) {
+      if (listFilterActive) {
         setSelectedThread(null);
         setSelectedMail(null);
       }
@@ -943,7 +1642,7 @@ export default function InboxPage() {
         setSelectedMail(pick.row);
       }
     }
-  }, [visibleMailRows, selectedThread, selectedMail, mailSearchActive, leadMailFilterActive]);
+  }, [visibleMailRows, selectedThread, selectedMail, listFilterActive]);
 
   const pageActions = (
     <div className="flex gap-2 flex-wrap">
@@ -1012,7 +1711,53 @@ export default function InboxPage() {
     return matchFromMessage(selectedMail);
   }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads]);
 
-  function createLeadFromSelectedMessage() {
+  async function generateAiReply() {
+    if (!composeBody.trim() && !composeSubject.trim()) {
+      toast.error("Open a reply with thread context first, or paste the conversation.");
+      return;
+    }
+    setAiReplyGenerating(true);
+    try {
+      const thread = composeBody.trim() || composeSubject;
+      let leadContext = "";
+      if (selectedLead) {
+        leadContext = JSON.stringify({
+          id: selectedLead.id,
+          stage: selectedLead.stage,
+          company: selectedLead.companyName,
+          contact: selectedLead.contactName,
+          channel: selectedLead.channel,
+        });
+      }
+      const res = await fetch("/api/ai/email-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          thread,
+          leadContext,
+          leadId: selectedLead?.id,
+          channel: selectedLead?.channel,
+          profileId: selectedLead?.profileId,
+          campaignId: selectedLead?.campaignId,
+          tone: aiReplyTone,
+          goal: aiReplyGoal,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not generate reply");
+        return;
+      }
+      setComposeBody(data.body ?? "");
+      toast.success("Draft generated — review before sending");
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setAiReplyGenerating(false);
+    }
+  }
+
+  async function createLeadFromSelectedMessage() {
     if (inboxReadOnly) {
       toast.error("You can’t add leads from another member’s inbox.");
       return;
@@ -1034,49 +1779,54 @@ export default function InboxPage() {
     const leadId = `ld-${crypto.randomUUID()}`;
     const display = email.split("@")[0].replace(/[._-]/g, " ").trim();
     const name = display ? display.replace(/\b\w/g, (x) => x.toUpperCase()) : email;
-    addAccount({
-      id: accountId,
-      name: company.charAt(0).toUpperCase() + company.slice(1),
-      domain,
-      contactCount: 1,
-      leadCount: 1,
-      openDealValue: 0,
-      ownerId: currentUserId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    addContact({
-      id: contactId,
-      accountId,
-      firstName: name.split(" ")[0] ?? name,
-      lastName: name.split(" ").slice(1).join(" "),
-      fullName: name,
-      email,
-      ownerId: currentUserId,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    addLead({
-      id: leadId,
-      accountId,
-      contactId,
-      channel: "personalized_email",
-      stage: "new",
-      temperature: "warm",
-      priority: "medium",
-      ownerId: currentUserId,
-      contactName: name,
-      contactEmail: email,
-      companyName: company,
-      companyDomain: domain,
-      touches: 1,
-      isIdle: false,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    });
-    const mid = "uid" in target ? `${account.id}:in:${target.id}` : target.id;
-    linkMessageToLead(mid, leadId);
-    toast.success("Lead created and linked");
+    const now = new Date().toISOString();
+    try {
+      await addAccount({
+        id: accountId,
+        name: company.charAt(0).toUpperCase() + company.slice(1),
+        domain,
+        contactCount: 1,
+        leadCount: 1,
+        openDealValue: 0,
+        ownerId: currentUserId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await addContact({
+        id: contactId,
+        accountId,
+        firstName: name.split(" ")[0] ?? name,
+        lastName: name.split(" ").slice(1).join(" "),
+        fullName: name,
+        email,
+        ownerId: currentUserId,
+        createdAt: now,
+        updatedAt: now,
+      });
+      await addLead({
+        id: leadId,
+        accountId,
+        contactId,
+        channel: "personalized_email",
+        stage: "new",
+        temperature: "warm",
+        priority: "medium",
+        ownerId: currentUserId,
+        contactName: name,
+        contactEmail: email,
+        companyName: company,
+        companyDomain: domain,
+        touches: 1,
+        isIdle: false,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const mid = "uid" in target ? `${account.id}:in:${target.id}` : target.id;
+      linkMessageToLead(mid, leadId);
+      toast.success("Lead created and linked");
+    } catch {
+      /* toast shown in workspace provider */
+    }
   }
 
   return (
@@ -1126,15 +1876,23 @@ export default function InboxPage() {
                 }}
               >
                 <SelectTrigger className="h-8 min-w-[200px] max-w-[min(100%,280px)] text-xs">
-                  <SelectValue placeholder="Whose inbox?" />
+                  <SelectValue placeholder="Whose inbox?">
+                    {(value) => {
+                      if (value == null || value === INBOX_VIEW_SELF) return "My mailbox";
+                      const u =
+                        memberPickerUsers.find((x) => x.id === value) ??
+                        users.find((x) => x.id === value);
+                      return u
+                        ? workspaceMemberPickerLabel(u, getOwnerDisplayName, { includeRole: true })
+                        : fallbackOwnerPickerLabel(String(value));
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={INBOX_VIEW_SELF}>My mailbox</SelectItem>
                   {memberPickerUsers.map((u) => (
                     <SelectItem key={u.id} value={u.id}>
-                      {`${u.displayName?.trim() || u.email || u.id}${
-                        u.orgRole && u.orgRole !== "member" ? ` · ${u.orgRole}` : ""
-                      }`}
+                      {workspaceMemberPickerLabel(u, getOwnerDisplayName, { includeRole: true })}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -1164,7 +1922,85 @@ export default function InboxPage() {
         </div>
 
         <div className="flex min-h-0 flex-1 divide-x">
-            <div className="w-40 shrink-0 flex flex-col border-r p-2 gap-1">
+            <div className="w-52 shrink-0 flex flex-col border-r p-2 gap-1 overflow-y-auto max-h-[calc(100vh-250px)]">
+              <div className="space-y-2 pb-2 border-b border-border/60">
+                <p className="px-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  Filter by CRM
+                </p>
+                <Button
+                  variant={entityMailFilter === ENTITY_MAIL_FILTER_ALL ? "secondary" : "ghost"}
+                  size="sm"
+                  className="group h-7 w-full justify-start px-2 text-[11px]"
+                  onClick={() => setEntityMailFilter(ENTITY_MAIL_FILTER_ALL)}
+                >
+                  <span className="truncate">All conversations</span>
+                  <FilterCountBadge stats={inboxMailFilterStats.all} />
+                </Button>
+
+                <Collapsible open={leadsFilterOpen} onOpenChange={setLeadsFilterOpen}>
+                  <CollapsibleTrigger className="flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground">
+                    <ChevronDown
+                      className={cn("h-3 w-3 shrink-0 transition-transform", !leadsFilterOpen && "-rotate-90")}
+                      aria-hidden
+                    />
+                    Leads
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-0.5 pt-0.5">
+                    <Button
+                      variant={entityMailFilter === ENTITY_LEAD_LINKED ? "secondary" : "ghost"}
+                      size="sm"
+                      className="group h-7 w-full justify-start px-2 text-[11px]"
+                      onClick={() => setEntityMailFilter(ENTITY_LEAD_LINKED)}
+                    >
+                      <span className="truncate">Matched lead</span>
+                      <FilterCountBadge stats={inboxMailFilterStats.leadLinked} />
+                    </Button>
+                    <Button
+                      variant={entityMailFilter === ENTITY_LEAD_UNLINKED ? "secondary" : "ghost"}
+                      size="sm"
+                      className="group h-7 w-full justify-start px-2 text-[11px]"
+                      onClick={() => setEntityMailFilter(ENTITY_LEAD_UNLINKED)}
+                    >
+                      <span className="truncate">No lead match</span>
+                      <FilterCountBadge stats={inboxMailFilterStats.leadUnlinked} />
+                    </Button>
+                  </CollapsibleContent>
+                </Collapsible>
+
+                <Collapsible open={contactsFilterOpen} onOpenChange={setContactsFilterOpen}>
+                  <CollapsibleTrigger className="flex w-full items-center gap-1 rounded-md px-1 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground">
+                    <ChevronDown
+                      className={cn("h-3 w-3 shrink-0 transition-transform", !contactsFilterOpen && "-rotate-90")}
+                      aria-hidden
+                    />
+                    Contacts
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="space-y-0.5 pt-0.5">
+                    <Button
+                      variant={entityMailFilter === ENTITY_CONTACT_LINKED ? "secondary" : "ghost"}
+                      size="sm"
+                      className="group h-7 w-full justify-start px-2 text-[11px]"
+                      onClick={() => setEntityMailFilter(ENTITY_CONTACT_LINKED)}
+                    >
+                      <span className="truncate">Matched contact</span>
+                      <FilterCountBadge stats={inboxMailFilterStats.contactLinked} />
+                    </Button>
+                    <Button
+                      variant={entityMailFilter === ENTITY_CONTACT_UNLINKED ? "secondary" : "ghost"}
+                      size="sm"
+                      className="group h-7 w-full justify-start px-2 text-[11px]"
+                      onClick={() => setEntityMailFilter(ENTITY_CONTACT_UNLINKED)}
+                    >
+                      <span className="truncate">No contact match</span>
+                      <FilterCountBadge stats={inboxMailFilterStats.contactUnlinked} />
+                    </Button>
+                  </CollapsibleContent>
+                </Collapsible>
+              </div>
+
+              <p className="px-1 pt-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Folders
+              </p>
               {(
                 [
                   { id: "inbox" as const, label: "Inbox" },
@@ -1186,15 +2022,24 @@ export default function InboxPage() {
                   }}
                 >
                   {f.label}
-                  {f.id === "inbox" && (
-                    <Badge
-                      variant="outline"
-                      className="ml-auto h-5 max-w-[min(100%,5.75rem)] shrink-0 truncate px-1.5 text-[10px] font-normal"
-                      title={mailboxDisplayLabel(account)}
-                    >
-                      {mailboxDisplayLabel(account)}
-                    </Badge>
-                  )}
+                  {f.id === "inbox" ? (
+                    inboxMailFilterStats.all.unread > 0 ? (
+                      <span
+                        className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
+                        title={`${inboxMailFilterStats.all.unread} unread · ${mailboxDisplayLabel(account)}`}
+                      >
+                        {inboxMailFilterStats.all.unread > 99 ? "99+" : inboxMailFilterStats.all.unread}
+                      </span>
+                    ) : (
+                      <Badge
+                        variant="outline"
+                        className="ml-auto h-5 max-w-[min(100%,5.75rem)] shrink-0 truncate px-1.5 text-[10px] font-normal"
+                        title={mailboxDisplayLabel(account)}
+                      >
+                        {mailboxDisplayLabel(account)}
+                      </Badge>
+                    )
+                  ) : null}
                   {f.id === "trash" && trashInbound.length > 0 && (
                     <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px] tabular-nums">
                       {trashInbound.length}
@@ -1271,6 +2116,48 @@ export default function InboxPage() {
                     >
                       Clear
                     </Button>
+                    {(mailFolder === "inbox" || mailFolder === "trash") && (
+                      <>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px] px-2 gap-1"
+                          disabled={
+                            selectedUnreadUids.length === 0 || mailActionLoading
+                          }
+                          onClick={() => void handleMarkSelectionAsRead()}
+                        >
+                          {mailActionLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <MailOpen className="h-3 w-3" />
+                          )}
+                          Mark as read
+                          {selectedUnreadUids.length > 0
+                            ? ` (${selectedUnreadUids.length})`
+                            : ""}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-[10px] px-2 gap-1"
+                          disabled={selectedSeenUids.length === 0 || mailActionLoading}
+                          onClick={() => void handleMarkSelectionAsUnread()}
+                        >
+                          {mailActionLoading ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Mail className="h-3 w-3" />
+                          )}
+                          Mark as unread
+                          {selectedSeenUids.length > 0
+                            ? ` (${selectedSeenUids.length})`
+                            : ""}
+                        </Button>
+                      </>
+                    )}
                     {mailFolder === "inbox" && (
                       <Button
                         type="button"
@@ -1304,43 +2191,121 @@ export default function InboxPage() {
                   </div>
                 )}
                 <div className="space-y-2 normal-case">
-                  <div className="space-y-1">
-                    <Label htmlFor="inbox-lead-filter" className="text-[10px] text-muted-foreground font-normal">
-                      Lead filter
-                    </Label>
-                    <Select
-                      value={leadMailFilter}
-                      onValueChange={(v) => {
-                        if (v) setLeadMailFilter(v);
-                      }}
+                  {(mailFolder === "inbox" || mailFolder === "trash") && (
+                    <div
+                      className="flex flex-wrap gap-1"
+                      role="group"
+                      aria-label="Filter by read status"
                     >
-                      <SelectTrigger id="inbox-lead-filter" className="h-8 w-full min-w-0 max-w-full text-xs font-normal">
-                        <SelectValue placeholder="All conversations">{leadMailFilterTriggerLabel}</SelectValue>
-                      </SelectTrigger>
-                      <SelectContent className="max-h-72">
-                        <SelectGroup>
-                          <SelectItem value={LEAD_MAIL_FILTER_ALL}>All conversations</SelectItem>
-                          <SelectItem value={LEAD_MAIL_FILTER_LINKED}>With a matched lead</SelectItem>
-                          <SelectItem value={LEAD_MAIL_FILTER_UNLINKED}>Without a matched lead</SelectItem>
-                        </SelectGroup>
-                        {leadsSortedForMailFilter.length > 0 ? (
+                      <Button
+                        type="button"
+                        variant={readStatusFilter === READ_STATUS_FILTER_ALL ? "secondary" : "ghost"}
+                        size="sm"
+                        className="h-7 text-[10px] px-2 gap-1"
+                        onClick={() => setReadStatusFilter(READ_STATUS_FILTER_ALL)}
+                      >
+                        All
+                        <span className="tabular-nums text-muted-foreground">{readFilterStats.total}</span>
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={readStatusFilter === READ_STATUS_UNREAD ? "secondary" : "ghost"}
+                        size="sm"
+                        className="h-7 text-[10px] px-2 gap-1"
+                        onClick={() => setReadStatusFilter(READ_STATUS_UNREAD)}
+                      >
+                        <Mail className="h-3 w-3 shrink-0" aria-hidden />
+                        Unread
+                        {readFilterStats.unread > 0 ? (
+                          <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold text-white tabular-nums">
+                            {readFilterStats.unread > 99 ? "99+" : readFilterStats.unread}
+                          </span>
+                        ) : (
+                          <span className="tabular-nums text-muted-foreground">0</span>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant={readStatusFilter === READ_STATUS_READ ? "secondary" : "ghost"}
+                        size="sm"
+                        className="h-7 text-[10px] px-2 gap-1"
+                        onClick={() => setReadStatusFilter(READ_STATUS_READ)}
+                      >
+                        <MailOpen className="h-3 w-3 shrink-0" aria-hidden />
+                        Read
+                        <span className="tabular-nums text-muted-foreground">{readFilterStats.read}</span>
+                      </Button>
+                    </div>
+                  )}
+                  {listFilterActive ? (
+                    <p className="text-[10px] text-muted-foreground font-normal leading-snug">
+                      Filter: <span className="text-foreground">{activeListFilterSummary}</span>
+                      <button
+                        type="button"
+                        className="ml-1.5 text-primary underline-offset-2 hover:underline"
+                        onClick={clearAllListFilters}
+                      >
+                        Clear
+                      </button>
+                    </p>
+                  ) : null}
+                  {showEntitySubFilter && entitySubFilterOptions.length > 0 ? (
+                    <div className="space-y-1">
+                      <Label htmlFor="inbox-entity-sub-filter" className="text-[10px] text-muted-foreground font-normal">
+                        {entityMailFilter === ENTITY_LEAD_LINKED ? "Lead" : "Contact"}
+                      </Label>
+                      <Select
+                        value={entitySubFilter}
+                        onValueChange={(v) => {
+                          if (v) setEntitySubFilter(v);
+                        }}
+                      >
+                        <SelectTrigger
+                          id="inbox-entity-sub-filter"
+                          className="h-8 w-full min-w-0 max-w-full text-xs font-normal"
+                        >
+                          <SelectValue placeholder="All matched">
+                            {entitySubFilter === ENTITY_SUB_FILTER_ALL
+                              ? entityMailFilter === ENTITY_LEAD_LINKED
+                                ? "All matched leads"
+                                : "All matched contacts"
+                              : entitySubFilterOptions.find((o) => o.id === entitySubFilter)?.label ??
+                                "Selected"}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent className="max-h-72">
                           <SelectGroup>
-                            <SelectLabel className="text-[10px]">Specific lead</SelectLabel>
-                            {leadsSortedForMailFilter.map((l) => (
-                              <SelectItem key={l.id} value={l.id}>
-                                <span className="truncate">
-                                  {l.contactName?.trim() || l.contactEmail || l.id}
-                                  {l.companyName?.trim() ? (
-                                    <span className="text-muted-foreground"> · {l.companyName.trim()}</span>
-                                  ) : null}
+                            <SelectItem value={ENTITY_SUB_FILTER_ALL}>
+                              {entityMailFilter === ENTITY_LEAD_LINKED
+                                ? "All matched leads"
+                                : "All matched contacts"}
+                            </SelectItem>
+                          </SelectGroup>
+                          <SelectGroup>
+                            <SelectLabel className="text-[10px]">
+                              {entityMailFilter === ENTITY_LEAD_LINKED ? "Specific lead" : "Specific contact"}
+                            </SelectLabel>
+                            {entitySubFilterOptions.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                <span className="flex w-full items-center justify-between gap-2">
+                                  <span className="truncate">{o.label}</span>
+                                  {o.stats.unread > 0 ? (
+                                    <span className="flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold text-white tabular-nums">
+                                      {o.stats.unread > 99 ? "99+" : o.stats.unread}
+                                    </span>
+                                  ) : (
+                                    <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">
+                                      {o.stats.total}
+                                    </span>
+                                  )}
                                 </span>
                               </SelectItem>
                             ))}
                           </SelectGroup>
-                        ) : null}
-                      </SelectContent>
-                    </Select>
-                  </div>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  ) : null}
                   <div className="relative normal-case">
                     <Search
                       className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
@@ -1409,15 +2374,12 @@ export default function InboxPage() {
                 {(mailFolder === "sent" || mailFolder === "drafts") && mailListRows.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
                 )}
-                {(mailSearchActive || leadMailFilterActive) &&
-                  mailListRows.length > 0 &&
-                  visibleMailRows.length === 0 && (
+                {listFilterActive && mailListRows.length > 0 && visibleMailRows.length === 0 && (
                     <div className="p-6 text-center text-sm text-muted-foreground">
-                      {mailSearchActive && leadMailFilterActive
-                        ? "No messages match your search and lead filter."
-                        : mailSearchActive
-                          ? "No messages match your search."
-                          : "No messages match this lead filter."}
+                      No messages match your current filters.
+                      {readStatusFilterActive && readStatusFilter === READ_STATUS_UNREAD
+                        ? " Try All or load more of your inbox."
+                        : null}
                     </div>
                   )}
                 {visibleMailRows.map((row) => {
@@ -1606,6 +2568,37 @@ export default function InboxPage() {
                         <Forward className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         Forward
                       </Button>
+                      <InboxReadingToolbarExtras
+                        messages={selectedThread.messages}
+                        mailFolder={mailFolder}
+                        inboxReadOnly={inboxReadOnly}
+                        blockedSenderDomains={blockedSenderDomains}
+                        onRequestBlockDomain={openBlockDomainDialog}
+                      />
+                      {(mailFolder === "inbox" || mailFolder === "trash") &&
+                        (selectedThread.hasUnread ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            disabled={inboxReadOnly && !isDemo}
+                            onClick={() => markThreadAsRead(selectedThread)}
+                          >
+                            <MailOpen className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            Mark as read
+                          </Button>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="gap-1.5"
+                            disabled={inboxReadOnly && !isDemo}
+                            onClick={() => markThreadAsUnread(selectedThread)}
+                          >
+                            <Mail className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                            Mark as unread
+                          </Button>
+                        ))}
                     </div>
                   </div>
 
@@ -1798,6 +2791,13 @@ export default function InboxPage() {
                           <Forward className="h-3.5 w-3.5 shrink-0" aria-hidden />
                           Forward
                         </Button>
+                        <InboxReadingToolbarExtras
+                          messages={[selectedMail]}
+                          mailFolder={mailFolder}
+                          inboxReadOnly={inboxReadOnly}
+                          blockedSenderDomains={blockedSenderDomains}
+                          onRequestBlockDomain={openBlockDomainDialog}
+                        />
                       </div>
                     </div>
                     <div className="flex-1 min-h-0 overflow-y-auto py-4 pr-1">
@@ -1883,6 +2883,67 @@ export default function InboxPage() {
           </div>
       </PageBody>
 
+      <AlertDialog open={blockDomainOpen} onOpenChange={setBlockDomainOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Block {blockDomainTarget || "this domain"}?</AlertDialogTitle>
+            <AlertDialogDescription asChild>
+              <div className="space-y-2 text-sm text-muted-foreground">
+                {blockDomainPendingStats.messages > 0 ? (
+                  <p>
+                    <span className="font-semibold text-foreground tabular-nums">
+                      {blockDomainPendingStats.messages}
+                    </span>{" "}
+                    {blockDomainPendingStats.messages === 1 ? "message" : "messages"}
+                    {blockDomainPendingStats.conversations > 0 ? (
+                      <>
+                        {" "}
+                        in{" "}
+                        <span className="font-semibold text-foreground tabular-nums">
+                          {blockDomainPendingStats.conversations}
+                        </span>{" "}
+                        {blockDomainPendingStats.conversations === 1 ? "conversation" : "conversations"}
+                      </>
+                    ) : null}{" "}
+                    in your loaded inbox will move to Trash now.
+                  </p>
+                ) : (
+                  <p>
+                    No messages from this domain are in your loaded inbox right now. Future mail will still go to Trash
+                    automatically.
+                  </p>
+                )}
+                <p>
+                  All future email from{" "}
+                  <span className="font-medium text-foreground">{blockDomainTarget}</span> will be moved to Trash when
+                  your inbox syncs. Open Trash to review — nothing is deleted until you use Select all and Delete
+                  forever.
+                </p>
+                {imapMailboxTotal != null && inbound.length < imapMailboxTotal ? (
+                  <p className="text-xs">
+                    Count is from {inbound.length} of {imapMailboxTotal} inbox messages loaded. Older mail from this
+                    domain on the server may not be included until you load more or refresh.
+                  </p>
+                ) : null}
+              </div>
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={mailActionLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={mailActionLoading}
+              onClick={(e) => {
+                e.preventDefault();
+                void confirmBlockSenderDomain();
+              }}
+            >
+              {mailActionLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+              Block domain
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <AlertDialog open={purgeTrashOpen} onOpenChange={setPurgeTrashOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -1952,6 +3013,20 @@ export default function InboxPage() {
             </div>
           </div>
           <SheetFooter className="flex-row flex-wrap gap-2 border-t">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              disabled={aiReplyGenerating || inboxReadOnly}
+              onClick={() => void generateAiReply()}
+            >
+              {aiReplyGenerating ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
+              AI draft
+            </Button>
             <Button variant="outline" size="sm" onClick={saveDraft}>
               Save draft
             </Button>
@@ -1962,6 +3037,74 @@ export default function InboxPage() {
           </SheetFooter>
         </SheetContent>
       </Sheet>
+    </>
+  );
+}
+
+function InboxReadingToolbarExtras({
+  messages,
+  mailFolder,
+  inboxReadOnly,
+  blockedSenderDomains,
+  onRequestBlockDomain,
+}: {
+  messages: MailInbound[];
+  mailFolder: MailFolder;
+  inboxReadOnly: boolean;
+  blockedSenderDomains: string[];
+  onRequestBlockDomain: (domain: string) => void;
+}) {
+  const messageUnsubKey = messages
+    .map((m) => `${m.uid}:${m.listUnsubscribe ?? ""}:${m.bodyHtml?.length ?? 0}:${m.bodySynced}`)
+    .join("|");
+  const unsubscribeUrl = React.useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const u = extractUnsubscribeUrl(messages[i]!);
+      if (u) return u;
+    }
+    return null;
+  }, [messages, messageUnsubKey]);
+
+  const senderDomain =
+    messages.length > 0 ? extractSenderDomain(messages[messages.length - 1]!.from) : "";
+  const domainBlocked =
+    !!senderDomain &&
+    blockedSenderDomains
+      .map(normalizeBlockedSenderDomain)
+      .includes(normalizeBlockedSenderDomain(senderDomain));
+
+  if (!unsubscribeUrl && (mailFolder !== "inbox" || inboxReadOnly || !senderDomain)) {
+    return null;
+  }
+
+  return (
+    <>
+      {unsubscribeUrl ? (
+        <Button
+          size="sm"
+          variant="destructive"
+          className="gap-1.5"
+          nativeButton={false}
+          render={
+            <a href={unsubscribeUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Unsubscribe
+            </a>
+          }
+        />
+      ) : null}
+      {mailFolder === "inbox" && !inboxReadOnly && senderDomain ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="gap-1.5"
+          disabled={domainBlocked}
+          onClick={() => onRequestBlockDomain(senderDomain)}
+        >
+          <Ban className="h-3.5 w-3.5 shrink-0" aria-hidden />
+          {domainBlocked ? `Blocked (${senderDomain})` : `Block ${senderDomain}`}
+        </Button>
+      ) : null}
     </>
   );
 }
@@ -2084,6 +3227,47 @@ function InboundMessageCard({ message: m }: { message: MailInbound }) {
       )}
     </div>
   );
+}
+
+function resolveContactForMailListRow(row: MailListRow, contacts: Contact[]): Contact | null {
+  const matchInbound = (msg: MailInbound) => {
+    const emails = collectMessageEmails(msg);
+    return (
+      contacts.find((contact) => {
+        const owned = contactEmailSet(contact);
+        for (const e of owned) {
+          if (emails.has(e)) return true;
+        }
+        return false;
+      }) ?? null
+    );
+  };
+
+  if (row.thread) {
+    for (let i = row.thread.messages.length - 1; i >= 0; i--) {
+      const hit = matchInbound(row.thread.messages[i]!);
+      if (hit) return hit;
+    }
+    return null;
+  }
+
+  const item = row.row;
+  if ("uid" in item) {
+    return matchInbound(item);
+  }
+  if ("sentAt" in item || "updatedAt" in item) {
+    const emails = collectMessageEmails(item);
+    return (
+      contacts.find((contact) => {
+        const owned = contactEmailSet(contact);
+        for (const e of owned) {
+          if (emails.has(e)) return true;
+        }
+        return false;
+      }) ?? null
+    );
+  }
+  return null;
 }
 
 function resolveLeadForMailListRow(

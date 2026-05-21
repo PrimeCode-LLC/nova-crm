@@ -39,6 +39,11 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { resolveOrganizationIdForFirestoreWrite } from "@/lib/firebase/resolve-organization-id-for-write";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
+import {
+  persistAccountCreateClient,
+  persistContactCreateClient,
+  persistLeadCreateClient,
+} from "@/lib/firestore/persist-lead-graph-client";
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
 import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
 import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
@@ -61,6 +66,8 @@ import {
   persistNoteUpdate,
   persistProfileCreate,
   persistProfileUpdate,
+  persistCampaignCreate,
+  persistCampaignUpdate,
   persistTimelineEventCreate,
   persistTouchpointCreate,
 } from "@/lib/firestore/persist-workspace-entities-client";
@@ -103,9 +110,9 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addProfile: (profile: Profile) => void;
     updateCampaign: (id: string, patch: Partial<Campaign>) => void;
     addCampaign: (campaign: Campaign) => void;
-    addAccount: (account: Account) => void;
-    addContact: (contact: Contact) => void;
-    addLead: (lead: Lead) => void;
+    addAccount: (account: Account) => Promise<void>;
+    addContact: (contact: Contact) => Promise<void>;
+    addLead: (lead: Lead) => Promise<void>;
     patchUser: (userId: string, patch: Partial<Omit<User, "id">>) => void;
     /** Session-backed (persists in tab until refresh / mode change). */
     sessionHydrated: boolean;
@@ -381,29 +388,112 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId],
   );
 
-  const updateCampaign = React.useCallback((id: string, patch: Partial<Campaign>) => {
-    setCampaignEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
-  }, []);
+  const updateCampaign = React.useCallback(
+    (id: string, patch: Partial<Campaign>) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistCampaignUpdate(db, id, patch);
+          } catch (e) {
+            console.error(e);
+            toast.error("Could not save campaign");
+          }
+        })();
+        return;
+      }
+      setCampaignEdits((prev) => ({ ...prev, [id]: { ...prev[id], ...patch } }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addCampaign = React.useCallback((campaign: Campaign) => {
-    setCampaignsAdded((prev) => [...prev, campaign]);
-  }, []);
+  const addCampaign = React.useCallback(
+    (campaign: Campaign) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            const orgId = userDoc!.organizationId!;
+            await persistCampaignCreate(db, orgId, campaign);
+          } catch (e) {
+            console.error(e);
+            toast.error("Could not create campaign");
+          }
+        })();
+        return;
+      }
+      setCampaignsAdded((prev) => [...prev, campaign]);
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addAccount = React.useCallback((account: Account) => {
-    setAccountsAdded((prev) => [...prev, account]);
-  }, []);
+  const addAccount = React.useCallback(
+    async (account: Account): Promise<void> => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        try {
+          const db = getFirebaseDb();
+          await persistAccountCreateClient(db, orgId, account);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not save company", { description: msg });
+          throw e;
+        }
+      }
+      setAccountsAdded((prev) => [...prev, account]);
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addContact = React.useCallback((contact: Contact) => {
-    setContactsAdded((prev) => [...prev, contact]);
-    setAccountContactBumps((b) => ({
-      ...b,
-      [contact.accountId]: (b[contact.accountId] ?? 0) + 1,
-    }));
-  }, []);
+  const addContact = React.useCallback(
+    async (contact: Contact): Promise<void> => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        try {
+          const db = getFirebaseDb();
+          await persistContactCreateClient(db, orgId, contact);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not save contact", { description: msg });
+          throw e;
+        }
+      }
+      setContactsAdded((prev) => [...prev, contact]);
+      setAccountContactBumps((b) => ({
+        ...b,
+        [contact.accountId]: (b[contact.accountId] ?? 0) + 1,
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addLead = React.useCallback((lead: Lead) => {
-    setLeadsAdded((prev) => [...prev, lead]);
-  }, []);
+  const addLead = React.useCallback(
+    async (lead: Lead): Promise<void> => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        try {
+          const db = getFirebaseDb();
+          await persistLeadCreateClient(db, orgId, lead);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not save lead", { description: msg });
+          throw e;
+        }
+      }
+      setLeadsAdded((prev) => [...prev, lead]);
+    },
+    [mode, userDoc?.organizationId],
+  );
 
   const patchUser = React.useCallback((userId: string, patch: Partial<Omit<User, "id">>) => {
     setUserPatches((prev) => ({ ...prev, [userId]: { ...prev[userId], ...patch } }));
@@ -1095,6 +1185,7 @@ export function WorkspaceModeProvider({
       activityCounters: liveFs.activityCounters,
       activityRecords: liveFs.activityRecords,
       profiles: liveFs.profiles,
+      campaigns: liveFs.campaigns,
       crmLabels: liveFs.crmLabels,
       currentUserId: uid,
     };
@@ -1127,6 +1218,7 @@ export function WorkspaceModeProvider({
     liveFs.activityCounters,
     liveFs.activityRecords,
     liveFs.profiles,
+    liveFs.campaigns,
     liveFs.crmLabels,
   ]);
 

@@ -34,7 +34,16 @@ import {
   Monitor,
   Mail,
   Loader2,
+  Sparkles,
 } from "lucide-react";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
@@ -222,6 +231,26 @@ function SettingsPage() {
   const [sendingResetEmail, setSendingResetEmail] = React.useState(false);
 
   const [notifications, setNotifications] = React.useState({ ...DEFAULT_NOTIFICATIONS });
+  const [aiTone, setAiTone] = React.useState<"professional" | "friendly" | "concise">("professional");
+  const [aiExtra, setAiExtra] = React.useState("");
+  const [aiSaveToTimeline, setAiSaveToTimeline] = React.useState(true);
+  const [savingAiPrefs, setSavingAiPrefs] = React.useState(false);
+
+  React.useEffect(() => {
+    void (async () => {
+      try {
+        const res = await fetch("/api/ai/preferences");
+        if (!res.ok) return;
+        const data = await res.json();
+        const p = data.preferences ?? {};
+        if (p.tone) setAiTone(p.tone);
+        if (p.extraInstructions) setAiExtra(p.extraInstructions);
+        if (typeof p.saveAnalysisToTimeline === "boolean") setAiSaveToTimeline(p.saveAnalysisToTimeline);
+      } catch {
+        /* ignore */
+      }
+    })();
+  }, []);
 
   React.useEffect(() => {
     try {
@@ -443,6 +472,9 @@ function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="integrations" className="gap-1.5">
               <Plug className="h-3.5 w-3.5" /> Integrations
+            </TabsTrigger>
+            <TabsTrigger value="ai" className="gap-1.5">
+              <Sparkles className="h-3.5 w-3.5" /> AI
             </TabsTrigger>
             <TabsTrigger value="appearance" className="gap-1.5">
               <Palette className="h-3.5 w-3.5" /> Appearance
@@ -724,6 +756,79 @@ function SettingsPage() {
                 </Card>
               ))}
             </div>
+          </TabsContent>
+
+          <TabsContent value="ai">
+            <Card className="max-w-lg">
+              <CardHeader>
+                <CardTitle className="text-sm">Personal AI preferences</CardTitle>
+                <CardDescription className="text-xs">
+                  Tone and instructions appended to org prompts. API keys are configured in Admin → AI & knowledge.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs">Reply tone</Label>
+                  <Select value={aiTone} onValueChange={(v) => v && setAiTone(v as typeof aiTone)}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="professional">Professional</SelectItem>
+                      <SelectItem value="friendly">Friendly</SelectItem>
+                      <SelectItem value="concise">Concise</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs">Extra instructions</Label>
+                  <Textarea
+                    className="min-h-[80px] text-sm"
+                    placeholder="e.g. Always mention our 30-day pilot…"
+                    value={aiExtra}
+                    onChange={(e) => setAiExtra(e.target.value)}
+                  />
+                </div>
+                <div className="flex items-center justify-between">
+                  <Label htmlFor="ai-timeline" className="text-xs">
+                    Save lead analyses to timeline
+                  </Label>
+                  <Switch
+                    id="ai-timeline"
+                    checked={aiSaveToTimeline}
+                    onCheckedChange={setAiSaveToTimeline}
+                  />
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={savingAiPrefs}
+                  onClick={() => {
+                    setSavingAiPrefs(true);
+                    void (async () => {
+                      try {
+                        const res = await fetch("/api/ai/preferences", {
+                          method: "PATCH",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({
+                            tone: aiTone,
+                            extraInstructions: aiExtra,
+                            saveAnalysisToTimeline: aiSaveToTimeline,
+                          }),
+                        });
+                        if (!res.ok) toast.error("Could not save");
+                        else toast.success("AI preferences saved");
+                      } finally {
+                        setSavingAiPrefs(false);
+                      }
+                    })();
+                  }}
+                >
+                  {savingAiPrefs ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  Save preferences
+                </Button>
+              </CardContent>
+            </Card>
           </TabsContent>
 
           {/* Appearance */}

@@ -75,6 +75,7 @@ export async function parseMailSourceFields(source: Buffer): Promise<{
   messageId?: string;
   inReplyTo?: string;
   referenceIds?: string[];
+  listUnsubscribe?: string;
 }> {
   const parsed = await simpleParser(source);
   const bodyText = (parsed.text || "").trim();
@@ -101,6 +102,15 @@ export async function parseMailSourceFields(source: Buffer): Promise<{
         : undefined,
   );
   const refParsed = parseReferencesField(parsed.references);
+  const listUnsubscribeRaw = parsed.headers.get("list-unsubscribe");
+  const listUnsubscribe =
+    typeof listUnsubscribeRaw === "string"
+      ? listUnsubscribeRaw
+      : Array.isArray(listUnsubscribeRaw)
+        ? listUnsubscribeRaw.map(String).join(", ")
+        : listUnsubscribeRaw != null
+          ? String(listUnsubscribeRaw)
+          : undefined;
   return {
     preview,
     bodyText,
@@ -110,6 +120,7 @@ export async function parseMailSourceFields(source: Buffer): Promise<{
     messageId: messageId ?? undefined,
     inReplyTo: inReplyTo ?? undefined,
     referenceIds: refParsed.length > 0 ? refParsed : undefined,
+    listUnsubscribe: listUnsubscribe?.trim() || undefined,
   };
 }
 

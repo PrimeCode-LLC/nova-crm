@@ -23,8 +23,17 @@ import {
   getDashboardOverviewDescription,
   getDashboardRoleFocusLine,
   isFrontlineDashboardRole,
+  showTeamFollowupsOnDashboard,
 } from "@/lib/dashboard-role-focus";
 import { DashboardPendingOverview } from "@/components/dashboard/dashboard-pending-overview";
+import { DashboardAiBrief } from "@/components/ai/dashboard-ai-brief";
+import {
+  filterLeadsByDateRange,
+  filterDealsByDateRange,
+  filterActivityRecordsByDateRange,
+  filterActivityCountersByDateRange,
+  type DashboardTimeRangeKey,
+} from "@/lib/dashboard-date-range";
 import {
   OWNER_SCOPE_PREFIX,
   buildPersonOwnerOptions,
@@ -71,9 +80,9 @@ export default function DashboardPage() {
     leads,
     deals,
     isDemo,
+    users,
     activityCounters,
     activityRecords,
-    users,
     currentUserId,
     getUserById,
     getOwnerDisplayName,
@@ -118,17 +127,30 @@ export default function DashboardPage() {
     [leads, channelScope],
   );
 
-  const scopedLeads = React.useMemo(
+  const ownerScopedLeads = React.useMemo(
     () => filterLeadsByOwnerScope(channelScopedLeads, ownerScope, ownerScopeDeps),
     [channelScopedLeads, ownerScope, ownerScopeDeps],
   );
 
+  const scopedLeads = React.useMemo(
+    () => filterLeadsByDateRange(ownerScopedLeads, timeRange as DashboardTimeRangeKey),
+    [ownerScopedLeads, timeRange],
+  );
+
   const scopedLeadIds = React.useMemo(() => new Set(scopedLeads.map((l) => l.id)), [scopedLeads]);
 
-  const scopedDeals = React.useMemo(() => {
+  const ownerScopedDeals = React.useMemo(() => {
     if (channelScope.length === 0 && ownerScope === "all-owners") return deals;
-    return deals.filter((d) => scopedLeadIds.has(d.leadId));
-  }, [deals, scopedLeadIds, channelScope.length, ownerScope]);
+    const ids = new Set(
+      filterLeadsByOwnerScope(channelScopedLeads, ownerScope, ownerScopeDeps).map((l) => l.id),
+    );
+    return deals.filter((d) => ids.has(d.leadId));
+  }, [deals, channelScopedLeads, ownerScope, ownerScopeDeps, channelScope.length]);
+
+  const scopedDeals = React.useMemo(
+    () => filterDealsByDateRange(ownerScopedDeals, timeRange as DashboardTimeRangeKey),
+    [ownerScopedDeals, timeRange],
+  );
 
   const activityAfterChannel = React.useMemo(
     () =>
@@ -139,8 +161,13 @@ export default function DashboardPage() {
   );
 
   const scopedActivityCounters = React.useMemo(
-    () => filterActivityCountersByOwnerScope(activityAfterChannel, ownerScope, ownerScopeDeps),
-    [activityAfterChannel, ownerScope, ownerScopeDeps],
+    () =>
+      filterActivityCountersByOwnerScope(
+        filterActivityCountersByDateRange(activityAfterChannel, timeRange as DashboardTimeRangeKey),
+        ownerScope,
+        ownerScopeDeps,
+      ),
+    [activityAfterChannel, ownerScope, ownerScopeDeps, timeRange],
   );
 
   const activityRecordsAfterChannel = React.useMemo(
@@ -150,8 +177,13 @@ export default function DashboardPage() {
   );
 
   const scopedActivityRecords = React.useMemo(
-    () => filterActivityRecordsByOwnerScope(activityRecordsAfterChannel, ownerScope, ownerScopeDeps),
-    [activityRecordsAfterChannel, ownerScope, ownerScopeDeps],
+    () =>
+      filterActivityRecordsByOwnerScope(
+        filterActivityRecordsByDateRange(activityRecordsAfterChannel, timeRange as DashboardTimeRangeKey),
+        ownerScope,
+        ownerScopeDeps,
+      ),
+    [activityRecordsAfterChannel, ownerScope, ownerScopeDeps, timeRange],
   );
 
   const totalOpen = scopedLeads.filter((l) => !["won", "lost"].includes(l.stage)).length;
@@ -475,6 +507,30 @@ export default function DashboardPage() {
                 href="/leads?filter=idle"
               />
             </div>
+
+            {!frontlineLayout && (
+              <DashboardAiBrief
+                channelScope={channelScope}
+                ownerScope={ownerScope}
+                timeRange={timeRange as DashboardTimeRangeKey}
+                ownerLabel={ownerFilterTriggerLabel}
+                enabled={
+                  Boolean(viewer?.roleId) &&
+                  (showTeamFollowupsOnDashboard(viewer?.roleId) || viewer?.roleId === "director")
+                }
+                demoBundle={
+                  isDemo
+                    ? {
+                        leads,
+                        deals,
+                        followups,
+                        leadTasks,
+                        users,
+                      }
+                    : undefined
+                }
+              />
+            )}
 
             {!frontlineLayout && pendingOverview}
 

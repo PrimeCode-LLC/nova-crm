@@ -525,9 +525,9 @@ export function NewProspectDialog({
         const db = getFirebaseDb();
         await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
       } else {
-        addAccount(account);
-        addContact(contact);
-        addLead(lead);
+        await addAccount(account);
+        await addContact(contact);
+        await addLead(lead);
       }
       addTimelineEvent({
         id: newTimelineEventId(),

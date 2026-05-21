@@ -1,4 +1,4 @@
-import { writeBatch, doc } from "firebase/firestore";
+import { writeBatch, doc, setDoc } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { Account, Contact, Lead } from "@/lib/types";
@@ -9,6 +9,48 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<strin
     if (v !== undefined) out[k] = v;
   }
   return out;
+}
+
+export async function persistAccountCreateClient(
+  db: Firestore,
+  organizationId: string,
+  account: Account,
+): Promise<void> {
+  await setDoc(
+    doc(db, COLLECTIONS.accounts, account.id),
+    stripUndefined({
+      ...account,
+      organizationId,
+    }) as Record<string, unknown>,
+  );
+}
+
+export async function persistContactCreateClient(
+  db: Firestore,
+  organizationId: string,
+  contact: Contact,
+): Promise<void> {
+  await setDoc(
+    doc(db, COLLECTIONS.contacts, contact.id),
+    stripUndefined({
+      ...contact,
+      organizationId,
+    }) as Record<string, unknown>,
+  );
+}
+
+export async function persistLeadCreateClient(
+  db: Firestore,
+  organizationId: string,
+  lead: Lead,
+): Promise<void> {
+  await setDoc(
+    doc(db, COLLECTIONS.leads, lead.id),
+    stripUndefined({
+      ...lead,
+      organizationId,
+    }) as Record<string, unknown>,
+  );
 }
 
 /**

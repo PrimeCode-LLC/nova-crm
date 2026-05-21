@@ -65,6 +65,7 @@ export async function GET(req: Request) {
     mailboxes,
     activeMailboxId: meta.activeMailboxId,
     linkedLeadByMessageId: meta.linkedLeadByMessageId,
+    blockedSenderDomains: meta.blockedSenderDomains,
   });
 }
 

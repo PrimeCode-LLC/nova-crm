@@ -1,4 +1,4 @@
-import type { ActivityCounterRow, ActivityRecord, Followup, Lead, User } from "@/lib/types";
+import type { ActivityCounterRow, ActivityRecord, Followup, Lead, LeadTask, User } from "@/lib/types";
 
 /** `Select` value prefix for filtering to a single `ownerId` (Firebase uid). */
 export const OWNER_SCOPE_PREFIX = "owner:";
@@ -67,6 +67,34 @@ export function filterFollowupsByOwnerScope(
   return [...followups];
 }
 
+/** Narrow lead tasks by assignee (`assigneeId`), same semantics as `filterFollowupsByOwnerScope`. */
+export function filterLeadTasksByOwnerScope(
+  tasks: readonly LeadTask[],
+  ownerScope: string,
+  deps: OwnerScopeDeps,
+): LeadTask[] {
+  const { currentUserId, users, getUserById, getOwnerDisplayName } = deps;
+  if (ownerScope === "all-owners") return [...tasks];
+  if (ownerScope === "open-queue") return [...tasks];
+  if (ownerScope === "me") return tasks.filter((t) => t.assigneeId === currentUserId);
+  if (ownerScope === "unassigned") {
+    return tasks.filter((t) => {
+      const aid = t.assigneeId?.trim();
+      if (!aid) return true;
+      return !getUserById(aid) && !getOwnerDisplayName(aid);
+    });
+  }
+  if (ownerScope === "team") {
+    const peerIds = new Set(users.filter((u) => u.id !== currentUserId).map((u) => u.id));
+    return tasks.filter((t) => peerIds.has(t.assigneeId));
+  }
+  if (ownerScope.startsWith(OWNER_SCOPE_PREFIX)) {
+    const uid = ownerScope.slice(OWNER_SCOPE_PREFIX.length);
+    return tasks.filter((t) => t.assigneeId === uid);
+  }
+  return [...tasks];
+}
+
 export function buildPersonOwnerOptions(
   leads: readonly Lead[],
   users: readonly User[],
@@ -101,6 +129,26 @@ export function fallbackOwnerPickerLabel(uid: string): string {
   if (!t) return "Unknown member";
   if (t.length <= 14) return t;
   return `Member (…${t.slice(-6)})`;
+}
+
+/** Readable label for workspace-member pickers when `displayName` is missing or equals the uid. */
+export function workspaceMemberPickerLabel(
+  u: User,
+  getOwnerDisplayName: (uid: string) => string | undefined,
+  options?: { includeRole?: boolean },
+): string {
+  const fromLookup = getOwnerDisplayName(u.id)?.trim() || "";
+  const name = u.displayName?.trim() || fromLookup;
+  let base: string;
+  if (name && name !== u.id) base = name;
+  else {
+    const em = u.email?.trim();
+    base = em || fallbackOwnerPickerLabel(u.id);
+  }
+  if (options?.includeRole && u.orgRole && u.orgRole !== "member") {
+    return `${base} · ${u.orgRole}`;
+  }
+  return base;
 }
 
 /** Resolve label for an owner `<Select>` trigger from built options (or short fallback). */

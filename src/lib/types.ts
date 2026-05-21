@@ -90,6 +90,12 @@ export interface User {
   orgRole?: OrgMemberRole;
   status: "active" | "inactive" | "pip";
   createdAt: ISODate;
+  /** Personal AI preferences (tone, extra instructions). */
+  aiPreferences?: {
+    tone?: "professional" | "friendly" | "concise";
+    extraInstructions?: string;
+    saveAnalysisToTimeline?: boolean;
+  };
 }
 
 /** SaaS customer (tenant). Managed via platform admin + Admin SDK + tenant owner. */
@@ -550,7 +556,8 @@ export type TimelineEventType =
   | "lead_task_completed"
   | "deal_created"
   | "assignment_changed"
-  | "field_changed";
+  | "field_changed"
+  | "ai_analysis";
 
 export interface TimelineEvent {
   id: string;

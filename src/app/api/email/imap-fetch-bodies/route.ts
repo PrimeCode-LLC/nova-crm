@@ -110,6 +110,7 @@ export async function POST(req: Request) {
         messageId?: string;
         inReplyTo?: string;
         referenceIds?: string[];
+        listUnsubscribe?: string;
         bodySynced: boolean;
       }> = [];
 
@@ -172,6 +173,7 @@ export async function POST(req: Request) {
               messageId,
               inReplyTo,
               referenceIds,
+              listUnsubscribe: parsed.listUnsubscribe,
               bodySynced: true,
             });
           } catch {

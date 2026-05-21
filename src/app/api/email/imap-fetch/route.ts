@@ -165,6 +165,8 @@ export async function POST(req: Request) {
           let inReplyTo = normalizeMessageId(envExt?.inReplyTo);
           let referenceIds = parseReferencesField(envExt?.references);
 
+          let listUnsubscribe: string | undefined;
+
           const inBodyTier = uidsForBody.includes(uid);
           const src = sourceByUid.get(uid);
 
@@ -186,6 +188,7 @@ export async function POST(req: Request) {
               if (parsed.referenceIds?.length) referenceIds = parsed.referenceIds;
               if (parsed.cc.trim()) cc = parsed.cc;
               if (parsed.attachments.length > 0) attachments = parsed.attachments;
+              if (parsed.listUnsubscribe) listUnsubscribe = parsed.listUnsubscribe;
               bodySynced = true;
             } catch {
               preview = "";
@@ -218,6 +221,7 @@ export async function POST(req: Request) {
             inReplyTo,
             referenceIds: referenceIds.length > 0 ? referenceIds : undefined,
             bodySynced,
+            ...(listUnsubscribe ? { listUnsubscribe } : {}),
           };
         }),
       );

@@ -6,6 +6,7 @@ import { setEmailAccountMetaServer } from "@/lib/email/mailbox-profiles-server";
 const schema = z.object({
   activeMailboxId: z.string().optional(),
   linkedLeadByMessageId: z.record(z.string(), z.string()).optional(),
+  blockedSenderDomains: z.array(z.string()).optional(),
 });
 
 export async function PATCH(req: Request) {

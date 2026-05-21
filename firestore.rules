@@ -18,15 +18,16 @@ service cloud.firestore {
     }
 
     /**
-     * Tenant id for the requesting user. Tries the JWT claim first (fast,
-     * no document read). Falls back to the user doc so brand-new signups
-     * work before the ID-token refresh propagates.
+     * Tenant id for the requesting user. Prefer the `/users/{uid}` document
+     * (source of truth, matches client queries from `useUserDoc`). Fall back
+     * to the JWT claim only when the doc field is absent — a stale token org
+     * must not override the live membership on the user doc.
      */
     function callerOrgId() {
       return signedIn()
-        ? (request.auth.token.organizationId != null
-            ? request.auth.token.organizationId
-            : userDoc().organizationId)
+        ? (userDoc().organizationId != null
+            ? userDoc().organizationId
+            : request.auth.token.organizationId)
         : null;
     }
 
@@ -250,6 +251,11 @@ service cloud.firestore {
     match /profiles/{id} {
       allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
       allow write: if tenantWritable();
+    }
+
+    match /campaigns/{id} {
+      allow read: if tenantReadable() && inCallerOrg(resource.data);
+      allow write: if tenantWritable() && isOrgAtLeast('manager');
     }
 
     match /labels/{id} {

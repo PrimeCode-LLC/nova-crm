@@ -11,6 +11,7 @@ import {
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { workspaceChatChannelsForUserQuery } from "@/lib/firestore/workspace-chat-queries";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import {
   persistWorkspaceChatChannelCreate,
@@ -122,10 +123,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
     setLoading(true);
     setError(null);
-    const qCh = query(
-      collection(db, COLLECTIONS.workspaceChatChannels),
-      where("organizationId", "==", organizationId),
-    );
+    const qCh = workspaceChatChannelsForUserQuery(db, organizationId, currentUserId);
     const unsub = onSnapshot(
       qCh,
       (snap) => {
@@ -140,7 +138,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       },
     );
     return () => unsub();
-  }, [isDemo, organizationId]);
+  }, [isDemo, organizationId, currentUserId]);
 
   /** Ensure #general exists (live). */
   React.useEffect(() => {

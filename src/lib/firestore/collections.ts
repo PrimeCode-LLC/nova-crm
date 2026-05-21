@@ -16,6 +16,7 @@ export const COLLECTIONS = {
   activityCounters: "activityCounters",
   activityRecords: "activityRecords",
   profiles: "profiles",
+  campaigns: "campaigns",
   scriptLibrary: "scriptLibrary",
   /** Workspace-defined labels for leads, deals, accounts, contacts. */
   labels: "labels",
@@ -36,6 +37,16 @@ export const ORG_SUBCOLLECTIONS = {
   members: "members",
   invites: "invites",
   audit: "audit",
+  aiSettings: "aiSettings",
+  aiProviderSecrets: "aiProviderSecrets",
+  aiPrompts: "aiPrompts",
+  aiLibraries: "aiLibraries",
+  aiDocuments: "aiDocuments",
+  aiUsageDaily: "aiUsageDaily",
+  aiUsageEvents: "aiUsageEvents",
+  aiCache: "aiCache",
+  /** Saved dashboard AI brief generations (trimmed to last N per org). */
+  aiBriefHistory: "aiBriefHistory",
 } as const;
 
 /**
@@ -57,6 +68,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.activityCounters,
   COLLECTIONS.activityRecords,
   COLLECTIONS.profiles,
+  COLLECTIONS.campaigns,
   COLLECTIONS.scriptLibrary,
   COLLECTIONS.labels,
   COLLECTIONS.auditLog,

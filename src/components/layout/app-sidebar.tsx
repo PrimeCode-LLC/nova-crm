@@ -33,6 +33,8 @@ import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
+import { useInboxMailUnreadTotal } from "@/hooks/use-inbox-mail-unread-total";
+import { formatUnreadBadgeCount } from "@/lib/email/inbox-unread-count";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import type { Role } from "@/lib/types";
@@ -76,10 +78,12 @@ function NavMenuLinks({
   items,
   pathname,
   teamChatUnreadTotal,
+  inboxMailUnreadTotal,
 }: {
   items: NavItem[];
   pathname: string;
   teamChatUnreadTotal: number;
+  inboxMailUnreadTotal: number;
 }) {
   return (
     <>
@@ -88,11 +92,11 @@ function NavMenuLinks({
           pathname === item.href || pathname.startsWith(item.href + "/");
         const Icon = item.icon;
         const chatBadge =
-          item.href === "/team-chat" && teamChatUnreadTotal > 0
-            ? teamChatUnreadTotal > 99
-              ? "99+"
-              : String(teamChatUnreadTotal)
-            : null;
+          item.href === "/team-chat" ? formatUnreadBadgeCount(teamChatUnreadTotal) : null;
+        const inboxBadge =
+          item.href === "/inbox" ? formatUnreadBadgeCount(inboxMailUnreadTotal) : null;
+        const badge = inboxBadge ?? chatBadge;
+        const badgeIsInbox = Boolean(inboxBadge);
         return (
           <SidebarMenuItem key={item.href}>
             <SidebarMenuButton
@@ -102,9 +106,16 @@ function NavMenuLinks({
                 <Link href={item.href} className="flex min-w-0 flex-1 items-center gap-2">
                   <Icon className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{item.label}</span>
-                  {chatBadge ? (
-                    <span className="flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full bg-muted px-1.5 text-[10px] font-bold tabular-nums text-foreground ring-1 ring-border">
-                      {chatBadge}
+                  {badge ? (
+                    <span
+                      className={cn(
+                        "flex h-5 min-w-5 shrink-0 items-center justify-center rounded-full px-1.5 text-[10px] font-bold tabular-nums",
+                        badgeIsInbox
+                          ? "bg-red-600 text-white"
+                          : "bg-muted text-foreground ring-1 ring-border",
+                      )}
+                    >
+                      {badge}
                     </span>
                   ) : null}
                 </Link>
@@ -122,31 +133,61 @@ function ConfigurationNavGroups({
   pathname,
   flat,
   teamChatUnreadTotal,
+  inboxMailUnreadTotal,
 }: {
   items: NavItem[];
   pathname: string;
   flat: boolean;
   teamChatUnreadTotal: number;
+  inboxMailUnreadTotal: number;
 }) {
   if (flat) {
     return (
       <SidebarMenu>
-        <NavMenuLinks items={items} pathname={pathname} teamChatUnreadTotal={teamChatUnreadTotal} />
+        <NavMenuLinks
+          items={items}
+          pathname={pathname}
+          teamChatUnreadTotal={teamChatUnreadTotal}
+          inboxMailUnreadTotal={inboxMailUnreadTotal}
+        />
       </SidebarMenu>
     );
   }
   const clusters = clusterConfigurationItems(items);
+  const [clusterOpen, setClusterOpen] = React.useState<Record<string, boolean>>({});
+
+  React.useEffect(() => {
+    setClusterOpen((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const cluster of clusters) {
+        const pathOpen = cluster.items.some(
+          (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
+        );
+        if (pathOpen && !prev[cluster.clusterId]) {
+          next[cluster.clusterId] = true;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pathname, clusters]);
+
   return (
     <div className="flex flex-col gap-0.5">
       {clusters.map((cluster) => {
-        const defaultOpen = cluster.items.some(
+        const pathOpen = cluster.items.some(
           (item) =>
             pathname === item.href || pathname.startsWith(item.href + "/"),
         );
+        const open = clusterOpen[cluster.clusterId] ?? pathOpen;
         return (
           <Collapsible
             key={cluster.clusterId}
-            defaultOpen={defaultOpen}
+            open={open}
+            onOpenChange={(nextOpen) =>
+              setClusterOpen((prev) => ({ ...prev, [cluster.clusterId]: nextOpen }))
+            }
             className="group/cluster"
           >
             <SidebarMenu>
@@ -167,6 +208,7 @@ function ConfigurationNavGroups({
                   items={cluster.items}
                   pathname={pathname}
                   teamChatUnreadTotal={teamChatUnreadTotal}
+                  inboxMailUnreadTotal={inboxMailUnreadTotal}
                 />
               </SidebarMenu>
             </CollapsibleContent>
@@ -258,6 +300,7 @@ export function AppSidebar({
     [navAccess.roleId, navAccess.isSuperAdmin, navAccess.roleLoading],
   );
   const { teamChatUnreadTotal } = useTeamChatUnread();
+  const inboxMailUnreadTotal = useInboxMailUnreadTotal();
   const { state: sidebarState } = useSidebar();
   const sidebarIsCollapsed = sidebarState === "collapsed";
 
@@ -284,6 +327,7 @@ export function AppSidebar({
                   pathname={pathname}
                   flat={sidebarIsCollapsed}
                   teamChatUnreadTotal={teamChatUnreadTotal}
+                  inboxMailUnreadTotal={inboxMailUnreadTotal}
                 />
               ) : (
                 <SidebarMenu>
@@ -291,6 +335,7 @@ export function AppSidebar({
                     items={section.items}
                     pathname={pathname}
                     teamChatUnreadTotal={teamChatUnreadTotal}
+                    inboxMailUnreadTotal={inboxMailUnreadTotal}
                   />
                 </SidebarMenu>
               )}

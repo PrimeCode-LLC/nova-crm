@@ -52,6 +52,7 @@ export function EmailAccountSync() {
           mailboxes?: EmailMailboxSettings[];
           activeMailboxId?: string;
           linkedLeadByMessageId?: Record<string, string>;
+          blockedSenderDomains?: string[];
           mailboxReadOnly?: boolean;
           dataOwnerUid?: string;
         };
@@ -74,6 +75,7 @@ export function EmailAccountSync() {
           mailboxes,
           activeMailboxId: active,
           linkedLeadByMessageId: data.linkedLeadByMessageId ?? {},
+          blockedSenderDomains: data.blockedSenderDomains ?? [],
           mailboxReadOnly: data.mailboxReadOnly,
         });
         const readOnly = Boolean(data.mailboxReadOnly);

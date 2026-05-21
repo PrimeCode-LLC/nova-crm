@@ -75,6 +75,7 @@ import {
 } from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
+import { LeadAnalyzeDialog } from "@/components/ai/lead-analyze-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
@@ -101,6 +102,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const [prospectFieldsOpen, setProspectFieldsOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
+  const [aiInsights, setAiInsights] = React.useState<{
+    summary: string;
+    riskLevel: string;
+  } | null>(null);
   React.useEffect(() => {
     setActiveTab(tabFromUrl);
   }, [tabFromUrl]);
@@ -203,6 +209,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
+  const deal = ws.deals.find((d) => d.leadId === lead.id);
   const campaign = ws.getCampaignById(lead.campaignId);
   const profile = ws.getProfileById(lead.profileId);
   const needsOutreachProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(lead.channel);
@@ -391,6 +398,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               }}
             >
               <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} /> Pin
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => setAnalyzeOpen(true)}
+            >
+              <Sparkles className="h-3.5 w-3.5" /> Analyze
             </Button>
             <Button
               variant="outline"
@@ -758,18 +773,29 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0 space-y-2 text-xs text-muted-foreground">
-                <p>
-                  Response time was{" "}
-                  <span className="font-semibold text-foreground tabular-nums">
-                    {lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "n/a"}
-                  </span>
-                  {lead.responseTimeMinutes && lead.responseTimeMinutes < 60
-                    ? ", in the top 10%."
-                    : ", slower than team average."}
-                </p>
-                <p>
-                  Last activity {fmtRelative(lead.lastActivityAt)} · {lead.touches} touches total.
-                </p>
+                {aiInsights ? (
+                  <>
+                    <p className="text-sm text-foreground leading-relaxed">{aiInsights.summary}</p>
+                    <p>
+                      AI risk: <span className="font-semibold capitalize">{aiInsights.riskLevel}</span>
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p>
+                      Response time was{" "}
+                      <span className="font-semibold text-foreground tabular-nums">
+                        {lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "n/a"}
+                      </span>
+                      {lead.responseTimeMinutes && lead.responseTimeMinutes < 60
+                        ? ", in the top 10%."
+                        : ", slower than team average."}
+                    </p>
+                    <p>
+                      Last activity {fmtRelative(lead.lastActivityAt)} · {lead.touches} touches total.
+                    </p>
+                  </>
+                )}
                 {lead.estimatedValue && (
                   <p>
                     Estimated value{" "}
@@ -777,12 +803,60 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     {lead.expectedCloseDate && ` · close ${fmtDate(lead.expectedCloseDate, "MMM d")}`}
                   </p>
                 )}
+                <Button
+                  type="button"
+                  variant="link"
+                  className="h-auto p-0 text-xs"
+                  onClick={() => setAnalyzeOpen(true)}
+                >
+                  Run AI analysis
+                </Button>
               </CardContent>
             </Card>
           </aside>
         </div>
       </PageBody>
 
+      <LeadAnalyzeDialog
+        open={analyzeOpen}
+        onOpenChange={setAnalyzeOpen}
+        lead={lead}
+        demoContext={
+          ws.isDemo
+            ? {
+                lead,
+                account: account ?? undefined,
+                contact: contact ?? undefined,
+                deal: deal ?? undefined,
+                notes,
+                timeline,
+                touchpoints,
+                followups,
+                tasks: leadTasksForTab,
+                emailThreads: relatedEmails.map((e) => ({
+                  subject: e.subject,
+                  messages: [{ from: e.from, date: e.at, snippet: e.body.slice(0, 500) }],
+                })),
+              }
+            : undefined
+        }
+        onAnalysis={(a) => {
+          setAiInsights({ summary: a.summary, riskLevel: a.riskLevel });
+          if (ws.currentUserId) {
+            ws.addTimelineEvent({
+              id:
+                typeof crypto !== "undefined" && "randomUUID" in crypto
+                  ? `te-${crypto.randomUUID()}`
+                  : `te-${Date.now()}`,
+              leadId: lead.id,
+              type: "ai_analysis",
+              actorId: ws.currentUserId,
+              summary: `AI analysis (${a.riskLevel} risk): ${a.summary.slice(0, 120)}${a.summary.length > 120 ? "…" : ""}`,
+              createdAt: new Date().toISOString(),
+            });
+          }
+        }}
+      />
       <EditLeadDialog
         open={editOpen}
         onOpenChange={setEditOpen}

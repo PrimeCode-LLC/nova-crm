@@ -11,6 +11,7 @@ import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import type {
   ActivityCounterRow,
+  Campaign,
   Followup,
   LeadTask,
   Note,
@@ -235,6 +236,39 @@ export async function persistProfileUpdate(
     payload.notes = patch.notes && patch.notes.trim() ? patch.notes : deleteField();
   }
   await updateDoc(doc(db, COLLECTIONS.profiles, profileId), payload);
+}
+
+export async function persistCampaignCreate(
+  db: Firestore,
+  organizationId: string,
+  c: Campaign,
+): Promise<void> {
+  await setDoc(doc(db, COLLECTIONS.campaigns, c.id), {
+    organizationId,
+    name: c.name,
+    channel: c.channel,
+    status: c.status,
+    externalRef: c.externalRef ?? null,
+    startedAt: c.startedAt ?? null,
+    stats: c.stats,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function persistCampaignUpdate(
+  db: Firestore,
+  campaignId: string,
+  patch: Partial<Campaign>,
+): Promise<void> {
+  const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.name !== undefined) payload.name = patch.name;
+  if (patch.channel !== undefined) payload.channel = patch.channel;
+  if (patch.status !== undefined) payload.status = patch.status;
+  if (patch.externalRef !== undefined) payload.externalRef = patch.externalRef ?? deleteField();
+  if (patch.startedAt !== undefined) payload.startedAt = patch.startedAt ?? deleteField();
+  if (patch.stats !== undefined) payload.stats = patch.stats;
+  await updateDoc(doc(db, COLLECTIONS.campaigns, campaignId), payload);
 }
 
 export async function persistWorkspaceChatChannelCreate(

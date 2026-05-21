@@ -8,6 +8,7 @@ import {
 } from "@/lib/email-account-types";
 import { buildDemoEmailSeed } from "@/lib/demo-email-seed";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
+import { normalizeBlockedSenderDomain } from "@/lib/email/blocked-sender-domains";
 
 export interface EmailAccountStore {
   /** Live workspace: true after /api/email/mailboxes load (or failed); demo: true immediately. */
@@ -27,6 +28,8 @@ export interface EmailAccountStore {
   mailboxes: EmailMailboxSettings[];
   activeMailboxId: string;
   linkedLeadByMessageId: Record<string, string>;
+  /** Sender domains whose INBOX messages are auto-moved to Trash. */
+  blockedSenderDomains: string[];
   inboundByMailbox: Record<string, MailInbound[]>;
   /** Messages shown in Email → Trash (loaded from server Trash folder or demo moves). */
   trashInboundByMailbox: Record<string, MailInbound[]>;
@@ -38,8 +41,11 @@ export interface EmailAccountStore {
     mailboxes: EmailMailboxSettings[];
     activeMailboxId: string;
     linkedLeadByMessageId: Record<string, string>;
+    blockedSenderDomains?: string[];
     mailboxReadOnly?: boolean;
   }) => void;
+  addBlockedSenderDomain: (domain: string) => void;
+  removeBlockedSenderDomain: (domain: string) => void;
   /** Live: switch inbox subject (admin). Clears cached threads until the next mailbox hydrate. */
   setMailViewAsUid: (uid: string | null) => void;
   setActiveMailbox: (mailboxId: string) => void;
@@ -72,6 +78,10 @@ export interface EmailAccountStore {
   moveInboundUidsToTrashLocal: (mailboxId: string, uids: number[]) => void;
   /** Remove from local Trash cache after permanent delete (demo) or optimistic UI. */
   removeTrashByUids: (mailboxId: string, uids: number[]) => void;
+  /** Update \\Seen for INBOX rows by IMAP uid (optimistic UI + after IMAP STORE). */
+  patchInboundSeen: (mailboxId: string, uids: number[], seen: boolean) => void;
+  /** Update \\Seen for Trash rows by IMAP uid. */
+  patchTrashSeen: (mailboxId: string, uids: number[], seen: boolean) => void;
   upsertDraft: (draft: Omit<MailDraft, "id" | "updatedAt"> & { id?: string }) => string;
   deleteDraft: (id: string) => void;
   addSent: (item: Omit<MailSent, "id" | "sentAt">) => string;
@@ -120,6 +130,7 @@ function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
       body: JSON.stringify({
         activeMailboxId: s.activeMailboxId,
         linkedLeadByMessageId: s.linkedLeadByMessageId,
+        blockedSenderDomains: s.blockedSenderDomains,
       }),
     });
   }, 800);
@@ -133,6 +144,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
   activeMailboxId: "",
   linkedLeadByMessageId: {},
+  blockedSenderDomains: [],
   inboundByMailbox: {},
   trashInboundByMailbox: {},
   drafts: [],
@@ -149,12 +161,35 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       activeFromServer && mailboxes.some((m) => m.id === activeFromServer)
         ? activeFromServer
         : mailboxes[0].id;
+    const blocked = (payload.blockedSenderDomains ?? [])
+      .map(normalizeBlockedSenderDomain)
+      .filter(Boolean);
     set({
       mailboxes,
       activeMailboxId: active,
       linkedLeadByMessageId: payload.linkedLeadByMessageId,
+      blockedSenderDomains: [...new Set(blocked)],
       mailboxDataReadOnly: Boolean(payload.mailboxReadOnly),
     });
+  },
+  addBlockedSenderDomain: (domain) => {
+    if (get().mailboxDataReadOnly) return;
+    const key = normalizeBlockedSenderDomain(domain);
+    if (!key) return;
+    set((s) => {
+      if (s.blockedSenderDomains.includes(key)) return s;
+      return { blockedSenderDomains: [...s.blockedSenderDomains, key] };
+    });
+    scheduleEmailMetaPersist(get);
+  },
+  removeBlockedSenderDomain: (domain) => {
+    if (get().mailboxDataReadOnly) return;
+    const key = normalizeBlockedSenderDomain(domain);
+    if (!key) return;
+    set((s) => ({
+      blockedSenderDomains: s.blockedSenderDomains.filter((d) => d !== key),
+    }));
+    scheduleEmailMetaPersist(get);
   },
   setMailViewAsUid: (uid) =>
     set((s) => {
@@ -169,6 +204,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         drafts: [],
         sent: [],
         linkedLeadByMessageId: {},
+        blockedSenderDomains: [],
         mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
         activeMailboxId: "",
       };
@@ -367,6 +403,26 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       };
     });
   },
+  patchInboundSeen: (mailboxId, uids, seen) => {
+    if (uids.length === 0) return;
+    const uidSet = new Set(uids);
+    set((s) => {
+      const prev = s.inboundByMailbox[mailboxId] ?? [];
+      if (prev.length === 0) return s;
+      const next = prev.map((m) => (uidSet.has(m.uid) ? { ...m, seen } : m));
+      return { inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: next } };
+    });
+  },
+  patchTrashSeen: (mailboxId, uids, seen) => {
+    if (uids.length === 0) return;
+    const uidSet = new Set(uids);
+    set((s) => {
+      const prev = s.trashInboundByMailbox[mailboxId] ?? [];
+      if (prev.length === 0) return s;
+      const next = prev.map((m) => (uidSet.has(m.uid) ? { ...m, seen } : m));
+      return { trashInboundByMailbox: { ...s.trashInboundByMailbox, [mailboxId]: next } };
+    });
+  },
   removeTrashByUids: (mailboxId, uids) => {
     if (uids.length === 0) return;
     const uidSet = new Set(uids);
@@ -433,6 +489,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       mailboxes: seed.mailboxes,
       activeMailboxId: seed.activeMailboxId,
       linkedLeadByMessageId: seed.linkedLeadByMessageId,
+      blockedSenderDomains: [],
       inboundByMailbox: seed.inboundByMailbox,
       trashInboundByMailbox: {},
       drafts: seed.drafts,

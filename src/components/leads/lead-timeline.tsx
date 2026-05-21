@@ -17,6 +17,7 @@ import {
   ListChecks,
   ListTodo,
   Handshake,
+  Sparkles,
   type LucideIcon,
 } from "lucide-react";
 import type { Lead, TimelineEvent, TimelineEventType, User } from "@/lib/types";
@@ -44,6 +45,7 @@ const ICONS: Record<TimelineEventType, LucideIcon> = {
   deal_created: Handshake,
   assignment_changed: UserCog2,
   field_changed: FileEdit,
+  ai_analysis: Sparkles,
 };
 
 const TONES: Record<TimelineEventType, string> = {
@@ -60,6 +62,7 @@ const TONES: Record<TimelineEventType, string> = {
   deal_created: "bg-success/10 text-success border-success/20",
   assignment_changed: "bg-info/10 text-info border-info/20",
   field_changed: "bg-muted text-muted-foreground border-muted",
+  ai_analysis: "bg-primary/10 text-primary border-primary/20",
 };
 
 function newTeId() {

@@ -2,6 +2,7 @@
 
 import { reload, type User } from "firebase/auth";
 import { getFirebaseAuth } from "@/lib/firebase/client";
+import { readAppClaims } from "@/lib/auth/claims";
 
 export type ExchangeResult = {
   organizationId: string | null;
@@ -41,28 +42,32 @@ export async function exchangeIdTokenForSession(
     needsClaimRefresh?: boolean;
   };
 
-  if (data.needsClaimRefresh) {
-    const auth = getFirebaseAuth();
-    const user = auth.currentUser;
-    if (user) {
-      const fresh = await user.getIdToken(true);
-      const re = await fetch("/api/auth/session", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ idToken: fresh }),
-      });
-      if (!re.ok) {
-        const body = (await re.json().catch(() => ({}))) as { error?: string };
-        throw new Error(body.error ?? `Session refresh failed (${re.status})`);
-      }
-      const refreshed = (await re.json()) as ExchangeResult;
-      return {
-        organizationId: refreshed.organizationId,
-        orgRole: refreshed.orgRole,
-        membershipPending: refreshed.membershipPending,
-      };
+  const auth = getFirebaseAuth();
+  const user = auth.currentUser;
+
+  if (data.needsClaimRefresh && user) {
+    const fresh = await user.getIdToken(true);
+    const re = await fetch("/api/auth/session", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ idToken: fresh }),
+    });
+    if (!re.ok) {
+      const body = (await re.json().catch(() => ({}))) as { error?: string };
+      throw new Error(body.error ?? `Session refresh failed (${re.status})`);
     }
+    const refreshed = (await re.json()) as ExchangeResult;
+    await user.getIdToken(true);
+    return {
+      organizationId: refreshed.organizationId,
+      orgRole: refreshed.orgRole,
+      membershipPending: refreshed.membershipPending,
+    };
+  }
+
+  if (user && data.organizationId) {
+    await user.getIdToken(true);
   }
 
   return {
@@ -70,6 +75,33 @@ export async function exchangeIdTokenForSession(
     orgRole: data.orgRole,
     membershipPending: data.membershipPending,
   };
+}
+
+/**
+ * After login or on app load, align the Firebase client ID token with custom
+ * claims stamped by `/api/auth/session` (rules read `users/{uid}.organizationId`
+ * first, but other clients still benefit from a fresh token).
+ */
+export async function syncFirebaseAuthClaimsClient(user: User): Promise<void> {
+  try {
+    const meRes = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+    if (!meRes.ok) return;
+    const body = (await meRes.json()) as {
+      user?: { organizationId?: string; orgRole?: string } | null;
+    };
+    const expectedOrg = body.user?.organizationId;
+    if (!expectedOrg) return;
+    const token = await user.getIdTokenResult(false);
+    const claims = readAppClaims(token.claims as Record<string, unknown>);
+    if (
+      claims.organizationId !== expectedOrg ||
+      (body.user?.orgRole && claims.orgRole !== body.user.orgRole)
+    ) {
+      await user.getIdToken(true);
+    }
+  } catch {
+    /* non-fatal */
+  }
 }
 
 /**

@@ -158,14 +158,14 @@ export function buildLeadGraphFromMappedRow(
 export function ingestMappedRowAsLead(
   m: MappedImportRow,
   ownerId: string,
-  addAccount: (a: Account) => void,
-  addContact: (c: Contact) => void,
-  addLead: (l: Lead) => void,
+  addAccount: (a: Account) => Promise<void>,
+  addContact: (c: Contact) => Promise<void>,
+  addLead: (l: Lead) => Promise<void>,
 ): void {
   const { account, contact, lead } = buildLeadGraphFromMappedRow(m, ownerId);
-  addAccount(account);
-  addContact(contact);
-  addLead(lead);
+  void addAccount(account);
+  void addContact(contact);
+  void addLead(lead);
 }
 
 export function collectNormalizedEmailsFromWorkspace(

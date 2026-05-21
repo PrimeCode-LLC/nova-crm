@@ -2,11 +2,21 @@
 
 import * as React from "react";
 import { usePathname, useRouter } from "next/navigation";
-import { collection, doc, limit, onSnapshot, orderBy, query, where } from "firebase/firestore";
+import {
+  collection,
+  doc,
+  limit,
+  onSnapshot,
+  orderBy,
+  query,
+  where,
+  type Unsubscribe,
+} from "firebase/firestore";
 import { toast } from "sonner";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { workspaceChatChannelsForUserQuery } from "@/lib/firestore/workspace-chat-queries";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import { persistWorkspaceChatChannelLastRead } from "@/lib/firestore/persist-workspace-entities-client";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -15,6 +25,7 @@ import { useTeamChatDemoStore } from "@/stores/team-chat-demo-store";
 import type { User, WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
 
 const RECENT_MSG_LIMIT = 250;
+const CHANNEL_ID_IN_QUERY_LIMIT = 10;
 
 /** Stable fallbacks for Zustand selectors — `?? []` allocates a new array each snapshot, which makes `useSyncExternalStore` think the value changed every render and triggers React #185 (max update depth) in production builds. */
 const EMPTY_DEMO_CHANNELS: WorkspaceChatChannel[] = [];
@@ -156,9 +167,8 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
     !isDemo && Boolean(organizationId && currentUserId && isFirebaseWebConfigured());
 
   React.useEffect(() => {
-    if (!liveEnabled || !organizationId) {
+    if (!liveEnabled || !organizationId || !currentUserId) {
       setLiveChannels([]);
-      setLiveRecentMessages([]);
       setLiveChannelReads({});
       return;
     }
@@ -167,57 +177,119 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
       db = getFirebaseDb();
     } catch {
       setLiveChannels([]);
-      setLiveRecentMessages([]);
       setLiveChannelReads({});
       return;
     }
 
-    const qCh = query(
-      collection(db, COLLECTIONS.workspaceChatChannels),
-      where("organizationId", "==", organizationId),
+    const qCh = workspaceChatChannelsForUserQuery(db, organizationId, currentUserId);
+    const unsubCh = onSnapshot(
+      qCh,
+      (snap) => {
+        const list = snap.docs.map((d) => asChannelRaw(d.id, d.data() as Record<string, unknown>));
+        list.sort((a, b) => a.name.localeCompare(b.name));
+        setLiveChannels(list);
+      },
+      () => setLiveChannels([]),
     );
-    const unsubCh = onSnapshot(qCh, (snap) => {
-      const list = snap.docs.map((d) => asChannelRaw(d.id, d.data() as Record<string, unknown>));
-      list.sort((a, b) => a.name.localeCompare(b.name));
-      setLiveChannels(list);
-    });
-
-    const qMsg = query(
-      collection(db, COLLECTIONS.workspaceChatMessages),
-      where("organizationId", "==", organizationId),
-      orderBy("createdAt", "desc"),
-      limit(RECENT_MSG_LIMIT),
-    );
-    const unsubMsg = onSnapshot(qMsg, (snap) => {
-      const list = snap.docs.map((d) => asMessageRaw(d.id, d.data() as Record<string, unknown>));
-      setLiveRecentMessages(list);
-    });
 
     const readRef = doc(db, COLLECTIONS.workspaceChatReads, `${organizationId}__${currentUserId}`);
-    const unsubRead = onSnapshot(readRef, (snap) => {
-      if (!snap.exists()) {
-        setLiveChannelReads({});
-        return;
-      }
-      const raw = snap.data() as Record<string, unknown>;
-      const ch = raw.channels;
-      if (ch && typeof ch === "object" && !Array.isArray(ch)) {
-        const out: Record<string, string> = {};
-        for (const [k, v] of Object.entries(ch as Record<string, unknown>)) {
-          if (typeof v === "string") out[k] = v;
+    const unsubRead = onSnapshot(
+      readRef,
+      (snap) => {
+        if (!snap.exists()) {
+          setLiveChannelReads({});
+          return;
         }
-        setLiveChannelReads(out);
-      } else {
-        setLiveChannelReads({});
-      }
-    });
+        const raw = snap.data() as Record<string, unknown>;
+        const ch = raw.channels;
+        if (ch && typeof ch === "object" && !Array.isArray(ch)) {
+          const out: Record<string, string> = {};
+          for (const [k, v] of Object.entries(ch as Record<string, unknown>)) {
+            if (typeof v === "string") out[k] = v;
+          }
+          setLiveChannelReads(out);
+        } else {
+          setLiveChannelReads({});
+        }
+      },
+      () => setLiveChannelReads({}),
+    );
 
     return () => {
       unsubCh();
-      unsubMsg();
       unsubRead();
     };
   }, [liveEnabled, organizationId, currentUserId]);
+
+  /** Recent messages only from channels the user can read (org-wide query fails security rules when DMs exist). */
+  React.useEffect(() => {
+    if (!liveEnabled || !organizationId || !currentUserId) {
+      setLiveRecentMessages([]);
+      return;
+    }
+
+    const accessibleIds = liveChannels
+      .filter((ch) => channelAccessible(ch, currentUserId))
+      .map((ch) => ch.id);
+    if (!accessibleIds.length) {
+      setLiveRecentMessages([]);
+      return;
+    }
+
+    let db: ReturnType<typeof getFirebaseDb>;
+    try {
+      db = getFirebaseDb();
+    } catch {
+      setLiveRecentMessages([]);
+      return;
+    }
+
+    const batches: string[][] = [];
+    for (let i = 0; i < accessibleIds.length; i += CHANNEL_ID_IN_QUERY_LIMIT) {
+      batches.push(accessibleIds.slice(i, i + CHANNEL_ID_IN_QUERY_LIMIT));
+    }
+
+    const byBatch = new Map<number, WorkspaceChatMessage[]>();
+    const unsubs: Unsubscribe[] = [];
+
+    const publishMerged = () => {
+      const list = Array.from(byBatch.values())
+        .flat()
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+      setLiveRecentMessages(list.slice(0, RECENT_MSG_LIMIT));
+    };
+
+    batches.forEach((channelIds, batchIndex) => {
+      const qMsg = query(
+        collection(db, COLLECTIONS.workspaceChatMessages),
+        where("organizationId", "==", organizationId),
+        where("channelId", "in", channelIds),
+        orderBy("createdAt", "desc"),
+        limit(RECENT_MSG_LIMIT),
+      );
+      unsubs.push(
+        onSnapshot(
+          qMsg,
+          (snap) => {
+            byBatch.set(
+              batchIndex,
+              snap.docs.map((d) => asMessageRaw(d.id, d.data() as Record<string, unknown>)),
+            );
+            publishMerged();
+          },
+          () => {
+            byBatch.delete(batchIndex);
+            publishMerged();
+          },
+        ),
+      );
+    });
+
+    return () => {
+      for (const u of unsubs) u();
+      byBatch.clear();
+    };
+  }, [liveEnabled, organizationId, currentUserId, liveChannels]);
 
   const channels = isDemo ? demoChannels : liveChannels;
   const recentMessages = isDemo ? demoMessages : liveRecentMessages;

@@ -30,6 +30,7 @@ import type {
   TimelineEvent,
   User,
   Profile,
+  Campaign,
   CrmLabel,
 } from "@/lib/types";
 
@@ -49,6 +50,7 @@ export type LiveWorkspaceFirestoreState = {
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
   profiles: Profile[];
+  campaigns: Campaign[];
   crmLabels: CrmLabel[];
 };
 
@@ -68,6 +70,7 @@ const empty: LiveWorkspaceFirestoreState = {
   activityCounters: [],
   activityRecords: [],
   profiles: [],
+  campaigns: [],
   crmLabels: [],
 };
 
@@ -161,6 +164,23 @@ function asProfile(id: string, raw: Record<string, unknown>): Profile {
     ownerId: String(raw.ownerId ?? ""),
     active: raw.active !== false,
     notes: optionalNonEmptyString(raw.notes),
+  };
+}
+
+function asCampaign(id: string, raw: Record<string, unknown>): Campaign {
+  const statsRaw = raw.stats;
+  const stats =
+    statsRaw && typeof statsRaw === "object" && !Array.isArray(statsRaw)
+      ? (statsRaw as Campaign["stats"])
+      : { sent: 0, replied: 0, meetings: 0, closed: 0 };
+  return {
+    id,
+    name: String(raw.name ?? ""),
+    channel: (raw.channel as Campaign["channel"]) ?? "cold_email",
+    status: (raw.status as Campaign["status"]) ?? "draft",
+    externalRef: optionalNonEmptyString(raw.externalRef),
+    startedAt: raw.startedAt ? firestoreValueToIso(raw.startedAt) : undefined,
+    stats,
   };
 }
 
@@ -316,6 +336,7 @@ export function useLiveWorkspaceFirestore(
         activityCounters: [],
         activityRecords: [],
         profiles: [],
+        campaigns: [],
         crmLabels: [],
       });
       return;
@@ -342,6 +363,7 @@ export function useLiveWorkspaceFirestore(
         activityCounters: [],
         activityRecords: [],
         profiles: [],
+        campaigns: [],
         crmLabels: [],
       });
       return;
@@ -631,6 +653,21 @@ export function useLiveWorkspaceFirestore(
           applySnapshot("profiles", "profiles", profiles);
         },
         (err) => applyListenerError("profiles", err),
+      ),
+    );
+
+    const qCampaigns = query(
+      collection(db, COLLECTIONS.campaigns),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qCampaigns,
+        (snap) => {
+          const campaigns = snap.docs.map((d) => asCampaign(d.id, d.data() as Record<string, unknown>));
+          applySnapshot("campaigns", "campaigns", campaigns);
+        },
+        (err) => applyListenerError("campaigns", err),
       ),
     );
 

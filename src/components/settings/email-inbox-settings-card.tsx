@@ -21,7 +21,7 @@ import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-a
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
-import { Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
+import { Ban, Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
 
 export function EmailInboxSettingsCard() {
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
@@ -34,6 +34,12 @@ export function EmailInboxSettingsCard() {
   const setImap = useEmailAccountStore((s) => s.setImap);
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const emailServerSyncEnabled = useEmailAccountStore((s) => s.emailServerSyncEnabled);
+  const blockedSenderDomains = useEmailAccountStore((s) => s.blockedSenderDomains);
+  const removeBlockedSenderDomain = useEmailAccountStore((s) => s.removeBlockedSenderDomain);
+  const sortedBlockedDomains = React.useMemo(
+    () => [...blockedSenderDomains].sort((a, b) => a.localeCompare(b)),
+    [blockedSenderDomains],
+  );
   const [savingRemote, setSavingRemote] = React.useState(false);
   const [testingMailboxId, setTestingMailboxId] = React.useState<string | null>(null);
   const [openValues, setOpenValues] = React.useState<string[]>([]);
@@ -232,6 +238,57 @@ export function EmailInboxSettingsCard() {
             browser local storage.
           </CardDescription>
         </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <Ban className="h-4 w-4 shrink-0" />
+            Blocked sender domains
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Mail from these domains is moved to Trash automatically when your inbox syncs. Unblock a domain to allow new
+            messages in your inbox again (existing Trash items stay until you delete them). You can also block a domain
+            from the{" "}
+            <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
+              Inbox
+            </Link>{" "}
+            reading toolbar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {sortedBlockedDomains.length === 0 ? (
+            <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4">
+              No blocked domains. Open a message in Inbox and use{" "}
+              <span className="font-medium text-foreground">Block domain</span> to add one.
+            </p>
+          ) : (
+            <ul className="divide-y rounded-lg border">
+              {sortedBlockedDomains.map((domain) => (
+                <li
+                  key={domain}
+                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                >
+                  <span className="font-mono text-xs tabular-nums">{domain}</span>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 text-xs"
+                    onClick={() => {
+                      removeBlockedSenderDomain(domain);
+                      toast.success(`Unblocked ${domain}`, {
+                        description: "New mail from this domain will appear in your inbox again.",
+                      });
+                    }}
+                  >
+                    Unblock
+                  </Button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </CardContent>
       </Card>
 
       <Card>

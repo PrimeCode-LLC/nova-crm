@@ -13,6 +13,8 @@ const META_DOC_ID = "default";
 export type EmailAccountMeta = {
   activeMailboxId: string;
   linkedLeadByMessageId: Record<string, string>;
+  /** Sender domains (e.g. `bark.com`) whose INBOX mail is auto-moved to Trash. */
+  blockedSenderDomains: string[];
 };
 
 function memberRoot(orgId: string, uid: string) {
@@ -101,11 +103,11 @@ export async function getEmailAccountMetaServer(input: {
 }): Promise<EmailAccountMeta> {
   const ref = metaRef(input.organizationId, input.uid);
   if (!ref) {
-    return { activeMailboxId: "", linkedLeadByMessageId: {} };
+    return { activeMailboxId: "", linkedLeadByMessageId: {}, blockedSenderDomains: [] };
   }
   const snap = await ref.get();
   if (!snap.exists) {
-    return { activeMailboxId: "", linkedLeadByMessageId: {} };
+    return { activeMailboxId: "", linkedLeadByMessageId: {}, blockedSenderDomains: [] };
   }
   const data = snap.data() as Record<string, unknown>;
   const active = String(data.activeMailboxId ?? "").trim();
@@ -114,7 +116,11 @@ export async function getEmailAccountMetaServer(input: {
     links && typeof links === "object" && !Array.isArray(links)
       ? (links as Record<string, string>)
       : {};
-  return { activeMailboxId: active, linkedLeadByMessageId };
+  const blockedRaw = data.blockedSenderDomains;
+  const blockedSenderDomains = Array.isArray(blockedRaw)
+    ? blockedRaw.map((d) => String(d).trim().toLowerCase()).filter(Boolean)
+    : [];
+  return { activeMailboxId: active, linkedLeadByMessageId, blockedSenderDomains };
 }
 
 export async function setEmailAccountMetaServer(input: {
@@ -130,6 +136,9 @@ export async function setEmailAccountMetaServer(input: {
   }
   if (input.meta.linkedLeadByMessageId !== undefined) {
     patch.linkedLeadByMessageId = input.meta.linkedLeadByMessageId;
+  }
+  if (input.meta.blockedSenderDomains !== undefined) {
+    patch.blockedSenderDomains = input.meta.blockedSenderDomains;
   }
   await ref.set(patch, { merge: true });
   return { ok: true };
