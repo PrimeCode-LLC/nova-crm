@@ -3160,45 +3160,42 @@ export default function InboxPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Block {blockDomainTarget || "this domain"}?</AlertDialogTitle>
-            <AlertDialogDescription asChild>
-              <div className="space-y-2 text-sm text-muted-foreground">
-                {blockDomainPendingStats.messages > 0 ? (
-                  <p>
-                    <span className="font-semibold text-foreground tabular-nums">
-                      {blockDomainPendingStats.messages}
-                    </span>{" "}
-                    {blockDomainPendingStats.messages === 1 ? "message" : "messages"}
-                    {blockDomainPendingStats.conversations > 0 ? (
-                      <>
-                        {" "}
-                        in{" "}
-                        <span className="font-semibold text-foreground tabular-nums">
-                          {blockDomainPendingStats.conversations}
-                        </span>{" "}
-                        {blockDomainPendingStats.conversations === 1 ? "conversation" : "conversations"}
-                      </>
-                    ) : null}{" "}
-                    in your loaded inbox will move to Trash now.
-                  </p>
-                ) : (
-                  <p>
-                    No messages from this domain are in your loaded inbox right now. Future mail will still go to Trash
-                    automatically.
-                  </p>
-                )}
-                <p>
-                  All future email from{" "}
-                  <span className="font-medium text-foreground">{blockDomainTarget}</span> will be moved to Trash when
-                  your inbox syncs. Open Trash to review — nothing is deleted until you use Select all and Delete
-                  forever.
-                </p>
-                {imapMailboxTotal != null && inbound.length < imapMailboxTotal ? (
-                  <p className="text-xs">
-                    Count is from {inbound.length} of {imapMailboxTotal} inbox messages loaded. Older mail from this
-                    domain on the server may not be included until you load more or refresh.
-                  </p>
-                ) : null}
-              </div>
+            <AlertDialogDescription className="space-y-2 text-left sm:text-left">
+              {blockDomainPendingStats.messages > 0 ? (
+                <span className="block">
+                  <span className="font-semibold text-foreground tabular-nums">
+                    {blockDomainPendingStats.messages}
+                  </span>{" "}
+                  {blockDomainPendingStats.messages === 1 ? "message" : "messages"}
+                  {blockDomainPendingStats.conversations > 0 ? (
+                    <>
+                      {" "}
+                      in{" "}
+                      <span className="font-semibold text-foreground tabular-nums">
+                        {blockDomainPendingStats.conversations}
+                      </span>{" "}
+                      {blockDomainPendingStats.conversations === 1 ? "conversation" : "conversations"}
+                    </>
+                  ) : null}{" "}
+                  in your loaded inbox will move to Trash now.
+                </span>
+              ) : (
+                <span className="block">
+                  No messages from this domain are in your loaded inbox right now. Future mail will still go to Trash
+                  automatically.
+                </span>
+              )}
+              <span className="block">
+                All future email from{" "}
+                <span className="font-medium text-foreground">{blockDomainTarget}</span> will be moved to Trash when
+                your inbox syncs. Open Trash to review — nothing is deleted until you use Select all and Delete forever.
+              </span>
+              {imapMailboxTotal != null && inbound.length < imapMailboxTotal ? (
+                <span className="block text-xs">
+                  Count is from {inbound.length} of {imapMailboxTotal} inbox messages loaded. Older mail from this
+                  domain on the server may not be included until you load more or refresh.
+                </span>
+              ) : null}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
