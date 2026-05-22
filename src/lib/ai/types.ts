@@ -5,6 +5,7 @@ export type AiProvider = "openai" | "anthropic" | "google";
 export type AiFeatureKey =
   | "dashboard_brief"
   | "lead_analyze"
+  | "followup_suggest"
   | "email_reply"
   | "rag_index";
 
@@ -130,6 +131,10 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
       allowedRoles: ["director", "manager", "team_lead"],
     },
     lead_analyze: {
+      enabled: true,
+      ragMode: "reference",
+    },
+    followup_suggest: {
       enabled: true,
       ragMode: "reference",
     },

@@ -56,7 +56,14 @@ export function buildLeadAiContext(input: {
     followups: followups
       .filter((f) => !f.completedAt)
       .slice(0, 10)
-      .map((f) => ({ title: f.title, dueAt: f.dueAt, priority: f.priority })),
+      .map((f) => ({
+        title: f.title,
+        dueAt: f.dueAt,
+        priority: f.priority,
+        channel: f.channel,
+        description: f.description?.slice(0, 200),
+        hasMessageBody: Boolean(f.messageBody),
+      })),
     tasks: tasks
       .filter((t) => !t.completedAt)
       .slice(0, 10)

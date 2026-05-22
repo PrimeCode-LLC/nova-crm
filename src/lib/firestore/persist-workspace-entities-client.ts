@@ -78,6 +78,10 @@ export async function persistFollowupCreate(
   if (f.dealId) data.dealId = f.dealId;
   if (f.contactId) data.contactId = f.contactId;
   if (f.description) data.description = f.description;
+  if (f.messageBody) data.messageBody = f.messageBody;
+  if (f.channel) data.channel = f.channel;
+  if (f.planId) data.planId = f.planId;
+  if (f.aiGenerated) data.aiGenerated = f.aiGenerated;
   if (f.completedAt) data.completedAt = f.completedAt;
   await setDoc(doc(db, COLLECTIONS.followups, f.id), data);
 }
@@ -249,7 +253,10 @@ export async function persistCampaignCreate(
     channel: c.channel,
     status: c.status,
     externalRef: c.externalRef ?? null,
+    instantlyId: c.instantlyId ?? null,
     startedAt: c.startedAt ?? null,
+    lastSyncedAt: c.lastSyncedAt ?? null,
+    sequenceSummary: c.sequenceSummary ?? null,
     stats: c.stats,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -266,7 +273,10 @@ export async function persistCampaignUpdate(
   if (patch.channel !== undefined) payload.channel = patch.channel;
   if (patch.status !== undefined) payload.status = patch.status;
   if (patch.externalRef !== undefined) payload.externalRef = patch.externalRef ?? deleteField();
+  if (patch.instantlyId !== undefined) payload.instantlyId = patch.instantlyId ?? deleteField();
   if (patch.startedAt !== undefined) payload.startedAt = patch.startedAt ?? deleteField();
+  if (patch.lastSyncedAt !== undefined) payload.lastSyncedAt = patch.lastSyncedAt ?? deleteField();
+  if (patch.sequenceSummary !== undefined) payload.sequenceSummary = patch.sequenceSummary ?? deleteField();
   if (patch.stats !== undefined) payload.stats = patch.stats;
   await updateDoc(doc(db, COLLECTIONS.campaigns, campaignId), payload);
 }

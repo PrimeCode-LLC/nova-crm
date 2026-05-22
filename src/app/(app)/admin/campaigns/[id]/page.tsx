@@ -1,10 +1,10 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { useParams } from "next/navigation";
-import { CampaignDetailView } from "./campaign-detail-view";
-
-export default function AdminCampaignDetailPage() {
-  const params = useParams();
-  const id = typeof params.id === "string" ? params.id : "";
-  return <CampaignDetailView campaignId={id} />;
+export default async function AdminCampaignDetailRedirect({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  redirect(`/outreach/${id}`);
 }

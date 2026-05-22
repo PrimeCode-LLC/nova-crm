@@ -38,6 +38,29 @@ Return JSON with:
 - riskLevel: "low" | "medium" | "high"
 - nextActions: string[]`,
   },
+  followup_suggest: {
+    systemPrompt: `You are a B2B sales follow-up planner. Propose a short sequence of dated follow-ups with ready-to-send message copy for the lead's primary channel. Respect existing open follow-ups—extend the cadence, do not duplicate the same step. Output structured JSON only. Never invent facts not in context.`,
+    userPromptTemplate: `Plan follow-ups for this lead.
+
+User instructions (may be empty):
+{{userPrompt}}
+
+Lead context:
+{{context}}
+
+{{ragBlock}}
+
+Return JSON with:
+- planSummary: string (1-2 sentences)
+- items: array of 2-6 objects, each with:
+  - title: string (short reminder title)
+  - offsetDays: integer (0 = today, days from today for due date)
+  - priority: "low" | "medium" | "high" | "urgent"
+  - channel: one of "cold_email" | "linkedin_outbound" | "linkedin_1to1" | "personalized_email" | "website_form" | "upwork" | "job_apply" | "other" (prefer lead channel or "other")
+  - messageBody: string (full outbound text to copy-paste; match channel tone)
+  - description: string (internal note for the rep; use "" if none)
+  - rationale: string (why this step; use "" if none)`,
+  },
   email_reply: {
     systemPrompt: `You are drafting a professional sales email reply. Match the thread tone. Do not invent facts not in context. Output only the email body text (no subject line unless asked).`,
     userPromptTemplate: `Draft a reply for this email thread.

@@ -188,6 +188,25 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
   }, [inboundByMailbox, linkedLeadByMessageId, lead, sent]);
 
+  const followupAiContext = React.useMemo(() => {
+    if (!lead) return undefined;
+    return {
+      lead,
+      account: ws.getAccountById(lead.accountId),
+      contact: ws.getContactById(lead.contactId),
+      deal: ws.deals.find((d) => d.leadId === lead.id),
+      notes: ws.notes.filter((n) => n.leadId === lead.id),
+      timeline: ws.timelineByLead[lead.id] ?? [],
+      touchpoints: ws.touchpoints.filter((t) => t.leadId === lead.id),
+      followups: ws.followups.filter((f) => f.leadId === lead.id),
+      tasks: filterLeadTasksForLeadDetail(ws.leadTasks, lead.id, viewerForTasks),
+      emailThreads: relatedEmails.map((e) => ({
+        subject: e.subject,
+        messages: [{ from: e.from, date: e.at, snippet: e.body.slice(0, 500) }],
+      })),
+    };
+  }, [lead, relatedEmails, viewerForTasks, ws]);
+
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
@@ -523,7 +542,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <LeadNotes notes={notes} leadId={lead.id} leadProfileNotes={lead.notes} />
                 </TabsContent>
                 <TabsContent value="followups">
-                  <LeadFollowups followups={followups} lead={lead} />
+                  <LeadFollowups
+                    followups={followups}
+                    lead={lead}
+                    aiContext={followupAiContext}
+                  />
                 </TabsContent>
                 <TabsContent value="tasks">
                   <LeadTasksPanel tasks={leadTasksForTab} lead={lead} />

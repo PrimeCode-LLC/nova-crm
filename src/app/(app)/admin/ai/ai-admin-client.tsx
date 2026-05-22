@@ -42,6 +42,7 @@ import { AI_PROMPT_DEFAULTS } from "@/lib/ai/prompt-defaults";
 const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "dashboard_brief", label: "Dashboard overview" },
   { key: "lead_analyze", label: "Lead analysis" },
+  { key: "followup_suggest", label: "Follow-up suggestions" },
   { key: "email_reply", label: "Email reply" },
 ];
 

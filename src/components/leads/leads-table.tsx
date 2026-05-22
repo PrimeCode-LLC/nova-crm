@@ -57,8 +57,8 @@ import {
   Plus,
   Trash2,
   Tag,
-  UserCog,
   Mail,
+  UserCog,
 } from "lucide-react";
 import type { Lead, PipelineStage, ChannelKey, LeadTemperature } from "@/lib/types";
 import {
@@ -84,6 +84,7 @@ import {
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
+import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { buildInboxSyncedLeadIds } from "@/lib/email/lead-inbox-sync";
@@ -328,6 +329,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     lockedIntakeScope ?? initialIntakeScope,
   );
   const [reassignOpen, setReassignOpen] = React.useState(false);
+  const [campaignDialogOpen, setCampaignDialogOpen] = React.useState(false);
+  const [campaignLeadIds, setCampaignLeadIds] = React.useState<string[]>([]);
   const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
 
   const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
@@ -849,6 +852,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         leadIds={reassignLeadIds}
         onSuccess={() => setRowSelection({})}
       />
+      <AddToCampaignDialog
+        open={campaignDialogOpen}
+        onOpenChange={setCampaignDialogOpen}
+        leadIds={campaignLeadIds}
+        onSuccess={() => setRowSelection({})}
+      />
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
@@ -1156,6 +1165,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             }}
           >
             <UserCog className="h-3.5 w-3.5" /> Reassign
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              if (!ids.length) return;
+              setCampaignLeadIds(ids);
+              setCampaignDialogOpen(true);
+            }}
+          >
+            <Mail className="h-3.5 w-3.5" /> Add to campaign
           </Button>
           <Button
             variant="outline"

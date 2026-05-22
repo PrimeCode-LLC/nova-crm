@@ -24,7 +24,13 @@ export type AuditEvent =
   | "user.hierarchy_updated"
   | "ai.settings_updated"
   | "ai.key_rotated"
-  | "ai.library_indexed";
+  | "ai.library_indexed"
+  | "instantly.connected"
+  | "instantly.disconnected"
+  | "instantly.campaign_created"
+  | "instantly.campaigns_synced"
+  | "instantly.leads_pushed"
+  | "instantly.webhook_reply";
 
 /**
  * Append-only per-tenant audit log. Always-on side-channel — failures

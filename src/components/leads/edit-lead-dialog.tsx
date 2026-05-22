@@ -51,6 +51,7 @@ import {
 } from "@/lib/constants";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
@@ -126,6 +127,7 @@ export function EditLeadDialog({
   const [revenueRange, setRevenueRange] = React.useState<RevenueRange | UnsetToken>(UNSET);
   const [pushToInstantly, setPushToInstantly] = React.useState<PushStatus | UnsetToken>(UNSET);
   const [pushToLinkedIn, setPushToLinkedIn] = React.useState<PushStatus | UnsetToken>(UNSET);
+  const [campaignDialogOpen, setCampaignDialogOpen] = React.useState(false);
 
   const [useBant, setUseBant] = React.useState(false);
   const [bantBudget, setBantBudget] = React.useState("3");
@@ -568,6 +570,17 @@ export function EditLeadDialog({
                       ))}
                     </SelectContent>
                   </Select>
+                  {channel === "cold_email" && lead && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => setCampaignDialogOpen(true)}
+                    >
+                      Add to outreach campaign
+                    </Button>
+                  )}
                 </div>
                 <div className="grid gap-2">
                   <Label>Push to LinkedIn</Label>
@@ -738,6 +751,13 @@ export function EditLeadDialog({
           </DialogFooter>
         </form>
       </DialogContent>
+      {lead && (
+        <AddToCampaignDialog
+          open={campaignDialogOpen}
+          onOpenChange={setCampaignDialogOpen}
+          leadIds={[lead.id]}
+        />
+      )}
     </Dialog>
   );
 }

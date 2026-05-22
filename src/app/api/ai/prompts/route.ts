@@ -5,7 +5,13 @@ import { getAiPromptServer, upsertAiPromptServer } from "@/lib/ai/ai-settings-se
 import type { AiFeatureKey } from "@/lib/ai/types";
 import { recordAudit } from "@/lib/firestore/audit";
 
-const FEATURE_KEYS = ["dashboard_brief", "lead_analyze", "email_reply", "rag_index"] as const;
+const FEATURE_KEYS = [
+  "dashboard_brief",
+  "lead_analyze",
+  "followup_suggest",
+  "email_reply",
+  "rag_index",
+] as const;
 
 export async function GET(req: Request) {
   const g = await guardTenantApi({ minRole: "admin" });

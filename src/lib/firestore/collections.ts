@@ -47,6 +47,8 @@ export const ORG_SUBCOLLECTIONS = {
   aiCache: "aiCache",
   /** Saved dashboard AI brief generations (trimmed to last N per org). */
   aiBriefHistory: "aiBriefHistory",
+  /** Encrypted third-party integration credentials (Instantly, etc.). */
+  integrationSecrets: "integrationSecrets",
 } as const;
 
 /**

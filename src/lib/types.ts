@@ -109,6 +109,8 @@ export interface OrganizationSettings {
   operatorNotes?: string;
   /** Per-tenant secret for `POST /api/integrations/webhook/lead` (never returned to browsers). */
   inboundWebhookSecret?: string;
+  /** Per-tenant secret for `POST /api/integrations/webhook/instantly?organizationId=…` (never returned to browsers). */
+  instantlyWebhookSecret?: string;
 }
 
 /** Workspace-wide channel admin config; stored on org doc as `channelAdmin`. */
@@ -343,12 +345,17 @@ export interface Campaign {
   channel: ChannelKey;
   status: "draft" | "active" | "paused" | "done";
   externalRef?: string;
+  /** Instantly campaign UUID (mirrors externalRef without prefix). */
+  instantlyId?: string;
   startedAt?: ISODate;
+  lastSyncedAt?: ISODate;
+  sequenceSummary?: { steps: number };
   stats: {
     sent: number;
     replied: number;
     meetings: number;
     closed: number;
+    opened?: number;
   };
 }
 
@@ -404,6 +411,8 @@ export interface Lead {
 
   // Campaign routing
   pushToInstantly?: PushStatus;
+  /** Instantly lead id after push to a campaign. */
+  instantlyLeadId?: string;
   pushToLinkedIn?: PushStatus;
   doNotContact?: boolean;
 
@@ -489,6 +498,9 @@ export interface ActivityRecord {
   metadata?: Record<string, unknown>;
 }
 
+/** Channel for outbound copy; `other` resolves to the lead's channel on create. */
+export type FollowupChannel = ChannelKey | "other";
+
 export interface Followup {
   id: string;
   leadId?: string;
@@ -496,6 +508,12 @@ export interface Followup {
   contactId?: string;
   title: string;
   description?: string;
+  /** Ready-to-send message (Upwork, LinkedIn, email, etc.). */
+  messageBody?: string;
+  channel?: FollowupChannel;
+  /** Groups followups created together from one AI suggestion run. */
+  planId?: string;
+  aiGenerated?: boolean;
   dueAt: ISODate;
   completedAt?: ISODate;
   ownerId: string;

@@ -179,7 +179,13 @@ function asCampaign(id: string, raw: Record<string, unknown>): Campaign {
     channel: (raw.channel as Campaign["channel"]) ?? "cold_email",
     status: (raw.status as Campaign["status"]) ?? "draft",
     externalRef: optionalNonEmptyString(raw.externalRef),
+    instantlyId: optionalNonEmptyString(raw.instantlyId),
     startedAt: raw.startedAt ? firestoreValueToIso(raw.startedAt) : undefined,
+    lastSyncedAt: raw.lastSyncedAt ? firestoreValueToIso(raw.lastSyncedAt) : undefined,
+    sequenceSummary:
+      raw.sequenceSummary && typeof raw.sequenceSummary === "object"
+        ? (raw.sequenceSummary as Campaign["sequenceSummary"])
+        : undefined,
     stats,
   };
 }
@@ -211,6 +217,10 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     ownerId: String(raw.ownerId ?? ""),
     priority: (raw.priority as Followup["priority"]) ?? "medium",
     auto: Boolean(raw.auto),
+    messageBody: typeof raw.messageBody === "string" ? raw.messageBody : undefined,
+    channel: typeof raw.channel === "string" ? (raw.channel as Followup["channel"]) : undefined,
+    planId: typeof raw.planId === "string" ? raw.planId : undefined,
+    aiGenerated: Boolean(raw.aiGenerated),
   };
 }
 

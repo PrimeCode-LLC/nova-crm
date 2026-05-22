@@ -46,6 +46,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
+import { InstantlyIntegrationCard } from "@/components/integrations/instantly-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
 import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
@@ -169,7 +170,6 @@ function ThemePreviewInner({
 }
 
 const INTEGRATIONS = [
-  { id: "instantly", name: "Instantly", desc: "Cold email automation: sends, tracks opens/replies.", connected: false },
   { id: "apollo", name: "Apollo", desc: "Lead enrichment and contact data.", connected: false },
   { id: "outlook", name: "Outlook / Exchange", desc: "Sync email threads to lead timeline.", connected: false },
   { id: "linkedin", name: "LinkedIn Sales Nav", desc: "Import connection data + sequence tracking.", connected: false },
@@ -712,6 +712,7 @@ function SettingsPage() {
           {/* Integrations */}
           <TabsContent value="integrations">
             <div className="max-w-lg space-y-3">
+              <InstantlyIntegrationCard />
               {INTEGRATIONS.map((int) => (
                 <Card key={int.id}>
                   <CardContent className="p-4 flex items-center gap-4">
