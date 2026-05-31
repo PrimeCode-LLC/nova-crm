@@ -10,6 +10,7 @@ import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
 import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { recordAudit } from "@/lib/firestore/audit";
 import type { Role } from "@/lib/types";
 
 const analysisSchema = z.object({
@@ -117,6 +118,12 @@ export async function POST(req: Request) {
       },
       schema: analysisSchema,
       leadId: parsed.data.leadId,
+    });
+    void recordAudit({
+      organizationId: orgId,
+      actorUid: uid,
+      event: "feature.lead_analyze",
+      meta: { leadId: parsed.data.leadId },
     });
     return NextResponse.json(result);
   } catch (e) {

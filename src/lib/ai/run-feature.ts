@@ -92,6 +92,7 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
       system: prompt.systemPrompt,
       prompt: userPrompt,
       schema: input.schema,
+      maxRetries: 0,
     });
 
     await logUsage({
@@ -158,6 +159,7 @@ export async function runAiTextFeature(input: {
       model: languageModel,
       system: prompt.systemPrompt,
       prompt: userPrompt,
+      maxRetries: 0,
     });
 
     await logUsage({

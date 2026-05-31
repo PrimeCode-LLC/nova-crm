@@ -65,6 +65,7 @@ import { findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { buildChannelOptions } from "@/lib/channel-options";
+import type { NewProspectPrefill } from "@/components/layout/quick-add-launcher";
 
 const UNSET = "__unset__" as const;
 const UNSET_SCRAPER = "__unset_scraper__" as const;
@@ -197,9 +198,11 @@ function emptyFormDefaults(uid: string | undefined) {
 export function NewProspectDialog({
   open,
   onOpenChange,
+  initialPrefill,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  initialPrefill?: NewProspectPrefill;
 }) {
   const router = useRouter();
   const {
@@ -260,12 +263,20 @@ export function NewProspectDialog({
   const F = emptyFormDefaults(effectiveUid);
   const [ownerId, setOwnerId] = React.useState(F.ownerId);
   const [scraperId, setScraperId] = React.useState(F.scraperId);
-  const [channel, setChannel] = React.useState<ChannelKey>(F.channel);
+  const [channel, setChannel] = React.useState<ChannelKey>(
+    initialPrefill?.channel ?? F.channel,
+  );
   const [profileId, setProfileId] = React.useState(F.profileId);
   const [stage, setStage] = React.useState<PipelineStage>(F.stage);
   const [temperature, setTemperature] = React.useState<LeadTemperature>(F.temperature);
   const [priority, setPriority] = React.useState<LeadPriority>(F.priority);
-  const [leadNotes, setLeadNotes] = React.useState(F.leadNotes);
+  const [leadNotes, setLeadNotes] = React.useState(initialPrefill?.leadNotes ?? F.leadNotes);
+
+  React.useEffect(() => {
+    if (!open || !initialPrefill) return;
+    if (initialPrefill.leadNotes !== undefined) setLeadNotes(initialPrefill.leadNotes);
+    if (initialPrefill.channel !== undefined) setChannel(initialPrefill.channel);
+  }, [open, initialPrefill]);
 
   const [bizName, setBizName] = React.useState(F.bizName);
   const [industry, setIndustry] = React.useState(F.industry);

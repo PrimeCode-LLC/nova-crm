@@ -7,8 +7,32 @@ import {
   type OrganizationAiSettings,
 } from "@/lib/ai/types";
 import { AI_PROMPT_DEFAULTS } from "@/lib/ai/prompt-defaults";
+import { mergeFitCheckKnowledgeConfig } from "@/lib/ai/fit-check-knowledge-types";
 import { getAiProviderKeyFlagsServer } from "@/lib/ai/ai-secrets-server";
 import type { Role } from "@/lib/types";
+
+function stripUndefinedDeep<T>(value: T): T {
+  if (value === undefined) return value;
+  if (value === null) return value;
+  if (Array.isArray(value)) {
+    return value
+      .map((v) => stripUndefinedDeep(v))
+      .filter((v) => v !== undefined) as unknown as T;
+  }
+  if (typeof value === "object") {
+    // Preserve special objects as-is (Firestore sentinels, Dates, etc.)
+    const proto = Object.getPrototypeOf(value);
+    if (proto && proto !== Object.prototype) return value;
+
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      const next = stripUndefinedDeep(v);
+      if (next !== undefined) out[k] = next;
+    }
+    return out as T;
+  }
+  return value;
+}
 
 function settingsDoc(orgId: string) {
   const db = getAdminDb();
@@ -43,6 +67,11 @@ function mergeSettings(raw: Record<string, unknown> | undefined): OrganizationAi
       ...base.features[key],
     };
   }
+  if (raw.fitCheckKnowledge) {
+    base.fitCheckKnowledge = mergeFitCheckKnowledgeConfig(
+      raw.fitCheckKnowledge as Parameters<typeof mergeFitCheckKnowledgeConfig>[0],
+    );
+  }
   return base;
 }
 
@@ -68,7 +97,8 @@ export async function updateOrganizationAiSettingsServer(
     features: patch.features ? { ...current.features, ...patch.features } : current.features,
     updatedAt: new Date().toISOString(),
   };
-  await ref.set(next, { merge: true });
+  // Firestore rejects `undefined` anywhere inside the document.
+  await ref.set(stripUndefinedDeep(next), { merge: true });
   return { ok: true };
 }
 

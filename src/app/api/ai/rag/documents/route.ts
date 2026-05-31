@@ -33,6 +33,9 @@ const createSchema = z.object({
   content: z.string().min(1).max(200_000),
   sourceType: z.enum(["markdown", "script", "upload"]).default("markdown"),
   sourceRef: z.string().optional(),
+  knowledgeSection: z
+    .enum(["icp", "services", "pricing", "case_studies", "playbook", "website", "other"])
+    .optional(),
   indexNow: z.boolean().optional(),
 });
 
@@ -69,6 +72,7 @@ export async function POST(req: Request) {
     content: parsed.data.content,
     sourceType: parsed.data.sourceType,
     sourceRef: parsed.data.sourceRef ?? null,
+    knowledgeSection: parsed.data.knowledgeSection ?? null,
     chunkCount: 0,
     organizationId: orgId,
     createdAt: now,

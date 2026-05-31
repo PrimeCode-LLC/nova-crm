@@ -79,6 +79,8 @@ import { LeadAnalyzeDialog } from "@/components/ai/lead-analyze-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
+import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
+import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 
 const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "tasks", "emails"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
@@ -145,6 +147,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const sent = useEmailAccountStore((s) => s.sent);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
+  const emailResponseCtx = useLeadEmailResponseContext();
+  const responseTimeMinutes = lead ? resolveLeadResponseTimeMinutes(lead, emailResponseCtx) : null;
 
   const touchpoints = React.useMemo(
     () => (lead ? ws.touchpoints.filter((t) => t.leadId === lead.id) : []),
@@ -808,11 +812,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <p>
                       Response time was{" "}
                       <span className="font-semibold text-foreground tabular-nums">
-                        {lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "n/a"}
+                        {responseTimeMinutes != null ? `${responseTimeMinutes}m` : "n/a"}
                       </span>
-                      {lead.responseTimeMinutes && lead.responseTimeMinutes < 60
+                      {responseTimeMinutes != null && responseTimeMinutes < 60
                         ? ", in the top 10%."
-                        : ", slower than team average."}
+                        : responseTimeMinutes != null
+                          ? ", slower than team average."
+                          : ""}
                     </p>
                     <p>
                       Last activity {fmtRelative(lead.lastActivityAt)} · {lead.touches} touches total.

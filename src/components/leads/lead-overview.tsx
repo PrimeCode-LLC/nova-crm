@@ -11,6 +11,8 @@ import { AlertTriangle } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
+import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
+import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -32,6 +34,8 @@ export function LeadOverview({
   outreachProfileFieldLabel?: string;
 }) {
   const ws = useWorkspace();
+  const emailResponseCtx = useLeadEmailResponseContext();
+  const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -216,7 +220,7 @@ export function LeadOverview({
           <Metric label="Last activity" value={fmtRelative(lead.lastActivityAt)} />
           <Metric
             label="Response time"
-            value={lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "-"}
+            value={responseTimeMinutes != null ? `${responseTimeMinutes}m` : "-"}
           />
           <Metric label="Created" value={fmtRelative(lead.createdAt)} />
         </CardContent>

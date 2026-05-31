@@ -26,6 +26,7 @@ import {
   Network,
   ScanSearch,
   Sparkles,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 
@@ -69,6 +70,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Target },
       { href: "/prospects", label: "Prospects", icon: ScanSearch },
+      { href: "/fit-check", label: "Fit Check", icon: Sparkles },
       { href: "/pipeline", label: "Pipeline", icon: Kanban },
       { href: "/accounts", label: "Companies", icon: Building2 },
       { href: "/contacts", label: "Contacts", icon: Contact2 },
@@ -123,6 +125,13 @@ export const NAV_SECTIONS: NavSection[] = [
         href: "/admin/permissions",
         label: "Permissions",
         icon: Shield,
+        minWorkspaceRole: "director",
+        adminCluster: "access",
+      },
+      {
+        href: "/admin/logs",
+        label: "Activity logs",
+        icon: ScrollText,
         minWorkspaceRole: "director",
         adminCluster: "access",
       },

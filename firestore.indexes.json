@@ -218,6 +218,40 @@
         { "fieldPath": "email", "order": "ASCENDING" },
         { "fieldPath": "status", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "opportunityScans",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "createdByUserId", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "audit",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "actorUid", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "opportunityScans",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "createdAt", "order": "DESCENDING" }]
+    },
+    {
+      "collectionGroup": "aiLibraries",
+      "queryScope": "COLLECTION",
+      "fields": [{ "fieldPath": "libraryKind", "order": "ASCENDING" }]
+    },
+    {
+      "collectionGroup": "aiLibraries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "libraryKind", "order": "ASCENDING" },
+        { "fieldPath": "fitCategory", "order": "ASCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

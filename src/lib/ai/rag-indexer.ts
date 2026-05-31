@@ -88,10 +88,16 @@ export async function indexAiDocumentServer(input: {
     });
   });
 
-  batch.update(docRef, {
-    chunkCount: chunks.length,
-    updatedAt: new Date().toISOString(),
-  });
+  // Use set+merge (not update) so indexing doesn't fail if the doc
+  // was deleted concurrently (e.g. during reseeding).
+  batch.set(
+    docRef,
+    {
+      chunkCount: chunks.length,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true },
+  );
 
   if (libraryId) {
     const libRef = db

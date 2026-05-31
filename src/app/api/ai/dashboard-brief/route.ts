@@ -36,6 +36,7 @@ import {
   getCachedDashboardBriefServer,
   saveDashboardBriefServer,
 } from "@/lib/ai/dashboard-brief-store";
+import { recordAudit } from "@/lib/firestore/audit";
 
 const briefSchema = z.object({
   progress: z.string(),
@@ -227,6 +228,17 @@ export async function POST(req: Request) {
         ownerLabel,
       },
       result: { ...result, watchList },
+    });
+
+    void recordAudit({
+      organizationId: orgId,
+      actorUid: uid,
+      event: "feature.dashboard_brief",
+      meta: {
+        ownerScope: parsed.data.ownerScope,
+        timeRange,
+        filterHash,
+      },
     });
 
     return NextResponse.json(payload);
