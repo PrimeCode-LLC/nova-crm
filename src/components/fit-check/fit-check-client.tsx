@@ -37,7 +37,7 @@ export function FitCheckClient() {
   const [title, setTitle] = React.useState("");
   const [sourceType, setSourceType] = React.useState<OpportunitySourceType>("other");
   const [availableSourceTypes, setAvailableSourceTypes] = React.useState<OpportunitySourceType[]>(
-    OPPORTUNITY_SOURCE_TYPES as OpportunitySourceType[],
+    [...OPPORTUNITY_SOURCE_TYPES],
   );
   const [analyzing, setAnalyzing] = React.useState(false);
   const [result, setResult] = React.useState<OpportunityFitResult | null>(null);

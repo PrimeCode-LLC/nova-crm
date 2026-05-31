@@ -12,6 +12,7 @@ import { toast } from "sonner";
 import {
   OPPORTUNITY_SOURCE_LABELS,
   OPPORTUNITY_SOURCE_TYPES,
+  type FitCheckCategoryKnowledgeConfig,
   type FitCheckKnowledgeConfig,
 } from "@/lib/ai/fit-check-knowledge-types";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
@@ -63,8 +64,10 @@ export function FitKnowledgeAdminPanel({
     void load();
   }, [load]);
 
-  async function saveConfig(patch: Partial<FitCheckKnowledgeConfig> & {
-    categories?: Partial<Record<OpportunitySourceType, { enabled?: boolean; useGlobal?: boolean }>>;
+  async function saveConfig(patch: {
+    globalEnabled?: boolean;
+    retrievalBudget?: FitCheckKnowledgeConfig["retrievalBudget"];
+    categories?: Partial<Record<OpportunitySourceType, Partial<FitCheckCategoryKnowledgeConfig>>>;
   }) {
     setSaving(true);
     try {
