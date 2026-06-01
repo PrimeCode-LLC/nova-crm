@@ -12,13 +12,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -72,6 +71,7 @@ import {
   ChevronRight,
   Paperclip,
   Sparkles,
+  X,
   Ban,
   ExternalLink,
 } from "lucide-react";
@@ -150,6 +150,35 @@ const INBOX_VIEW_SELF = "__inbox_view_self__";
 type MailFilterStats = { total: number; unread: number };
 
 const EMPTY_MAIL_FILTER_STATS: MailFilterStats = { total: 0, unread: 0 };
+
+const MAX_COMPOSE_ATTACHMENTS = 5;
+const MAX_COMPOSE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+type ComposeAttachment = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentBase64: string;
+};
+
+function formatComposeFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      resolve(dataUrl.split(",")[1] ?? "");
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function isEntityMailFilterActive(filter: string): boolean {
   return filter !== ENTITY_MAIL_FILTER_ALL;
@@ -439,6 +468,8 @@ export default function InboxPage() {
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
+  const [composeAttachments, setComposeAttachments] = React.useState<ComposeAttachment[]>([]);
+  const composeFileInputRef = React.useRef<HTMLInputElement>(null);
   const [aiReplyGenerating, setAiReplyGenerating] = React.useState(false);
   const [aiReplyTone, setAiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
   const [aiReplyGoal, setAiReplyGoal] = React.useState("follow up");
@@ -890,7 +921,54 @@ export default function InboxPage() {
     setComposeSubject(preset?.subject ?? "");
     setComposeBody(preset?.body ?? (account.signature ? `\n\n${account.signature}` : ""));
     setComposeDraftId(preset?.id);
+    setComposeAttachments([]);
     setComposeOpen(true);
+  }
+
+  async function addComposeAttachments(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    const remaining = MAX_COMPOSE_ATTACHMENTS - composeAttachments.length;
+    if (remaining <= 0) {
+      toast.error(`You can attach up to ${MAX_COMPOSE_ATTACHMENTS} files.`);
+      return;
+    }
+
+    const toAdd = list.slice(0, remaining);
+    if (list.length > remaining) {
+      toast.message(`Only ${remaining} more file${remaining === 1 ? "" : "s"} can be added.`);
+    }
+
+    const next: ComposeAttachment[] = [];
+    for (const file of toAdd) {
+      if (file.size > MAX_COMPOSE_ATTACHMENT_BYTES) {
+        toast.error(`${file.name} is too large (max ${formatComposeFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)}).`);
+        continue;
+      }
+      try {
+        const contentBase64 = await readFileAsBase64(file);
+        if (!contentBase64) {
+          toast.error(`Could not read ${file.name}.`);
+          continue;
+        }
+        next.push({
+          id: `att-${crypto.randomUUID()}`,
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          contentBase64,
+        });
+      } catch {
+        toast.error(`Could not read ${file.name}.`);
+      }
+    }
+
+    if (next.length > 0) setComposeAttachments((prev) => [...prev, ...next]);
+  }
+
+  function removeComposeAttachment(id: string) {
+    setComposeAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
   async function handleSend() {
@@ -910,8 +988,12 @@ export default function InboxPage() {
         });
         if (composeDraftId) deleteDraft(composeDraftId);
         toast.success("Message saved to Sent (demo)", {
-          description: "SMTP is not used in demo mode.",
+          description:
+            composeAttachments.length > 0
+              ? "SMTP is not used in demo mode. Attachments are not stored in demo sent mail."
+              : "SMTP is not used in demo mode.",
         });
+        setComposeAttachments([]);
         setComposeOpen(false);
         setMailFolder("sent");
         setSelectedMail(null);
@@ -947,6 +1029,14 @@ export default function InboxPage() {
           subject: composeSubject.trim(),
           text,
           html,
+          attachments:
+            composeAttachments.length > 0
+              ? composeAttachments.map((a) => ({
+                  filename: a.filename,
+                  mimeType: a.mimeType,
+                  contentBase64: a.contentBase64,
+                }))
+              : undefined,
           smtp: {
             host: account.smtp.host,
             port: account.smtp.port,
@@ -970,6 +1060,7 @@ export default function InboxPage() {
       });
       if (composeDraftId) deleteDraft(composeDraftId);
       toast.success("Message sent");
+      setComposeAttachments([]);
       setComposeOpen(false);
       setMailFolder("sent");
       setSelectedMail(null);
@@ -1967,6 +2058,17 @@ export default function InboxPage() {
     return matchFromMessage(selectedMail);
   }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads]);
 
+  function composeLeadContextPayload() {
+    if (!selectedLead) return "";
+    return JSON.stringify({
+      id: selectedLead.id,
+      stage: selectedLead.stage,
+      company: selectedLead.companyName,
+      contact: selectedLead.contactName,
+      channel: selectedLead.channel,
+    });
+  }
+
   async function generateAiReply() {
     if (!composeBody.trim() && !composeSubject.trim()) {
       toast.error("Open a reply with thread context first, or paste the conversation.");
@@ -1975,22 +2077,13 @@ export default function InboxPage() {
     setAiReplyGenerating(true);
     try {
       const thread = composeBody.trim() || composeSubject;
-      let leadContext = "";
-      if (selectedLead) {
-        leadContext = JSON.stringify({
-          id: selectedLead.id,
-          stage: selectedLead.stage,
-          company: selectedLead.companyName,
-          contact: selectedLead.contactName,
-          channel: selectedLead.channel,
-        });
-      }
       const res = await fetch("/api/ai/email-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode: "reply",
           thread,
-          leadContext,
+          leadContext: composeLeadContextPayload(),
           leadId: selectedLead?.id,
           channel: selectedLead?.channel,
           profileId: selectedLead?.profileId,
@@ -2006,6 +2099,43 @@ export default function InboxPage() {
       }
       setComposeBody(data.body ?? "");
       toast.success("Draft generated — review before sending");
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setAiReplyGenerating(false);
+    }
+  }
+
+  async function improviseComposeWithAi() {
+    if (!composeBody.trim()) {
+      toast.error("Write a message first, then improvise with AI.");
+      return;
+    }
+    setAiReplyGenerating(true);
+    try {
+      const res = await fetch("/api/ai/email-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "improve",
+          draft: composeBody.trim(),
+          subject: composeSubject.trim() || undefined,
+          leadContext: composeLeadContextPayload(),
+          leadId: selectedLead?.id,
+          channel: selectedLead?.channel,
+          profileId: selectedLead?.profileId,
+          campaignId: selectedLead?.campaignId,
+          tone: aiReplyTone,
+          goal: "Polish and improve clarity while keeping my intent and facts",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not improve message");
+        return;
+      }
+      setComposeBody(data.body ?? "");
+      toast.success("Message improved — review before sending");
     } catch {
       toast.error("Network error");
     } finally {
@@ -3309,13 +3439,22 @@ export default function InboxPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Sheet open={composeOpen} onOpenChange={setComposeOpen}>
-        <SheetContent side="right" className="sm:max-w-lg w-full flex flex-col">
-          <SheetHeader>
-            <SheetTitle>Compose</SheetTitle>
-            <SheetDescription>Send through your SMTP account saved in Settings.</SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 space-y-3">
+      <Dialog
+        open={composeOpen}
+        onOpenChange={(open) => {
+          setComposeOpen(open);
+          if (!open) setComposeAttachments([]);
+        }}
+      >
+        <DialogContent
+          className="flex max-h-[min(92vh,880px)] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          showCloseButton
+        >
+          <DialogHeader className="shrink-0 border-b px-5 py-4">
+            <DialogTitle>Compose</DialogTitle>
+            <DialogDescription>Send through your SMTP account saved in Settings.</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
             <div className="space-y-1.5">
               <Label className="text-xs">To</Label>
               <Input value={composeTo} onChange={(e) => setComposeTo(e.target.value)} placeholder="name@company.com" />
@@ -3333,39 +3472,112 @@ export default function InboxPage() {
               <Input value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Message</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Message</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  disabled={!composeBody.trim() || aiReplyGenerating || inboxReadOnly}
+                  onClick={() => void improviseComposeWithAi()}
+                >
+                  {aiReplyGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  Improvise with AI
+                </Button>
+              </div>
               <Textarea
-                className="min-h-[200px] text-sm"
+                className="min-h-[280px] resize-y text-sm"
                 value={composeBody}
                 onChange={(e) => setComposeBody(e.target.value)}
+                placeholder="Write your message…"
               />
             </div>
+            <div className="space-y-2">
+              <input
+                ref={composeFileInputRef}
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (files?.length) void addComposeAttachments(files);
+                  e.target.value = "";
+                }}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={inboxReadOnly || composeAttachments.length >= MAX_COMPOSE_ATTACHMENTS}
+                  onClick={() => composeFileInputRef.current?.click()}
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Attach files
+                </Button>
+                <span className="text-[11px] text-muted-foreground">
+                  Up to {MAX_COMPOSE_ATTACHMENTS} files, {formatComposeFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)} each
+                </span>
+              </div>
+              {composeAttachments.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {composeAttachments.map((att) => (
+                    <li
+                      key={att.id}
+                      className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
+                    >
+                      <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-medium">{att.filename}</span>
+                      <span className="shrink-0 text-muted-foreground">{formatComposeFileSize(att.sizeBytes)}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0"
+                        aria-label={`Remove ${att.filename}`}
+                        onClick={() => removeComposeAttachment(att.id)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
           </div>
-          <SheetFooter className="flex-row flex-wrap gap-2 border-t">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={aiReplyGenerating || inboxReadOnly}
-              onClick={() => void generateAiReply()}
-            >
-              {aiReplyGenerating ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-              ) : (
-                <Sparkles className="h-3.5 w-3.5" />
-              )}
-              AI draft
-            </Button>
-            <Button variant="outline" size="sm" onClick={saveDraft}>
-              Save draft
-            </Button>
-            <Button size="sm" className="gap-1.5" disabled={sending} onClick={() => void handleSend()}>
-              {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              Send
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+          <div className="shrink-0 border-t bg-muted/30 px-5 pb-5 pt-4">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={aiReplyGenerating || inboxReadOnly}
+                onClick={() => void generateAiReply()}
+              >
+                {aiReplyGenerating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                AI draft
+              </Button>
+              <Button variant="outline" size="sm" onClick={saveDraft}>
+                Save draft
+              </Button>
+              <Button size="sm" className="gap-1.5" disabled={sending} onClick={() => void handleSend()}>
+                {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                Send
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
