@@ -256,6 +256,8 @@ export interface LeadsTableProps {
   lockedIntakeScope?: "all" | "prospect" | "sales_lead";
   /** Origin route for lead-detail back navigation (appended as `?from=…`). */
   linkFromKey?: "prospects" | "pipeline";
+  /** Initial owner filter (`me`, `all-owners`, `open-queue`, etc.). */
+  initialOwnerScope?: string;
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
@@ -268,6 +270,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     initialIntakeScope = "all",
     lockedIntakeScope,
     linkFromKey,
+    initialOwnerScope = "all-owners",
   },
   ref,
 ) {
@@ -322,7 +325,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
     profileId: false,
   });
-  const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [ownerScope, setOwnerScope] = React.useState(initialOwnerScope);
+  React.useEffect(() => {
+    setOwnerScope(initialOwnerScope);
+  }, [initialOwnerScope]);
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
   const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">(

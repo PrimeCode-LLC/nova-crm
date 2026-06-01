@@ -1,8 +1,39 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import { stampForCreate } from "@/lib/firestore/tenant-write";
 import type { Account, ChannelKey, Contact, Lead, ScraperRawItem } from "@/lib/types";
 import { getScraperRawItemServer, markRawItemPromotedServer } from "@/lib/scrapers/raw-items-server";
+
+function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
+  const base = { ...raw, id } as unknown as Lead;
+  return {
+    ...base,
+    id,
+    createdAt: firestoreValueToIso(raw.createdAt),
+    updatedAt: firestoreValueToIso(raw.updatedAt),
+  };
+}
+
+function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
+  const base = { ...raw, id } as unknown as Account;
+  return {
+    ...base,
+    id,
+    createdAt: firestoreValueToIso(raw.createdAt),
+    updatedAt: firestoreValueToIso(raw.updatedAt),
+  };
+}
+
+function mapContactDoc(id: string, raw: Record<string, unknown>): Contact {
+  const base = { ...raw, id } as unknown as Contact;
+  return {
+    ...base,
+    id,
+    createdAt: firestoreValueToIso(raw.createdAt),
+    updatedAt: firestoreValueToIso(raw.updatedAt),
+  };
+}
 
 function newEntityId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -52,7 +83,15 @@ export async function promoteRawItemToProspectServer(input: {
   ownerId: string;
   scraperId?: string;
 }): Promise<
-  | { ok: true; leadId: string; accountId: string; contactId: string }
+  | {
+      ok: true;
+      leadId: string;
+      accountId: string;
+      contactId: string;
+      lead: Lead;
+      account: Account;
+      contact: Contact;
+    }
   | { error: string }
 > {
   const db = getAdminDb();
@@ -61,11 +100,48 @@ export async function promoteRawItemToProspectServer(input: {
   const item = await getScraperRawItemServer(input.organizationId, input.itemId);
   if (!item) return { error: "Item not found" };
   if (item.status === "promoted" && item.promotedToLeadId) {
+    const existing = await db.collection(COLLECTIONS.leads).doc(item.promotedToLeadId).get();
+    if (!existing.exists) {
+      return { error: "Promoted lead record is missing" };
+    }
+    const leadData = existing.data() as Record<string, unknown>;
+    const accountId = String(leadData.accountId ?? "");
+    const contactId = String(leadData.contactId ?? "");
+    const [accountSnap, contactSnap] = await Promise.all([
+      accountId ? db.collection(COLLECTIONS.accounts).doc(accountId).get() : null,
+      contactId ? db.collection(COLLECTIONS.contacts).doc(contactId).get() : null,
+    ]);
+    const fallbackAt = new Date().toISOString();
     return {
       ok: true,
       leadId: item.promotedToLeadId,
-      accountId: "",
-      contactId: "",
+      accountId,
+      contactId,
+      lead: mapLeadDoc(item.promotedToLeadId, leadData),
+      account: accountSnap?.exists
+        ? mapAccountDoc(accountId, accountSnap.data() as Record<string, unknown>)
+        : {
+            id: accountId || "a-unknown",
+            name: "Unknown company",
+            contactCount: 0,
+            leadCount: 0,
+            openDealValue: 0,
+            ownerId: String(leadData.ownerId ?? ""),
+            createdAt: fallbackAt,
+            updatedAt: fallbackAt,
+          },
+      contact: contactSnap?.exists
+        ? mapContactDoc(contactId, contactSnap.data() as Record<string, unknown>)
+        : {
+            id: contactId || "ct-unknown",
+            accountId: accountId || "a-unknown",
+            firstName: "Unknown",
+            lastName: "Contact",
+            fullName: "Unknown contact",
+            ownerId: String(leadData.ownerId ?? ""),
+            createdAt: fallbackAt,
+            updatedAt: fallbackAt,
+          },
     };
   }
   if (item.status === "dismissed") return { error: "Item was dismissed" };
@@ -161,5 +237,5 @@ export async function promoteRawItemToProspectServer(input: {
   });
   if ("error" in marked) return { error: marked.error };
 
-  return { ok: true, leadId, accountId, contactId };
+  return { ok: true, leadId, accountId, contactId, lead, account, contact };
 }

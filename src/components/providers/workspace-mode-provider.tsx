@@ -113,6 +113,12 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addAccount: (account: Account) => Promise<void>;
     addContact: (contact: Contact) => Promise<void>;
     addLead: (lead: Lead) => Promise<void>;
+    /** Merge server-created CRM rows into the client cache without writing again (e.g. intake promote). */
+    stageCrmEntities: (payload: {
+      leads?: Lead[];
+      accounts?: Account[];
+      contacts?: Contact[];
+    }) => void;
     patchUser: (userId: string, patch: Partial<Omit<User, "id">>) => void;
     /** Session-backed (persists in tab until refresh / mode change). */
     sessionHydrated: boolean;
@@ -493,6 +499,30 @@ export function WorkspaceModeProvider({
       setLeadsAdded((prev) => [...prev, lead]);
     },
     [mode, userDoc?.organizationId],
+  );
+
+  const stageCrmEntities = React.useCallback(
+    (payload: { leads?: Lead[]; accounts?: Account[]; contacts?: Contact[] }) => {
+      if (payload.accounts?.length) {
+        setAccountsAdded((prev) => {
+          const ids = new Set(prev.map((a) => a.id));
+          return [...prev, ...payload.accounts!.filter((a) => !ids.has(a.id))];
+        });
+      }
+      if (payload.contacts?.length) {
+        setContactsAdded((prev) => {
+          const ids = new Set(prev.map((c) => c.id));
+          return [...prev, ...payload.contacts!.filter((c) => !ids.has(c.id))];
+        });
+      }
+      if (payload.leads?.length) {
+        setLeadsAdded((prev) => {
+          const ids = new Set(prev.map((l) => l.id));
+          return [...prev, ...payload.leads!.filter((l) => !ids.has(l.id))];
+        });
+      }
+    },
+    [],
   );
 
   const patchUser = React.useCallback((userId: string, patch: Partial<Omit<User, "id">>) => {
@@ -1382,6 +1412,7 @@ export function WorkspaceModeProvider({
       addAccount,
       addContact,
       addLead,
+      stageCrmEntities,
       patchUser,
       sessionHydrated,
       addFollowup,
@@ -1433,6 +1464,7 @@ export function WorkspaceModeProvider({
     addAccount,
     addContact,
     addLead,
+    stageCrmEntities,
     patchUser,
     sessionHydrated,
     addFollowup,

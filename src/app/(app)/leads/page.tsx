@@ -17,9 +17,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
 
 function LeadsPageInner() {
   const searchParams = useSearchParams();
+  const ownerScope = ownerScopeFromQueryParam(searchParams.get("owner"));
   const urlChannelKey = searchParams
     .getAll("channel")
     .filter(Boolean)
@@ -122,6 +124,7 @@ function LeadsPageInner() {
             idleOnly={idleOnly}
             initialIntakeScope="sales_lead"
             lockedIntakeScope="sales_lead"
+            initialOwnerScope={ownerScope}
           />
         )}
       </PageBody>

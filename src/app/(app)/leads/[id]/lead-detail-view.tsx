@@ -74,6 +74,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import { LeadSourceButton, LeadScraperSourceSummary } from "@/components/leads/lead-source-button";
 import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
 import { LeadAnalyzeDialog } from "@/components/ai/lead-analyze-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
@@ -411,6 +412,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <UserPlus className="h-3.5 w-3.5" /> Claim
               </Button>
             ) : null}
+            <LeadSourceButton lead={lead} />
             <Button
               variant={pinned ? "default" : "outline"}
               size="sm"
@@ -666,7 +668,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   Prospecting rows feed integrations and campaigns. When a contact responds with interest, promote to a
                   sales lead for normal pipeline work.
                 </p>
+                <LeadScraperSourceSummary lead={lead} />
                 <div className="flex flex-wrap gap-2">
+                  <LeadSourceButton lead={lead} />
                   {account && contact && (
                     <Button type="button" size="sm" variant="outline" onClick={() => setProspectFieldsOpen(true)}>
                       Edit prospect fields

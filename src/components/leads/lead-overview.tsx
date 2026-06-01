@@ -9,6 +9,12 @@ import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
+import { LeadSourceButton } from "@/components/leads/lead-source-button";
+import { getLeadScraperSource } from "@/lib/scrapers/lead-scraper-source";
+import {
+  SCRAPER_CATEGORY_LABELS,
+  SCRAPER_PLATFORM_LABELS,
+} from "@/lib/scrapers/labels";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
@@ -37,6 +43,7 @@ export function LeadOverview({
   const emailResponseCtx = useLeadEmailResponseContext();
   const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
+  const scraperSource = getLeadScraperSource(lead);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card className="lg:col-span-2">
@@ -82,6 +89,28 @@ export function LeadOverview({
             {lead.scraperId?.trim() ? (
               <Field label="Lead by (sourced by)">
                 <UserChip userId={lead.scraperId} size="sm" />
+              </Field>
+            ) : null}
+            {scraperSource ? (
+              <Field label="Intake source">
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    {scraperSource.feedName ? (
+                      <span className="font-medium">{scraperSource.feedName}</span>
+                    ) : null}
+                    {scraperSource.platform && scraperSource.platform in SCRAPER_PLATFORM_LABELS ? (
+                      <span className="text-muted-foreground">
+                        {SCRAPER_PLATFORM_LABELS[scraperSource.platform]}
+                      </span>
+                    ) : null}
+                    {scraperSource.category && scraperSource.category in SCRAPER_CATEGORY_LABELS ? (
+                      <span className="text-muted-foreground">
+                        · {SCRAPER_CATEGORY_LABELS[scraperSource.category]}
+                      </span>
+                    ) : null}
+                  </div>
+                  <LeadSourceButton lead={lead} variant="outline" size="sm" className="w-fit" />
+                </div>
               </Field>
             ) : null}
           </dl>

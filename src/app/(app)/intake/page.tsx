@@ -2,17 +2,9 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import {
-  Calendar,
-  ExternalLink,
-  Loader2,
-  RefreshCw,
-  Search,
-  UserPlus,
-  Users,
-  X,
-} from "lucide-react";
+import { Calendar, Loader2, RefreshCw, Search } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
@@ -29,12 +21,13 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import type { ScraperCategory, ScraperPlatform, ScraperRawItem } from "@/lib/types";
+import type { Account, Contact, Lead, ScraperCategory, ScraperPlatform, ScraperRawItem } from "@/lib/types";
 import {
   SCRAPER_CATEGORY_LABELS,
   SCRAPER_PLATFORM_LABELS,
 } from "@/lib/scrapers/labels";
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
+import { IntakeItemActions } from "@/components/intake/intake-item-actions";
 
 const ALL = "__all__" as const;
 
@@ -70,6 +63,7 @@ function rawItemSearchHaystack(item: ScraperRawItem): string {
 
 export default function IntakePoolPage() {
   const ws = useWorkspace();
+  const router = useRouter();
   const [items, setItems] = React.useState<ScraperRawItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [platform, setPlatform] = React.useState<string>(ALL);
@@ -77,7 +71,10 @@ export default function IntakePoolPage() {
   const [searchQuery, setSearchQuery] = React.useState("");
   const [dateFrom, setDateFrom] = React.useState("");
   const [dateTo, setDateTo] = React.useState("");
-  const [busyId, setBusyId] = React.useState<string | null>(null);
+  const [busy, setBusy] = React.useState<{
+    itemId: string;
+    action: "assign" | "queue" | "dismiss";
+  } | null>(null);
 
   const filteredItems = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -122,7 +119,7 @@ export default function IntakePoolPage() {
   }, [load]);
 
   async function promote(itemId: string, assignToMe: boolean) {
-    setBusyId(itemId);
+    setBusy({ itemId, action: assignToMe ? "assign" : "queue" });
     try {
       const res = await fetch(`/api/org/scraper-raw/${itemId}/promote`, {
         method: "POST",
@@ -130,31 +127,56 @@ export default function IntakePoolPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ assignToMe }),
       });
-      const data = (await res.json()) as { leadId?: string; error?: string };
+      const data = (await res.json()) as {
+        leadId?: string;
+        lead?: Lead;
+        account?: Account;
+        contact?: Contact;
+        error?: string;
+      };
       if (!res.ok) {
         toast.error(data.error ?? "Promote failed");
         return;
       }
+      if (data.lead) {
+        ws.stageCrmEntities({
+          leads: [data.lead],
+          accounts: data.account ? [data.account] : undefined,
+          contacts: data.contact ? [data.contact] : undefined,
+        });
+      }
       setItems((prev) => prev.filter((i) => i.id !== itemId));
-      toast.success(assignToMe ? "Prospect created and assigned to you" : "Prospect added to open queue", {
-        action: data.leadId
-          ? {
-              label: "View",
-              onClick: () => {
-                window.location.href = `/leads/${data.leadId}?from=prospects`;
-              },
-            }
-          : undefined,
-      });
+      const viewHref = data.leadId ? `/leads/${data.leadId}?from=prospects` : null;
+      if (assignToMe) {
+        toast.success("Prospect created — you are the owner", {
+          description: "Find it anytime under Prospects → Owned by me.",
+          action: viewHref
+            ? {
+                label: "View prospect",
+                onClick: () => router.push(viewHref),
+              }
+            : undefined,
+        });
+      } else {
+        toast.success("Prospect added to open queue", {
+          description: "Teammates can claim it from Prospects → Open queue.",
+          action: viewHref
+            ? {
+                label: "View queue",
+                onClick: () => router.push("/prospects?owner=open-queue"),
+              }
+            : undefined,
+        });
+      }
     } catch {
       toast.error("Network error");
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
   async function dismiss(itemId: string) {
-    setBusyId(itemId);
+    setBusy({ itemId, action: "dismiss" });
     try {
       const res = await fetch(`/api/org/scraper-raw/${itemId}`, {
         method: "PATCH",
@@ -172,7 +194,7 @@ export default function IntakePoolPage() {
     } catch {
       toast.error("Network error");
     } finally {
-      setBusyId(null);
+      setBusy(null);
     }
   }
 
@@ -190,7 +212,13 @@ export default function IntakePoolPage() {
               variant="outline"
               size="sm"
               nativeButton={false}
-              render={<Link href="/prospects">Prospects</Link>}
+              render={<Link href="/prospects?owner=me">My prospects</Link>}
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={<Link href="/prospects">All prospects</Link>}
             />
             <Button
               variant="outline"
@@ -329,7 +357,7 @@ export default function IntakePoolPage() {
             ) : (
               <ul className="space-y-3">
                 {filteredItems.map((item) => {
-                  const busy = busyId === item.id;
+                  const itemBusy = busy?.itemId === item.id ? busy.action : null;
                   const snippet =
                     item.contentSnippet?.trim() ||
                     item.content.replace(/<[^>]+>/g, " ").slice(0, 280);
@@ -339,7 +367,17 @@ export default function IntakePoolPage() {
                         <CardHeader className="pb-2">
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="min-w-0 flex-1 space-y-1">
-                              <CardTitle className="text-base leading-snug">{item.title}</CardTitle>
+                              <CardTitle className="text-base leading-snug">
+                                <a
+                                  href={item.link}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="hover:text-primary hover:underline underline-offset-2"
+                                  title="Open original post"
+                                >
+                                  {item.title}
+                                </a>
+                              </CardTitle>
                               <div className="flex flex-wrap gap-1.5">
                                 <Badge variant="secondary">{SCRAPER_PLATFORM_LABELS[item.platform]}</Badge>
                                 <Badge variant="outline">{SCRAPER_CATEGORY_LABELS[item.category]}</Badge>
@@ -355,28 +393,13 @@ export default function IntakePoolPage() {
                         </CardHeader>
                         <CardContent className="space-y-3">
                           <p className="text-sm text-muted-foreground line-clamp-3">{snippet}</p>
-                          <div className="flex flex-wrap gap-2">
-                            <Button variant="default" size="sm" disabled={busy} type="button" onClick={() => void promote(item.id, true)}>
-                              {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <UserPlus className="h-3.5 w-3.5" />}
-                              Promote & assign to me
-                            </Button>
-                            <Button variant="outline" size="sm" disabled={busy} type="button" onClick={() => void promote(item.id, false)}>
-                              <Users className="h-3.5 w-3.5" /> Open queue
-                            </Button>
-                            <Button variant="ghost" size="sm" disabled={busy} type="button" onClick={() => void dismiss(item.id)}>
-                              <X className="h-3.5 w-3.5" /> Dismiss
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              nativeButton={false}
-                              render={
-                                <a href={item.link} target="_blank" rel="noopener noreferrer">
-                                  <ExternalLink className="h-3.5 w-3.5" /> Source
-                                </a>
-                              }
-                            />
-                          </div>
+                          <IntakeItemActions
+                            item={item}
+                            busyAction={itemBusy}
+                            onAssignToMe={() => promote(item.id, true)}
+                            onOpenQueue={() => promote(item.id, false)}
+                            onDismissConfirmed={() => dismiss(item.id)}
+                          />
                         </CardContent>
                       </Card>
                     </li>
