@@ -136,7 +136,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     patchAccount: (accountId: string, patch: Partial<Account>) => void;
     patchContact: (contactId: string, patch: Partial<Contact>) => void;
     /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
-    deleteLead: (leadId: string) => Promise<boolean>;
+    deleteLead: (leadId: string, options?: { quiet?: boolean }) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
     canDeleteLeads: boolean;
     /** Org role for the signed-in user (defaults to member when missing on the user row). */
@@ -1061,19 +1061,24 @@ export function WorkspaceModeProvider({
   );
 
   const deleteLead = React.useCallback(
-    async (leadId: string): Promise<boolean> => {
+    async (leadId: string, options?: { quiet?: boolean }): Promise<boolean> => {
+      const quiet = options?.quiet === true;
       const snap = snapshotRef.current;
       const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole;
       const allowed = role === "owner" || role === "admin";
       if (!allowed) {
-        toast.error("Only organization owners and admins can delete leads.");
+        if (!quiet) {
+          toast.error("Only organization owners and admins can delete leads.");
+        }
         return false;
       }
       const lead = snap.leads.find((l) => l.id === leadId);
       if (!lead) return false;
       const account = snap.accounts.find((a) => a.id === lead.accountId);
       if (!account) {
-        toast.error("Could not delete lead: account not found.");
+        if (!quiet) {
+          toast.error("Could not delete lead: account not found.");
+        }
         return false;
       }
 
@@ -1087,7 +1092,7 @@ export function WorkspaceModeProvider({
             accountId: account.id,
             accountLeadCount: account.leadCount,
           });
-          toast.success("Lead deleted");
+          if (!quiet) toast.success("Lead deleted");
           setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
           setSessionV2((s) => {
             if (s.deletedLeadIds.includes(leadId)) return s;
@@ -1106,12 +1111,12 @@ export function WorkspaceModeProvider({
           return true;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not delete lead", { description: msg });
+          if (!quiet) toast.error("Could not delete lead", { description: msg });
           return false;
         }
       }
 
-      toast.success("Lead removed");
+      if (!quiet) toast.success("Lead removed");
       setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
       setSessionV2((s) => {
         if (s.deletedLeadIds.includes(leadId)) return s;
