@@ -4,9 +4,11 @@ import * as React from "react";
 import Link from "next/link";
 import { formatDistanceToNow } from "date-fns";
 import {
+  Calendar,
   ExternalLink,
   Loader2,
   RefreshCw,
+  Search,
   UserPlus,
   Users,
   X,
@@ -16,6 +18,8 @@ import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -34,13 +38,58 @@ import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 
 const ALL = "__all__" as const;
 
+function localYmdFromIso(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function passesPublishedDateRange(iso: string, fromYmd: string, toYmd: string): boolean {
+  if (!fromYmd && !toYmd) return true;
+  const rowYmd = localYmdFromIso(iso);
+  if (!rowYmd) return true;
+  let from = fromYmd;
+  let to = toYmd;
+  if (from && to && from > to) [from, to] = [to, from];
+  if (from && rowYmd < from) return false;
+  if (to && rowYmd > to) return false;
+  return true;
+}
+
+function rawItemSearchHaystack(item: ScraperRawItem): string {
+  const snippet =
+    item.contentSnippet?.trim() || item.content.replace(/<[^>]+>/g, " ").trim();
+  return [item.title, snippet, item.feedName, item.creator, item.dcCreator]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 export default function IntakePoolPage() {
   const ws = useWorkspace();
   const [items, setItems] = React.useState<ScraperRawItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [platform, setPlatform] = React.useState<string>(ALL);
   const [category, setCategory] = React.useState<string>(ALL);
+  const [searchQuery, setSearchQuery] = React.useState("");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
   const [busyId, setBusyId] = React.useState<string | null>(null);
+
+  const filteredItems = React.useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return items.filter((item) => {
+      if (q && !rawItemSearchHaystack(item).includes(q)) return false;
+      if (!passesPublishedDateRange(item.publishedAt, dateFrom, dateTo)) return false;
+      return true;
+    });
+  }, [items, searchQuery, dateFrom, dateTo]);
+
+  const filtersActive =
+    searchQuery.trim().length > 0 || dateFrom.length > 0 || dateTo.length > 0;
 
   const load = React.useCallback(async () => {
     if (ws.isDemo) {
@@ -164,36 +213,93 @@ export default function IntakePoolPage() {
           </Card>
         ) : (
           <>
-            <div className="flex flex-wrap gap-3">
-              <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Platform" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All platforms</SelectItem>
-                  {(Object.keys(SCRAPER_PLATFORM_LABELS) as ScraperPlatform[]).map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {SCRAPER_PLATFORM_LABELS[p]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={category} onValueChange={(v) => v && setCategory(v)}>
-                <SelectTrigger className="w-[140px]">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL}>All categories</SelectItem>
-                  {(Object.keys(SCRAPER_CATEGORY_LABELS) as ScraperCategory[]).map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {SCRAPER_CATEGORY_LABELS[c]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <span className="text-sm text-muted-foreground self-center">
-                {loading ? "Loading…" : `${items.length} available`}
-              </span>
+            <div className="space-y-3">
+              <div className="relative max-w-xl">
+                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search title, feed, or content…"
+                  className="pl-8 h-9"
+                  aria-label="Search intake pool"
+                />
+              </div>
+              <div className="flex flex-wrap items-end gap-3">
+                <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Platform" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All platforms</SelectItem>
+                    {(Object.keys(SCRAPER_PLATFORM_LABELS) as ScraperPlatform[]).map((p) => (
+                      <SelectItem key={p} value={p}>
+                        {SCRAPER_PLATFORM_LABELS[p]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={category} onValueChange={(v) => v && setCategory(v)}>
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All categories</SelectItem>
+                    {(Object.keys(SCRAPER_CATEGORY_LABELS) as ScraperCategory[]).map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {SCRAPER_CATEGORY_LABELS[c]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">From date</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="date"
+                      value={dateFrom}
+                      onChange={(e) => setDateFrom(e.target.value)}
+                      className="pl-8 h-9 w-[150px]"
+                      aria-label="Published from date"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">To date</Label>
+                  <div className="relative">
+                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                    <Input
+                      type="date"
+                      value={dateTo}
+                      onChange={(e) => setDateTo(e.target.value)}
+                      className="pl-8 h-9 w-[150px]"
+                      aria-label="Published to date"
+                    />
+                  </div>
+                </div>
+                {filtersActive ? (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    className="h-9"
+                    onClick={() => {
+                      setSearchQuery("");
+                      setDateFrom("");
+                      setDateTo("");
+                    }}
+                  >
+                    Clear filters
+                  </Button>
+                ) : null}
+                <span className="text-sm text-muted-foreground pb-2 ml-auto">
+                  {loading
+                    ? "Loading…"
+                    : filtersActive
+                      ? `${filteredItems.length} of ${items.length} shown`
+                      : `${items.length} available`}
+                </span>
+              </div>
             </div>
 
             {loading ? (
@@ -210,9 +316,19 @@ export default function IntakePoolPage() {
                   </CardDescription>
                 </CardHeader>
               </Card>
+            ) : filteredItems.length === 0 ? (
+              <Card>
+                <CardHeader>
+                  <CardTitle>No matches</CardTitle>
+                  <CardDescription>
+                    Try a different search term or date range, or clear filters to see all{" "}
+                    {items.length} posts.
+                  </CardDescription>
+                </CardHeader>
+              </Card>
             ) : (
               <ul className="space-y-3">
-                {items.map((item) => {
+                {filteredItems.map((item) => {
                   const busy = busyId === item.id;
                   const snippet =
                     item.contentSnippet?.trim() ||
