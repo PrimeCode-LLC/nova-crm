@@ -37,6 +37,11 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "feature.dashboard_brief": "Dashboard AI brief",
   "feature.outreach_view": "Email outreach opened",
   "feature.import": "Data import",
+  "scraper.feeds_seed": "Scraper feeds seeded",
+  "scraper.run": "Scraper feeds run",
+  "scraper.feed_create": "Scraper feed created",
+  "scraper.feed_delete": "Scraper feed deleted",
+  "scraper.raw_promote": "Intake item promoted to prospect",
 };
 
 export type AuditEventCategory =
@@ -83,6 +88,11 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "feature.dashboard_brief": "usage",
   "feature.outreach_view": "usage",
   "feature.import": "usage",
+  "scraper.feeds_seed": "crm",
+  "scraper.run": "crm",
+  "scraper.feed_create": "crm",
+  "scraper.feed_delete": "crm",
+  "scraper.raw_promote": "crm",
 };
 
 export function labelForAuditEvent(event: string): string {

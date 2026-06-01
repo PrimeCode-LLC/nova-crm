@@ -37,7 +37,12 @@ export type AuditEvent =
   | "feature.followup_suggest"
   | "feature.dashboard_brief"
   | "feature.outreach_view"
-  | "feature.import";
+  | "feature.import"
+  | "scraper.feeds_seed"
+  | "scraper.run"
+  | "scraper.feed_create"
+  | "scraper.feed_delete"
+  | "scraper.raw_promote";
 
 export type AuditLogRecord = {
   id: string;

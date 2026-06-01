@@ -390,6 +390,14 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /scraperFeeds/{id} {
+      allow read, write: if false;
+    }
+
+    match /scraperRawItems/{id} {
+      allow read, write: if false;
+    }
+
     match /organizations/{orgId} {
       // Members of an org can READ their own org doc (for plan / seats UI).
       // Admins / owners can update *settings* (name, billingEmail, etc.) — but

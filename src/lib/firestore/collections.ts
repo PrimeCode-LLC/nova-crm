@@ -21,6 +21,10 @@ export const COLLECTIONS = {
   /** Workspace-defined labels for leads, deals, accounts, contacts. */
   labels: "labels",
   ingestQueue: "ingestQueue",
+  /** RSS feed configs for social scraper (tenant-scoped). */
+  scraperFeeds: "scraperFeeds",
+  /** 7-day staging pool before promote to prospect/lead. */
+  scraperRawItems: "scraperRawItems",
   auditLog: "auditLog",
   workspaceChatChannels: "workspaceChatChannels",
   workspaceChatMessages: "workspaceChatMessages",

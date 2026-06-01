@@ -623,3 +623,63 @@ export interface WorkspaceChatReadState {
   userId: string;
   channels: Record<string, ISODate>;
 }
+
+/** RSS feed source platform (social / job boards). */
+export type ScraperPlatform = "reddit" | "x" | "linkedin" | "other";
+
+/** Intent bucket for scraped posts. */
+export type ScraperCategory = "hiring" | "problem" | "other";
+
+/** Admin-configured RSS feed (`scraperFeeds`). */
+export interface ScraperFeed {
+  id: string;
+  organizationId: string;
+  name: string;
+  platform: ScraperPlatform;
+  category: ScraperCategory;
+  feedUrl: string;
+  enabled: boolean;
+  /** Minutes between scheduled runs (default 60). */
+  runIntervalMinutes: number;
+  lastRunAt?: ISODate;
+  lastSuccessAt?: ISODate;
+  lastError?: string;
+  lastNewCount?: number;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+  createdByUid?: string;
+}
+
+export type ScraperRawItemStatus = "available" | "promoted" | "dismissed";
+
+/** Staging row from RSS ingest (`scraperRawItems`); unpromoted rows expire after 7 days. */
+export interface ScraperRawItem {
+  id: string;
+  organizationId: string;
+  feedId: string;
+  feedName: string;
+  platform: ScraperPlatform;
+  category: ScraperCategory;
+  /** Stable dedupe key (`guid` or canonical link). */
+  dedupeKey: string;
+  guid?: string;
+  link: string;
+  title: string;
+  content: string;
+  contentSnippet?: string;
+  creator?: string;
+  dcCreator?: string;
+  pubDate?: string;
+  isoDate?: ISODate;
+  publishedAt: ISODate;
+  status: ScraperRawItemStatus;
+  promotedToLeadId?: string;
+  promotedAt?: ISODate;
+  promotedByUserId?: string;
+  dismissedAt?: ISODate;
+  dismissedByUserId?: string;
+  /** When `status === available`, deleted after this time. */
+  expiresAt: ISODate;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}

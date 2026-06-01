@@ -1,0 +1,93 @@
+import { NextResponse } from "next/server";
+import { z } from "zod";
+import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import {
+  deleteScraperFeedServer,
+  getScraperFeedServer,
+  updateScraperFeedServer,
+} from "@/lib/scrapers/feeds-server";
+import { runScraperFeedByIdServer } from "@/lib/scrapers/run-feeds-server";
+import { recordAudit } from "@/lib/firestore/audit";
+
+const patchSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    platform: z.enum(["reddit", "x", "linkedin", "other"]).optional(),
+    category: z.enum(["hiring", "problem", "other"]).optional(),
+    feedUrl: z.string().url().max(2000).optional(),
+    enabled: z.boolean().optional(),
+    runIntervalMinutes: z.number().int().min(15).max(1440).optional(),
+  })
+  .strict();
+
+type RouteCtx = { params: Promise<{ feedId: string }> };
+
+export async function GET(_req: Request, ctx: RouteCtx) {
+  const g = await guardTenantApi();
+  if (!g.ok) return g.response;
+  const { feedId } = await ctx.params;
+  const feed = await getScraperFeedServer(g.ctx.session.organizationId, feedId);
+  if (!feed) return NextResponse.json({ error: "Not found" }, { status: 404 });
+  return NextResponse.json({ feed });
+}
+
+export async function PATCH(req: Request, ctx: RouteCtx) {
+  const g = await guardTenantApi({ minRole: "manager" });
+  if (!g.ok) return g.response;
+  const { feedId } = await ctx.params;
+
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (
+    typeof json === "object" &&
+    json !== null &&
+    (json as { action?: string }).action === "run"
+  ) {
+    const result = await runScraperFeedByIdServer(g.ctx.session.organizationId, feedId);
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({ result });
+  }
+
+  const parsed = patchSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json(
+      { error: "Validation failed", issues: parsed.error.flatten() },
+      { status: 400 },
+    );
+  }
+
+  const updated = await updateScraperFeedServer({
+    organizationId: g.ctx.session.organizationId,
+    feedId,
+    uid: g.ctx.session.uid,
+    patch: parsed.data,
+  });
+  if ("error" in updated) {
+    return NextResponse.json({ error: updated.error }, { status: 404 });
+  }
+  return NextResponse.json({ feed: updated.feed });
+}
+
+export async function DELETE(_req: Request, ctx: RouteCtx) {
+  const g = await guardTenantApi({ minRole: "manager" });
+  if (!g.ok) return g.response;
+  const { feedId } = await ctx.params;
+  const deleted = await deleteScraperFeedServer(g.ctx.session.organizationId, feedId);
+  if ("error" in deleted) {
+    return NextResponse.json({ error: deleted.error }, { status: 404 });
+  }
+  void recordAudit({
+    organizationId: g.ctx.session.organizationId,
+    actorUid: g.ctx.session.uid,
+    event: "scraper.feed_delete",
+    meta: { feedId },
+  });
+  return NextResponse.json({ ok: true });
+}
