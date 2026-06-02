@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import {
   ArrowLeft,
   Calendar,
@@ -57,9 +58,23 @@ const STATUS_LABEL: Record<Campaign["status"], string> = {
 
 const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
+function formatScheduleDays(days: number[] | Record<string, boolean> | undefined): string | null {
+  if (!days) return null;
+  if (Array.isArray(days)) {
+    return days.length > 0 ? days.map((d) => DAY_NAMES[d] ?? String(d)).join(", ") : null;
+  }
+  const labels = Object.entries(days)
+    .filter(([, on]) => on)
+    .map(([d]) => DAY_NAMES[Number(d)] ?? d);
+  return labels.length > 0 ? labels.join(", ") : null;
+}
+
 type RemoteData = InstantlyCampaign & { email_list?: string[] };
 
+const CAMPAIGN_TABS = ["overview", "sequence", "leads", "accounts", "options"] as const;
+
 export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
+  const searchParams = useSearchParams();
   const { getCampaignById, leads, isDemo, viewerOrgRole } = useWorkspace();
   const c = getCampaignById(campaignId);
   const [syncing, setSyncing] = React.useState(false);
@@ -114,6 +129,11 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
   const remoteAccounts = accountEmails;
   const canEditAccounts = roleAtLeast(viewerOrgRole, "manager") && (connected || isDemo);
   const schedule = remote?.campaign_schedule?.schedules?.[0];
+  const scheduleDayLabels = schedule ? formatScheduleDays(schedule.days) : null;
+  const tabParam = searchParams.get("tab");
+  const initialTab = CAMPAIGN_TABS.includes(tabParam as (typeof CAMPAIGN_TABS)[number])
+    ? (tabParam as (typeof CAMPAIGN_TABS)[number])
+    : "overview";
 
   async function syncStats() {
     setSyncing(true);
@@ -221,7 +241,7 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
           )}
         </div>
 
-        <Tabs defaultValue="overview">
+        <Tabs defaultValue={initialTab}>
           <TabsList>
             <TabsTrigger value="overview">Overview</TabsTrigger>
             <TabsTrigger value="sequence">
@@ -305,10 +325,10 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
                 <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Schedule</h3>
                 <div className="rounded-lg border bg-card p-4">
                   <div className="flex flex-wrap items-center gap-4 text-sm">
-                    {schedule.days && schedule.days.length > 0 && (
+                    {scheduleDayLabels && (
                       <div className="flex items-center gap-2 text-muted-foreground">
                         <Calendar className="h-4 w-4 shrink-0" />
-                        <span>{schedule.days.map((d) => DAY_NAMES[d] ?? d).join(", ")}</span>
+                        <span>{scheduleDayLabels}</span>
                       </div>
                     )}
                     {schedule.timing && (

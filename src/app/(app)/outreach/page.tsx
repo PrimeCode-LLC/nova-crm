@@ -194,7 +194,7 @@ export default function OutreachPage() {
           {connected ? " · synced with Instantly" : ""}
         </p>
       </PageBody>
-      <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} connected={connected} />
+      <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
     </>
   );
 }

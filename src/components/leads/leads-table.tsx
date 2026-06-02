@@ -77,6 +77,7 @@ import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { downloadLeadsCsv } from "@/lib/leads-csv";
+import { LEAD_TABLE_COLUMN_LABELS as COL } from "@/lib/leads/lead-table-labels";
 import {
   OWNER_SCOPE_PREFIX,
   buildPersonOwnerOptions,
@@ -521,7 +522,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "contact",
       accessorKey: "contactName",
-      header: "Contact",
+      header: COL.contact,
       cell: ({ row }) => (
         <div className="min-w-0">
           <Link
@@ -541,7 +542,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "company",
       accessorKey: "companyName",
-      header: "Company",
+      header: COL.company,
       cell: ({ row }) => (
         <div className="min-w-0">
           <div className="text-sm truncate">{row.original.companyName}</div>
@@ -556,7 +557,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "intakeKind",
       accessorFn: (row) => row.intakeKind ?? "sales_lead",
-      header: "Intake",
+      header: COL.intakeKind,
       cell: ({ row }) => {
         const k = row.original.intakeKind ?? "sales_lead";
         const m = INTAKE_KIND_META[k];
@@ -570,7 +571,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "labelIds",
       accessorFn: (row) => (row.labelIds ?? []).join(","),
-      header: "Labels",
+      header: COL.labelIds,
       cell: ({ row }) => {
         const ids = row.original.labelIds ?? [];
         if (!ids.length) {
@@ -616,7 +617,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "channel",
       accessorKey: "channel",
-      header: "Channel",
+      header: COL.channel,
       cell: ({ row }) => <LeadChannelCell lead={row.original} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
@@ -624,7 +625,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "profileId",
       accessorKey: "profileId",
-      header: "Profile",
+      header: COL.profileId,
       cell: ({ row }) => {
         const p = getProfileById(row.original.profileId);
         if (!p) {
@@ -650,7 +651,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "stage",
       accessorKey: "stage",
-      header: "Stage",
+      header: COL.stage,
       cell: ({ row }) => <LeadStageCell lead={row.original} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
@@ -658,7 +659,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "owner",
       accessorKey: "ownerId",
-      header: "Owner",
+      header: COL.owner,
       cell: ({ row }) => {
         const oid = row.original.ownerId?.trim();
         if (!oid) {
@@ -674,7 +675,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "addedBy",
       accessorFn: (row) => row.createdById ?? "",
-      header: "Added by",
+      header: COL.addedBy,
       cell: ({ row }) => {
         const id = row.original.createdById?.trim();
         if (!id) return <span className="text-xs text-muted-foreground">—</span>;
@@ -684,7 +685,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "temperature",
       accessorKey: "temperature",
-      header: "Temp",
+      header: COL.temperature,
       cell: ({ row }) => {
         const t = TEMPERATURE_TONE[row.original.temperature];
         return (
@@ -697,7 +698,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "priority",
       accessorKey: "priority",
-      header: "Priority",
+      header: COL.priority,
       cell: ({ row }) => {
         const p = PRIORITY_TONE[row.original.priority];
         return <Badge className={cn("rounded-md border-transparent", p.className)}>{p.label}</Badge>;
@@ -708,7 +709,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "push",
       accessorFn: (r) => r.pushToInstantly ?? r.pushToLinkedIn ?? "not_ready",
-      header: "Push",
+      header: COL.push,
       cell: ({ row }) => {
         const v = row.original.pushToInstantly ?? row.original.pushToLinkedIn;
         if (!v) return <span className="text-xs text-muted-foreground">-</span>;
@@ -723,7 +724,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "value",
       accessorKey: "estimatedValue",
-      header: () => <span className="tabular-nums">Value</span>,
+      header: () => <span className="tabular-nums">{COL.value}</span>,
       cell: ({ row }) => (
         <span className="tabular-nums text-right block">
           {fmtCurrency(row.original.estimatedValue)}
@@ -733,7 +734,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "created",
       accessorKey: "createdAt",
-      header: "Added date",
+      header: COL.created,
       cell: ({ row }) => (
         <span
           className="text-xs text-muted-foreground tabular-nums whitespace-nowrap"
@@ -747,7 +748,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "idle",
       accessorKey: "idleDays",
-      header: "Idle",
+      header: COL.idle,
       cell: ({ row }) => {
         const days = row.original.idleDays ?? 0;
         const isIdle = row.original.isIdle;
@@ -769,7 +770,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "updated",
       accessorKey: "updatedAt",
-      header: "Last activity",
+      header: COL.updated,
       cell: ({ row }) => (
         <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap" suppressHydrationWarning>
           {fmtRelative(row.original.lastActivityAt ?? row.original.updatedAt)}

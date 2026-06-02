@@ -9,6 +9,7 @@ import type {
   InstantlyLead,
   InstantlyLeadInput,
 } from "./types";
+import { DEFAULT_INSTANTLY_TIMEZONE, normalizeInstantlyTimezone } from "./timezones";
 
 const BASE = "https://api.instantly.ai/api/v2";
 
@@ -418,14 +419,31 @@ export async function addInstantlyLeadsBulk(
   });
 }
 
-/** Default schedule for new campaigns (Mon–Fri 9–17 UTC). */
-export function defaultInstantlySchedule(timezone = "Etc/UTC"): CreateInstantlyCampaignInput["campaign_schedule"] {
+/** Instantly v2 weekday object (0=Sun … 6=Sat). Mon–Fri enabled by default. */
+export function defaultInstantlyScheduleDays(): Record<string, boolean> {
+  return {
+    "0": false,
+    "1": true,
+    "2": true,
+    "3": true,
+    "4": true,
+    "5": true,
+    "6": false,
+  };
+}
+
+/** Default schedule for new campaigns (Mon–Fri 9–17). */
+export function defaultInstantlySchedule(
+  timezone = DEFAULT_INSTANTLY_TIMEZONE,
+): CreateInstantlyCampaignInput["campaign_schedule"] {
+  const tz = normalizeInstantlyTimezone(timezone);
   return {
     schedules: [
       {
-        days: [1, 2, 3, 4, 5],
+        name: "Default schedule",
+        days: defaultInstantlyScheduleDays(),
         timing: { from: "09:00", to: "17:00" },
-        timezone,
+        timezone: tz,
       },
     ],
   };

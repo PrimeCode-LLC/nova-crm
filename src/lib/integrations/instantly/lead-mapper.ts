@@ -1,27 +1,8 @@
 import type { InstantlyLead, InstantlyLeadInput } from "./types";
 import type { Lead } from "@/lib/types";
 
-export type InstantlyMergeVariable = {
-  token: string;
-  label: string;
-  source: string;
-};
-
-/** Merge tags available when pushing Nova leads to Instantly (use in Sequence subject/body). */
-export const INSTANTLY_MERGE_VARIABLES: InstantlyMergeVariable[] = [
-  { token: "first_name", label: "First name", source: "Contact name (first word)" },
-  { token: "last_name", label: "Last name", source: "Contact name (remaining words)" },
-  { token: "email", label: "Email", source: "Contact email" },
-  { token: "company_name", label: "Company", source: "Company name" },
-  { token: "company_domain", label: "Company domain", source: "Company domain" },
-  { token: "company_industry", label: "Industry", source: "Company industry" },
-  { token: "contact_title", label: "Job title", source: "Contact title" },
-  { token: "linkedin", label: "LinkedIn", source: "Contact LinkedIn URL" },
-  { token: "trigger_event", label: "Trigger event", source: "Lead trigger event" },
-  { token: "ps_line", label: "P.S. line", source: "Personalization line" },
-  { token: "pain_points", label: "Pain points", source: "Lead pain points" },
-  { token: "business_focus", label: "Business focus", source: "Business focus" },
-];
+export type { InstantlyMergeVariable } from "./merge-variables";
+export { INSTANTLY_MERGE_VARIABLES } from "./merge-variables";
 
 function optionalString(v: unknown): string | undefined {
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
@@ -128,6 +109,14 @@ export function mapNovaLeadToInstantly(lead: Lead): InstantlyLeadInput | null {
   setCustom(custom_variables, "ps_line", lead.psLine);
   setCustom(custom_variables, "pain_points", lead.painPoints);
   setCustom(custom_variables, "business_focus", lead.businessFocus);
+  setCustom(custom_variables, "stage", lead.stage);
+  setCustom(custom_variables, "priority", lead.priority);
+  setCustom(custom_variables, "channel", lead.channel);
+  setCustom(custom_variables, "temperature", lead.temperature);
+  if (lead.intakeKind) setCustom(custom_variables, "intake_kind", lead.intakeKind);
+  if (lead.estimatedValue != null && !Number.isNaN(lead.estimatedValue)) {
+    setCustom(custom_variables, "estimated_value", String(lead.estimatedValue));
+  }
 
   return {
     email,

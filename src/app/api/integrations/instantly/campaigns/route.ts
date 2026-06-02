@@ -10,6 +10,7 @@ import {
   createInstantlyCampaign,
   defaultInstantlySchedule,
 } from "@/lib/integrations/instantly/client";
+import { normalizeInstantlyTimezone } from "@/lib/integrations/instantly/timezones";
 import {
   novaCampaignFromInstantly,
   persistCampaignServer,
@@ -36,7 +37,7 @@ const createSchema = z.object({
   timezone: z.string().optional(),
   scheduleFrom: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   scheduleTo: z.string().regex(/^\d{2}:\d{2}$/).optional(),
-  steps: z.array(stepSchema).min(1),
+  steps: z.array(stepSchema).min(1).optional(),
   email_list: z.array(z.string().email()).optional(),
   activate: z.boolean().optional(),
 });
@@ -100,8 +101,7 @@ export async function POST(req: Request) {
   }
 
   const { name, timezone, scheduleFrom, scheduleTo, steps, email_list, activate } = parsed.data;
-  const tz = timezone ?? "Etc/UTC";
-  const schedule = defaultInstantlySchedule(tz);
+  const schedule = defaultInstantlySchedule(normalizeInstantlyTimezone(timezone));
   if (schedule.schedules[0]) {
     schedule.schedules[0].timing = {
       from: scheduleFrom ?? "09:00",
@@ -109,17 +109,15 @@ export async function POST(req: Request) {
     };
   }
 
-  const sequences: InstantlySequence[] = [
-    {
-      steps: steps as InstantlySequenceStep[],
-    },
-  ];
+  const sequences: InstantlySequence[] | undefined = steps?.length
+    ? [{ steps: steps as InstantlySequenceStep[] }]
+    : undefined;
 
   try {
     const remote = await createInstantlyCampaign(g.apiKey, {
       name,
       campaign_schedule: schedule,
-      sequences,
+      ...(sequences ? { sequences } : {}),
       email_list: email_list?.length ? email_list : undefined,
     });
 

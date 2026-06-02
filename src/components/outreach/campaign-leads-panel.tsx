@@ -143,13 +143,18 @@ export function CampaignLeadsPanel({
         </CollapsibleTrigger>
         <CollapsibleContent className="mt-2 rounded-md border bg-muted/20 p-3">
           <p className="text-xs text-muted-foreground mb-2">
-            Use these in the <strong>Sequence</strong> tab as{" "}
-            <code className="rounded bg-muted px-1">{`{{token}}`}</code> (snake_case). Values are
-            filled from each lead when you add them below.
+            Tags match Leads table columns. Use in the <strong>Sequence</strong> tab as{" "}
+            <code className="rounded bg-muted px-1">{`{{token}}`}</code>. Values fill from each lead
+            when you add them below.
           </p>
           <div className="flex flex-wrap gap-1.5">
             {INSTANTLY_MERGE_VARIABLES.map((v) => (
-              <Badge key={v.token} variant="outline" className="font-mono text-[10px] font-normal">
+              <Badge
+                key={v.token}
+                variant="outline"
+                className="font-mono text-[10px] font-normal"
+                title={`${v.label} — ${v.source}`}
+              >
                 {`{{${v.token}}}`}
               </Badge>
             ))}

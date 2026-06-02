@@ -13,8 +13,8 @@ import { InstantlyAccountsPanel } from "@/components/integrations/instantly-acco
 type ConnectionState = {
   connected: boolean;
   encryptionConfigured: boolean;
-  webhookUrl: string;
-  hasWebhookSecret: boolean;
+  webhookSecret?: string;
+  canManageWebhook?: boolean;
 };
 
 export function InstantlyIntegrationCard() {
@@ -84,11 +84,11 @@ export function InstantlyIntegrationCard() {
     }
   }
 
-  async function copyWebhook() {
-    if (!state?.webhookUrl) return;
+  async function copyWebhookSecret() {
+    if (!state?.webhookSecret) return;
     try {
-      await navigator.clipboard.writeText(state.webhookUrl);
-      toast.success("Webhook URL copied");
+      await navigator.clipboard.writeText(state.webhookSecret);
+      toast.success("Webhook secret copied");
     } catch {
       toast.error("Could not copy");
     }
@@ -187,16 +187,30 @@ export function InstantlyIntegrationCard() {
               </Button>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs text-muted-foreground">Webhook URL (paste in Instantly → Webhooks)</Label>
-              <div className="flex gap-2">
-                <Input readOnly value={state?.webhookUrl ?? ""} className="font-mono text-[10px] h-8" />
-                <Button type="button" variant="outline" size="sm" onClick={() => void copyWebhook()}>
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-              </div>
+              <Label className="text-xs text-muted-foreground">
+                Webhook secret (Instantly → Webhooks → header{" "}
+                <code className="rounded bg-muted px-1">x-webhook-secret</code>)
+              </Label>
+              {state?.canManageWebhook && state.webhookSecret ? (
+                <div className="flex gap-2">
+                  <Input
+                    readOnly
+                    value={state.webhookSecret}
+                    className="font-mono text-xs h-8"
+                  />
+                  <Button type="button" variant="outline" size="sm" onClick={() => void copyWebhookSecret()}>
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Ask a workspace admin to copy the webhook secret from this page.
+                </p>
+              )}
               <p className="text-[10px] text-muted-foreground">
-                Enable: reply_received, email_sent, email_opened. Use header{" "}
-                <code className="rounded bg-muted px-1">x-webhook-secret</code> with the secret generated on connect.
+                In Instantly, enable reply_received, email_sent, and email_opened. Set the webhook URL to your Nova
+                deployment and paste this secret as the <code className="rounded bg-muted px-1">x-webhook-secret</code>{" "}
+                header value.
               </p>
             </div>
           </div>

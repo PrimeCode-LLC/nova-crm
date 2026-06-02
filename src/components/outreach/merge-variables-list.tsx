@@ -38,8 +38,8 @@ export function MergeVariablesList({ className }: { className?: string }) {
           Merge variables
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Click copy to paste into subject or body. Use exact spelling — Instantly expects{" "}
-          <code className="rounded bg-muted px-1 font-mono text-[10px]">{`{{snake_case}}`}</code>.
+          Click copy to paste into subject or body. Labels match the Leads table columns. Instantly
+          expects <code className="rounded bg-muted px-1 font-mono text-[10px]">{`{{snake_case}}`}</code>.
         </p>
       </div>
       <ul className="divide-y rounded-md border bg-card">

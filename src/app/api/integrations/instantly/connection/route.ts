@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import crypto from "crypto";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { roleAtLeast } from "@/lib/platform/org-role";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
@@ -10,8 +11,30 @@ import {
   isInstantlyEncryptionConfigured,
   upsertInstantlyApiKeyServer,
 } from "@/lib/integrations/instantly/secrets";
-import { buildInstantlyWebhookUrl } from "@/lib/integrations/instantly/webhook-url";
 import { recordAudit } from "@/lib/firestore/audit";
+
+async function getOrCreateInstantlyWebhookSecret(organizationId: string): Promise<string | null> {
+  const db = getAdminDb();
+  if (!db) return null;
+  const orgRef = db.collection(COLLECTIONS.organizations).doc(organizationId);
+  const snap = await orgRef.get();
+  const settings = (snap.data()?.settings ?? {}) as { instantlyWebhookSecret?: string };
+  let secret = settings.instantlyWebhookSecret?.trim();
+  if (!secret) {
+    secret = crypto.randomBytes(24).toString("hex");
+    await orgRef.set(
+      {
+        settings: {
+          ...settings,
+          instantlyWebhookSecret: secret,
+        },
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true },
+    );
+  }
+  return secret;
+}
 
 const putSchema = z
   .object({
@@ -25,19 +48,19 @@ export async function GET() {
 
   const orgId = g.ctx.session.organizationId;
   const connected = await hasInstantlyApiKeyServer(orgId);
-  const db = getAdminDb();
-  let hasWebhookSecret = false;
-  if (db) {
-    const snap = await db.collection(COLLECTIONS.organizations).doc(orgId).get();
-    const settings = (snap.data()?.settings ?? {}) as { instantlyWebhookSecret?: string };
-    hasWebhookSecret = Boolean(settings.instantlyWebhookSecret?.trim());
+  const canManageWebhook = roleAtLeast(g.ctx.role, "admin");
+
+  let webhookSecret: string | undefined;
+  if (connected && canManageWebhook) {
+    const secret = await getOrCreateInstantlyWebhookSecret(orgId);
+    if (secret) webhookSecret = secret;
   }
 
   return NextResponse.json({
     connected,
     encryptionConfigured: isInstantlyEncryptionConfigured(),
-    webhookUrl: buildInstantlyWebhookUrl(orgId),
-    hasWebhookSecret,
+    webhookSecret,
+    canManageWebhook,
   });
 }
 
@@ -65,25 +88,7 @@ export async function PUT(req: Request) {
     return NextResponse.json({ error: result.error }, { status: 500 });
   }
 
-  const db = getAdminDb();
-  if (db) {
-    const orgRef = db.collection(COLLECTIONS.organizations).doc(orgId);
-    const snap = await orgRef.get();
-    const settings = (snap.data()?.settings ?? {}) as { instantlyWebhookSecret?: string };
-    if (!settings.instantlyWebhookSecret?.trim()) {
-      const secret = crypto.randomBytes(24).toString("hex");
-      await orgRef.set(
-        {
-          settings: {
-            ...settings,
-            instantlyWebhookSecret: secret,
-          },
-          updatedAt: new Date().toISOString(),
-        },
-        { merge: true },
-      );
-    }
-  }
+  const webhookSecret = await getOrCreateInstantlyWebhookSecret(orgId);
 
   await recordAudit({
     organizationId: orgId,
@@ -93,7 +98,7 @@ export async function PUT(req: Request) {
 
   return NextResponse.json({
     connected: true,
-    webhookUrl: buildInstantlyWebhookUrl(orgId),
+    webhookSecret: webhookSecret ?? undefined,
   });
 }
 

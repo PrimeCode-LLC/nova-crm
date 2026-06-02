@@ -8,8 +8,13 @@ export function parseInstantlyId(
   externalRef?: string | null,
   instantlyId?: string | null,
 ): string | null {
-  if (instantlyId?.trim()) return instantlyId.trim();
+  const direct = instantlyId?.trim();
+  if (direct) {
+    if (direct.startsWith("demo-")) return null;
+    return direct;
+  }
   if (!externalRef?.startsWith("instantly:")) return null;
   const slug = externalRef.slice("instantly:".length).trim();
-  return slug || null;
+  if (!slug || slug.startsWith("demo-")) return null;
+  return slug;
 }

@@ -21,7 +21,8 @@ export interface InstantlyScheduleTiming {
 }
 
 export interface InstantlyScheduleEntry {
-  days?: number[];
+  name?: string;
+  days?: number[] | Record<string, boolean>;
   timing?: InstantlyScheduleTiming;
   timezone?: string;
 }
@@ -141,6 +142,6 @@ export interface InstantlyBulkAddLeadsResponse {
 export interface CreateInstantlyCampaignInput {
   name: string;
   campaign_schedule: InstantlyCampaignSchedule;
-  sequences: InstantlySequence[];
+  sequences?: InstantlySequence[];
   email_list?: string[];
 }
