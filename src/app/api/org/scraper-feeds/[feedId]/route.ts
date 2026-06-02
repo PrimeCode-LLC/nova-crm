@@ -12,8 +12,8 @@ import { recordAudit } from "@/lib/firestore/audit";
 const patchSchema = z
   .object({
     name: z.string().min(1).max(200).optional(),
-    platform: z.enum(["reddit", "x", "linkedin", "other"]).optional(),
-    category: z.enum(["hiring", "problem", "other"]).optional(),
+    platform: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()).optional(),
+    category: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()).optional(),
     feedUrl: z.string().url().max(2000).optional(),
     enabled: z.boolean().optional(),
     runIntervalMinutes: z.number().int().min(15).max(1440).optional(),

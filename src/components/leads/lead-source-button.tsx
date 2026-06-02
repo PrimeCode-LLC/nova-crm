@@ -6,8 +6,8 @@ import { Button } from "@/components/ui/button";
 import type { Lead } from "@/lib/types";
 import { getLeadScraperSource } from "@/lib/scrapers/lead-scraper-source";
 import {
-  SCRAPER_CATEGORY_LABELS,
-  SCRAPER_PLATFORM_LABELS,
+  getScraperCategoryLabel,
+  getScraperPlatformLabel,
 } from "@/lib/scrapers/labels";
 import { cn } from "@/lib/utils";
 
@@ -48,14 +48,8 @@ export function LeadScraperSourceSummary({ lead }: { lead: Lead }) {
   const source = getLeadScraperSource(lead);
   if (!source) return null;
 
-  const platformLabel =
-    source.platform && source.platform in SCRAPER_PLATFORM_LABELS
-      ? SCRAPER_PLATFORM_LABELS[source.platform]
-      : null;
-  const categoryLabel =
-    source.category && source.category in SCRAPER_CATEGORY_LABELS
-      ? SCRAPER_CATEGORY_LABELS[source.category]
-      : null;
+  const platformLabel = source.platform ? getScraperPlatformLabel(source.platform) : null;
+  const categoryLabel = source.category ? getScraperCategoryLabel(source.category) : null;
 
   return (
     <p className="text-xs text-muted-foreground">

@@ -624,11 +624,11 @@ export interface WorkspaceChatReadState {
   channels: Record<string, ISODate>;
 }
 
-/** RSS feed source platform (social / job boards). */
-export type ScraperPlatform = "reddit" | "x" | "linkedin" | "other";
+/** RSS feed source platform (preset keys like `reddit`/`x`/`linkedin` or custom). */
+export type ScraperPlatform = string;
 
-/** Intent bucket for scraped posts. */
-export type ScraperCategory = "hiring" | "problem" | "other";
+/** Intent bucket for scraped posts (preset keys like `hiring`/`problem` or custom). */
+export type ScraperCategory = string;
 
 /** Admin-configured RSS feed (`scraperFeeds`). */
 export interface ScraperFeed {

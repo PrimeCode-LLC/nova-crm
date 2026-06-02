@@ -56,12 +56,18 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { ScraperCategory, ScraperFeed, ScraperPlatform } from "@/lib/types";
 import {
-  SCRAPER_CATEGORY_LABELS,
-  SCRAPER_PLATFORM_LABELS,
+  getScraperCategoryLabel,
+  getScraperPlatformLabel,
+  isScraperCategoryPreset,
+  isScraperPlatformPreset,
+  SCRAPER_CATEGORY_PRESETS,
+  SCRAPER_PLATFORM_PRESETS,
 } from "@/lib/scrapers/labels";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+const CUSTOM_CATEGORY_VALUE = "__custom__";
+const CUSTOM_PLATFORM_VALUE = "__custom__";
 
 function resetFeedForm(setters: {
   setName: (v: string) => void;
@@ -94,7 +100,9 @@ export default function AdminScrapersPage() {
   const [name, setName] = React.useState("");
   const [feedUrl, setFeedUrl] = React.useState("");
   const [platform, setPlatform] = React.useState<ScraperPlatform>("reddit");
+  const [customPlatform, setCustomPlatform] = React.useState("");
   const [category, setCategory] = React.useState<ScraperCategory>("hiring");
+  const [customCategory, setCustomCategory] = React.useState("");
   const [enabled, setEnabled] = React.useState(true);
   const [intervalMin, setIntervalMin] = React.useState("60");
 
@@ -102,6 +110,8 @@ export default function AdminScrapersPage() {
   const [pageSize, setPageSize] = React.useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
 
   const isEditing = editFeedId !== null;
+  const selectedPlatformValue = isScraperPlatformPreset(platform) ? platform : CUSTOM_PLATFORM_VALUE;
+  const selectedCategoryValue = isScraperCategoryPreset(category) ? category : CUSTOM_CATEGORY_VALUE;
   const totalPages = Math.max(1, Math.ceil(feeds.length / pageSize));
   const pageStart = (page - 1) * pageSize;
   const paginatedFeeds = feeds.slice(pageStart, pageStart + pageSize);
@@ -119,6 +129,8 @@ export default function AdminScrapersPage() {
   function openCreateDialog() {
     setEditFeedId(null);
     resetFeedForm({ setName, setFeedUrl, setPlatform, setCategory, setEnabled, setIntervalMin });
+    setCustomPlatform("");
+    setCustomCategory("");
     setFeedDialogOpen(true);
   }
 
@@ -126,8 +138,10 @@ export default function AdminScrapersPage() {
     setEditFeedId(feed.id);
     setName(feed.name);
     setFeedUrl(feed.feedUrl);
-    setPlatform(feed.platform);
-    setCategory(feed.category);
+    setPlatform(isScraperPlatformPreset(feed.platform) ? feed.platform : CUSTOM_PLATFORM_VALUE);
+    setCustomPlatform(isScraperPlatformPreset(feed.platform) ? "" : feed.platform);
+    setCategory(isScraperCategoryPreset(feed.category) ? feed.category : CUSTOM_CATEGORY_VALUE);
+    setCustomCategory(isScraperCategoryPreset(feed.category) ? "" : feed.category);
     setEnabled(feed.enabled);
     setIntervalMin(String(feed.runIntervalMinutes));
     setFeedDialogOpen(true);
@@ -241,15 +255,29 @@ export default function AdminScrapersPage() {
   async function saveFeed() {
     const n = name.trim();
     const url = feedUrl.trim();
+    const nextPlatform = (isScraperPlatformPreset(platform) ? platform : customPlatform)
+      .trim()
+      .toLowerCase();
+    const nextCategory = (isScraperCategoryPreset(category) ? category : customCategory)
+      .trim()
+      .toLowerCase();
     if (!n || !url) {
       toast.error("Name and feed URL are required");
+      return;
+    }
+    if (!nextCategory) {
+      toast.error("Category is required");
+      return;
+    }
+    if (!nextPlatform) {
+      toast.error("Platform is required");
       return;
     }
     const payload = {
       name: n,
       feedUrl: url,
-      platform,
-      category,
+      platform: nextPlatform,
+      category: nextCategory,
       enabled,
       runIntervalMinutes: Number(intervalMin) || 60,
     };
@@ -392,10 +420,10 @@ export default function AdminScrapersPage() {
                         ) : null}
                       </TableCell>
                       <TableCell>
-                        <Badge variant="secondary">{SCRAPER_PLATFORM_LABELS[feed.platform]}</Badge>
+                        <Badge variant="secondary">{getScraperPlatformLabel(feed.platform)}</Badge>
                       </TableCell>
                       <TableCell>
-                        <Badge variant="outline">{SCRAPER_CATEGORY_LABELS[feed.category]}</Badge>
+                        <Badge variant="outline">{getScraperCategoryLabel(feed.category)}</Badge>
                       </TableCell>
                       <TableCell>{feed.runIntervalMinutes}m</TableCell>
                       <TableCell className="text-sm text-muted-foreground">
@@ -526,33 +554,65 @@ export default function AdminScrapersPage() {
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
                 <Label>Platform</Label>
-                <Select value={platform} onValueChange={(v) => v && setPlatform(v as ScraperPlatform)}>
+                <Select
+                  value={selectedPlatformValue}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    setPlatform(v as ScraperPlatform);
+                    if (v !== CUSTOM_PLATFORM_VALUE) setCustomPlatform("");
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(SCRAPER_PLATFORM_LABELS) as ScraperPlatform[]).map((p) => (
+                    {SCRAPER_PLATFORM_PRESETS.map((p) => (
                       <SelectItem key={p} value={p}>
-                        {SCRAPER_PLATFORM_LABELS[p]}
+                        {getScraperPlatformLabel(p)}
                       </SelectItem>
                     ))}
+                    <SelectItem value={CUSTOM_PLATFORM_VALUE}>Custom...</SelectItem>
                   </SelectContent>
                 </Select>
+                {platform === CUSTOM_PLATFORM_VALUE ? (
+                  <Input
+                    value={customPlatform}
+                    onChange={(e) => setCustomPlatform(e.target.value)}
+                    placeholder="e.g. hackernews"
+                    className="mt-2"
+                  />
+                ) : null}
               </div>
               <div className="space-y-1.5">
                 <Label>Category</Label>
-                <Select value={category} onValueChange={(v) => v && setCategory(v as ScraperCategory)}>
+                <Select
+                  value={selectedCategoryValue}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    setCategory(v as ScraperCategory);
+                    if (v !== CUSTOM_CATEGORY_VALUE) setCustomCategory("");
+                  }}
+                >
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(Object.keys(SCRAPER_CATEGORY_LABELS) as ScraperCategory[]).map((c) => (
+                    {SCRAPER_CATEGORY_PRESETS.map((c) => (
                       <SelectItem key={c} value={c}>
-                        {SCRAPER_CATEGORY_LABELS[c]}
+                        {getScraperCategoryLabel(c)}
                       </SelectItem>
                     ))}
+                    <SelectItem value={CUSTOM_CATEGORY_VALUE}>Custom...</SelectItem>
                   </SelectContent>
                 </Select>
+                {category === CUSTOM_CATEGORY_VALUE ? (
+                  <Input
+                    value={customCategory}
+                    onChange={(e) => setCustomCategory(e.target.value)}
+                    placeholder="e.g. partnership"
+                    className="mt-2"
+                  />
+                ) : null}
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3 items-end">

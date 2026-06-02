@@ -21,10 +21,12 @@ import {
 } from "@/components/ui/select";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import type { Account, Contact, Lead, ScraperCategory, ScraperPlatform, ScraperRawItem } from "@/lib/types";
+import type { Account, Contact, Lead, ScraperRawItem } from "@/lib/types";
 import {
-  SCRAPER_CATEGORY_LABELS,
-  SCRAPER_PLATFORM_LABELS,
+  getScraperCategoryLabel,
+  getScraperPlatformLabel,
+  SCRAPER_CATEGORY_PRESETS,
+  SCRAPER_PLATFORM_PRESETS,
 } from "@/lib/scrapers/labels";
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 import { IntakeItemActions } from "@/components/intake/intake-item-actions";
@@ -84,6 +86,16 @@ export default function IntakePoolPage() {
       return true;
     });
   }, [items, searchQuery, dateFrom, dateTo]);
+  const categoryOptions = React.useMemo(() => {
+    const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
+    for (const preset of SCRAPER_CATEGORY_PRESETS) dynamic.add(preset);
+    return Array.from(dynamic).sort((a, b) => getScraperCategoryLabel(a).localeCompare(getScraperCategoryLabel(b)));
+  }, [items]);
+  const platformOptions = React.useMemo(() => {
+    const dynamic = new Set(items.map((item) => item.platform).filter(Boolean));
+    for (const preset of SCRAPER_PLATFORM_PRESETS) dynamic.add(preset);
+    return Array.from(dynamic).sort((a, b) => getScraperPlatformLabel(a).localeCompare(getScraperPlatformLabel(b)));
+  }, [items]);
 
   const filtersActive =
     searchQuery.trim().length > 0 || dateFrom.length > 0 || dateTo.length > 0;
@@ -259,9 +271,9 @@ export default function IntakePoolPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>All platforms</SelectItem>
-                    {(Object.keys(SCRAPER_PLATFORM_LABELS) as ScraperPlatform[]).map((p) => (
+                    {platformOptions.map((p) => (
                       <SelectItem key={p} value={p}>
-                        {SCRAPER_PLATFORM_LABELS[p]}
+                        {getScraperPlatformLabel(p)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -272,9 +284,9 @@ export default function IntakePoolPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>All categories</SelectItem>
-                    {(Object.keys(SCRAPER_CATEGORY_LABELS) as ScraperCategory[]).map((c) => (
+                    {categoryOptions.map((c) => (
                       <SelectItem key={c} value={c}>
-                        {SCRAPER_CATEGORY_LABELS[c]}
+                        {getScraperCategoryLabel(c)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -379,8 +391,8 @@ export default function IntakePoolPage() {
                                 </a>
                               </CardTitle>
                               <div className="flex flex-wrap gap-1.5">
-                                <Badge variant="secondary">{SCRAPER_PLATFORM_LABELS[item.platform]}</Badge>
-                                <Badge variant="outline">{SCRAPER_CATEGORY_LABELS[item.category]}</Badge>
+                                <Badge variant="secondary">{getScraperPlatformLabel(item.platform)}</Badge>
+                                <Badge variant="outline">{getScraperCategoryLabel(item.category)}</Badge>
                                 <Badge variant="outline" className="font-normal text-muted-foreground">
                                   {item.feedName}
                                 </Badge>

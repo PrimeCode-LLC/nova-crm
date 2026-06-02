@@ -11,8 +11,8 @@ import { recordAudit } from "@/lib/firestore/audit";
 
 const createSchema = z.object({
   name: z.string().min(1).max(200),
-  platform: z.enum(["reddit", "x", "linkedin", "other"]),
-  category: z.enum(["hiring", "problem", "other"]),
+  platform: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()),
+  category: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()),
   feedUrl: z.string().url().max(2000),
   enabled: z.boolean().optional(),
   runIntervalMinutes: z.number().int().min(15).max(1440).optional(),

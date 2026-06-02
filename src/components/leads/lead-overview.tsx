@@ -12,8 +12,8 @@ import { UserChip } from "@/components/common/user-chip";
 import { LeadSourceButton } from "@/components/leads/lead-source-button";
 import { getLeadScraperSource } from "@/lib/scrapers/lead-scraper-source";
 import {
-  SCRAPER_CATEGORY_LABELS,
-  SCRAPER_PLATFORM_LABELS,
+  getScraperCategoryLabel,
+  getScraperPlatformLabel,
 } from "@/lib/scrapers/labels";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
@@ -98,14 +98,14 @@ export function LeadOverview({
                     {scraperSource.feedName ? (
                       <span className="font-medium">{scraperSource.feedName}</span>
                     ) : null}
-                    {scraperSource.platform && scraperSource.platform in SCRAPER_PLATFORM_LABELS ? (
+                    {scraperSource.platform ? (
                       <span className="text-muted-foreground">
-                        {SCRAPER_PLATFORM_LABELS[scraperSource.platform]}
+                        {getScraperPlatformLabel(scraperSource.platform)}
                       </span>
                     ) : null}
-                    {scraperSource.category && scraperSource.category in SCRAPER_CATEGORY_LABELS ? (
+                    {scraperSource.category ? (
                       <span className="text-muted-foreground">
-                        · {SCRAPER_CATEGORY_LABELS[scraperSource.category]}
+                        · {getScraperCategoryLabel(scraperSource.category)}
                       </span>
                     ) : null}
                   </div>
