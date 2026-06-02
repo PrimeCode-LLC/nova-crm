@@ -121,6 +121,8 @@ export interface InstantlyCampaignAnalytics {
   open_count_unique?: number;
   reply_count?: number;
   reply_count_unique?: number;
+  reply_count_unique_by_step?: number;
+  open_count_unique_by_step?: number;
   link_click_count?: number;
   bounced_count?: number;
   unsubscribed_count?: number;

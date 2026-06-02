@@ -94,7 +94,9 @@ function normalizeCampaignAnalytics(raw: unknown): InstantlyCampaignAnalytics[] 
     const o = raw as Record<string, unknown>;
     if (Array.isArray(o.items)) return o.items as InstantlyCampaignAnalytics[];
     if (Array.isArray(o.data)) return o.data as InstantlyCampaignAnalytics[];
-    if (typeof o.campaign_id === "string") return [o as InstantlyCampaignAnalytics];
+    if (typeof o.campaign_id === "string") {
+      return [o as unknown as InstantlyCampaignAnalytics];
+    }
     // Single-campaign analytics/overview object (no campaign_id on overview).
     if (
       "emails_sent_count" in o ||
@@ -102,7 +104,7 @@ function normalizeCampaignAnalytics(raw: unknown): InstantlyCampaignAnalytics[] 
       "reply_count_unique" in o ||
       "open_count" in o
     ) {
-      return [o as InstantlyCampaignAnalytics];
+      return [o as unknown as InstantlyCampaignAnalytics];
     }
   }
   return [];
@@ -468,7 +470,7 @@ export function extractInstantlyStats(c: InstantlyCampaign | InstantlyCampaignAn
   completed: number;
 } {
   const a = c as InstantlyCampaignAnalytics;
-  const row = c as Record<string, unknown>;
+  const row = c as unknown as Record<string, unknown>;
   // Do not use `??` between counts: reply_count_unique can be 0 while reply_count is 6.
   const replied = pickAnalyticsMax(
     a.reply_count,
