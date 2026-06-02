@@ -91,7 +91,7 @@ export default function AdminChannelsPage() {
     isDemo ||
     userHasAdminFeature(
       {
-        roleId: userDoc?.roleId,
+        roleId: userDoc?.roleId ?? "salesperson",
         isSuperAdmin: userDoc?.isSuperAdmin,
         featureGrants: userDoc?.featureGrants,
         orgRole: userDoc?.orgRole,
