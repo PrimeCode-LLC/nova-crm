@@ -1,9 +1,31 @@
 import type { Campaign } from "./types";
 
+/**
+ * Match Instantly campaign list: reply rate = replies ÷ contacted leads
+ * (leads who started the sequence), not ÷ emails sent.
+ */
 export function campaignReplyRate(c: Campaign): number {
-  const { sent, replied } = c.stats;
-  if (sent > 0) return (replied / sent) * 100;
+  const { sent, replied, leadsCount, contacted } = c.stats;
+  const denom =
+    contacted && contacted > 0
+      ? contacted
+      : leadsCount && leadsCount > 0
+        ? leadsCount
+        : sent;
+  if (denom > 0) return (replied / denom) * 100;
   if (replied > 0) return 100;
+  return 0;
+}
+
+export function campaignOpenRate(c: Campaign): number {
+  const { sent, opened } = c.stats;
+  if (sent > 0 && opened) return (opened / sent) * 100;
+  return 0;
+}
+
+export function campaignBounceRate(c: Campaign): number {
+  const { sent, bounced } = c.stats;
+  if (sent > 0 && bounced) return (bounced / sent) * 100;
   return 0;
 }
 

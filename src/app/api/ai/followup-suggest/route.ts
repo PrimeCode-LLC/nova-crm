@@ -56,6 +56,18 @@ function normalizeSuggestResult(result: z.infer<typeof suggestSchema>) {
 const bodySchema = z.object({
   leadId: z.string().min(1),
   userPrompt: z.string().max(500).optional(),
+  regenerateContext: z.string().max(800).optional(),
+  followupPlans: z
+    .array(
+      z.object({
+        id: z.string(),
+        status: z.enum(["active", "paused", "superseded", "completed"]),
+        planSummary: z.string(),
+        pausedReason: z.string().optional(),
+        pausedAt: z.string().optional(),
+      }),
+    )
+    .optional(),
   demoContext: z
     .object({
       lead: z.record(z.string(), z.unknown()),
@@ -121,7 +133,11 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: loaded.error }, { status: loaded.status });
   }
 
-  const context = buildLeadAiContext(loaded);
+  const context = buildLeadAiContext({
+    ...loaded,
+    followupPlans: parsed.data.followupPlans as import("@/lib/types").FollowupPlan[] | undefined,
+    regenerateContext: parsed.data.regenerateContext,
+  });
   const feat = settings.features.followup_suggest;
   const ragMode = feat.ragMode ?? "reference";
   const chunks = await retrieveRagChunksServer({
@@ -153,6 +169,7 @@ export async function POST(req: Request) {
         context,
         ragBlock: ragBlock || "(none)",
         userPrompt,
+        regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
       },
       schema: suggestSchema,
       leadId: parsed.data.leadId,

@@ -14,6 +14,7 @@ import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-
 import { EmailAccountSync } from "@/components/providers/email-account-sync";
 import { AlertSoundUnlock } from "@/components/providers/alert-sound-unlock";
 import { InboxBackgroundSync } from "@/components/providers/inbox-background-sync";
+import { FollowupPlanReplyWatcher } from "@/components/providers/followup-plan-reply-watcher";
 import { PlatformNotificationsAlertSync } from "@/components/providers/platform-notifications-alert-sync";
 import { ChannelAdminSync } from "@/components/providers/channel-admin-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
@@ -63,6 +64,7 @@ export default async function AppLayout({
         <EmailAccountSync />
         <AlertSoundUnlock />
         <InboxBackgroundSync />
+        <FollowupPlanReplyWatcher />
         <PlatformNotificationsAlertSync />
         <ChannelAdminSync />
         <QuickAddLauncherProvider>

@@ -39,11 +39,14 @@ Return JSON with:
 - nextActions: string[]`,
   },
   followup_suggest: {
-    systemPrompt: `You are a B2B sales follow-up planner. Propose a short sequence of dated follow-ups with ready-to-send message copy for the lead's primary channel. Respect existing open follow-ups—extend the cadence, do not duplicate the same step. Output structured JSON only. Never invent facts not in context.`,
+    systemPrompt: `You are a B2B sales follow-up planner. Propose a short sequence of dated follow-ups with ready-to-send message copy for the lead's primary channel. Respect existing open follow-ups—extend the cadence, do not duplicate the same step. If regenerateContext is provided, the lead replied—draft a fresh plan that acknowledges their message and proposes next steps. Output structured JSON only. Never invent facts not in context.`,
     userPromptTemplate: `Plan follow-ups for this lead.
 
 User instructions (may be empty):
 {{userPrompt}}
+
+Regenerate context (if replanning after a lead reply):
+{{regenerateBlock}}
 
 Lead context:
 {{context}}

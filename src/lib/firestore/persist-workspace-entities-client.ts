@@ -82,8 +82,60 @@ export async function persistFollowupCreate(
   if (f.channel) data.channel = f.channel;
   if (f.planId) data.planId = f.planId;
   if (f.aiGenerated) data.aiGenerated = f.aiGenerated;
+  if (f.pausedAt) data.pausedAt = f.pausedAt;
   if (f.completedAt) data.completedAt = f.completedAt;
   await setDoc(doc(db, COLLECTIONS.followups, f.id), data);
+}
+
+export async function persistFollowupSetPaused(
+  db: Firestore,
+  followupId: string,
+  paused: boolean,
+): Promise<void> {
+  await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
+    pausedAt: paused ? serverTimestamp() : deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
+export async function persistFollowupPlanCreate(
+  db: Firestore,
+  organizationId: string,
+  plan: import("@/lib/types").FollowupPlan,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    leadId: plan.leadId,
+    ownerId: plan.ownerId,
+    status: plan.status,
+    planSummary: plan.planSummary,
+    createdAt: plan.createdAt,
+  };
+  if (plan.pausedAt) data.pausedAt = plan.pausedAt;
+  if (plan.pausedReason) data.pausedReason = plan.pausedReason;
+  if (plan.replyMessageId) data.replyMessageId = plan.replyMessageId;
+  if (plan.supersededByPlanId) data.supersededByPlanId = plan.supersededByPlanId;
+  await setDoc(doc(db, COLLECTIONS.followupPlans, plan.id), data);
+}
+
+export async function persistFollowupPlanPatch(
+  db: Firestore,
+  planId: string,
+  patch: Partial<
+    Pick<
+      import("@/lib/types").FollowupPlan,
+      "status" | "pausedAt" | "pausedReason" | "replyMessageId" | "supersededByPlanId" | "planSummary"
+    >
+  >,
+): Promise<void> {
+  const data: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.status !== undefined) data.status = patch.status;
+  if (patch.planSummary !== undefined) data.planSummary = patch.planSummary;
+  if (patch.pausedAt !== undefined) data.pausedAt = patch.pausedAt;
+  if (patch.pausedReason !== undefined) data.pausedReason = patch.pausedReason;
+  if (patch.replyMessageId !== undefined) data.replyMessageId = patch.replyMessageId;
+  if (patch.supersededByPlanId !== undefined) data.supersededByPlanId = patch.supersededByPlanId;
+  await updateDoc(doc(db, COLLECTIONS.followupPlans, planId), data);
 }
 
 export async function persistFollowupSetCompleted(

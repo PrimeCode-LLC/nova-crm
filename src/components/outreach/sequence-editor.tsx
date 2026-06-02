@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { INSTANTLY_MERGE_VARIABLES } from "@/lib/integrations/instantly/lead-mapper";
+import { MergeVariablesList } from "@/components/outreach/merge-variables-list";
 import {
   DEFAULT_SEQUENCE_STEP,
   type SequenceStepDraft,
@@ -27,6 +27,7 @@ export function SequenceEditor({
 
   return (
     <div className="space-y-4">
+      <MergeVariablesList />
       {steps.map((s, i) => (
         <div key={i} className="rounded-lg border bg-card p-4 space-y-3">
           <div className="flex items-center justify-between">
@@ -92,9 +93,7 @@ export function SequenceEditor({
         </Button>
       )}
       <p className="text-[11px] text-muted-foreground">
-        Use merge tags in subject/body (e.g.{" "}
-        {INSTANTLY_MERGE_VARIABLES.slice(0, 4).map((v) => `{{${v.token}}}`).join(", ")}
-        …). Add leads on the <strong>Leads</strong> tab so Instantly fills values per contact.
+        Add leads on the <strong>Leads</strong> tab so Instantly fills variable values per contact.
       </p>
     </div>
   );

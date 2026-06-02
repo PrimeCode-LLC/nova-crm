@@ -2,7 +2,27 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowLeft, ExternalLink, Loader2, Pause, Play, RefreshCw } from "lucide-react";
+import {
+  ArrowLeft,
+  Calendar,
+  Clock,
+  ExternalLink,
+  Loader2,
+  Mail,
+  MailWarning,
+  MousePointerClick,
+  Pause,
+  Play,
+  RefreshCw,
+  Send,
+  Reply,
+  Eye,
+  UserX,
+  Users,
+  CheckCircle2,
+  Handshake,
+  Trophy,
+} from "lucide-react";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -10,12 +30,16 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { fmtNumber, fmtPercent, fmtRelative } from "@/lib/format";
-import { campaignReplyRate, instantlyCampaignHref } from "@/lib/campaign-utils";
+import { fmtNumber, fmtPercent, fmtRelative, fmtDate } from "@/lib/format";
+import { campaignReplyRate, campaignOpenRate, campaignBounceRate, instantlyCampaignHref } from "@/lib/campaign-utils";
 import type { Campaign } from "@/lib/types";
+import type { InstantlyCampaign } from "@/lib/integrations/instantly/types";
 import { cn } from "@/lib/utils";
 import { CampaignSequencePanel } from "@/components/outreach/campaign-sequence-panel";
 import { CampaignLeadsPanel } from "@/components/outreach/campaign-leads-panel";
+import { CampaignAccountsPanel } from "@/components/outreach/campaign-accounts-panel";
+import { CampaignOptionsPanel } from "@/components/outreach/campaign-options-panel";
+import { roleAtLeast } from "@/lib/platform/org-role";
 
 const STATUS_TONE: Record<string, string> = {
   draft: "bg-muted text-muted-foreground border-transparent",
@@ -31,13 +55,18 @@ const STATUS_LABEL: Record<Campaign["status"], string> = {
   done: "Done",
 };
 
+const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+type RemoteData = InstantlyCampaign & { email_list?: string[] };
+
 export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
-  const { getCampaignById, leads, isDemo } = useWorkspace();
+  const { getCampaignById, leads, isDemo, viewerOrgRole } = useWorkspace();
   const c = getCampaignById(campaignId);
   const [syncing, setSyncing] = React.useState(false);
   const [acting, setActing] = React.useState(false);
-  const [remoteAccounts, setRemoteAccounts] = React.useState<string[]>([]);
+  const [remote, setRemote] = React.useState<RemoteData | null>(null);
   const [connected, setConnected] = React.useState(false);
+  const [accountEmails, setAccountEmails] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     void (async () => {
@@ -54,10 +83,17 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
     void (async () => {
       const res = await fetch(`/api/integrations/instantly/campaigns/${campaignId}`);
       if (!res.ok) return;
-      const data = (await res.json()) as { remote?: { email_list?: string[] } };
-      setRemoteAccounts(data.remote?.email_list ?? []);
+      const data = (await res.json()) as { remote?: RemoteData };
+      if (data.remote) {
+        setRemote(data.remote);
+        if (data.remote.email_list?.length) setAccountEmails(data.remote.email_list);
+      }
     })();
   }, [campaignId, c, isDemo, connected]);
+
+  React.useEffect(() => {
+    if (remote?.email_list) setAccountEmails(remote.email_list);
+  }, [remote?.email_list]);
 
   if (!c) {
     return (
@@ -71,8 +107,13 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
   }
 
   const replyRate = campaignReplyRate(c);
+  const openRate = campaignOpenRate(c);
+  const bounceRate = campaignBounceRate(c);
   const instantlyHref = instantlyCampaignHref(c.externalRef);
   const campaignLeads = leads.filter((l) => l.campaignId === campaignId);
+  const remoteAccounts = accountEmails;
+  const canEditAccounts = roleAtLeast(viewerOrgRole, "manager") && (connected || isDemo);
+  const schedule = remote?.campaign_schedule?.schedules?.[0];
 
   async function syncStats() {
     setSyncing(true);
@@ -173,6 +214,11 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
           {c.sequenceSummary?.steps ? (
             <span className="text-xs text-muted-foreground">{c.sequenceSummary.steps} email steps</span>
           ) : null}
+          {c.lastSyncedAt && (
+            <span className="text-xs text-muted-foreground">
+              Last synced {fmtRelative(c.lastSyncedAt)}
+            </span>
+          )}
         </div>
 
         <Tabs defaultValue="overview">
@@ -181,23 +227,106 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
             <TabsTrigger value="sequence">
               Sequence{c.sequenceSummary?.steps ? ` (${c.sequenceSummary.steps})` : ""}
             </TabsTrigger>
-            <TabsTrigger value="leads">Leads ({campaignLeads.length})</TabsTrigger>
-            <TabsTrigger value="accounts">Accounts</TabsTrigger>
+            <TabsTrigger value="leads">
+              Leads ({campaignLeads.length}
+              {(c.stats.leadsCount ?? c.stats.contacted)
+                ? ` / ${c.stats.leadsCount ?? c.stats.contacted}`
+                : ""}
+              )
+            </TabsTrigger>
+            <TabsTrigger value="accounts">Accounts{remoteAccounts.length > 0 ? ` (${remoteAccounts.length})` : ""}</TabsTrigger>
+            <TabsTrigger value="options">Options</TabsTrigger>
           </TabsList>
-          <TabsContent value="overview" className="mt-4">
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              <StatCard label="Started" value={c.startedAt ? fmtRelative(c.startedAt) : "—"} />
-              <StatCard label="Sent" value={fmtNumber(c.stats.sent)} />
-              <StatCard label="Opened" value={fmtNumber(c.stats.opened ?? 0)} />
-              <StatCard label="Replied" value={fmtNumber(c.stats.replied)} />
-              <StatCard label="Meetings" value={fmtNumber(c.stats.meetings)} />
-              <StatCard
-                label="Reply rate"
-                value={fmtPercent(replyRate, 1)}
-                highlight={replyRate >= 5}
-              />
+
+          {/* ── Overview ── */}
+          <TabsContent value="overview" className="mt-4 space-y-6">
+            {/* Delivery */}
+            <div>
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Delivery</h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard icon={<Users className="h-4 w-4" />} label="Total leads" value={fmtNumber(c.stats.leadsCount ?? 0)} />
+                <StatCard icon={<Send className="h-4 w-4" />} label="Contacted" value={fmtNumber(c.stats.contacted ?? 0)} />
+                <StatCard icon={<Mail className="h-4 w-4" />} label="Emails sent" value={fmtNumber(c.stats.sent)} />
+                <StatCard icon={<CheckCircle2 className="h-4 w-4" />} label="Completed" value={fmtNumber(c.stats.completed ?? 0)} />
+              </div>
             </div>
+
+            {/* Engagement */}
+            <div>
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Engagement</h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard
+                  icon={<Eye className="h-4 w-4" />}
+                  label="Opened"
+                  value={fmtNumber(c.stats.opened ?? 0)}
+                  sub={openRate > 0 ? `${fmtPercent(openRate, 1)} open rate` : undefined}
+                />
+                <StatCard
+                  icon={<Reply className="h-4 w-4" />}
+                  label="Replied"
+                  value={fmtNumber(c.stats.replied)}
+                  sub={replyRate > 0 ? `${fmtPercent(replyRate, 2)} reply rate` : undefined}
+                  highlight={replyRate >= 5}
+                />
+                <StatCard
+                  icon={<MousePointerClick className="h-4 w-4" />}
+                  label="Link clicks"
+                  value={fmtNumber(c.stats.linkClicks ?? 0)}
+                />
+                <StatCard icon={<Handshake className="h-4 w-4" />} label="Meetings" value={fmtNumber(c.stats.meetings)} />
+              </div>
+            </div>
+
+            {/* Health */}
+            <div>
+              <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Health</h3>
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <StatCard
+                  icon={<MailWarning className="h-4 w-4" />}
+                  label="Bounced"
+                  value={fmtNumber(c.stats.bounced ?? 0)}
+                  sub={bounceRate > 0 ? `${fmtPercent(bounceRate, 1)} bounce rate` : undefined}
+                  warn={bounceRate > 5}
+                />
+                <StatCard icon={<UserX className="h-4 w-4" />} label="Unsubscribed" value={fmtNumber(c.stats.unsubscribed ?? 0)} />
+                <StatCard icon={<Trophy className="h-4 w-4" />} label="Closed" value={fmtNumber(c.stats.closed)} />
+                <StatCard
+                  icon={<Calendar className="h-4 w-4" />}
+                  label="Started"
+                  value={c.startedAt ? fmtDate(c.startedAt, "MMM d, yyyy") : "—"}
+                  sub={c.startedAt ? fmtRelative(c.startedAt) : undefined}
+                />
+              </div>
+            </div>
+
+            {/* Schedule */}
+            {schedule && (
+              <div>
+                <h3 className="mb-3 text-xs font-medium uppercase tracking-wider text-muted-foreground">Schedule</h3>
+                <div className="rounded-lg border bg-card p-4">
+                  <div className="flex flex-wrap items-center gap-4 text-sm">
+                    {schedule.days && schedule.days.length > 0 && (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Calendar className="h-4 w-4 shrink-0" />
+                        <span>{schedule.days.map((d) => DAY_NAMES[d] ?? d).join(", ")}</span>
+                      </div>
+                    )}
+                    {schedule.timing && (
+                      <div className="flex items-center gap-2 text-muted-foreground">
+                        <Clock className="h-4 w-4 shrink-0" />
+                        <span>{schedule.timing.from} – {schedule.timing.to}</span>
+                      </div>
+                    )}
+                    {schedule.timezone && (
+                      <span className="text-xs text-muted-foreground/60">{schedule.timezone}</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
           </TabsContent>
+
+          {/* ── Sequence ── */}
           <TabsContent value="sequence" className="mt-4">
             <CampaignSequencePanel
               campaignId={campaignId}
@@ -207,6 +336,8 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
               isDemo={isDemo}
             />
           </TabsContent>
+
+          {/* ── Leads ── */}
           <TabsContent value="leads" className="mt-4">
             <CampaignLeadsPanel
               campaignId={campaignId}
@@ -215,22 +346,39 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
               instantlyId={c.instantlyId}
               connected={connected}
               isDemo={isDemo}
+              instantlyLeadCount={c.stats.leadsCount ?? c.stats.contacted}
             />
           </TabsContent>
+
+          {/* ── Accounts ── */}
           <TabsContent value="accounts" className="mt-4">
-            {remoteAccounts.length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                No sending accounts on this campaign. Assign accounts in the wizard or Instantly dashboard.
-              </p>
-            ) : (
-              <ul className="space-y-1">
-                {remoteAccounts.map((email) => (
-                  <li key={email} className="font-mono text-xs text-muted-foreground">
-                    {email}
-                  </li>
-                ))}
-              </ul>
-            )}
+            <CampaignAccountsPanel
+              campaignId={campaignId}
+              accounts={remoteAccounts}
+              connected={connected}
+              isDemo={isDemo}
+              canEdit={canEditAccounts}
+              onAccountsChange={(emails) => {
+                setAccountEmails(emails);
+                setRemote((prev) => (prev ? { ...prev, email_list: emails } : prev));
+              }}
+            />
+          </TabsContent>
+
+          {/* ── Options ── */}
+          <TabsContent value="options" className="mt-4">
+            <CampaignOptionsPanel
+              campaignId={campaignId}
+              remote={remote}
+              accounts={remoteAccounts}
+              connected={connected}
+              isDemo={isDemo}
+              canEdit={canEditAccounts}
+              onOptionsChange={(patch) => {
+                setRemote((prev) => (prev ? { ...prev, ...patch } : prev));
+                if (patch.email_list) setAccountEmails(patch.email_list);
+              }}
+            />
           </TabsContent>
         </Tabs>
       </PageBody>
@@ -238,19 +386,39 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
   );
 }
 
+/* ── Stat Card ── */
+
 function StatCard({
+  icon,
   label,
   value,
+  sub,
   highlight,
+  warn,
 }: {
+  icon?: React.ReactNode;
   label: string;
   value: string;
+  sub?: string;
   highlight?: boolean;
+  warn?: boolean;
 }) {
   return (
     <div className="rounded-lg border bg-card p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn("mt-1 text-lg font-semibold tabular-nums", highlight && "text-success")}>{value}</p>
+      <div className="flex items-center gap-2">
+        {icon && <span className="text-muted-foreground">{icon}</span>}
+        <p className="text-xs text-muted-foreground">{label}</p>
+      </div>
+      <p
+        className={cn(
+          "mt-1 text-lg font-semibold tabular-nums",
+          highlight && "text-success",
+          warn && "text-destructive",
+        )}
+      >
+        {value}
+      </p>
+      {sub && <p className="mt-0.5 text-[11px] text-muted-foreground">{sub}</p>}
     </div>
   );
 }

@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Loader2, Search, UserPlus } from "lucide-react";
+import { Download, Loader2, Search, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -23,6 +23,7 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { INSTANTLY_MERGE_VARIABLES } from "@/lib/integrations/instantly/lead-mapper";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
+import { importLeadsFromInstantly } from "@/lib/outreach/import-leads-from-instantly";
 import { pushLeadsToCampaign } from "@/lib/outreach/push-leads";
 import type { Lead } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -34,6 +35,7 @@ export function CampaignLeadsPanel({
   instantlyId,
   connected,
   isDemo,
+  instantlyLeadCount,
 }: {
   campaignId: string;
   campaignLeads: Lead[];
@@ -41,11 +43,14 @@ export function CampaignLeadsPanel({
   instantlyId?: string;
   connected: boolean;
   isDemo: boolean;
+  /** From Instantly analytics (total leads in campaign). */
+  instantlyLeadCount?: number;
 }) {
   const { leads, patchLead } = useWorkspace();
   const [search, setSearch] = React.useState("");
   const [selected, setSelected] = React.useState<Record<string, boolean>>({});
   const [pushing, setPushing] = React.useState(false);
+  const [importing, setImporting] = React.useState(false);
   const [varsOpen, setVarsOpen] = React.useState(false);
 
   const linked = Boolean(parseInstantlyId(externalRef, instantlyId));
@@ -86,6 +91,16 @@ export function CampaignLeadsPanel({
       next[l.id] = checked;
     }
     setSelected(next);
+  }
+
+  async function syncFromInstantly() {
+    setImporting(true);
+    try {
+      const result = await importLeadsFromInstantly(campaignId, { isDemo });
+      if (result.ok && !isDemo) window.location.reload();
+    } finally {
+      setImporting(false);
+    }
   }
 
   async function addSelected() {
@@ -142,10 +157,52 @@ export function CampaignLeadsPanel({
         </CollapsibleContent>
       </Collapsible>
 
+      {canPushApi && instantlyLeadCount != null && instantlyLeadCount > campaignLeads.length && (
+        <div className="rounded-md border border-dashed bg-muted/20 px-3 py-2.5 text-sm text-muted-foreground">
+          <p>
+            Instantly has <strong className="text-foreground">{instantlyLeadCount}</strong> leads in this
+            campaign, but only <strong className="text-foreground">{campaignLeads.length}</strong> are linked
+            in Nova CRM.
+          </p>
+          <p className="mt-1 text-xs">
+            Campaign sync only updates stats. Use <strong>Import from Instantly</strong> to pull leads into
+            your CRM.
+          </p>
+        </div>
+      )}
+
       <section className="space-y-3">
-        <h3 className="text-sm font-medium">Enrolled in this campaign ({campaignLeads.length})</h3>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">
+            Enrolled in this campaign ({campaignLeads.length}
+            {instantlyLeadCount != null && instantlyLeadCount > 0
+              ? ` · ${instantlyLeadCount} in Instantly`
+              : ""}
+            )
+          </h3>
+          {canPushApi && (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={importing}
+              onClick={() => void syncFromInstantly()}
+            >
+              {importing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Download className="h-3.5 w-3.5" />
+              )}
+              Import from Instantly
+            </Button>
+          )}
+        </div>
         {campaignLeads.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No leads in this campaign yet. Add leads below.</p>
+          <p className="text-sm text-muted-foreground">
+            No CRM leads linked yet.
+            {canPushApi
+              ? " Import from Instantly or add leads from your CRM below."
+              : " Add leads from your CRM below."}
+          </p>
         ) : (
           <ul className="divide-y rounded-md border">
             {campaignLeads.map((l) => (

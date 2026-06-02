@@ -195,6 +195,15 @@ service cloud.firestore {
       allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
+    match /followupPlans/{id} {
+      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
+    }
+
     match /leadTasks/{id} {
       allow read: if signedIn()
         && inCallerOrg(resource.data)

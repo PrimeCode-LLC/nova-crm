@@ -356,6 +356,12 @@ export interface Campaign {
     meetings: number;
     closed: number;
     opened?: number;
+    bounced?: number;
+    linkClicks?: number;
+    unsubscribed?: number;
+    leadsCount?: number;
+    contacted?: number;
+    completed?: number;
   };
 }
 
@@ -501,6 +507,24 @@ export interface ActivityRecord {
 /** Channel for outbound copy; `other` resolves to the lead's channel on create. */
 export type FollowupChannel = ChannelKey | "other";
 
+export type FollowupPlanStatus = "active" | "paused" | "superseded" | "completed";
+
+/** AI-generated cadence for a lead; open follow-ups reference `planId`. */
+export interface FollowupPlan {
+  id: string;
+  leadId: string;
+  ownerId: string;
+  status: FollowupPlanStatus;
+  planSummary: string;
+  createdAt: ISODate;
+  pausedAt?: ISODate;
+  /** Human-readable reason (e.g. lead replied by email). */
+  pausedReason?: string;
+  /** `${mailboxId}:in:${uid}` when paused due to inbox reply. */
+  replyMessageId?: string;
+  supersededByPlanId?: string;
+}
+
 export interface Followup {
   id: string;
   leadId?: string;
@@ -514,6 +538,8 @@ export interface Followup {
   /** Groups followups created together from one AI suggestion run. */
   planId?: string;
   aiGenerated?: boolean;
+  /** Set when the parent plan is paused (step skipped until regen or resume). */
+  pausedAt?: ISODate;
   dueAt: ISODate;
   completedAt?: ISODate;
   ownerId: string;
@@ -570,6 +596,7 @@ export type TimelineEventType =
   | "note_added"
   | "followup_created"
   | "followup_completed"
+  | "followup_plan_paused"
   | "lead_task_created"
   | "lead_task_completed"
   | "deal_created"
