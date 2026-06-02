@@ -1,7 +1,8 @@
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { findMembershipForUserServer, listMembersServer } from "@/lib/platform/members-server";
+import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
+import { listMembersServer } from "@/lib/platform/members-server";
 import { ActivityLogsClient } from "./activity-logs-client";
 
 export const dynamic = "force-dynamic";
@@ -9,15 +10,12 @@ export const dynamic = "force-dynamic";
 export default async function ActivityLogsPage() {
   const session = await requireSession();
 
-  let orgId = session.organizationId;
-  let role = session.orgRole;
-
-  if (!orgId && !isAuthDisabled()) {
-    const m = await findMembershipForUserServer(session.uid);
-    if (!m) redirect("/onboarding");
-    orgId = m.organizationId;
-    role = m.role;
-  }
+  const live = isAuthDisabled()
+    ? { organizationId: session.organizationId, orgRole: session.orgRole, membershipPending: false }
+    : await resolveLiveTenantForSession(session);
+  const orgId = live.organizationId;
+  const role = live.orgRole;
+  if (!orgId && !isAuthDisabled()) redirect("/onboarding");
 
   const members = orgId
     ? (await listMembersServer(orgId)).map((m) => ({

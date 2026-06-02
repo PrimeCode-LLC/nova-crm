@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import {
   createScraperFeedServer,
   listScraperFeedsServer,
@@ -26,7 +27,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const g = await guardTenantApi({ minRole: "manager" });
+  const g = await guardAdminFeature("scrapers");
   if (!g.ok) return g.response;
 
   let json: unknown;

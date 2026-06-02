@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAiUsageRollupsServer } from "@/lib/ai/usage-logger";
 import { estimateTokenCostUsd } from "@/lib/ai/pricing-table";
 import { getAdminDb } from "@/lib/firebase/admin";
@@ -12,7 +13,7 @@ function parseRange(param: string | null): number {
 }
 
 export async function GET(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const url = new URL(req.url);

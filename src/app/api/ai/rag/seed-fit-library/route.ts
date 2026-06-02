@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { seedFitCheckLibraryServer } from "@/lib/ai/seed-fit-check-library-server";
 import { recordAudit } from "@/lib/firestore/audit";
 
@@ -11,7 +12,7 @@ const bodySchema = z
   .optional();
 
 export async function POST(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   let rescrape = true;

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldValue } from "firebase-admin/firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import { indexAiDocumentServer } from "@/lib/ai/rag-indexer";
@@ -17,7 +18,7 @@ const patchSchema = z.object({
 type RouteCtx = { params: Promise<{ documentId: string }> };
 
 export async function GET(_req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const { documentId } = await ctx.params;
@@ -37,7 +38,7 @@ export async function GET(_req: Request, ctx: RouteCtx) {
 }
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const { documentId } = await ctx.params;
@@ -96,7 +97,7 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
 }
 
 export async function DELETE(_req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const { documentId } = await ctx.params;

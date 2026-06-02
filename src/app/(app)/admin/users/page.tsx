@@ -43,6 +43,13 @@ import { ROLES } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import type { Department, OrgMemberRole, PermissionOverride, Role, User } from "@/lib/types";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
+import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
+import {
+  FeatureGrantsEditor,
+  featureGrantsSummary,
+} from "@/components/admin/feature-grants-editor";
+import type { AdminFeatureKey } from "@/lib/admin-features";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import {
   Search,
@@ -130,10 +137,13 @@ function AdminUsersPageContent() {
     getUserById,
     getOwnerDisplayName,
     patchUser,
+    mode,
+    isDemo,
   } = useWorkspace();
 
   const viewer = getUserById(currentUserId);
   const canManage = canManageOrgUsers(viewer);
+  const canEditFeatureGrants = canManageFeatureGrants(viewer);
 
   const users = wsUsers;
 
@@ -161,6 +171,7 @@ function AdminUsersPageContent() {
   const [editDept, setEditDept] = React.useState<string>(NONE);
   const [editManager, setEditManager] = React.useState<string>(NONE);
   const [editStatus, setEditStatus] = React.useState<User["status"]>("active");
+  const [editFeatureGrants, setEditFeatureGrants] = React.useState<AdminFeatureKey[]>([]);
   const [editSaving, setEditSaving] = React.useState(false);
 
   const editingUser = editUserId
@@ -224,6 +235,7 @@ function AdminUsersPageContent() {
     setEditDept(editingUser.departmentId ?? NONE);
     setEditManager(editingUser.managerId ?? NONE);
     setEditStatus(editingUser.status);
+    setEditFeatureGrants(editingUser.featureGrants ?? []);
   }, [editOpen, editingUser]);
 
   const filtered = users.filter((u) => {
@@ -262,7 +274,7 @@ function AdminUsersPageContent() {
     setEditUserId(null);
   }
 
-  function handleSaveEdit() {
+  async function handleSaveEdit() {
     if (!editUserId || !editingUser) return;
     const email = editEmail.trim();
     if (!editDisplayName.trim() || !email) {
@@ -278,7 +290,32 @@ function AdminUsersPageContent() {
       departmentId: editDept === NONE ? undefined : editDept,
       managerId: editManager === NONE ? undefined : editManager,
       status: editStatus,
+      featureGrants: editFeatureGrants.length ? editFeatureGrants : undefined,
     };
+
+    const writeGrantsLive =
+      canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured();
+    if (writeGrantsLive) {
+      const res = await fetch("/api/org/workspace-users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: editUserId,
+          featureGrants: editFeatureGrants,
+        }),
+      });
+      const data = (await res.json()) as { error?: unknown };
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string"
+            ? data.error
+            : JSON.stringify(data.error ?? "Failed to save feature access");
+        toast.error(msg);
+        setEditSaving(false);
+        return;
+      }
+    }
+
     patchUser(editUserId, patch);
     setEditSaving(false);
     toast.success("User updated");
@@ -340,7 +377,7 @@ function AdminUsersPageContent() {
     <>
       <PageHeader
         title="Users"
-        description="Demo / display view of the org chart. For real account management use Team →"
+        description="CRM roles, reporting lines, and per-user feature access (without changing role). For logins and invites use Team →"
         actions={
           <div className="flex items-center gap-2">
             <a
@@ -722,6 +759,17 @@ function AdminUsersPageContent() {
                   </SelectContent>
                 </Select>
               </div>
+              {canEditFeatureGrants ? (
+                <div className="space-y-2 border-t border-border/60 pt-3">
+                  <Label className="text-xs font-semibold">Feature access</Label>
+                  <FeatureGrantsEditor
+                    user={editingUser}
+                    value={editFeatureGrants}
+                    onChange={setEditFeatureGrants}
+                    disabled={editSaving}
+                  />
+                </div>
+              ) : null}
             </div>
           )}
           <DialogFooter>
@@ -821,6 +869,12 @@ function AdminUsersPageContent() {
                     <div className="flex justify-between">
                       <dt className="text-muted-foreground">Joined</dt>
                       <dd>{fmtDate(selectedUser.createdAt, "MMM d, yyyy")}</dd>
+                    </div>
+                    <div className="flex justify-between gap-4">
+                      <dt className="text-muted-foreground shrink-0">Extra features</dt>
+                      <dd className="text-right text-xs">
+                        {featureGrantsSummary(selectedUser)}
+                      </dd>
                     </div>
                   </dl>
                 </section>

@@ -14,6 +14,7 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { memberCrmOwnerIdsForFirestore } from "@/lib/workspace-hierarchy";
 import type {
   Account,
   ActivityCounterRow,
@@ -54,6 +55,22 @@ export type LiveWorkspaceFirestoreState = {
   crmLabels: CrmLabel[];
 };
 
+function sortedOwnerIdsKey(ids: string[] | undefined): string {
+  if (!ids?.length) return "";
+  return [...ids].sort().join("\0");
+}
+
+function ownerIdsEqual(a: string[] | undefined, b: string[] | undefined): boolean {
+  return sortedOwnerIdsKey(a) === sortedOwnerIdsKey(b);
+}
+
+function rosterScopeSignature(users: readonly User[]): string {
+  return users
+    .map((u) => `${u.id}\t${u.managerId ?? ""}\t${u.departmentId ?? ""}\t${u.roleId}`)
+    .sort()
+    .join("\n");
+}
+
 const empty: LiveWorkspaceFirestoreState = {
   loading: true,
   error: null,
@@ -83,6 +100,9 @@ function asUser(id: string, raw: Record<string, unknown>): User {
     roleId: (raw.roleId as Role) ?? "salesperson",
     departmentId: typeof raw.departmentId === "string" ? raw.departmentId : undefined,
     managerId: typeof raw.managerId === "string" ? raw.managerId : undefined,
+    managerAncestorIds: Array.isArray(raw.managerAncestorIds)
+      ? raw.managerAncestorIds.filter((id): id is string => typeof id === "string")
+      : undefined,
     title: typeof raw.title === "string" ? raw.title : undefined,
     isSuperAdmin: Boolean(raw.isSuperAdmin),
     company: typeof raw.company === "string" ? raw.company : undefined,
@@ -317,13 +337,39 @@ function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRec
  *
  * @param narrowToMemberCrm When true (workspace `orgRole == "member"`), queries only rows the user may read
  *   under tightened Firestore rules (own `ownerId` / `leadOwnerId` / task participation, etc.).
+ * @param viewerForMemberScope When member-scoped, viewer profile used to resolve org-chart report owner ids.
  */
 export function useLiveWorkspaceFirestore(
   organizationId: string | undefined,
   viewerUid: string | undefined,
   narrowToMemberCrm: boolean,
+  viewerForMemberScope?: User | null,
 ): LiveWorkspaceFirestoreState {
   const [state, setState] = React.useState<LiveWorkspaceFirestoreState>(empty);
+  const [rosterUsers, setRosterUsers] = React.useState<User[]>([]);
+  const memberCrmOwnerIdsStableRef = React.useRef<string[] | undefined>(undefined);
+
+  const memberCrmOwnerIds = React.useMemo(() => {
+    if (!narrowToMemberCrm || !viewerUid || !viewerForMemberScope) {
+      memberCrmOwnerIdsStableRef.current = undefined;
+      return undefined;
+    }
+    const roster =
+      rosterUsers.length === 0
+        ? [viewerForMemberScope]
+        : rosterUsers.some((u) => u.id === viewerUid)
+          ? rosterUsers
+          : [...rosterUsers, viewerForMemberScope];
+    const next = memberCrmOwnerIdsForFirestore(viewerForMemberScope, roster);
+    const prev = memberCrmOwnerIdsStableRef.current;
+    if (prev && ownerIdsEqual(prev, next)) {
+      return prev;
+    }
+    memberCrmOwnerIdsStableRef.current = next;
+    return next;
+  }, [narrowToMemberCrm, viewerUid, viewerForMemberScope, rosterUsers]);
+
+  const memberCrmOwnerIdsKey = sortedOwnerIdsKey(memberCrmOwnerIds);
   /** One entry per listener; cleared on that listener’s success so the banner can recover after transient errors. */
   const listenerErrorsRef = React.useRef(new Map<string, Error>());
 
@@ -384,6 +430,11 @@ export function useLiveWorkspaceFirestore(
 
     const memberScope = Boolean(narrowToMemberCrm && viewerUid);
     const uid = viewerUid ?? "";
+    const ownerIds = memberScope
+      ? Array.from(new Set(memberCrmOwnerIds?.length ? memberCrmOwnerIds : [uid])).slice(0, 30)
+      : [];
+    const singleOwner = memberScope && ownerIds.length === 1;
+    const multiOwner = memberScope && ownerIds.length > 1;
 
     const firstAggregateError = (): Error | null => {
       const v = listenerErrorsRef.current.values().next();
@@ -424,19 +475,28 @@ export function useLiveWorkspaceFirestore(
         qUsers,
         (snap) => {
           const users = snap.docs.map((d) => asUser(d.id, d.data() as Record<string, unknown>));
+          setRosterUsers((prev) =>
+            rosterScopeSignature(prev) === rosterScopeSignature(users) ? prev : users,
+          );
           applySnapshot("users", "users", users);
         },
         (err) => applyListenerError("users", err),
       ),
     );
 
-    const qLeads = memberScope
+    const qLeads = singleOwner
       ? query(
           collection(db, COLLECTIONS.leads),
           where("organizationId", "==", organizationId),
-          where("ownerId", "==", uid),
+          where("ownerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.leads),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qLeads,
@@ -448,13 +508,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qAccounts = memberScope
+    const qAccounts = singleOwner
       ? query(
           collection(db, COLLECTIONS.accounts),
           where("organizationId", "==", organizationId),
-          where("ownerId", "==", uid),
+          where("ownerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.accounts), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.accounts),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.accounts), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qAccounts,
@@ -468,13 +534,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qContacts = memberScope
+    const qContacts = singleOwner
       ? query(
           collection(db, COLLECTIONS.contacts),
           where("organizationId", "==", organizationId),
-          where("ownerId", "==", uid),
+          where("ownerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.contacts), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.contacts),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.contacts), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qContacts,
@@ -488,13 +560,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qDeals = memberScope
+    const qDeals = singleOwner
       ? query(
           collection(db, COLLECTIONS.deals),
           where("organizationId", "==", organizationId),
-          where("ownerId", "==", uid),
+          where("ownerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.deals), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.deals),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.deals), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qDeals,
@@ -506,15 +584,29 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qNotes = memberScope
+    const qNotes = singleOwner
       ? query(
           collection(db, COLLECTIONS.notes),
           or(
-            and(where("organizationId", "==", organizationId), where("authorId", "==", uid)),
-            and(where("organizationId", "==", organizationId), where("leadOwnerId", "==", uid)),
+            and(where("organizationId", "==", organizationId), where("authorId", "==", ownerIds[0])),
+            and(
+              where("organizationId", "==", organizationId),
+              where("leadOwnerId", "==", ownerIds[0]),
+            ),
           ),
         )
-      : query(collection(db, COLLECTIONS.notes), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.notes),
+            or(
+              and(where("organizationId", "==", organizationId), where("authorId", "==", uid)),
+              and(
+                where("organizationId", "==", organizationId),
+                where("leadOwnerId", "in", ownerIds),
+              ),
+            ),
+          )
+        : query(collection(db, COLLECTIONS.notes), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qNotes,
@@ -526,13 +618,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qFollowups = memberScope
+    const qFollowups = singleOwner
       ? query(
           collection(db, COLLECTIONS.followups),
           where("organizationId", "==", organizationId),
-          where("ownerId", "==", uid),
+          where("ownerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.followups), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.followups),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.followups), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qFollowups,
@@ -546,15 +644,23 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qLeadTasks = memberScope
+    const qLeadTasks = singleOwner
       ? query(
           collection(db, COLLECTIONS.leadTasks),
           or(
-            and(where("organizationId", "==", organizationId), where("assigneeId", "==", uid)),
-            and(where("organizationId", "==", organizationId), where("createdById", "==", uid)),
+            and(where("organizationId", "==", organizationId), where("assigneeId", "==", ownerIds[0])),
+            and(where("organizationId", "==", organizationId), where("createdById", "==", ownerIds[0])),
           ),
         )
-      : query(collection(db, COLLECTIONS.leadTasks), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.leadTasks),
+            or(
+              and(where("organizationId", "==", organizationId), where("assigneeId", "in", ownerIds)),
+              and(where("organizationId", "==", organizationId), where("createdById", "in", ownerIds)),
+            ),
+          )
+        : query(collection(db, COLLECTIONS.leadTasks), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qLeadTasks,
@@ -568,13 +674,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qTouchpoints = memberScope
+    const qTouchpoints = singleOwner
       ? query(
           collection(db, COLLECTIONS.touchpoints),
           where("organizationId", "==", organizationId),
-          where("leadOwnerId", "==", uid),
+          where("leadOwnerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.touchpoints), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.touchpoints),
+            where("organizationId", "==", organizationId),
+            where("leadOwnerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.touchpoints), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qTouchpoints,
@@ -588,13 +700,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qTimeline = memberScope
+    const qTimeline = singleOwner
       ? query(
           collection(db, COLLECTIONS.timelineEvents),
           where("organizationId", "==", organizationId),
-          where("leadOwnerId", "==", uid),
+          where("leadOwnerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.timelineEvents), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.timelineEvents),
+            where("organizationId", "==", organizationId),
+            where("leadOwnerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.timelineEvents), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qTimeline,
@@ -608,13 +726,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qActivityCounters = memberScope
+    const qActivityCounters = singleOwner
       ? query(
           collection(db, COLLECTIONS.activityCounters),
           where("organizationId", "==", organizationId),
-          where("userId", "==", uid),
+          where("userId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.activityCounters), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.activityCounters),
+            where("organizationId", "==", organizationId),
+            where("userId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.activityCounters), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qActivityCounters,
@@ -628,13 +752,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qActivityRecords = memberScope
+    const qActivityRecords = singleOwner
       ? query(
           collection(db, COLLECTIONS.activityRecords),
           where("organizationId", "==", organizationId),
-          where("userId", "==", uid),
+          where("userId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.activityRecords), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.activityRecords),
+            where("organizationId", "==", organizationId),
+            where("userId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.activityRecords), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qActivityRecords,
@@ -648,13 +778,19 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qProfiles = memberScope
+    const qProfiles = singleOwner
       ? query(
           collection(db, COLLECTIONS.profiles),
           where("organizationId", "==", organizationId),
-          where("ownerId", "==", uid),
+          where("ownerId", "==", ownerIds[0]),
         )
-      : query(collection(db, COLLECTIONS.profiles), where("organizationId", "==", organizationId));
+      : multiOwner
+        ? query(
+            collection(db, COLLECTIONS.profiles),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "in", ownerIds),
+          )
+        : query(collection(db, COLLECTIONS.profiles), where("organizationId", "==", organizationId));
     unsubs.push(
       onSnapshot(
         qProfiles,
@@ -700,7 +836,7 @@ export function useLiveWorkspaceFirestore(
       listenerErrorsRef.current.clear();
       for (const u of unsubs) u();
     };
-  }, [organizationId, viewerUid, narrowToMemberCrm]);
+  }, [organizationId, viewerUid, narrowToMemberCrm, memberCrmOwnerIdsKey]);
 
   return state;
 }

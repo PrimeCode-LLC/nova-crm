@@ -1,6 +1,8 @@
 // Domain types: single source of truth for the CRM entities.
 // These mirror the Firestore collection shapes (see PLAN.md §3).
 
+import type { AdminFeatureKey } from "@/lib/admin-features";
+
 export type ISODate = string;
 
 export type Role =
@@ -77,6 +79,8 @@ export interface User {
   roleId: Role;
   departmentId?: string;
   managerId?: string;
+  /** Denormalized chain of manager user ids (for Firestore read rules). Maintained on hierarchy edits. */
+  managerAncestorIds?: string[];
   title?: string;
   /** Workspace-level super admin (can manage users alongside director / founder). */
   isSuperAdmin?: boolean;
@@ -96,6 +100,11 @@ export interface User {
     extraInstructions?: string;
     saveAnalysisToTimeline?: boolean;
   };
+  /**
+   * Extra admin capabilities without raising `roleId`.
+   * Managed by directors / org admins via server API only.
+   */
+  featureGrants?: AdminFeatureKey[];
 }
 
 /** SaaS customer (tenant). Managed via platform admin + Admin SDK + tenant owner. */

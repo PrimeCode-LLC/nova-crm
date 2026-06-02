@@ -30,7 +30,11 @@ import {
   type WorkspaceSnapshot,
   type WorkspaceLookup,
 } from "@/lib/workspace-dataset";
-import { applyLiveHierarchyScope } from "@/lib/workspace-hierarchy";
+import {
+  applyLiveHierarchyScope,
+  collectDescendantUserIds,
+  seesAllLeadsInTenant,
+} from "@/lib/workspace-hierarchy";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
@@ -141,8 +145,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     canDeleteLeads: boolean;
     /** Org role for the signed-in user (defaults to member when missing on the user row). */
     viewerOrgRole: OrgMemberRole;
-    /** Org owner or admin: may open another member’s linked inbox (read-only). */
+    /** May open another member’s linked inbox (read-only): admins or managers with reports. */
     canViewMemberMailboxes: boolean;
+    /** User ids whose mailboxes the viewer may open (empty when `canViewMemberMailboxes` is false). */
+    mailboxViewableUserIds: string[];
     updateLeadStage: (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => void;
     toggleLeadPin: (leadId: string) => void;
     isLeadPinned: (leadId: string) => boolean;
@@ -245,8 +251,20 @@ export function WorkspaceModeProvider({
   );
   const liveOrgId =
     mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
-  const narrowMemberCrm = userDoc?.orgRole === "member";
-  const liveFs = useLiveWorkspaceFirestore(liveOrgId, fbUser?.uid, narrowMemberCrm);
+  const viewerForMemberScope = React.useMemo((): User | null => {
+    if (!userDoc || !fbUser?.uid) return null;
+    return { ...userDoc, id: fbUser.uid } as User;
+  }, [fbUser?.uid, userDoc]);
+  /** Align Firestore queries with rules: narrow unless viewer sees the full tenant (directors / owner / admin / manager org roles). */
+  const narrowMemberCrm = viewerForMemberScope
+    ? !seesAllLeadsInTenant(viewerForMemberScope)
+    : userDoc?.orgRole === "member";
+  const liveFs = useLiveWorkspaceFirestore(
+    liveOrgId,
+    fbUser?.uid,
+    narrowMemberCrm,
+    viewerForMemberScope,
+  );
 
   const liveLeadsForPersistRef = React.useRef<Lead[]>([]);
   React.useEffect(() => {
@@ -1394,7 +1412,20 @@ export function WorkspaceModeProvider({
     const viewerRole: OrgMemberRole =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
     const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
-    const canViewMemberMailboxes = roleAtLeast(viewerRole, "admin");
+    const viewer =
+      snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId) ??
+      (userDoc && fbUser?.uid ? ({ ...userDoc, id: fbUser.uid } as User) : undefined);
+    const reportIds = viewer
+      ? collectDescendantUserIds(viewer.id, snapshotWithIdle.users)
+      : new Set<string>();
+    const canViewMemberMailboxes = roleAtLeast(viewerRole, "admin") || reportIds.size > 0;
+    const mailboxViewableUserIds = canViewMemberMailboxes
+      ? roleAtLeast(viewerRole, "admin")
+        ? snapshotWithIdle.users
+            .filter((u) => u.status === "active" && u.id && u.id !== snapshotWithIdle.currentUserId)
+            .map((u) => u.id)
+        : [...reportIds]
+      : [];
     return {
       ...snapshotWithIdle,
       ...lookup,
@@ -1441,6 +1472,7 @@ export function WorkspaceModeProvider({
       canDeleteLeads,
       viewerOrgRole: viewerRole,
       canViewMemberMailboxes,
+      mailboxViewableUserIds,
       updateLeadStage,
       toggleLeadPin,
       isLeadPinned,
@@ -1457,6 +1489,7 @@ export function WorkspaceModeProvider({
     liveFs.error,
     userProfileLoadError,
     fbUser,
+    userDoc,
     setMode,
     setDemoPersona,
     addPermissionOverride,

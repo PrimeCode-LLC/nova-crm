@@ -8,7 +8,12 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import { recordAudit } from "@/lib/firestore/audit";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
-import { managerAssignmentCreatesCycle } from "@/lib/user-hierarchy-tree";
+import {
+  buildOrgManagerAncestorIdsMap,
+  managerAssignmentCreatesCycle,
+} from "@/lib/user-hierarchy-tree";
+import { normalizeFeatureGrants } from "@/lib/admin-feature-access";
+import { GRANTABLE_ADMIN_FEATURES } from "@/lib/admin-features";
 import type { Role, User } from "@/lib/types";
 
 const ROLE_IDS = [
@@ -26,9 +31,22 @@ const patchSchema = z
     managerId: z.union([z.string().min(1), z.null()]).optional(),
     departmentId: z.union([z.string().min(1), z.null()]).optional(),
     roleId: z.enum(ROLE_IDS).optional(),
+    featureGrants: z
+      .array(z.string())
+      .optional()
+      .refine(
+        (arr) =>
+          arr === undefined ||
+          arr.every((k) => (GRANTABLE_ADMIN_FEATURES as readonly string[]).includes(k)),
+        { message: "Invalid feature grant" },
+      ),
   })
   .refine(
-    (d) => d.managerId !== undefined || d.departmentId !== undefined || d.roleId !== undefined,
+    (d) =>
+      d.managerId !== undefined ||
+      d.departmentId !== undefined ||
+      d.roleId !== undefined ||
+      d.featureGrants !== undefined,
     { message: "At least one field is required" },
   );
 
@@ -47,6 +65,7 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
     company: typeof r.company === "string" ? r.company : undefined,
     organizationId: typeof r.organizationId === "string" ? r.organizationId : undefined,
     orgRole: r.orgRole as User["orgRole"],
+    featureGrants: normalizeFeatureGrants(r.featureGrants),
     status: (r.status as User["status"]) ?? "active",
     createdAt: firestoreValueToIso(r.createdAt),
   };
@@ -89,8 +108,13 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const { userId: targetId, managerId: bodyManagerId, departmentId: bodyDeptId, roleId: bodyRoleId } =
-    parsed.data;
+  const {
+    userId: targetId,
+    managerId: bodyManagerId,
+    departmentId: bodyDeptId,
+    roleId: bodyRoleId,
+    featureGrants: bodyFeatureGrants,
+  } = parsed.data;
 
   if (targetId === g.ctx.session.uid && bodyRoleId !== undefined) {
     return NextResponse.json(
@@ -157,18 +181,48 @@ export async function PATCH(req: Request) {
   if (bodyRoleId !== undefined) {
     payload.roleId = bodyRoleId;
   }
+  if (bodyFeatureGrants !== undefined) {
+    const normalized = normalizeFeatureGrants(bodyFeatureGrants) ?? [];
+    if (normalized.length === 0) {
+      payload.featureGrants = FieldValue.delete();
+    } else {
+      payload.featureGrants = normalized;
+    }
+  }
 
   await db.collection(COLLECTIONS.users).doc(targetId).update(payload);
+
+  if (bodyManagerId !== undefined) {
+    const nextUsers = orgUsers.map((u) =>
+      u.id === targetId
+        ? {
+            ...u,
+            managerId: bodyManagerId === null ? undefined : bodyManagerId,
+          }
+        : u,
+    );
+    const ancestorMap = buildOrgManagerAncestorIdsMap(nextUsers);
+    const batch = db.batch();
+    for (const u of nextUsers) {
+      const ancestors = ancestorMap.get(u.id) ?? [];
+      batch.update(db.collection(COLLECTIONS.users).doc(u.id), {
+        managerAncestorIds: ancestors,
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+    }
+    await batch.commit();
+  }
 
   await recordAudit({
     organizationId: orgId,
     actorUid: g.ctx.session.uid,
-    event: "user.hierarchy_updated",
+    event: bodyFeatureGrants !== undefined ? "user.feature_grants_updated" : "user.hierarchy_updated",
     meta: {
       targetUid: targetId,
       managerId: bodyManagerId === undefined ? undefined : bodyManagerId,
       departmentId: bodyDeptId === undefined ? undefined : bodyDeptId,
       roleId: bodyRoleId,
+      featureGrants: bodyFeatureGrants,
     },
   });
 

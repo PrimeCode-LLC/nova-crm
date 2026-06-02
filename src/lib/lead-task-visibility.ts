@@ -1,4 +1,5 @@
 import type { LeadTask, TimelineEvent, User } from "./types";
+import { collectDescendantUserIds } from "./workspace-hierarchy";
 
 /**
  * Org-level or CRM roles that may see **all** team tasks in the tenant (oversight).
@@ -11,14 +12,27 @@ export function canViewAllLeadTasksInTenant(viewer: User): boolean {
   return false;
 }
 
-/** Whether this user may see this task (participant or oversight role). */
-export function leadTaskVisibleForViewer(t: LeadTask, viewer: User): boolean {
+/** Whether this user may see this task (participant, org-chart parent, or oversight role). */
+export function leadTaskVisibleForViewer(
+  t: LeadTask,
+  viewer: User,
+  orgUsers?: readonly User[],
+): boolean {
   if (canViewAllLeadTasksInTenant(viewer)) return true;
-  return t.assigneeId === viewer.id || t.createdById === viewer.id;
+  if (t.assigneeId === viewer.id || t.createdById === viewer.id) return true;
+  if (orgUsers?.length) {
+    const reports = collectDescendantUserIds(viewer.id, orgUsers);
+    if (reports.has(t.assigneeId) || reports.has(t.createdById)) return true;
+  }
+  return false;
 }
 
-export function filterLeadTasksForViewer(tasks: readonly LeadTask[], viewer: User): LeadTask[] {
-  return tasks.filter((t) => leadTaskVisibleForViewer(t, viewer));
+export function filterLeadTasksForViewer(
+  tasks: readonly LeadTask[],
+  viewer: User,
+  orgUsers?: readonly User[],
+): LeadTask[] {
+  return tasks.filter((t) => leadTaskVisibleForViewer(t, viewer, orgUsers));
 }
 
 export function filterLeadTasksForLeadDetail(

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import { getOrganizationAiSettingsServer, updateOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
@@ -43,7 +44,7 @@ async function deleteLibraryDocumentsAndChunks(input: {
 }
 
 export async function DELETE(_req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const { libraryId } = await ctx.params;

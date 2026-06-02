@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import {
   deleteScraperFeedServer,
   getScraperFeedServer,
@@ -32,7 +33,7 @@ export async function GET(_req: Request, ctx: RouteCtx) {
 }
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi({ minRole: "manager" });
+  const g = await guardAdminFeature("scrapers");
   if (!g.ok) return g.response;
   const { feedId } = await ctx.params;
 
@@ -76,7 +77,7 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
 }
 
 export async function DELETE(_req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi({ minRole: "manager" });
+  const g = await guardAdminFeature("scrapers");
   if (!g.ok) return g.response;
   const { feedId } = await ctx.params;
   const deleted = await deleteScraperFeedServer(g.ctx.session.organizationId, feedId);

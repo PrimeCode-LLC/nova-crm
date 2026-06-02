@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { indexAiDocumentServer } from "@/lib/ai/rag-indexer";
 
 const bodySchema = z.object({
@@ -8,7 +9,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   let json: unknown;

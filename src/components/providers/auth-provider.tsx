@@ -10,6 +10,7 @@ import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseAuth } from "@/lib/firebase/client";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { syncFirebaseAuthClaimsClient } from "@/lib/auth/client-session";
+import { AuthSessionSync } from "@/components/providers/auth-session-sync";
 
 type AuthContextValue = {
   user: User | null;
@@ -73,6 +74,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   return (
-    <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+    <AuthContext.Provider value={value}>
+      <AuthSessionSync />
+      {children}
+    </AuthContext.Provider>
   );
 }

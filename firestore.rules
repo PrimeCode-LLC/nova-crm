@@ -94,7 +94,8 @@ service cloud.firestore {
         && request.resource.data.get('membershipPendingOrgId', null)
             == resource.data.get('membershipPendingOrgId', null)
         && (!('isSuperAdmin' in request.resource.data)
-            || request.resource.data.isSuperAdmin == resource.data.get('isSuperAdmin', false));
+            || request.resource.data.isSuperAdmin == resource.data.get('isSuperAdmin', false))
+        && request.resource.data.get('featureGrants', []) == resource.data.get('featureGrants', []);
 
       allow delete: if false;
     }
@@ -133,6 +134,27 @@ service cloud.firestore {
       return data.get('ownerId', '') == request.auth.uid;
     }
 
+    function rosterUser(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    /** Org-chart parent may read CRM rows owned by a direct/indirect report (`managerAncestorIds` on owner user). */
+    function callerManagesCrmOwner(ownerId) {
+      return ownerId == request.auth.uid
+        || rosterUser(ownerId).get('managerId', '') == request.auth.uid
+        || request.auth.uid in rosterUser(ownerId).get('managerAncestorIds', []);
+    }
+
+    function canReadCrmOwnedBy(ownerId) {
+      return crmTenantReadAll() || callerManagesCrmOwner(ownerId);
+    }
+
+    function canReadCrmActivityUser(activityUserId) {
+      return crmTenantReadAll()
+        || activityUserId == request.auth.uid
+        || callerManagesCrmOwner(activityUserId);
+    }
+
     function workspaceChatChannelDoc(channelId) {
       return get(/databases/$(database)/documents/workspaceChatChannels/$(channelId)).data;
     }
@@ -164,11 +186,16 @@ service cloud.firestore {
     function leadTaskCanRead(data) {
       return signedIn()
         && inCallerOrg(data)
-        && (leadTaskParticipant(data) || leadTaskElevated());
+        && (
+          leadTaskParticipant(data)
+          || leadTaskElevated()
+          || callerManagesCrmOwner(data.assigneeId)
+          || callerManagesCrmOwner(data.createdById)
+        );
     }
 
     match /leads/{id} {
-      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
@@ -181,13 +208,13 @@ service cloud.firestore {
         && (
           crmTenantReadAll()
           || resource.data.authorId == request.auth.uid
-          || resource.data.get('leadOwnerId', '') == request.auth.uid
+          || canReadCrmOwnedBy(resource.data.get('leadOwnerId', ''))
         );
       allow write: if tenantWritable();
     }
 
     match /followups/{id} {
-      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
@@ -196,13 +223,7 @@ service cloud.firestore {
     }
 
     match /leadTasks/{id} {
-      allow read: if signedIn()
-        && inCallerOrg(resource.data)
-        && (
-          crmTenantReadAll()
-          || leadTaskParticipant(resource.data)
-          || leadTaskElevated()
-        );
+      allow read: if leadTaskCanRead(resource.data);
       allow create: if signedIn()
         && request.resource.data.organizationId == callerOrgId()
         && request.resource.data.createdById == request.auth.uid;
@@ -217,39 +238,33 @@ service cloud.firestore {
 
     match /touchpoints/{id} {
       allow read: if tenantReadable()
-        && (
-          crmTenantReadAll()
-          || resource.data.get('leadOwnerId', '') == request.auth.uid
-        );
+        && canReadCrmOwnedBy(resource.data.get('leadOwnerId', ''));
       allow write: if tenantWritable();
     }
 
     match /timelineEvents/{id} {
       allow read: if tenantReadable()
-        && (
-          crmTenantReadAll()
-          || resource.data.get('leadOwnerId', '') == request.auth.uid
-        );
+        && canReadCrmOwnedBy(resource.data.get('leadOwnerId', ''));
       allow write: if tenantWritable();
     }
 
     match /accounts/{id} {
-      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow write: if tenantWritable();
     }
 
     match /contacts/{id} {
-      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow write: if tenantWritable();
     }
 
     match /deals/{id} {
-      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow write: if tenantWritable();
     }
 
     match /profiles/{id} {
-      allow read: if tenantReadable() && (crmTenantReadAll() || ownsCrmDoc(resource.data));
+      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow write: if tenantWritable();
     }
 
@@ -274,11 +289,7 @@ service cloud.firestore {
     }
 
     match /activityCounters/{id} {
-      allow read: if tenantReadable()
-        && (
-          crmTenantReadAll()
-          || resource.data.userId == request.auth.uid
-        );
+      allow read: if tenantReadable() && canReadCrmActivityUser(resource.data.get('userId', ''));
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
@@ -287,11 +298,7 @@ service cloud.firestore {
     }
 
     match /activityRecords/{id} {
-      allow read: if tenantReadable()
-        && (
-          crmTenantReadAll()
-          || resource.data.userId == request.auth.uid
-        );
+      allow read: if tenantReadable() && canReadCrmActivityUser(resource.data.get('userId', ''));
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)

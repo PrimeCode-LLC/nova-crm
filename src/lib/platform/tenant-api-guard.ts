@@ -4,10 +4,7 @@ import { getAdminAuth } from "@/lib/firebase/admin";
 import { getVerifiedSession, type AppSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import type { OrgMemberRole } from "@/lib/types";
-import {
-  findMembershipForUserServer,
-  getMemberServer,
-} from "@/lib/platform/members-server";
+import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import { roleAtLeast } from "./org-role";
 
 export { roleAtLeast };
@@ -67,43 +64,22 @@ export async function guardTenantApi(opts?: {
     };
   }
 
-  let organizationId = session.organizationId;
-  let role = session.orgRole;
-  if (organizationId && role) {
-    const live = await getMemberServer(organizationId, session.uid);
-    if (live?.status === "pending") {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          {
-            error: "Workspace access is pending admin approval.",
-            code: "membership_pending",
-          },
-          { status: 403 },
-        ),
-      };
-    }
+  const liveTenant = await resolveLiveTenantForSession(session);
+  if (liveTenant.membershipPending) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        {
+          error: "Workspace access is pending admin approval.",
+          code: "membership_pending",
+        },
+        { status: 403 },
+      ),
+    };
   }
 
-  if (!organizationId || !role) {
-    const membership = await findMembershipForUserServer(session.uid);
-    if (membership?.status === "pending") {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          {
-            error: "Workspace access is pending admin approval.",
-            code: "membership_pending",
-          },
-          { status: 403 },
-        ),
-      };
-    }
-    if (membership) {
-      organizationId = membership.organizationId;
-      role = membership.role;
-    }
-  }
+  const organizationId = liveTenant.organizationId;
+  const role = liveTenant.orgRole;
 
   if (!organizationId || !role) {
     return {

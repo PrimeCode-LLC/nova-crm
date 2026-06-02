@@ -22,6 +22,7 @@ export type AuditEvent =
   | "settings.updated"
   | "channel_admin.updated"
   | "user.hierarchy_updated"
+  | "user.feature_grants_updated"
   | "ai.settings_updated"
   | "ai.key_rotated"
   | "ai.library_indexed"

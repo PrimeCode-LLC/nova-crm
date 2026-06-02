@@ -18,7 +18,10 @@ import Link from "next/link";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
+import { UserChip } from "@/components/common/user-chip";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -87,6 +90,49 @@ const ROLE_RANK: Record<OrgMemberRole, number> = {
   member: 1,
 };
 
+const MEMBER_STATUS_TONE: Record<string, string> = {
+  active: "bg-success/10 text-success border-success/20",
+  disabled: "bg-destructive/10 text-destructive border-destructive/20",
+  invited: "bg-warning/10 text-warning border-warning/20",
+  pending: "bg-muted text-muted-foreground",
+};
+
+const INVITED_BY_SOURCE_LABELS: Record<string, string> = {
+  "owner-bootstrap": "Organization founder",
+  "platform-seed": "Platform onboarding",
+  "open-join-link": "Open join link",
+  migration: "Account migration",
+};
+
+function memberLabel(m: Pick<OrganizationMember, "displayName" | "email">): string {
+  return m.displayName?.trim() || m.email;
+}
+
+function memberInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function resolveInvitedBy(
+  invitedByUid: string,
+  members: OrganizationMember[],
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): { label: string; personUid?: string } {
+  const raw = invitedByUid?.trim();
+  if (!raw) return { label: "—" };
+  const system = INVITED_BY_SOURCE_LABELS[raw];
+  if (system) return { label: system };
+  const member = members.find((m) => m.uid === raw);
+  if (member) return { label: memberLabel(member), personUid: raw };
+  const workspace = getOwnerDisplayName(raw);
+  if (workspace) return { label: workspace, personUid: raw };
+  return { label: "Unknown user" };
+}
+
 function randomTempPassword(): string {
   const alphabet =
     "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@%^&*";
@@ -131,6 +177,8 @@ export function TeamPageClient({
   );
 
   const [editMember, setEditMember] = React.useState<OrganizationMember | null>(null);
+
+  const { getOwnerDisplayName, getUserById } = useWorkspace();
 
   const canManage = role === "owner" || role === "admin";
   const isOwner = role === "owner";
@@ -892,106 +940,190 @@ export function TeamPageClient({
       </Dialog>
 
       <Sheet open={editMember !== null} onOpenChange={(o) => !o && setEditMember(null)}>
-        <SheetContent className="sm:max-w-md overflow-y-auto">
-          {editMember && (
-            <>
-              <SheetHeader>
-                <SheetTitle>{editMember.displayName || editMember.email}</SheetTitle>
-                <SheetDescription>
-                  Workspace membership (owner / admin / manager / member). For CRM job roles and
-                  permissions, use Users.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="grid gap-3 py-4 text-sm">
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Email</div>
-                  <div className="mt-0.5">{editMember.email}</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">User ID</div>
-                  <div className="mt-0.5 font-mono text-xs break-all">{editMember.uid}</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Organization role
-                  </div>
-                  <div className="mt-1.5">
-                    {(() => {
-                      const canTouchThis =
-                        canManage &&
-                        editMember.uid !== currentUid &&
-                        (isOwner ||
-                          (ROLE_RANK[editMember.role] < ROLE_RANK[role] &&
-                            editMember.role !== "owner"));
-                      return canTouchThis ? (
-                        <Select
-                          value={editMember.role}
-                          onValueChange={(v) => {
-                            void patchMember(editMember.uid, {
-                              role: v as OrgMemberRole,
-                            }).then(() =>
-                              setEditMember((prev) =>
-                                prev && prev.uid === editMember.uid
-                                  ? { ...prev, role: v as OrgMemberRole }
-                                  : prev,
-                              ),
-                            );
-                          }}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLE_OPTIONS.filter((opt) => {
-                              if (opt.value === "owner" && !isOwner) return false;
-                              return true;
-                            }).map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <Badge variant="outline" className="capitalize">
-                          {editMember.role}
+        <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md overflow-y-auto">
+          {editMember && (() => {
+            const displayName = memberLabel(editMember);
+            const invitedBy = resolveInvitedBy(
+              editMember.invitedByUid,
+              members,
+              getOwnerDisplayName,
+            );
+            const crmUser = getUserById(editMember.uid);
+            const canTouchThis =
+              canManage &&
+              editMember.uid !== currentUid &&
+              (isOwner ||
+                (ROLE_RANK[editMember.role] < ROLE_RANK[role] &&
+                  editMember.role !== "owner"));
+
+            return (
+              <>
+                <SheetHeader className="space-y-0 border-b pb-4 text-left">
+                  <div className="flex items-start gap-3 pr-8">
+                    <Avatar className="h-10 w-10 shrink-0 rounded-md">
+                      <AvatarFallback className="rounded-md bg-primary/15 text-primary text-sm font-semibold">
+                        {memberInitials(displayName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <SheetTitle className="text-base leading-snug">{displayName}</SheetTitle>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {editMember.email}
+                      </p>
+                      {editMember.uid === currentUid ? (
+                        <Badge variant="outline" className="mt-2 text-[10px]">
+                          You
                         </Badge>
-                      );
-                    })()}
+                      ) : null}
+                    </div>
                   </div>
+                  <SheetDescription className="pt-3 text-xs leading-relaxed">
+                    Workspace membership (owner, admin, manager, member). For CRM job roles and
+                    permissions, use Users.
+                  </SheetDescription>
+                </SheetHeader>
+
+                <div className="flex-1 space-y-5 py-4 text-sm">
+                  <section className="space-y-2">
+                    <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                      Membership
+                    </div>
+                    <dl className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="shrink-0 text-muted-foreground">Organization role</dt>
+                        <dd className="min-w-0 text-right">
+                          {canTouchThis ? (
+                            <Select
+                              value={editMember.role}
+                              onValueChange={(v) => {
+                                void patchMember(editMember.uid, {
+                                  role: v as OrgMemberRole,
+                                }).then(() =>
+                                  setEditMember((prev) =>
+                                    prev && prev.uid === editMember.uid
+                                      ? { ...prev, role: v as OrgMemberRole }
+                                      : prev,
+                                  ),
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-8 w-[140px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ROLE_OPTIONS.filter((opt) => {
+                                  if (opt.value === "owner" && !isOwner) return false;
+                                  return true;
+                                }).map((opt) => (
+                                  <SelectItem key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge variant="outline" className="capitalize">
+                              {ROLE_OPTIONS.find((o) => o.value === editMember.role)?.label ??
+                                editMember.role}
+                            </Badge>
+                          )}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-muted-foreground">Status</dt>
+                        <dd>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "capitalize",
+                              MEMBER_STATUS_TONE[editMember.status] ?? "",
+                            )}
+                          >
+                            {editMember.status}
+                          </Badge>
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-muted-foreground">Joined</dt>
+                        <dd className="text-muted-foreground">{fmtRelative(editMember.joinedAt)}</dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <dt className="shrink-0 text-muted-foreground">Invited by</dt>
+                        <dd className="min-w-0 text-right">
+                          {invitedBy.personUid ? (
+                            <UserChip
+                              userId={invitedBy.personUid}
+                              size="xs"
+                              className="inline-flex justify-end"
+                              profileHref={`/admin/users?user=${encodeURIComponent(invitedBy.personUid)}`}
+                            />
+                          ) : (
+                            <span>{invitedBy.label}</span>
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                  </section>
+
+                  {crmUser ? (
+                    <section className="space-y-2">
+                      <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        CRM profile
+                      </div>
+                      <p className="text-xs text-muted-foreground leading-relaxed">
+                        {crmUser.title?.trim()
+                          ? `${crmUser.title} · `
+                          : ""}
+                        Role:{" "}
+                        {crmUser.roleId.replace(/_/g, " ")}
+                      </p>
+                      <Link
+                        href={`/admin/users?user=${encodeURIComponent(editMember.uid)}`}
+                        className={cn(
+                          buttonVariants({ variant: "outline", size: "sm" }),
+                          "inline-flex w-full justify-center",
+                        )}
+                      >
+                        Open CRM user
+                      </Link>
+                    </section>
+                  ) : (
+                    <section className="rounded-md border border-dashed bg-muted/20 p-3 text-xs text-muted-foreground leading-relaxed">
+                      No CRM user record yet. They can still sign in; assign CRM roles from Users
+                      after provisioning.
+                    </section>
+                  )}
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
-                  <div className="mt-1">
-                    <Badge variant="outline" className="capitalize">
-                      {editMember.status}
-                    </Badge>
-                  </div>
+
+                <div className="mt-auto flex flex-col gap-2 border-t pt-4">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 justify-center text-xs text-muted-foreground"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(editMember.uid);
+                      toast.success("User ID copied");
+                    }}
+                  >
+                    <Copy className="mr-1.5 h-3.5 w-3.5" />
+                    Copy user ID
+                  </Button>
+                  {!crmUser ? (
+                    <Link
+                      href="/admin/users"
+                      className={cn(
+                        buttonVariants({ variant: "outline", size: "sm" }),
+                        "inline-flex w-full justify-center",
+                      )}
+                    >
+                      Open Users (CRM roles)
+                    </Link>
+                  ) : null}
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Joined</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {fmtRelative(editMember.joinedAt)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Invited / source
-                  </div>
-                  <div className="mt-0.5 font-mono text-xs break-all">{editMember.invitedByUid}</div>
-                </div>
-              </div>
-              <Link
-                href="/admin/users"
-                className={cn(
-                  buttonVariants({ variant: "outline", size: "sm" }),
-                  "inline-flex w-fit",
-                )}
-              >
-                Open Users (CRM roles)
-              </Link>
-            </>
-          )}
+              </>
+            );
+          })()}
         </SheetContent>
       </Sheet>
     </>

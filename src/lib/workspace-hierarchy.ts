@@ -21,13 +21,43 @@ export function collectDescendantUserIds(
   return ids;
 }
 
-function seesAllLeadsInTenant(viewer: User): boolean {
+export function seesAllLeadsInTenant(viewer: User): boolean {
   if (viewer.roleId === "director") return true;
   if (viewer.isSuperAdmin) return true;
   if (viewer.orgRole === "owner" || viewer.orgRole === "admin" || viewer.orgRole === "manager") {
     return true;
   }
   return false;
+}
+
+/**
+ * User IDs whose owned CRM rows the viewer may see: self, everyone in their org-chart subtree
+ * (direct + indirect reports from Admin → Org hierarchy), same-department peers when set, and
+ * manager / team-lead role subtree (same as chart subtree when they have reports).
+ */
+export function leadOwnerIdsVisibleToViewer(
+  viewer: User,
+  orgUsers: readonly User[],
+): Set<string> {
+  const ids = new Set<string>([viewer.id]);
+  for (const id of collectDescendantUserIds(viewer.id, orgUsers)) {
+    ids.add(id);
+  }
+  if (viewer.departmentId) {
+    for (const u of orgUsers) {
+      if (u.departmentId === viewer.departmentId) ids.add(u.id);
+    }
+  }
+  return ids;
+}
+
+/** Owner IDs to query in Firestore for workspace `orgRole == "member"` (max 30 for `in`). */
+export function memberCrmOwnerIdsForFirestore(
+  viewer: User,
+  orgUsers: readonly User[],
+): string[] {
+  if (seesAllLeadsInTenant(viewer)) return [];
+  return Array.from(leadOwnerIdsVisibleToViewer(viewer, orgUsers)).slice(0, 30);
 }
 
 /** Whether `lead` should appear for `viewer` given the org roster (live workspace). */
@@ -41,31 +71,21 @@ export function leadVisibleForLiveViewer(
   /** Unassigned leads are only visible to owner / admin / manager (see Firestore `crmTenantReadAll`). */
   if (!lead.ownerId?.trim()) return false;
 
-  if (viewer.roleId === "manager" || viewer.roleId === "team_lead") {
-    const owners = new Set<string>([viewer.id]);
-    for (const id of collectDescendantUserIds(viewer.id, orgUsers)) owners.add(id);
-    return owners.has(lead.ownerId);
-  }
-
-  if (viewer.departmentId) {
-    const deptOwnerIds = new Set(
-      orgUsers.filter((u) => u.departmentId === viewer.departmentId).map((u) => u.id),
-    );
-    return deptOwnerIds.has(lead.ownerId);
-  }
+  if (leadOwnerIdsVisibleToViewer(viewer, orgUsers).has(lead.ownerId)) return true;
 
   if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
-    return lead.ownerId === viewer.id || lead.scraperId === viewer.id;
+    return lead.scraperId === viewer.id;
   }
 
-  return lead.ownerId === viewer.id;
+  return false;
 }
 
 function directoryUserIdsForLive(viewer: User, orgUsers: readonly User[]): Set<string> | null {
   if (seesAllLeadsInTenant(viewer)) return null;
-  if (viewer.roleId === "manager" || viewer.roleId === "team_lead") {
+  const descendants = collectDescendantUserIds(viewer.id, orgUsers);
+  if (viewer.roleId === "manager" || viewer.roleId === "team_lead" || descendants.size > 0) {
     const s = new Set<string>([viewer.id]);
-    for (const id of collectDescendantUserIds(viewer.id, orgUsers)) s.add(id);
+    for (const id of descendants) s.add(id);
     return s;
   }
   if (viewer.departmentId) {
@@ -111,8 +131,9 @@ export function followupVisibleInHierarchyScope(
 
 /**
  * Applies org-chart style visibility to a loaded tenant snapshot (live Firestore data).
- * Directors and workspace owner/admin see the full org; managers/team leads see their subtree;
- * same-department members see each other's pipeline when departmentId is set; otherwise own rows only.
+ * Directors and workspace owner/admin see the full org; anyone with reports in the org chart sees
+ * their subtree; same-department members see each other's pipeline when departmentId is set;
+ * otherwise own rows only.
  */
 export function applyLiveHierarchyScope(
   snapshot: WorkspaceSnapshot,
@@ -150,7 +171,7 @@ export function applyLiveHierarchyScope(
     followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, activityActorIds),
   );
 
-  const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, viewer);
+  const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, viewer, orgUsers);
 
   const notes = snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { listAuditLogsServer } from "@/lib/firestore/audit";
 import {
   AUDIT_EVENT_CATEGORY,
@@ -20,7 +21,7 @@ const CATEGORIES = new Set<string>([
 ]);
 
 export async function GET(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("activity_logs");
   if (!g.ok) return g.response;
 
   const url = new URL(req.url);

@@ -1,4 +1,8 @@
 import { getMemberServer } from "@/lib/platform/members-server";
+import {
+  listOrgUsersServer,
+  viewerManagesUserServer,
+} from "@/lib/platform/hierarchy-access-server";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import type { OrgMemberRole } from "@/lib/types";
 
@@ -20,11 +24,14 @@ export async function resolveMailboxDataOwnerUid(input: {
   }
 
   if (!roleAtLeast(input.viewerRole, "admin")) {
-    return {
-      ok: false,
-      status: 403,
-      error: "Only workspace admins can open another member’s mailbox.",
-    };
+    const orgUsers = await listOrgUsersServer(input.organizationId);
+    if (!viewerManagesUserServer(input.viewerUid, dataOwnerUid, orgUsers)) {
+      return {
+        ok: false,
+        status: 403,
+        error: "You can only open your own mailbox or a direct/indirect report’s inbox.",
+      };
+    }
   }
 
   const member = await getMemberServer(input.organizationId, dataOwnerUid);

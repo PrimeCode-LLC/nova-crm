@@ -42,6 +42,7 @@ import { parseDemoPersonaId } from "./demo-persona";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
 import {
   activityActorUserIdsVisibleToViewer,
+  collectDescendantUserIds,
   followupVisibleInHierarchyScope,
 } from "./workspace-hierarchy";
 
@@ -110,31 +111,16 @@ export const LIVE_SNAPSHOT: WorkspaceSnapshot = {
   currentUserId: "",
 };
 
-/** Users managed under `rootManagerId` (not including `rootManagerId`). */
-function collectDescendantUserIds(rootManagerId: string, users: readonly User[]): Set<string> {
-  const ids = new Set<string>();
-  const queue = [rootManagerId];
-  while (queue.length) {
-    const mid = queue.shift()!;
-    for (const u of users) {
-      if (u.managerId === mid && !ids.has(u.id)) {
-        ids.add(u.id);
-        queue.push(u.id);
-      }
-    }
-  }
-  return ids;
-}
-
 /**
  * User IDs this persona can see in directory / admin pickers.
  * `null` = entire org (director).
  */
 function directoryUserIdsFor(persona: User, allUsers: readonly User[]): Set<string> | null {
   if (persona.roleId === "director") return null;
-  if (persona.roleId === "manager") {
+  const descendants = collectDescendantUserIds(persona.id, allUsers);
+  if (persona.roleId === "manager" || descendants.size > 0) {
     const s = new Set<string>([persona.id]);
-    for (const id of collectDescendantUserIds(persona.id, allUsers)) s.add(id);
+    for (const id of descendants) s.add(id);
     return s;
   }
   if (persona.departmentId) {
@@ -143,14 +129,15 @@ function directoryUserIdsFor(persona: User, allUsers: readonly User[]): Set<stri
   return new Set([persona.id]);
 }
 
-/** Whether a demo lead is visible to the active persona (org + ownership rules). */
+/** Whether a demo lead is visible to the active persona (org chart + ownership rules). */
 function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly User[]): boolean {
   // Intake prospects are treated as an org-wide pool in demo so every tour persona sees sample rows.
   if (lead.intakeKind === "prospect") return true;
   if (persona.roleId === "director") return true;
-  if (persona.roleId === "manager") {
+  const descendants = collectDescendantUserIds(persona.id, allUsers);
+  if (persona.roleId === "manager" || descendants.size > 0) {
     const owners = new Set<string>([persona.id]);
-    for (const id of collectDescendantUserIds(persona.id, allUsers)) owners.add(id);
+    for (const id of descendants) owners.add(id);
     return owners.has(lead.ownerId);
   }
   // Chris (Senior SDR): mock permission grant, read leads for full Outbound department.
@@ -200,7 +187,7 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, standaloneActorIds),
   );
 
-  const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, persona);
+  const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, persona, mockUsers);
 
   const notes = snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
 

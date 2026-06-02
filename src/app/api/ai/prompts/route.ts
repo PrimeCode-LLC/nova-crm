@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAiPromptServer, upsertAiPromptServer } from "@/lib/ai/ai-settings-server";
 import type { AiFeatureKey } from "@/lib/ai/types";
 import { recordAudit } from "@/lib/firestore/audit";
@@ -14,7 +15,7 @@ const FEATURE_KEYS = [
 ] as const;
 
 export async function GET(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const url = new URL(req.url);
@@ -39,7 +40,7 @@ const patchSchema = z.object({
 });
 
 export async function PATCH(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   let json: unknown;

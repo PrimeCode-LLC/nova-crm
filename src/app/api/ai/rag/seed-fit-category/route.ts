@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
 import { seedFitCheckCategoryLibraryServer } from "@/lib/ai/seed-fit-check-library-server";
 
@@ -10,7 +11,7 @@ const bodySchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   let json: unknown;

@@ -285,21 +285,33 @@ export function AppSidebar({
   const navAccess = React.useMemo<NavAccessContext>(
     () => ({
       roleId: useMockPersona ? mockUser.roleId : userDoc?.roleId,
+      orgRole: useMockPersona ? mockUser.orgRole : userDoc?.orgRole,
       isSuperAdmin: !useMockPersona && Boolean(userDoc?.isSuperAdmin),
+      featureGrants: useMockPersona ? mockUser.featureGrants : userDoc?.featureGrants,
       roleLoading: !useMockPersona && userDocLoading && userDoc == null,
     }),
     [
       useMockPersona,
       mockUser.roleId,
+      mockUser.orgRole,
+      mockUser.featureGrants,
       userDoc?.roleId,
+      userDoc?.orgRole,
       userDoc?.isSuperAdmin,
+      userDoc?.featureGrants,
       userDocLoading,
       userDoc,
     ],
   );
   const sections = React.useMemo(
     () => getVisibleNavSections(navAccess),
-    [navAccess.roleId, navAccess.isSuperAdmin, navAccess.roleLoading],
+    [
+      navAccess.roleId,
+      navAccess.orgRole,
+      navAccess.isSuperAdmin,
+      navAccess.featureGrants,
+      navAccess.roleLoading,
+    ],
   );
   const { teamChatUnreadTotal } = useTeamChatUnread();
   const inboxMailUnreadTotal = useInboxMailUnreadTotal();

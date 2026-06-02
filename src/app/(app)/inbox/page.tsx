@@ -365,6 +365,7 @@ export default function InboxPage() {
     currentUserId,
     users,
     canViewMemberMailboxes,
+    mailboxViewableUserIds,
     getOwnerDisplayName,
   } = useWorkspace();
 
@@ -423,16 +424,26 @@ export default function InboxPage() {
 
   const inboxReadOnly = !isDemo && mailboxDataReadOnly;
 
+  const viewableMailboxIdSet = React.useMemo(
+    () => new Set(mailboxViewableUserIds),
+    [mailboxViewableUserIds],
+  );
   const memberPickerUsers = React.useMemo(
     () =>
       [...users]
-        .filter((u) => u.status === "active" && u.id && u.id !== currentUserId)
+        .filter(
+          (u) =>
+            u.status === "active" &&
+            u.id &&
+            u.id !== currentUserId &&
+            (!canViewMemberMailboxes || viewableMailboxIdSet.has(u.id)),
+        )
         .sort((a, b) =>
           (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "", undefined, {
             sensitivity: "base",
           }),
         ),
-    [users, currentUserId],
+    [users, currentUserId, canViewMemberMailboxes, viewableMailboxIdSet],
   );
 
   const leadsSortedForMailFilter = React.useMemo(
