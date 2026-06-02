@@ -38,6 +38,7 @@ export type AuditEvent =
   | "instantly.disconnected"
   | "instantly.campaign_created"
   | "instantly.campaigns_synced"
+  | "instantly.campaign_leads_synced"
   | "instantly.leads_pushed"
   | "instantly.webhook_reply"
   | "feature.page_view"
