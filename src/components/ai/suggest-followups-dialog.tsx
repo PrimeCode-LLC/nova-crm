@@ -29,6 +29,7 @@ import type {
   Contact,
   Deal,
   Followup,
+  FollowupPlan,
   FollowupChannel,
   Lead,
   LeadPriority,
@@ -95,7 +96,9 @@ export function SuggestFollowupsDialog({
   aiContext,
   isDemo,
   currentUserId,
-  onCreateMany,
+  onCreatePlanWithFollowups,
+  regenerateFromPlan,
+  followupPlans = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -103,7 +106,10 @@ export function SuggestFollowupsDialog({
   aiContext: LeadFollowupAiContext;
   isDemo: boolean;
   currentUserId: string;
-  onCreateMany: (followups: Followup[]) => void;
+  onCreatePlanWithFollowups: (plan: FollowupPlan, followups: Followup[]) => void;
+  /** When set, accept supersedes this paused plan and pre-fills regenerate context. */
+  regenerateFromPlan?: FollowupPlan;
+  followupPlans?: FollowupPlan[];
 }) {
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
   const [userPrompt, setUserPrompt] = React.useState("");
@@ -116,12 +122,16 @@ export function SuggestFollowupsDialog({
   React.useEffect(() => {
     if (!open) return;
     setPhase("prompt");
-    setUserPrompt("");
+    setUserPrompt(
+      regenerateFromPlan
+        ? `Regenerate after lead reply. Prior plan: ${regenerateFromPlan.planSummary}. ${regenerateFromPlan.pausedReason ?? ""}`.trim()
+        : "",
+    );
     setError(null);
     setPlanSummary("");
     setItems([]);
     setLeadChannel(lead.channel);
-  }, [open, lead.id, lead.channel]);
+  }, [open, lead.id, lead.channel, regenerateFromPlan]);
 
   function demoContextPayload(): LeadAiContextInput | undefined {
     if (!isDemo) return undefined;
@@ -168,6 +178,16 @@ export function SuggestFollowupsDialog({
         body: JSON.stringify({
           leadId: lead.id,
           userPrompt: userPrompt.trim() || undefined,
+          regenerateContext: regenerateFromPlan
+            ? `${regenerateFromPlan.pausedReason ?? "Lead replied"}. Prior: ${regenerateFromPlan.planSummary}`
+            : undefined,
+          followupPlans: followupPlans.map((p) => ({
+            id: p.id,
+            status: p.status,
+            planSummary: p.planSummary,
+            pausedReason: p.pausedReason,
+            pausedAt: p.pausedAt,
+          })),
           demoContext: demoContextPayload(),
         }),
       });
@@ -207,6 +227,15 @@ export function SuggestFollowupsDialog({
         ? `fp-${crypto.randomUUID()}`
         : `fp-${Date.now()}`;
     const ownerId = lead.ownerId ?? currentUserId;
+    const plan: FollowupPlan = {
+      id: planId,
+      leadId: lead.id,
+      ownerId,
+      status: "active",
+      planSummary: planSummary.trim() || "Follow-up plan",
+      createdAt: new Date().toISOString(),
+      supersededByPlanId: undefined,
+    };
     const created: Followup[] = selected.map((it) => ({
       id: newFollowupId(),
       leadId: lead.id,
@@ -221,7 +250,7 @@ export function SuggestFollowupsDialog({
       priority: it.priority,
       auto: false,
     }));
-    onCreateMany(created);
+    onCreatePlanWithFollowups(plan, created);
     toast.success(`Created ${created.length} follow-up${created.length === 1 ? "" : "s"}`);
     onOpenChange(false);
   }
@@ -232,11 +261,12 @@ export function SuggestFollowupsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Sparkles className="h-4 w-4 text-primary" />
-            Suggest follow-ups
+            {regenerateFromPlan ? "Regenerate follow-ups" : "Suggest follow-ups"}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            AI analyzes this lead and proposes a cadence with copy-ready messages. Edit anything
-            before creating.
+            {regenerateFromPlan
+              ? "Lead replied — draft a new cadence that reflects their message. Edit before creating."
+              : "AI analyzes this lead and proposes a cadence with copy-ready messages. Edit anything before creating."}
           </DialogDescription>
         </DialogHeader>
 

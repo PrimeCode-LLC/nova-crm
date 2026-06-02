@@ -9,6 +9,7 @@ import type {
   Contact,
   Department,
   Followup,
+  FollowupPlan,
   Lead,
   LeadTask,
   Note,
@@ -62,6 +63,9 @@ import {
   persistFollowupCreate,
   persistFollowupDelete,
   persistFollowupSetCompleted,
+  persistFollowupSetPaused,
+  persistFollowupPlanCreate,
+  persistFollowupPlanPatch,
   persistLeadTaskCreate,
   persistLeadTaskSetCompleted,
   persistLeadActivityBump,
@@ -90,6 +94,7 @@ import {
 } from "@/lib/workspace-session";
 import { STAGES_BY_KEY } from "@/lib/constants";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
+import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
@@ -127,8 +132,18 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     /** Session-backed (persists in tab until refresh / mode change). */
     sessionHydrated: boolean;
     addFollowup: (f: Followup) => void;
+    createFollowupPlanWithFollowups: (plan: FollowupPlan, followups: Followup[]) => void;
     setFollowupCompleted: (id: string, completed: boolean) => void;
     removeFollowup: (id: string) => void;
+    pauseFollowupPlanForReply: (input: {
+      planId: string;
+      leadId: string;
+      reason: string;
+      replyMessageId?: string;
+      actorId: string;
+      openFollowupIds: string[];
+    }) => void;
+    supersedeFollowupPlan: (oldPlanId: string, newPlanId: string) => void;
     addLeadTask: (t: LeadTask) => void;
     setLeadTaskCompleted: (id: string, completed: boolean) => void;
     addLeadNote: (leadId: string, body: string, authorId: string) => void;
@@ -614,6 +629,159 @@ export function WorkspaceModeProvider({
           },
         };
       });
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const createFollowupPlanWithFollowups = React.useCallback(
+    (plan: FollowupPlan, items: Followup[]) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupPlanCreate(db, orgId, plan);
+            for (const f of items) {
+              await persistFollowupCreate(db, orgId, f);
+            }
+            if (plan.leadId) await persistLeadActivityBump(db, plan.leadId);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not save follow-up plan", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        followupPlans: {
+          ...s.followupPlans,
+          extras: [...s.followupPlans.extras, plan],
+        },
+        followups: {
+          ...s.followups,
+          extras: [...s.followups.extras, ...items],
+        },
+      }));
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const pauseFollowupPlanForReply = React.useCallback(
+    (input: {
+      planId: string;
+      leadId: string;
+      reason: string;
+      replyMessageId?: string;
+      actorId: string;
+      openFollowupIds: string[];
+    }) => {
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      const planPatch: Partial<FollowupPlan> = {
+        status: "paused",
+        pausedAt: iso,
+        pausedReason: input.reason,
+        replyMessageId: input.replyMessageId,
+      };
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupPlanPatch(db, input.planId, planPatch);
+            for (const fid of input.openFollowupIds) {
+              await persistFollowupSetPaused(db, fid, true);
+            }
+            const te: TimelineEvent = {
+              id: newLocalId("te"),
+              leadId: input.leadId,
+              type: "followup_plan_paused",
+              actorId: input.actorId,
+              summary: `Follow-up plan paused: ${input.reason}`,
+              payload: { planId: input.planId, replyMessageId: input.replyMessageId },
+              createdAt: iso,
+            };
+            await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not pause follow-up plan", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => {
+        const paused = { ...s.followups.paused };
+        for (const fid of input.openFollowupIds) {
+          paused[fid] = iso;
+        }
+        const patches = {
+          ...s.followupPlans.patches,
+          [input.planId]: {
+            ...(s.followupPlans.patches[input.planId] ?? {}),
+            ...planPatch,
+          },
+        };
+        const extras = s.followupPlans.extras.map((p) =>
+          p.id === input.planId ? { ...p, ...planPatch } : p,
+        );
+        const te: TimelineEvent = {
+          id: newLocalId("te"),
+          leadId: input.leadId,
+          type: "followup_plan_paused",
+          actorId: input.actorId,
+          summary: `Follow-up plan paused: ${input.reason}`,
+          payload: { planId: input.planId, replyMessageId: input.replyMessageId },
+          createdAt: iso,
+        };
+        return {
+          ...s,
+          followupPlans: { ...s.followupPlans, patches, extras },
+          followups: { ...s.followups, paused },
+          timelineAdded: [...s.timelineAdded, te],
+        };
+      });
+      toast.message("Lead replied — follow-up plan paused", {
+        description: "Review the inbox and regenerate next steps when ready.",
+        duration: 8000,
+      });
+    },
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+  );
+
+  const supersedeFollowupPlan = React.useCallback(
+    (oldPlanId: string, newPlanId: string) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupPlanPatch(db, oldPlanId, {
+              status: "superseded",
+              supersededByPlanId: newPlanId,
+            });
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update prior plan", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        followupPlans: {
+          ...s.followupPlans,
+          patches: {
+            ...s.followupPlans.patches,
+            [oldPlanId]: {
+              ...(s.followupPlans.patches[oldPlanId] ?? {}),
+              status: "superseded",
+              supersededByPlanId: newPlanId,
+            },
+          },
+        },
+      }));
     },
     [mode, userDoc?.organizationId],
   );
@@ -1232,6 +1400,7 @@ export function WorkspaceModeProvider({
       deals: liveFs.deals,
       notes: liveFs.notes,
       followups: liveFs.followups,
+      followupPlans: liveFs.followupPlans,
       leadTasks: liveFs.leadTasks,
       touchpoints: liveFs.touchpoints,
       timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
@@ -1265,6 +1434,7 @@ export function WorkspaceModeProvider({
     liveFs.deals,
     liveFs.notes,
     liveFs.followups,
+    liveFs.followupPlans,
     liveFs.leadTasks,
     liveFs.touchpoints,
     liveFs.timelineEvents,
@@ -1363,7 +1533,11 @@ export function WorkspaceModeProvider({
 
   const snapshot = React.useMemo((): WorkspaceSnapshot => {
     const merged = mergeSessionIntoSnapshot(preSessionSnapshot, sessionV2);
-    return { ...preSessionSnapshot, ...merged };
+    const planPatches = sessionV2.followupPlans.patches;
+    const followupPlans = mergeFollowupPlans(merged.followupPlans ?? [], merged.followups).map(
+      (p) => (planPatches[p.id] ? { ...p, ...planPatches[p.id] } : p),
+    );
+    return { ...preSessionSnapshot, ...merged, followupPlans };
   }, [preSessionSnapshot, sessionV2]);
 
   const snapshotRef = React.useRef(snapshot);
@@ -1452,8 +1626,11 @@ export function WorkspaceModeProvider({
       patchUser,
       sessionHydrated,
       addFollowup,
+      createFollowupPlanWithFollowups,
       setFollowupCompleted,
       removeFollowup,
+      pauseFollowupPlanForReply,
+      supersedeFollowupPlan,
       addLeadTask,
       setLeadTaskCompleted,
       addLeadNote,
@@ -1506,8 +1683,11 @@ export function WorkspaceModeProvider({
     patchUser,
     sessionHydrated,
     addFollowup,
+    createFollowupPlanWithFollowups,
     setFollowupCompleted,
     removeFollowup,
+    pauseFollowupPlanForReply,
+    supersedeFollowupPlan,
     addLeadTask,
     setLeadTaskCompleted,
     addLeadNote,

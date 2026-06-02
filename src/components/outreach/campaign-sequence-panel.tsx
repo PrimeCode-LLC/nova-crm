@@ -131,7 +131,7 @@ export function CampaignSequencePanel({
   }
 
   return (
-    <div className="space-y-4 max-w-2xl">
+    <div className="space-y-4 max-w-3xl">
       <div className="flex flex-wrap items-center gap-2">
         <Button size="sm" disabled={saving || !dirty} onClick={() => void saveSequence()}>
           {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}

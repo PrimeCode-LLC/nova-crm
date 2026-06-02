@@ -5,9 +5,17 @@ import {
   persistCampaignServer,
   updateCampaignServer,
 } from "./campaign-server";
-import { listInstantlyCampaigns } from "./client";
+import {
+  buildCampaignAnalyticsMaps,
+  getCampaignAnalytics,
+  listInstantlyCampaigns,
+  mapInstantlyStatusToNova,
+  resolveCampaignAnalytics,
+  resolveCampaignStatsFromInstantly,
+} from "./client";
 import { getInstantlyApiKeyServer } from "./secrets";
 import type { Campaign } from "@/lib/types";
+import type { InstantlyCampaignAnalytics } from "./types";
 
 export type SyncInstantlyCampaignsResult = {
   total: number;
@@ -24,7 +32,13 @@ export async function syncInstantlyCampaignsFromRemote(
   const apiKey = await getInstantlyApiKeyServer(organizationId);
   if (!apiKey) throw new Error("Instantly is not connected");
 
-  const remoteList = await listInstantlyCampaigns(apiKey);
+  const [remoteList, analyticsAll] = await Promise.all([
+    listInstantlyCampaigns(apiKey),
+    getCampaignAnalytics(apiKey).catch((): InstantlyCampaignAnalytics[] => []),
+  ]);
+
+  const analyticsMaps = buildCampaignAnalyticsMaps(analyticsAll);
+
   let imported = 0;
   let updated = 0;
   let skipped = 0;
@@ -37,6 +51,17 @@ export async function syncInstantlyCampaignsFromRemote(
       continue;
     }
 
+    const preloaded = resolveCampaignAnalytics(analyticsMaps, instantlyId, name);
+    const { stats: ex, campaignStatus } = await resolveCampaignStatsFromInstantly(
+      apiKey,
+      instantlyId,
+      preloaded,
+    );
+    const novaStatus =
+      campaignStatus != null
+        ? mapInstantlyStatusToNova(campaignStatus)
+        : mapInstantlyStatusToNova(remote.status);
+
     const existing = await findNovaCampaignByInstantlyId(organizationId, instantlyId);
 
     if (existing) {
@@ -47,8 +72,17 @@ export async function syncInstantlyCampaignsFromRemote(
           ? (existing.data.stats as Campaign["stats"])
           : undefined;
       const campaign = novaCampaignFromInstantly(existing.id, remote);
+      campaign.status = novaStatus;
       campaign.stats = {
-        ...campaign.stats,
+        sent: ex.sent || prevStats?.sent || 0,
+        replied: ex.replied,
+        opened: ex.opened || prevStats?.opened || 0,
+        bounced: ex.bounced || prevStats?.bounced || 0,
+        linkClicks: ex.linkClicks || prevStats?.linkClicks || 0,
+        unsubscribed: ex.unsubscribed || prevStats?.unsubscribed || 0,
+        leadsCount: ex.leadsCount || prevStats?.leadsCount || 0,
+        contacted: ex.contacted || prevStats?.contacted || 0,
+        completed: ex.completed || prevStats?.completed || 0,
         meetings: prevStats?.meetings ?? campaign.stats.meetings,
         closed: prevStats?.closed ?? campaign.stats.closed,
       };
@@ -60,6 +94,19 @@ export async function syncInstantlyCampaignsFromRemote(
     } else {
       const novaId = `c-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
       const campaign = novaCampaignFromInstantly(novaId, remote);
+      campaign.status = novaStatus;
+      campaign.stats = {
+        ...campaign.stats,
+        sent: ex.sent,
+        replied: ex.replied,
+        opened: ex.opened,
+        bounced: ex.bounced,
+        linkClicks: ex.linkClicks,
+        unsubscribed: ex.unsubscribed,
+        leadsCount: ex.leadsCount,
+        contacted: ex.contacted,
+        completed: ex.completed,
+      };
       await persistCampaignServer(organizationId, campaign, uid);
       imported += 1;
     }

@@ -1,4 +1,4 @@
-import type { InstantlyLeadInput } from "./types";
+import type { InstantlyLead, InstantlyLeadInput } from "./types";
 import type { Lead } from "@/lib/types";
 
 export type InstantlyMergeVariable = {
@@ -64,6 +64,50 @@ function setCustom(
   value: string | undefined,
 ): void {
   if (value?.trim()) out[key] = value.trim();
+}
+
+export type InstantlyLeadContactFields = {
+  email: string;
+  contactName: string;
+  contactTitle?: string;
+  companyName: string;
+  companyDomain?: string;
+};
+
+/** Map an Instantly campaign lead into Nova contact/lead snapshot fields. */
+export function mapInstantlyLeadToContact(remote: InstantlyLead): InstantlyLeadContactFields | null {
+  const email = remote.email?.trim().toLowerCase();
+  if (!email) return null;
+
+  const first = remote.first_name?.trim() ?? "";
+  const last = remote.last_name?.trim() ?? "";
+  const fromParts = [first, last].filter(Boolean).join(" ").trim();
+  const localPart = email.split("@")[0] ?? "";
+  const fromEmail =
+    localPart.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "Contact";
+  const contactName = fromParts || fromEmail;
+
+  const payload = remote.payload && typeof remote.payload === "object" ? remote.payload : {};
+  const companyFromPayload =
+    typeof payload.company_name === "string" ? payload.company_name.trim() : "";
+
+  const companyName =
+    remote.company_name?.trim() ||
+    companyFromPayload ||
+    remote.company_domain?.trim() ||
+    (email.includes("@") ? email.split("@")[1]! : "Unknown");
+
+  const companyDomain =
+    remote.company_domain?.trim() ||
+    (email.includes("@") ? email.split("@")[1] : undefined);
+
+  return {
+    email,
+    contactName,
+    contactTitle: remote.job_title?.trim() || undefined,
+    companyName,
+    companyDomain,
+  };
 }
 
 export function mapNovaLeadToInstantly(lead: Lead): InstantlyLeadInput | null {

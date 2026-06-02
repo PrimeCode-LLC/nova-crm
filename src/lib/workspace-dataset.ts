@@ -8,6 +8,7 @@ import type {
   Touchpoint,
   TimelineEvent,
   Followup,
+  FollowupPlan,
   LeadTask,
   Note,
   Profile,
@@ -59,6 +60,7 @@ export type WorkspaceSnapshot = {
   touchpoints: Touchpoint[];
   timelineByLead: Record<string, TimelineEvent[]>;
   followups: Followup[];
+  followupPlans: FollowupPlan[];
   leadTasks: LeadTask[];
   notes: Note[];
   activityCounters: ActivityCounterRow[];
@@ -80,6 +82,7 @@ export const DEMO_SNAPSHOT: WorkspaceSnapshot = {
   touchpoints: mockTouchpoints,
   timelineByLead: mockTimelineByLead,
   followups: mockFollowups,
+  followupPlans: [],
   leadTasks: mockLeadTasks,
   notes: mockNotes,
   activityCounters: mockActivityCounters,
@@ -103,6 +106,7 @@ export const LIVE_SNAPSHOT: WorkspaceSnapshot = {
   touchpoints: [],
   timelineByLead: EMPTY_TIMELINE,
   followups: [],
+  followupPlans: [],
   leadTasks: [],
   notes: [],
   activityCounters: [],
@@ -187,6 +191,8 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     followupVisibleInHierarchyScope(f, visibleLeadIds, visibleDealIds, standaloneActorIds),
   );
 
+  const followupPlans = (snapshot.followupPlans ?? []).filter((p) => visibleLeadIds.has(p.leadId));
+
   const leadTasks = filterLeadTasksForViewer(snapshot.leadTasks, persona, mockUsers);
 
   const notes = snapshot.notes.filter((n) => n.leadId && visibleLeadIds.has(n.leadId));
@@ -220,6 +226,7 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     touchpoints,
     timelineByLead,
     followups,
+    followupPlans,
     leadTasks,
     notes,
     profiles,

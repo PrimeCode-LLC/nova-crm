@@ -8,6 +8,7 @@ import {
   extractInstantlyStats,
   getInstantlyCampaign,
   mapInstantlyStatusToNova,
+  resolveCampaignStatsFromInstantly,
 } from "./client";
 import { getInstantlyApiKeyServer } from "./secrets";
 import type { InstantlyCampaign } from "./types";
@@ -104,8 +105,18 @@ export async function syncCampaignStatsFromInstantly(
 ): Promise<Campaign["stats"]> {
   const apiKey = await getInstantlyApiKeyServer(organizationId);
   if (!apiKey) throw new Error("Instantly is not connected");
-  const remote = await getInstantlyCampaign(apiKey, instantlyId);
-  const extracted = extractInstantlyStats(remote);
+
+  const [remote, resolved] = await Promise.all([
+    getInstantlyCampaign(apiKey, instantlyId),
+    resolveCampaignStatsFromInstantly(apiKey, instantlyId),
+  ]);
+
+  const extracted = resolved.stats;
+  const novaStatus =
+    resolved.campaignStatus != null
+      ? mapInstantlyStatusToNova(resolved.campaignStatus)
+      : mapInstantlyStatusToNova(remote.status);
+
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured");
   const ref = db.collection(COLLECTIONS.campaigns).doc(novaCampaignId);
@@ -116,15 +127,21 @@ export async function syncCampaignStatsFromInstantly(
       : { sent: 0, replied: 0, meetings: 0, closed: 0 };
   const stats: Campaign["stats"] = {
     ...prev,
-    sent: extracted.sent,
+    sent: extracted.sent || prev.sent || 0,
     replied: extracted.replied,
-    opened: extracted.opened,
+    opened: extracted.opened || prev.opened || 0,
+    bounced: extracted.bounced || prev.bounced || 0,
+    linkClicks: extracted.linkClicks || prev.linkClicks || 0,
+    unsubscribed: extracted.unsubscribed || prev.unsubscribed || 0,
+    leadsCount: extracted.leadsCount || prev.leadsCount || 0,
+    contacted: extracted.contacted || prev.contacted || 0,
+    completed: extracted.completed || prev.completed || 0,
   };
   await ref.update(
     stampForUpdate(
       {
         stats,
-        status: mapInstantlyStatusToNova(remote.status),
+        status: novaStatus,
         lastSyncedAt: new Date().toISOString(),
       },
       uid,
@@ -151,11 +168,17 @@ export function novaCampaignFromInstantly(
     lastSyncedAt: new Date().toISOString(),
     sequenceSummary: steps > 0 ? { steps } : undefined,
     stats: {
-      sent: stats.sent,
-      replied: stats.replied,
+      sent: stats.sent ?? 0,
+      replied: stats.replied ?? 0,
       meetings: 0,
       closed: 0,
-      opened: stats.opened,
+      opened: stats.opened ?? 0,
+      bounced: stats.bounced ?? 0,
+      linkClicks: stats.linkClicks ?? 0,
+      unsubscribed: stats.unsubscribed ?? 0,
+      leadsCount: stats.leadsCount ?? 0,
+      contacted: stats.contacted ?? 0,
+      completed: stats.completed ?? 0,
     },
   };
 }

@@ -23,6 +23,7 @@ import type {
   Contact,
   Deal,
   Followup,
+  FollowupPlan,
   Lead,
   LeadTask,
   Note,
@@ -45,6 +46,7 @@ export type LiveWorkspaceFirestoreState = {
   deals: Deal[];
   notes: Note[];
   followups: Followup[];
+  followupPlans: FollowupPlan[];
   leadTasks: LeadTask[];
   touchpoints: Touchpoint[];
   timelineEvents: TimelineEvent[];
@@ -81,6 +83,7 @@ const empty: LiveWorkspaceFirestoreState = {
   deals: [],
   notes: [],
   followups: [],
+  followupPlans: [],
   leadTasks: [],
   touchpoints: [],
   timelineEvents: [],
@@ -241,6 +244,23 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     channel: typeof raw.channel === "string" ? (raw.channel as Followup["channel"]) : undefined,
     planId: typeof raw.planId === "string" ? raw.planId : undefined,
     aiGenerated: Boolean(raw.aiGenerated),
+    pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
+  };
+}
+
+function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan {
+  return {
+    id,
+    leadId: String(raw.leadId ?? ""),
+    ownerId: String(raw.ownerId ?? ""),
+    status: (raw.status as FollowupPlan["status"]) ?? "active",
+    planSummary: String(raw.planSummary ?? ""),
+    createdAt: firestoreValueToIso(raw.createdAt),
+    pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
+    pausedReason: typeof raw.pausedReason === "string" ? raw.pausedReason : undefined,
+    replyMessageId: typeof raw.replyMessageId === "string" ? raw.replyMessageId : undefined,
+    supersededByPlanId:
+      typeof raw.supersededByPlanId === "string" ? raw.supersededByPlanId : undefined,
   };
 }
 
@@ -386,6 +406,7 @@ export function useLiveWorkspaceFirestore(
         deals: [],
         notes: [],
         followups: [],
+        followupPlans: [],
         leadTasks: [],
         touchpoints: [],
         timelineEvents: [],
@@ -413,6 +434,7 @@ export function useLiveWorkspaceFirestore(
         deals: [],
         notes: [],
         followups: [],
+        followupPlans: [],
         leadTasks: [],
         touchpoints: [],
         timelineEvents: [],
@@ -644,7 +666,27 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qLeadTasks = singleOwner
+    const qFollowupPlans = memberScope
+      ? query(
+          collection(db, COLLECTIONS.followupPlans),
+          where("organizationId", "==", organizationId),
+          where("ownerId", "==", uid),
+        )
+      : query(collection(db, COLLECTIONS.followupPlans), where("organizationId", "==", organizationId));
+    unsubs.push(
+      onSnapshot(
+        qFollowupPlans,
+        (snap) => {
+          const followupPlans = snap.docs.map((d) =>
+            asFollowupPlan(d.id, d.data() as Record<string, unknown>),
+          );
+          applySnapshot("followupPlans", "followupPlans", followupPlans);
+        },
+        (err) => applyListenerError("followupPlans", err),
+      ),
+    );
+
+    const qLeadTasks = memberScope
       ? query(
           collection(db, COLLECTIONS.leadTasks),
           or(

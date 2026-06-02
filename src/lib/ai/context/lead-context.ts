@@ -3,6 +3,7 @@ import type {
   Contact,
   Deal,
   Followup,
+  FollowupPlan,
   Lead,
   LeadTask,
   Note,
@@ -21,6 +22,8 @@ export function buildLeadAiContext(input: {
   followups: Followup[];
   tasks: LeadTask[];
   emailThreads?: { subject: string; messages: { from: string; date: string; snippet: string }[] }[];
+  followupPlans?: FollowupPlan[];
+  regenerateContext?: string;
 }): string {
   const { lead, account, contact, deal, notes, timeline, touchpoints, followups, tasks } = input;
   const payload = {
@@ -69,6 +72,14 @@ export function buildLeadAiContext(input: {
       .slice(0, 10)
       .map((t) => ({ title: t.title, dueAt: t.dueAt })),
     emailThreads: input.emailThreads ?? [],
+    followupPlans: (input.followupPlans ?? []).slice(0, 5).map((p) => ({
+      id: p.id,
+      status: p.status,
+      planSummary: p.planSummary.slice(0, 300),
+      pausedReason: p.pausedReason?.slice(0, 200),
+      pausedAt: p.pausedAt,
+    })),
+    regenerateContext: input.regenerateContext?.slice(0, 800) ?? null,
   };
   const json = JSON.stringify(payload);
   return json.length > 16_000 ? json.slice(0, 16_000) + "…[truncated]" : json;

@@ -35,6 +35,9 @@ import {
   SuggestFollowupsDialog,
   type LeadFollowupAiContext,
 } from "@/components/ai/suggest-followups-dialog";
+import { FollowupPlanPausedBanner } from "@/components/leads/followup-plan-paused-banner";
+import { getPausedFollowupPlanForLead, mergeFollowupPlans } from "@/lib/followup-plans";
+import type { FollowupPlan } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import { toast } from "sonner";
@@ -123,6 +126,11 @@ function FollowupRow({
                 <Sparkles className="h-2.5 w-2.5" /> AI
               </Badge>
             )}
+            {f.pausedAt && (
+              <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-400">
+                Paused
+              </Badge>
+            )}
             {f.auto && !f.aiGenerated && (
               <Badge variant="outline" className="text-[10px] gap-1">
                 <Sparkles className="h-2.5 w-2.5" /> Auto
@@ -204,9 +212,33 @@ export function LeadFollowups({
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [suggestOpen, setSuggestOpen] = React.useState(false);
+  const [regeneratePlan, setRegeneratePlan] = React.useState<FollowupPlan | undefined>();
+  const [dismissedPlanId, setDismissedPlanId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
-  const { addFollowup, setFollowupCompleted, removeFollowup, currentUserId, leads, users, isDemo } =
-    useWorkspace();
+  const {
+    addFollowup,
+    createFollowupPlanWithFollowups,
+    supersedeFollowupPlan,
+    setFollowupCompleted,
+    removeFollowup,
+    currentUserId,
+    leads,
+    users,
+    isDemo,
+    followupPlans,
+  } = useWorkspace();
+
+  const plans = React.useMemo(
+    () => mergeFollowupPlans(followupPlans, followups),
+    [followupPlans, followups],
+  );
+  const pausedPlan = React.useMemo(
+    () => getPausedFollowupPlanForLead(plans, lead.id),
+    [plans, lead.id],
+  );
+  const showPausedBanner =
+    pausedPlan && pausedPlan.id !== dismissedPlanId && !regeneratePlan;
+
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
 
@@ -231,12 +263,29 @@ export function LeadFollowups({
     setDeleteTarget(null);
   }
 
-  function createMany(batch: Followup[]) {
-    for (const f of batch) addFollowup(f);
+  function handleCreatePlan(plan: FollowupPlan, batch: Followup[]) {
+    if (regeneratePlan) {
+      supersedeFollowupPlan(regeneratePlan.id, plan.id);
+    }
+    createFollowupPlanWithFollowups(plan, batch);
+    setRegeneratePlan(undefined);
+    setDismissedPlanId(null);
+  }
+
+  function openSuggest(regenerate?: FollowupPlan) {
+    setRegeneratePlan(regenerate);
+    setSuggestOpen(true);
   }
 
   return (
     <div className="space-y-4">
+      {showPausedBanner && pausedPlan ? (
+        <FollowupPlanPausedBanner
+          plan={pausedPlan}
+          onRegenerate={() => openSuggest(pausedPlan)}
+          onDismiss={() => setDismissedPlanId(pausedPlan.id)}
+        />
+      ) : null}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
           <p className="text-sm font-medium">Open followups</p>
@@ -245,7 +294,7 @@ export function LeadFollowups({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" type="button" variant="outline" onClick={() => setSuggestOpen(true)}>
+          <Button size="sm" type="button" variant="outline" onClick={() => openSuggest()}>
             <Sparkles className="h-3.5 w-3.5" /> Suggest with AI
           </Button>
           <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
@@ -265,12 +314,17 @@ export function LeadFollowups({
 
       <SuggestFollowupsDialog
         open={suggestOpen}
-        onOpenChange={setSuggestOpen}
+        onOpenChange={(o) => {
+          setSuggestOpen(o);
+          if (!o) setRegeneratePlan(undefined);
+        }}
         lead={lead}
         aiContext={contextForAi}
         isDemo={isDemo}
         currentUserId={currentUserId}
-        onCreateMany={createMany}
+        followupPlans={plans}
+        regenerateFromPlan={regeneratePlan}
+        onCreatePlanWithFollowups={handleCreatePlan}
       />
 
       <ul className="space-y-2">

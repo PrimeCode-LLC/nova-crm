@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/table";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent, fmtRelative } from "@/lib/format";
-import { campaignReplyRate, instantlyCampaignHref } from "@/lib/campaign-utils";
+import { campaignReplyRate, campaignOpenRate, instantlyCampaignHref } from "@/lib/campaign-utils";
 import type { Campaign } from "@/lib/types";
 import { ExternalLink, Loader2, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
@@ -71,6 +71,7 @@ export default function OutreachPage() {
       toast.success("Campaigns synced from Instantly", {
         description: `${imported} imported, ${updated} updated (${data.total ?? 0} in Instantly).`,
       });
+      window.location.reload();
     } finally {
       setSyncing(false);
     }
@@ -113,7 +114,9 @@ export default function OutreachPage() {
                 <TableHead>Name</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Started</TableHead>
+                <TableHead className="text-right">Leads</TableHead>
                 <TableHead className="text-right">Sent</TableHead>
+                <TableHead className="text-right">Opened</TableHead>
                 <TableHead className="text-right">Replied</TableHead>
                 <TableHead className="text-right">Reply rate</TableHead>
                 <TableHead className="w-10" />
@@ -122,7 +125,7 @@ export default function OutreachPage() {
             <TableBody>
               {coldCampaigns.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                     No outreach campaigns yet.
                     {connected
                       ? " Click Sync from Instantly or create a new campaign."
@@ -131,7 +134,8 @@ export default function OutreachPage() {
                 </TableRow>
               ) : (
                 coldCampaigns.map((c) => {
-                  const replyRate = campaignReplyRate(c);
+                  const rr = campaignReplyRate(c);
+                  const or = campaignOpenRate(c);
                   const href = instantlyCampaignHref(c.externalRef);
                   return (
                     <TableRow key={c.id}>
@@ -150,13 +154,20 @@ export default function OutreachPage() {
                         {c.startedAt ? fmtRelative(c.startedAt) : "—"}
                       </TableCell>
                       <TableCell className="py-2 text-right tabular-nums text-sm">
+                        {fmtNumber(c.stats.leadsCount ?? 0)}
+                      </TableCell>
+                      <TableCell className="py-2 text-right tabular-nums text-sm">
                         {fmtNumber(c.stats.sent)}
+                      </TableCell>
+                      <TableCell className="py-2 text-right tabular-nums text-sm text-muted-foreground">
+                        {fmtNumber(c.stats.opened ?? 0)}
+                        {or > 0 && <span className="ml-1 text-[10px]">{fmtPercent(or, 0)}</span>}
                       </TableCell>
                       <TableCell className="py-2 text-right tabular-nums text-sm">
                         {fmtNumber(c.stats.replied)}
                       </TableCell>
                       <TableCell className="py-2 text-right tabular-nums text-sm">
-                        {fmtPercent(replyRate, 1)}
+                        <span className={cn(rr >= 5 && "text-success")}>{fmtPercent(rr, 2)}</span>
                       </TableCell>
                       <TableCell className="py-2">
                         {href ? (

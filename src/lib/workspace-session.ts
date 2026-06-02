@@ -1,5 +1,6 @@
 import type {
   Followup,
+  FollowupPlan,
   LeadTask,
   Note,
   Touchpoint,
@@ -19,6 +20,13 @@ const LEGACY_FOLLOWUP_KEY = "nova-crm-followup-delta-v1";
 export type FollowupSessionDelta = {
   extras: Followup[];
   completion: Record<string, string | null>;
+  /** followupId → pausedAt ISO, or null to clear */
+  paused: Record<string, string | null>;
+};
+
+export type FollowupPlanSessionDelta = {
+  extras: FollowupPlan[];
+  patches: Record<string, Partial<FollowupPlan>>;
 };
 
 export type LeadTaskSessionDelta = {
@@ -34,6 +42,7 @@ export type NotesSessionDelta = {
 
 export type WorkspaceSessionV2 = {
   followups: FollowupSessionDelta;
+  followupPlans: FollowupPlanSessionDelta;
   leadTasks: LeadTaskSessionDelta;
   notes: NotesSessionDelta;
   touchpointsAdded: Touchpoint[];
@@ -51,7 +60,8 @@ export type WorkspaceSessionV2 = {
 
 export function emptyWorkspaceSession(): WorkspaceSessionV2 {
   return {
-    followups: { extras: [], completion: {} },
+    followups: { extras: [], completion: {}, paused: {} },
+    followupPlans: { extras: [], patches: {} },
     leadTasks: { extras: [], completion: {} },
     notes: { added: [], removedIds: [], updates: {} },
     touchpointsAdded: [],
@@ -66,11 +76,29 @@ export function emptyWorkspaceSession(): WorkspaceSessionV2 {
   };
 }
 
-function mergeFollowup(f: Followup, completion: Record<string, string | null>): Followup {
-  if (!Object.prototype.hasOwnProperty.call(completion, f.id)) return f;
-  const c = completion[f.id];
-  if (c === null) return { ...f, completedAt: undefined };
-  return { ...f, completedAt: c };
+function mergeFollowup(
+  f: Followup,
+  completion: Record<string, string | null>,
+  paused: Record<string, string | null>,
+): Followup {
+  let next = f;
+  if (Object.prototype.hasOwnProperty.call(completion, f.id)) {
+    const c = completion[f.id];
+    next = c === null ? { ...next, completedAt: undefined } : { ...next, completedAt: c };
+  }
+  if (Object.prototype.hasOwnProperty.call(paused, f.id)) {
+    const p = paused[f.id];
+    next = p === null ? { ...next, pausedAt: undefined } : { ...next, pausedAt: p };
+  }
+  return next;
+}
+
+function mergeFollowupPlan(
+  p: FollowupPlan,
+  patches: Record<string, Partial<FollowupPlan>>,
+): FollowupPlan {
+  const patch = patches[p.id];
+  return patch ? { ...p, ...patch } : p;
 }
 
 function mergeLeadTask(t: LeadTask, completion: Record<string, string | null>): LeadTask {
@@ -95,8 +123,13 @@ export function readWorkspaceSession(): WorkspaceSessionV2 {
         ...emptyWorkspaceSession(),
         followups:
           parsed && Array.isArray(parsed.extras) && typeof parsed.completion === "object"
-            ? { extras: parsed.extras, completion: parsed.completion }
-            : { extras: [], completion: {} },
+            ? {
+                extras: parsed.extras,
+                completion: parsed.completion,
+                paused: {},
+              }
+            : { extras: [], completion: {}, paused: {} },
+        followupPlans: { extras: [], patches: {} },
         leadTasks: { extras: [], completion: {} },
       };
       window.sessionStorage.setItem(WORKSPACE_SESSION_KEY, JSON.stringify(migrated));
@@ -110,12 +143,22 @@ export function readWorkspaceSession(): WorkspaceSessionV2 {
 
 function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSessionV2 {
   const empty = emptyWorkspaceSession();
+  const followupsRaw = parsed.followups;
   return {
     followups: {
-      extras: Array.isArray(parsed.followups?.extras) ? parsed.followups!.extras : [],
+      extras: Array.isArray(followupsRaw?.extras) ? followupsRaw!.extras : [],
       completion:
-        parsed.followups?.completion && typeof parsed.followups.completion === "object"
-          ? parsed.followups.completion
+        followupsRaw?.completion && typeof followupsRaw.completion === "object"
+          ? followupsRaw.completion
+          : {},
+      paused:
+        followupsRaw?.paused && typeof followupsRaw.paused === "object" ? followupsRaw.paused : {},
+    },
+    followupPlans: {
+      extras: Array.isArray(parsed.followupPlans?.extras) ? parsed.followupPlans!.extras : [],
+      patches:
+        parsed.followupPlans?.patches && typeof parsed.followupPlans.patches === "object"
+          ? parsed.followupPlans.patches
           : {},
     },
     leadTasks: {
@@ -189,6 +232,7 @@ export function mergeSessionIntoSnapshot(
 ): Pick<
   WorkspaceSnapshot,
   | "followups"
+  | "followupPlans"
   | "leadTasks"
   | "notes"
   | "touchpoints"
@@ -265,7 +309,7 @@ export function mergeSessionIntoSnapshot(
 
   const mergedBaseFollowups = base.followups
     .filter((f) => !f.leadId || visibleLeadIds.has(f.leadId))
-    .map((f) => mergeFollowup(f, session.followups.completion));
+    .map((f) => mergeFollowup(f, session.followups.completion, session.followups.paused));
   const baseFollowupIds = new Set(mergedBaseFollowups.map((f) => f.id));
   const mergedExtras = session.followups.extras
     .filter(
@@ -275,8 +319,17 @@ export function mergeSessionIntoSnapshot(
           (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
           (f.dealId != null && visibleDealIds.has(f.dealId))),
     )
-    .map((f) => mergeFollowup(f, session.followups.completion));
+    .map((f) => mergeFollowup(f, session.followups.completion, session.followups.paused));
   const followups = [...mergedBaseFollowups, ...mergedExtras];
+
+  const mergedBasePlans = (base.followupPlans ?? [])
+    .filter((p) => visibleLeadIds.has(p.leadId))
+    .map((p) => mergeFollowupPlan(p, session.followupPlans.patches));
+  const basePlanIds = new Set(mergedBasePlans.map((p) => p.id));
+  const planExtras = session.followupPlans.extras
+    .filter((p) => visibleLeadIds.has(p.leadId) && !basePlanIds.has(p.id))
+    .map((p) => mergeFollowupPlan(p, session.followupPlans.patches));
+  const followupPlans = [...mergedBasePlans, ...planExtras];
 
   const mergedBaseLeadTasks = base.leadTasks
     .filter((t) => !t.leadId || visibleLeadIds.has(t.leadId))
@@ -294,5 +347,16 @@ export function mergeSessionIntoSnapshot(
       return p ? { ...d, ...p } : d;
     });
 
-  return { followups, leadTasks, notes, touchpoints, timelineByLead, leads, accounts, contacts, deals };
+  return {
+    followups,
+    followupPlans,
+    leadTasks,
+    notes,
+    touchpoints,
+    timelineByLead,
+    leads,
+    accounts,
+    contacts,
+    deals,
+  };
 }
