@@ -16,7 +16,14 @@ import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -116,6 +123,7 @@ export function ActivityLogsClient({
   const canView = roleAtLeast(orgRole, "admin");
   const [items, setItems] = React.useState<AuditRow[]>([]);
   const [hasNextPage, setHasNextPage] = React.useState(false);
+  const [totalCount, setTotalCount] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] =
@@ -168,10 +176,13 @@ export function ActivityLogsClient({
         const data = (await res.json()) as {
           items: AuditRow[];
           nextCursor: string | null;
+          totalCount?: number;
+          hasMore?: boolean;
           filterMembers?: MemberOption[];
         };
         cursorsRef.current = [...cursorsRef.current.slice(0, pageNum), data.nextCursor];
-        setHasNextPage(!!data.nextCursor);
+        setHasNextPage(data.hasMore ?? !!data.nextCursor);
+        setTotalCount(data.totalCount ?? data.items.length);
         setItems(data.items);
         if (data.filterMembers?.length) {
           setFilterMembers(data.filterMembers);
@@ -191,7 +202,7 @@ export function ActivityLogsClient({
 
   if (!canView) {
     return (
-      <>
+      <div className="flex min-h-0 flex-1 flex-col">
         <PageHeader
           title="Activity logs"
           description="Workspace owners and admins can review who used which tools and when."
@@ -203,12 +214,15 @@ export function ActivityLogsClient({
             </CardContent>
           </Card>
         </PageBody>
-      </>
+      </div>
     );
   }
 
+  const rangeStart = items.length === 0 ? 0 : (page - 1) * pageSize + 1;
+  const rangeEnd = items.length === 0 ? 0 : rangeStart + items.length - 1;
+
   return (
-    <>
+    <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Activity logs"
         description="Audit trail of team changes, integrations, AI usage, and feature visits across your workspace."
@@ -232,7 +246,7 @@ export function ActivityLogsClient({
           </Button>
         }
       />
-      <PageBody className="space-y-6">
+      <PageBody className="min-h-0 flex-1 space-y-6">
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
@@ -286,7 +300,7 @@ export function ActivityLogsClient({
           </div>
         </div>
 
-        <Card>
+        <Card className="overflow-visible">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <ScrollText className="h-4 w-4" />
@@ -363,73 +377,71 @@ export function ActivityLogsClient({
                 </TableBody>
               </Table>
             )}
-            {!loading || items.length > 0 || page > 1 ? (
-              <div className="flex flex-col gap-3 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-muted-foreground">
-                  {loading && items.length > 0
-                    ? "Loading…"
-                    : items.length === 0
-                      ? `Page ${page}`
-                      : `Showing ${items.length} event${items.length === 1 ? "" : "s"} on page ${page}`}
-                  {!loading && !hasNextPage && page > 1 ? " · Last page" : null}
-                  {!loading && hasNextPage ? " · More available" : null}
-                </p>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="activity-log-page-size" className="text-sm text-muted-foreground">
-                      Per page
-                    </Label>
-                    <Select
-                      value={String(pageSize)}
-                      onValueChange={(v) => {
-                        if (!v) return;
-                        setPageSize(Number(v) as (typeof PAGE_SIZE_OPTIONS)[number]);
-                        resetPagination();
-                      }}
-                    >
-                      <SelectTrigger id="activity-log-page-size" className="h-8 w-[72px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZE_OPTIONS.map((n) => (
-                          <SelectItem key={n} value={String(n)}>
-                            {n}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={page <= 1 || loading}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      aria-label="Previous page"
-                    >
-                      <ChevronLeft className="h-4 w-4 mr-1" />
-                      Previous
-                    </Button>
-                    <span className="min-w-[5rem] px-2 text-center text-sm font-medium tabular-nums">
-                      Page {page}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      disabled={!hasNextPage || loading}
-                      onClick={() => setPage((p) => p + 1)}
-                      aria-label="Next page"
-                    >
-                      Next
-                      <ChevronRight className="h-4 w-4 ml-1" />
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
           </CardContent>
+          <CardFooter className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p className="text-sm text-muted-foreground">
+              {loading && items.length === 0
+                ? "Loading activity…"
+                : totalCount === 0
+                  ? "No events in audit log"
+                  : items.length === 0
+                    ? `No events on page ${page} (${totalCount} total)`
+                    : `Showing ${rangeStart}–${rangeEnd} of ${totalCount} event${totalCount === 1 ? "" : "s"}`}
+            </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="activity-log-page-size" className="text-sm text-muted-foreground">
+                  Per page
+                </Label>
+                <Select
+                  value={String(pageSize)}
+                  onValueChange={(v) => {
+                    if (!v) return;
+                    setPageSize(Number(v) as (typeof PAGE_SIZE_OPTIONS)[number]);
+                    resetPagination();
+                  }}
+                >
+                  <SelectTrigger id="activity-log-page-size" className="h-8 w-[72px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PAGE_SIZE_OPTIONS.map((n) => (
+                      <SelectItem key={n} value={String(n)}>
+                        {n}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1 || loading}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  aria-label="Previous page"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" />
+                  Previous
+                </Button>
+                <span className="min-w-[5rem] px-2 text-center text-sm font-medium tabular-nums">
+                  Page {page}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!hasNextPage || loading}
+                  onClick={() => setPage((p) => p + 1)}
+                  aria-label="Next page"
+                >
+                  Next
+                  <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          </CardFooter>
         </Card>
       </PageBody>
-    </>
+    </div>
   );
 }

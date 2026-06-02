@@ -35,7 +35,7 @@ export async function GET(req: Request) {
       : undefined;
 
   const orgId = g.ctx.session.organizationId;
-  const { items, nextCursor } = await listAuditLogsFilteredServer({
+  const { items, nextCursor, totalCount } = await listAuditLogsFilteredServer({
     organizationId: orgId,
     limit: Number.isFinite(limit) ? limit : 50,
     cursor,
@@ -52,7 +52,14 @@ export async function GET(req: Request) {
   ]);
 
   const labelByUid = new Map(filterMembers.map((m) => [m.uid, m.label]));
-  const memberByUid = new Map(
+  const memberByUid = new Map<
+    string,
+    {
+      displayName: string;
+      email: string | null;
+      role?: import("@/lib/types").OrgMemberRole;
+    }
+  >(
     members.map((m) => [
       m.uid,
       {
@@ -102,6 +109,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     items: enriched,
     nextCursor,
+    totalCount,
+    hasMore: !!nextCursor,
     categories: [...CATEGORIES],
     filterMembers,
   });

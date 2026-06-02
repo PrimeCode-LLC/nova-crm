@@ -1,4 +1,8 @@
-import { FieldValue } from "firebase-admin/firestore";
+import {
+  FieldValue,
+  type Firestore,
+  type QueryDocumentSnapshot,
+} from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import {
@@ -100,6 +104,85 @@ export async function recordAudit(input: {
   }
 }
 
+const IN_MEMORY_AUDIT_CAP = 2_000;
+
+function docToAuditRecord(
+  doc: QueryDocumentSnapshot,
+  organizationId: string,
+): AuditLogRecord {
+  const data = doc.data();
+  return {
+    id: doc.id,
+    organizationId: String(data.organizationId ?? organizationId),
+    actorUid: String(data.actorUid ?? ""),
+    event: data.event as AuditEvent,
+    meta: (data.meta as Record<string, unknown>) ?? {},
+    createdAt: timestampToIso(data.createdAt),
+  };
+}
+
+function sortAuditRecords(items: AuditLogRecord[]): AuditLogRecord[] {
+  return [...items].sort((a, b) => {
+    const ta = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+    const tb = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+    if (tb !== ta) return tb - ta;
+    return b.id.localeCompare(a.id);
+  });
+}
+
+function auditCol(db: Firestore, organizationId: string) {
+  return db
+    .collection(COLLECTIONS.organizations)
+    .doc(organizationId)
+    .collection(ORG_SUBCOLLECTIONS.audit);
+}
+
+export async function countAuditLogsServer(input: {
+  organizationId: string;
+  actorUid?: string;
+}): Promise<number> {
+  const db = getAdminDb();
+  if (!db) return 0;
+  const col = auditCol(db, input.organizationId);
+  const q = input.actorUid
+    ? col.where("actorUid", "==", input.actorUid)
+    : col;
+  const snap = await q.count().get();
+  return snap.data().count;
+}
+
+async function listAllAuditRecordsServer(input: {
+  organizationId: string;
+  actorUid?: string;
+}): Promise<AuditLogRecord[]> {
+  const db = getAdminDb();
+  if (!db) return [];
+  const col = auditCol(db, input.organizationId);
+  const snap = input.actorUid
+    ? await col.where("actorUid", "==", input.actorUid).get()
+    : await col.get();
+  return sortAuditRecords(
+    snap.docs.map((doc) => docToAuditRecord(doc, input.organizationId)),
+  );
+}
+
+function paginateSortedAuditRecords(
+  sorted: AuditLogRecord[],
+  limit: number,
+  cursor?: string,
+): { items: AuditLogRecord[]; nextCursor: string | null } {
+  let start = 0;
+  if (cursor) {
+    const idx = sorted.findIndex((row) => row.id === cursor);
+    start = idx >= 0 ? idx + 1 : 0;
+  }
+  const slice = sorted.slice(start, start + limit + 1);
+  const hasMore = slice.length > limit;
+  const items = hasMore ? slice.slice(0, limit) : slice;
+  const nextCursor = hasMore && items.length > 0 ? items[items.length - 1]!.id : null;
+  return { items, nextCursor };
+}
+
 export async function listAuditLogsServer(input: {
   organizationId: string;
   limit?: number;
@@ -111,14 +194,32 @@ export async function listAuditLogsServer(input: {
   if (!db) return { items: [], nextCursor: null };
 
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
-  const col = db
-    .collection(COLLECTIONS.organizations)
-    .doc(input.organizationId)
-    .collection(ORG_SUBCOLLECTIONS.audit);
+  const total = await countAuditLogsServer({
+    organizationId: input.organizationId,
+    actorUid: input.actorUid,
+  });
+
+  if (total <= IN_MEMORY_AUDIT_CAP) {
+    let sorted = await listAllAuditRecordsServer({
+      organizationId: input.organizationId,
+      actorUid: input.actorUid,
+    });
+    if (input.eventPrefix) {
+      const prefix = input.eventPrefix;
+      sorted = sorted.filter((row) => row.event.startsWith(prefix));
+    }
+    return paginateSortedAuditRecords(sorted, limit, input.cursor);
+  }
+
+  const col = auditCol(db, input.organizationId);
+  const fetchLimit = limit + 1;
 
   let q = input.actorUid
-    ? col.where("actorUid", "==", input.actorUid).orderBy("createdAt", "desc").limit(limit)
-    : col.orderBy("createdAt", "desc").limit(limit);
+    ? col
+        .where("actorUid", "==", input.actorUid)
+        .orderBy("createdAt", "desc")
+        .limit(fetchLimit)
+    : col.orderBy("createdAt", "desc").limit(fetchLimit);
   if (input.cursor) {
     const cursorSnap = await col.doc(input.cursor).get();
     if (cursorSnap.exists) {
@@ -127,34 +228,27 @@ export async function listAuditLogsServer(input: {
             .where("actorUid", "==", input.actorUid)
             .orderBy("createdAt", "desc")
             .startAfter(cursorSnap)
-            .limit(limit)
-        : col.orderBy("createdAt", "desc").startAfter(cursorSnap).limit(limit);
+            .limit(fetchLimit)
+        : col.orderBy("createdAt", "desc").startAfter(cursorSnap).limit(fetchLimit);
     }
   }
 
   const snap = await q.get();
-  let items: AuditLogRecord[] = snap.docs.map((doc) => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      organizationId: String(data.organizationId ?? input.organizationId),
-      actorUid: String(data.actorUid ?? ""),
-      event: data.event as AuditEvent,
-      meta: (data.meta as Record<string, unknown>) ?? {},
-      createdAt: timestampToIso(data.createdAt),
-    };
-  });
+  let items: AuditLogRecord[] = snap.docs.map((doc) =>
+    docToAuditRecord(doc, input.organizationId),
+  );
 
   if (input.eventPrefix) {
     const prefix = input.eventPrefix;
     items = items.filter((row) => row.event.startsWith(prefix));
   }
 
-  const last = snap.docs[snap.docs.length - 1];
+  const hasMore = snap.docs.length > limit;
+  const pageItems = hasMore ? items.slice(0, limit) : items;
   const nextCursor =
-    snap.docs.length >= limit && last ? last.id : null;
+    hasMore && pageItems.length > 0 ? pageItems[pageItems.length - 1]!.id : null;
 
-  return { items, nextCursor };
+  return { items: pageItems, nextCursor };
 }
 
 function applyAuditPostFilters(
@@ -191,7 +285,7 @@ export async function listAuditLogsFilteredServer(input: {
   eventPrefix?: string;
   category?: AuditEventCategory;
   event?: string;
-}): Promise<{ items: AuditLogRecord[]; nextCursor: string | null }> {
+}): Promise<{ items: AuditLogRecord[]; nextCursor: string | null; totalCount: number }> {
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
   const needsPostFilter = !!(
     input.category ||
@@ -199,14 +293,37 @@ export async function listAuditLogsFilteredServer(input: {
     input.event?.endsWith("*")
   );
 
+  const rawTotal = await countAuditLogsServer({
+    organizationId: input.organizationId,
+    actorUid: input.actorUid,
+  });
+
   if (!needsPostFilter) {
-    return listAuditLogsServer({
+    const page = await listAuditLogsServer({
       organizationId: input.organizationId,
       limit,
       cursor: input.cursor,
       actorUid: input.actorUid,
       eventPrefix: input.eventPrefix,
     });
+    return { ...page, totalCount: rawTotal };
+  }
+
+  if (rawTotal <= IN_MEMORY_AUDIT_CAP) {
+    let sorted = await listAllAuditRecordsServer({
+      organizationId: input.organizationId,
+      actorUid: input.actorUid,
+    });
+    if (input.eventPrefix) {
+      const prefix = input.eventPrefix;
+      sorted = sorted.filter((row) => row.event.startsWith(prefix));
+    }
+    sorted = applyAuditPostFilters(sorted, {
+      category: input.category,
+      event: input.event,
+    });
+    const page = paginateSortedAuditRecords(sorted, limit, input.cursor);
+    return { ...page, totalCount: sorted.length };
   }
 
   const accumulated: AuditLogRecord[] = [];
@@ -246,11 +363,11 @@ export async function listAuditLogsFilteredServer(input: {
       const lastIdx = filtered.findIndex((row) => row.id === lastReturned.id);
       const moreInBatch = lastIdx >= 0 && lastIdx < filtered.length - 1;
       const nextCursor = dbHasMore || moreInBatch ? lastReturned.id : null;
-      return { items: accumulated, nextCursor };
+      return { items: accumulated, nextCursor, totalCount: rawTotal };
     }
 
     if (!dbHasMore) break;
   }
 
-  return { items: accumulated, nextCursor: null };
+  return { items: accumulated, nextCursor: null, totalCount: rawTotal };
 }
