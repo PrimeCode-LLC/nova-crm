@@ -43,6 +43,7 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "scraper.feed_create": "Scraper feed created",
   "scraper.feed_delete": "Scraper feed deleted",
   "scraper.raw_promote": "Intake item promoted to prospect",
+  "intake_filter_defaults.updated": "Team intake filters updated",
 };
 
 export type AuditEventCategory =
@@ -95,6 +96,7 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "scraper.feed_create": "crm",
   "scraper.feed_delete": "crm",
   "scraper.raw_promote": "crm",
+  "intake_filter_defaults.updated": "settings",
 };
 
 export function labelForAuditEvent(event: string): string {

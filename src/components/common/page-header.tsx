@@ -1,5 +1,12 @@
 import { cn } from "@/lib/utils";
 
+/** Flex column shell for PageHeader + PageBody so the body can scroll inside the app viewport. */
+export function AppPage({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <div className={cn("flex h-0 min-h-0 flex-1 flex-col overflow-hidden", className)}>{children}</div>
+  );
+}
+
 export function PageHeader({
   title,
   description,
@@ -35,11 +42,33 @@ export function PageHeader({
 export function PageBody({
   className,
   children,
+  /** When true, children manage their own scroll regions (e.g. full-height data tables). */
+  contained = false,
 }: {
   className?: string;
   children: React.ReactNode;
+  contained?: boolean;
 }) {
+  if (contained) {
+    return (
+      <div
+        className={cn("flex min-h-0 flex-1 flex-col overflow-hidden p-6", className)}
+      >
+        {children}
+      </div>
+    );
+  }
+
   return (
-    <div className={cn("flex min-h-0 flex-1 flex-col space-y-6 overflow-y-auto p-6", className)}>{children}</div>
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
+      <div
+        className={cn(
+          "flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-y-contain scrollbar-thin",
+          className,
+        )}
+      >
+        {children}
+      </div>
+    </div>
   );
 }

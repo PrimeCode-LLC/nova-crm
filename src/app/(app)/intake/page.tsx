@@ -30,6 +30,16 @@ import {
 } from "@/lib/scrapers/labels";
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 import { IntakeItemActions } from "@/components/intake/intake-item-actions";
+import { IntakeKeywordFilters } from "@/components/intake/intake-keyword-filters";
+import {
+  intakeKeywordFiltersActive,
+  mergeTeamAndPersonalKeywords,
+  passesKeywordFilters,
+  rawItemSearchHaystack,
+} from "@/lib/intake/keyword-filter";
+import type { OrganizationIntakeFilterDefaults } from "@/lib/types";
+import { EMPTY_INTAKE_FILTER_DEFAULTS } from "@/lib/intake/intake-filter-defaults";
+import { roleAtLeast } from "@/lib/platform/org-role";
 
 const ALL = "__all__" as const;
 
@@ -54,15 +64,6 @@ function passesPublishedDateRange(iso: string, fromYmd: string, toYmd: string): 
   return true;
 }
 
-function rawItemSearchHaystack(item: ScraperRawItem): string {
-  const snippet =
-    item.contentSnippet?.trim() || item.content.replace(/<[^>]+>/g, " ").trim();
-  return [item.title, snippet, item.feedName, item.creator, item.dcCreator]
-    .filter(Boolean)
-    .join(" ")
-    .toLowerCase();
-}
-
 export default function IntakePoolPage() {
   const ws = useWorkspace();
   const router = useRouter();
@@ -73,19 +74,43 @@ export default function IntakePoolPage() {
   const [searchQuery, setSearchQuery] = React.useState("");
   const [dateFrom, setDateFrom] = React.useState("");
   const [dateTo, setDateTo] = React.useState("");
+  const [teamDefaults, setTeamDefaults] = React.useState<OrganizationIntakeFilterDefaults>({
+    ...EMPTY_INTAKE_FILTER_DEFAULTS,
+  });
+  const [personalIncludeKeywords, setPersonalIncludeKeywords] = React.useState<string[]>([]);
+  const [personalExcludeKeywords, setPersonalExcludeKeywords] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState<{
     itemId: string;
     action: "assign" | "queue" | "dismiss";
   } | null>(null);
 
+  const effectiveKeywords = React.useMemo(
+    () =>
+      mergeTeamAndPersonalKeywords(teamDefaults, {
+        includeKeywords: personalIncludeKeywords,
+        excludeKeywords: personalExcludeKeywords,
+      }),
+    [teamDefaults, personalIncludeKeywords, personalExcludeKeywords],
+  );
+
   const filteredItems = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return items.filter((item) => {
-      if (q && !rawItemSearchHaystack(item).includes(q)) return false;
+      const haystack = rawItemSearchHaystack(item);
+      if (q && !haystack.includes(q)) return false;
+      if (
+        !passesKeywordFilters(
+          haystack,
+          effectiveKeywords.includeKeywords,
+          effectiveKeywords.excludeKeywords,
+        )
+      ) {
+        return false;
+      }
       if (!passesPublishedDateRange(item.publishedAt, dateFrom, dateTo)) return false;
       return true;
     });
-  }, [items, searchQuery, dateFrom, dateTo]);
+  }, [items, searchQuery, effectiveKeywords, dateFrom, dateTo]);
   const categoryOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
     for (const preset of SCRAPER_CATEGORY_PRESETS) dynamic.add(preset);
@@ -97,8 +122,32 @@ export default function IntakePoolPage() {
     return Array.from(dynamic).sort((a, b) => getScraperPlatformLabel(a).localeCompare(getScraperPlatformLabel(b)));
   }, [items]);
 
+  const keywordFiltersActive =
+    intakeKeywordFiltersActive(teamDefaults.includeKeywords, teamDefaults.excludeKeywords) ||
+    intakeKeywordFiltersActive(personalIncludeKeywords, personalExcludeKeywords);
+  const canManageTeamDefaults = roleAtLeast(ws.viewerOrgRole, "admin");
   const filtersActive =
-    searchQuery.trim().length > 0 || dateFrom.length > 0 || dateTo.length > 0;
+    searchQuery.trim().length > 0 ||
+    dateFrom.length > 0 ||
+    dateTo.length > 0 ||
+    keywordFiltersActive;
+
+  React.useEffect(() => {
+    if (ws.isDemo) return;
+    void (async () => {
+      try {
+        const res = await fetch("/api/org/intake-filter-defaults", { credentials: "same-origin" });
+        const data = (await res.json()) as {
+          defaults?: OrganizationIntakeFilterDefaults;
+        };
+        if (res.ok && data.defaults) {
+          setTeamDefaults(data.defaults);
+        }
+      } catch {
+        /* optional — personal filters still work */
+      }
+    })();
+  }, [ws.isDemo, ws.organizationId]);
 
   const load = React.useCallback(async () => {
     if (ws.isDemo) {
@@ -264,6 +313,16 @@ export default function IntakePoolPage() {
                   aria-label="Search intake pool"
                 />
               </div>
+              <IntakeKeywordFilters
+                organizationId={ws.organizationId}
+                teamIncludeKeywords={teamDefaults.includeKeywords}
+                teamExcludeKeywords={teamDefaults.excludeKeywords}
+                personalIncludeKeywords={personalIncludeKeywords}
+                personalExcludeKeywords={personalExcludeKeywords}
+                onPersonalIncludeChange={setPersonalIncludeKeywords}
+                onPersonalExcludeChange={setPersonalExcludeKeywords}
+                canManageTeamDefaults={canManageTeamDefaults}
+              />
               <div className="flex flex-wrap items-end gap-3">
                 <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
                   <SelectTrigger className="w-[140px]">
@@ -327,6 +386,8 @@ export default function IntakePoolPage() {
                       setSearchQuery("");
                       setDateFrom("");
                       setDateTo("");
+                      setPersonalIncludeKeywords([]);
+                      setPersonalExcludeKeywords([]);
                     }}
                   >
                     Clear filters
@@ -361,7 +422,7 @@ export default function IntakePoolPage() {
                 <CardHeader>
                   <CardTitle>No matches</CardTitle>
                   <CardDescription>
-                    Try a different search term or date range, or clear filters to see all{" "}
+                    Try different search terms, keyword lists, or dates, or clear filters to see all{" "}
                     {items.length} posts.
                   </CardDescription>
                 </CardHeader>

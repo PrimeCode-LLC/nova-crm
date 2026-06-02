@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Bookmark, Download, Kanban, Upload, ChevronDown, Target } from "lucide-react";
 
-import { PageBody, PageHeader } from "@/components/common/page-header";
+import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { LeadsTable, type LeadsTableRef, type LeadsTablePreset } from "@/components/leads/leads-table";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ function ProspectsPageInner() {
   const prospectCount = React.useMemo(() => leads.filter((l) => l.intakeKind === "prospect").length, [leads]);
 
   return (
-    <>
+    <AppPage>
       <PageHeader
         title="Prospects"
         description="Intake records from research and scraping. Promote to a sales lead when someone shows interest."
@@ -117,7 +117,7 @@ function ProspectsPageInner() {
           </>
         }
       />
-      <PageBody>
+      <PageBody contained>
         {!isDemo && prospectCount === 0 ? (
           <WorkspaceEmptyHint
             title="No prospects yet"
@@ -139,7 +139,7 @@ function ProspectsPageInner() {
           />
         )}
       </PageBody>
-    </>
+    </AppPage>
   );
 }
 
@@ -147,12 +147,12 @@ export default function ProspectsPage() {
   return (
     <Suspense
       fallback={
-        <>
+        <AppPage>
           <PageHeader title="Prospects" description="Loading…" />
           <PageBody>
             <p className="text-sm text-muted-foreground">Loading…</p>
           </PageBody>
-        </>
+        </AppPage>
       }
     >
       <ProspectsPageInner />

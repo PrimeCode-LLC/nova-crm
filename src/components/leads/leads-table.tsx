@@ -908,7 +908,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       <ReassignLeadsDialog
         open={reassignOpen}
         onOpenChange={(o) => {
@@ -959,7 +959,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         </AlertDialogContent>
       </AlertDialog>
       {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -1251,7 +1251,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
       {/* Bulk actions bar */}
       {selectedCount > 0 && (
-        <div className="flex items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
+        <div className="flex shrink-0 items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
           <span className="font-medium">{selectedCount} selected</span>
           <Button
             variant="outline"
@@ -1308,8 +1308,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       )}
 
       {/* Table */}
-      <div className="rounded-md border overflow-hidden">
-        <div className="overflow-x-auto scrollbar-thin">
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-md border">
+        <div className="min-h-0 flex-1 overflow-auto scrollbar-thin">
+          <div className="overflow-x-auto">
           <Table>
             <TableHeader className="bg-muted/30">
               {table.getHeaderGroups().map((hg) => (
@@ -1377,10 +1378,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               )}
             </TableBody>
           </Table>
+          </div>
         </div>
       </div>
 
-      <div className="flex items-center justify-between text-xs text-muted-foreground">
+      <div className="flex shrink-0 items-center justify-between text-xs text-muted-foreground">
         <span>
           Showing <span className="font-medium text-foreground tabular-nums">{table.getRowModel().rows.length}</span> of{" "}
           <span className="tabular-nums">{table.getCoreRowModel().rows.length}</span> leads

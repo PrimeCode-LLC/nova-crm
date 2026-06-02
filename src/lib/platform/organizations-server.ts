@@ -12,11 +12,13 @@ import type {
   Organization,
   OrganizationChannelAdminConfig,
   OrganizationCustomChannelRow,
+  OrganizationIntakeFilterDefaults,
   OrganizationSettings,
   OrganizationStatus,
   SaaSPlanId,
 } from "@/lib/types";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
+import { parseIntakeFilterDefaults } from "@/lib/intake/intake-filter-defaults";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
 
 const TRIAL_DAYS = 14;
@@ -117,6 +119,10 @@ function docToOrg(id: string, data: DocumentData): Organization {
     channelAdminRaw !== undefined && channelAdminRaw !== null
       ? parseOrgChannelAdmin(channelAdminRaw)
       : undefined;
+  const intakeFilterDefaults =
+    data.intakeFilterDefaults !== undefined && data.intakeFilterDefaults !== null
+      ? parseIntakeFilterDefaults(data.intakeFilterDefaults)
+      : undefined;
 
   return {
     id,
@@ -136,6 +142,7 @@ function docToOrg(id: string, data: DocumentData): Organization {
     trialEndsAt: maybeTsToIso(data.trialEndsAt as Timestamp | undefined),
     settings,
     channelAdmin,
+    intakeFilterDefaults,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
     openJoinTokenHash:

@@ -51,7 +51,8 @@ export type AuditEvent =
   | "scraper.run"
   | "scraper.feed_create"
   | "scraper.feed_delete"
-  | "scraper.raw_promote";
+  | "scraper.raw_promote"
+  | "intake_filter_defaults.updated";
 
 export type AuditLogRecord = {
   id: string;

@@ -40,10 +40,10 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${GeistSans.variable} ${GeistMono.variable} h-full`}
+      className={`${GeistSans.variable} ${GeistMono.variable} h-dvh overflow-hidden`}
     >
       <body
-        className="min-h-full bg-background text-foreground font-sans antialiased"
+        className="h-dvh overflow-hidden bg-background text-foreground font-sans antialiased"
         suppressHydrationWarning
       >
         <ThemeProvider

@@ -14,7 +14,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { PageBody, PageHeader } from "@/components/common/page-header";
+import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,6 +64,7 @@ import {
   SCRAPER_PLATFORM_PRESETS,
 } from "@/lib/scrapers/labels";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
+import { TeamIntakeFilterDefaultsCard } from "@/components/intake/team-intake-filter-defaults-card";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 const CUSTOM_CATEGORY_VALUE = "__custom__";
@@ -347,7 +348,7 @@ export default function AdminScrapersPage() {
   }
 
   return (
-    <>
+    <AppPage>
       <PageHeader
         title="Scrapers"
         description="RSS feeds (rss.app) ingested into the intake pool. Replaces n8n + Google Sheets."
@@ -370,71 +371,96 @@ export default function AdminScrapersPage() {
           </>
         }
       />
-      <PageBody className="space-y-4">
-        {ws.isDemo ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>Demo mode</CardTitle>
-              <CardDescription>Scraper admin requires a live Firebase workspace.</CardDescription>
-            </CardHeader>
-          </Card>
-        ) : loading ? (
-          <p className="text-sm text-muted-foreground flex items-center gap-2">
-            <Loader2 className="h-4 w-4 animate-spin" /> Loading feeds…
-          </p>
-        ) : feeds.length === 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>No feeds yet</CardTitle>
-              <CardDescription>
-                Click &quot;Seed defaults&quot; to import your n8n/rss.app URLs, or add feeds manually.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        ) : (
-          <Card>
-            <CardContent className="p-0">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Platform</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Interval</TableHead>
-                    <TableHead>Last run</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+      <PageBody contained className="gap-4">
+        {!ws.isDemo ? (
+          <div className="shrink-0">
+            <TeamIntakeFilterDefaultsCard />
+          </div>
+        ) : null}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+          {ws.isDemo ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>Demo mode</CardTitle>
+                <CardDescription>Scraper admin requires a live Firebase workspace.</CardDescription>
+              </CardHeader>
+            </Card>
+          ) : loading ? (
+            <p className="text-sm text-muted-foreground flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" /> Loading feeds…
+            </p>
+          ) : feeds.length === 0 ? (
+            <Card>
+              <CardHeader>
+                <CardTitle>No feeds yet</CardTitle>
+                <CardDescription>
+                  Click &quot;Seed defaults&quot; to import your n8n/rss.app URLs, or add feeds manually.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+          ) : (
+            <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden py-0">
+              <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+                <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin">
+                  <Table>
+                <TableHeader className="bg-muted/30">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Name</TableHead>
+                    <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Platform</TableHead>
+                    <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Category</TableHead>
+                    <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Interval</TableHead>
+                    <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Last run</TableHead>
+                    <TableHead className="h-9 px-3 text-right text-xs font-medium text-muted-foreground">
+                      Actions
+                    </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {paginatedFeeds.map((feed) => (
                     <TableRow key={feed.id}>
-                      <TableCell>
-                        <div className="font-medium">{feed.name}</div>
-                        <div className="text-xs text-muted-foreground truncate max-w-[240px]" title={feed.feedUrl}>
-                          {feed.feedUrl}
-                        </div>
-                        {feed.lastError ? (
-                          <div className="text-xs text-destructive mt-1 truncate max-w-[280px]" title={feed.lastError}>
-                            {feed.lastError}
+                      <TableCell className="px-3 py-2.5 align-top">
+                        <div className="space-y-0.5">
+                          <div className="font-medium leading-snug">{feed.name}</div>
+                          <div
+                            className="text-xs leading-snug text-muted-foreground truncate max-w-[240px]"
+                            title={feed.feedUrl}
+                          >
+                            {feed.feedUrl}
                           </div>
-                        ) : null}
+                          {feed.lastError ? (
+                            <div
+                              className="text-xs leading-snug text-destructive truncate max-w-[280px]"
+                              title={feed.lastError}
+                            >
+                              {feed.lastError}
+                            </div>
+                          ) : null}
+                        </div>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-3 py-2.5 align-middle">
                         <Badge variant="secondary">{getScraperPlatformLabel(feed.platform)}</Badge>
                       </TableCell>
-                      <TableCell>
+                      <TableCell className="px-3 py-2.5 align-middle">
                         <Badge variant="outline">{getScraperCategoryLabel(feed.category)}</Badge>
                       </TableCell>
-                      <TableCell>{feed.runIntervalMinutes}m</TableCell>
-                      <TableCell className="text-sm text-muted-foreground">
-                        {feed.lastRunAt
-                          ? formatDistanceToNow(new Date(feed.lastRunAt), { addSuffix: true })
-                          : "Never"}
-                        {typeof feed.lastNewCount === "number" && feed.lastRunAt ? (
-                          <span className="block text-xs">+{feed.lastNewCount} new</span>
-                        ) : null}
+                      <TableCell className="px-3 py-2.5 align-middle tabular-nums">
+                        {feed.runIntervalMinutes}m
                       </TableCell>
-                      <TableCell className="text-right">
+                      <TableCell className="px-3 py-2.5 align-top text-sm text-muted-foreground">
+                        <div className="space-y-0.5 leading-snug">
+                          <span>
+                            {feed.lastRunAt
+                              ? formatDistanceToNow(new Date(feed.lastRunAt), { addSuffix: true })
+                              : "Never"}
+                          </span>
+                          {typeof feed.lastNewCount === "number" && feed.lastRunAt ? (
+                            <span className="block text-xs text-muted-foreground/80">
+                              +{feed.lastNewCount} new
+                            </span>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-3 py-2.5 text-right align-middle">
                         <div className="flex items-center justify-end gap-2">
                           <Switch checked={feed.enabled} onCheckedChange={() => void toggleEnabled(feed)} />
                           <Button
@@ -471,60 +497,62 @@ export default function AdminScrapersPage() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
-              <div className="flex flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-muted-foreground">
-                  Showing {rangeStart}–{rangeEnd} of {feeds.length} feeds
-                </p>
-                <div className="flex flex-wrap items-center gap-3">
-                  <div className="flex items-center gap-2">
-                    <Label htmlFor="scraper-page-size" className="text-sm text-muted-foreground">
-                      Per page
-                    </Label>
-                    <Select
-                      value={String(pageSize)}
-                      onValueChange={(v) => v && setPageSize(Number(v) as (typeof PAGE_SIZE_OPTIONS)[number])}
-                    >
-                      <SelectTrigger id="scraper-page-size" className="h-8 w-[72px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {PAGE_SIZE_OPTIONS.map((n) => (
-                          <SelectItem key={n} value={String(n)}>
-                            {n}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="icon-sm"
-                      disabled={page <= 1}
-                      onClick={() => setPage((p) => Math.max(1, p - 1))}
-                      aria-label="Previous page"
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="min-w-[4.5rem] text-center text-sm text-muted-foreground">
-                      Page {page} of {totalPages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="icon-sm"
-                      disabled={page >= totalPages}
-                      onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                      aria-label="Next page"
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
+                  </Table>
+                </div>
+                <div className="flex shrink-0 flex-col gap-3 border-t px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {rangeStart}–{rangeEnd} of {feeds.length} feeds
+                  </p>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                      <Label htmlFor="scraper-page-size" className="text-sm text-muted-foreground">
+                        Per page
+                      </Label>
+                      <Select
+                        value={String(pageSize)}
+                        onValueChange={(v) => v && setPageSize(Number(v) as (typeof PAGE_SIZE_OPTIONS)[number])}
+                      >
+                        <SelectTrigger id="scraper-page-size" className="h-8 w-[72px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {PAGE_SIZE_OPTIONS.map((n) => (
+                            <SelectItem key={n} value={String(n)}>
+                              {n}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        disabled={page <= 1}
+                        onClick={() => setPage((p) => Math.max(1, p - 1))}
+                        aria-label="Previous page"
+                      >
+                        <ChevronLeft className="h-4 w-4" />
+                      </Button>
+                      <span className="min-w-[4.5rem] text-center text-sm text-muted-foreground">
+                        Page {page} of {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="icon-sm"
+                        disabled={page >= totalPages}
+                        onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                        aria-label="Next page"
+                      >
+                        <ChevronRight className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
+              </CardContent>
+            </Card>
+          )}
+        </div>
       </PageBody>
 
       <Dialog
@@ -658,6 +686,6 @@ export default function AdminScrapersPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </>
+    </AppPage>
   );
 }

@@ -3,6 +3,10 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import { stampForCreate } from "@/lib/firestore/tenant-write";
 import type { Account, ChannelKey, Contact, Lead, ScraperRawItem } from "@/lib/types";
+import {
+  companyNameFromRaw,
+  contactNameFromRaw,
+} from "@/lib/scrapers/raw-item-field-parser";
 import { getScraperRawItemServer, markRawItemPromotedServer } from "@/lib/scrapers/raw-items-server";
 
 function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
@@ -44,20 +48,6 @@ function newEntityId(prefix: string): string {
 
 function stripHtml(text: string): string {
   return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
-function contactNameFromRaw(item: ScraperRawItem): { firstName: string; lastName: string; fullName: string } {
-  const raw =
-    item.creator?.trim() ||
-    item.dcCreator?.trim() ||
-    item.title.split(/[-–|:]/)[0]?.trim() ||
-    "Unknown";
-  const cleaned = stripHtml(raw).slice(0, 120) || "Unknown contact";
-  const parts = cleaned.split(/\s+/).filter(Boolean);
-  const firstName = parts[0] ?? "Unknown";
-  const lastName = parts.length > 1 ? parts.slice(1).join(" ") : firstName;
-  const fullName = firstName === lastName ? firstName : `${firstName} ${lastName}`;
-  return { firstName, lastName, fullName };
 }
 
 function channelForPlatform(platform: ScraperRawItem["platform"]): ChannelKey {
@@ -147,8 +137,8 @@ export async function promoteRawItemToProspectServer(input: {
   if (item.status === "dismissed") return { error: "Item was dismissed" };
 
   const now = new Date().toISOString();
-  const { firstName, lastName, fullName } = contactNameFromRaw(item);
-  const companyName = item.title.trim().slice(0, 200) || "Unknown company";
+  const companyName = companyNameFromRaw(item);
+  const { firstName, lastName, fullName } = contactNameFromRaw(item, companyName);
   const accountId = newEntityId("a");
   const contactId = newEntityId("ct");
   const leadId = newEntityId("l");

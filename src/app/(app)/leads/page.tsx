@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Bookmark, Download, Kanban, Upload, ChevronDown } from "lucide-react";
 
-import { PageBody, PageHeader } from "@/components/common/page-header";
+import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { LeadsTable, type LeadsTableRef, type LeadsTablePreset } from "@/components/leads/leads-table";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { Button } from "@/components/ui/button";
@@ -46,7 +46,7 @@ function LeadsPageInner() {
   }>({ key: 0, preset: "default" });
 
   return (
-    <>
+    <AppPage>
       <PageHeader
         title="Leads"
         description="Pipeline and outreach across channels. Intake-only rows are listed under Prospects in the sidebar."
@@ -110,7 +110,7 @@ function LeadsPageInner() {
           </>
         }
       />
-      <PageBody>
+      <PageBody contained>
         {!isDemo && salesLeadCount === 0 ? (
           <WorkspaceEmptyHint title="No leads in workspace" />
         ) : (
@@ -128,7 +128,7 @@ function LeadsPageInner() {
           />
         )}
       </PageBody>
-    </>
+    </AppPage>
   );
 }
 
@@ -136,12 +136,12 @@ export default function LeadsPage() {
   return (
     <Suspense
       fallback={
-        <>
+        <AppPage>
           <PageHeader title="Leads" description="Loading…" />
           <PageBody>
             <p className="text-sm text-muted-foreground">Loading leads…</p>
           </PageBody>
-        </>
+        </AppPage>
       }
     >
       <LeadsPageInner />

@@ -137,6 +137,12 @@ export type OrganizationChannelAdminConfig = {
   customChannels: OrganizationCustomChannelRow[];
 };
 
+/** Org-wide default keyword filters for the intake pool (managed by admins). */
+export type OrganizationIntakeFilterDefaults = {
+  includeKeywords: string[];
+  excludeKeywords: string[];
+};
+
 export interface Organization {
   id: string;
   name: string;
@@ -158,6 +164,8 @@ export interface Organization {
   settings: OrganizationSettings;
   /** From Firestore `channelAdmin`; stripped in `sanitizeOrganizationForApi`. */
   channelAdmin?: OrganizationChannelAdminConfig;
+  /** Team-wide intake pool keyword defaults; readable by all members. */
+  intakeFilterDefaults?: OrganizationIntakeFilterDefaults;
   createdAt: ISODate;
   updatedAt: ISODate;
   /** Populated by platform GET APIs after stripping `settings.inboundWebhookSecret`. */
