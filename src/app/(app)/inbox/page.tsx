@@ -12,15 +12,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetFooter,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
+import { format } from "date-fns";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import {
   Select,
@@ -43,6 +44,7 @@ import type {
   MailInbound,
   MailInboundAttachment,
   MailSent,
+  ScheduledEmail,
 } from "@/lib/email-account-types";
 import {
   conversationSubject,
@@ -65,6 +67,7 @@ import {
   ReplyAll,
   Forward,
   Send,
+  CalendarClock,
   Trash2,
   ArchiveRestore,
   Search,
@@ -72,6 +75,7 @@ import {
   ChevronRight,
   Paperclip,
   Sparkles,
+  X,
   Ban,
   ExternalLink,
 } from "lucide-react";
@@ -131,9 +135,10 @@ type MailListRow = {
   title: string;
   subtitle: string;
   at: string;
-  row: MailDraft | MailSent | MailInbound;
+  row: MailDraft | MailSent | MailInbound | ScheduledEmail;
   muted?: boolean;
   thread?: MailThread;
+  scheduled?: ScheduledEmail;
 };
 
 const ENTITY_MAIL_FILTER_ALL = "__all__";
@@ -150,6 +155,35 @@ const INBOX_VIEW_SELF = "__inbox_view_self__";
 type MailFilterStats = { total: number; unread: number };
 
 const EMPTY_MAIL_FILTER_STATS: MailFilterStats = { total: 0, unread: 0 };
+
+const MAX_COMPOSE_ATTACHMENTS = 5;
+const MAX_COMPOSE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+
+type ComposeAttachment = {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentBase64: string;
+};
+
+function formatComposeFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function readFileAsBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      resolve(dataUrl.split(",")[1] ?? "");
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
+    reader.readAsDataURL(file);
+  });
+}
 
 function isEntityMailFilterActive(filter: string): boolean {
   return filter !== ENTITY_MAIL_FILTER_ALL;
@@ -317,7 +351,8 @@ function mailListRowMatchesSearch(row: MailListRow, q: string): boolean {
   return false;
 }
 
-type MailFolder = "inbox" | "sent" | "drafts" | "trash";
+type MailFolder = "inbox" | "sent" | "drafts" | "trash" | "scheduled";
+type ScheduledTab = "pending" | "done";
 type ImapListFolder = "inbox" | "trash";
 
 /** Matches server-side IMAP list batching; older messages load via “Load more”. */
@@ -336,6 +371,7 @@ export default function InboxPage() {
     currentUserId,
     users,
     canViewMemberMailboxes,
+    mailboxViewableUserIds,
     getOwnerDisplayName,
   } = useWorkspace();
 
@@ -386,6 +422,11 @@ export default function InboxPage() {
   const upsertDraft = useEmailAccountStore((s) => s.upsertDraft);
   const deleteDraft = useEmailAccountStore((s) => s.deleteDraft);
   const addSent = useEmailAccountStore((s) => s.addSent);
+  const scheduled = useEmailAccountStore((s) => s.scheduled);
+  const addScheduled = useEmailAccountStore((s) => s.addScheduled);
+  const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const setScheduled = useEmailAccountStore((s) => s.setScheduled);
+  const processDueScheduledLocal = useEmailAccountStore((s) => s.processDueScheduledLocal);
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
@@ -394,16 +435,26 @@ export default function InboxPage() {
 
   const inboxReadOnly = !isDemo && mailboxDataReadOnly;
 
+  const viewableMailboxIdSet = React.useMemo(
+    () => new Set(mailboxViewableUserIds),
+    [mailboxViewableUserIds],
+  );
   const memberPickerUsers = React.useMemo(
     () =>
       [...users]
-        .filter((u) => u.status === "active" && u.id && u.id !== currentUserId)
+        .filter(
+          (u) =>
+            u.status === "active" &&
+            u.id &&
+            u.id !== currentUserId &&
+            (!canViewMemberMailboxes || viewableMailboxIdSet.has(u.id)),
+        )
         .sort((a, b) =>
           (a.displayName || a.email || "").localeCompare(b.displayName || b.email || "", undefined, {
             sensitivity: "base",
           }),
         ),
-    [users, currentUserId],
+    [users, currentUserId, canViewMemberMailboxes, viewableMailboxIdSet],
   );
 
   const leadsSortedForMailFilter = React.useMemo(
@@ -439,10 +490,17 @@ export default function InboxPage() {
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
+  const [composeAttachments, setComposeAttachments] = React.useState<ComposeAttachment[]>([]);
+  const composeFileInputRef = React.useRef<HTMLInputElement>(null);
   const [aiReplyGenerating, setAiReplyGenerating] = React.useState(false);
   const [aiReplyTone, setAiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
   const [aiReplyGoal, setAiReplyGoal] = React.useState("follow up");
   const [sending, setSending] = React.useState(false);
+  const [composeScheduleEnabled, setComposeScheduleEnabled] = React.useState(false);
+  const [composeScheduledAt, setComposeScheduledAt] = React.useState("");
+  const [scheduledTab, setScheduledTab] = React.useState<ScheduledTab>("pending");
+  const [scheduledLoading, setScheduledLoading] = React.useState(false);
+  const [selectedScheduled, setSelectedScheduled] = React.useState<ScheduledEmail | null>(null);
 
   /** True only when there is no cached list yet (blocking empty state). */
   const [inboundLoading, setInboundLoading] = React.useState(false);
@@ -880,6 +938,17 @@ export default function InboxPage() {
     currentUserId,
   ]);
 
+  function defaultScheduleDatetimeLocal(): string {
+    const d = new Date(Date.now() + 60 * 60 * 1000);
+    d.setSeconds(0, 0);
+    const y = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    const h = String(d.getHours()).padStart(2, "0");
+    const mi = String(d.getMinutes()).padStart(2, "0");
+    return `${y}-${mo}-${da}T${h}:${mi}`;
+  }
+
   function openCompose(preset?: Partial<MailDraft>) {
     if (inboxReadOnly) {
       toast.error("Compose is disabled while viewing another member’s mailbox.");
@@ -890,7 +959,85 @@ export default function InboxPage() {
     setComposeSubject(preset?.subject ?? "");
     setComposeBody(preset?.body ?? (account.signature ? `\n\n${account.signature}` : ""));
     setComposeDraftId(preset?.id);
+    setComposeAttachments([]);
+    setComposeScheduleEnabled(false);
+    setComposeScheduledAt(defaultScheduleDatetimeLocal());
     setComposeOpen(true);
+  }
+
+  const fetchScheduledEmails = React.useCallback(async () => {
+    if (isDemo) return;
+    setScheduledLoading(true);
+    try {
+      const url = appendMailDataOwnerParam("/api/email/scheduled", mailViewAsUid, currentUserId);
+      const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      const data = (await res.json()) as { ok?: boolean; items?: ScheduledEmail[] };
+      if (res.ok && data.ok && Array.isArray(data.items)) {
+        setScheduled(data.items);
+      }
+    } catch {
+      /* keep cached list */
+    } finally {
+      setScheduledLoading(false);
+    }
+  }, [isDemo, mailViewAsUid, currentUserId, setScheduled]);
+
+  React.useEffect(() => {
+    if (isDemo || !emailServerHydrated) return;
+    void fetchScheduledEmails();
+  }, [isDemo, emailServerHydrated, fetchScheduledEmails, mailViewAsUid]);
+
+  React.useEffect(() => {
+    if (!isDemo) return;
+    processDueScheduledLocal();
+    const id = window.setInterval(() => processDueScheduledLocal(), 15_000);
+    return () => window.clearInterval(id);
+  }, [isDemo, processDueScheduledLocal, scheduled]);
+
+  async function addComposeAttachments(files: FileList | File[]) {
+    const list = Array.from(files);
+    if (list.length === 0) return;
+
+    const remaining = MAX_COMPOSE_ATTACHMENTS - composeAttachments.length;
+    if (remaining <= 0) {
+      toast.error(`You can attach up to ${MAX_COMPOSE_ATTACHMENTS} files.`);
+      return;
+    }
+
+    const toAdd = list.slice(0, remaining);
+    if (list.length > remaining) {
+      toast.message(`Only ${remaining} more file${remaining === 1 ? "" : "s"} can be added.`);
+    }
+
+    const next: ComposeAttachment[] = [];
+    for (const file of toAdd) {
+      if (file.size > MAX_COMPOSE_ATTACHMENT_BYTES) {
+        toast.error(`${file.name} is too large (max ${formatComposeFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)}).`);
+        continue;
+      }
+      try {
+        const contentBase64 = await readFileAsBase64(file);
+        if (!contentBase64) {
+          toast.error(`Could not read ${file.name}.`);
+          continue;
+        }
+        next.push({
+          id: `att-${crypto.randomUUID()}`,
+          filename: file.name,
+          mimeType: file.type || "application/octet-stream",
+          sizeBytes: file.size,
+          contentBase64,
+        });
+      } catch {
+        toast.error(`Could not read ${file.name}.`);
+      }
+    }
+
+    if (next.length > 0) setComposeAttachments((prev) => [...prev, ...next]);
+  }
+
+  function removeComposeAttachment(id: string) {
+    setComposeAttachments((prev) => prev.filter((a) => a.id !== id));
   }
 
   async function handleSend() {
@@ -910,8 +1057,12 @@ export default function InboxPage() {
         });
         if (composeDraftId) deleteDraft(composeDraftId);
         toast.success("Message saved to Sent (demo)", {
-          description: "SMTP is not used in demo mode.",
+          description:
+            composeAttachments.length > 0
+              ? "SMTP is not used in demo mode. Attachments are not stored in demo sent mail."
+              : "SMTP is not used in demo mode.",
         });
+        setComposeAttachments([]);
         setComposeOpen(false);
         setMailFolder("sent");
         setSelectedMail(null);
@@ -947,6 +1098,14 @@ export default function InboxPage() {
           subject: composeSubject.trim(),
           text,
           html,
+          attachments:
+            composeAttachments.length > 0
+              ? composeAttachments.map((a) => ({
+                  filename: a.filename,
+                  mimeType: a.mimeType,
+                  contentBase64: a.contentBase64,
+                }))
+              : undefined,
           smtp: {
             host: account.smtp.host,
             port: account.smtp.port,
@@ -970,6 +1129,7 @@ export default function InboxPage() {
       });
       if (composeDraftId) deleteDraft(composeDraftId);
       toast.success("Message sent");
+      setComposeAttachments([]);
       setComposeOpen(false);
       setMailFolder("sent");
       setSelectedMail(null);
@@ -978,6 +1138,140 @@ export default function InboxPage() {
       toast.error("Could not reach the server");
     } finally {
       setSending(false);
+    }
+  }
+
+  async function handleScheduleSend() {
+    if (!composeTo.trim()) {
+      toast.error("Add a recipient");
+      return;
+    }
+    if (!composeScheduledAt.trim()) {
+      toast.error("Pick a date and time");
+      return;
+    }
+    const scheduledDate = new Date(composeScheduledAt);
+    if (Number.isNaN(scheduledDate.getTime())) {
+      toast.error("Invalid schedule time");
+      return;
+    }
+    if (scheduledDate.getTime() < Date.now() + 60_000) {
+      toast.error("Schedule time must be at least 1 minute in the future");
+      return;
+    }
+
+    if (isDemo) {
+      setSending(true);
+      try {
+        addScheduled({
+          mailboxId: account.id,
+          from: account.emailAddress.trim() || "demo@nova.local",
+          to: composeTo.trim(),
+          cc: composeCc.trim() || undefined,
+          subject: composeSubject.trim() || "(no subject)",
+          body: composeBody,
+          text: composeBody,
+          scheduledAt: scheduledDate.toISOString(),
+        });
+        if (composeDraftId) deleteDraft(composeDraftId);
+        toast.success("Email scheduled (demo)", {
+          description: `Will move to Sent after ${format(scheduledDate, "MMM d, h:mm a")}.`,
+        });
+        setComposeAttachments([]);
+        setComposeOpen(false);
+        setMailFolder("scheduled");
+        setScheduledTab("pending");
+        setSelectedScheduled(null);
+      } finally {
+        setSending(false);
+      }
+      return;
+    }
+
+    if (!isEmailAccountConfigured(account)) {
+      toast.error("Configure SMTP in Settings → Email first.");
+      return;
+    }
+    if (inboxReadOnly) {
+      toast.error("Scheduling is disabled while viewing another member’s mailbox.");
+      return;
+    }
+
+    setSending(true);
+    try {
+      const text = composeBody;
+      const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
+      const url = appendMailDataOwnerParam("/api/email/scheduled", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mailboxId: account.id,
+          from: account.emailAddress,
+          displayName: account.displayName,
+          replyTo: account.replyTo,
+          to: composeTo.trim(),
+          cc: composeCc.trim() || undefined,
+          subject: composeSubject.trim(),
+          text,
+          html,
+          scheduledAt: scheduledDate.toISOString(),
+          attachments:
+            composeAttachments.length > 0
+              ? composeAttachments.map((a) => ({
+                  filename: a.filename,
+                  mimeType: a.mimeType,
+                  contentBase64: a.contentBase64,
+                }))
+              : undefined,
+        }),
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) {
+        toast.error(data.error ?? "Could not schedule email");
+        return;
+      }
+      if (composeDraftId) deleteDraft(composeDraftId);
+      toast.success("Email scheduled", {
+        description: `Sending ${format(scheduledDate, "MMM d, yyyy 'at' h:mm a")}`,
+      });
+      setComposeAttachments([]);
+      setComposeOpen(false);
+      setMailFolder("scheduled");
+      setScheduledTab("pending");
+      setSelectedScheduled(null);
+      void fetchScheduledEmails();
+    } catch {
+      toast.error("Could not reach the server");
+    } finally {
+      setSending(false);
+    }
+  }
+
+  async function cancelScheduledEmail(id: string) {
+    if (isDemo) {
+      cancelScheduled(id);
+      setSelectedScheduled(null);
+      toast.success("Scheduled email cancelled");
+      return;
+    }
+    try {
+      const url = appendMailDataOwnerParam(
+        `/api/email/scheduled/${encodeURIComponent(id)}`,
+        mailViewAsUid,
+        currentUserId,
+      );
+      const res = await fetch(url, { method: "DELETE", credentials: "same-origin" });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) {
+        toast.error(data.error ?? "Could not cancel");
+        return;
+      }
+      setSelectedScheduled(null);
+      toast.success("Scheduled email cancelled");
+      void fetchScheduledEmails();
+    } catch {
+      toast.error("Could not reach the server");
     }
   }
 
@@ -1298,15 +1592,7 @@ export default function InboxPage() {
     }
   }
 
-  const mailListRows: {
-    id: string;
-    title: string;
-    subtitle: string;
-    at: string;
-    row: MailDraft | MailSent | MailInbound;
-    muted?: boolean;
-    thread?: MailThread;
-  }[] = React.useMemo(() => {
+  const mailListRows: MailListRow[] = React.useMemo(() => {
     if (mailFolder === "inbox") {
       return inboundThreads.map((t) => ({
         id: `${account.id}:thread:${t.threadId}`,
@@ -1353,8 +1639,30 @@ export default function InboxPage() {
         row: m,
       }));
     }
+    if (mailFolder === "scheduled") {
+      return scheduled
+        .filter((m) => m.mailboxId === account.id)
+        .filter((m) => (scheduledTab === "pending" ? m.status === "pending" : m.status !== "pending"))
+        .map((m) => ({
+          id: m.id,
+          title: m.subject || "(no subject)",
+          subtitle:
+            scheduledTab === "pending"
+              ? `${m.to} · sends ${format(new Date(m.scheduledAt), "MMM d, h:mm a")}`
+              : `${m.to} · ${m.status}${m.error ? " — failed" : ""}`,
+          at: scheduledTab === "pending" ? m.scheduledAt : m.sentAt ?? m.scheduledAt,
+          row: m,
+          scheduled: m,
+          muted: m.status === "cancelled",
+        }));
+    }
     return [];
-  }, [mailFolder, sent, drafts, inboundThreads, trashThreads, account.id]);
+  }, [mailFolder, sent, drafts, scheduled, scheduledTab, inboundThreads, trashThreads, account.id]);
+
+  const scheduledPendingCount = React.useMemo(
+    () => scheduled.filter((m) => m.mailboxId === account.id && m.status === "pending").length,
+    [scheduled, account.id],
+  );
 
   const inboxMailListRows = React.useMemo((): MailListRow[] => {
     return inboundThreads.map((t) => ({
@@ -1762,26 +2070,38 @@ export default function InboxPage() {
       if (pick.thread) {
         setSelectedThread(pick.thread);
         setSelectedMail(null);
+        setSelectedScheduled(null);
+      } else if (pick.scheduled) {
+        setSelectedThread(null);
+        setSelectedMail(null);
+        setSelectedScheduled(pick.scheduled);
       } else {
         setSelectedThread(null);
-        setSelectedMail(pick.row);
+        setSelectedMail(pick.row as MailDraft | MailSent | MailInbound);
+        setSelectedScheduled(null);
       }
       return;
     }
     if (selectedMail) {
-      const ok = visibleMailRows.some((r) => !r.thread && r.row.id === selectedMail.id);
+      const ok = visibleMailRows.some((r) => !r.thread && !r.scheduled && r.row.id === selectedMail.id);
       if (ok) return;
       if (unreadFilterActive) return;
       const pick = visibleMailRows[0]!;
       if (pick.thread) {
         setSelectedThread(pick.thread);
         setSelectedMail(null);
+        setSelectedScheduled(null);
+      } else if (pick.scheduled) {
+        setSelectedThread(null);
+        setSelectedMail(null);
+        setSelectedScheduled(pick.scheduled);
       } else {
         setSelectedThread(null);
-        setSelectedMail(pick.row);
+        setSelectedMail(pick.row as MailDraft | MailSent | MailInbound);
+        setSelectedScheduled(null);
       }
     }
-  }, [visibleMailRows, selectedThread, selectedMail, listFilterActive, readStatusFilter]);
+  }, [visibleMailRows, selectedThread, selectedMail, selectedScheduled, listFilterActive, readStatusFilter]);
 
   const mailRowElByIdRef = React.useRef<Map<string, HTMLElement>>(new Map());
 
@@ -1789,9 +2109,15 @@ export default function InboxPage() {
     if (row.thread) {
       setSelectedThread(row.thread);
       setSelectedMail(null);
+      setSelectedScheduled(null);
+    } else if (row.scheduled) {
+      setSelectedThread(null);
+      setSelectedMail(null);
+      setSelectedScheduled(row.scheduled);
     } else {
       setSelectedThread(null);
-      setSelectedMail(row.row);
+      setSelectedMail(row.row as MailDraft | MailSent | MailInbound);
+      setSelectedScheduled(null);
     }
   }, []);
 
@@ -1801,11 +2127,15 @@ export default function InboxPage() {
       if (i >= 0) return i;
     }
     if (selectedMail && selectedThread == null) {
-      const i = visibleMailRows.findIndex((r) => !r.thread && r.row.id === selectedMail.id);
+      const i = visibleMailRows.findIndex((r) => !r.thread && !r.scheduled && r.row.id === selectedMail.id);
+      if (i >= 0) return i;
+    }
+    if (selectedScheduled) {
+      const i = visibleMailRows.findIndex((r) => r.scheduled?.id === selectedScheduled.id);
       if (i >= 0) return i;
     }
     return visibleMailRows.length > 0 ? 0 : -1;
-  }, [visibleMailRows, selectedThread, selectedMail]);
+  }, [visibleMailRows, selectedThread, selectedMail, selectedScheduled]);
 
   const scrollMailRowIntoView = React.useCallback((rowId: string) => {
     mailRowElByIdRef.current.get(rowId)?.scrollIntoView({ block: "nearest", behavior: "smooth" });
@@ -1816,7 +2146,7 @@ export default function InboxPage() {
       if (composeOpen || purgeTrashOpen || blockDomainOpen) return;
       if (shouldIgnoreMailListKeyboardTarget(e.target)) return;
       if (visibleMailRows.length === 0) return;
-      if (mailFolder !== "inbox" && mailFolder !== "trash" && mailFolder !== "sent" && mailFolder !== "drafts") {
+      if (mailFolder !== "inbox" && mailFolder !== "trash" && mailFolder !== "sent" && mailFolder !== "drafts" && mailFolder !== "scheduled") {
         return;
       }
 
@@ -1967,6 +2297,17 @@ export default function InboxPage() {
     return matchFromMessage(selectedMail);
   }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads]);
 
+  function composeLeadContextPayload() {
+    if (!selectedLead) return "";
+    return JSON.stringify({
+      id: selectedLead.id,
+      stage: selectedLead.stage,
+      company: selectedLead.companyName,
+      contact: selectedLead.contactName,
+      channel: selectedLead.channel,
+    });
+  }
+
   async function generateAiReply() {
     if (!composeBody.trim() && !composeSubject.trim()) {
       toast.error("Open a reply with thread context first, or paste the conversation.");
@@ -1975,22 +2316,13 @@ export default function InboxPage() {
     setAiReplyGenerating(true);
     try {
       const thread = composeBody.trim() || composeSubject;
-      let leadContext = "";
-      if (selectedLead) {
-        leadContext = JSON.stringify({
-          id: selectedLead.id,
-          stage: selectedLead.stage,
-          company: selectedLead.companyName,
-          contact: selectedLead.contactName,
-          channel: selectedLead.channel,
-        });
-      }
       const res = await fetch("/api/ai/email-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          mode: "reply",
           thread,
-          leadContext,
+          leadContext: composeLeadContextPayload(),
           leadId: selectedLead?.id,
           channel: selectedLead?.channel,
           profileId: selectedLead?.profileId,
@@ -2006,6 +2338,43 @@ export default function InboxPage() {
       }
       setComposeBody(data.body ?? "");
       toast.success("Draft generated — review before sending");
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setAiReplyGenerating(false);
+    }
+  }
+
+  async function improviseComposeWithAi() {
+    if (!composeBody.trim()) {
+      toast.error("Write a message first, then improvise with AI.");
+      return;
+    }
+    setAiReplyGenerating(true);
+    try {
+      const res = await fetch("/api/ai/email-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "improve",
+          draft: composeBody.trim(),
+          subject: composeSubject.trim() || undefined,
+          leadContext: composeLeadContextPayload(),
+          leadId: selectedLead?.id,
+          channel: selectedLead?.channel,
+          profileId: selectedLead?.profileId,
+          campaignId: selectedLead?.campaignId,
+          tone: aiReplyTone,
+          goal: "Polish and improve clarity while keeping my intent and facts",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not improve message");
+        return;
+      }
+      setComposeBody(data.body ?? "");
+      toast.success("Message improved — review before sending");
     } catch {
       toast.error("Network error");
     } finally {
@@ -2263,6 +2632,7 @@ export default function InboxPage() {
                   { id: "trash" as const, label: "Trash" },
                   { id: "sent" as const, label: "Sent" },
                   { id: "drafts" as const, label: "Drafts" },
+                  { id: "scheduled" as const, label: "Scheduled" },
                 ] as const
               ).map((f) => (
                 <Button
@@ -2274,7 +2644,9 @@ export default function InboxPage() {
                     setMailFolder(f.id);
                     setSelectedMail(null);
                     setSelectedThread(null);
+                    setSelectedScheduled(null);
                     clearMailRowSelection();
+                    if (f.id === "scheduled") void fetchScheduledEmails();
                   }}
                 >
                   {f.label}
@@ -2311,6 +2683,11 @@ export default function InboxPage() {
                       {drafts.length}
                     </Badge>
                   )}
+                  {f.id === "scheduled" && scheduledPendingCount > 0 && (
+                    <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px] tabular-nums">
+                      {scheduledPendingCount}
+                    </Badge>
+                  )}
                 </Button>
               ))}
               <div className="mt-auto pt-2 border-t">
@@ -2323,7 +2700,50 @@ export default function InboxPage() {
 
             <div className="w-full max-w-md flex flex-col border-r max-h-[calc(100vh-250px)] overflow-y-auto">
               <div className="px-3 py-2 border-b text-xs font-medium text-muted-foreground capitalize space-y-2">
-                <div>{mailFolder}</div>
+                <div className="flex items-center justify-between gap-2 normal-case">
+                  <span>{mailFolder === "scheduled" ? "Scheduled" : mailFolder}</span>
+                  {mailFolder === "scheduled" ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-7 w-7 shrink-0"
+                      disabled={scheduledLoading}
+                      onClick={() => void fetchScheduledEmails()}
+                      aria-label="Refresh scheduled emails"
+                    >
+                      <RefreshCw className={cn("h-3.5 w-3.5", scheduledLoading && "animate-spin")} />
+                    </Button>
+                  ) : null}
+                </div>
+                {mailFolder === "scheduled" ? (
+                  <div className="flex gap-1 normal-case">
+                    <Button
+                      type="button"
+                      variant={scheduledTab === "pending" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="h-7 flex-1 text-[11px]"
+                      onClick={() => {
+                        setScheduledTab("pending");
+                        setSelectedScheduled(null);
+                      }}
+                    >
+                      Pending
+                    </Button>
+                    <Button
+                      type="button"
+                      variant={scheduledTab === "done" ? "secondary" : "ghost"}
+                      size="sm"
+                      className="h-7 flex-1 text-[11px]"
+                      onClick={() => {
+                        setScheduledTab("done");
+                        setSelectedScheduled(null);
+                      }}
+                    >
+                      Sent & history
+                    </Button>
+                  </div>
+                ) : null}
                 {mailFolder === "inbox" &&
                   imapMailboxTotal != null &&
                   imapMailboxTotal > inbound.length && (
@@ -2661,6 +3081,18 @@ export default function InboxPage() {
                 {(mailFolder === "sent" || mailFolder === "drafts") && mailListRows.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
                 )}
+                {mailFolder === "scheduled" && scheduledLoading && mailListRows.length === 0 && (
+                  <div className="p-8 flex justify-center text-muted-foreground">
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                  </div>
+                )}
+                {mailFolder === "scheduled" && !scheduledLoading && mailListRows.length === 0 && (
+                  <div className="p-6 text-center text-sm text-muted-foreground">
+                    {scheduledTab === "pending"
+                      ? "No pending scheduled emails. Compose a message and choose Schedule send."
+                      : "No sent or completed scheduled emails yet."}
+                  </div>
+                )}
                 {listFilterActive && mailListRows.length > 0 && visibleMailRows.length === 0 && (
                     <div className="p-6 text-center text-sm text-muted-foreground">
                       No messages match your current filters.
@@ -2670,9 +3102,11 @@ export default function InboxPage() {
                     </div>
                   )}
                 {visibleMailRows.map((row, rowIndex) => {
-                  const isRowSelected = row.thread
-                    ? selectedThread?.threadId === row.thread.threadId
-                    : selectedMail?.id === row.row.id && selectedThread == null;
+                  const isRowSelected = row.scheduled
+                    ? selectedScheduled?.id === row.scheduled.id
+                    : row.thread
+                      ? selectedThread?.threadId === row.thread.threadId
+                      : selectedMail?.id === row.row.id && selectedThread == null;
                   const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
                   const bulkChecked = selectedMailRowIds.has(row.id);
                   return (
@@ -2985,6 +3419,71 @@ export default function InboxPage() {
                     </div>
                   ) : null}
                 </div>
+              ) : selectedScheduled ? (
+                <div className="space-y-4 max-w-xl">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-semibold">{selectedScheduled.subject || "(no subject)"}</h3>
+                      <Badge
+                        variant={
+                          selectedScheduled.status === "pending"
+                            ? "secondary"
+                            : selectedScheduled.status === "sent"
+                              ? "outline"
+                              : "destructive"
+                        }
+                        className="text-[10px] capitalize"
+                      >
+                        {selectedScheduled.status}
+                      </Badge>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-1">To: {selectedScheduled.to}</p>
+                    {selectedScheduled.cc ? (
+                      <p className="text-xs text-muted-foreground">Cc: {selectedScheduled.cc}</p>
+                    ) : null}
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {selectedScheduled.status === "pending"
+                        ? `Scheduled for ${format(new Date(selectedScheduled.scheduledAt), "MMM d, yyyy 'at' h:mm a")}`
+                        : selectedScheduled.sentAt
+                          ? `Sent ${format(new Date(selectedScheduled.sentAt), "MMM d, yyyy 'at' h:mm a")}`
+                          : fmtRelative(selectedScheduled.scheduledAt)}
+                    </p>
+                    {selectedScheduled.error ? (
+                      <p className="text-xs text-destructive mt-1">{selectedScheduled.error}</p>
+                    ) : null}
+                  </div>
+                  <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">
+                    {selectedScheduled.body}
+                  </div>
+                  {selectedScheduled.status === "pending" ? (
+                    <div className="flex flex-wrap gap-2">
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={inboxReadOnly}
+                        onClick={() =>
+                          openCompose({
+                            to: selectedScheduled.to,
+                            cc: selectedScheduled.cc,
+                            subject: selectedScheduled.subject,
+                            body: selectedScheduled.body,
+                          })
+                        }
+                      >
+                        Edit in compose
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive"
+                        disabled={inboxReadOnly}
+                        onClick={() => void cancelScheduledEmail(selectedScheduled.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" /> Cancel schedule
+                      </Button>
+                    </div>
+                  ) : null}
+                </div>
               ) : selectedMail ? (
                 "sentAt" in selectedMail ? (
                   <div className="space-y-4 max-w-xl">
@@ -3198,7 +3697,9 @@ export default function InboxPage() {
                   title={
                     mailFolder === "inbox" || mailFolder === "trash"
                       ? "Select a conversation"
-                      : "Select a message"
+                      : mailFolder === "scheduled"
+                        ? "Select a scheduled email"
+                        : "Select a message"
                   }
                   description={
                     mailFolder === "inbox"
@@ -3207,7 +3708,9 @@ export default function InboxPage() {
                         : "Configure IMAP in Email settings, then open Inbox to load messages."
                       : mailFolder === "trash"
                         ? "Open Trash to review messages removed from your inbox. Deleting here removes them from the server permanently."
-                        : "Pick an item from the list or compose a new message."
+                        : mailFolder === "scheduled"
+                          ? "Pick a scheduled email from the list, or compose and use Schedule send."
+                          : "Pick an item from the list or compose a new message."
                   }
                 />
               )}
@@ -3309,13 +3812,22 @@ export default function InboxPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Sheet open={composeOpen} onOpenChange={setComposeOpen}>
-        <SheetContent side="right" className="sm:max-w-lg w-full flex flex-col">
-          <SheetHeader>
-            <SheetTitle>Compose</SheetTitle>
-            <SheetDescription>Send through your SMTP account saved in Settings.</SheetDescription>
-          </SheetHeader>
-          <div className="flex-1 overflow-y-auto px-4 space-y-3">
+      <Dialog
+        open={composeOpen}
+        onOpenChange={(open) => {
+          setComposeOpen(open);
+          if (!open) setComposeAttachments([]);
+        }}
+      >
+        <DialogContent
+          className="flex max-h-[min(92vh,880px)] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          showCloseButton
+        >
+          <DialogHeader className="shrink-0 border-b px-5 py-4">
+            <DialogTitle>Compose</DialogTitle>
+            <DialogDescription>Send through your SMTP account saved in Settings.</DialogDescription>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
             <div className="space-y-1.5">
               <Label className="text-xs">To</Label>
               <Input value={composeTo} onChange={(e) => setComposeTo(e.target.value)} placeholder="name@company.com" />
@@ -3333,39 +3845,164 @@ export default function InboxPage() {
               <Input value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Message</Label>
+              <div className="flex items-center justify-between gap-2">
+                <Label className="text-xs">Message</Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  disabled={!composeBody.trim() || aiReplyGenerating || inboxReadOnly}
+                  onClick={() => void improviseComposeWithAi()}
+                >
+                  {aiReplyGenerating ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5" />
+                  )}
+                  Improvise with AI
+                </Button>
+              </div>
               <Textarea
-                className="min-h-[200px] text-sm"
+                className="min-h-[280px] resize-y text-sm"
                 value={composeBody}
                 onChange={(e) => setComposeBody(e.target.value)}
+                placeholder="Write your message…"
               />
             </div>
+            <div className="space-y-2">
+              <input
+                ref={composeFileInputRef}
+                type="file"
+                multiple
+                className="sr-only"
+                onChange={(e) => {
+                  const files = e.target.files;
+                  if (files?.length) void addComposeAttachments(files);
+                  e.target.value = "";
+                }}
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  disabled={inboxReadOnly || composeAttachments.length >= MAX_COMPOSE_ATTACHMENTS}
+                  onClick={() => composeFileInputRef.current?.click()}
+                >
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Attach files
+                </Button>
+                <span className="text-[11px] text-muted-foreground">
+                  Up to {MAX_COMPOSE_ATTACHMENTS} files, {formatComposeFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)} each
+                </span>
+              </div>
+              {composeAttachments.length > 0 ? (
+                <ul className="space-y-1.5">
+                  {composeAttachments.map((att) => (
+                    <li
+                      key={att.id}
+                      className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
+                    >
+                      <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                      <span className="min-w-0 flex-1 truncate font-medium">{att.filename}</span>
+                      <span className="shrink-0 text-muted-foreground">{formatComposeFileSize(att.sizeBytes)}</span>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        className="shrink-0"
+                        aria-label={`Remove ${att.filename}`}
+                        onClick={() => removeComposeAttachment(att.id)}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </div>
+            <div className="rounded-lg border bg-muted/20 px-3 py-3 space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="compose-schedule-toggle" className="text-xs font-medium">
+                    Schedule send
+                  </Label>
+                  <p className="text-[11px] text-muted-foreground">Send later at a specific date and time.</p>
+                </div>
+                <Switch
+                  id="compose-schedule-toggle"
+                  checked={composeScheduleEnabled}
+                  disabled={inboxReadOnly}
+                  onCheckedChange={(checked: boolean) => {
+                    setComposeScheduleEnabled(checked);
+                    if (checked && !composeScheduledAt) {
+                      setComposeScheduledAt(defaultScheduleDatetimeLocal());
+                    }
+                  }}
+                />
+              </div>
+              {composeScheduleEnabled ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="compose-scheduled-at" className="text-xs">
+                    Send on
+                  </Label>
+                  <Input
+                    id="compose-scheduled-at"
+                    type="datetime-local"
+                    value={composeScheduledAt}
+                    min={defaultScheduleDatetimeLocal()}
+                    disabled={inboxReadOnly}
+                    onChange={(e) => setComposeScheduledAt(e.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
           </div>
-          <SheetFooter className="flex-row flex-wrap gap-2 border-t">
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              disabled={aiReplyGenerating || inboxReadOnly}
-              onClick={() => void generateAiReply()}
-            >
-              {aiReplyGenerating ? (
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          <div className="shrink-0 border-t bg-muted/30 px-5 pb-5 pt-4">
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={aiReplyGenerating || inboxReadOnly}
+                onClick={() => void generateAiReply()}
+              >
+                {aiReplyGenerating ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Sparkles className="h-3.5 w-3.5" />
+                )}
+                AI draft
+              </Button>
+              <Button variant="outline" size="sm" onClick={saveDraft}>
+                Save draft
+              </Button>
+              {composeScheduleEnabled ? (
+                <Button
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={sending || inboxReadOnly}
+                  onClick={() => void handleScheduleSend()}
+                >
+                  {sending ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <CalendarClock className="h-3.5 w-3.5" />
+                  )}
+                  Schedule send
+                </Button>
               ) : (
-                <Sparkles className="h-3.5 w-3.5" />
+                <Button size="sm" className="gap-1.5" disabled={sending} onClick={() => void handleSend()}>
+                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
+                  Send
+                </Button>
               )}
-              AI draft
-            </Button>
-            <Button variant="outline" size="sm" onClick={saveDraft}>
-              Save draft
-            </Button>
-            <Button size="sm" className="gap-1.5" disabled={sending} onClick={() => void handleSend()}>
-              {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-              Send
-            </Button>
-          </SheetFooter>
-        </SheetContent>
-      </Sheet>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }
@@ -3731,11 +4368,14 @@ function resolveContactForMailListRow(row: MailListRow, contacts: Contact[]): Co
   }
 
   const item = row.row;
+  if ("scheduledAt" in item && "status" in item) {
+    return null;
+  }
   if ("uid" in item) {
     return matchInbound(item);
   }
   if ("sentAt" in item || "updatedAt" in item) {
-    const emails = collectMessageEmails(item);
+    const emails = collectMessageEmails(item as MailDraft | MailSent | MailInbound);
     return (
       contacts.find((contact) => {
         const owned = contactEmailSet(contact);
@@ -3774,19 +4414,22 @@ function resolveLeadForMailListRow(
   }
 
   const item = row.row;
+  if ("scheduledAt" in item && "status" in item) {
+    return null;
+  }
   if ("uid" in item) {
     return matchInbound(item);
   }
   if ("sentAt" in item) {
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
-    const emails = collectMessageEmails(item);
+    const emails = collectMessageEmails(item as MailSent);
     return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
   }
   if ("updatedAt" in item) {
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
-    const emails = collectMessageEmails(item);
+    const emails = collectMessageEmails(item as MailDraft);
     return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
   }
   return null;

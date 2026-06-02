@@ -61,6 +61,16 @@ export async function PATCH(req: Request) {
   if (role) {
     const r = await setMemberRoleServer(orgId, uid, role);
     if ("error" in r) return NextResponse.json({ error: r.error }, { status: 400 });
+    const db = getAdminDb();
+    if (db) {
+      await db
+        .collection(COLLECTIONS.users)
+        .doc(uid)
+        .set(
+          { orgRole: role, updatedAt: FieldValue.serverTimestamp() },
+          { merge: true },
+        );
+    }
     await recordAudit({
       organizationId: orgId,
       actorUid: g.ctx.session.uid,

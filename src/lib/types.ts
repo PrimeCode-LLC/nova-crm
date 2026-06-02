@@ -1,6 +1,8 @@
 // Domain types: single source of truth for the CRM entities.
 // These mirror the Firestore collection shapes (see PLAN.md §3).
 
+import type { AdminFeatureKey } from "@/lib/admin-features";
+
 export type ISODate = string;
 
 export type Role =
@@ -77,6 +79,8 @@ export interface User {
   roleId: Role;
   departmentId?: string;
   managerId?: string;
+  /** Denormalized chain of manager user ids (for Firestore read rules). Maintained on hierarchy edits. */
+  managerAncestorIds?: string[];
   title?: string;
   /** Workspace-level super admin (can manage users alongside director / founder). */
   isSuperAdmin?: boolean;
@@ -96,6 +100,11 @@ export interface User {
     extraInstructions?: string;
     saveAnalysisToTimeline?: boolean;
   };
+  /**
+   * Extra admin capabilities without raising `roleId`.
+   * Managed by directors / org admins via server API only.
+   */
+  featureGrants?: AdminFeatureKey[];
 }
 
 /** SaaS customer (tenant). Managed via platform admin + Admin SDK + tenant owner. */
@@ -649,4 +658,64 @@ export interface WorkspaceChatReadState {
   organizationId: string;
   userId: string;
   channels: Record<string, ISODate>;
+}
+
+/** RSS feed source platform (preset keys like `reddit`/`x`/`linkedin` or custom). */
+export type ScraperPlatform = string;
+
+/** Intent bucket for scraped posts (preset keys like `hiring`/`problem` or custom). */
+export type ScraperCategory = string;
+
+/** Admin-configured RSS feed (`scraperFeeds`). */
+export interface ScraperFeed {
+  id: string;
+  organizationId: string;
+  name: string;
+  platform: ScraperPlatform;
+  category: ScraperCategory;
+  feedUrl: string;
+  enabled: boolean;
+  /** Minutes between scheduled runs (default 60). */
+  runIntervalMinutes: number;
+  lastRunAt?: ISODate;
+  lastSuccessAt?: ISODate;
+  lastError?: string;
+  lastNewCount?: number;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+  createdByUid?: string;
+}
+
+export type ScraperRawItemStatus = "available" | "promoted" | "dismissed";
+
+/** Staging row from RSS ingest (`scraperRawItems`); unpromoted rows expire after 7 days. */
+export interface ScraperRawItem {
+  id: string;
+  organizationId: string;
+  feedId: string;
+  feedName: string;
+  platform: ScraperPlatform;
+  category: ScraperCategory;
+  /** Stable dedupe key (`guid` or canonical link). */
+  dedupeKey: string;
+  guid?: string;
+  link: string;
+  title: string;
+  content: string;
+  contentSnippet?: string;
+  creator?: string;
+  dcCreator?: string;
+  pubDate?: string;
+  isoDate?: ISODate;
+  publishedAt: ISODate;
+  status: ScraperRawItemStatus;
+  promotedToLeadId?: string;
+  promotedAt?: ISODate;
+  promotedByUserId?: string;
+  dismissedAt?: ISODate;
+  dismissedByUserId?: string;
+  /** When `status === available`, deleted after this time. */
+  expiresAt: ISODate;
+  createdAt: ISODate;
+  updatedAt: ISODate;
 }

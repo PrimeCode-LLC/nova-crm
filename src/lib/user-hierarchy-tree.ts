@@ -1,6 +1,30 @@
 import type { User } from "@/lib/types";
 import { collectDescendantUserIds } from "@/lib/workspace-hierarchy";
 
+/** All manager user IDs above `userId` in the org chart (direct manager first). */
+export function computeManagerAncestorIds(
+  userId: string,
+  users: readonly User[],
+): string[] {
+  const byId = new Map(users.map((u) => [u.id, u]));
+  const ancestors: string[] = [];
+  const seen = new Set<string>();
+  let mid = byId.get(userId)?.managerId;
+  while (mid && !seen.has(mid)) {
+    seen.add(mid);
+    ancestors.push(mid);
+    mid = byId.get(mid)?.managerId;
+  }
+  return ancestors;
+}
+
+/** Recompute `managerAncestorIds` for every user in the roster (after hierarchy edits). */
+export function buildOrgManagerAncestorIdsMap(
+  users: readonly User[],
+): Map<string, string[]> {
+  return new Map(users.map((u) => [u.id, computeManagerAncestorIds(u.id, users)]));
+}
+
 export type HierarchyNode = {
   user: User;
   children: HierarchyNode[];

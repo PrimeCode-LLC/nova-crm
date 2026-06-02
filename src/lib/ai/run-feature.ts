@@ -92,6 +92,7 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
       system: prompt.systemPrompt,
       prompt: userPrompt,
       schema: input.schema,
+      maxRetries: 0,
     });
 
     await logUsage({
@@ -134,6 +135,8 @@ export async function runAiTextFeature(input: {
   roleId?: Role;
   feature: AiFeatureKey;
   promptVars: Record<string, string>;
+  /** When set, used instead of interpolating the org prompt template (e.g. email improve mode). */
+  userPromptOverride?: string;
   filterHash?: string;
   leadId?: string;
 }): Promise<string> {
@@ -144,7 +147,8 @@ export async function runAiTextFeature(input: {
 
   const { provider, model } = resolveFeatureModel(settings, input.feature);
   const prompt = await getAiPromptServer(input.organizationId, input.feature);
-  const userPrompt = interpolatePrompt(prompt.userPromptTemplate, input.promptVars);
+  const userPrompt =
+    input.userPromptOverride ?? interpolatePrompt(prompt.userPromptTemplate, input.promptVars);
 
   const started = Date.now();
   try {
@@ -158,6 +162,7 @@ export async function runAiTextFeature(input: {
       model: languageModel,
       system: prompt.systemPrompt,
       prompt: userPrompt,
+      maxRetries: 0,
     });
 
     await logUsage({

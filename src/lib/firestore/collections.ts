@@ -22,6 +22,10 @@ export const COLLECTIONS = {
   /** Workspace-defined labels for leads, deals, accounts, contacts. */
   labels: "labels",
   ingestQueue: "ingestQueue",
+  /** RSS feed configs for social scraper (tenant-scoped). */
+  scraperFeeds: "scraperFeeds",
+  /** 7-day staging pool before promote to prospect/lead. */
+  scraperRawItems: "scraperRawItems",
   auditLog: "auditLog",
   workspaceChatChannels: "workspaceChatChannels",
   workspaceChatMessages: "workspaceChatMessages",
@@ -48,6 +52,8 @@ export const ORG_SUBCOLLECTIONS = {
   aiCache: "aiCache",
   /** Saved dashboard AI brief generations (trimmed to last N per org). */
   aiBriefHistory: "aiBriefHistory",
+  /** Opportunity fit check scans (paste → match analysis). */
+  opportunityScans: "opportunityScans",
   /** Encrypted third-party integration credentials (Instantly, etc.). */
   integrationSecrets: "integrationSecrets",
 } as const;

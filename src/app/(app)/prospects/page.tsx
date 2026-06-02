@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Bookmark, Download, Kanban, Upload, ChevronDown, Target } from "lucide-react";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
@@ -17,8 +18,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
+import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
 
 function ProspectsPageInner() {
+  const searchParams = useSearchParams();
+  const ownerScope = ownerScopeFromQueryParam(searchParams.get("owner"));
   const { leads, isDemo } = useWorkspace();
   const { openNewProspectForm } = useOpenQuickAdd();
   const tableRef = React.useRef<LeadsTableRef>(null);
@@ -61,6 +65,16 @@ function ProspectsPageInner() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/prospects?owner=me">
+                  <Target className="h-3.5 w-3.5" /> My prospects
+                </Link>
+              }
+            />
             <Button
               variant="outline"
               size="sm"
@@ -121,6 +135,7 @@ function ProspectsPageInner() {
             initialIntakeScope="prospect"
             lockedIntakeScope="prospect"
             linkFromKey="prospects"
+            initialOwnerScope={ownerScope}
           />
         )}
       </PageBody>

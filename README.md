@@ -92,6 +92,15 @@ The body MUST include `organizationId` so the lead is stamped to the right tenan
 
 Writes a tenant-stamped doc to **`ingestQueue`** via Admin SDK (clients cannot write this collection).
 
+## Social RSS scrapers (replaces n8n + Google Sheets)
+
+- **Admin → Scrapers** (`/admin/scrapers`): manage rss.app feed URLs, seed ~46 default feeds from the legacy n8n workflow, run feeds manually.
+- **Intake pool** (`/intake`): team browses new posts (7-day retention), promotes to **prospect** (open queue or assign to self), or dismisses.
+- Promoted prospects use the existing **Claim** flow on `/prospects` when left in the open queue.
+- Scheduled ingest: set `CRON_SECRET` and deploy with `vercel.json` (hourly `GET /api/cron/scrapers/run` with `Authorization: Bearer $CRON_SECRET`), or call that URL from your scheduler.
+
+Deploy Firestore indexes after pulling: `npm run firebase:deploy:rules` (rules + indexes).
+
 ## Cloud Functions
 
 Located in `functions/`. Build:

@@ -8,7 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
-import { Loader2, Globe } from "lucide-react";
+import { Loader2, Globe, Eye, EyeOff } from "lucide-react";
 import {
   signInWithEmailAndPassword,
   GoogleAuthProvider,
@@ -71,6 +71,7 @@ function LoginForm() {
   const joinToken = searchParams.get("join") ?? undefined;
   const inviteToken = searchParams.get("invite") ?? undefined;
   const [loading, setLoading] = React.useState(false);
+  const [showPassword, setShowPassword] = React.useState(false);
   const resetBannerShown = React.useRef(false);
 
   React.useEffect(() => {
@@ -206,13 +207,30 @@ function LoginForm() {
                   </Link>
                 </div>
                 <FormControl>
-                  <Input
-                    type="password"
-                    placeholder="••••••••"
-                    autoComplete="current-password"
-                    className="h-9"
-                    {...field}
-                  />
+                  <div className="relative">
+                    <Input
+                      type={showPassword ? "text" : "password"}
+                      placeholder="••••••••"
+                      autoComplete="current-password"
+                      className="h-9 pr-10"
+                      {...field}
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="absolute right-0.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                      aria-label={showPassword ? "Hide password" : "Show password"}
+                      aria-pressed={showPassword}
+                      onClick={() => setShowPassword((v) => !v)}
+                    >
+                      {showPassword ? (
+                        <EyeOff className="h-4 w-4" />
+                      ) : (
+                        <Eye className="h-4 w-4" />
+                      )}
+                    </Button>
+                  </div>
                 </FormControl>
                 <FormMessage className="text-xs" />
               </FormItem>

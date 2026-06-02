@@ -1,3 +1,5 @@
+import type { FitCheckKnowledgeConfig } from "@/lib/ai/fit-check-knowledge-types";
+import type { KnowledgeSection } from "@/lib/ai/fit-check-knowledge-types";
 import type { Role } from "@/lib/types";
 
 export type AiProvider = "openai" | "anthropic" | "google";
@@ -7,6 +9,8 @@ export type AiFeatureKey =
   | "lead_analyze"
   | "followup_suggest"
   | "email_reply"
+  | "opportunity_fit"
+  | "opportunity_fit_discuss"
   | "rag_index";
 
 export type AiRagMode = "strict" | "reference" | "open";
@@ -34,6 +38,8 @@ export interface OrganizationAiSettings {
   features: Record<AiFeatureKey, AiFeatureConfig>;
   embeddingModel?: string;
   embeddingProvider?: AiProvider;
+  /** Layered Fit Check RAG: global + per-category libraries with connect toggles. */
+  fitCheckKnowledge?: FitCheckKnowledgeConfig;
   updatedAt?: string;
 }
 
@@ -62,6 +68,12 @@ export interface AiKnowledgeLibrary {
   lastIndexedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** System libraries (fit_check_global, fit_check_category, legacy fit_check_default). */
+  libraryKind?: string;
+  /** For fit_check_category libraries. */
+  fitCategory?: string;
+  seedSourceUrl?: string;
+  lastSeededAt?: string;
 }
 
 export interface AiKnowledgeDocument {
@@ -73,6 +85,7 @@ export interface AiKnowledgeDocument {
   sourceRef?: string;
   content: string;
   chunkCount: number;
+  knowledgeSection?: KnowledgeSection;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +152,14 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
       ragMode: "reference",
     },
     email_reply: {
+      enabled: true,
+      ragMode: "reference",
+    },
+    opportunity_fit: {
+      enabled: true,
+      ragMode: "strict",
+    },
+    opportunity_fit_discuss: {
       enabled: true,
       ragMode: "reference",
     },

@@ -93,11 +93,12 @@ export async function syncFirebaseAuthClaimsClient(user: User): Promise<void> {
     if (!expectedOrg) return;
     const token = await user.getIdTokenResult(false);
     const claims = readAppClaims(token.claims as Record<string, unknown>);
-    if (
-      claims.organizationId !== expectedOrg ||
-      (body.user?.orgRole && claims.orgRole !== body.user.orgRole)
-    ) {
-      await user.getIdToken(true);
+    const orgMismatch = claims.organizationId !== expectedOrg;
+    const roleMismatch = Boolean(
+      body.user?.orgRole && claims.orgRole !== body.user.orgRole,
+    );
+    if (orgMismatch || roleMismatch) {
+      await refreshServerSessionFromCurrentUser(user);
     }
   } catch {
     /* non-fatal */

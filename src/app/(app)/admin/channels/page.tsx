@@ -60,7 +60,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { roleAtLeast } from "@/lib/platform/org-role";
+import { userHasAdminFeature } from "@/lib/admin-feature-access";
 
 const CHANNEL_DESCRIPTIONS: Record<ChannelKey, string> = {
   cold_email: "Mass outbound email campaigns via Instantly. High volume, low personalization.",
@@ -89,7 +89,16 @@ export default function AdminChannelsPage() {
   );
   const isWorkspaceAdmin =
     isDemo ||
-    (userDoc?.orgRole !== undefined && roleAtLeast(userDoc.orgRole, "admin"));
+    userHasAdminFeature(
+      {
+        roleId: userDoc?.roleId ?? "salesperson",
+        isSuperAdmin: userDoc?.isSuperAdmin,
+        featureGrants: userDoc?.featureGrants,
+        orgRole: userDoc?.orgRole,
+      },
+      "channels",
+      userDoc?.orgRole,
+    );
 
   const autoMap = useChannelAdminStore((s) => s.autoMap);
   const setAuto = useChannelAdminStore((s) => s.setAuto);

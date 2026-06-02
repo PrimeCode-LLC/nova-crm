@@ -4,6 +4,7 @@ import {
   computeOpenPipelineMetrics,
 } from "@/lib/dashboard-analytics";
 import { CHANNEL_LIST } from "@/lib/constants";
+import { isLeadOrProspect } from "@/lib/email/lead-response-time";
 import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
 import type { ChannelKey, Deal, Followup, Lead, LeadPriority, LeadTask, User } from "@/lib/types";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
@@ -260,9 +261,11 @@ export function buildDashboardAiContext(input: {
       pipelineValue: pipeline.total,
       closedValue,
       wonDeals: won.length,
-      avgResponseMinutes:
-        leads.filter((l) => l.responseTimeMinutes != null).reduce((s, l) => s + (l.responseTimeMinutes ?? 0), 0) /
-        Math.max(1, leads.filter((l) => l.responseTimeMinutes != null).length),
+      avgResponseMinutes: (() => {
+        const withRt = leads.filter((l) => isLeadOrProspect(l) && l.responseTimeMinutes != null);
+        if (withRt.length === 0) return 0;
+        return withRt.reduce((s, l) => s + (l.responseTimeMinutes ?? 0), 0) / withRt.length;
+      })(),
     },
     stageDistribution: byStage,
     funnelSummary,

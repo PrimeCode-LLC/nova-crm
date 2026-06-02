@@ -31,7 +31,11 @@ import {
   type WorkspaceSnapshot,
   type WorkspaceLookup,
 } from "@/lib/workspace-dataset";
-import { applyLiveHierarchyScope } from "@/lib/workspace-hierarchy";
+import {
+  applyLiveHierarchyScope,
+  collectDescendantUserIds,
+  seesAllLeadsInTenant,
+} from "@/lib/workspace-hierarchy";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
@@ -118,6 +122,12 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addAccount: (account: Account) => Promise<void>;
     addContact: (contact: Contact) => Promise<void>;
     addLead: (lead: Lead) => Promise<void>;
+    /** Merge server-created CRM rows into the client cache without writing again (e.g. intake promote). */
+    stageCrmEntities: (payload: {
+      leads?: Lead[];
+      accounts?: Account[];
+      contacts?: Contact[];
+    }) => void;
     patchUser: (userId: string, patch: Partial<Omit<User, "id">>) => void;
     /** Session-backed (persists in tab until refresh / mode change). */
     sessionHydrated: boolean;
@@ -145,13 +155,15 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     patchAccount: (accountId: string, patch: Partial<Account>) => void;
     patchContact: (contactId: string, patch: Partial<Contact>) => void;
     /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
-    deleteLead: (leadId: string) => Promise<boolean>;
+    deleteLead: (leadId: string, options?: { quiet?: boolean }) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
     canDeleteLeads: boolean;
     /** Org role for the signed-in user (defaults to member when missing on the user row). */
     viewerOrgRole: OrgMemberRole;
-    /** Org owner or admin: may open another member’s linked inbox (read-only). */
+    /** May open another member’s linked inbox (read-only): admins or managers with reports. */
     canViewMemberMailboxes: boolean;
+    /** User ids whose mailboxes the viewer may open (empty when `canViewMemberMailboxes` is false). */
+    mailboxViewableUserIds: string[];
     updateLeadStage: (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => void;
     toggleLeadPin: (leadId: string) => void;
     isLeadPinned: (leadId: string) => boolean;
@@ -254,8 +266,20 @@ export function WorkspaceModeProvider({
   );
   const liveOrgId =
     mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
-  const narrowMemberCrm = userDoc?.orgRole === "member";
-  const liveFs = useLiveWorkspaceFirestore(liveOrgId, fbUser?.uid, narrowMemberCrm);
+  const viewerForMemberScope = React.useMemo((): User | null => {
+    if (!userDoc || !fbUser?.uid) return null;
+    return { ...userDoc, id: fbUser.uid } as User;
+  }, [fbUser?.uid, userDoc]);
+  /** Align Firestore queries with rules: narrow unless viewer sees the full tenant (directors / owner / admin / manager org roles). */
+  const narrowMemberCrm = viewerForMemberScope
+    ? !seesAllLeadsInTenant(viewerForMemberScope)
+    : userDoc?.orgRole === "member";
+  const liveFs = useLiveWorkspaceFirestore(
+    liveOrgId,
+    fbUser?.uid,
+    narrowMemberCrm,
+    viewerForMemberScope,
+  );
 
   const liveLeadsForPersistRef = React.useRef<Lead[]>([]);
   React.useEffect(() => {
@@ -508,6 +532,30 @@ export function WorkspaceModeProvider({
       setLeadsAdded((prev) => [...prev, lead]);
     },
     [mode, userDoc?.organizationId],
+  );
+
+  const stageCrmEntities = React.useCallback(
+    (payload: { leads?: Lead[]; accounts?: Account[]; contacts?: Contact[] }) => {
+      if (payload.accounts?.length) {
+        setAccountsAdded((prev) => {
+          const ids = new Set(prev.map((a) => a.id));
+          return [...prev, ...payload.accounts!.filter((a) => !ids.has(a.id))];
+        });
+      }
+      if (payload.contacts?.length) {
+        setContactsAdded((prev) => {
+          const ids = new Set(prev.map((c) => c.id));
+          return [...prev, ...payload.contacts!.filter((c) => !ids.has(c.id))];
+        });
+      }
+      if (payload.leads?.length) {
+        setLeadsAdded((prev) => {
+          const ids = new Set(prev.map((l) => l.id));
+          return [...prev, ...payload.leads!.filter((l) => !ids.has(l.id))];
+        });
+      }
+    },
+    [],
   );
 
   const patchUser = React.useCallback((userId: string, patch: Partial<Omit<User, "id">>) => {
@@ -1199,19 +1247,24 @@ export function WorkspaceModeProvider({
   );
 
   const deleteLead = React.useCallback(
-    async (leadId: string): Promise<boolean> => {
+    async (leadId: string, options?: { quiet?: boolean }): Promise<boolean> => {
+      const quiet = options?.quiet === true;
       const snap = snapshotRef.current;
       const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole;
       const allowed = role === "owner" || role === "admin";
       if (!allowed) {
-        toast.error("Only organization owners and admins can delete leads.");
+        if (!quiet) {
+          toast.error("Only organization owners and admins can delete leads.");
+        }
         return false;
       }
       const lead = snap.leads.find((l) => l.id === leadId);
       if (!lead) return false;
       const account = snap.accounts.find((a) => a.id === lead.accountId);
       if (!account) {
-        toast.error("Could not delete lead: account not found.");
+        if (!quiet) {
+          toast.error("Could not delete lead: account not found.");
+        }
         return false;
       }
 
@@ -1225,7 +1278,7 @@ export function WorkspaceModeProvider({
             accountId: account.id,
             accountLeadCount: account.leadCount,
           });
-          toast.success("Lead deleted");
+          if (!quiet) toast.success("Lead deleted");
           setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
           setSessionV2((s) => {
             if (s.deletedLeadIds.includes(leadId)) return s;
@@ -1244,12 +1297,12 @@ export function WorkspaceModeProvider({
           return true;
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not delete lead", { description: msg });
+          if (!quiet) toast.error("Could not delete lead", { description: msg });
           return false;
         }
       }
 
-      toast.success("Lead removed");
+      if (!quiet) toast.success("Lead removed");
       setLeadsAdded((prev) => prev.filter((l) => l.id !== leadId));
       setSessionV2((s) => {
         if (s.deletedLeadIds.includes(leadId)) return s;
@@ -1533,7 +1586,20 @@ export function WorkspaceModeProvider({
     const viewerRole: OrgMemberRole =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
     const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
-    const canViewMemberMailboxes = roleAtLeast(viewerRole, "admin");
+    const viewer =
+      snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId) ??
+      (userDoc && fbUser?.uid ? ({ ...userDoc, id: fbUser.uid } as User) : undefined);
+    const reportIds = viewer
+      ? collectDescendantUserIds(viewer.id, snapshotWithIdle.users)
+      : new Set<string>();
+    const canViewMemberMailboxes = roleAtLeast(viewerRole, "admin") || reportIds.size > 0;
+    const mailboxViewableUserIds = canViewMemberMailboxes
+      ? roleAtLeast(viewerRole, "admin")
+        ? snapshotWithIdle.users
+            .filter((u) => u.status === "active" && u.id && u.id !== snapshotWithIdle.currentUserId)
+            .map((u) => u.id)
+        : [...reportIds]
+      : [];
     return {
       ...snapshotWithIdle,
       ...lookup,
@@ -1556,6 +1622,7 @@ export function WorkspaceModeProvider({
       addAccount,
       addContact,
       addLead,
+      stageCrmEntities,
       patchUser,
       sessionHydrated,
       addFollowup,
@@ -1582,6 +1649,7 @@ export function WorkspaceModeProvider({
       canDeleteLeads,
       viewerOrgRole: viewerRole,
       canViewMemberMailboxes,
+      mailboxViewableUserIds,
       updateLeadStage,
       toggleLeadPin,
       isLeadPinned,
@@ -1598,6 +1666,7 @@ export function WorkspaceModeProvider({
     liveFs.error,
     userProfileLoadError,
     fbUser,
+    userDoc,
     setMode,
     setDemoPersona,
     addPermissionOverride,
@@ -1610,6 +1679,7 @@ export function WorkspaceModeProvider({
     addAccount,
     addContact,
     addLead,
+    stageCrmEntities,
     patchUser,
     sessionHydrated,
     addFollowup,

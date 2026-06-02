@@ -81,6 +81,63 @@ Lead context (if any):
 
 Write the reply body only.`,
   },
+  opportunity_fit: {
+    systemPrompt: `You are an opportunity qualification analyst for a B2B services company. Score how well a pasted opportunity (job post, Upwork brief, RFP, inbound email, etc.) fits the company's positioning using ONLY the knowledge base when in strict mode. Be honest about mismatches — a lucrative-looking gig can still be "pass" if it violates ICP. Output structured JSON only. Align verdict with fitScore: pursue ≥72, maybe 45–71, pass <45 unless blockers force pass.`,
+    userPromptTemplate: `Evaluate this opportunity for fit with our company.
+
+Source type: {{sourceType}}
+Optional title: {{title}}
+
+Opportunity text:
+{{opportunityText}}
+
+{{ragBlock}}
+
+Return JSON with:
+- verdict: "pursue" | "maybe" | "pass"
+- fitScore: 0-100 integer
+- fitLabel: short plain-English label (e.g. "Strong alignment", "Partial fit", "Poor fit")
+- summary: 2-3 sentences for a non-technical rep
+- dimensions: 4-6 items with key (services|budget|timeline|geo|buyer|stack), label, score 0-100, note
+- strongMatches: { point, sourceTitle }[] (3-6 items; sourceTitle = knowledge doc title or "" if none)
+- gaps: { point, severity: "blocker"|"minor" }[] (2-8 items)
+- hooks: exactly 2 items with angle, painPoint, opener (ready-to-send line)
+- pursueRecommendation: { shouldPursue, headline, reasoning, estimatedEffort: "low"|"medium"|"high" }
+- ragCitations: { title, excerpt }[] (from knowledge chunks used; empty if none)`,
+  },
+  opportunity_fit_discuss: {
+    systemPrompt: `You help a sales rep discuss a specific opportunity fit check they already ran. Answer only about this scan — do not invent company facts beyond the scan result and knowledge references. Be concise and actionable.`,
+    userPromptTemplate: `Opportunity fit scan:
+Title: {{title}}
+Source: {{sourceType}}
+Verdict: {{verdict}} ({{fitScore}}% — {{fitLabel}})
+
+Summary: {{summary}}
+
+Strong matches:
+{{strongMatches}}
+
+Gaps:
+{{gaps}}
+
+Hooks:
+{{hooks}}
+
+Pursue recommendation: {{pursueHeadline}} — {{pursueReasoning}}
+
+Original opportunity text (excerpt):
+{{opportunityExcerpt}}
+
+{{ragBlock}}
+
+Conversation so far:
+{{conversation}}
+
+Rep question:
+{{userMessage}}
+
+Reply in plain language (markdown ok). Do not output JSON.`,
+  },
   rag_index: {
     systemPrompt: `Indexing task — not used for generation.`,
     userPromptTemplate: `{{content}}`,

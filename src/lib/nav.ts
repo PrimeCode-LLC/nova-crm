@@ -25,11 +25,15 @@ import {
   UsersRound,
   Network,
   ScanSearch,
+  Rss,
   Sparkles,
+  ScrollText,
   type LucideIcon,
 } from "lucide-react";
 
-import type { Role } from "@/lib/types";
+import type { AdminFeatureKey } from "@/lib/admin-features";
+import { userHasAdminFeature, workspaceRoleMeetsMin } from "@/lib/admin-feature-access";
+import type { OrgMemberRole, Role } from "@/lib/types";
 
 export interface NavItem {
   href: string;
@@ -38,9 +42,13 @@ export interface NavItem {
   badge?: string;
   /**
    * Lowest CRM workspace role that may see this link (OrgMemberRole is separate).
-   * Omitted = visible to everyone who can open the app.
+   * Omitted = visible to everyone who can open the app unless `adminFeature` is set.
    */
   minWorkspaceRole?: Role;
+  /** When set, access also follows per-user grants (`User.featureGrants`). */
+  adminFeature?: AdminFeatureKey;
+  /** Visible if the user has any listed admin feature grant or role gate. */
+  adminFeatures?: AdminFeatureKey[];
   /** Only used for items under the Configuration section — drives sidebar clusters. */
   adminCluster?: AdminNavClusterId;
 }
@@ -69,6 +77,8 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Target },
       { href: "/prospects", label: "Prospects", icon: ScanSearch },
+      { href: "/intake", label: "Intake pool", icon: Rss },
+      { href: "/fit-check", label: "Fit Check", icon: Sparkles },
       { href: "/pipeline", label: "Pipeline", icon: Kanban },
       { href: "/accounts", label: "Companies", icon: Building2 },
       { href: "/contacts", label: "Contacts", icon: Contact2 },
@@ -82,6 +92,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Email outreach",
         icon: Mail,
         minWorkspaceRole: "team_lead",
+        adminFeature: "email_outreach",
       },
       { href: "/inbox", label: "Inbox", icon: Inbox },
       { href: "/notifications", label: "Notifications", icon: Bell },
@@ -96,20 +107,15 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Organization",
         icon: Building2,
         minWorkspaceRole: "manager",
+        adminFeature: "organization",
         adminCluster: "company",
       },
       {
-        href: "/admin/team",
-        label: "Team",
+        href: "/admin/people",
+        label: "People",
         icon: UsersRound,
         minWorkspaceRole: "manager",
-        adminCluster: "company",
-      },
-      {
-        href: "/admin/users",
-        label: "Users (demo)",
-        icon: Users,
-        minWorkspaceRole: "manager",
+        adminFeatures: ["team", "users"],
         adminCluster: "company",
       },
       {
@@ -117,6 +123,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Org hierarchy",
         icon: Network,
         minWorkspaceRole: "manager",
+        adminFeature: "hierarchy",
         adminCluster: "company",
       },
       {
@@ -124,6 +131,15 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Permissions",
         icon: Shield,
         minWorkspaceRole: "director",
+        adminFeature: "permissions",
+        adminCluster: "access",
+      },
+      {
+        href: "/admin/logs",
+        label: "Activity logs",
+        icon: ScrollText,
+        minWorkspaceRole: "director",
+        adminFeature: "activity_logs",
         adminCluster: "access",
       },
       {
@@ -131,12 +147,14 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Departments",
         icon: UserCog,
         minWorkspaceRole: "manager",
+        adminFeature: "departments",
         adminCluster: "company",
       },
       {
         href: "/admin/channels",
         label: "Channels",
         icon: Radio,
+        adminFeature: "channels",
         adminCluster: "access",
       },
       {
@@ -144,6 +162,7 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Profiles",
         icon: FileText,
         minWorkspaceRole: "team_lead",
+        adminFeature: "profiles",
         adminCluster: "access",
       },
       {
@@ -151,12 +170,14 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "AI & knowledge",
         icon: Sparkles,
         minWorkspaceRole: "director",
+        adminFeature: "ai_knowledge",
         adminCluster: "programs",
       },
       {
         href: "/admin/labels",
         label: "Labels",
         icon: Tag,
+        adminFeature: "labels",
         adminCluster: "programs",
       },
       {
@@ -164,6 +185,15 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Import",
         icon: UploadCloud,
         minWorkspaceRole: "manager",
+        adminFeature: "import",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/scrapers",
+        label: "Scrapers",
+        icon: Rss,
+        minWorkspaceRole: "manager",
+        adminFeature: "scrapers",
         adminCluster: "programs",
       },
       {
@@ -176,28 +206,33 @@ export const NAV_SECTIONS: NavSection[] = [
   },
 ];
 
-const WORKSPACE_ROLE_RANK: Record<Role, number> = {
-  director: 40,
-  manager: 30,
-  team_lead: 20,
-  salesperson: 10,
-  data_scraper: 10,
-  prospecting: 10,
-};
-
 export type NavAccessContext = {
   roleId: Role | undefined;
+  orgRole?: OrgMemberRole;
   isSuperAdmin: boolean;
+  featureGrants?: import("@/lib/types").User["featureGrants"];
   /** When true, do not hide elevated links while the user profile is still loading. */
   roleLoading?: boolean;
 };
 
 export function canAccessNavItem(item: NavItem, ctx: NavAccessContext): boolean {
+  if (ctx.roleLoading && ctx.roleId === undefined && !ctx.featureGrants?.length) {
+    return true;
+  }
+  const featureKeys =
+    item.adminFeatures?.length ? item.adminFeatures : item.adminFeature ? [item.adminFeature] : [];
+  if (featureKeys.length > 0) {
+    const user = {
+      roleId: ctx.roleId ?? "salesperson",
+      isSuperAdmin: ctx.isSuperAdmin,
+      featureGrants: ctx.featureGrants,
+      orgRole: ctx.orgRole,
+    };
+    return featureKeys.some((key) => userHasAdminFeature(user, key, ctx.orgRole));
+  }
   if (ctx.isSuperAdmin) return true;
   if (!item.minWorkspaceRole) return true;
-  if (ctx.roleLoading && ctx.roleId === undefined) return true;
-  const role = ctx.roleId ?? "salesperson";
-  return WORKSPACE_ROLE_RANK[role] >= WORKSPACE_ROLE_RANK[item.minWorkspaceRole];
+  return workspaceRoleMeetsMin(ctx.roleId, item.minWorkspaceRole);
 }
 
 export function getVisibleNavSections(ctx: NavAccessContext): NavSection[] {

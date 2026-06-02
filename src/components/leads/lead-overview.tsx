@@ -9,8 +9,16 @@ import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
+import { LeadSourceButton } from "@/components/leads/lead-source-button";
+import { getLeadScraperSource } from "@/lib/scrapers/lead-scraper-source";
+import {
+  getScraperCategoryLabel,
+  getScraperPlatformLabel,
+} from "@/lib/scrapers/labels";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
+import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
+import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -32,7 +40,10 @@ export function LeadOverview({
   outreachProfileFieldLabel?: string;
 }) {
   const ws = useWorkspace();
+  const emailResponseCtx = useLeadEmailResponseContext();
+  const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
+  const scraperSource = getLeadScraperSource(lead);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <Card className="lg:col-span-2">
@@ -78,6 +89,28 @@ export function LeadOverview({
             {lead.scraperId?.trim() ? (
               <Field label="Lead by (sourced by)">
                 <UserChip userId={lead.scraperId} size="sm" />
+              </Field>
+            ) : null}
+            {scraperSource ? (
+              <Field label="Intake source">
+                <div className="flex flex-col gap-2">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+                    {scraperSource.feedName ? (
+                      <span className="font-medium">{scraperSource.feedName}</span>
+                    ) : null}
+                    {scraperSource.platform ? (
+                      <span className="text-muted-foreground">
+                        {getScraperPlatformLabel(scraperSource.platform)}
+                      </span>
+                    ) : null}
+                    {scraperSource.category ? (
+                      <span className="text-muted-foreground">
+                        · {getScraperCategoryLabel(scraperSource.category)}
+                      </span>
+                    ) : null}
+                  </div>
+                  <LeadSourceButton lead={lead} variant="outline" size="sm" className="w-fit" />
+                </div>
               </Field>
             ) : null}
           </dl>
@@ -216,7 +249,7 @@ export function LeadOverview({
           <Metric label="Last activity" value={fmtRelative(lead.lastActivityAt)} />
           <Metric
             label="Response time"
-            value={lead.responseTimeMinutes ? `${lead.responseTimeMinutes}m` : "-"}
+            value={responseTimeMinutes != null ? `${responseTimeMinutes}m` : "-"}
           />
           <Metric label="Created" value={fmtRelative(lead.createdAt)} />
         </CardContent>

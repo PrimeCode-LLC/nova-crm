@@ -3,6 +3,15 @@ import type { ActivityCounterRow, ActivityRecord, Followup, Lead, LeadTask, User
 /** `Select` value prefix for filtering to a single `ownerId` (Firebase uid). */
 export const OWNER_SCOPE_PREFIX = "owner:";
 
+/** Map `?owner=` query values to LeadsTable owner-scope keys. */
+export function ownerScopeFromQueryParam(raw: string | null): string {
+  if (raw === "me") return "me";
+  if (raw === "open-queue") return "open-queue";
+  if (raw === "team") return "team";
+  if (raw === "unassigned") return "unassigned";
+  return "all-owners";
+}
+
 export type OwnerScopeDeps = {
   currentUserId: string;
   users: readonly User[];

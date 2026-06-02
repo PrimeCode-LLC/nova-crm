@@ -55,7 +55,6 @@ export function DashboardAiBrief({
   );
 
   const fetchGenerationRef = React.useRef(0);
-  const loadedFilterKeyRef = React.useRef<string | null>(null);
 
   const fetchBrief = React.useCallback(
     async (regenerate = false, requestFilterKey = filterKey) => {
@@ -79,12 +78,15 @@ export function DashboardAiBrief({
         if (generation !== fetchGenerationRef.current) return;
         if (!res.ok) {
           const msg = typeof data.error === "string" ? data.error : "Could not generate overview";
+          const code = typeof data.code === "string" ? data.code : "";
           if (res.status === 403) {
             setError(
               msg.includes("not enabled")
                 ? `${msg} Turn on Platform AI in Admin → AI & knowledge, add a provider key, then Regenerate.`
                 : msg,
             );
+          } else if (res.status === 402 || code === "provider_quota") {
+            setError(msg);
           } else {
             setError(msg);
           }
@@ -103,14 +105,6 @@ export function DashboardAiBrief({
     },
     [channelScope, ownerScope, timeRange, enabled, demoBundle, filterKey],
   );
-
-  React.useEffect(() => {
-    if (!enabled) return;
-    if (loadedFilterKeyRef.current === filterKey) return;
-    loadedFilterKeyRef.current = filterKey;
-    setBrief(null);
-    void fetchBrief(false, filterKey);
-  }, [enabled, filterKey, fetchBrief]);
 
   if (!enabled) return null;
 
@@ -146,7 +140,7 @@ export function DashboardAiBrief({
             className="shrink-0 gap-1.5"
           >
             {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-            Regenerate
+            {brief ? "Regenerate" : "Generate"}
           </Button>
         </div>
       </CardHeader>

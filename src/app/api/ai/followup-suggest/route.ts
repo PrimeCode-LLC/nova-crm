@@ -10,6 +10,7 @@ import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
 import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { recordAudit } from "@/lib/firestore/audit";
 import type { ChannelKey, Role } from "@/lib/types";
 
 const CHANNEL_VALUES = [
@@ -173,6 +174,15 @@ export async function POST(req: Request) {
       },
       schema: suggestSchema,
       leadId: parsed.data.leadId,
+    });
+    void recordAudit({
+      organizationId: orgId,
+      actorUid: uid,
+      event: "feature.followup_suggest",
+      meta: {
+        leadId: parsed.data.leadId,
+        itemCount: result.items.length,
+      },
     });
     return NextResponse.json({
       ...normalizeSuggestResult(result),

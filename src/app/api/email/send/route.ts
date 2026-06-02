@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
-import { formatSmtpError } from "@/lib/email/smtp-client-options";
-import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { parseOutboundAttachments } from "@/lib/email/outbound-attachments";
+import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 
 export async function POST(req: Request) {
   try {
@@ -60,33 +60,34 @@ export async function POST(req: Request) {
     const subject = String(b.subject ?? "").trim();
     const text = String(b.text ?? "");
     const html = String(b.html ?? "");
-
-    if (!host || !user || !from || !to) {
-      return NextResponse.json(
-        { ok: false, error: "SMTP host, user, from, and recipient are required." },
-        { status: 400 },
-      );
+    const parsedAttachments = parseOutboundAttachments(b.attachments);
+    if ("error" in parsedAttachments) {
+      return NextResponse.json({ ok: false, error: parsedAttachments.error }, { status: 400 });
     }
 
-    const fromHeader = displayName ? `"${displayName.replace(/"/g, "")}" <${from}>` : from;
+    const result = await sendOutboundMailServer({
+      organizationId: g.ctx.session.organizationId,
+      uid: dataOwnerUid,
+      mailboxId,
+      smtp: { host, port, secure, user, pass },
+      from,
+      displayName,
+      replyTo,
+      to,
+      cc,
+      subject,
+      text,
+      html,
+      attachments: parsedAttachments,
+    });
 
-    await runWithSmtpTransporter(
-      host,
-      { port, secure, user, pass },
-      async (transporter) =>
-        transporter.sendMail({
-          from: fromHeader,
-          to,
-          cc: cc || undefined,
-          subject: subject || "(no subject)",
-          text: text || undefined,
-          html: html || undefined,
-          replyTo: replyTo || undefined,
-        }),
-    );
+    if (!result.ok) {
+      return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: formatSmtpError(e) }, { status: 400 });
+    const error = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ ok: false, error }, { status: 400 });
   }
 }

@@ -1,12 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import type { AiKnowledgeLibrary, AiLibraryScope } from "@/lib/ai/types";
 
 export async function GET() {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   const db = getAdminDb();
@@ -34,7 +35,7 @@ const createSchema = z.object({
 });
 
 export async function POST(req: Request) {
-  const g = await guardTenantApi({ minRole: "admin" });
+  const g = await guardAdminFeature("ai_knowledge");
   if (!g.ok) return g.response;
 
   let json: unknown;

@@ -93,6 +93,16 @@ import {
   isWithinRange,
   type DateRange,
 } from "@/components/common/date-range-filter";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 /** Column filter token: leads with no outreach profile assigned. */
 const PROFILE_FILTER_NONE = "__none__";
@@ -256,6 +266,8 @@ export interface LeadsTableProps {
   lockedIntakeScope?: "all" | "prospect" | "sales_lead";
   /** Origin route for lead-detail back navigation (appended as `?from=…`). */
   linkFromKey?: "prospects" | "pipeline";
+  /** Initial owner filter (`me`, `all-owners`, `open-queue`, etc.). */
+  initialOwnerScope?: string;
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
@@ -268,6 +280,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     initialIntakeScope = "all",
     lockedIntakeScope,
     linkFromKey,
+    initialOwnerScope = "all-owners",
   },
   ref,
 ) {
@@ -295,6 +308,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     profiles,
     crmLabels,
     isDemo,
+    canDeleteLeads,
+    deleteLead,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
@@ -322,7 +337,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
     profileId: false,
   });
-  const [ownerScope, setOwnerScope] = React.useState("all-owners");
+  const [ownerScope, setOwnerScope] = React.useState(initialOwnerScope);
+  React.useEffect(() => {
+    setOwnerScope(initialOwnerScope);
+  }, [initialOwnerScope]);
   const [createdRange, setCreatedRange] = React.useState<DateRange | undefined>();
   const [activityRange, setActivityRange] = React.useState<DateRange | undefined>();
   const [intakeScope, setIntakeScope] = React.useState<"all" | "prospect" | "sales_lead">(
@@ -343,11 +361,62 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     setIntakeScope(initialIntakeScope);
   }, [initialIntakeScope, lockedIntakeScope]);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
+  const [archiveOpen, setArchiveOpen] = React.useState(false);
+  const [archiveLeadIds, setArchiveLeadIds] = React.useState<string[]>([]);
+  const [archiveBusy, setArchiveBusy] = React.useState(false);
 
   const openReassignForIds = React.useCallback((ids: string[]) => {
     setReassignLeadIds(ids);
     setReassignOpen(true);
   }, []);
+
+  const openArchiveForIds = React.useCallback(
+    (ids: string[]) => {
+      if (!ids.length) return;
+      if (isDemo) {
+        toast.info("Demo workspace", {
+          description:
+            ids.length === 1
+              ? "Archiving is disabled in sample data."
+              : "Bulk archive is disabled in sample data.",
+        });
+        return;
+      }
+      if (!canDeleteLeads) {
+        toast.error("Only organization owners and admins can archive leads.");
+        return;
+      }
+      setArchiveLeadIds(ids);
+      setArchiveOpen(true);
+    },
+    [isDemo, canDeleteLeads],
+  );
+
+  const confirmArchive = React.useCallback(async () => {
+    if (!archiveLeadIds.length) return;
+    setArchiveBusy(true);
+    let removed = 0;
+    for (const id of archiveLeadIds) {
+      if (await deleteLead(id, { quiet: true })) removed += 1;
+    }
+    setArchiveBusy(false);
+    if (removed > 0) {
+      const n = archiveLeadIds.length;
+      toast.success(
+        removed === 1 ? "Lead archived" : `Archived ${removed} lead${removed === 1 ? "" : "s"}`,
+        removed < n
+          ? { description: `${n - removed} could not be removed. Check permissions or try again.` }
+          : undefined,
+      );
+      setArchiveOpen(false);
+      setArchiveLeadIds([]);
+      setRowSelection({});
+    } else {
+      toast.error("Could not archive", {
+        description: "None of the selected leads could be removed. Try again or contact an admin.",
+      });
+    }
+  }, [archiveLeadIds, deleteLead]);
 
   React.useEffect(() => {
     setColumnFilters(mergeUrlColumnFilters(preset, initialChannels, initialStages));
@@ -741,13 +810,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 variant="destructive"
-                onClick={() =>
-                  toast.info(isDemo ? "Demo workspace" : "Not yet available", {
-                    description: isDemo
-                      ? "Archiving is disabled in sample data."
-                      : "Archive will be available once your workspace is connected.",
-                  })
-                }
+                onClick={(e) => {
+                  e.stopPropagation();
+                  openArchiveForIds([id]);
+                }}
               >
                 Archive
               </DropdownMenuItem>
@@ -758,7 +824,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, isDemo, getProfileById, crmLabels]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -858,6 +924,40 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         leadIds={campaignLeadIds}
         onSuccess={() => setRowSelection({})}
       />
+      <AlertDialog
+        open={archiveOpen}
+        onOpenChange={(o) => {
+          if (!archiveBusy) {
+            setArchiveOpen(o);
+            if (!o) setArchiveLeadIds([]);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {archiveLeadIds.length === 1 ? "Archive this lead?" : `Archive ${archiveLeadIds.length} leads?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {archiveLeadIds.length === 1
+                ? "This removes the lead from your workspace. Notes and activity for it will no longer appear."
+                : "These leads will be removed from your workspace. Notes and activity for them will no longer appear."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archiveBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={archiveBusy}
+              onClick={() => {
+                void confirmArchive();
+              }}
+            >
+              {archiveBusy ? "Archiving…" : archiveLeadIds.length === 1 ? "Archive" : "Archive all"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Toolbar */}
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
@@ -1197,13 +1297,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             variant="destructive"
             size="sm"
             type="button"
-            onClick={() =>
-              toast.info(isDemo ? "Demo workspace" : "Not yet available", {
-                description: isDemo
-                  ? "Bulk archive is disabled in sample data."
-                  : "Bulk archive will be available once your workspace is connected.",
-              })
-            }
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              openArchiveForIds(ids);
+            }}
           >
             <Trash2 className="h-3.5 w-3.5" /> Archive
           </Button>

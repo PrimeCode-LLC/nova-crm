@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   UserPlus,
   Mail,
@@ -13,12 +15,26 @@ import {
   Pencil,
   UserCheck,
   KeyRound,
+  Search,
+  X,
 } from "lucide-react";
-import Link from "next/link";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { UserChip } from "@/components/common/user-chip";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import {
+  FeatureGrantsEditor,
+  featureGrantsSummary,
+} from "@/components/admin/feature-grants-editor";
+import { Button } from "@/components/ui/button";
+import { ROLES } from "@/lib/constants";
+import { canManageOrgUsers } from "@/lib/can-manage-org-users";
+import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
+import type { AdminFeatureKey } from "@/lib/admin-features";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -32,13 +48,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
 import {
   Select,
   SelectContent,
@@ -60,6 +69,8 @@ import type {
   OrganizationInvite,
   OrganizationMember,
   OrgMemberRole,
+  Role,
+  User,
 } from "@/lib/types";
 
 type OrgSummary = {
@@ -87,6 +98,63 @@ const ROLE_RANK: Record<OrgMemberRole, number> = {
   member: 1,
 };
 
+const NONE = "__none__" as const;
+
+const CRM_STATUS_TONE: Record<User["status"], string> = {
+  active: "bg-success/10 text-success border-success/20",
+  inactive: "bg-muted text-muted-foreground border-transparent",
+  pip: "bg-warning/10 text-warning border-warning/20",
+};
+
+const CRM_STATUS_LABEL: Record<User["status"], string> = {
+  active: "Active",
+  inactive: "Inactive",
+  pip: "PIP",
+};
+
+const MEMBER_STATUS_TONE: Record<string, string> = {
+  active: "bg-success/10 text-success border-success/20",
+  disabled: "bg-destructive/10 text-destructive border-destructive/20",
+  invited: "bg-warning/10 text-warning border-warning/20",
+  pending: "bg-muted text-muted-foreground",
+};
+
+const INVITED_BY_SOURCE_LABELS: Record<string, string> = {
+  "owner-bootstrap": "Organization founder",
+  "platform-seed": "Platform onboarding",
+  "open-join-link": "Open join link",
+  migration: "Account migration",
+};
+
+function memberLabel(m: Pick<OrganizationMember, "displayName" | "email">): string {
+  return m.displayName?.trim() || m.email;
+}
+
+function memberInitials(name: string): string {
+  return name
+    .split(" ")
+    .map((n) => n[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+}
+
+function resolveInvitedBy(
+  invitedByUid: string,
+  members: OrganizationMember[],
+  getOwnerDisplayName: (uid: string) => string | undefined,
+): { label: string; personUid?: string } {
+  const raw = invitedByUid?.trim();
+  if (!raw) return { label: "—" };
+  const system = INVITED_BY_SOURCE_LABELS[raw];
+  if (system) return { label: system };
+  const member = members.find((m) => m.uid === raw);
+  if (member) return { label: memberLabel(member), personUid: raw };
+  const workspace = getOwnerDisplayName(raw);
+  if (workspace) return { label: workspace, personUid: raw };
+  return { label: "Unknown user" };
+}
+
 function randomTempPassword(): string {
   const alphabet =
     "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@%^&*";
@@ -100,7 +168,7 @@ function randomTempPassword(): string {
   return out;
 }
 
-export function TeamPageClient({
+function PeoplePageClientInner({
   currentUid,
   organization,
   role,
@@ -109,6 +177,9 @@ export function TeamPageClient({
   organization: OrgSummary;
   role: OrgMemberRole;
 }) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+
   const [members, setMembers] = React.useState<OrganizationMember[]>([]);
   const [invites, setInvites] = React.useState<OrganizationInvite[]>([]);
   const [loading, setLoading] = React.useState(true);
@@ -131,9 +202,106 @@ export function TeamPageClient({
   );
 
   const [editMember, setEditMember] = React.useState<OrganizationMember | null>(null);
+  const [editTab, setEditTab] = React.useState<"access" | "profile" | "admin">("access");
+  const [query, setQuery] = React.useState("");
+  const [workspaceRoleFilter, setWorkspaceRoleFilter] = React.useState("all");
+  const [crmRoleFilter, setCrmRoleFilter] = React.useState("all");
+
+  const [editDisplayName, setEditDisplayName] = React.useState("");
+  const [editEmail, setEditEmail] = React.useState("");
+  const [editTitle, setEditTitle] = React.useState("");
+  const [editCrmRole, setEditCrmRole] = React.useState<Role>("salesperson");
+  const [editDept, setEditDept] = React.useState<string>(NONE);
+  const [editManager, setEditManager] = React.useState<string>(NONE);
+  const [editCrmStatus, setEditCrmStatus] = React.useState<User["status"]>("active");
+  const [editFeatureGrants, setEditFeatureGrants] = React.useState<AdminFeatureKey[]>([]);
+  const [profileSaving, setProfileSaving] = React.useState(false);
+
+  const dismissedUrlPerson = React.useRef<string | null>(null);
+
+  const {
+    getOwnerDisplayName,
+    getUserById,
+    users: wsUsers,
+    departments,
+    currentUserId,
+    patchUser,
+    mode,
+    isDemo,
+  } = useWorkspace();
+
+  const viewer = getUserById(currentUserId);
+  const canManageCrm = canManageOrgUsers(viewer);
+  const canEditFeatureGrants = canManageFeatureGrants(viewer);
 
   const canManage = role === "owner" || role === "admin";
   const isOwner = role === "owner";
+
+  const urlPersonParam = searchParams.get("person") ?? searchParams.get("user");
+  const urlPersonId =
+    urlPersonParam && members.some((m) => m.uid === urlPersonParam)
+      ? urlPersonParam
+      : urlPersonParam && wsUsers.some((u) => u.id === urlPersonParam)
+        ? urlPersonParam
+        : null;
+
+  React.useEffect(() => {
+    if (!urlPersonId) dismissedUrlPerson.current = null;
+    else if (dismissedUrlPerson.current && dismissedUrlPerson.current !== urlPersonId) {
+      dismissedUrlPerson.current = null;
+    }
+  }, [urlPersonId]);
+
+  React.useEffect(() => {
+    if (!urlPersonId || dismissedUrlPerson.current === urlPersonId || editMember) return;
+    const member = members.find((m) => m.uid === urlPersonId);
+    if (member && member.status !== "pending") {
+      setEditMember(member);
+      setEditTab("profile");
+    }
+  }, [urlPersonId, members, editMember]);
+
+  function openMember(m: OrganizationMember, tab: "access" | "profile" | "admin" = "access") {
+    dismissedUrlPerson.current = null;
+    setEditTab(tab);
+    setEditMember(m);
+  }
+
+  function closeMemberDialog(open: boolean) {
+    if (!open) {
+      if (urlPersonId) dismissedUrlPerson.current = urlPersonId;
+      setEditMember(null);
+      if (searchParams.get("person") || searchParams.get("user")) {
+        router.replace("/admin/people", { scroll: false });
+      }
+    }
+  }
+
+  const crmUserForEdit = editMember ? getUserById(editMember.uid) : null;
+
+  React.useEffect(() => {
+    if (!editMember) return;
+    const u = getUserById(editMember.uid);
+    if (u) {
+      setEditDisplayName(u.displayName);
+      setEditEmail(u.email);
+      setEditTitle(u.title ?? "");
+      setEditCrmRole(u.roleId);
+      setEditDept(u.departmentId ?? NONE);
+      setEditManager(u.managerId ?? NONE);
+      setEditCrmStatus(u.status);
+      setEditFeatureGrants(u.featureGrants ?? []);
+    } else {
+      setEditDisplayName(editMember.displayName?.trim() || "");
+      setEditEmail(editMember.email);
+      setEditTitle("");
+      setEditCrmRole("salesperson");
+      setEditDept(NONE);
+      setEditManager(NONE);
+      setEditCrmStatus("active");
+      setEditFeatureGrants([]);
+    }
+  }, [editMember, getUserById]);
 
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -327,6 +495,80 @@ export function TeamPageClient({
     }
   }
 
+  async function handleSaveProfile() {
+    if (!editMember || !canManageCrm) return;
+    const email = editEmail.trim();
+    if (!editDisplayName.trim() || !email) {
+      toast.error("Name and email are required");
+      return;
+    }
+    setProfileSaving(true);
+    const patch: Partial<Omit<User, "id">> = {
+      displayName: editDisplayName.trim(),
+      email,
+      title: editTitle.trim() || undefined,
+      roleId: editCrmRole,
+      departmentId: editDept === NONE ? undefined : editDept,
+      managerId: editManager === NONE ? undefined : editManager,
+      status: editCrmStatus,
+      featureGrants: editFeatureGrants.length ? editFeatureGrants : undefined,
+    };
+
+    const writeGrantsLive =
+      canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured();
+    if (writeGrantsLive) {
+      const res = await fetch("/api/org/workspace-users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: editMember.uid,
+          featureGrants: editFeatureGrants,
+        }),
+      });
+      const data = (await res.json()) as { error?: unknown };
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string"
+            ? data.error
+            : JSON.stringify(data.error ?? "Failed to save feature access");
+        toast.error(msg);
+        setProfileSaving(false);
+        return;
+      }
+    }
+
+    patchUser(editMember.uid, patch);
+    setProfileSaving(false);
+    toast.success("Profile saved");
+  }
+
+  const activeMembers = members.filter((m) => m.status !== "pending");
+  const filteredMembers = activeMembers.filter((m) => {
+    const q = query.toLowerCase().trim();
+    const crm = getUserById(m.uid);
+    const matchQuery =
+      !q ||
+      memberLabel(m).toLowerCase().includes(q) ||
+      m.email.toLowerCase().includes(q);
+    const matchWorkspace =
+      workspaceRoleFilter === "all" || m.role === workspaceRoleFilter;
+    const matchCrm =
+      crmRoleFilter === "all" || (crm?.roleId ?? "") === crmRoleFilter;
+    return matchQuery && matchWorkspace && matchCrm;
+  });
+
+  const hasActiveFilters =
+    query.trim() !== "" ||
+    workspaceRoleFilter !== "all" ||
+    crmRoleFilter !== "all";
+
+  function clearFilters() {
+    setQuery("");
+    setWorkspaceRoleFilter("all");
+    setCrmRoleFilter("all");
+  }
+
+  const managerCandidates = wsUsers.filter((u) => u.id !== editMember?.uid);
   const pendingInvites = invites.filter((i) => i.status === "pending");
   const pendingRequests = members.filter((m) => m.status === "pending");
   const seatLabel =
@@ -337,11 +579,11 @@ export function TeamPageClient({
   return (
     <>
       <PageHeader
-        title="Team"
+        title="People"
         description={
           organization
-            ? `Manage members and invites for ${organization.name}.`
-            : "Manage members and invites."
+            ? `Who can access ${organization.name} and how they appear in the CRM — workspace access, roles, reporting lines, and admin tools.`
+            : "Workspace access, CRM profiles, invites, and admin permissions in one place."
         }
         actions={
           <div className="flex items-center gap-2">
@@ -414,7 +656,7 @@ export function TeamPageClient({
         <Tabs defaultValue="members" className="space-y-4">
           <TabsList>
             <TabsTrigger value="members">
-              Members ({members.filter((m) => m.status !== "pending").length})
+              People ({activeMembers.length})
             </TabsTrigger>
             <TabsTrigger value="requests">
               Pending requests ({pendingRequests.length})
@@ -424,28 +666,87 @@ export function TeamPageClient({
             </TabsTrigger>
           </TabsList>
 
-          <TabsContent value="members">
+          <TabsContent value="members" className="space-y-3">
             {loading ? (
               <div className="h-32 animate-pulse rounded-md border bg-muted/30" />
-            ) : members.filter((m) => m.status !== "pending").length === 0 ? (
-              <p className="text-sm text-muted-foreground">No active members yet.</p>
+            ) : activeMembers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No people in this workspace yet.</p>
             ) : (
+              <>
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="relative min-w-[200px] max-w-sm flex-1">
+                    <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                    <Input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      placeholder="Search people…"
+                      className="h-8 pl-8"
+                    />
+                  </div>
+                  <Select
+                    value={workspaceRoleFilter}
+                    onValueChange={(v) => setWorkspaceRoleFilter(v ?? "all")}
+                  >
+                    <SelectTrigger className="h-8 w-40">
+                      <SelectValue placeholder="Workspace access" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All workspace access</SelectItem>
+                      {ROLE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Select value={crmRoleFilter} onValueChange={(v) => setCrmRoleFilter(v ?? "all")}>
+                    <SelectTrigger className="h-8 w-36">
+                      <SelectValue placeholder="CRM role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All CRM roles</SelectItem>
+                      {Object.entries(ROLES).map(([k, v]) => (
+                        <SelectItem key={k} value={k}>
+                          {v.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {hasActiveFilters ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 gap-1 text-muted-foreground"
+                      onClick={clearFilters}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
               <div className="overflow-hidden rounded-md border">
+                <div className="overflow-x-auto scrollbar-thin">
                 <Table>
                   <TableHeader className="bg-muted/30">
                     <TableRow>
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
-                      <TableHead>Status</TableHead>
+                      <TableHead>Workspace access</TableHead>
+                      <TableHead>CRM role</TableHead>
+                      <TableHead>Department</TableHead>
+                      <TableHead>Account</TableHead>
+                      <TableHead>CRM status</TableHead>
                       <TableHead>Joined</TableHead>
                       {canManage && <TableHead className="text-right">Actions</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {members
-                      .filter((m) => m.status !== "pending")
-                      .map((m) => {
+                    {filteredMembers.map((m) => {
+                      const crm = getUserById(m.uid);
+                      const dept = crm?.departmentId
+                        ? departments.find((d) => d.id === crm.departmentId)
+                        : null;
                       const canTouchThisMember =
                         canManage &&
                         m.uid !== currentUid &&
@@ -496,6 +797,18 @@ export function TeamPageClient({
                               </Badge>
                             )}
                           </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {crm ? (
+                              <Badge variant="outline" className="text-[10px] font-medium">
+                                {ROLES[crm.roleId]?.label ?? crm.roleId}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-sm text-muted-foreground">
+                            {dept?.name ?? "—"}
+                          </TableCell>
                           <TableCell>
                             <Badge
                               variant="outline"
@@ -510,7 +823,19 @@ export function TeamPageClient({
                               {m.status}
                             </Badge>
                           </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">
+                          <TableCell>
+                            {crm ? (
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] capitalize ${CRM_STATUS_TONE[crm.status]}`}
+                              >
+                                {CRM_STATUS_LABEL[crm.status]}
+                              </Badge>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="text-xs text-muted-foreground whitespace-nowrap">
                             {fmtRelative(m.joinedAt)}
                           </TableCell>
                           {canManage && (
@@ -520,7 +845,7 @@ export function TeamPageClient({
                                   size="sm"
                                   variant="ghost"
                                   className="h-7 px-2"
-                                  onClick={() => setEditMember(m)}
+                                  onClick={() => openMember(m)}
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
                                   <span className="sr-only sm:not-sr-only sm:ml-1">View / edit</span>
@@ -577,7 +902,17 @@ export function TeamPageClient({
                     })}
                   </TableBody>
                 </Table>
+                </div>
               </div>
+                <p className="text-xs text-muted-foreground">
+                  Showing{" "}
+                  <span className="font-medium tabular-nums text-foreground">
+                    {filteredMembers.length}
+                  </span>{" "}
+                  of{" "}
+                  <span className="tabular-nums">{activeMembers.length}</span> people
+                </p>
+              </>
             )}
           </TabsContent>
 
@@ -649,7 +984,7 @@ export function TeamPageClient({
                   <TableHeader className="bg-muted/30">
                     <TableRow>
                       <TableHead>Email</TableHead>
-                      <TableHead>Role</TableHead>
+                      <TableHead>Workspace access</TableHead>
                       <TableHead>Sent</TableHead>
                       <TableHead>Expires</TableHead>
                       {canManage && <TableHead className="text-right">Actions</TableHead>}
@@ -818,7 +1153,7 @@ export function TeamPageClient({
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Role</Label>
+              <Label className="text-xs">Workspace access</Label>
               <Select
                 value={inviteRole}
                 onValueChange={(v) => setInviteRole(v as OrgMemberRole)}
@@ -891,109 +1226,399 @@ export function TeamPageClient({
         </DialogContent>
       </Dialog>
 
-      <Sheet open={editMember !== null} onOpenChange={(o) => !o && setEditMember(null)}>
-        <SheetContent className="sm:max-w-md overflow-y-auto">
-          {editMember && (
-            <>
-              <SheetHeader>
-                <SheetTitle>{editMember.displayName || editMember.email}</SheetTitle>
-                <SheetDescription>
-                  Workspace membership (owner / admin / manager / member). For CRM job roles and
-                  permissions, use Users.
-                </SheetDescription>
-              </SheetHeader>
-              <div className="grid gap-3 py-4 text-sm">
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Email</div>
-                  <div className="mt-0.5">{editMember.email}</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">User ID</div>
-                  <div className="mt-0.5 font-mono text-xs break-all">{editMember.uid}</div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Organization role
-                  </div>
-                  <div className="mt-1.5">
-                    {(() => {
-                      const canTouchThis =
-                        canManage &&
-                        editMember.uid !== currentUid &&
-                        (isOwner ||
-                          (ROLE_RANK[editMember.role] < ROLE_RANK[role] &&
-                            editMember.role !== "owner"));
-                      return canTouchThis ? (
-                        <Select
-                          value={editMember.role}
-                          onValueChange={(v) => {
-                            void patchMember(editMember.uid, {
-                              role: v as OrgMemberRole,
-                            }).then(() =>
-                              setEditMember((prev) =>
-                                prev && prev.uid === editMember.uid
-                                  ? { ...prev, role: v as OrgMemberRole }
-                                  : prev,
-                              ),
-                            );
-                          }}
-                        >
-                          <SelectTrigger className="h-9">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {ROLE_OPTIONS.filter((opt) => {
-                              if (opt.value === "owner" && !isOwner) return false;
-                              return true;
-                            }).map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      ) : (
-                        <Badge variant="outline" className="capitalize">
-                          {editMember.role}
+      <Dialog open={editMember !== null} onOpenChange={closeMemberDialog}>
+        <DialogContent className="flex max-h-[min(90vh,720px)] w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+          {editMember && (() => {
+            const displayName = memberLabel(editMember);
+            const invitedBy = resolveInvitedBy(
+              editMember.invitedByUid,
+              members,
+              getOwnerDisplayName,
+            );
+            const crmUser = crmUserForEdit;
+            const canTouchAccess =
+              canManage &&
+              editMember.uid !== currentUid &&
+              (isOwner ||
+                (ROLE_RANK[editMember.role] < ROLE_RANK[role] &&
+                  editMember.role !== "owner"));
+
+            return (
+              <>
+                <DialogHeader className="space-y-0 border-b px-4 pb-3 pt-4 text-left">
+                  <div className="flex items-start gap-3 pr-8">
+                    <Avatar className="h-10 w-10 shrink-0 rounded-md">
+                      <AvatarFallback className="rounded-md bg-primary/15 text-primary text-sm font-semibold">
+                        {memberInitials(displayName)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 flex-1">
+                      <DialogTitle className="text-base leading-snug">{displayName}</DialogTitle>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {editMember.email}
+                      </p>
+                      {editMember.uid === currentUid ? (
+                        <Badge variant="outline" className="mt-2 text-[10px]">
+                          You
                         </Badge>
-                      );
-                    })()}
+                      ) : null}
+                    </div>
                   </div>
+                </DialogHeader>
+
+                <Tabs
+                  value={editTab}
+                  onValueChange={(v) =>
+                    setEditTab((v as "access" | "profile" | "admin") ?? "access")
+                  }
+                  className="flex min-h-0 flex-1 flex-col overflow-hidden px-4"
+                >
+                  <TabsList className="mx-0 mt-3 w-full shrink-0">
+                    <TabsTrigger value="access" className="flex-1 text-xs">
+                      Access
+                    </TabsTrigger>
+                    <TabsTrigger value="profile" className="flex-1 text-xs">
+                      CRM profile
+                    </TabsTrigger>
+                    {canEditFeatureGrants ? (
+                      <TabsTrigger value="admin" className="flex-1 text-xs">
+                        Admin tools
+                      </TabsTrigger>
+                    ) : null}
+                  </TabsList>
+
+                  <TabsContent
+                    value="access"
+                    className="mt-0 flex-1 space-y-4 overflow-y-auto py-4 text-sm"
+                  >
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Controls sign-in, billing seats, and who can manage workspace settings.
+                    </p>
+                    <dl className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="shrink-0 text-muted-foreground">Workspace access</dt>
+                        <dd className="min-w-0 text-right">
+                          {canTouchAccess ? (
+                            <Select
+                              value={editMember.role}
+                              onValueChange={(v) => {
+                                void patchMember(editMember.uid, {
+                                  role: v as OrgMemberRole,
+                                }).then(() =>
+                                  setEditMember((prev) =>
+                                    prev && prev.uid === editMember.uid
+                                      ? { ...prev, role: v as OrgMemberRole }
+                                      : prev,
+                                  ),
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-8 w-[140px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ROLE_OPTIONS.filter((opt) => {
+                                  if (opt.value === "owner" && !isOwner) return false;
+                                  if (opt.value === "admin" && !isOwner) return false;
+                                  return true;
+                                }).map((opt) => (
+                                  <SelectItem key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <Badge variant="outline" className="capitalize">
+                              {ROLE_OPTIONS.find((o) => o.value === editMember.role)?.label ??
+                                editMember.role}
+                            </Badge>
+                          )}
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-muted-foreground">Account status</dt>
+                        <dd>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "capitalize",
+                              MEMBER_STATUS_TONE[editMember.status] ?? "",
+                            )}
+                          >
+                            {editMember.status}
+                          </Badge>
+                        </dd>
+                      </div>
+                      <div className="flex items-center justify-between gap-4">
+                        <dt className="text-muted-foreground">Joined</dt>
+                        <dd className="text-muted-foreground">{fmtRelative(editMember.joinedAt)}</dd>
+                      </div>
+                      <div className="flex items-start justify-between gap-4">
+                        <dt className="shrink-0 text-muted-foreground">Invited by</dt>
+                        <dd className="min-w-0 text-right">
+                          {invitedBy.personUid ? (
+                            <UserChip
+                              userId={invitedBy.personUid}
+                              size="xs"
+                              className="inline-flex justify-end"
+                              profileHref={`/admin/people?person=${encodeURIComponent(invitedBy.personUid)}`}
+                            />
+                          ) : (
+                            <span>{invitedBy.label}</span>
+                          )}
+                        </dd>
+                      </div>
+                    </dl>
+                    {canTouchAccess ? (
+                      <div className="flex flex-wrap gap-2 border-t pt-4">
+                        {editMember.status !== "disabled" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void patchMember(editMember.uid, { status: "disabled" })}
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            Disable account
+                          </Button>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => void patchMember(editMember.uid, { status: "active" })}
+                          >
+                            <RefreshCw className="h-3.5 w-3.5" />
+                            Re-enable account
+                          </Button>
+                        )}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => void removeMember(editMember)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remove from workspace
+                        </Button>
+                      </div>
+                    ) : null}
+                  </TabsContent>
+
+                  <TabsContent
+                    value="profile"
+                    className="mt-0 flex-1 space-y-3 overflow-y-auto py-4"
+                  >
+                    {!crmUser && !canManageCrm ? (
+                      <p className="text-sm text-muted-foreground">
+                        No CRM profile yet. An admin can set roles after they join.
+                      </p>
+                    ) : (
+                      <div className="space-y-3 pr-1">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Display name</Label>
+                          <Input
+                            className="h-9"
+                            value={editDisplayName}
+                            onChange={(e) => setEditDisplayName(e.target.value)}
+                            disabled={!canManageCrm}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Email</Label>
+                          <Input
+                            type="email"
+                            className="h-9"
+                            value={editEmail}
+                            onChange={(e) => setEditEmail(e.target.value)}
+                            disabled={!canManageCrm}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Job title</Label>
+                          <Input
+                            className="h-9"
+                            placeholder="e.g. Senior SDR"
+                            value={editTitle}
+                            onChange={(e) => setEditTitle(e.target.value)}
+                            disabled={!canManageCrm}
+                          />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">CRM role</Label>
+                          <Select
+                            value={editCrmRole}
+                            onValueChange={(v) => setEditCrmRole((v as Role) ?? "salesperson")}
+                            disabled={!canManageCrm}
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue>{ROLES[editCrmRole]?.label ?? undefined}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {Object.entries(ROLES).map(([k, v]) => (
+                                <SelectItem key={k} value={k}>
+                                  {v.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Department</Label>
+                          <Select
+                            value={editDept}
+                            onValueChange={(v) => setEditDept(v ?? NONE)}
+                            disabled={!canManageCrm}
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue placeholder="None">
+                                {editDept === NONE
+                                  ? "None"
+                                  : selectTriggerLabelByIdName(editDept, departments) ?? "Department"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NONE}>None</SelectItem>
+                              {departments.map((d) => (
+                                <SelectItem key={d.id} value={d.id}>
+                                  {d.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Reports to</Label>
+                          <Select
+                            value={editManager}
+                            onValueChange={(v) => setEditManager(v ?? NONE)}
+                            disabled={!canManageCrm}
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue placeholder="None">
+                                {editManager === NONE
+                                  ? "None"
+                                  : managerCandidates.find((m) => m.id === editManager)
+                                      ?.displayName ?? "Manager"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value={NONE}>None</SelectItem>
+                              {managerCandidates.map((m) => (
+                                <SelectItem key={m.id} value={m.id}>
+                                  {m.displayName}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">CRM status</Label>
+                          <Select
+                            value={editCrmStatus}
+                            onValueChange={(v) =>
+                              setEditCrmStatus((v as User["status"]) ?? "active")
+                            }
+                            disabled={!canManageCrm}
+                          >
+                            <SelectTrigger className="h-9">
+                              <SelectValue>{CRM_STATUS_LABEL[editCrmStatus]}</SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="active">Active</SelectItem>
+                              <SelectItem value="inactive">Inactive</SelectItem>
+                              <SelectItem value="pip">PIP</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        {crmUser ? (
+                          <p className="text-[11px] text-muted-foreground">
+                            Extra admin tools: {featureGrantsSummary(crmUser)}
+                          </p>
+                        ) : null}
+                      </div>
+                    )}
+                    {canManageCrm ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="w-full"
+                        disabled={profileSaving}
+                        onClick={() => void handleSaveProfile()}
+                      >
+                        {profileSaving ? "Saving…" : "Save CRM profile"}
+                      </Button>
+                    ) : null}
+                  </TabsContent>
+
+                  {canEditFeatureGrants ? (
+                    <TabsContent
+                      value="admin"
+                      className="mt-0 flex-1 space-y-3 overflow-y-auto py-4"
+                    >
+                      {crmUser ? (
+                        <>
+                          <FeatureGrantsEditor
+                            user={crmUser}
+                            value={editFeatureGrants}
+                            onChange={setEditFeatureGrants}
+                            disabled={profileSaving}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="w-full"
+                            disabled={profileSaving}
+                            onClick={() => void handleSaveProfile()}
+                          >
+                            {profileSaving ? "Saving…" : "Save admin access"}
+                          </Button>
+                        </>
+                      ) : (
+                        <p className="text-sm text-muted-foreground">
+                          Save a CRM profile first, then you can grant admin tools here.
+                        </p>
+                      )}
+                    </TabsContent>
+                  ) : null}
+                </Tabs>
+
+                <div className="shrink-0 border-t px-4 py-3">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 w-full justify-center text-xs text-muted-foreground"
+                    onClick={() => {
+                      void navigator.clipboard.writeText(editMember.uid);
+                      toast.success("User ID copied");
+                    }}
+                  >
+                    <Copy className="mr-1.5 h-3.5 w-3.5" />
+                    Copy user ID
+                  </Button>
                 </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Status</div>
-                  <div className="mt-1">
-                    <Badge variant="outline" className="capitalize">
-                      {editMember.status}
-                    </Badge>
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">Joined</div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {fmtRelative(editMember.joinedAt)}
-                  </div>
-                </div>
-                <div>
-                  <div className="text-xs uppercase tracking-wide text-muted-foreground">
-                    Invited / source
-                  </div>
-                  <div className="mt-0.5 font-mono text-xs break-all">{editMember.invitedByUid}</div>
-                </div>
-              </div>
-              <Link
-                href="/admin/users"
-                className={cn(
-                  buttonVariants({ variant: "outline", size: "sm" }),
-                  "inline-flex w-fit",
-                )}
-              >
-                Open Users (CRM roles)
-              </Link>
-            </>
-          )}
-        </SheetContent>
-      </Sheet>
+              </>
+            );
+          })()}
+        </DialogContent>
+      </Dialog>
     </>
+  );
+}
+
+export function PeoplePageClient(
+  props: Parameters<typeof PeoplePageClientInner>[0],
+) {
+  return (
+    <Suspense
+      fallback={
+        <div className="h-48 animate-pulse rounded-md border bg-muted/30 m-6" />
+      }
+    >
+      <PeoplePageClientInner {...props} />
+    </Suspense>
   );
 }

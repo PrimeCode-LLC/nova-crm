@@ -27,6 +27,12 @@ import {
 } from "@/lib/dashboard-role-focus";
 import { DashboardPendingOverview } from "@/components/dashboard/dashboard-pending-overview";
 import { DashboardAiBrief } from "@/components/ai/dashboard-ai-brief";
+import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
+import {
+  computeAverageResponseTimeMinutes,
+  resolveLeadResponseTimeMinutes,
+  responseTimeModeForOwnerScope,
+} from "@/lib/email/lead-response-time";
 import {
   filterLeadsByDateRange,
   filterDealsByDateRange,
@@ -91,6 +97,7 @@ export default function DashboardPage() {
     setFollowupCompleted,
     setLeadTaskCompleted,
   } = useWorkspace();
+  const emailResponseCtx = useLeadEmailResponseContext();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
     () => mergeActivityCounters(activityCounters, localRollups),
@@ -188,9 +195,26 @@ export default function DashboardPage() {
 
   const totalOpen = scopedLeads.filter((l) => !["won", "lost"].includes(l.stage)).length;
   const idleCount = scopedLeads.filter((l) => l.isIdle).length;
-  const avgResponseMin =
-    scopedLeads.filter((l) => l.responseTimeMinutes != null).reduce((s, l) => s + (l.responseTimeMinutes ?? 0), 0) /
-    Math.max(1, scopedLeads.filter((l) => l.responseTimeMinutes != null).length);
+  const avgResponseMin = React.useMemo(
+    () =>
+      computeAverageResponseTimeMinutes(scopedLeads, emailResponseCtx, {
+        ownerScope,
+        currentUserId,
+      }),
+    [scopedLeads, emailResponseCtx, ownerScope, currentUserId],
+  );
+
+  const demoLeadsForBrief = React.useMemo(() => {
+    if (!isDemo) return undefined;
+    const mode = responseTimeModeForOwnerScope(ownerScope, currentUserId);
+    return leads.map((l) => {
+      const minutes = resolveLeadResponseTimeMinutes(l, emailResponseCtx, {
+        mode,
+        currentUserId,
+      });
+      return minutes != null ? { ...l, responseTimeMinutes: minutes } : l;
+    });
+  }, [isDemo, leads, emailResponseCtx, ownerScope, currentUserId]);
   const pipelineMetrics = React.useMemo(
     () => computeOpenPipelineMetrics(scopedLeads, scopedDeals),
     [scopedLeads, scopedDeals],
@@ -277,7 +301,10 @@ export default function DashboardPage() {
         },
         { label: "Won deals", value: String(scopedDeals.filter((d) => d.stage === "won").length) },
         { label: "Idle leads", value: String(idleCount) },
-        { label: "Avg response (minutes)", value: String(Math.round(avgResponseMin)) },
+        {
+          label: "Avg response (minutes)",
+          value: avgResponseMin != null ? String(Math.round(avgResponseMin)) : "—",
+        },
       ],
       "nova-dashboard-overview",
     );
@@ -492,8 +519,8 @@ export default function DashboardPage() {
               />
               <KpiCard
                 label="Avg response"
-                value={`${avgResponseMin.toFixed(0)}m`}
-                hint="Time to first outbound"
+                value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "—"}
+                hint="Email: created → first outbound (leads & prospects)"
                 deltaType="positive-down"
                 icon={Clock}
                 href="/activity"
@@ -521,7 +548,7 @@ export default function DashboardPage() {
                 demoBundle={
                   isDemo
                     ? {
-                        leads,
+                        leads: demoLeadsForBrief ?? leads,
                         deals,
                         followups,
                         leadTasks,

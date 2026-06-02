@@ -65,15 +65,23 @@ function RootDropBanner({ canEdit, activeDragId }: { canEdit: boolean; activeDra
     disabled: !canEdit,
   });
   if (!canEdit) return null;
+  const dragging = Boolean(activeDragId);
   return (
     <div
       ref={setNodeRef}
       className={cn(
-        "rounded-md border border-dashed px-2 py-1.5 text-center text-[11px] text-muted-foreground transition-colors sm:text-left",
-        isOver && activeDragId ? "border-primary bg-primary/10 text-foreground" : "border-border/80",
+        "min-h-10 rounded-md border border-dashed px-3 py-2 text-center text-[11px] text-muted-foreground transition-colors sm:text-left",
+        dragging && "border-primary/50 bg-primary/5",
+        isOver && activeDragId ? "border-primary bg-primary/15 text-foreground shadow-sm" : "border-border/80",
       )}
     >
-      Drop on <span className="font-medium text-foreground">Top level</span> to clear “Reports to”
+      {dragging ? (
+        <span className="font-medium text-foreground">Release here for top level</span>
+      ) : (
+        <>
+          Drop on <span className="font-medium text-foreground">Top level</span> to clear “Reports to”
+        </>
+      )}
     </div>
   );
 }
@@ -436,9 +444,10 @@ function HorizontalOrgBlock({
   );
 }
 
+/** Use `null` to clear manager or department; omit keys you are not changing. */
 export type HierarchyPersistPayload = {
-  managerId?: string | undefined;
-  departmentId?: string | undefined;
+  managerId?: string | null;
+  departmentId?: string | null;
   roleId?: Role;
 };
 
@@ -521,8 +530,8 @@ export function UserHierarchyPanel({
     setSaving(true);
     try {
       await onPersist(selected.id, {
-        managerId: editManager === NONE ? undefined : editManager,
-        departmentId: editDept === NONE ? undefined : editDept,
+        managerId: editManager === NONE ? null : editManager,
+        departmentId: editDept === NONE ? null : editDept,
         roleId: editRole,
       });
       setSelected(null);
@@ -542,7 +551,7 @@ export function UserHierarchyPanel({
       toast.error("That would create a reporting loop.");
       return;
     }
-    await onPersist(draggedId, { managerId: newManagerId });
+    await onPersist(draggedId, { managerId: newManagerId ?? null });
   }
 
   function handleDragStart(event: { active: { id: string | number } }) {

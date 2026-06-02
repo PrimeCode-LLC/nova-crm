@@ -15,9 +15,11 @@ import { EmailAccountSync } from "@/components/providers/email-account-sync";
 import { AlertSoundUnlock } from "@/components/providers/alert-sound-unlock";
 import { InboxBackgroundSync } from "@/components/providers/inbox-background-sync";
 import { FollowupPlanReplyWatcher } from "@/components/providers/followup-plan-reply-watcher";
+import { LeadResponseTimeSync } from "@/components/providers/lead-response-time-sync";
 import { PlatformNotificationsAlertSync } from "@/components/providers/platform-notifications-alert-sync";
 import { ChannelAdminSync } from "@/components/providers/channel-admin-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
+import { ActivityAuditTracker } from "@/components/providers/activity-audit-tracker";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
 import { DEMO_PERSONA_COOKIE, parseDemoPersonaId } from "@/lib/demo-persona";
 
@@ -65,9 +67,11 @@ export default async function AppLayout({
         <AlertSoundUnlock />
         <InboxBackgroundSync />
         <FollowupPlanReplyWatcher />
+        <LeadResponseTimeSync />
         <PlatformNotificationsAlertSync />
         <ChannelAdminSync />
         <QuickAddLauncherProvider>
+          <ActivityAuditTracker />
           <SidebarProvider>
             <AppSidebar showPlatformLink={showPlatformLink} />
             <SidebarInset>

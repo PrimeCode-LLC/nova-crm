@@ -38,12 +38,15 @@ import {
 import { formatUsd } from "@/lib/ai/pricing-table";
 import type { AiFeatureKey, AiProvider, OrganizationAiSettings } from "@/lib/ai/types";
 import { AI_PROMPT_DEFAULTS } from "@/lib/ai/prompt-defaults";
+import { FitKnowledgeAdminPanel } from "@/components/admin/fit-knowledge-admin-panel";
 
 const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "dashboard_brief", label: "Dashboard overview" },
   { key: "lead_analyze", label: "Lead analysis" },
   { key: "followup_suggest", label: "Follow-up suggestions" },
   { key: "email_reply", label: "Email reply" },
+  { key: "opportunity_fit", label: "Opportunity fit check" },
+  { key: "opportunity_fit_discuss", label: "Fit check — discuss" },
 ];
 
 export function AiAdminClient() {
@@ -67,7 +70,6 @@ export function AiAdminClient() {
   const [docTitle, setDocTitle] = React.useState("");
   const [docContent, setDocContent] = React.useState("");
   const [selectedLib, setSelectedLib] = React.useState("");
-
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -390,8 +392,12 @@ export function AiAdminClient() {
               </div>
             </TabsContent>
 
-            <TabsContent value="knowledge" className="space-y-4 max-w-2xl">
-              <Card>
+            <TabsContent value="knowledge" className="space-y-4">
+              <FitKnowledgeAdminPanel
+                aiEnabled={settings?.enabled ?? false}
+                onSeeded={() => void load()}
+              />
+              <Card className="max-w-2xl">
                 <CardHeader>
                   <CardTitle className="text-sm">Libraries</CardTitle>
                 </CardHeader>

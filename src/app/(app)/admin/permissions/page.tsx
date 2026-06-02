@@ -46,6 +46,7 @@ import type { Department, PermissionOverride, User } from "@/lib/types";
 import { Plus, Shield, Trash2, Info, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { FeatureGrantsPanel } from "@/components/admin/feature-grants-panel";
 
 const RESOURCES = ["leads", "deals", "accounts", "contacts", "activities"] as const;
 
@@ -285,14 +286,16 @@ export default function AdminPermissionsPage() {
     <>
       <PageHeader
         title="Permission Overrides"
-        description="Fine-tune access per user. Overrides stack on top of role and department defaults."
+        description="CRM record access overrides and per-user admin feature grants — without changing roles."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New override
           </Button>
         }
       />
-      <PageBody>
+      <PageBody className="space-y-6">
+        <FeatureGrantsPanel />
+
         {/* Explanation banner */}
         <div className="rounded-lg border bg-muted/20 p-4 flex gap-3">
           <Info className="h-4 w-4 text-primary mt-0.5 shrink-0" />
@@ -410,7 +413,7 @@ export default function AdminPermissionsPage() {
                         <UserChip
                           userId={po.userId}
                           size="xs"
-                          profileHref={`/admin/users?user=${encodeURIComponent(po.userId)}`}
+                          profileHref={`/admin/people?person=${encodeURIComponent(po.userId)}`}
                         />
                       </TableCell>
                       <TableCell className="py-2">
@@ -510,7 +513,7 @@ export default function AdminPermissionsPage() {
                         <UserChip
                           userId={po.createdBy}
                           size="xs"
-                          profileHref={`/admin/users?user=${encodeURIComponent(po.createdBy)}`}
+                          profileHref={`/admin/people?person=${encodeURIComponent(po.createdBy)}`}
                         />
                       </TableCell>
                       <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">

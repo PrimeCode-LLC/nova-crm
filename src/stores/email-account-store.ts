@@ -4,6 +4,7 @@ import {
   type MailDraft,
   type MailSent,
   type MailInbound,
+  type ScheduledEmail,
   defaultEmailMailboxSettings,
 } from "@/lib/email-account-types";
 import { buildDemoEmailSeed } from "@/lib/demo-email-seed";
@@ -35,6 +36,7 @@ export interface EmailAccountStore {
   trashInboundByMailbox: Record<string, MailInbound[]>;
   drafts: MailDraft[];
   sent: MailSent[];
+  scheduled: ScheduledEmail[];
   setEmailServerHydrated: (v: boolean) => void;
   setEmailServerSyncEnabled: (v: boolean) => void;
   hydrateFromServer: (payload: {
@@ -87,6 +89,10 @@ export interface EmailAccountStore {
   upsertDraft: (draft: Omit<MailDraft, "id" | "updatedAt"> & { id?: string }) => string;
   deleteDraft: (id: string) => void;
   addSent: (item: Omit<MailSent, "id" | "sentAt">) => string;
+  addScheduled: (item: Omit<ScheduledEmail, "id" | "createdAt" | "status">) => string;
+  cancelScheduled: (id: string) => void;
+  setScheduled: (items: ScheduledEmail[]) => void;
+  processDueScheduledLocal: () => void;
   linkMessageToLead: (messageId: string, leadId: string) => void;
   unlinkMessageToLead: (messageId: string) => void;
   clearLocalMail: () => void;
@@ -151,6 +157,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   trashInboundByMailbox: {},
   drafts: [],
   sent: [],
+  scheduled: [],
   setEmailServerHydrated: (v) => set({ emailServerHydrated: v }),
   setEmailServerSyncEnabled: (v) => set({ emailServerSyncEnabled: v }),
   hydrateFromServer: (payload) => {
@@ -483,6 +490,42 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     set({ sent: [{ ...item, id, sentAt }, ...get().sent] });
     return id;
   },
+  addScheduled: (item) => {
+    const id = `sch-${crypto.randomUUID()}`;
+    const createdAt = new Date().toISOString();
+    const row: ScheduledEmail = { ...item, id, createdAt, status: "pending" };
+    set({ scheduled: [row, ...get().scheduled] });
+    return id;
+  },
+  cancelScheduled: (id) => {
+    set({
+      scheduled: get().scheduled.map((s) =>
+        s.id === id && s.status === "pending" ? { ...s, status: "cancelled" as const } : s,
+      ),
+    });
+  },
+  setScheduled: (items) => set({ scheduled: items }),
+  processDueScheduledLocal: () => {
+    const now = Date.now();
+    const scheduled = get().scheduled;
+    let changed = false;
+    const next = scheduled.map((s) => {
+      if (s.status !== "pending") return s;
+      const due = new Date(s.scheduledAt).getTime();
+      if (Number.isNaN(due) || due > now) return s;
+      changed = true;
+      const sentAt = new Date().toISOString();
+      get().addSent({
+        mailboxId: s.mailboxId,
+        from: s.from,
+        to: s.to,
+        subject: s.subject,
+        body: s.body,
+      });
+      return { ...s, status: "sent" as const, sentAt };
+    });
+    if (changed) set({ scheduled: next });
+  },
   linkMessageToLead: (messageId, leadId) => {
     if (get().mailboxDataReadOnly) return;
     set((s) => ({
@@ -499,7 +542,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     });
     scheduleEmailMetaPersist(get);
   },
-  clearLocalMail: () => set({ drafts: [], sent: [], inboundByMailbox: {}, trashInboundByMailbox: {} }),
+  clearLocalMail: () => set({ drafts: [], sent: [], scheduled: [], inboundByMailbox: {}, trashInboundByMailbox: {} }),
   resetForDemoMode: () => {
     const seed = buildDemoEmailSeed();
     set({
@@ -511,6 +554,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       trashInboundByMailbox: {},
       drafts: seed.drafts,
       sent: seed.sent,
+      scheduled: [],
       mailViewAsUid: null,
       mailboxDataReadOnly: false,
     });

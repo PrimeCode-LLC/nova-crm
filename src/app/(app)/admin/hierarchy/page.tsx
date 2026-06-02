@@ -26,8 +26,8 @@ export default function AdminHierarchyPage() {
 
       const merged = {
         ...prev,
-        ...(patch.managerId !== undefined ? { managerId: patch.managerId } : {}),
-        ...(patch.departmentId !== undefined ? { departmentId: patch.departmentId } : {}),
+        ...("managerId" in patch ? { managerId: patch.managerId ?? undefined } : {}),
+        ...("departmentId" in patch ? { departmentId: patch.departmentId ?? undefined } : {}),
         ...(patch.roleId !== undefined ? { roleId: patch.roleId } : {}),
       };
       const nextUsers = users.map((u) => (u.id === userId ? merged : u));
@@ -41,8 +41,8 @@ export default function AdminHierarchyPage() {
       const writeFs = mode === "live" && isFirebaseWebConfigured();
       if (writeFs) {
         const body: Record<string, unknown> = { userId };
-        if (patch.managerId !== undefined) body.managerId = patch.managerId ?? null;
-        if (patch.departmentId !== undefined) body.departmentId = patch.departmentId ?? null;
+        if ("managerId" in patch) body.managerId = patch.managerId ?? null;
+        if ("departmentId" in patch) body.departmentId = patch.departmentId ?? null;
         if (userId !== currentUserId && patch.roleId !== undefined) {
           body.roleId = patch.roleId;
         }
@@ -67,8 +67,8 @@ export default function AdminHierarchyPage() {
       }
 
       const demoPatch: Partial<Omit<User, "id">> = {};
-      if (patch.managerId !== undefined) demoPatch.managerId = patch.managerId;
-      if (patch.departmentId !== undefined) demoPatch.departmentId = patch.departmentId;
+      if ("managerId" in patch) demoPatch.managerId = patch.managerId ?? undefined;
+      if ("departmentId" in patch) demoPatch.departmentId = patch.departmentId ?? undefined;
       if (patch.roleId !== undefined) demoPatch.roleId = patch.roleId;
       patchUser(userId, demoPatch);
       toast.success("Org chart updated (this tab)");
@@ -76,18 +76,34 @@ export default function AdminHierarchyPage() {
     [users, mode, patchUser, currentUserId],
   );
 
+  /** Keep `managerAncestorIds` in Firestore aligned with reporting lines (required for manager CRM + inbox access). */
+  React.useEffect(() => {
+    if (!canEdit || mode !== "live" || !isFirebaseWebConfigured()) return;
+    let cancelled = false;
+    void fetch("/api/org/repair-hierarchy", { method: "POST", credentials: "same-origin" })
+      .then((res) => {
+        if (!res.ok && !cancelled) {
+          console.warn("[hierarchy] repair-hierarchy failed", res.status);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [canEdit, mode]);
+
   return (
     <>
       <PageHeader
         title="Org hierarchy"
-        description="Vertical or horizontal chart, drag-and-drop reporting lines, and quick edits for department and CRM role."
+        description="Vertical or horizontal chart, drag-and-drop reporting lines, and quick edits for department and CRM role. People above someone in this tree can see that person’s leads, deals, and activity in the CRM."
         actions={
           <Link
-            href="/admin/users"
+            href="/admin/people"
             className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           >
             <Users className="h-3.5 w-3.5" />
-            Users table
+            People table
           </Link>
         }
       />

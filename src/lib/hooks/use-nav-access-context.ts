@@ -19,7 +19,9 @@ export function useNavAccessContext(): NavAccessContext {
 
   return {
     roleId: useMockPersona ? mockUser.roleId : userDoc?.roleId,
+    orgRole: useMockPersona ? mockUser.orgRole : userDoc?.orgRole,
     isSuperAdmin: !useMockPersona && Boolean(userDoc?.isSuperAdmin),
+    featureGrants: useMockPersona ? mockUser.featureGrants : userDoc?.featureGrants,
     roleLoading: !useMockPersona && userDocLoading && userDoc == null,
   };
 }

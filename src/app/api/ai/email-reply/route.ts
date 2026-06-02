@@ -11,7 +11,10 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { Lead, Role } from "@/lib/types";
 
 const bodySchema = z.object({
-  thread: z.string().min(1).max(50_000),
+  mode: z.enum(["reply", "improve"]).default("reply"),
+  thread: z.string().max(50_000).optional(),
+  draft: z.string().max(50_000).optional(),
+  subject: z.string().max(500).optional(),
   leadContext: z.string().max(20_000).optional(),
   leadId: z.string().optional(),
   channel: z.string().optional(),
@@ -37,6 +40,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
+  if (parsed.data.mode === "reply" && !parsed.data.thread?.trim()) {
+    return NextResponse.json({ error: "thread is required for reply mode" }, { status: 400 });
+  }
+  if (parsed.data.mode === "improve" && !parsed.data.draft?.trim()) {
+    return NextResponse.json({ error: "draft is required for improve mode" }, { status: 400 });
+  }
+
   const orgId = g.ctx.session.organizationId;
   const uid = g.ctx.session.uid;
   const userSnap = await getAdminDb()?.collection(COLLECTIONS.users).doc(uid).get();
@@ -48,9 +58,13 @@ export async function POST(req: Request) {
   }
 
   const feat = settings.features.email_reply;
+  const ragQuery =
+    parsed.data.mode === "improve"
+      ? (parsed.data.draft ?? "").slice(0, 500)
+      : (parsed.data.thread ?? "").slice(0, 500);
   const chunks = await retrieveRagChunksServer({
     organizationId: orgId,
-    query: parsed.data.thread.slice(0, 500),
+    query: ragQuery,
     libraryIds: feat.libraryIds,
     scope: {
       channel: parsed.data.channel,
@@ -65,6 +79,31 @@ export async function POST(req: Request) {
   );
 
   try {
+    const isImprove = parsed.data.mode === "improve";
+    const threadText = parsed.data.thread?.trim() ?? "";
+    const draftText = parsed.data.draft?.trim() ?? "";
+    const subjectLine = parsed.data.subject?.trim() || "(no subject)";
+
+    const userPromptOverride = isImprove
+      ? `Improve and polish the user's email draft. Preserve intent and factual claims from the draft. Do not invent facts.
+
+Tone: ${parsed.data.tone}
+Goal: ${parsed.data.goal}
+
+Subject: ${subjectLine}
+
+Draft to improve:
+${draftText}
+${threadText ? `\nThread context (for reference only):\n${threadText}` : ""}
+
+Lead context (if any):
+${parsed.data.leadContext ?? "(no lead linked)"}
+
+${ragBlock || "(none)"}
+
+Output only the improved email body text.`
+      : undefined;
+
     const body = await runAiTextFeature({
       organizationId: orgId,
       userId: uid,
@@ -74,10 +113,11 @@ export async function POST(req: Request) {
       promptVars: {
         tone: parsed.data.tone,
         goal: parsed.data.goal,
-        thread: parsed.data.thread,
+        thread: threadText || draftText,
         leadContext: parsed.data.leadContext ?? "(no lead linked)",
         ragBlock: ragBlock || "(none)",
       },
+      userPromptOverride,
       leadId: parsed.data.leadId,
     });
     return NextResponse.json({ body });
