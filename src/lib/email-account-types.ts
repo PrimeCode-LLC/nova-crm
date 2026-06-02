@@ -92,6 +92,35 @@ export interface MailSent {
   sentAt: string;
 }
 
+export type ScheduledEmailStatus = "pending" | "sent" | "failed" | "cancelled";
+
+export interface ScheduledEmailAttachment {
+  filename: string;
+  mimeType: string;
+  contentBase64: string;
+}
+
+/** Outbound email queued for future delivery (server-backed in live mode). */
+export interface ScheduledEmail {
+  id: string;
+  mailboxId: string;
+  from: string;
+  displayName?: string;
+  replyTo?: string;
+  to: string;
+  cc?: string;
+  subject: string;
+  body: string;
+  text?: string;
+  html?: string;
+  attachments?: ScheduledEmailAttachment[];
+  scheduledAt: string;
+  status: ScheduledEmailStatus;
+  createdAt: string;
+  sentAt?: string;
+  error?: string;
+}
+
 /** Message loaded from the mailbox via IMAP (server round-trip). */
 export interface MailInbound {
   id: string;

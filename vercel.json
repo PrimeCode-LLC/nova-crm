@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/scrapers/run",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/scheduled-emails/send",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { listAuditLogsServer } from "@/lib/firestore/audit";
+import { listAuditLogsFilteredServer } from "@/lib/firestore/audit";
 import {
-  AUDIT_EVENT_CATEGORY,
   categoryForAuditEvent,
   type AuditEventCategory,
 } from "@/lib/firestore/audit-events";
 import { listMembersServer } from "@/lib/platform/members-server";
+import { listMembersForDisplayServer, memberDisplayLabel } from "@/lib/platform/member-display";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 
@@ -29,43 +28,35 @@ export async function GET(req: Request) {
   const cursor = url.searchParams.get("cursor") ?? undefined;
   const actorUid = url.searchParams.get("actorUid") ?? undefined;
   const event = url.searchParams.get("event") ?? undefined;
-  const category = url.searchParams.get("category") ?? undefined;
+  const categoryParam = url.searchParams.get("category") ?? undefined;
+  const category =
+    categoryParam && CATEGORIES.has(categoryParam)
+      ? (categoryParam as AuditEventCategory)
+      : undefined;
 
   const orgId = g.ctx.session.organizationId;
-  let { items, nextCursor } = await listAuditLogsServer({
+  const { items, nextCursor } = await listAuditLogsFilteredServer({
     organizationId: orgId,
     limit: Number.isFinite(limit) ? limit : 50,
     cursor,
     actorUid: actorUid || undefined,
     eventPrefix:
       event && !event.includes("*") ? undefined : event?.replace(/\*$/, ""),
+    category,
+    event: event || undefined,
   });
 
-  if (event && !event.endsWith("*")) {
-    items = items.filter((row) => row.event === event);
-  } else if (event?.endsWith("*")) {
-    const prefix = event.slice(0, -1);
-    items = items.filter((row) => row.event.startsWith(prefix));
-  }
+  const [members, filterMembers] = await Promise.all([
+    listMembersServer(orgId),
+    listMembersForDisplayServer(orgId),
+  ]);
 
-  if (category && CATEGORIES.has(category)) {
-    const cat = category as AuditEventCategory;
-    items = items.filter((row) => categoryForAuditEvent(row.event) === cat);
-  }
-
-  const members = await listMembersServer(orgId);
-  const memberByUid = new Map<
-    string,
-    {
-      displayName: string;
-      email: string | null;
-      role?: import("@/lib/types").OrgMemberRole;
-    }
-  >(
+  const labelByUid = new Map(filterMembers.map((m) => [m.uid, m.label]));
+  const memberByUid = new Map(
     members.map((m) => [
       m.uid,
       {
-        displayName: m.displayName ?? m.email ?? m.uid,
+        displayName: labelByUid.get(m.uid) ?? memberDisplayLabel(m),
         email: m.email ?? null,
         role: m.role,
       },
@@ -88,9 +79,11 @@ export async function GET(req: Request) {
       if (!snap.exists) continue;
       const d = snap.data();
       memberByUid.set(snap.id, {
-        displayName: String(d?.name ?? d?.email ?? snap.id),
+        displayName: memberDisplayLabel(
+          { uid: snap.id, displayName: "", email: "" },
+          d,
+        ),
         email: (d?.email as string) ?? null,
-        role: undefined,
       });
     }
   }
@@ -110,5 +103,6 @@ export async function GET(req: Request) {
     items: enriched,
     nextCursor,
     categories: [...CATEGORIES],
+    filterMembers,
   });
 }

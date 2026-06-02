@@ -1,42 +1,10 @@
 import { NextResponse } from "next/server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
-import { formatSmtpError } from "@/lib/email/smtp-client-options";
-import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
-
-const MAX_OUTBOUND_ATTACHMENTS = 5;
-const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-
-type OutboundAttachment = { filename: string; content: Buffer; contentType: string };
-
-function parseOutboundAttachments(raw: unknown): OutboundAttachment[] | { error: string } {
-  if (raw == null) return [];
-  if (!Array.isArray(raw)) return { error: "attachments must be an array" };
-
-  const out: OutboundAttachment[] = [];
-  for (const item of raw.slice(0, MAX_OUTBOUND_ATTACHMENTS)) {
-    if (!item || typeof item !== "object") continue;
-    const rec = item as Record<string, unknown>;
-    const filename = String(rec.filename ?? "attachment").trim() || "attachment";
-    const contentBase64 = String(rec.contentBase64 ?? "").trim();
-    if (!contentBase64) continue;
-    let buf: Buffer;
-    try {
-      buf = Buffer.from(contentBase64, "base64");
-    } catch {
-      return { error: `Invalid attachment data for ${filename}` };
-    }
-    if (!buf.length) continue;
-    if (buf.length > MAX_ATTACHMENT_BYTES) {
-      return { error: `${filename} exceeds the 10 MB per-file limit` };
-    }
-    const contentType = String(rec.mimeType ?? rec.contentType ?? "application/octet-stream").trim();
-    out.push({ filename, content: buf, contentType: contentType || "application/octet-stream" });
-  }
-  return out;
-}
+import { parseOutboundAttachments } from "@/lib/email/outbound-attachments";
+import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 
 export async function POST(req: Request) {
   try {
@@ -97,40 +65,29 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: parsedAttachments.error }, { status: 400 });
     }
 
-    if (!host || !user || !from || !to) {
-      return NextResponse.json(
-        { ok: false, error: "SMTP host, user, from, and recipient are required." },
-        { status: 400 },
-      );
+    const result = await sendOutboundMailServer({
+      organizationId: g.ctx.session.organizationId,
+      uid: dataOwnerUid,
+      mailboxId,
+      smtp: { host, port, secure, user, pass },
+      from,
+      displayName,
+      replyTo,
+      to,
+      cc,
+      subject,
+      text,
+      html,
+      attachments: parsedAttachments,
+    });
+
+    if (!result.ok) {
+      return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
     }
-
-    const fromHeader = displayName ? `"${displayName.replace(/"/g, "")}" <${from}>` : from;
-
-    await runWithSmtpTransporter(
-      host,
-      { port, secure, user, pass },
-      async (transporter) =>
-        transporter.sendMail({
-          from: fromHeader,
-          to,
-          cc: cc || undefined,
-          subject: subject || "(no subject)",
-          text: text || undefined,
-          html: html || undefined,
-          replyTo: replyTo || undefined,
-          attachments:
-            parsedAttachments.length > 0
-              ? parsedAttachments.map((att) => ({
-                  filename: att.filename,
-                  content: att.content,
-                  contentType: att.contentType,
-                }))
-              : undefined,
-        }),
-    );
 
     return NextResponse.json({ ok: true });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: formatSmtpError(e) }, { status: 400 });
+    const error = e instanceof Error ? e.message : String(e);
+    return NextResponse.json({ ok: false, error }, { status: 400 });
   }
 }

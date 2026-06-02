@@ -1,17 +1,17 @@
 import type { ScraperCategory, ScraperPlatform } from "@/lib/types";
 
-export const SCRAPER_PLATFORM_LABELS: Record<ScraperPlatform, string> = {
+export const SCRAPER_PLATFORM_LABELS = {
   reddit: "Reddit",
   x: "X",
   linkedin: "LinkedIn",
   other: "Other",
-};
+} as const;
 
-export const SCRAPER_PLATFORM_PRESETS = Object.keys(SCRAPER_PLATFORM_LABELS) as Array<
-  keyof typeof SCRAPER_PLATFORM_LABELS
->;
+export type ScraperPlatformPreset = keyof typeof SCRAPER_PLATFORM_LABELS;
 
-export function isScraperPlatformPreset(platform: string): platform is keyof typeof SCRAPER_PLATFORM_LABELS {
+export const SCRAPER_PLATFORM_PRESETS = Object.keys(SCRAPER_PLATFORM_LABELS) as ScraperPlatformPreset[];
+
+export function isScraperPlatformPreset(platform: string): platform is ScraperPlatformPreset {
   return platform in SCRAPER_PLATFORM_LABELS;
 }
 
@@ -32,11 +32,11 @@ export const SCRAPER_CATEGORY_LABELS = {
   other: "Other",
 } as const;
 
-export const SCRAPER_CATEGORY_PRESETS = Object.keys(SCRAPER_CATEGORY_LABELS) as Array<
-  keyof typeof SCRAPER_CATEGORY_LABELS
->;
+export type ScraperCategoryPreset = keyof typeof SCRAPER_CATEGORY_LABELS;
 
-export function isScraperCategoryPreset(category: string): category is keyof typeof SCRAPER_CATEGORY_LABELS {
+export const SCRAPER_CATEGORY_PRESETS = Object.keys(SCRAPER_CATEGORY_LABELS) as ScraperCategoryPreset[];
+
+export function isScraperCategoryPreset(category: string): category is ScraperCategoryPreset {
   return category in SCRAPER_CATEGORY_LABELS;
 }
 

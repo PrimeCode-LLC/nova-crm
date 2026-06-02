@@ -141,7 +141,9 @@ export const PAGE_PATH_TO_FEATURE: Record<string, string> = {
   "/notifications": "Notifications",
   "/team-chat": "Team chat",
   "/admin/ai": "AI admin",
-  "/admin/team": "Team admin",
+  "/admin/people": "People admin",
+  "/admin/team": "People admin",
+  "/admin/users": "People admin",
   "/admin/import": "Import",
 };
 

@@ -8,7 +8,7 @@ import type {
 } from "@/lib/types";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { roleAtLeast } from "@/lib/platform/org-role";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import {
   getOrganizationServer,
   updateOrganizationChannelAdminServer,
@@ -149,8 +149,10 @@ export async function PUT(req: Request) {
   const incoming = sanitizeChannelAdminInput(parsed.data);
   const base = mergeChannelAdminConfig(org.channelAdmin);
 
+  const channelAdminGuard = await guardAdminFeature("channels");
+
   let normalized: OrganizationChannelAdminConfig;
-  if (roleAtLeast(g.ctx.role, "admin")) {
+  if (channelAdminGuard.ok) {
     normalized = incoming;
   } else {
     const m = mergeMemberChannelAdminPut(base, incoming);

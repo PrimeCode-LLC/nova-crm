@@ -7,13 +7,15 @@ import {
   ScrollText,
   Filter,
   User,
-  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Select,
@@ -52,6 +54,8 @@ type AuditRow = {
 };
 
 type MemberOption = { uid: string; label: string };
+
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
 const CATEGORY_LABELS: Record<AuditEventCategory, string> = {
   team: "Team",
@@ -111,22 +115,49 @@ export function ActivityLogsClient({
 }) {
   const canView = roleAtLeast(orgRole, "admin");
   const [items, setItems] = React.useState<AuditRow[]>([]);
-  const [nextCursor, setNextCursor] = React.useState<string | null>(null);
+  const [hasNextPage, setHasNextPage] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
-  const [loadingMore, setLoadingMore] = React.useState(false);
+  const [page, setPage] = React.useState(1);
+  const [pageSize, setPageSize] =
+    React.useState<(typeof PAGE_SIZE_OPTIONS)[number]>(25);
   const [category, setCategory] = React.useState<string>("all");
   const [actorUid, setActorUid] = React.useState<string>("all");
+  const [filterMembers, setFilterMembers] = React.useState<MemberOption[]>(members);
+  const cursorsRef = React.useRef<(string | null)[]>([null]);
+
+  React.useEffect(() => {
+    setFilterMembers(members);
+  }, [members]);
+
+  const memberLabelByUid = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const m of filterMembers) map.set(m.uid, m.label);
+    for (const row of items) {
+      if (row.actorUid && row.actorDisplayName) {
+        map.set(row.actorUid, row.actorDisplayName);
+      }
+    }
+    return map;
+  }, [filterMembers, items]);
+
+  const actorFilterLabel =
+    actorUid === "all" ? "Everyone" : (memberLabelByUid.get(actorUid) ?? "Team member");
+
+  const resetPagination = React.useCallback(() => {
+    cursorsRef.current = [null];
+    setPage(1);
+  }, []);
 
   const load = React.useCallback(
-    async (opts?: { cursor?: string; append?: boolean }) => {
+    async (pageNum: number) => {
       if (!canView) return;
-      const params = new URLSearchParams({ limit: "50" });
-      if (opts?.cursor) params.set("cursor", opts.cursor);
+      const params = new URLSearchParams({ limit: String(pageSize) });
+      const cursor = cursorsRef.current[pageNum - 1];
+      if (cursor) params.set("cursor", cursor);
       if (category !== "all") params.set("category", category);
       if (actorUid !== "all") params.set("actorUid", actorUid);
 
-      if (opts?.append) setLoadingMore(true);
-      else setLoading(true);
+      setLoading(true);
 
       try {
         const res = await fetch(`/api/org/audit-logs?${params}`);
@@ -134,22 +165,29 @@ export function ActivityLogsClient({
           const body = await res.json().catch(() => ({}));
           throw new Error(body.error ?? `Failed (${res.status})`);
         }
-        const data = (await res.json()) as { items: AuditRow[]; nextCursor: string | null };
-        setNextCursor(data.nextCursor);
-        setItems((prev) => (opts?.append ? [...prev, ...data.items] : data.items));
+        const data = (await res.json()) as {
+          items: AuditRow[];
+          nextCursor: string | null;
+          filterMembers?: MemberOption[];
+        };
+        cursorsRef.current = [...cursorsRef.current.slice(0, pageNum), data.nextCursor];
+        setHasNextPage(!!data.nextCursor);
+        setItems(data.items);
+        if (data.filterMembers?.length) {
+          setFilterMembers(data.filterMembers);
+        }
       } catch (e) {
         toast.error(e instanceof Error ? e.message : "Could not load activity logs");
       } finally {
         setLoading(false);
-        setLoadingMore(false);
       }
     },
-    [canView, category, actorUid],
+    [canView, category, actorUid, pageSize],
   );
 
   React.useEffect(() => {
-    void load();
-  }, [load]);
+    void load(page);
+  }, [page, load]);
 
   if (!canView) {
     return (
@@ -179,7 +217,11 @@ export function ActivityLogsClient({
             variant="outline"
             size="sm"
             disabled={loading}
-            onClick={() => void load()}
+            onClick={() => {
+              cursorsRef.current = [null];
+              if (page === 1) void load(1);
+              else setPage(1);
+            }}
           >
             {loading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -199,7 +241,10 @@ export function ActivityLogsClient({
             </span>
             <Select
               value={category}
-              onValueChange={(v) => setCategory(v ?? "all")}
+              onValueChange={(v) => {
+                setCategory(v ?? "all");
+                resetPagination();
+              }}
             >
               <SelectTrigger className="w-[180px]">
                 <SelectValue placeholder="All categories" />
@@ -221,14 +266,17 @@ export function ActivityLogsClient({
             </span>
             <Select
               value={actorUid}
-              onValueChange={(v) => setActorUid(v ?? "all")}
+              onValueChange={(v) => {
+                setActorUid(v ?? "all");
+                resetPagination();
+              }}
             >
               <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Everyone" />
+                <SelectValue placeholder="Everyone">{actorFilterLabel}</SelectValue>
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">Everyone</SelectItem>
-                {members.map((m) => (
+                {filterMembers.map((m) => (
                   <SelectItem key={m.uid} value={m.uid}>
                     {m.label}
                   </SelectItem>
@@ -256,8 +304,9 @@ export function ActivityLogsClient({
               </div>
             ) : items.length === 0 ? (
               <p className="py-16 text-center text-sm text-muted-foreground">
-                No activity recorded yet. Events appear as your team uses the CRM, AI tools, and
-                admin settings.
+                {actorUid !== "all" || category !== "all"
+                  ? "No activity matches these filters. Try Everyone or a different category."
+                  : "No activity recorded yet. Events appear as your team uses the CRM, AI tools, and admin settings."}
               </p>
             ) : (
               <Table>
@@ -314,23 +363,70 @@ export function ActivityLogsClient({
                 </TableBody>
               </Table>
             )}
-            {nextCursor && (
-              <div className="border-t p-4 flex justify-center">
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  disabled={loadingMore}
-                  onClick={() => void load({ cursor: nextCursor, append: true })}
-                >
-                  {loadingMore ? (
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 mr-2" />
-                  )}
-                  Load more
-                </Button>
+            {!loading || items.length > 0 || page > 1 ? (
+              <div className="flex flex-col gap-3 border-t bg-muted/20 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {loading && items.length > 0
+                    ? "Loading…"
+                    : items.length === 0
+                      ? `Page ${page}`
+                      : `Showing ${items.length} event${items.length === 1 ? "" : "s"} on page ${page}`}
+                  {!loading && !hasNextPage && page > 1 ? " · Last page" : null}
+                  {!loading && hasNextPage ? " · More available" : null}
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <div className="flex items-center gap-2">
+                    <Label htmlFor="activity-log-page-size" className="text-sm text-muted-foreground">
+                      Per page
+                    </Label>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(v) => {
+                        if (!v) return;
+                        setPageSize(Number(v) as (typeof PAGE_SIZE_OPTIONS)[number]);
+                        resetPagination();
+                      }}
+                    >
+                      <SelectTrigger id="activity-log-page-size" className="h-8 w-[72px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAGE_SIZE_OPTIONS.map((n) => (
+                          <SelectItem key={n} value={String(n)}>
+                            {n}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={page <= 1 || loading}
+                      onClick={() => setPage((p) => Math.max(1, p - 1))}
+                      aria-label="Previous page"
+                    >
+                      <ChevronLeft className="h-4 w-4 mr-1" />
+                      Previous
+                    </Button>
+                    <span className="min-w-[5rem] px-2 text-center text-sm font-medium tabular-nums">
+                      Page {page}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={!hasNextPage || loading}
+                      onClick={() => setPage((p) => p + 1)}
+                      aria-label="Next page"
+                    >
+                      Next
+                      <ChevronRight className="h-4 w-4 ml-1" />
+                    </Button>
+                  </div>
+                </div>
               </div>
-            )}
+            ) : null}
           </CardContent>
         </Card>
       </PageBody>

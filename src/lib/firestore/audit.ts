@@ -1,6 +1,10 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import {
+  categoryForAuditEvent,
+  type AuditEventCategory,
+} from "@/lib/firestore/audit-events";
 
 export type AuditEvent =
   | "member.invited"
@@ -151,4 +155,102 @@ export async function listAuditLogsServer(input: {
     snap.docs.length >= limit && last ? last.id : null;
 
   return { items, nextCursor };
+}
+
+function applyAuditPostFilters(
+  items: AuditLogRecord[],
+  filters: {
+    category?: AuditEventCategory;
+    event?: string;
+  },
+): AuditLogRecord[] {
+  let filtered = items;
+  if (filters.event && !filters.event.endsWith("*")) {
+    filtered = filtered.filter((row) => row.event === filters.event);
+  } else if (filters.event?.endsWith("*")) {
+    const prefix = filters.event.slice(0, -1);
+    filtered = filtered.filter((row) => row.event.startsWith(prefix));
+  }
+  if (filters.category) {
+    filtered = filtered.filter(
+      (row) => categoryForAuditEvent(row.event) === filters.category,
+    );
+  }
+  return filtered;
+}
+
+/**
+ * Paginated audit list with correct cursors when category/event filters
+ * are applied in memory (Firestore cannot filter by derived category).
+ */
+export async function listAuditLogsFilteredServer(input: {
+  organizationId: string;
+  limit?: number;
+  cursor?: string;
+  actorUid?: string;
+  eventPrefix?: string;
+  category?: AuditEventCategory;
+  event?: string;
+}): Promise<{ items: AuditLogRecord[]; nextCursor: string | null }> {
+  const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
+  const needsPostFilter = !!(
+    input.category ||
+    (input.event && !input.event.includes("*")) ||
+    input.event?.endsWith("*")
+  );
+
+  if (!needsPostFilter) {
+    return listAuditLogsServer({
+      organizationId: input.organizationId,
+      limit,
+      cursor: input.cursor,
+      actorUid: input.actorUid,
+      eventPrefix: input.eventPrefix,
+    });
+  }
+
+  const accumulated: AuditLogRecord[] = [];
+  let cursor = input.cursor;
+  let dbHasMore = true;
+  const maxPasses = 20;
+
+  for (let pass = 0; pass < maxPasses && accumulated.length < limit && dbHasMore; pass++) {
+    const batch = await listAuditLogsServer({
+      organizationId: input.organizationId,
+      limit: 100,
+      cursor,
+      actorUid: input.actorUid,
+      eventPrefix: input.eventPrefix,
+    });
+
+    if (batch.items.length === 0) {
+      dbHasMore = false;
+      break;
+    }
+
+    const filtered = applyAuditPostFilters(batch.items, {
+      category: input.category,
+      event: input.event,
+    });
+
+    for (const item of filtered) {
+      if (accumulated.length >= limit) break;
+      accumulated.push(item);
+    }
+
+    dbHasMore = !!batch.nextCursor;
+    cursor = batch.nextCursor ?? undefined;
+
+    if (accumulated.length >= limit) {
+      const lastReturned = accumulated[accumulated.length - 1]!;
+      const lastIdx = filtered.findIndex((row) => row.id === lastReturned.id);
+      const moreInBatch = lastIdx >= 0 && lastIdx < filtered.length - 1;
+      const nextCursor = dbHasMore || moreInBatch ? lastReturned.id : null;
+      return { items: accumulated, nextCursor };
+    }
+
+    if (!dbHasMore) break;
+  }
+
+  return { items: accumulated, nextCursor: null };
 }

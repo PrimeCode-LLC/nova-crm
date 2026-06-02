@@ -413,7 +413,7 @@ export default function AdminPermissionsPage() {
                         <UserChip
                           userId={po.userId}
                           size="xs"
-                          profileHref={`/admin/users?user=${encodeURIComponent(po.userId)}`}
+                          profileHref={`/admin/people?person=${encodeURIComponent(po.userId)}`}
                         />
                       </TableCell>
                       <TableCell className="py-2">
@@ -513,7 +513,7 @@ export default function AdminPermissionsPage() {
                         <UserChip
                           userId={po.createdBy}
                           size="xs"
-                          profileHref={`/admin/users?user=${encodeURIComponent(po.createdBy)}`}
+                          profileHref={`/admin/people?person=${encodeURIComponent(po.createdBy)}`}
                         />
                       </TableCell>
                       <TableCell className="py-2 text-xs text-muted-foreground whitespace-nowrap">

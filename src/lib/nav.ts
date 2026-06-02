@@ -47,6 +47,8 @@ export interface NavItem {
   minWorkspaceRole?: Role;
   /** When set, access also follows per-user grants (`User.featureGrants`). */
   adminFeature?: AdminFeatureKey;
+  /** Visible if the user has any listed admin feature grant or role gate. */
+  adminFeatures?: AdminFeatureKey[];
   /** Only used for items under the Configuration section — drives sidebar clusters. */
   adminCluster?: AdminNavClusterId;
 }
@@ -109,19 +111,11 @@ export const NAV_SECTIONS: NavSection[] = [
         adminCluster: "company",
       },
       {
-        href: "/admin/team",
-        label: "Team",
+        href: "/admin/people",
+        label: "People",
         icon: UsersRound,
         minWorkspaceRole: "manager",
-        adminFeature: "team",
-        adminCluster: "company",
-      },
-      {
-        href: "/admin/users",
-        label: "Users (demo)",
-        icon: Users,
-        minWorkspaceRole: "manager",
-        adminFeature: "users",
+        adminFeatures: ["team", "users"],
         adminCluster: "company",
       },
       {
@@ -225,17 +219,16 @@ export function canAccessNavItem(item: NavItem, ctx: NavAccessContext): boolean 
   if (ctx.roleLoading && ctx.roleId === undefined && !ctx.featureGrants?.length) {
     return true;
   }
-  if (item.adminFeature) {
-    return userHasAdminFeature(
-      {
-        roleId: ctx.roleId ?? "salesperson",
-        isSuperAdmin: ctx.isSuperAdmin,
-        featureGrants: ctx.featureGrants,
-        orgRole: ctx.orgRole,
-      },
-      item.adminFeature,
-      ctx.orgRole,
-    );
+  const featureKeys =
+    item.adminFeatures?.length ? item.adminFeatures : item.adminFeature ? [item.adminFeature] : [];
+  if (featureKeys.length > 0) {
+    const user = {
+      roleId: ctx.roleId ?? "salesperson",
+      isSuperAdmin: ctx.isSuperAdmin,
+      featureGrants: ctx.featureGrants,
+      orgRole: ctx.orgRole,
+    };
+    return featureKeys.some((key) => userHasAdminFeature(user, key, ctx.orgRole));
   }
   if (ctx.isSuperAdmin) return true;
   if (!item.minWorkspaceRole) return true;

@@ -76,6 +76,7 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     label: "Channels",
     description: "Pipeline channels and stage configuration",
     cluster: "access",
+    minOrgRole: "admin",
     href: "/admin/channels",
   },
   profiles: {
@@ -94,19 +95,19 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     href: "/admin/organization",
   },
   team: {
-    label: "Team",
-    description: "Members, invites, and org roles",
+    label: "People",
+    description: "Workspace access, invites, and membership",
     cluster: "company",
     minWorkspaceRole: "manager",
     minOrgRole: "admin",
-    href: "/admin/team",
+    href: "/admin/people",
   },
   users: {
-    label: "Users",
+    label: "People (CRM profile)",
     description: "CRM roles, hierarchy, and feature access",
     cluster: "company",
     minWorkspaceRole: "manager",
-    href: "/admin/users",
+    href: "/admin/people",
   },
   hierarchy: {
     label: "Org hierarchy",

@@ -99,11 +99,11 @@ export default function AdminHierarchyPage() {
         description="Vertical or horizontal chart, drag-and-drop reporting lines, and quick edits for department and CRM role. People above someone in this tree can see that person’s leads, deals, and activity in the CRM."
         actions={
           <Link
-            href="/admin/users"
+            href="/admin/people"
             className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
           >
             <Users className="h-3.5 w-3.5" />
-            Users table
+            People table
           </Link>
         }
       />

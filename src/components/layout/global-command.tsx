@@ -42,10 +42,10 @@ export function GlobalCommandMenu({
     () => getVisibleNavSections(navAccess),
     [navAccess.roleId, navAccess.isSuperAdmin, navAccess.roleLoading],
   );
-  const adminUsersNav = findNavItemByHref("/admin/users");
+  const adminPeopleNav = findNavItemByHref("/admin/people");
   const adminProfilesNav = findNavItemByHref("/admin/profiles");
   const showTeamJumpList =
-    adminUsersNav != null && canAccessNavItem(adminUsersNav, navAccess);
+    adminPeopleNav != null && canAccessNavItem(adminPeopleNav, navAccess);
   const showProfilesJumpList =
     adminProfilesNav != null && canAccessNavItem(adminProfilesNav, navAccess);
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
@@ -125,11 +125,11 @@ export function GlobalCommandMenu({
         <CommandSeparator />
 
         {showTeamJumpList && (
-          <CommandGroup heading="Team">
+          <CommandGroup heading="People">
             {users.slice(0, 12).map((u) => (
               <CommandItem
                 key={u.id}
-                onSelect={() => go(`/admin/users?user=${encodeURIComponent(u.id)}`)}
+                onSelect={() => go(`/admin/people?person=${encodeURIComponent(u.id)}`)}
               >
                 <User className="mr-2 h-4 w-4" />
                 <span>{u.displayName}</span>
