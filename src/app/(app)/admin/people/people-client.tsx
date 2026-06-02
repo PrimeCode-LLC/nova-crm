@@ -17,6 +17,7 @@ import {
   KeyRound,
   Search,
   X,
+  Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,6 +33,7 @@ import { ROLES } from "@/lib/constants";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
 import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
 import type { AdminFeatureKey } from "@/lib/admin-features";
+import { userHasAdminFeature } from "@/lib/admin-feature-access";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -64,6 +66,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { fmtRelative } from "@/lib/format";
 import type {
   OrganizationInvite,
@@ -475,6 +483,44 @@ function PeoplePageClientInner({
     }
   }
 
+  async function toggleCreateCampaignGrant(uid: string, enable: boolean) {
+    const crm = getUserById(uid);
+    if (!crm) {
+      toast.error("Add a CRM profile for this person first.");
+      return;
+    }
+    const current = crm.featureGrants ?? [];
+    const next = enable
+      ? ([...new Set([...current, "create_campaigns" as AdminFeatureKey])] as AdminFeatureKey[])
+      : current.filter((g) => g !== "create_campaigns");
+
+    const writeGrantsLive =
+      canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured();
+    if (writeGrantsLive) {
+      try {
+        const res = await fetch("/api/org/workspace-users", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ userId: uid, featureGrants: next }),
+        });
+        const data = (await res.json()) as { error?: unknown };
+        if (!res.ok) {
+          const msg =
+            typeof data.error === "string"
+              ? data.error
+              : JSON.stringify(data.error ?? "Failed to update campaign permission");
+          throw new Error(msg);
+        }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Failed");
+        return;
+      }
+    }
+
+    patchUser(uid, { featureGrants: next.length ? next : undefined });
+    toast.success(enable ? "Can create campaigns" : "Campaign creation revoked");
+  }
+
   async function removeMember(m: OrganizationMember) {
     if (m.uid === currentUid) {
       toast.error("You can't remove yourself.");
@@ -754,6 +800,14 @@ function PeoplePageClientInner({
                         (isOwner ||
                           (ROLE_RANK[m.role] < ROLE_RANK[role] &&
                             m.role !== "owner"));
+                      const hasCreateCampaignGrant = crm
+                        ? userHasAdminFeature(crm, "create_campaigns", m.role)
+                        : false;
+                      const showCampaignGrantToggle =
+                        canEditFeatureGrants &&
+                        canTouchThisMember &&
+                        m.role === "member" &&
+                        Boolean(crm);
                       return (
                         <TableRow key={m.uid}>
                           <TableCell className="font-medium">
@@ -850,6 +904,43 @@ function PeoplePageClientInner({
                                   <Pencil className="h-3.5 w-3.5" />
                                   <span className="sr-only sm:not-sr-only sm:ml-1">View / edit</span>
                                 </Button>
+                                {showCampaignGrantToggle ? (
+                                  <TooltipProvider delay={300}>
+                                    <Tooltip>
+                                      <TooltipTrigger
+                                        render={
+                                          <Button
+                                            size="sm"
+                                            variant="ghost"
+                                            className={cn(
+                                              "h-7 px-2",
+                                              hasCreateCampaignGrant &&
+                                                "text-primary hover:text-primary",
+                                            )}
+                                            onClick={() =>
+                                              void toggleCreateCampaignGrant(
+                                                m.uid,
+                                                !hasCreateCampaignGrant,
+                                              )
+                                            }
+                                          >
+                                            <Megaphone className="h-3.5 w-3.5" />
+                                            <span className="sr-only sm:not-sr-only sm:ml-1">
+                                              {hasCreateCampaignGrant
+                                                ? "Revoke campaigns"
+                                                : "Allow campaigns"}
+                                            </span>
+                                          </Button>
+                                        }
+                                      />
+                                      <TooltipContent side="top">
+                                        {hasCreateCampaignGrant
+                                          ? "Revoke permission to create outreach campaigns"
+                                          : "Allow this member to create outreach campaigns"}
+                                      </TooltipContent>
+                                    </Tooltip>
+                                  </TooltipProvider>
+                                ) : null}
                                 {canTouchThisMember ? (
                                   <>
                                     {m.status !== "disabled" ? (
