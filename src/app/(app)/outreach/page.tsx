@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { userCanCreateCampaigns } from "@/lib/admin-feature-access";
 import { fmtNumber, fmtPercent, fmtRelative } from "@/lib/format";
 import { campaignReplyRate, campaignOpenRate, instantlyCampaignHref } from "@/lib/campaign-utils";
 import type { Campaign } from "@/lib/types";
@@ -37,7 +38,9 @@ const STATUS_LABEL: Record<Campaign["status"], string> = {
 };
 
 export default function OutreachPage() {
-  const { campaigns } = useWorkspace();
+  const { campaigns, getUserById, currentUserId, viewerOrgRole } = useWorkspace();
+  const viewer = getUserById(currentUserId);
+  const canCreateCampaigns = userCanCreateCampaigns(viewer, viewerOrgRole);
   const [wizardOpen, setWizardOpen] = React.useState(false);
   const [connected, setConnected] = React.useState(false);
   const [syncing, setSyncing] = React.useState(false);
@@ -99,9 +102,11 @@ export default function OutreachPage() {
                 Sync from Instantly
               </Button>
             )}
-            <Button size="sm" onClick={() => setWizardOpen(true)}>
-              <Plus className="h-3.5 w-3.5" /> New campaign
-            </Button>
+            {canCreateCampaigns ? (
+              <Button size="sm" onClick={() => setWizardOpen(true)}>
+                <Plus className="h-3.5 w-3.5" /> New campaign
+              </Button>
+            ) : null}
           </div>
         }
       />
@@ -128,7 +133,9 @@ export default function OutreachPage() {
                   <TableCell colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                     No outreach campaigns yet.
                     {connected
-                      ? " Click Sync from Instantly or create a new campaign."
+                      ? canCreateCampaigns
+                        ? " Click Sync from Instantly or create a new campaign."
+                        : " Click Sync from Instantly to import campaigns."
                       : " Connect Instantly in Settings, then sync or create a campaign."}
                   </TableCell>
                 </TableRow>
@@ -194,7 +201,9 @@ export default function OutreachPage() {
           {connected ? " · synced with Instantly" : ""}
         </p>
       </PageBody>
-      <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+      {canCreateCampaigns ? (
+        <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
+      ) : null}
     </>
   );
 }

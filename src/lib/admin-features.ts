@@ -15,7 +15,8 @@ export type AdminFeatureKey =
   | "departments"
   | "channels"
   | "profiles"
-  | "email_outreach";
+  | "email_outreach"
+  | "create_campaigns";
 
 export type AdminFeatureMeta = {
   label: string;
@@ -130,6 +131,12 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     cluster: "workspace",
     minWorkspaceRole: "team_lead",
     href: "/outreach",
+  },
+  create_campaigns: {
+    label: "Create campaigns",
+    description: "Create new email outreach campaigns in Instantly",
+    cluster: "workspace",
+    minOrgRole: "manager",
   },
 };
 

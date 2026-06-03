@@ -55,6 +55,14 @@ export function userHasAdminFeature(
   return false;
 }
 
+/** Whether the user may create Instantly outreach campaigns (manager+ org role or explicit grant). */
+export function userCanCreateCampaigns(
+  user: AdminFeatureAccessInput | undefined,
+  orgRole?: OrgMemberRole,
+): boolean {
+  return userHasAdminFeature(user, "create_campaigns", orgRole);
+}
+
 export function normalizeFeatureGrants(
   grants: unknown,
 ): AdminFeatureKey[] | undefined {

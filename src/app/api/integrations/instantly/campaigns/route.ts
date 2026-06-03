@@ -86,7 +86,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const g = await guardInstantlyApi({ minRole: "manager" });
+  const g = await guardInstantlyApi({ minRole: "manager", grantFeature: "create_campaigns" });
   if (!g.ok) return g.response;
 
   let json: unknown;
