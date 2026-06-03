@@ -24,11 +24,25 @@ export function demoOpportunityFitResult(
       { point: "Clear problem statement (legacy migration)", sourceTitle: "" },
     ],
     gaps: [
-      { point: "Budget not stated explicitly — confirm before investing time", severity: "minor" },
+      {
+        point: "Budget not stated explicitly — confirm before investing time",
+        severity: "minor",
+        gapKind: "info_missing",
+      },
       ...(sourceType === "upwork"
-        ? [{ point: "High competition / race-to-bottom risk on platform", severity: "minor" as const }]
+        ? [
+            {
+              point: "High competition / race-to-bottom risk on platform",
+              severity: "minor" as const,
+              gapKind: "commercial" as const,
+            },
+          ]
         : []),
-      { point: "Security/compliance requirements unclear", severity: "minor" },
+      {
+        point: "Security/compliance requirements unclear",
+        severity: "minor",
+        gapKind: "info_missing",
+      },
     ],
     hooks: [
       {

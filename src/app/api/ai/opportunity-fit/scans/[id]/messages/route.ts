@@ -4,8 +4,7 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiTextFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
-import { retrieveFitCheckRagChunksServer } from "@/lib/ai/fit-check-knowledge";
+import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
@@ -120,16 +119,13 @@ export async function POST(req: Request, ctx: RouteCtx) {
   if (useDemo) {
     assistantText = `**Demo reply** — configure AI keys for live answers.\n\nOn this scan (${scan.result.verdict}, ${scan.result.fitScore}%): ${parsed.data.message}\n\nI'd focus on the first hook (“${scan.result.hooks[0]?.angle ?? "value"}”) and confirm budget before investing more than 20 minutes.`;
   } else {
-    const feat = settings.features.opportunity_fit_discuss;
-    const chunks = await retrieveFitCheckRagChunksServer({
+    const rag = await retrieveFitCheckContextServer({
       organizationId: orgId,
       query: `${scan.title} ${parsed.data.message}`,
       sourceType: scan.sourceType,
+      profileId: scan.profileId,
     });
-    const ragBlock = buildRagInstructionBlock(
-      feat.ragMode ?? "reference",
-      chunks.map((c) => ({ title: c.title, content: c.content })),
-    );
+    const ragBlock = rag.ragBlock;
 
     try {
       assistantText = await runAiTextFeature({

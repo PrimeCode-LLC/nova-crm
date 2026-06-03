@@ -48,6 +48,8 @@ export const opportunityFitResultSchema = z.object({
     z.object({
       point: z.string(),
       severity: z.enum(["blocker", "minor"]),
+      /** opportunity = gap in the posting; company_capability = we cannot deliver; commercial = budget/geo; info_missing = unclear JD */
+      gapKind: z.enum(["opportunity", "company_capability", "commercial", "info_missing"]),
     }),
   ),
   hooks: z.array(
@@ -73,17 +75,84 @@ export const opportunityFitResultSchema = z.object({
 
 export type OpportunityFitResult = z.infer<typeof opportunityFitResultSchema>;
 
+const COMPANY_STACK_DENY_RE =
+  /\b(our (core )?stack|we lack|we don'?t (use|offer|support)|company lacks|not in our (stack|toolkit))\b/i;
+
+/** Downgrade LLM mistakes: claiming we lack tech that appears in the RAG corpus. */
+export function reconcileFitGapsWithCorpus(
+  result: OpportunityFitResult,
+  corpusText: string,
+): OpportunityFitResult {
+  const corpus = corpusText.toLowerCase();
+  const techTokens = [
+    "next.js",
+    "nextjs",
+    "typescript",
+    "react",
+    "node.js",
+    "nodejs",
+    ".net",
+    "aws",
+    "postgresql",
+    "mongodb",
+  ];
+
+  const gaps = result.gaps.map((g) => {
+    let gap = { ...g };
+    const pointLower = g.point.toLowerCase();
+
+    if (g.gapKind === "company_capability" || COMPANY_STACK_DENY_RE.test(g.point)) {
+      for (const tech of techTokens) {
+        if (pointLower.includes(tech) && corpus.includes(tech)) {
+          gap = {
+            ...gap,
+            gapKind: "opportunity" as const,
+            severity: "minor" as const,
+            point: g.point.replace(
+              /\b(missing|lacks?|not in (the )?stack)\b/gi,
+              "not mentioned in the opportunity",
+            ),
+          };
+          break;
+        }
+      }
+    }
+
+    if (
+      gap.severity === "blocker" &&
+      (gap.gapKind === "opportunity" || gap.gapKind === "info_missing")
+    ) {
+      gap = { ...gap, severity: "minor" };
+    }
+
+    return gap;
+  });
+
+  return { ...result, gaps };
+}
+
 /** Trim empty strings from model output for display/storage. */
 export function normalizeOpportunityFitResult(
   result: OpportunityFitResult,
+  corpusText?: string,
 ): OpportunityFitResult {
-  return {
+  let normalized: OpportunityFitResult = {
     ...result,
     strongMatches: result.strongMatches.map((m) => ({
       point: m.point,
       sourceTitle: m.sourceTitle.trim(),
     })),
+    gaps: result.gaps.map((g) => ({
+      ...g,
+      gapKind: g.gapKind ?? "opportunity",
+    })),
   };
+
+  if (corpusText?.trim()) {
+    normalized = reconcileFitGapsWithCorpus(normalized, corpusText);
+  }
+
+  return normalized;
 }
 
 export type OpportunityFitScan = {
@@ -98,6 +167,8 @@ export type OpportunityFitScan = {
   verdict: OpportunityFitResult["verdict"];
   fitScore: number;
   leadId?: string;
+  /** Workspace profile whose knowledge libraries were used for this scan. */
+  profileId?: string;
   createdAt: string;
   updatedAt: string;
 };
@@ -124,6 +195,16 @@ export function sourceTypeToChannel(source: OpportunitySourceType): ChannelKey {
       return "website_form";
   }
 }
+
+export const FIT_GAP_KIND_LABELS: Record<
+  NonNullable<OpportunityFitResult["gaps"][number]["gapKind"]>,
+  string
+> = {
+  opportunity: "In the opportunity",
+  company_capability: "We cannot deliver",
+  commercial: "Commercial / terms",
+  info_missing: "Needs clarification",
+};
 
 export function verdictMeta(verdict: OpportunityFitResult["verdict"]): {
   label: string;

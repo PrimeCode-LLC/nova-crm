@@ -4,8 +4,7 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
-import { retrieveFitCheckRagChunksServer } from "@/lib/ai/fit-check-knowledge";
+import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import {
@@ -24,6 +23,7 @@ const bodySchema = z.object({
   sourceType: z.enum(OPPORTUNITY_SOURCE_TYPES),
   title: z.string().max(200).optional(),
   leadId: z.string().optional(),
+  profileId: z.string().max(120).optional(),
   demo: z.boolean().optional(),
 });
 
@@ -73,18 +73,13 @@ export async function POST(req: Request) {
       demoOpportunityFitResult(parsed.data.sourceType, scanTitle),
     );
   } else {
-    const feat = settings.features.opportunity_fit;
-    const ragMode = feat.ragMode ?? "strict";
     const query = `${parsed.data.sourceType} ${parsed.data.rawInput.slice(0, 2000)}`;
-    const chunks = await retrieveFitCheckRagChunksServer({
+    const rag = await retrieveFitCheckContextServer({
       organizationId: orgId,
       query,
       sourceType: parsed.data.sourceType,
+      profileId: parsed.data.profileId,
     });
-    const ragBlock = buildRagInstructionBlock(
-      ragMode,
-      chunks.map((c) => ({ title: c.title, content: c.content })),
-    );
 
     try {
       const raw = await runAiStructuredFeature({
@@ -96,20 +91,22 @@ export async function POST(req: Request) {
         promptVars: {
           sourceType: parsed.data.sourceType,
           title: scanTitle,
-          opportunityText: parsed.data.rawInput.slice(0, 24000),
-          ragBlock: ragBlock || "(No knowledge base chunks retrieved — score using opportunity text only and note gaps.)",
+          opportunityText: parsed.data.rawInput.slice(0, 16000),
+          ragBlock:
+            rag.ragBlock ||
+            "(No knowledge base chunks retrieved — score using opportunity text only and note gaps.)",
         },
         schema: opportunityFitResultSchema,
       });
-      result = normalizeOpportunityFitResult(raw);
+      result = normalizeOpportunityFitResult(raw, rag.corpusText);
     } catch (e) {
       return aiErrorResponse(e);
     }
 
-    if (result.ragCitations.length === 0 && chunks.length > 0) {
+    if (result.ragCitations.length === 0 && rag.chunks.length > 0) {
       result = {
         ...result,
-        ragCitations: chunks.slice(0, 4).map((c) => ({
+        ragCitations: rag.chunks.slice(0, 4).map((c) => ({
           title: c.title,
           excerpt: c.content.slice(0, 280),
         })),
@@ -126,6 +123,7 @@ export async function POST(req: Request) {
     rawInput: parsed.data.rawInput,
     result,
     leadId: parsed.data.leadId,
+    profileId: parsed.data.profileId,
   });
 
   if ("error" in saved) {

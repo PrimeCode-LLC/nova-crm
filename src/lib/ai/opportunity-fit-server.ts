@@ -44,6 +44,7 @@ function mapScan(id: string, organizationId: string, data: Record<string, unknow
     verdict: (data.verdict ?? "maybe") as OpportunityFitResult["verdict"],
     fitScore: Number(data.fitScore ?? 0),
     leadId: data.leadId as string | undefined,
+    profileId: data.profileId as string | undefined,
     createdAt: String(data.createdAt ?? ""),
     updatedAt: String(data.updatedAt ?? ""),
   };
@@ -58,6 +59,7 @@ export async function createOpportunityScanServer(input: {
   rawInput: string;
   result: OpportunityFitResult;
   leadId?: string;
+  profileId?: string;
 }): Promise<{ ok: true; scan: OpportunityFitScan } | { error: string }> {
   const col = scansCol(input.organizationId);
   if (!col) return { error: "Database not configured" };
@@ -75,6 +77,7 @@ export async function createOpportunityScanServer(input: {
     verdict: input.result.verdict,
     fitScore: input.result.fitScore,
     leadId: input.leadId ?? null,
+    profileId: input.profileId ?? null,
     createdAt: now,
     updatedAt: now,
   };

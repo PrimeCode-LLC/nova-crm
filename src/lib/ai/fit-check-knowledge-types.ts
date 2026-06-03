@@ -55,8 +55,9 @@ export interface FitCheckKnowledgeConfig {
 }
 
 export const DEFAULT_FIT_CHECK_RETRIEVAL_BUDGET: FitCheckRetrievalBudget = {
-  globalChunks: 5,
-  categoryChunks: 4,
+  /** Semantic hits from global/profile library (pinned ICP/stack added separately). */
+  globalChunks: 4,
+  categoryChunks: 2,
 };
 
 export function defaultFitCheckKnowledgeConfig(): FitCheckKnowledgeConfig {

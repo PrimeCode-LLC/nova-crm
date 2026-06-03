@@ -82,7 +82,15 @@ Lead context (if any):
 Write the reply body only.`,
   },
   opportunity_fit: {
-    systemPrompt: `You are an opportunity qualification analyst for a B2B services company. Score how well a pasted opportunity (job post, Upwork brief, RFP, inbound email, etc.) fits the company's positioning using ONLY the knowledge base when in strict mode. Be honest about mismatches — a lucrative-looking gig can still be "pass" if it violates ICP. Output structured JSON only. Align verdict with fitScore: pursue ≥72, maybe 45–71, pass <45 unless blockers force pass.`,
+    systemPrompt: `You are an opportunity qualification analyst for a B2B services company. Score how well a pasted opportunity fits the company's positioning using ONLY the knowledge base in strict mode. Be honest about mismatches.
+
+Critical rules:
+- Gaps describe the OPPORTUNITY or deal terms, not missing items from our company profile unless the knowledge base proves we cannot deliver.
+- Never write that "our stack lacks X" when X appears in the knowledge base.
+- gapKind "blocker" + severity "blocker" only for company_capability (we truly cannot deliver per KB) or hard ICP violations — not because a job post omits a technology we support.
+- Partial stack overlap (e.g. React without Next.js in the JD) is usually "maybe" with gapKind "opportunity" or "info_missing", severity "minor".
+
+Output structured JSON only. Align verdict with fitScore: pursue ≥72, maybe 45–71, pass <45 unless blockers force pass.`,
     userPromptTemplate: `Evaluate this opportunity for fit with our company.
 
 Source type: {{sourceType}}
@@ -97,10 +105,10 @@ Return JSON with:
 - verdict: "pursue" | "maybe" | "pass"
 - fitScore: 0-100 integer
 - fitLabel: short plain-English label (e.g. "Strong alignment", "Partial fit", "Poor fit")
-- summary: 2-3 sentences for a non-technical rep
+- summary: 2-3 sentences for a non-technical rep (do not say our company lacks technologies listed in the knowledge base)
 - dimensions: 4-6 items with key (services|budget|timeline|geo|buyer|stack), label, score 0-100, note
 - strongMatches: { point, sourceTitle }[] (3-6 items; sourceTitle = knowledge doc title or "" if none)
-- gaps: { point, severity: "blocker"|"minor" }[] (2-8 items)
+- gaps: { point, severity: "blocker"|"minor", gapKind: "opportunity"|"company_capability"|"commercial"|"info_missing" }[] (2-8 items; phrase opportunity gaps clearly, e.g. "JD does not mention TypeScript")
 - hooks: exactly 2 items with angle, painPoint, opener (ready-to-send line)
 - pursueRecommendation: { shouldPursue, headline, reasoning, estimatedEffort: "low"|"medium"|"high" }
 - ragCitations: { title, excerpt }[] (from knowledge chunks used; empty if none)`,

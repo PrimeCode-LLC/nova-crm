@@ -1,7 +1,8 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import { getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { retrieveRagChunksServer, type RagChunkHit } from "@/lib/ai/rag-retrieve";
+import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
+import type { RagChunkHit } from "@/lib/ai/rag-retrieve";
 import type { OrganizationAiSettings } from "@/lib/ai/types";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 import {
@@ -64,76 +65,15 @@ export async function resolveFitCheckLibraryIdsServer(
   return { config, globalLibraryId, categoryLibraryId };
 }
 
-/**
- * Cost-efficient retrieval: one query, capped chunks per layer (no duplicate website embeddings).
- */
+/** @deprecated Prefer retrieveFitCheckContextServer for analyze (includes compact ragBlock). */
 export async function retrieveFitCheckRagChunksServer(input: {
   organizationId: string;
   query: string;
   sourceType: OpportunitySourceType;
+  profileId?: string;
 }): Promise<RagChunkHit[]> {
-  const { config, globalLibraryId, categoryLibraryId } =
-    await resolveFitCheckLibraryIdsServer(input.organizationId, input.sourceType);
-
-  const catCfg = config.categories[input.sourceType];
-  const budget = config.retrievalBudget;
-  const hits: RagChunkHit[] = [];
-
-  const useGlobal =
-    config.globalEnabled &&
-    catCfg?.useGlobal !== false &&
-    globalLibraryId &&
-    budget.globalChunks > 0;
-
-  if (useGlobal) {
-    const globalHits = await retrieveRagChunksServer({
-      organizationId: input.organizationId,
-      query: input.query,
-      libraryIds: [globalLibraryId],
-      topK: budget.globalChunks,
-    });
-    hits.push(...globalHits);
-  }
-
-  const useCategory =
-    catCfg?.enabled !== false &&
-    categoryLibraryId &&
-    budget.categoryChunks > 0;
-
-  if (useCategory) {
-    const catHits = await retrieveRagChunksServer({
-      organizationId: input.organizationId,
-      query: input.query,
-      libraryIds: [categoryLibraryId],
-      topK: budget.categoryChunks,
-    });
-    hits.push(...catHits);
-  }
-
-  // Fallback: legacy feature.libraryIds if layered config empty
-  if (hits.length === 0) {
-    const settings = await getOrganizationAiSettingsServer(input.organizationId);
-    const legacyIds = settings.features.opportunity_fit.libraryIds;
-    if (legacyIds?.length) {
-      return retrieveRagChunksServer({
-        organizationId: input.organizationId,
-        query: input.query,
-        libraryIds: legacyIds,
-        topK: budget.globalChunks + budget.categoryChunks,
-      });
-    }
-  }
-
-  const seen = new Set<string>();
-  return hits
-    .sort((a, b) => b.score - a.score)
-    .filter((h) => {
-      const key = `${h.documentId}:${h.content.slice(0, 80)}`;
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .slice(0, budget.globalChunks + budget.categoryChunks);
+  const bundle = await retrieveFitCheckContextServer(input);
+  return bundle.chunks;
 }
 
 export function attachFitCheckKnowledgeToSettings(

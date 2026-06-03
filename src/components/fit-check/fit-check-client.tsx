@@ -2,13 +2,20 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Loader2, Plus, Sparkles, History } from "lucide-react";
+import { Loader2, Plus, Sparkles, History, UserCircle } from "lucide-react";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -25,15 +32,22 @@ import {
 import { FitCheckResultView } from "@/components/fit-check/fit-check-result";
 import { FitCheckDiscussSheet } from "@/components/fit-check/fit-check-discuss-sheet";
 
+const FIT_CHECK_PROFILE_KEY = "nova-fit-check-profile-id";
+
 const PLACEHOLDER = `Paste the full job post, Upwork brief, RFP excerpt, or inbound email here.
 
 Include: what they need, budget/rate if mentioned, timeline, tech stack, location, and any red flags you noticed.`;
 
 export function FitCheckClient() {
-  const { isDemo } = useWorkspace();
+  const { isDemo, profiles } = useWorkspace();
   const { openNewProspectForm } = useOpenQuickAdd();
+  const activeProfiles = React.useMemo(
+    () => profiles.filter((p) => p.active),
+    [profiles],
+  );
 
   const [rawInput, setRawInput] = React.useState("");
+  const [profileId, setProfileId] = React.useState<string>("");
   const [title, setTitle] = React.useState("");
   const [sourceType, setSourceType] = React.useState<OpportunitySourceType>("other");
   const [availableSourceTypes, setAvailableSourceTypes] = React.useState<OpportunitySourceType[]>(
@@ -64,6 +78,19 @@ export function FitCheckClient() {
   React.useEffect(() => {
     void loadScans();
   }, [loadScans]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const saved = window.localStorage.getItem(FIT_CHECK_PROFILE_KEY);
+    if (saved && activeProfiles.some((p) => p.id === saved)) {
+      setProfileId(saved);
+    }
+  }, [activeProfiles]);
+
+  React.useEffect(() => {
+    if (!profileId || typeof window === "undefined") return;
+    window.localStorage.setItem(FIT_CHECK_PROFILE_KEY, profileId);
+  }, [profileId]);
 
   React.useEffect(() => {
     void (async () => {
@@ -104,6 +131,7 @@ export function FitCheckClient() {
           rawInput: rawInput.trim(),
           sourceType,
           title: title.trim() || undefined,
+          profileId: profileId || undefined,
           demo: isDemo,
         }),
       });
@@ -148,6 +176,7 @@ export function FitCheckClient() {
         setRawInput(data.scan.rawInput);
         setTitle(data.scan.title);
         setSourceType(data.scan.sourceType);
+        setProfileId(data.scan.profileId ?? "");
       }
     } catch {
       toast.error("Network error");
@@ -239,6 +268,35 @@ export function FitCheckClient() {
         <div className="flex-1 min-w-0 space-y-6">
           {!result ? (
             <div className="space-y-4">
+              {activeProfiles.length > 0 ? (
+                <div className="grid gap-2 max-w-md">
+                  <Label htmlFor="fit-profile">Profile / persona</Label>
+                  <Select
+                    value={profileId || "__org__"}
+                    onValueChange={(v) => setProfileId(!v || v === "__org__" ? "" : v)}
+                  >
+                    <SelectTrigger id="fit-profile" className="w-full">
+                      <SelectValue placeholder="Company default (global library)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__org__">Company default (global library)</SelectItem>
+                      {activeProfiles.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          <span className="flex items-center gap-1.5">
+                            <UserCircle className="h-3.5 w-3.5 opacity-70" />
+                            {p.name}
+                          </span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    Profile libraries override the global company KB. Link libraries in Admin → AI
+                    (scope: profile).
+                  </p>
+                </div>
+              ) : null}
+
               <div className="grid gap-2 max-w-md">
                 <Label htmlFor="fit-title">Title (optional)</Label>
                 <Input
@@ -292,13 +350,13 @@ export function FitCheckClient() {
               </Button>
 
               <p className="text-xs text-muted-foreground">
-                Uses a <strong className="font-medium">global</strong> company library plus a{" "}
-                <strong className="font-medium">category playbook</strong> for the type you select
-                (connect global per category in{" "}
+                Retrieval uses <strong className="font-medium">pinned ICP/stack</strong> docs,{" "}
+                <strong className="font-medium">hybrid semantic search</strong> (compact excerpts), plus
+                a <strong className="font-medium">category playbook</strong>. Manage libraries in{" "}
                 <Link href="/admin/ai" className="underline underline-offset-2">
                   Admin → AI → Knowledge
                 </Link>
-                ).
+                .
               </p>
             </div>
           ) : (

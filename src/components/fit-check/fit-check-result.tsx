@@ -8,7 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import type { OpportunityFitResult } from "@/lib/ai/opportunity-fit-types";
-import { verdictMeta } from "@/lib/ai/opportunity-fit-types";
+import { FIT_GAP_KIND_LABELS, verdictMeta } from "@/lib/ai/opportunity-fit-types";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -121,8 +121,11 @@ export function FitCheckResultView({
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm flex items-center gap-1.5">
-              <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> Gaps & cons
+              <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> Gaps in the opportunity
             </CardTitle>
+            <CardDescription className="text-xs">
+              Mismatches vs your knowledge base — not missing items from your company profile.
+            </CardDescription>
           </CardHeader>
           <CardContent>
             <ul className="text-sm space-y-2 list-none p-0 m-0">
@@ -135,11 +138,18 @@ export function FitCheckResultView({
                   )}
                   <span>
                     {g.point}
-                    {g.severity === "blocker" ? (
-                      <Badge variant="destructive" className="ml-1.5 text-[10px] px-1 py-0">
-                        Blocker
-                      </Badge>
-                    ) : null}
+                    <span className="flex flex-wrap gap-1 mt-1">
+                      {g.gapKind ? (
+                        <Badge variant="secondary" className="text-[10px] px-1 py-0 font-normal">
+                          {FIT_GAP_KIND_LABELS[g.gapKind] ?? g.gapKind}
+                        </Badge>
+                      ) : null}
+                      {g.severity === "blocker" ? (
+                        <Badge variant="destructive" className="text-[10px] px-1 py-0">
+                          Blocker
+                        </Badge>
+                      ) : null}
+                    </span>
                   </span>
                 </li>
               ))}

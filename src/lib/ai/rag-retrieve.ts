@@ -35,15 +35,21 @@ function libraryMatchesScope(
   return false;
 }
 
-/** Keyword fallback when embeddings unavailable. */
-function keywordScore(query: string, text: string): number {
-  const q = query.toLowerCase().split(/\s+/).filter(Boolean);
+/** Keyword overlap score 0–1 for hybrid RAG. */
+export function ragKeywordScore(query: string, text: string): number {
+  const q = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
   const t = text.toLowerCase();
+  if (q.length === 0) return 0;
   let hits = 0;
   for (const w of q) {
-    if (w.length > 2 && t.includes(w)) hits++;
+    if (t.includes(w)) hits++;
   }
-  return hits / Math.max(1, q.length);
+  return hits / q.length;
+}
+
+/** Blend semantic + keyword scores (common enterprise RAG pattern). */
+export function ragHybridScore(semantic: number, keyword: number): number {
+  return 0.72 * semantic + 0.28 * keyword;
 }
 
 export async function retrieveRagChunksServer(input: {
@@ -88,9 +94,13 @@ export async function retrieveRagChunksServer(input: {
         const content = String(data.content ?? "");
         const title = String(data.title ?? docSnap.data().title ?? "chunk");
         const embedding = data.embedding as number[] | undefined;
-        let score = keywordScore(input.query, content);
+        const kw = ragKeywordScore(input.query, content);
+        let score = kw;
         if (input.queryEmbedding?.length && embedding?.length) {
-          score = cosineSimilarity(input.queryEmbedding, embedding);
+          score = ragHybridScore(
+            cosineSimilarity(input.queryEmbedding, embedding),
+            kw,
+          );
         }
         hits.push({
           title,
