@@ -124,6 +124,7 @@ export async function POST(req: Request, ctx: RouteCtx) {
       query: `${scan.title} ${parsed.data.message}`,
       sourceType: scan.sourceType,
       profileId: scan.profileId,
+      profileLabel: scan.profileDisplayName,
     });
     const ragBlock = rag.ragBlock;
 

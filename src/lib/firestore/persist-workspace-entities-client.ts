@@ -275,6 +275,10 @@ export async function persistProfileCreate(
     updatedAt: serverTimestamp(),
   };
   if (p.notes) data.notes = p.notes;
+  if (p.stackLabel?.trim()) data.stackLabel = p.stackLabel.trim();
+  if (p.fitCheckCategories?.length) data.fitCheckCategories = p.fitCheckCategories;
+  if (p.knowledgeLibraryIds?.length) data.knowledgeLibraryIds = p.knowledgeLibraryIds;
+  if (p.knowledgeDocumentIds?.length) data.knowledgeDocumentIds = p.knowledgeDocumentIds;
   await setDoc(doc(db, COLLECTIONS.profiles, p.id), data);
 }
 
@@ -290,6 +294,22 @@ export async function persistProfileUpdate(
   if (patch.active !== undefined) payload.active = patch.active;
   if (patch.notes !== undefined) {
     payload.notes = patch.notes && patch.notes.trim() ? patch.notes : deleteField();
+  }
+  if (patch.stackLabel !== undefined) {
+    payload.stackLabel =
+      patch.stackLabel && patch.stackLabel.trim() ? patch.stackLabel.trim() : deleteField();
+  }
+  if (patch.fitCheckCategories !== undefined) {
+    payload.fitCheckCategories =
+      patch.fitCheckCategories.length > 0 ? patch.fitCheckCategories : deleteField();
+  }
+  if (patch.knowledgeLibraryIds !== undefined) {
+    payload.knowledgeLibraryIds =
+      patch.knowledgeLibraryIds.length > 0 ? patch.knowledgeLibraryIds : deleteField();
+  }
+  if (patch.knowledgeDocumentIds !== undefined) {
+    payload.knowledgeDocumentIds =
+      patch.knowledgeDocumentIds.length > 0 ? patch.knowledgeDocumentIds : deleteField();
   }
   await updateDoc(doc(db, COLLECTIONS.profiles, profileId), payload);
 }

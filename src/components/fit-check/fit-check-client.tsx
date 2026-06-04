@@ -9,13 +9,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -32,22 +25,31 @@ import {
 import { FitCheckResultView } from "@/components/fit-check/fit-check-result";
 import { FitCheckDiscussSheet } from "@/components/fit-check/fit-check-discuss-sheet";
 
-const FIT_CHECK_PROFILE_KEY = "nova-fit-check-profile-id";
+type FitCheckProfileOption = {
+  id: string;
+  name: string;
+  displayLabel: string;
+  stackLabel?: string;
+  knowledgeLibraryIds: string[];
+  knowledgeDocumentIds: string[];
+};
+
+function profileStorageKey(sourceType: OpportunitySourceType) {
+  return `nova-fit-check-profile-${sourceType}`;
+}
 
 const PLACEHOLDER = `Paste the full job post, Upwork brief, RFP excerpt, or inbound email here.
 
 Include: what they need, budget/rate if mentioned, timeline, tech stack, location, and any red flags you noticed.`;
 
 export function FitCheckClient() {
-  const { isDemo, profiles } = useWorkspace();
+  const { isDemo } = useWorkspace();
   const { openNewProspectForm } = useOpenQuickAdd();
-  const activeProfiles = React.useMemo(
-    () => profiles.filter((p) => p.active),
-    [profiles],
-  );
 
   const [rawInput, setRawInput] = React.useState("");
   const [profileId, setProfileId] = React.useState<string>("");
+  const [profileOptions, setProfileOptions] = React.useState<FitCheckProfileOption[]>([]);
+  const [loadingProfiles, setLoadingProfiles] = React.useState(false);
   const [title, setTitle] = React.useState("");
   const [sourceType, setSourceType] = React.useState<OpportunitySourceType>("other");
   const [availableSourceTypes, setAvailableSourceTypes] = React.useState<OpportunitySourceType[]>(
@@ -80,19 +82,6 @@ export function FitCheckClient() {
   }, [loadScans]);
 
   React.useEffect(() => {
-    if (typeof window === "undefined") return;
-    const saved = window.localStorage.getItem(FIT_CHECK_PROFILE_KEY);
-    if (saved && activeProfiles.some((p) => p.id === saved)) {
-      setProfileId(saved);
-    }
-  }, [activeProfiles]);
-
-  React.useEffect(() => {
-    if (!profileId || typeof window === "undefined") return;
-    window.localStorage.setItem(FIT_CHECK_PROFILE_KEY, profileId);
-  }, [profileId]);
-
-  React.useEffect(() => {
     void (async () => {
       try {
         const res = await fetch("/api/ai/rag/fit-check-sources", { credentials: "same-origin" });
@@ -102,7 +91,7 @@ export function FitCheckClient() {
           setAvailableSourceTypes(data.sourceTypes);
         }
       } catch {
-        // If this endpoint fails, keep showing the full set.
+        // keep full set
       }
     })();
   }, []);
@@ -114,10 +103,64 @@ export function FitCheckClient() {
     }
   }, [availableSourceTypes, sourceType]);
 
+  React.useEffect(() => {
+    let cancelled = false;
+    setLoadingProfiles(true);
+    void (async () => {
+      try {
+        const res = await fetch(
+          `/api/ai/fit-check/profile-options?sourceType=${encodeURIComponent(sourceType)}`,
+          { credentials: "same-origin" },
+        );
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { profiles?: FitCheckProfileOption[] };
+        const list = data.profiles ?? [];
+        if (cancelled) return;
+        setProfileOptions(list);
+
+        const saved =
+          typeof window !== "undefined"
+            ? window.localStorage.getItem(profileStorageKey(sourceType))
+            : null;
+        const validSaved = saved && list.some((p) => p.id === saved) ? saved : "";
+        const keepCurrent = profileId && list.some((p) => p.id === profileId) ? profileId : "";
+        const next = keepCurrent || validSaved || (list.length === 1 ? list[0]!.id : "");
+        setProfileId(next);
+      } finally {
+        if (!cancelled) setLoadingProfiles(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sourceType]);
+
+  React.useEffect(() => {
+    if (!profileId || typeof window === "undefined") return;
+    window.localStorage.setItem(profileStorageKey(sourceType), profileId);
+  }, [profileId, sourceType]);
+
+  const selectedProfile = profileOptions.find((p) => p.id === profileId);
+  const requiresProfile = profileOptions.length > 0;
+
   async function runCheck() {
     if (rawInput.trim().length < 40) {
       toast.error("Paste more detail about the opportunity (at least a few sentences).");
       return;
+    }
+    if (requiresProfile && !profileId) {
+      toast.error("Choose which stack / persona fits this opportunity.");
+      return;
+    }
+    if (
+      requiresProfile &&
+      selectedProfile &&
+      selectedProfile.knowledgeLibraryIds.length === 0 &&
+      selectedProfile.knowledgeDocumentIds.length === 0
+    ) {
+      toast.warning(
+        `"${selectedProfile.displayLabel}" has no knowledge linked. Select libraries or documents in Admin → Profiles.`,
+      );
     }
     setAnalyzing(true);
     setResult(null);
@@ -188,18 +231,24 @@ export function FitCheckClient() {
     setActiveScan(null);
     setRawInput("");
     setTitle("");
-    setSourceType("other");
+    setSourceType(availableSourceTypes[0] ?? "other");
+    setProfileId("");
   }
 
   function handleCreateProspect() {
     if (!result) return;
     const notes = [
+      selectedProfile || activeScan?.profileDisplayName
+        ? `Persona: ${selectedProfile?.displayLabel ?? activeScan?.profileDisplayName}`
+        : null,
       `Fit check: ${result.verdict} (${result.fitScore}%) — ${result.fitLabel}`,
       result.summary,
       "",
       "Hooks:",
       ...result.hooks.map((h, i) => `${i + 1}. ${h.angle}\n${h.opener}`),
-    ].join("\n");
+    ]
+      .filter(Boolean)
+      .join("\n");
     openNewProspectForm({
       leadNotes: notes,
       channel: sourceTypeToChannel(sourceType),
@@ -210,7 +259,7 @@ export function FitCheckClient() {
     <>
       <PageHeader
         title="Fit Check"
-        description="Paste an opportunity and see how well it matches your company — with hooks and a clear pursue / pass recommendation."
+        description="Pick the opportunity type and your stack persona — then paste the job to get a pursue / pass recommendation."
         actions={
           <Button type="button" variant="outline" size="sm" onClick={startNew}>
             <Plus className="h-3.5 w-3.5" /> New check
@@ -244,10 +293,13 @@ export function FitCheckClient() {
                       )}
                     >
                       <span className="line-clamp-1 font-medium">{s.title}</span>
-                      <span className="flex items-center gap-1 mt-0.5 text-muted-foreground">
+                      <span className="flex items-center gap-1 mt-0.5 text-muted-foreground flex-wrap">
                         <Badge variant="outline" className={cn("text-[10px] px-1 py-0 h-4", vm.className)}>
                           {s.fitScore}%
                         </Badge>
+                        {s.profileDisplayName ? (
+                          <span className="truncate max-w-[8rem]">{s.profileDisplayName}</span>
+                        ) : null}
                         {elevated && s.createdByDisplayName ? (
                           <span className="truncate">{s.createdByDisplayName}</span>
                         ) : null}
@@ -258,45 +310,11 @@ export function FitCheckClient() {
               })}
             </ul>
           )}
-          {elevated ? (
-            <p className="text-[10px] text-muted-foreground px-1">
-              As admin/director you see everyone&apos;s scans.
-            </p>
-          ) : null}
         </aside>
 
         <div className="flex-1 min-w-0 space-y-6">
           {!result ? (
-            <div className="space-y-4">
-              {activeProfiles.length > 0 ? (
-                <div className="grid gap-2 max-w-md">
-                  <Label htmlFor="fit-profile">Profile / persona</Label>
-                  <Select
-                    value={profileId || "__org__"}
-                    onValueChange={(v) => setProfileId(!v || v === "__org__" ? "" : v)}
-                  >
-                    <SelectTrigger id="fit-profile" className="w-full">
-                      <SelectValue placeholder="Company default (global library)" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__org__">Company default (global library)</SelectItem>
-                      {activeProfiles.map((p) => (
-                        <SelectItem key={p.id} value={p.id}>
-                          <span className="flex items-center gap-1.5">
-                            <UserCircle className="h-3.5 w-3.5 opacity-70" />
-                            {p.name}
-                          </span>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    Profile libraries override the global company KB. Link libraries in Admin → AI
-                    (scope: profile).
-                  </p>
-                </div>
-              ) : null}
-
+            <div className="space-y-5">
               <div className="grid gap-2 max-w-md">
                 <Label htmlFor="fit-title">Title (optional)</Label>
                 <Input
@@ -308,7 +326,10 @@ export function FitCheckClient() {
               </div>
 
               <div className="space-y-2">
-                <Label>What kind of opportunity?</Label>
+                <Label className="text-sm">
+                  <span className="text-muted-foreground font-normal mr-1">1.</span>
+                  What kind of opportunity?
+                </Label>
                 <div className="flex flex-wrap gap-1.5">
                   {availableSourceTypes.map((t) => (
                     <Button
@@ -326,7 +347,65 @@ export function FitCheckClient() {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="fit-paste">Opportunity details</Label>
+                <Label className="text-sm">
+                  <span className="text-muted-foreground font-normal mr-1">2.</span>
+                  Which stack / persona?
+                </Label>
+                {loadingProfiles ? (
+                  <p className="text-xs text-muted-foreground flex items-center gap-1">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading personas…
+                  </p>
+                ) : profileOptions.length === 0 ? (
+                  <div className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground space-y-1">
+                    <p>
+                      No personas assigned to{" "}
+                      <strong className="text-foreground">{OPPORTUNITY_SOURCE_LABELS[sourceType]}</strong>
+                      . Using company default knowledge.
+                    </p>
+                    <p>
+                      <Link href="/admin/profiles" className="underline underline-offset-2">
+                        Admin → Profiles
+                      </Link>{" "}
+                      — open a profile, set Fit Check categories and link libraries.
+                    </p>
+                  </div>
+                ) : (
+                  <>
+                    <div className="flex flex-wrap gap-1.5">
+                      {profileOptions.map((p) => (
+                        <Button
+                          key={p.id}
+                          type="button"
+                          size="sm"
+                          variant={profileId === p.id ? "default" : "outline"}
+                          className="h-8 text-xs gap-1"
+                          onClick={() => setProfileId(p.id)}
+                        >
+                          <UserCircle className="h-3.5 w-3.5 opacity-80" />
+                          {p.displayLabel}
+                        </Button>
+                      ))}
+                    </div>
+                    {selectedProfile &&
+                    selectedProfile.knowledgeLibraryIds.length === 0 &&
+                    selectedProfile.knowledgeDocumentIds.length === 0 ? (
+                      <p className="text-xs text-amber-600 dark:text-amber-400">
+                        Link knowledge libraries or documents (e.g. MERN Stack) in{" "}
+                        <Link href="/admin/profiles" className="underline">
+                          Admin → Profiles
+                        </Link>
+                        .
+                      </p>
+                    ) : null}
+                  </>
+                )}
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="fit-paste" className="text-sm">
+                  <span className="text-muted-foreground font-normal mr-1">3.</span>
+                  Opportunity details
+                </Label>
                 <Textarea
                   id="fit-paste"
                   value={rawInput}
@@ -350,21 +429,31 @@ export function FitCheckClient() {
               </Button>
 
               <p className="text-xs text-muted-foreground">
-                Retrieval uses <strong className="font-medium">pinned ICP/stack</strong> docs,{" "}
-                <strong className="font-medium">hybrid semantic search</strong> (compact excerpts), plus
-                a <strong className="font-medium">category playbook</strong>. Manage libraries in{" "}
-                <Link href="/admin/ai" className="underline underline-offset-2">
-                  Admin → AI → Knowledge
+                Each persona uses its own knowledge libraries. Shared libraries (e.g. one MERN doc)
+                can be linked to multiple profiles in{" "}
+                <Link href="/admin/profiles" className="underline underline-offset-2">
+                  Admin → Profiles
                 </Link>
                 .
               </p>
             </div>
           ) : (
-            <FitCheckResultView
-              result={result}
-              onDiscuss={() => setDiscussOpen(true)}
-              onCreateProspect={handleCreateProspect}
-            />
+            <>
+              {activeScan?.profileDisplayName || selectedProfile ? (
+                <p className="text-xs text-muted-foreground">
+                  Evaluated as{" "}
+                  <span className="font-medium text-foreground">
+                    {activeScan?.profileDisplayName ?? selectedProfile?.displayLabel}
+                  </span>{" "}
+                  · {OPPORTUNITY_SOURCE_LABELS[sourceType]}
+                </p>
+              ) : null}
+              <FitCheckResultView
+                result={result}
+                onDiscuss={() => setDiscussOpen(true)}
+                onCreateProspect={handleCreateProspect}
+              />
+            </>
           )}
         </div>
       </PageBody>

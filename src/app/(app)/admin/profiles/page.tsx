@@ -39,6 +39,12 @@ import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { selectTriggerLabelById, selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import type { ChannelKey, Profile } from "@/lib/types";
+import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
+import {
+  ProfileFitCheckBadges,
+  ProfileFitCheckFields,
+} from "@/components/admin/profile-fit-check-fields";
+import { profileFitCategories } from "@/lib/ai/profile-fit-check";
 import { Plus, User } from "lucide-react";
 import { toast } from "sonner";
 
@@ -69,6 +75,10 @@ export default function AdminProfilesPage() {
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
   const [ownerId, setOwnerId] = React.useState("");
   const [notes, setNotes] = React.useState("");
+  const [stackLabel, setStackLabel] = React.useState("");
+  const [fitCheckCategories, setFitCheckCategories] = React.useState<OpportunitySourceType[]>([]);
+  const [knowledgeLibraryIds, setKnowledgeLibraryIds] = React.useState<string[]>([]);
+  const [knowledgeDocumentIds, setKnowledgeDocumentIds] = React.useState<string[]>([]);
   const [loading, setLoading] = React.useState(false);
 
   const [detailOpen, setDetailOpen] = React.useState(false);
@@ -78,6 +88,10 @@ export default function AdminProfilesPage() {
   const [draftOwnerId, setDraftOwnerId] = React.useState("");
   const [draftNotes, setDraftNotes] = React.useState("");
   const [draftActive, setDraftActive] = React.useState(true);
+  const [draftStackLabel, setDraftStackLabel] = React.useState("");
+  const [draftFitCategories, setDraftFitCategories] = React.useState<OpportunitySourceType[]>([]);
+  const [draftLibraryIds, setDraftLibraryIds] = React.useState<string[]>([]);
+  const [draftDocumentIds, setDraftDocumentIds] = React.useState<string[]>([]);
   const [detailSaving, setDetailSaving] = React.useState(false);
 
   const weekMs = 7 * 24 * 60 * 60 * 1000;
@@ -123,6 +137,10 @@ export default function AdminProfilesPage() {
     setDraftOwnerId(profile.ownerId);
     setDraftNotes(profile.notes ?? "");
     setDraftActive(profile.active);
+    setDraftStackLabel(profile.stackLabel ?? "");
+    setDraftFitCategories(profile.fitCheckCategories ?? []);
+    setDraftLibraryIds(profile.knowledgeLibraryIds ?? []);
+    setDraftDocumentIds(profile.knowledgeDocumentIds ?? []);
     setDetailOpen(true);
   }
 
@@ -143,6 +161,10 @@ export default function AdminProfilesPage() {
       ownerId: draftOwnerId,
       notes: draftNotes.trim() || undefined,
       active: draftActive,
+      stackLabel: draftStackLabel.trim() || undefined,
+      fitCheckCategories: draftFitCategories,
+      knowledgeLibraryIds: draftLibraryIds,
+      knowledgeDocumentIds: draftDocumentIds,
     });
     setDetailSaving(false);
     toast.success("Profile updated");
@@ -166,6 +188,10 @@ export default function AdminProfilesPage() {
       ownerId,
       active: true,
       notes: notes.trim() || undefined,
+      stackLabel: stackLabel.trim() || undefined,
+      fitCheckCategories: fitCheckCategories.length ? fitCheckCategories : undefined,
+      knowledgeLibraryIds: knowledgeLibraryIds.length ? knowledgeLibraryIds : undefined,
+      knowledgeDocumentIds: knowledgeDocumentIds.length ? knowledgeDocumentIds : undefined,
     });
     setLoading(false);
     toast.success(`Profile "${name.trim()}" created`);
@@ -174,13 +200,17 @@ export default function AdminProfilesPage() {
     setChannel("");
     setOwnerId("");
     setNotes("");
+    setStackLabel("");
+    setFitCheckCategories([]);
+    setKnowledgeLibraryIds([]);
+    setKnowledgeDocumentIds([]);
   }
 
   return (
     <>
       <PageHeader
         title="Profiles"
-        description="Outreach personas tied to a channel (e.g. Upwork, job apply, LinkedIn, or a custom channel)."
+        description="Outreach personas per channel. Assign Fit Check categories and knowledge libraries so each stack (MERN, .NET, etc.) gets the right answers."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New profile
@@ -231,6 +261,12 @@ export default function AdminProfilesPage() {
               <CardContent className="pt-0 space-y-3">
                 <div className="flex items-center gap-2 flex-wrap">
                   <ChannelChip channel={p.channel} />
+                  <ProfileFitCheckBadges
+                    stackLabel={p.stackLabel}
+                    fitCheckCategories={profileFitCategories(p)}
+                    knowledgeLibraryCount={p.knowledgeLibraryIds?.length}
+                    knowledgeDocumentCount={p.knowledgeDocumentIds?.length}
+                  />
                   {!p.active && (
                     <Badge variant="outline" className="text-[10px] text-muted-foreground">
                       Inactive
@@ -261,7 +297,7 @@ export default function AdminProfilesPage() {
           }
         }}
       >
-        <DialogContent className="max-w-sm">
+        <DialogContent className="max-w-md max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <User className="h-4 w-4" /> New profile
@@ -326,6 +362,19 @@ export default function AdminProfilesPage() {
                 className="h-16 text-sm resize-none"
               />
             </div>
+            {channel ? (
+              <ProfileFitCheckFields
+                channel={channel as ChannelKey}
+                stackLabel={stackLabel}
+                onStackLabelChange={setStackLabel}
+                fitCheckCategories={fitCheckCategories}
+                onFitCheckCategoriesChange={setFitCheckCategories}
+                knowledgeLibraryIds={knowledgeLibraryIds}
+                onKnowledgeLibraryIdsChange={setKnowledgeLibraryIds}
+                knowledgeDocumentIds={knowledgeDocumentIds}
+                onKnowledgeDocumentIdsChange={setKnowledgeDocumentIds}
+              />
+            ) : null}
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setNewOpen(false)}>
@@ -344,7 +393,7 @@ export default function AdminProfilesPage() {
           if (!open) closeDetail();
         }}
       >
-        <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-md">
+        <SheetContent side="right" className="flex w-full flex-col gap-0 sm:max-w-lg">
           <SheetHeader className="border-b pb-4 text-left">
             <SheetTitle>Edit profile</SheetTitle>
             <SheetDescription>
@@ -426,6 +475,19 @@ export default function AdminProfilesPage() {
                 </div>
                 <Switch checked={draftActive} onCheckedChange={setDraftActive} />
               </div>
+              {draftChannel ? (
+                <ProfileFitCheckFields
+                  channel={draftChannel as ChannelKey}
+                  stackLabel={draftStackLabel}
+                  onStackLabelChange={setDraftStackLabel}
+                  fitCheckCategories={draftFitCategories}
+                  onFitCheckCategoriesChange={setDraftFitCategories}
+                  knowledgeLibraryIds={draftLibraryIds}
+                  onKnowledgeLibraryIdsChange={setDraftLibraryIds}
+                  knowledgeDocumentIds={draftDocumentIds}
+                  onKnowledgeDocumentIdsChange={setDraftDocumentIds}
+                />
+              ) : null}
             </div>
           )}
           <SheetFooter className="mt-auto border-t pt-4">

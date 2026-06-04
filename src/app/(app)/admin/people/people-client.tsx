@@ -309,7 +309,9 @@ function PeoplePageClientInner({
       setEditCrmStatus("active");
       setEditFeatureGrants([]);
     }
-  }, [editMember, getUserById]);
+    // Reload when the dialog opens for a member — not on every roster refresh.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- getUserById
+  }, [editMember]);
 
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
@@ -541,6 +543,38 @@ function PeoplePageClientInner({
     }
   }
 
+  async function handleSaveFeatureGrants() {
+    if (!editMember || !canEditFeatureGrants) return;
+    setProfileSaving(true);
+    const writeGrantsLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
+    if (writeGrantsLive) {
+      const res = await fetch("/api/org/workspace-users", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          userId: editMember.uid,
+          featureGrants: editFeatureGrants,
+        }),
+      });
+      const data = (await res.json()) as { error?: unknown };
+      if (!res.ok) {
+        const msg =
+          typeof data.error === "string"
+            ? data.error
+            : JSON.stringify(data.error ?? "Failed to save feature access");
+        toast.error(msg);
+        setProfileSaving(false);
+        return;
+      }
+    }
+
+    patchUser(editMember.uid, {
+      featureGrants: editFeatureGrants.length ? editFeatureGrants : undefined,
+    });
+    setProfileSaving(false);
+    toast.success("Admin access saved");
+  }
+
   async function handleSaveProfile() {
     if (!editMember || !canManageCrm) return;
     const email = editEmail.trim();
@@ -560,9 +594,7 @@ function PeoplePageClientInner({
       featureGrants: editFeatureGrants.length ? editFeatureGrants : undefined,
     };
 
-    const writeGrantsLive =
-      canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured();
-    if (writeGrantsLive) {
+    if (canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured()) {
       const res = await fetch("/api/org/workspace-users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1662,7 +1694,7 @@ function PeoplePageClientInner({
                             size="sm"
                             className="w-full"
                             disabled={profileSaving}
-                            onClick={() => void handleSaveProfile()}
+                            onClick={() => void handleSaveFeatureGrants()}
                           >
                             {profileSaving ? "Saving…" : "Save admin access"}
                           </Button>

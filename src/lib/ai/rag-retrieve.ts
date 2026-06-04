@@ -115,3 +115,48 @@ export async function retrieveRagChunksServer(input: {
 
   return hits.sort((a, b) => b.score - a.score).slice(0, input.topK ?? 6);
 }
+
+/** Retrieve chunks only from specific documents (profile-linked playbooks). */
+export async function retrieveRagChunksForDocumentsServer(input: {
+  organizationId: string;
+  query: string;
+  documentIds: string[];
+  topK?: number;
+  queryEmbedding?: number[];
+}): Promise<RagChunkHit[]> {
+  const db = getAdminDb();
+  if (!db || input.documentIds.length === 0) return [];
+
+  const hits: RagChunkHit[] = [];
+  const docsCol = db
+    .collection(COLLECTIONS.organizations)
+    .doc(input.organizationId)
+    .collection(ORG_SUBCOLLECTIONS.aiDocuments);
+
+  for (const documentId of input.documentIds) {
+    const docSnap = await docsCol.doc(documentId).get();
+    if (!docSnap.exists) continue;
+    const libraryId = String(docSnap.data()?.libraryId ?? "");
+    const chunksSnap = await docSnap.ref.collection("chunks").limit(200).get();
+    for (const chunkSnap of chunksSnap.docs) {
+      const data = chunkSnap.data();
+      const content = String(data.content ?? "");
+      const title = String(data.title ?? docSnap.data()?.title ?? "chunk");
+      const embedding = data.embedding as number[] | undefined;
+      const kw = ragKeywordScore(input.query, content);
+      let score = kw;
+      if (input.queryEmbedding?.length && embedding?.length) {
+        score = ragHybridScore(cosineSimilarity(input.queryEmbedding, embedding), kw);
+      }
+      hits.push({
+        title,
+        content,
+        score,
+        libraryId,
+        documentId,
+      });
+    }
+  }
+
+  return hits.sort((a, b) => b.score - a.score).slice(0, input.topK ?? 6);
+}

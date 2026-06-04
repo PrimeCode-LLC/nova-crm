@@ -14,7 +14,9 @@ import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { normalizeFeatureGrants } from "@/lib/admin-feature-access";
 import { memberCrmOwnerIdsForFirestore } from "@/lib/workspace-hierarchy";
+import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 import type {
   Account,
   ActivityCounterRow,
@@ -35,6 +37,7 @@ import type {
   Campaign,
   CrmLabel,
 } from "@/lib/types";
+import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
 
 export type LiveWorkspaceFirestoreState = {
   loading: boolean;
@@ -111,6 +114,7 @@ function asUser(id: string, raw: Record<string, unknown>): User {
     company: typeof raw.company === "string" ? raw.company : undefined,
     organizationId: typeof raw.organizationId === "string" ? raw.organizationId : undefined,
     orgRole: raw.orgRole as User["orgRole"],
+    featureGrants: normalizeFeatureGrants(raw.featureGrants),
     status: (raw.status as User["status"]) ?? "active",
     createdAt: firestoreValueToIso(raw.createdAt),
   };
@@ -180,6 +184,24 @@ function asCrmLabel(id: string, raw: Record<string, unknown>): CrmLabel {
 }
 
 function asProfile(id: string, raw: Record<string, unknown>): Profile {
+  const fitRaw = raw.fitCheckCategories;
+  const fitCheckCategories = Array.isArray(fitRaw)
+    ? fitRaw.filter(
+        (c): c is OpportunitySourceType =>
+          typeof c === "string" && (OPPORTUNITY_SOURCE_TYPES as readonly string[]).includes(c),
+      )
+    : undefined;
+
+  const libRaw = raw.knowledgeLibraryIds;
+  const knowledgeLibraryIds = Array.isArray(libRaw)
+    ? libRaw.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : undefined;
+
+  const docRaw = raw.knowledgeDocumentIds;
+  const knowledgeDocumentIds = Array.isArray(docRaw)
+    ? docRaw.filter((id): id is string => typeof id === "string" && id.length > 0)
+    : undefined;
+
   return {
     id,
     name: String(raw.name ?? ""),
@@ -187,6 +209,10 @@ function asProfile(id: string, raw: Record<string, unknown>): Profile {
     ownerId: String(raw.ownerId ?? ""),
     active: raw.active !== false,
     notes: optionalNonEmptyString(raw.notes),
+    stackLabel: optionalNonEmptyString(raw.stackLabel),
+    fitCheckCategories: fitCheckCategories?.length ? fitCheckCategories : undefined,
+    knowledgeLibraryIds: knowledgeLibraryIds?.length ? knowledgeLibraryIds : undefined,
+    knowledgeDocumentIds: knowledgeDocumentIds?.length ? knowledgeDocumentIds : undefined,
   };
 }
 

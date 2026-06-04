@@ -13,6 +13,11 @@ import {
   opportunityFitResultSchema,
 } from "@/lib/ai/opportunity-fit-types";
 import { createOpportunityScanServer } from "@/lib/ai/opportunity-fit-server";
+import {
+  getProfileServer,
+  listFitCheckProfileOptionsServer,
+} from "@/lib/firestore/profile-server";
+import { profileDisplayLabel } from "@/lib/ai/profile-fit-check";
 import { demoOpportunityFitResult } from "@/lib/ai/demo-opportunity-fit";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { recordAudit } from "@/lib/firestore/audit";
@@ -67,6 +72,43 @@ export async function POST(req: Request) {
   const scanTitle = titleFromInput(parsed.data.rawInput, parsed.data.title);
   const useDemo = parsed.data.demo === true || isAuthDisabled();
 
+  const profileOptions = useDemo
+    ? []
+    : await listFitCheckProfileOptionsServer({
+        organizationId: orgId,
+        sourceType: parsed.data.sourceType,
+      });
+
+  if (!useDemo && profileOptions.length > 0 && !parsed.data.profileId) {
+    return NextResponse.json(
+      {
+        error:
+          "Select a stack / persona for this opportunity type. Configure profiles under Admin → Profiles.",
+      },
+      { status: 400 },
+    );
+  }
+
+  let profileLabel: string | undefined;
+  if (parsed.data.profileId) {
+    const match = profileOptions.find((p) => p.id === parsed.data.profileId);
+    if (!useDemo && profileOptions.length > 0 && !match) {
+      return NextResponse.json(
+        { error: "This profile is not available for the selected opportunity type." },
+        { status: 400 },
+      );
+    }
+    if (match) {
+      profileLabel = match.displayLabel;
+    } else {
+      const p = await getProfileServer({
+        profileId: parsed.data.profileId,
+        organizationId: orgId,
+      });
+      if (p) profileLabel = profileDisplayLabel(p);
+    }
+  }
+
   let result;
   if (useDemo) {
     result = normalizeOpportunityFitResult(
@@ -79,6 +121,7 @@ export async function POST(req: Request) {
       query,
       sourceType: parsed.data.sourceType,
       profileId: parsed.data.profileId,
+      profileLabel,
     });
 
     try {
@@ -124,6 +167,7 @@ export async function POST(req: Request) {
     result,
     leadId: parsed.data.leadId,
     profileId: parsed.data.profileId,
+    profileDisplayName: profileLabel,
   });
 
   if ("error" in saved) {

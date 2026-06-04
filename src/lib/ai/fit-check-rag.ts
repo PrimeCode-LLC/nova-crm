@@ -7,7 +7,12 @@ import { getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import {
   resolveFitCheckLibraryIdsServer,
 } from "@/lib/ai/fit-check-knowledge";
-import { retrieveRagChunksServer, type RagChunkHit } from "@/lib/ai/rag-retrieve";
+import { getProfileServer } from "@/lib/firestore/profile-server";
+import {
+  retrieveRagChunksForDocumentsServer,
+  retrieveRagChunksServer,
+  type RagChunkHit,
+} from "@/lib/ai/rag-retrieve";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 import type { KnowledgeSection } from "@/lib/ai/fit-check-knowledge-types";
 import type { AiLibraryScope } from "@/lib/ai/types";
@@ -69,12 +74,26 @@ export async function embedFitCheckQueryServer(
   }
 }
 
-async function findProfileLibraryIdsServer(
+type ProfileKnowledgeSources = {
+  libraryIds: string[];
+  documentIds: string[];
+  explicit: boolean;
+};
+
+async function resolveProfileKnowledgeSourcesServer(
   organizationId: string,
   profileId: string,
-): Promise<string[]> {
+): Promise<ProfileKnowledgeSources> {
+  const profile = await getProfileServer({ profileId, organizationId });
+  const libraryIds = [...(profile?.knowledgeLibraryIds ?? [])];
+  const documentIds = [...(profile?.knowledgeDocumentIds ?? [])];
+
+  if (libraryIds.length > 0 || documentIds.length > 0) {
+    return { libraryIds, documentIds, explicit: true };
+  }
+
   const db = getAdminDb();
-  if (!db) return [];
+  if (!db) return { libraryIds: [], documentIds: [], explicit: false };
 
   const snap = await db
     .collection(COLLECTIONS.organizations)
@@ -82,12 +101,53 @@ async function findProfileLibraryIdsServer(
     .collection(ORG_SUBCOLLECTIONS.aiLibraries)
     .get();
 
-  return snap.docs
+  const legacyLibs = snap.docs
     .filter((d) => {
       const scope = d.data().scope as AiLibraryScope | undefined;
       return scope?.type === "profile" && scope.profileId === profileId;
     })
     .map((d) => d.id);
+
+  return {
+    libraryIds: legacyLibs,
+    documentIds: [],
+    explicit: legacyLibs.length > 0,
+  };
+}
+
+/** Pin first chunk of each linked document (playbooks, MERN stack, etc.). */
+async function fetchPinnedFromDocumentsServer(input: {
+  organizationId: string;
+  documentIds: string[];
+  maxChunks: number;
+}): Promise<RagChunkHit[]> {
+  const db = getAdminDb();
+  if (!db || input.documentIds.length === 0) return [];
+
+  const hits: RagChunkHit[] = [];
+  const docsCol = db
+    .collection(COLLECTIONS.organizations)
+    .doc(input.organizationId)
+    .collection(ORG_SUBCOLLECTIONS.aiDocuments);
+
+  for (const documentId of input.documentIds) {
+    if (hits.length >= input.maxChunks) break;
+    const docSnap = await docsCol.doc(documentId).get();
+    if (!docSnap.exists) continue;
+    const chunksSnap = await docSnap.ref.collection("chunks").limit(1).get();
+    const content =
+      chunksSnap.docs[0]?.data().content ??
+      String(docSnap.data()?.content ?? "").slice(0, FIT_CHECK_PINNED_PROMPT_CHARS);
+    hits.push({
+      title: String(docSnap.data()?.title ?? "Document"),
+      content: truncateForPrompt(String(content), FIT_CHECK_PINNED_PROMPT_CHARS),
+      score: 2,
+      libraryId: String(docSnap.data()?.libraryId ?? ""),
+      documentId,
+    });
+  }
+
+  return hits;
 }
 
 async function fetchPinnedChunksServer(input: {
@@ -144,6 +204,8 @@ async function resolvePrimaryLibraryIdsServer(input: {
   profileId?: string;
 }): Promise<{
   primaryLibraryIds: string[];
+  profileDocumentIds: string[];
+  profileExplicit: boolean;
   categoryLibraryId?: string;
   globalLibraryId?: string;
   useGlobal: boolean;
@@ -156,24 +218,32 @@ async function resolvePrimaryLibraryIdsServer(input: {
   const catCfg = config.categories[input.sourceType];
   const budget = config.retrievalBudget;
 
-  const profileLibs = input.profileId
-    ? await findProfileLibraryIdsServer(input.organizationId, input.profileId)
-    : [];
+  const profileKnowledge = input.profileId
+    ? await resolveProfileKnowledgeSourcesServer(input.organizationId, input.profileId)
+    : { libraryIds: [], documentIds: [], explicit: false };
 
   const useGlobal =
-    profileLibs.length === 0 &&
+    !profileKnowledge.explicit &&
     config.globalEnabled &&
     catCfg?.useGlobal !== false &&
     !!globalLibraryId;
 
-  const primaryLibraryIds =
-    profileLibs.length > 0 ? profileLibs : useGlobal && globalLibraryId ? [globalLibraryId] : [];
+  const primaryLibraryIds = profileKnowledge.explicit
+    ? profileKnowledge.libraryIds
+    : useGlobal && globalLibraryId
+      ? [globalLibraryId]
+      : [];
 
   const useCategory =
-    catCfg?.enabled !== false && !!categoryLibraryId && budget.categoryChunks > 0;
+    !profileKnowledge.explicit &&
+    catCfg?.enabled !== false &&
+    !!categoryLibraryId &&
+    budget.categoryChunks > 0;
 
   return {
     primaryLibraryIds,
+    profileDocumentIds: profileKnowledge.documentIds,
+    profileExplicit: profileKnowledge.explicit,
     categoryLibraryId,
     globalLibraryId,
     useGlobal,
@@ -190,17 +260,37 @@ export async function retrieveFitCheckContextServer(input: {
   query: string;
   sourceType: OpportunitySourceType;
   profileId?: string;
+  profileLabel?: string;
 }): Promise<FitCheckRagBundle> {
-  const { primaryLibraryIds, categoryLibraryId, useCategory, budget } =
-    await resolvePrimaryLibraryIdsServer(input);
+  const {
+    primaryLibraryIds,
+    profileDocumentIds,
+    categoryLibraryId,
+    useCategory,
+    budget,
+  } = await resolvePrimaryLibraryIdsServer(input);
 
   const queryEmbedding = await embedFitCheckQueryServer(input.organizationId, input.query);
 
-  const pinned = await fetchPinnedChunksServer({
-    organizationId: input.organizationId,
-    libraryIds: primaryLibraryIds,
-    maxChunks: 2,
-  });
+  const pinnedFromDocs =
+    profileDocumentIds.length > 0
+      ? await fetchPinnedFromDocumentsServer({
+          organizationId: input.organizationId,
+          documentIds: profileDocumentIds,
+          maxChunks: 2,
+        })
+      : [];
+
+  const pinnedFromLibs =
+    pinnedFromDocs.length < 2
+      ? await fetchPinnedChunksServer({
+          organizationId: input.organizationId,
+          libraryIds: primaryLibraryIds,
+          maxChunks: 2 - pinnedFromDocs.length,
+        })
+      : [];
+
+  const pinned = [...pinnedFromDocs, ...pinnedFromLibs];
 
   const poolK = Math.max(
     4,
@@ -217,6 +307,17 @@ export async function retrieveFitCheckContextServer(input: {
       topK: poolK,
       queryEmbedding,
     });
+  }
+
+  if (profileDocumentIds.length > 0) {
+    const docHits = await retrieveRagChunksForDocumentsServer({
+      organizationId: input.organizationId,
+      query: input.query,
+      documentIds: profileDocumentIds,
+      topK: poolK,
+      queryEmbedding,
+    });
+    semanticHits.push(...docHits);
   }
 
   if (useCategory && categoryLibraryId) {
@@ -262,6 +363,7 @@ export async function retrieveFitCheckContextServer(input: {
 
   const ragBlock = buildFitCheckRagBlock(chunks, {
     profileId: input.profileId,
+    profileLabel: input.profileLabel,
   });
   const corpusText = chunks.map((c) => `${c.title}\n${c.content}`).join("\n\n");
 
@@ -270,13 +372,15 @@ export async function retrieveFitCheckContextServer(input: {
 
 export function buildFitCheckRagBlock(
   chunks: { title: string; content: string }[],
-  meta?: { profileId?: string },
+  meta?: { profileId?: string; profileLabel?: string },
 ): string {
   if (chunks.length === 0) return "";
 
-  const profileNote = meta?.profileId
-    ? `Profile-scoped knowledge (persona ${meta.profileId}). `
-    : "";
+  const profileNote = meta?.profileLabel
+    ? `Persona / stack: ${meta.profileLabel}. `
+    : meta?.profileId
+      ? `Profile-scoped knowledge. `
+      : "";
 
   const corpus = chunks
     .map((c, i) => `[${i + 1}] ${c.title}\n${c.content}`)

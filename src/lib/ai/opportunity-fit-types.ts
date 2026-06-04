@@ -169,6 +169,7 @@ export type OpportunityFitScan = {
   leadId?: string;
   /** Workspace profile whose knowledge libraries were used for this scan. */
   profileId?: string;
+  profileDisplayName?: string;
   createdAt: string;
   updatedAt: string;
 };

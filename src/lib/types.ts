@@ -2,6 +2,7 @@
 // These mirror the Firestore collection shapes (see PLAN.md §3).
 
 import type { AdminFeatureKey } from "@/lib/admin-features";
+import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 
 export type ISODate = string;
 
@@ -354,6 +355,14 @@ export interface Profile {
   ownerId: string;
   active: boolean;
   notes?: string;
+  /** Short stack label for Fit Check (e.g. "MERN", ".NET"). */
+  stackLabel?: string;
+  /** Fit Check opportunity types this persona appears under (overrides channel defaults). */
+  fitCheckCategories?: OpportunitySourceType[];
+  /** Knowledge libraries for this persona (many profiles can share one library). */
+  knowledgeLibraryIds?: string[];
+  /** Specific documents to use (e.g. one MERN playbook in a category library). */
+  knowledgeDocumentIds?: string[];
 }
 
 export interface Campaign {
