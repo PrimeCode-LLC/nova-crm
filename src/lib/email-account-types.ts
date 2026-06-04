@@ -90,6 +90,11 @@ export interface MailSent {
   subject: string;
   body: string;
   sentAt: string;
+  /** Set when loaded from the server Sent folder (IMAP). */
+  uid?: number;
+  bodySynced?: boolean;
+  preview?: string;
+  bodyHtml?: string;
 }
 
 export type ScheduledEmailStatus = "pending" | "sent" | "failed" | "cancelled";

@@ -353,7 +353,7 @@ function mailListRowMatchesSearch(row: MailListRow, q: string): boolean {
 
 type MailFolder = "inbox" | "sent" | "drafts" | "trash" | "scheduled";
 type ScheduledTab = "pending" | "done";
-type ImapListFolder = "inbox" | "trash";
+type ImapListFolder = "inbox" | "trash" | "sent";
 
 /** Matches server-side IMAP list batching; older messages load via “Load more”. */
 const INBOX_IMAP_PAGE_LIMIT = INBOX_IMAP_HEAD_LIMIT;
@@ -404,7 +404,9 @@ export default function InboxPage() {
   const appendInbound = useEmailAccountStore((s) => s.appendInbound);
   const reconcileInboundHeadFromSync = useEmailAccountStore((s) => s.reconcileInboundHeadFromSync);
   const reconcileTrashHeadFromSync = useEmailAccountStore((s) => s.reconcileTrashHeadFromSync);
+  const reconcileSentHeadFromSync = useEmailAccountStore((s) => s.reconcileSentHeadFromSync);
   const setTrashInbound = useEmailAccountStore((s) => s.setTrashInbound);
+  const mergeSentBodies = useEmailAccountStore((s) => s.mergeSentBodies);
   const mergeInboundBodies = useEmailAccountStore((s) => s.mergeInboundBodies);
   const mergeTrashBodies = useEmailAccountStore((s) => s.mergeTrashBodies);
   const removeInboundByUids = useEmailAccountStore((s) => s.removeInboundByUids);
@@ -508,9 +510,17 @@ export default function InboxPage() {
   const [inboundLoadingMore, setInboundLoadingMore] = React.useState(false);
   const [trashLoading, setTrashLoading] = React.useState(false);
   const [trashSyncing, setTrashSyncing] = React.useState(false);
+  const [sentLoading, setSentLoading] = React.useState(false);
+  const [sentSyncing, setSentSyncing] = React.useState(false);
+  const [sentFetchError, setSentFetchError] = React.useState<string | null>(null);
   /** Total messages in INBOX on server (from last IMAP list); may exceed loaded rows. */
   const [imapMailboxTotal, setImapMailboxTotal] = React.useState<number | null>(null);
   const [imapTrashTotal, setImapTrashTotal] = React.useState<number | null>(null);
+  const [imapSentTotal, setImapSentTotal] = React.useState<number | null>(null);
+  const sentForMailbox = React.useMemo(
+    () => sent.filter((m) => m.mailboxId === account.id),
+    [sent, account.id],
+  );
   const inbound = React.useMemo(
     () => inboundByMailbox[account.id] ?? [],
     [inboundByMailbox, account.id],
@@ -546,6 +556,7 @@ export default function InboxPage() {
   React.useEffect(() => {
     setImapMailboxTotal(null);
     setImapTrashTotal(null);
+    setImapSentTotal(null);
   }, [account.id]);
 
   React.useEffect(() => {
@@ -589,6 +600,10 @@ export default function InboxPage() {
 
   React.useEffect(() => {
     setReadStatusFilter(READ_STATUS_FILTER_ALL);
+    if (mailFolder === "sent" || mailFolder === "drafts" || mailFolder === "scheduled") {
+      setEntityMailFilter(ENTITY_MAIL_FILTER_ALL);
+      setEntitySubFilter(ENTITY_SUB_FILTER_ALL);
+    }
   }, [mailFolder]);
 
   /** Load RFC822 bodies for older messages when a thread is opened (bulk sync only parses the newest chunk). */
@@ -694,20 +709,29 @@ export default function InboxPage() {
         }
         return;
       }
+      if (!useEmailAccountStore.getState().emailServerHydrated) return;
       const acct = getActiveMailbox(useEmailAccountStore.getState());
+      const mailboxId = acct.id;
       if (!isImapInboxConfigured(acct)) {
         if (folder === "inbox") setInbound(acct.id, []);
-        else setTrashInbound(acct.id, []);
+        else if (folder === "trash") setTrashInbound(acct.id, []);
+        else if (folder === "sent") setSentFetchError("Configure IMAP in Settings → Email to load Sent mail.");
         return;
       }
+      if (folder === "sent") setSentFetchError(null);
       const stBefore = useEmailAccountStore.getState();
       const cachedLen =
         folder === "inbox"
           ? (stBefore.inboundByMailbox[acct.id]?.length ?? 0)
-          : (stBefore.trashInboundByMailbox[acct.id]?.length ?? 0);
+          : folder === "trash"
+            ? (stBefore.trashInboundByMailbox[acct.id]?.length ?? 0)
+            : stBefore.sent.filter((m) => m.mailboxId === acct.id && m.uid != null).length;
       if (folder === "inbox") {
         if (cachedLen > 0) setInboundSyncing(true);
         else setInboundLoading(true);
+      } else if (folder === "sent") {
+        if (cachedLen > 0) setSentSyncing(true);
+        else setSentLoading(true);
       } else if (cachedLen > 0) {
         setTrashSyncing(true);
       } else {
@@ -732,19 +756,34 @@ export default function InboxPage() {
             },
           }),
         });
-        const data = (await res.json()) as {
+        let data: {
           ok?: boolean;
           error?: string;
           messages?: MailInbound[];
           mailboxTotal?: number;
+          mailboxPath?: string;
+          skippedNoEnvelope?: number;
         };
-        if (!data.ok) {
-          const err = data.error ?? "Unknown error from the mail server.";
-          toast.error(folder === "inbox" ? "Couldn’t refresh mail" : "Couldn’t load Trash", {
-            description: err.length > 400 ? `${err.slice(0, 400)}…` : err,
-          });
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          toast.error("Invalid response from mail server");
+          if (folder === "sent") setSentFetchError("Invalid response from mail server.");
           return;
         }
+        if (!res.ok || !data.ok) {
+          const err = data.error ?? `Mail server error (${res.status})`;
+          const label =
+            folder === "inbox" ? "Couldn’t refresh mail" : folder === "sent" ? "Couldn’t load Sent" : "Couldn’t load Trash";
+          toast.error(label, {
+            description: err.length > 400 ? `${err.slice(0, 400)}…` : err,
+          });
+          if (folder === "sent") setSentFetchError(err);
+          return;
+        }
+        const stillActive = getActiveMailbox(useEmailAccountStore.getState()).id;
+        if (stillActive !== mailboxId) return;
+
         let rows = Array.isArray(data.messages) ? data.messages : [];
         if (folder === "inbox") {
           rows = await filterInboxBatchAndTrashBlocked({
@@ -761,16 +800,41 @@ export default function InboxPage() {
         if (folder === "inbox") {
           reconcileInboundHeadFromSync(acct.id, rows);
           setImapMailboxTotal(total);
+        } else if (folder === "sent") {
+          reconcileSentHeadFromSync(mailboxId, rows);
+          setImapSentTotal(total);
+          if (rows.length === 0) {
+            const serverTotal = total ?? 0;
+            const skipped = data.skippedNoEnvelope ?? 0;
+            if (serverTotal > 0 && skipped > 0) {
+              const err = `Found ${serverTotal} messages in Sent but could not read them. Try Refresh mail.`;
+              setSentFetchError(err);
+              toast.error("Couldn’t load Sent messages", { description: err });
+            } else if (serverTotal === 0) {
+              const pathHint = data.mailboxPath ? ` (${data.mailboxPath})` : "";
+              const msg = `Your Sent folder on the mail server is empty${pathHint}. Messages sent from Nova appear here after SMTP send.`;
+              setSentFetchError(msg);
+              toast.message("Sent folder is empty", {
+                description: msg,
+              });
+            }
+          } else {
+            setSentFetchError(null);
+          }
         } else {
           reconcileTrashHeadFromSync(acct.id, rows);
           setImapTrashTotal(total);
         }
       } catch {
         toast.error("Could not reach the server");
+        if (folder === "sent") setSentFetchError("Could not reach the server. Check your connection and try Refresh mail.");
       } finally {
         if (folder === "inbox") {
           setInboundLoading(false);
           setInboundSyncing(false);
+        } else if (folder === "sent") {
+          setSentLoading(false);
+          setSentSyncing(false);
         } else {
           setTrashLoading(false);
           setTrashSyncing(false);
@@ -784,13 +848,16 @@ export default function InboxPage() {
       setTrashInbound,
       reconcileInboundHeadFromSync,
       reconcileTrashHeadFromSync,
+      reconcileSentHeadFromSync,
       mailViewAsUid,
       currentUserId,
+      emailServerHydrated,
     ],
   );
 
   const fetchInboundMail = React.useCallback(() => fetchImapListFolder("inbox"), [fetchImapListFolder]);
   const fetchTrashMail = React.useCallback(() => fetchImapListFolder("trash"), [fetchImapListFolder]);
+  const fetchSentMail = React.useCallback(() => fetchImapListFolder("sent"), [fetchImapListFolder]);
 
   const loadMoreInboundMail = React.useCallback(async () => {
     if (isDemo || inboundLoadingMore) return;
@@ -907,9 +974,9 @@ export default function InboxPage() {
     fetchTrashMail,
   ]);
 
-  /** Load INBOX or Trash from IMAP when the Email tab opens that folder (session-restored tab). */
+  /** Load INBOX, Sent, or Trash from IMAP when that folder is opened. */
   React.useEffect(() => {
-    if (mailFolder !== "inbox" && mailFolder !== "trash") return;
+    if (mailFolder !== "inbox" && mailFolder !== "trash" && mailFolder !== "sent") return;
     if (isDemo) return;
     if (!emailServerHydrated) return;
 
@@ -920,6 +987,7 @@ export default function InboxPage() {
       return;
     }
     if (mailFolder === "inbox") void fetchImapListFolder("inbox");
+    else if (mailFolder === "sent") void fetchImapListFolder("sent");
     else void fetchImapListFolder("trash");
   }, [
     mailFolder,
@@ -934,6 +1002,86 @@ export default function InboxPage() {
     fetchImapListFolder,
     setInbound,
     setTrashInbound,
+    mailViewAsUid,
+    currentUserId,
+  ]);
+
+  /** Load full body when opening a Sent message that only has headers from bulk sync. */
+  React.useEffect(() => {
+    if (isDemo) return;
+    if (mailFolder !== "sent") return;
+    if (!selectedMail || !("sentAt" in selectedMail)) return;
+    const row = selectedMail as MailSent;
+    if (row.uid == null || row.bodySynced !== false) return;
+
+    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    if (!isImapInboxConfigured(acct)) return;
+
+    const ac = new AbortController();
+    let cancelled = false;
+
+    void (async () => {
+      try {
+        const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailViewAsUid, currentUserId);
+        const res = await fetch(url, {
+          method: "POST",
+          signal: ac.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mailboxId: acct.id,
+            folder: "sent",
+            uids: [row.uid],
+            imap: {
+              host: acct.imap.host,
+              port: acct.imap.port,
+              secure: acct.imap.secure,
+              user: acct.imap.user,
+              pass: acct.imap.password,
+            },
+          }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          error?: string;
+          updates?: Array<{ uid: number; bodyText?: string; bodyHtml?: string; preview?: string; bodySynced?: boolean }>;
+        };
+        if (!data.ok || !Array.isArray(data.updates) || data.updates.length === 0) {
+          if (!cancelled && data.error) {
+            toast.error("Couldn’t load message body", { description: data.error });
+          }
+          return;
+        }
+        mergeSentBodies(acct.id, data.updates);
+        const patch = data.updates[0];
+        if (patch && selectedMail?.id === row.id) {
+          setSelectedMail({
+            ...row,
+            body: patch.bodyText ?? row.body,
+            bodyHtml: patch.bodyHtml ?? row.bodyHtml,
+            preview: patch.preview ?? row.preview,
+            bodySynced: true,
+          });
+        }
+      } catch {
+        if (!cancelled) toast.error("Could not load full message text");
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      ac.abort();
+    };
+  }, [
+    isDemo,
+    mailFolder,
+    selectedMail,
+    mergeSentBodies,
+    account.id,
+    account.imap.host,
+    account.imap.port,
+    account.imap.secure,
+    account.imap.user,
+    account.imap.password,
     mailViewAsUid,
     currentUserId,
   ]);
@@ -1134,6 +1282,7 @@ export default function InboxPage() {
       setMailFolder("sent");
       setSelectedMail(null);
       setSelectedThread(null);
+      if (isImapInboxConfigured(account)) void fetchSentMail();
     } catch {
       toast.error("Could not reach the server");
     } finally {
@@ -1622,7 +1771,7 @@ export default function InboxPage() {
       }));
     }
     if (mailFolder === "sent") {
-      return sent.filter((m) => m.mailboxId === account.id).map((m) => ({
+      return sentForMailbox.map((m) => ({
         id: m.id,
         title: m.subject || "(no subject)",
         subtitle: m.to,
@@ -1657,7 +1806,7 @@ export default function InboxPage() {
         }));
     }
     return [];
-  }, [mailFolder, sent, drafts, scheduled, scheduledTab, inboundThreads, trashThreads, account.id]);
+  }, [mailFolder, sentForMailbox, drafts, scheduled, scheduledTab, inboundThreads, trashThreads, account.id]);
 
   const scheduledPendingCount = React.useMemo(
     () => scheduled.filter((m) => m.mailboxId === account.id && m.status === "pending").length,
@@ -2240,10 +2389,14 @@ export default function InboxPage() {
         disabled={
           (mailFolder === "inbox" && (inboundLoading || inboundLoadingMore)) ||
           (mailFolder === "trash" && trashLoading) ||
-          (!isDemo && !isImapInboxConfigured(account) && (mailFolder === "inbox" || mailFolder === "trash"))
+          (mailFolder === "sent" && sentLoading) ||
+          (!isDemo &&
+            !isImapInboxConfigured(account) &&
+            (mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent"))
         }
         onClick={() => {
           if (mailFolder === "trash") void fetchTrashMail();
+          else if (mailFolder === "sent") void fetchSentMail();
           else void fetchInboundMail();
         }}
         title={
@@ -2252,12 +2405,15 @@ export default function InboxPage() {
             : isImapInboxConfigured(account)
               ? mailFolder === "trash"
                 ? "Reload Trash from the server"
-                : "Reload messages from the server"
+                : mailFolder === "sent"
+                  ? "Reload Sent from the server"
+                  : "Reload messages from the server"
               : "Configure IMAP in Email settings to refresh"
         }
       >
         {((mailFolder === "inbox" && (inboundLoading || inboundSyncing)) ||
-          (mailFolder === "trash" && (trashLoading || trashSyncing))) ? (
+          (mailFolder === "trash" && (trashLoading || trashSyncing)) ||
+          (mailFolder === "sent" && (sentLoading || sentSyncing))) ? (
           <Loader2 className="h-3.5 w-3.5 animate-spin" />
         ) : (
           <RefreshCw className="h-3.5 w-3.5" />
@@ -2647,6 +2803,14 @@ export default function InboxPage() {
                     setSelectedScheduled(null);
                     clearMailRowSelection();
                     if (f.id === "scheduled") void fetchScheduledEmails();
+                    else if (
+                      f.id === "sent" &&
+                      emailServerHydrated &&
+                      !isDemo &&
+                      isImapInboxConfigured(account)
+                    ) {
+                      void fetchSentMail();
+                    }
                   }}
                 >
                   {f.label}
@@ -2673,9 +2837,9 @@ export default function InboxPage() {
                       {trashInbound.length}
                     </Badge>
                   )}
-                  {f.id === "sent" && sent.length > 0 && (
-                    <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px]">
-                      {sent.length}
+                  {f.id === "sent" && sentForMailbox.length > 0 && (
+                    <Badge variant="outline" className="ml-auto h-5 px-1 text-[10px] tabular-nums">
+                      {sentForMailbox.length}
                     </Badge>
                   )}
                   {f.id === "drafts" && drafts.length > 0 && (
@@ -2768,6 +2932,20 @@ export default function InboxPage() {
                   <div className="flex items-center gap-1.5 font-normal text-[10px] text-muted-foreground normal-case">
                     <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden />
                     Syncing Trash…
+                  </div>
+                )}
+                {mailFolder === "sent" &&
+                  imapSentTotal != null &&
+                  imapSentTotal > sentForMailbox.filter((m) => m.uid != null).length && (
+                    <div className="font-normal text-[10px] leading-snug normal-case">
+                      Loaded newest {sentForMailbox.filter((m) => m.uid != null).length} of {imapSentTotal}{" "}
+                      messages in Sent
+                    </div>
+                  )}
+                {mailFolder === "sent" && isImapInboxConfigured(account) && sentSyncing && (
+                  <div className="flex items-center gap-1.5 font-normal text-[10px] text-muted-foreground normal-case">
+                    <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden />
+                    Syncing Sent…
                   </div>
                 )}
                 {showImapBulkMailActions && emailFolderSupportsImapList && (
@@ -3078,7 +3256,47 @@ export default function InboxPage() {
                   (isImapInboxConfigured(account) || isDemo) && (
                     <div className="p-6 text-center text-sm text-muted-foreground">Trash is empty.</div>
                   )}
-                {(mailFolder === "sent" || mailFolder === "drafts") && mailListRows.length === 0 && (
+                {mailFolder === "sent" && !isDemo && !isImapInboxConfigured(account) && (
+                  <div className="p-4 space-y-2">
+                    <p className="text-sm text-muted-foreground">
+                      Add IMAP in{" "}
+                      <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
+                        Settings → Email
+                      </Link>{" "}
+                      to load Sent mail from your server. Messages you send from Nova still appear here after SMTP is
+                      configured.
+                    </p>
+                  </div>
+                )}
+                {mailFolder === "sent" &&
+                  isImapInboxConfigured(account) &&
+                  sentLoading &&
+                  sentForMailbox.length === 0 && (
+                    <div className="p-8 flex justify-center text-muted-foreground">
+                      <Loader2 className="h-6 w-6 animate-spin" />
+                    </div>
+                  )}
+                {mailFolder === "sent" && sentFetchError && !sentLoading && !sentSyncing && (
+                  <div className="p-4 text-center text-sm text-muted-foreground space-y-2">
+                    <p>{sentFetchError}</p>
+                    {isImapInboxConfigured(account) && !inboxReadOnly ? (
+                      <Button type="button" size="sm" variant="outline" onClick={() => void fetchSentMail()}>
+                        <RefreshCw className="h-3.5 w-3.5" /> Try again
+                      </Button>
+                    ) : null}
+                  </div>
+                )}
+                {mailFolder === "sent" &&
+                  !sentFetchError &&
+                  !sentLoading &&
+                  !sentSyncing &&
+                  mailListRows.length === 0 &&
+                  (isImapInboxConfigured(account) || isDemo) && (
+                    <div className="p-6 text-center text-sm text-muted-foreground">
+                      {isDemo ? "Nothing here yet." : "No messages in Sent."}
+                    </div>
+                  )}
+                {mailFolder === "drafts" && mailListRows.length === 0 && (
                   <div className="p-6 text-center text-sm text-muted-foreground">Nothing here yet.</div>
                 )}
                 {mailFolder === "scheduled" && scheduledLoading && mailListRows.length === 0 && (
@@ -3490,9 +3708,26 @@ export default function InboxPage() {
                     <div>
                       <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
                       <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
+                      {selectedMail.from ? (
+                        <p className="text-xs text-muted-foreground">From: {selectedMail.from}</p>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.sentAt)}</p>
                     </div>
-                    <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">{selectedMail.body}</div>
+                    {selectedMail.bodySynced === false && !selectedMail.body ? (
+                      <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Loading message…
+                      </div>
+                    ) : selectedMail.bodyHtml ? (
+                      <div
+                        className="rounded-lg border bg-muted/10 p-4 text-sm prose prose-sm dark:prose-invert max-w-none"
+                        dangerouslySetInnerHTML={{ __html: selectedMail.bodyHtml }}
+                      />
+                    ) : (
+                      <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">
+                        {selectedMail.body || selectedMail.preview || ""}
+                      </div>
+                    )}
                   </div>
                 ) : "updatedAt" in selectedMail ? (
                   <div className="space-y-4 max-w-xl">
@@ -4371,10 +4606,22 @@ function resolveContactForMailListRow(row: MailListRow, contacts: Contact[]): Co
   if ("scheduledAt" in item && "status" in item) {
     return null;
   }
-  if ("uid" in item) {
-    return matchInbound(item);
+  if ("sentAt" in item && !("date" in item)) {
+    const emails = collectMessageEmails(item as MailDraft | MailSent);
+    return (
+      contacts.find((contact) => {
+        const owned = contactEmailSet(contact);
+        for (const e of owned) {
+          if (emails.has(e)) return true;
+        }
+        return false;
+      }) ?? null
+    );
   }
-  if ("sentAt" in item || "updatedAt" in item) {
+  if ("date" in item && "uid" in item) {
+    return matchInbound(item as MailInbound);
+  }
+  if ("updatedAt" in item) {
     const emails = collectMessageEmails(item as MailDraft | MailSent | MailInbound);
     return (
       contacts.find((contact) => {
@@ -4417,14 +4664,14 @@ function resolveLeadForMailListRow(
   if ("scheduledAt" in item && "status" in item) {
     return null;
   }
-  if ("uid" in item) {
-    return matchInbound(item);
-  }
-  if ("sentAt" in item) {
+  if ("sentAt" in item && !("date" in item)) {
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
     const emails = collectMessageEmails(item as MailSent);
     return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+  }
+  if ("date" in item && "uid" in item) {
+    return matchInbound(item as MailInbound);
   }
   if ("updatedAt" in item) {
     const manual = linkedLeadByMessageId[item.id];

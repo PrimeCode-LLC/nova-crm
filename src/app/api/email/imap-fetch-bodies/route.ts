@@ -11,6 +11,7 @@ import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-cli
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { resolveSentMailboxPath } from "@/lib/email/resolve-sent-mailbox";
 import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 const MAX_UIDS = 55;
@@ -92,6 +93,15 @@ export async function POST(req: Request) {
       if (!resolved) {
         return NextResponse.json(
           { ok: false, error: "Could not locate Trash folder on the server." },
+          { status: 400 },
+        );
+      }
+      mailboxPath = resolved;
+    } else if (folderRaw === "sent") {
+      const resolved = await resolveSentMailboxPath(client);
+      if (!resolved) {
+        return NextResponse.json(
+          { ok: false, error: "Could not locate Sent folder on the server." },
           { status: 400 },
         );
       }

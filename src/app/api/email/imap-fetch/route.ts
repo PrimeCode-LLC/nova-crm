@@ -14,6 +14,7 @@ import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-cli
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { resolveSentMailboxPath } from "@/lib/email/resolve-sent-mailbox";
 import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 /** Default number of newest INBOX messages to list in one refresh. */
@@ -90,6 +91,7 @@ export async function POST(req: Request) {
 
     const folderRaw = String((b as Record<string, unknown>).folder ?? "inbox").toLowerCase();
     let mailboxPath = "INBOX";
+    let resolvedFolder: string | undefined;
     if (folderRaw === "trash") {
       const resolved = await resolveTrashMailboxPath(client);
       if (!resolved) {
@@ -103,6 +105,21 @@ export async function POST(req: Request) {
         );
       }
       mailboxPath = resolved;
+      resolvedFolder = resolved;
+    } else if (folderRaw === "sent") {
+      const resolved = await resolveSentMailboxPath(client);
+      if (!resolved) {
+        return NextResponse.json(
+          {
+            ok: false,
+            error:
+              "Could not find a Sent folder on this account. Sent sync requires a standard Sent / Sent Items mailbox.",
+          },
+          { status: 400 },
+        );
+      }
+      mailboxPath = resolved;
+      resolvedFolder = resolved;
     }
 
     const lock = await client.getMailboxLock(mailboxPath, { readOnly: true });
@@ -146,10 +163,14 @@ export async function POST(req: Request) {
         }
       }
 
+      let skippedNoEnvelope = 0;
       const messages = await Promise.all(
         slice.map(async (uid) => {
           const msg = envByUid.get(uid);
-          if (!msg?.envelope) return null;
+          if (!msg?.envelope) {
+            skippedNoEnvelope += 1;
+            return null;
+          }
 
           const env = msg.envelope;
           const { subj, from, to, cc: ccFromEnv, envExt } = envelopeHeaderFields(env);
@@ -226,12 +247,15 @@ export async function POST(req: Request) {
         }),
       );
 
+      const parsed = messages.filter(Boolean);
       return NextResponse.json({
         ok: true,
-        messages: messages.filter(Boolean),
+        messages: parsed,
         mailboxTotal,
         offset,
         loadedThrough: offset + slice.length,
+        mailboxPath: resolvedFolder ?? mailboxPath,
+        skippedNoEnvelope,
       });
     } finally {
       try {

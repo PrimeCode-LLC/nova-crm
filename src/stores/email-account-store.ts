@@ -8,6 +8,7 @@ import {
   defaultEmailMailboxSettings,
 } from "@/lib/email-account-types";
 import { buildDemoEmailSeed } from "@/lib/demo-email-seed";
+import { mailInboundToSent, mergeSentMailRow } from "@/lib/email/mail-inbound-to-sent";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { normalizeBlockedSenderDomain } from "@/lib/email/blocked-sender-domains";
 
@@ -70,6 +71,12 @@ export interface EmailAccountStore {
    */
   reconcileInboundHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
   reconcileTrashHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
+  /** Apply offset-0 IMAP Sent list; keeps compose-only rows and older loaded pages. */
+  reconcileSentHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
+  mergeSentBodies: (
+    mailboxId: string,
+    updates: Array<{ uid: number; bodyText?: string; bodyHtml?: string; preview?: string; bodySynced?: boolean }>,
+  ) => void;
   mergeTrashBodies: (
     mailboxId: string,
     updates: Array<{ uid: number } & Partial<MailInbound>>,
@@ -363,6 +370,52 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
           [mailboxId]: [...mergedHead, ...tailSorted],
         },
       };
+    }),
+  reconcileSentHeadFromSync: (mailboxId, headRows) =>
+    set((s) => {
+      const prevForBox = s.sent.filter((m) => m.mailboxId === mailboxId);
+      const localOnly = prevForBox.filter((m) => m.uid == null);
+      const otherMailboxes = s.sent.filter((m) => m.mailboxId !== mailboxId);
+
+      if (headRows.length === 0) {
+        const kept = [...localOnly].sort(
+          (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+        );
+        return { sent: [...otherMailboxes, ...kept] };
+      }
+
+      const minHeadUid = Math.min(...headRows.map((m) => m.uid));
+      const prevByUid = new Map(
+        prevForBox.filter((m) => m.uid != null).map((m) => [m.uid!, m]),
+      );
+      const mergedHead = headRows.map((row) => {
+        const server = mailInboundToSent(mailboxId, row);
+        return mergeSentMailRow(prevByUid.get(server.uid!), server);
+      });
+      const tail = prevForBox.filter((m) => m.uid != null && m.uid! < minHeadUid);
+      const combined = [...localOnly, ...mergedHead, ...tail].sort(
+        (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+      );
+      return { sent: [...otherMailboxes, ...combined] };
+    }),
+  mergeSentBodies: (mailboxId, updates) =>
+    set((s) => {
+      if (updates.length === 0) return s;
+      const patch = new Map(updates.map((u) => [u.uid, u]));
+      const next = s.sent.map((m) => {
+        if (m.mailboxId !== mailboxId || m.uid == null) return m;
+        const p = patch.get(m.uid);
+        if (!p) return m;
+        const body = p.bodyText ?? m.body;
+        return {
+          ...m,
+          body,
+          bodyHtml: p.bodyHtml ?? m.bodyHtml,
+          preview: p.preview ?? m.preview,
+          bodySynced: p.bodySynced ?? true,
+        };
+      });
+      return { sent: next };
     }),
   mergeTrashBodies: (mailboxId, updates) =>
     set((s) => {
