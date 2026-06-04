@@ -1460,7 +1460,7 @@ export default function InboxPage() {
       for (const row of rows) {
         if (!rowIds.has(row.id)) continue;
         if (row.thread) for (const m of row.thread.messages) uidSet.add(m.uid);
-        else if ("uid" in row.row) uidSet.add(row.row.uid);
+        else if ("uid" in row.row && typeof row.row.uid === "number") uidSet.add(row.row.uid);
       }
       return [...uidSet];
     },
@@ -1476,7 +1476,12 @@ export default function InboxPage() {
           for (const m of row.thread.messages) {
             if (!m.seen) uidSet.add(m.uid);
           }
-        } else if ("uid" in row.row && !row.row.seen) {
+        } else if (
+          "uid" in row.row &&
+          typeof row.row.uid === "number" &&
+          "seen" in row.row &&
+          !row.row.seen
+        ) {
           uidSet.add(row.row.uid);
         }
       }
@@ -1494,7 +1499,12 @@ export default function InboxPage() {
           for (const m of row.thread.messages) {
             if (m.seen) uidSet.add(m.uid);
           }
-        } else if ("uid" in row.row && row.row.seen) {
+        } else if (
+          "uid" in row.row &&
+          typeof row.row.uid === "number" &&
+          "seen" in row.row &&
+          row.row.seen
+        ) {
           uidSet.add(row.row.uid);
         }
       }
@@ -2181,11 +2191,11 @@ export default function InboxPage() {
       if (selectedThread.hasUnread) markThreadAsRead(selectedThread);
       return;
     }
-    if (selectedMail && "uid" in selectedMail) {
+    if (selectedMail && "uid" in selectedMail && typeof selectedMail.uid === "number") {
       const key = `uid:${selectedMail.uid}`;
       if (autoReadConversationRef.current === key) return;
       autoReadConversationRef.current = key;
-      if (!selectedMail.seen) void applySeenToUids([selectedMail.uid], true);
+      if ("seen" in selectedMail && !selectedMail.seen) void applySeenToUids([selectedMail.uid], true);
       return;
     }
     autoReadConversationRef.current = null;
@@ -2193,7 +2203,9 @@ export default function InboxPage() {
     mailFolder,
     readStatusFilter,
     selectedThread?.threadId,
-    selectedMail && "uid" in selectedMail ? selectedMail.uid : null,
+    selectedMail && "uid" in selectedMail && typeof selectedMail.uid === "number"
+      ? selectedMail.uid
+      : null,
     markThreadAsRead,
     applySeenToUids,
   ]);
