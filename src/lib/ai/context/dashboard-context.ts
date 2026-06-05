@@ -69,7 +69,7 @@ export function buildDashboardWatchCandidates(input: {
       : 0;
     const score = priorityScore(f.priority) * 10 + (overdue ? 20 + Math.min(daysOverdue, 14) : 0);
     candidates.push({
-      title: lead ? `${leadLabel(lead)} — ${f.title}` : f.title,
+      title: lead ? `${leadLabel(lead)}, ${f.title}` : f.title,
       reason: overdue
         ? `Overdue follow-up (${daysOverdue}d) · ${f.priority} priority`
         : `Upcoming follow-up · ${f.priority} priority`,
@@ -90,7 +90,7 @@ export function buildDashboardWatchCandidates(input: {
         : 0;
     const score = (overdue ? 18 + Math.min(daysOverdue, 14) : 4) + (lead?.priority ? priorityScore(lead.priority) : 0);
     candidates.push({
-      title: lead ? `${leadLabel(lead)} — ${t.title}` : t.title,
+      title: lead ? `${leadLabel(lead)}, ${t.title}` : t.title,
       reason: overdue
         ? `Overdue task (${daysOverdue}d) · ${t.taskType}`
         : `Open task · ${t.taskType}`,

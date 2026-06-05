@@ -833,7 +833,7 @@ function CountersTable({
                   <TableCell className="py-2 text-sm text-muted-foreground">
                     {a.profileId?.trim()
                       ? getProfileById(a.profileId)?.name?.trim() || a.profileId
-                      : "—"}
+                      : "-"}
                   </TableCell>
                   <TableCell className="py-2 text-xs tabular-nums">
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5">
@@ -915,7 +915,7 @@ function RecordsTable({
                   <TableCell className="py-2 text-sm text-muted-foreground">
                     {a.profileId?.trim()
                       ? getProfileById(a.profileId)?.name?.trim() || a.profileId
-                      : "—"}
+                      : "-"}
                   </TableCell>
                   <TableCell className="py-2 text-sm">{a.summary ?? "-"}</TableCell>
                   <TableCell className="py-2 text-sm">

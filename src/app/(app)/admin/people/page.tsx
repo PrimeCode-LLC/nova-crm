@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
-import { PeoplePageClient } from "./people-client";
+import { PeoplePageShell } from "./people-page-shell";
 
 export const dynamic = "force-dynamic";
 
@@ -20,7 +20,7 @@ export default async function PeoplePage() {
   const org = orgId ? await getOrganizationServer(orgId) : null;
 
   return (
-    <PeoplePageClient
+    <PeoplePageShell
       currentUid={session.uid}
       organization={
         org

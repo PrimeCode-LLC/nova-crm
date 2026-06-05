@@ -575,7 +575,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => {
         const ids = row.original.labelIds ?? [];
         if (!ids.length) {
-          return <span className="text-xs text-muted-foreground">—</span>;
+          return <span className="text-xs text-muted-foreground">-</span>;
         }
         return (
           <div className="flex max-w-[148px] flex-wrap gap-0.5">
@@ -629,7 +629,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       cell: ({ row }) => {
         const p = getProfileById(row.original.profileId);
         if (!p) {
-          return <span className="text-xs text-muted-foreground">—</span>;
+          return <span className="text-xs text-muted-foreground">-</span>;
         }
         return (
           <span className="max-w-[10rem] truncate text-sm" title={p.name}>
@@ -678,7 +678,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       header: COL.addedBy,
       cell: ({ row }) => {
         const id = row.original.createdById?.trim();
-        if (!id) return <span className="text-xs text-muted-foreground">—</span>;
+        if (!id) return <span className="text-xs text-muted-foreground">-</span>;
         return <UserChip userId={id} size="xs" />;
       },
     },

@@ -241,7 +241,7 @@ export function FitCheckClient() {
       selectedProfile || activeScan?.profileDisplayName
         ? `Persona: ${selectedProfile?.displayLabel ?? activeScan?.profileDisplayName}`
         : null,
-      `Fit check: ${result.verdict} (${result.fitScore}%) — ${result.fitLabel}`,
+      `Fit check: ${result.verdict} (${result.fitScore}%), ${result.fitLabel}`,
       result.summary,
       "",
       "Hooks:",
@@ -259,7 +259,7 @@ export function FitCheckClient() {
     <>
       <PageHeader
         title="Fit Check"
-        description="Pick the opportunity type and your stack persona — then paste the job to get a pursue / pass recommendation."
+        description="Pick the opportunity type and your stack persona, then paste the job to get a pursue / pass recommendation."
         actions={
           <Button type="button" variant="outline" size="sm" onClick={startNew}>
             <Plus className="h-3.5 w-3.5" /> New check
@@ -366,7 +366,7 @@ export function FitCheckClient() {
                       <Link href="/admin/profiles" className="underline underline-offset-2">
                         Admin → Profiles
                       </Link>{" "}
-                      — open a profile, set Fit Check categories and link libraries.
+                     , open a profile, set Fit Check categories and link libraries.
                     </p>
                   </div>
                 ) : (

@@ -46,7 +46,7 @@ const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "followup_suggest", label: "Follow-up suggestions" },
   { key: "email_reply", label: "Email reply" },
   { key: "opportunity_fit", label: "Opportunity fit check" },
-  { key: "opportunity_fit_discuss", label: "Fit check — discuss" },
+  { key: "opportunity_fit_discuss", label: "Fit check, discuss" },
 ];
 
 export function AiAdminClient() {
@@ -305,8 +305,8 @@ export function AiAdminClient() {
                 <CardHeader>
                   <CardTitle className="text-sm">API keys</CardTitle>
                   <CardDescription className="text-xs">
-                    OpenAI {keyFlags.openai ? "✓" : "—"} · Anthropic {keyFlags.anthropic ? "✓" : "—"} · Google{" "}
-                    {keyFlags.google ? "✓" : "—"}
+                    OpenAI {keyFlags.openai ? "✓" : "-"} · Anthropic {keyFlags.anthropic ? "✓" : "-"} · Google{" "}
+                    {keyFlags.google ? "✓" : "-"}
                   </CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-3">

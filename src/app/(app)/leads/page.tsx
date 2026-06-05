@@ -2,13 +2,15 @@
 
 import * as React from "react";
 import { Suspense } from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Bookmark, Download, Kanban, Upload, ChevronDown } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
-import { LeadsTable, type LeadsTableRef, type LeadsTablePreset } from "@/components/leads/leads-table";
+import type { LeadsTableRef, LeadsTablePreset } from "@/components/leads/leads-table";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -18,6 +20,14 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
+
+const LeadsTable = dynamic(
+  () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
+  {
+    ssr: false,
+    loading: () => <WorkspacePageSkeleton />,
+  },
+);
 
 function LeadsPageInner() {
   const searchParams = useSearchParams();
@@ -34,7 +44,7 @@ function LeadsPageInner() {
     .join("|");
   const idleOnly = searchParams.get("filter") === "idle";
 
-  const { leads, isDemo } = useWorkspace();
+  const { leads, isDemo, workspaceLoading } = useWorkspace();
   const salesLeadCount = React.useMemo(
     () => leads.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead").length,
     [leads],
@@ -111,7 +121,9 @@ function LeadsPageInner() {
         }
       />
       <PageBody contained>
-        {!isDemo && salesLeadCount === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && salesLeadCount === 0 ? (
           <WorkspaceEmptyHint title="No leads in workspace" />
         ) : (
           <LeadsTable

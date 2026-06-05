@@ -19,13 +19,13 @@ export function demoOpportunityFitResult(
       { key: "stack", label: "Tech stack", score: 80, note: "Matches preferred technologies." },
     ],
     strongMatches: [
-      { point: "Needs React + Node delivery — in your sweet spot", sourceTitle: "Services overview" },
-      { point: "Ongoing retainer potential mentioned", sourceTitle: "ICP — ideal customer" },
+      { point: "Needs React + Node delivery, in your sweet spot", sourceTitle: "Services overview" },
+      { point: "Ongoing retainer potential mentioned", sourceTitle: "ICP, ideal customer" },
       { point: "Clear problem statement (legacy migration)", sourceTitle: "" },
     ],
     gaps: [
       {
-        point: "Budget not stated explicitly — confirm before investing time",
+        point: "Budget not stated explicitly, confirm before investing time",
         severity: "minor",
         gapKind: "info_missing",
       },
@@ -48,7 +48,7 @@ export function demoOpportunityFitResult(
       {
         angle: "De-risk the migration",
         painPoint: "Fear of downtime during legacy cutover",
-        opener: `Hi — saw you're planning a migration. We've helped similar teams ship in phases so production stays stable. Happy to share a 2-slide approach if useful.`,
+        opener: `Hi, saw you're planning a migration. We've helped similar teams ship in phases so production stays stable. Happy to share a 2-slide approach if useful.`,
       },
       {
         angle: "Speed to first milestone",
@@ -58,7 +58,7 @@ export function demoOpportunityFitResult(
     ],
     pursueRecommendation: {
       shouldPursue: sourceType !== "upwork",
-      headline: sourceType === "upwork" ? "Worth a short proposal if you need volume" : "Worth pursuing — personalize and send",
+      headline: sourceType === "upwork" ? "Worth a short proposal if you need volume" : "Worth pursuing, personalize and send",
       reasoning:
         sourceType === "upwork"
           ? "Partial fit: good skills match but verify rate and competition. Spend ≤20 min on a tailored opener unless pipeline is empty."

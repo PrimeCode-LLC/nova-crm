@@ -265,7 +265,7 @@ export function SuggestFollowupsDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {regenerateFromPlan
-              ? "Lead replied — draft a new cadence that reflects their message. Edit before creating."
+              ? "Lead replied, draft a new cadence that reflects their message. Edit before creating."
               : "AI analyzes this lead and proposes a cadence with copy-ready messages. Edit anything before creating."}
           </DialogDescription>
         </DialogHeader>

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { Plus } from "lucide-react";
 
@@ -12,10 +13,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
-import { NewLeadTaskDialog } from "@/components/tasks/new-lead-task-dialog";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import type { LeadTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+const NewLeadTaskDialog = dynamic(
+  () => import("@/components/tasks/new-lead-task-dialog").then((m) => ({ default: m.NewLeadTaskDialog })),
+  { ssr: false },
+);
 
 const TYPE_LABEL: Record<LeadTask["taskType"], string> = {
   review: "Review",
@@ -48,7 +53,7 @@ export default function TasksPage() {
     <>
       <PageHeader
         title="Team tasks"
-        description="Only the assignee, the person who assigned the task, and org admins or directors can see these — not the rest of the team."
+        description="Only the assignee, the person who assigned the task, and org admins or directors can see these, not the rest of the team."
         actions={
           <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> Assign task
@@ -102,13 +107,15 @@ export default function TasksPage() {
           </>
         )}
 
-        <NewLeadTaskDialog
-          open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          leads={leads}
-          currentUserId={currentUserId}
-          onCreate={addLeadTask}
-        />
+        {dialogOpen ? (
+          <NewLeadTaskDialog
+            open={dialogOpen}
+            onOpenChange={setDialogOpen}
+            leads={leads}
+            currentUserId={currentUserId}
+            onCreate={addLeadTask}
+          />
+        ) : null}
       </PageBody>
     </>
   );

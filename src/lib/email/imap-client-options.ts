@@ -88,22 +88,22 @@ export function formatImapError(err: unknown): string {
 
   /* Node uses ETIMEDOUT; imapflow uses ETIMEOUT for socket idle timeout */
   if (code === "ETIMEDOUT" || code === "ETIMEOUT" || /socket timeout|timeout/i.test(msg)) {
-    return "IMAP timed out — check host/port/TLS and firewall. If the mailbox is large or slow, try again; we allow extra time while downloading mail.";
+    return "IMAP timed out, check host/port/TLS and firewall. If the mailbox is large or slow, try again; we allow extra time while downloading mail.";
   }
   if (code === "ECONNREFUSED") {
-    return "IMAP connection refused — wrong port or server not accepting IMAP on this address.";
+    return "IMAP connection refused, wrong port or server not accepting IMAP on this address.";
   }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
-    return "IMAP host not found — check the hostname spelling.";
+    return "IMAP host not found, check the hostname spelling.";
   }
   if (messageLooksLikeImapAuthFailure(msg)) {
     return formatImapLoginRejected(err);
   }
   if (/certificate|SSL|TLS|UNABLE_TO_VERIFY_LEAF_SIGNATURE|self signed/i.test(msg)) {
-    return "IMAP TLS error — try port 993 with TLS on; some hosts need STARTTLS on port 143 with TLS off.";
+    return "IMAP TLS error, try port 993 with TLS on; some hosts need STARTTLS on port 143 with TLS off.";
   }
   if (/Unknown mailbox|MAILBOX.*not found|nonexistent.*mailbox|Folder not found/i.test(msg)) {
-    return "Could not open the mail folder — your provider may use a different name than INBOX for the main folder.";
+    return "Could not open the mail folder, your provider may use a different name than INBOX for the main folder.";
   }
 
   return msg.length > 280 ? `${msg.slice(0, 280)}…` : msg;

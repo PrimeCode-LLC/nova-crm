@@ -13,7 +13,7 @@ export function showTeamFollowupsOnDashboard(role: Role | undefined): boolean {
 export function getDashboardOverviewDescription(role: Role | undefined): string {
   switch (role) {
     case "director":
-      return "Org-wide pipeline, channel health, and where the team is stuck — with your own commitments in view.";
+      return "Org-wide pipeline, channel health, and where the team is stuck, with your own commitments in view.";
     case "manager":
       return "Team coverage, pipeline risk, and follow-through across your reports.";
     case "team_lead":
@@ -31,7 +31,7 @@ export function getDashboardOverviewDescription(role: Role | undefined): string 
 export function getDashboardRoleFocusLine(role: Role | undefined): string {
   switch (role) {
     case "director":
-      return "Prioritize idle companies, channel mix, and revenue concentration — then drill into any rep.";
+      return "Prioritize idle companies, channel mix, and revenue concentration, then drill into any rep.";
     case "manager":
       return "Watch overdue follow-ups on the team, funnel drop-offs, and idle leads in your scope.";
     case "team_lead":

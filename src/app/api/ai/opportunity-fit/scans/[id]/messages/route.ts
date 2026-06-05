@@ -117,7 +117,7 @@ export async function POST(req: Request, ctx: RouteCtx) {
 
   let assistantText: string;
   if (useDemo) {
-    assistantText = `**Demo reply** — configure AI keys for live answers.\n\nOn this scan (${scan.result.verdict}, ${scan.result.fitScore}%): ${parsed.data.message}\n\nI'd focus on the first hook (“${scan.result.hooks[0]?.angle ?? "value"}”) and confirm budget before investing more than 20 minutes.`;
+    assistantText = `**Demo reply**, configure AI keys for live answers.\n\nOn this scan (${scan.result.verdict}, ${scan.result.fitScore}%): ${parsed.data.message}\n\nI'd focus on the first hook (“${scan.result.hooks[0]?.angle ?? "value"}”) and confirm budget before investing more than 20 minutes.`;
   } else {
     const rag = await retrieveFitCheckContextServer({
       organizationId: orgId,

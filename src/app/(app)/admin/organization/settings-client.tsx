@@ -131,7 +131,7 @@ export function OrganizationSettingsClient({
       if (data.signupUrl) {
         setJoinUrl(data.signupUrl);
         setJoinConfigured(true);
-        toast.success("Join link ready — copy it below.");
+        toast.success("Join link ready, copy it below.");
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -209,7 +209,7 @@ export function OrganizationSettingsClient({
                   Primary email
                 </div>
                 <div className="mt-1 truncate">
-                  {organization.primaryEmail ?? "—"}
+                  {organization.primaryEmail ?? "-"}
                 </div>
               </div>
             </CardContent>
@@ -295,7 +295,7 @@ export function OrganizationSettingsClient({
               {joinConfigured && !joinUrl && (
                 <p className="text-xs text-muted-foreground">
                   A join link is active. Rotating generates a new URL and invalidates the previous one.
-                  The full URL is only shown right after you create or rotate it — for security it is
+                  The full URL is only shown right after you create or rotate it, for security it is
                   not stored in the browser.
                 </p>
               )}

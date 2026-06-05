@@ -45,6 +45,7 @@ import { LeadOverview } from "@/components/leads/lead-overview";
 import { LeadTouchpoints } from "@/components/leads/lead-touchpoints";
 import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
+import { LeadSchedulingPanel } from "@/components/scheduling/lead-scheduling-panel";
 import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
@@ -241,7 +242,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     ? profile?.name?.trim() ||
       (lead.profileId
         ? `Profile not found (id ${lead.profileId.length > 14 ? `${lead.profileId.slice(0, 12)}…` : lead.profileId})`
-        : "Not set — open Edit and choose a profile")
+        : "Not set, open Edit and choose a profile")
     : undefined;
   const showAttributionCard = Boolean(
     campaign || profile || lead.profileId || needsOutreachProfile,
@@ -657,6 +658,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               </CardContent>
             </Card>
 
+            <LeadSchedulingPanel lead={lead} />
+
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">
@@ -724,7 +727,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     <dd>
                       {[account.city, account.state, account.country].filter(Boolean).join(", ") ||
                         account.location ||
-                        "—"}
+                        "-"}
                     </dd>
                     {account.businessDescription && (
                       <>
@@ -788,8 +791,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                           (lead.profileId
                             ? `Not in workspace (${lead.profileId.length > 14 ? `${lead.profileId.slice(0, 12)}…` : lead.profileId})`
                             : needsOutreachProfile
-                              ? (outreachProfileSummary ?? "—")
-                              : "—")}
+                              ? (outreachProfileSummary ?? "-")
+                              : "-")}
                       </span>
                     </div>
                   )}

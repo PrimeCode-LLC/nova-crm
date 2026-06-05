@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
 import { Bell, Command as CommandIcon, Search } from "lucide-react";
@@ -26,13 +27,17 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { GlobalCommandMenu } from "./global-command";
 import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
 import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { cn } from "@/lib/utils";
+
+const GlobalCommandMenu = dynamic(
+  () => import("./global-command").then((m) => ({ default: m.GlobalCommandMenu })),
+  { ssr: false },
+);
 
 function toLabel(segment: string) {
   return segment
@@ -220,7 +225,7 @@ export function AppTopbar() {
           <QuickAddButton />
         </div>
       </header>
-      <GlobalCommandMenu open={cmdOpen} onOpenChange={setCmdOpen} />
+      {cmdOpen ? <GlobalCommandMenu open={cmdOpen} onOpenChange={setCmdOpen} /> : null}
     </>
   );
 }

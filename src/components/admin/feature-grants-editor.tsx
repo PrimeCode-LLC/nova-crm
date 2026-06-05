@@ -38,7 +38,7 @@ export function FeatureGrantsEditor({
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
         Grant specific admin tools without changing this person&apos;s CRM role. Role-based access
-        still applies — grants only add capabilities they would not have otherwise.
+        still applies, grants only add capabilities they would not have otherwise.
       </p>
       {groups.map((group) => (
         <div key={group.cluster} className="space-y-2">
@@ -106,6 +106,6 @@ export function featureGrantsSummary(
 ): string {
   const grants = user.featureGrants ?? [];
   const extra = grants.filter((k) => !roleOnlyHasFeature(user, k));
-  if (!extra.length) return "—";
+  if (!extra.length) return "-";
   return extra.map((k) => ADMIN_FEATURES[k].label).join(", ");
 }

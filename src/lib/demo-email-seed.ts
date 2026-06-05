@@ -26,7 +26,7 @@ function inbound(
   const bodyText =
     partial.bodyText ??
     partial.preview ??
-    "This is sample inbox text for Nova CRM demo mode — no mail server is contacted.";
+    "This is sample inbox text for Nova CRM demo mode, no mail server is contacted.";
   const preview = partial.preview ?? bodyText.slice(0, 140).replace(/\s+/g, " ").trim();
   return {
     ...partial,
@@ -57,24 +57,24 @@ export function buildDemoEmailSeed(): {
 
   const mbWork = defaultEmailMailboxSettings({
     id: DEMO_MB_WORK,
-    label: "Work — Outbound",
+    label: "Work, Outbound",
     enabled: true,
     displayName: "Sarah Chen",
     emailAddress: "sarah.chen@nova.co",
     replyTo: "sarah.chen@nova.co",
-    signature: "Sarah Chen\nOutbound — Nova CRM (demo)",
+    signature: "Sarah Chen\nOutbound, Nova CRM (demo)",
     smtp: { host: "", port: 587, secure: false, user: "", password: "" },
     imap: { host: "", port: 993, secure: true, user: "", password: "" },
   });
 
   const mbUpwork = defaultEmailMailboxSettings({
     id: DEMO_MB_UPWORK,
-    label: "Upwork — Marcus",
+    label: "Upwork, Marcus",
     enabled: true,
     displayName: "Marcus Webb",
     emailAddress: "marcus.webb@nova.co",
     replyTo: "marcus.webb@nova.co",
-    signature: "Marcus Webb\nUpwork closers — Nova CRM (demo)",
+    signature: "Marcus Webb\nUpwork closers, Nova CRM (demo)",
     smtp: { host: "", port: 587, secure: false, user: "", password: "" },
     imap: { host: "", port: 993, secure: true, user: "", password: "" },
   });
@@ -82,7 +82,7 @@ export function buildDemoEmailSeed(): {
   const msgA1 = inbound({
     id: "din-w-a1",
     uid: 11001,
-    subject: "Re: Pilot scope — security questionnaire",
+    subject: "Re: Pilot scope, security questionnaire",
     from: `"${L1.contactName ?? "Contact"}" <${L1mail}>`,
     to: "Sarah Chen <sarah.chen@nova.co>",
     cc: "security@acmecorp-demo.io",
@@ -104,7 +104,7 @@ export function buildDemoEmailSeed(): {
   const msgA2 = inbound({
     id: "din-w-a2",
     uid: 11002,
-    subject: "Re: Pilot scope — security questionnaire",
+    subject: "Re: Pilot scope, security questionnaire",
     from: "Sarah Chen <sarah.chen@nova.co>",
     to: `"${L1.contactName ?? "Contact"}" <${L1mail}>`,
     date: isoMinutesAgo(90),
@@ -112,9 +112,9 @@ export function buildDemoEmailSeed(): {
     messageId: "demo-msg-a-reply@nova.local",
     inReplyTo: "demo-msg-a-root@nova.local",
     referenceIds: ["demo-msg-a-root@nova.local", "demo-msg-a-reply@nova.local"],
-    preview: "Yes — we support SAML SSO and 90-day audit retention on Growth. I'll send the one-pager.",
+    preview: "Yes, we support SAML SSO and 90-day audit retention on Growth. I'll send the one-pager.",
     bodyText:
-      "Yes — we support SAML SSO and 90-day audit retention on Growth. I'll send the one-pager next.\n\nSarah",
+      "Yes, we support SAML SSO and 90-day audit retention on Growth. I'll send the one-pager next.\n\nSarah",
   });
 
   const msgB = inbound({
@@ -128,27 +128,27 @@ export function buildDemoEmailSeed(): {
     messageId: "demo-msg-b@nova.local",
     preview: "Do you offer read-only seats for finance reviewers? We have 4 stakeholders who only approve.",
     bodyText:
-      "Hi Sarah,\n\nDo you offer read-only seats for finance reviewers? We have 4 stakeholders who only approve quotes.\n\n— Ops",
+      "Hi Sarah,\n\nDo you offer read-only seats for finance reviewers? We have 4 stakeholders who only approve quotes.\n\n- Ops",
   });
 
   const msgC = inbound({
     id: "din-w-c1",
     uid: 11004,
-    subject: "Fwd: Intro — Nova x Riverline logistics",
+    subject: "Fwd: Intro, Nova x Riverline logistics",
     from: "James Mitchell <james.mitchell@nova.co>",
     to: "Sarah Chen <sarah.chen@nova.co>",
     date: isoMinutesAgo(2000),
     seen: true,
     messageId: "demo-msg-c@nova.local",
-    preview: "Looping you in with Riverline — they want outbound + inbound in one workspace.",
+    preview: "Looping you in with Riverline, they want outbound + inbound in one workspace.",
     bodyText:
-      "Sarah — looping you in with Riverline logistics. They want outbound + inbound in one workspace next quarter.\n\nJames",
+      "Sarah, looping you in with Riverline logistics. They want outbound + inbound in one workspace next quarter.\n\nJames",
   });
 
   const u1 = inbound({
     id: "din-u-1",
     uid: 21001,
-    subject: "Proposal submitted — CRM integration (fixed price)",
+    subject: "Proposal submitted, CRM integration (fixed price)",
     from: "Upwork Notifications <noreply@upwork.com>",
     to: "Marcus Webb <marcus.webb@nova.co>",
     date: isoMinutesAgo(60),
@@ -162,14 +162,14 @@ export function buildDemoEmailSeed(): {
   const u2 = inbound({
     id: "din-u-2",
     uid: 21002,
-    subject: `Re: ${L2.companyName ?? "Account"} — discovery call notes`,
+    subject: `Re: ${L2.companyName ?? "Account"}, discovery call notes`,
     from: `"${L2.contactName ?? "Contact"}" <${L2mail}>`,
     to: "Marcus Webb <marcus.webb@nova.co>",
     date: isoMinutesAgo(340),
     seen: true,
     messageId: "demo-upwork-thread@nova.local",
-    preview: "Thanks for yesterday — can you send pricing for 15 seats + onboarding week?",
-    bodyText: `Marcus,\n\nThanks for yesterday — can you send pricing for 15 seats + onboarding week?\n\n${L2.contactName}`,
+    preview: "Thanks for yesterday, can you send pricing for 15 seats + onboarding week?",
+    bodyText: `Marcus,\n\nThanks for yesterday, can you send pricing for 15 seats + onboarding week?\n\n${L2.contactName}`,
   });
 
   const drafts: MailDraft[] = [
@@ -177,7 +177,7 @@ export function buildDemoEmailSeed(): {
       id: "demo-draft-w1",
       mailboxId: DEMO_MB_WORK,
       to: L1mail,
-      subject: `Re: ${L1.companyName ?? "Account"} — next steps`,
+      subject: `Re: ${L1.companyName ?? "Account"}, next steps`,
       body: `Hi ${L1first},\n\nFollowing up on timeline for the pilot kickoff.\n\nSarah`,
       updatedAt: isoMinutesAgo(25),
     },
@@ -185,8 +185,8 @@ export function buildDemoEmailSeed(): {
       id: "demo-draft-u1",
       mailboxId: DEMO_MB_UPWORK,
       to: L2mail,
-      subject: "Proposal — Nova rollout (week 1–2)",
-      body: "Hi — here's the fixed-scope plan we discussed on the call…\n\nMarcus",
+      subject: "Proposal, Nova rollout (week 1–2)",
+      body: "Hi, here's the fixed-scope plan we discussed on the call…\n\nMarcus",
       updatedAt: isoMinutesAgo(180),
     },
   ];
@@ -197,7 +197,7 @@ export function buildDemoEmailSeed(): {
       mailboxId: DEMO_MB_WORK,
       from: "sarah.chen@nova.co",
       to: L1mail,
-      subject: "Nova — pilot checklist + security PDF",
+      subject: "Nova, pilot checklist + security PDF",
       body: `Hi ${L1.contactName ?? "there"},\n\nSharing the pilot checklist and security overview you asked for.\n\nSarah`,
       sentAt: isoMinutesAgo(1500),
     },
@@ -206,7 +206,7 @@ export function buildDemoEmailSeed(): {
       mailboxId: DEMO_MB_WORK,
       from: "sarah.chen@nova.co",
       to: "partnerships@riverline-demo.io",
-      subject: "Riverline — consolidated outbound + inbound",
+      subject: "Riverline, consolidated outbound + inbound",
       body: "James asked me to send a one-slide overview of how we consolidate outbound + inbound…",
       sentAt: isoMinutesAgo(2100),
     },
@@ -215,7 +215,7 @@ export function buildDemoEmailSeed(): {
       mailboxId: DEMO_MB_UPWORK,
       from: "marcus.webb@nova.co",
       to: L2mail,
-      subject: "Upwork — next milestones for CRM integration",
+      subject: "Upwork, next milestones for CRM integration",
       body: "Confirming deliverables for week 1: schema mapping, webhook stubs, and QA checklist.\n\nMarcus",
       sentAt: isoMinutesAgo(720),
     },

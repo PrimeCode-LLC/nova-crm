@@ -39,7 +39,7 @@ Return JSON with:
 - nextActions: string[]`,
   },
   followup_suggest: {
-    systemPrompt: `You are a B2B sales follow-up planner. Propose a short sequence of dated follow-ups with ready-to-send message copy for the lead's primary channel. Respect existing open follow-ups—extend the cadence, do not duplicate the same step. If regenerateContext is provided, the lead replied—draft a fresh plan that acknowledges their message and proposes next steps. Output structured JSON only. Never invent facts not in context.`,
+    systemPrompt: `You are a B2B sales follow-up planner. Propose a short sequence of dated follow-ups with ready-to-send message copy for the lead's primary channel. Respect existing open follow-ups, extend the cadence, do not duplicate the same step. If regenerateContext is provided, the lead replied, draft a fresh plan that acknowledges their message and proposes next steps. Output structured JSON only. Never invent facts not in context.`,
     userPromptTemplate: `Plan follow-ups for this lead.
 
 User instructions (may be empty):
@@ -87,7 +87,7 @@ Write the reply body only.`,
 Critical rules:
 - Gaps describe the OPPORTUNITY or deal terms, not missing items from our company profile unless the knowledge base proves we cannot deliver.
 - Never write that "our stack lacks X" when X appears in the knowledge base.
-- gapKind "blocker" + severity "blocker" only for company_capability (we truly cannot deliver per KB) or hard ICP violations — not because a job post omits a technology we support.
+- gapKind "blocker" + severity "blocker" only for company_capability (we truly cannot deliver per KB) or hard ICP violations, not because a job post omits a technology we support.
 - Partial stack overlap (e.g. React without Next.js in the JD) is usually "maybe" with gapKind "opportunity" or "info_missing", severity "minor".
 
 Output structured JSON only. Align verdict with fitScore: pursue ≥72, maybe 45–71, pass <45 unless blockers force pass.`,
@@ -114,11 +114,11 @@ Return JSON with:
 - ragCitations: { title, excerpt }[] (from knowledge chunks used; empty if none)`,
   },
   opportunity_fit_discuss: {
-    systemPrompt: `You help a sales rep discuss a specific opportunity fit check they already ran. Answer only about this scan — do not invent company facts beyond the scan result and knowledge references. Be concise and actionable.`,
+    systemPrompt: `You help a sales rep discuss a specific opportunity fit check they already ran. Answer only about this scan, do not invent company facts beyond the scan result and knowledge references. Be concise and actionable.`,
     userPromptTemplate: `Opportunity fit scan:
 Title: {{title}}
 Source: {{sourceType}}
-Verdict: {{verdict}} ({{fitScore}}% — {{fitLabel}})
+Verdict: {{verdict}} ({{fitScore}}%, {{fitLabel}})
 
 Summary: {{summary}}
 
@@ -131,7 +131,7 @@ Gaps:
 Hooks:
 {{hooks}}
 
-Pursue recommendation: {{pursueHeadline}} — {{pursueReasoning}}
+Pursue recommendation: {{pursueHeadline}}, {{pursueReasoning}}
 
 Original opportunity text (excerpt):
 {{opportunityExcerpt}}
@@ -147,7 +147,7 @@ Rep question:
 Reply in plain language (markdown ok). Do not output JSON.`,
   },
   rag_index: {
-    systemPrompt: `Indexing task — not used for generation.`,
+    systemPrompt: `Indexing task, not used for generation.`,
     userPromptTemplate: `{{content}}`,
   },
 };

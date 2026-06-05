@@ -41,7 +41,7 @@ export async function pushLeadsToCampaign(
       description: `${skipped.length} skipped (e.g. missing email).`,
     });
   } else {
-    toast.success(`Pushed ${pushed} lead(s) to Instantly — merge tags will use their CRM data.`);
+    toast.success(`Pushed ${pushed} lead(s) to Instantly, merge tags will use their CRM data.`);
   }
 
   return { ok: true, pushed, skipped };

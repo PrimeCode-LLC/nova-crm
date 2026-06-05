@@ -153,7 +153,7 @@ export function CampaignLeadsPanel({
                 key={v.token}
                 variant="outline"
                 className="font-mono text-[10px] font-normal"
-                title={`${v.label} — ${v.source}`}
+                title={`${v.label}, ${v.source}`}
               >
                 {`{{${v.token}}}`}
               </Badge>

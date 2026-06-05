@@ -547,7 +547,7 @@ export function NewProspectDialog({
         actorId: createdById,
         summary: oid
           ? `Prospect created by ${creatorLabel}. Assigned to ${assignedToLabel}.`
-          : `Prospect created by ${creatorLabel}. Left in the open queue — anyone may claim.`,
+          : `Prospect created by ${creatorLabel}. Left in the open queue, anyone may claim.`,
         createdAt: now,
       });
       toast.success("Prospect created");

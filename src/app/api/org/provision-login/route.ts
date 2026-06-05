@@ -249,7 +249,7 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           error:
-            "Firestore membership index is not ready. From the `crm` folder run: firebase deploy --only firestore:indexes — then open the Firebase console → Firestore → Indexes and wait until the `members` collection group index is Enabled.",
+            "Firestore membership index is not ready. From the `crm` folder run: firebase deploy --only firestore:indexes, then open the Firebase console → Firestore → Indexes and wait until the `members` collection group index is Enabled.",
         },
         { status: 503 },
       );

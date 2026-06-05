@@ -321,6 +321,23 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Scheduling module — server (Admin SDK) only; block direct client access.
+    match /schedulingLinks/{id} {
+      allow read, write: if false;
+    }
+    match /meetings/{id} {
+      allow read, write: if false;
+    }
+    match /availabilitySchedules/{id} {
+      allow read, write: if false;
+    }
+    match /calendarDelegations/{id} {
+      allow read, write: if false;
+    }
+    match /calendarConnections/{id} {
+      allow read, write: if false;
+    }
+
     match /workspaceChatChannels/{channelId} {
       allow read: if signedIn()
         && resource.data.organizationId == callerOrgId()

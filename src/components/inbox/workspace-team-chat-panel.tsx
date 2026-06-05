@@ -413,7 +413,7 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
                 <MessageBubble key={m.id} message={m} usersById={usersById} currentUserId={currentUserId} />
               ))}
             {selected && chat.messages.length === 0 && !chat.messageSyncError && (
-              <p className="py-10 text-center text-sm text-muted-foreground">No messages yet — send one below.</p>
+              <p className="py-10 text-center text-sm text-muted-foreground">No messages yet, send one below.</p>
             )}
             <div ref={listEndRef} />
           </div>

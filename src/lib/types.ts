@@ -628,7 +628,157 @@ export type TimelineEventType =
   | "deal_created"
   | "assignment_changed"
   | "field_changed"
-  | "ai_analysis";
+  | "ai_analysis"
+  | "meeting_scheduled"
+  | "meeting_completed"
+  | "meeting_cancelled";
+
+/** Scheduling / calendar module */
+export type MeetingLocationType =
+  | "google_meet"
+  | "zoom"
+  | "teams"
+  | "phone"
+  | "in_person"
+  | "custom";
+
+export type SchedulingLinkType = "personal" | "team" | "event";
+
+export type CalendarDelegatePermission =
+  | "view_availability"
+  | "book"
+  | "manage_links"
+  | "cancel";
+
+export type CalendarGranteeType = "user" | "role" | "department" | "org" | "reports";
+
+export type MeetingStatus = "scheduled" | "completed" | "cancelled" | "no_show";
+
+export type MeetingSource = "public_link" | "internal" | "manual";
+
+export interface AvailabilityTimeSlot {
+  start: string;
+  end: string;
+}
+
+export type WeekdayKey =
+  | "sunday"
+  | "monday"
+  | "tuesday"
+  | "wednesday"
+  | "thursday"
+  | "friday"
+  | "saturday";
+
+export type WeeklyAvailability = Record<WeekdayKey, AvailabilityTimeSlot[]>;
+
+export interface AvailabilitySchedule {
+  id: string;
+  organizationId: string;
+  ownerUid: string;
+  name: string;
+  isDefault: boolean;
+  timezone: string;
+  weekly: WeeklyAvailability;
+  minNoticeHours: number;
+  maxDaysAhead: number;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export interface SchedulingLink {
+  id: string;
+  organizationId: string;
+  slug: string;
+  hostId: string;
+  hostName?: string;
+  title: string;
+  description?: string;
+  durationMin: number;
+  bufferBeforeMin: number;
+  bufferAfterMin: number;
+  locationType: MeetingLocationType;
+  locationDetails?: string;
+  linkType: SchedulingLinkType;
+  color?: string;
+  active: boolean;
+  scheduleId?: string;
+  roundRobinHostIds?: string[];
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export interface Meeting {
+  id: string;
+  organizationId: string;
+  hostId: string;
+  hostName?: string;
+  bookedById?: string;
+  bookedByName?: string;
+  leadId?: string;
+  leadOwnerId?: string;
+  contactId?: string;
+  schedulingLinkId?: string;
+  title: string;
+  startAt: ISODate;
+  endAt: ISODate;
+  timezone: string;
+  status: MeetingStatus;
+  attendeeName: string;
+  attendeeEmail: string;
+  attendeeNotes?: string;
+  guestEmails?: string[];
+  locationType: MeetingLocationType;
+  locationDetails?: string;
+  source: MeetingSource;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export interface CalendarDelegation {
+  id: string;
+  organizationId: string;
+  hostId: string;
+  hostName?: string;
+  granteeType: CalendarGranteeType;
+  granteeIds: string[];
+  permissions: CalendarDelegatePermission[];
+  schedulingLinkIds?: string[];
+  createdBy: string;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+export type CalendarProvider = "google" | "microsoft";
+
+export interface CalendarConnection {
+  id: string;
+  organizationId: string;
+  ownerUid: string;
+  provider: CalendarProvider;
+  accountEmail: string;
+  /** Calendar used to check conflicts (display label). */
+  checkCalendarLabel?: string;
+  /** Calendar where Nova writes new meetings. */
+  writeCalendarLabel?: string;
+  includeBuffers: boolean;
+  syncExternalChanges: boolean;
+  status: "connected" | "error" | "disconnected";
+  lastSyncAt?: ISODate;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
+/** Read-only event pulled from a connected Google or Outlook calendar. */
+export interface ExternalCalendarEvent {
+  id: string;
+  provider: CalendarProvider;
+  accountEmail: string;
+  title: string;
+  startAt: ISODate;
+  endAt: ISODate;
+  allDay?: boolean;
+}
 
 export interface TimelineEvent {
   id: string;

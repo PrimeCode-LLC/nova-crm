@@ -137,7 +137,7 @@ export async function POST(req: Request) {
           opportunityText: parsed.data.rawInput.slice(0, 16000),
           ragBlock:
             rag.ragBlock ||
-            "(No knowledge base chunks retrieved — score using opportunity text only and note gaps.)",
+            "(No knowledge base chunks retrieved, score using opportunity text only and note gaps.)",
         },
         schema: opportunityFitResultSchema,
       });

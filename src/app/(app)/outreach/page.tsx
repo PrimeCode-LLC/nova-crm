@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -21,7 +22,11 @@ import { ExternalLink, Loader2, Plus, RefreshCw } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { OutreachConnectionBanner } from "@/components/outreach/connection-banner";
-import { CampaignWizard } from "@/components/outreach/campaign-wizard";
+
+const CampaignWizard = dynamic(
+  () => import("@/components/outreach/campaign-wizard").then((m) => ({ default: m.CampaignWizard })),
+  { ssr: false },
+);
 
 const STATUS_TONE: Record<string, string> = {
   draft: "bg-muted text-muted-foreground",
@@ -158,7 +163,7 @@ export default function OutreachPage() {
                         {STATUS_LABEL[c.status]}
                       </TableCell>
                       <TableCell className="py-2 text-xs text-muted-foreground">
-                        {c.startedAt ? fmtRelative(c.startedAt) : "—"}
+                        {c.startedAt ? fmtRelative(c.startedAt) : "-"}
                       </TableCell>
                       <TableCell className="py-2 text-right tabular-nums text-sm">
                         {fmtNumber(c.stats.leadsCount ?? 0)}
@@ -201,7 +206,7 @@ export default function OutreachPage() {
           {connected ? " · synced with Instantly" : ""}
         </p>
       </PageBody>
-      {canCreateCampaigns ? (
+      {canCreateCampaigns && wizardOpen ? (
         <CampaignWizard open={wizardOpen} onOpenChange={setWizardOpen} />
       ) : null}
     </>

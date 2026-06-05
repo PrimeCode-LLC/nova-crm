@@ -386,11 +386,11 @@ export function buildFitCheckRagBlock(
     .map((c, i) => `[${i + 1}] ${c.title}\n${c.content}`)
     .join("\n\n");
 
-  return `${profileNote}Knowledge base (strict — use only this for company capabilities, ICP, and scoring rules):
+  return `${profileNote}Knowledge base (strict, use only this for company capabilities, ICP, and scoring rules):
 Rules for gaps:
 - List gaps about the OPPORTUNITY (missing info, stack mismatch vs what we deliver, budget, geo). Use gapKind "opportunity" or "commercial".
 - Never claim our company lacks a technology that appears in these excerpts. gapKind "company_capability" only when the opportunity requires something we truly do not offer per excerpts.
-- "blocker" only for company_capability or clear ICP violation — not because the job post omits a keyword we support.
+- "blocker" only for company_capability or clear ICP violation, not because the job post omits a keyword we support.
 
 ${corpus}`;
 }

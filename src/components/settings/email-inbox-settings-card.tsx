@@ -59,7 +59,7 @@ export function EmailInboxSettingsCard() {
         toast.error("Could not save email settings", {
           description: !s.emailServerHydrated
             ? "Your mailboxes are still loading. Wait a moment, then try again."
-            : "Saving is unavailable—check your connection or sign in again. If this persists, reload the page.",
+            : "Saving is unavailable, check your connection or sign in again. If this persists, reload the page.",
         });
       }
       return false;
@@ -479,7 +479,7 @@ export function EmailInboxSettingsCard() {
                             placeholder="amsr200.websitehostserver.net"
                           />
                           <p className="text-[11px] text-muted-foreground">
-                            Hostname only — do not paste a web URL (no{" "}
+                            Hostname only, do not paste a web URL (no{" "}
                             <code className="text-foreground">http://</code> or path).
                           </p>
                         </div>
@@ -700,7 +700,7 @@ export function EmailInboxSettingsCard() {
 
           <p className="text-[11px] text-muted-foreground">
             Non-sensitive fields sync to your workspace; credentials are encrypted on the server. Changes also save
-            automatically after you stop typing—use <span className="font-medium text-foreground">Save settings</span>{" "}
+            automatically after you stop typing, use <span className="font-medium text-foreground">Save settings</span>{" "}
             to write immediately and confirm the server accepted them.
             {savingRemote ? " Saving to workspace..." : ""} Use an app-specific password for Gmail / Microsoft when 2FA
             is on.

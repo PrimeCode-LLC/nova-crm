@@ -153,7 +153,7 @@ function resolveInvitedBy(
   getOwnerDisplayName: (uid: string) => string | undefined,
 ): { label: string; personUid?: string } {
   const raw = invitedByUid?.trim();
-  if (!raw) return { label: "—" };
+  if (!raw) return { label: "-" };
   const system = INVITED_BY_SOURCE_LABELS[raw];
   if (system) return { label: system };
   const member = members.find((m) => m.uid === raw);
@@ -372,7 +372,7 @@ function PeoplePageClientInner({
         toast.success(`Invitation sent to ${inviteEmail.trim()}`);
         setInviteEmail("");
       } else {
-        toast.message("Invite created — copy the link to share manually.");
+        toast.message("Invite created, copy the link to share manually.");
       }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
@@ -660,7 +660,7 @@ function PeoplePageClientInner({
         title="People"
         description={
           organization
-            ? `Who can access ${organization.name} and how they appear in the CRM — workspace access, roles, reporting lines, and admin tools.`
+            ? `Who can access ${organization.name} and how they appear in the CRM, workspace access, roles, reporting lines, and admin tools.`
             : "Workspace access, CRM profiles, invites, and admin permissions in one place."
         }
         actions={
@@ -724,7 +724,7 @@ function PeoplePageClientInner({
                   Primary email
                 </div>
                 <div className="mt-1 truncate">
-                  {organization.primaryEmail ?? "—"}
+                  {organization.primaryEmail ?? "-"}
                 </div>
               </div>
             </CardContent>
@@ -889,11 +889,11 @@ function PeoplePageClientInner({
                                 {ROLES[crm.roleId]?.label ?? crm.roleId}
                               </Badge>
                             ) : (
-                              <span className="text-xs">—</span>
+                              <span className="text-xs">-</span>
                             )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
-                            {dept?.name ?? "—"}
+                            {dept?.name ?? "-"}
                           </TableCell>
                           <TableCell>
                             <Badge
@@ -918,7 +918,7 @@ function PeoplePageClientInner({
                                 {CRM_STATUS_LABEL[crm.status]}
                               </Badge>
                             ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
+                              <span className="text-xs text-muted-foreground">-</span>
                             )}
                           </TableCell>
                           <TableCell className="text-xs text-muted-foreground whitespace-nowrap">

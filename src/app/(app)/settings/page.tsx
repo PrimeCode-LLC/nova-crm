@@ -413,7 +413,7 @@ function SettingsPage() {
       return;
     }
     if (isAuthDisabled()) {
-      toast.success("Reset link sent (auth disabled mode — no email sent).");
+      toast.success("Reset link sent (auth disabled mode, no email sent).");
       return;
     }
     const addr = fbUser?.email?.trim();

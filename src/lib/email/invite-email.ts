@@ -72,7 +72,7 @@ export function renderInviteEmail(ctx: InviteEmailContext): {
     `This invite is for ${ctx.recipientEmail} and expires on ${expires}.`,
     "",
     `If you weren't expecting this email, you can safely ignore it.`,
-    `— ${SITE.name}`,
+    `- ${SITE.name}`,
   ].join("\n");
 
   return { subject, html, text };

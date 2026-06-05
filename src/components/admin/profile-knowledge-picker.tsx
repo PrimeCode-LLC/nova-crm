@@ -284,7 +284,7 @@ export function ProfileKnowledgePicker({
 
                           {isOpen && lib.documents.length === 0 ? (
                             <p className="text-[10px] text-muted-foreground px-2 pb-2 ml-6">
-                              No documents — add via Admin → AI → Knowledge.
+                              No documents, add via Admin → AI → Knowledge.
                             </p>
                           ) : null}
                         </div>

@@ -159,7 +159,7 @@ export default function PlatformAdminsPage() {
               {admins.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No Firestore records yet — operators matching{" "}
+                    No Firestore records yet, operators matching{" "}
                     <code className="rounded bg-muted px-1">PLATFORM_ADMIN_EMAILS</code> still have
                     access.
                   </TableCell>

@@ -1,5 +1,5 @@
-import { FitCheckClient } from "@/components/fit-check/fit-check-client";
+import FitCheckPageClient from "./fit-check-page-client";
 
 export default function FitCheckPage() {
-  return <FitCheckClient />;
+  return <FitCheckPageClient />;
 }

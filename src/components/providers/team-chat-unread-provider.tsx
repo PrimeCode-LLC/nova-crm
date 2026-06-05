@@ -141,10 +141,29 @@ export function useTeamChatUnread(): TeamChatUnreadContextValue {
   return ctx;
 }
 
-export function TeamChatUnreadProvider({ children }: { children: React.ReactNode }) {
+export function TeamChatUnreadProvider({
+  children,
+  deferSubscriptions = false,
+}: {
+  children: React.ReactNode;
+  /** Delay Firestore listeners until after first paint (sidebar badge hydrates shortly after). */
+  deferSubscriptions?: boolean;
+}) {
   const pathname = usePathname();
   const router = useRouter();
   const { organizationId, currentUserId, isDemo, users } = useWorkspace();
+  const [subscriptionsReady, setSubscriptionsReady] = React.useState(!deferSubscriptions);
+
+  React.useEffect(() => {
+    if (!deferSubscriptions || subscriptionsReady) return;
+    const activate = () => setSubscriptionsReady(true);
+    if (typeof requestIdleCallback !== "undefined") {
+      const id = requestIdleCallback(activate, { timeout: 3000 });
+      return () => cancelIdleCallback(id);
+    }
+    const timer = window.setTimeout(activate, 200);
+    return () => window.clearTimeout(timer);
+  }, [deferSubscriptions, subscriptionsReady]);
   const setDemoChannelLastRead = useTeamChatDemoStore((s) => s.setDemoChannelLastRead);
   const demoChannels = useTeamChatDemoStore(
     (s) => s.channelsByOrg[DEMO_WORKSPACE_ORG_ID] ?? EMPTY_DEMO_CHANNELS,
@@ -165,7 +184,9 @@ export function TeamChatUnreadProvider({ children }: { children: React.ReactNode
   const [liveChannelReads, setLiveChannelReads] = React.useState<Record<string, string>>({});
 
   const liveEnabled =
-    !isDemo && Boolean(organizationId && currentUserId && isFirebaseWebConfigured());
+    subscriptionsReady &&
+    !isDemo &&
+    Boolean(organizationId && currentUserId && isFirebaseWebConfigured());
 
   React.useEffect(() => {
     if (!liveEnabled || !organizationId || !currentUserId) {

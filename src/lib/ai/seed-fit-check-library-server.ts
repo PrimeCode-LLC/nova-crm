@@ -23,8 +23,8 @@ import {
   STELLIXSOFT_SITE_ORIGIN,
 } from "@/lib/ai/stellixsoft-site-crawler";
 
-export const FIT_CHECK_GLOBAL_LIBRARY_NAME = "Fit Check — Global (company)";
-export const FIT_CHECK_CATEGORY_LIBRARY_PREFIX = "Fit Check — ";
+export const FIT_CHECK_GLOBAL_LIBRARY_NAME = "Fit Check, Global (company)";
+export const FIT_CHECK_CATEGORY_LIBRARY_PREFIX = "Fit Check, ";
 
 export type SeedFitCheckLibraryResult = {
   globalLibraryId: string;
@@ -252,7 +252,7 @@ export async function seedFitCheckLibraryServer(input: {
   const globalLibraryId = await ensureLibrary(input.organizationId, {
     name: FIT_CHECK_GLOBAL_LIBRARY_NAME,
     description:
-      "Global company knowledge for Fit Check — ICP, services, pricing, case studies (website crawled once).",
+      "Global company knowledge for Fit Check, ICP, services, pricing, case studies (website crawled once).",
     libraryKind: FIT_CHECK_LIBRARY_KIND_GLOBAL,
   });
 

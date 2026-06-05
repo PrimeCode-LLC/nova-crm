@@ -21,6 +21,16 @@ export const COLLECTIONS = {
   scriptLibrary: "scriptLibrary",
   /** Workspace-defined labels for leads, deals, accounts, contacts. */
   labels: "labels",
+  /** Scheduling links (Calendly-style event types). */
+  schedulingLinks: "schedulingLinks",
+  /** Booked sales meetings tied to leads and hosts. */
+  meetings: "meetings",
+  /** Per-user weekly availability schedules. */
+  availabilitySchedules: "availabilitySchedules",
+  /** Explicit grants for booking on another member's calendar. */
+  calendarDelegations: "calendarDelegations",
+  /** Connected Google / Microsoft calendars per user (tokens server-only). */
+  calendarConnections: "calendarConnections",
   ingestQueue: "ingestQueue",
   /** RSS feed configs for social scraper (tenant-scoped). */
   scraperFeeds: "scraperFeeds",
@@ -81,6 +91,11 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.campaigns,
   COLLECTIONS.scriptLibrary,
   COLLECTIONS.labels,
+  COLLECTIONS.schedulingLinks,
+  COLLECTIONS.meetings,
+  COLLECTIONS.availabilitySchedules,
+  COLLECTIONS.calendarDelegations,
+  COLLECTIONS.calendarConnections,
   COLLECTIONS.auditLog,
   COLLECTIONS.workspaceChatChannels,
   COLLECTIONS.workspaceChatMessages,

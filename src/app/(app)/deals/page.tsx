@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -23,8 +24,12 @@ import { Plus, Search, DollarSign, TrendingUp, Trophy, Target, ArrowUpDown } fro
 import { STAGES_BY_KEY } from "@/lib/constants";
 import type { Deal } from "@/lib/types";
 import { useLocalDeals } from "@/hooks/use-local-deals";
-import { NewDealDialog } from "@/components/deals/new-deal-dialog";
 import { cn } from "@/lib/utils";
+
+const NewDealDialog = dynamic(
+  () => import("@/components/deals/new-deal-dialog").then((m) => ({ default: m.NewDealDialog })),
+  { ssr: false },
+);
 
 type SortKey = "name" | "stage" | "value" | "probability" | "weighted" | "close" | "owner";
 type SortDir = "asc" | "desc";
@@ -258,16 +263,18 @@ export default function DealsPage() {
         )}
       </PageBody>
 
-      <NewDealDialog
-        key={newDealFormKey}
-        open={newOpen}
-        onOpenChange={setNewOpen}
-        leads={ws.leads}
-        users={ws.users}
-        currentUserId={ws.currentUserId || ws.users[0]?.id || ""}
-        getOwnerDisplayName={ws.getOwnerDisplayName}
-        onCreate={addLocalDeal}
-      />
+      {newOpen ? (
+        <NewDealDialog
+          key={newDealFormKey}
+          open={newOpen}
+          onOpenChange={setNewOpen}
+          leads={ws.leads}
+          users={ws.users}
+          currentUserId={ws.currentUserId || ws.users[0]?.id || ""}
+          getOwnerDisplayName={ws.getOwnerDisplayName}
+          onCreate={addLocalDeal}
+        />
+      ) : null}
     </>
   );
 }

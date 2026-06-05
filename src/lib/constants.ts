@@ -81,7 +81,7 @@ export const ROLES: Record<Role, { label: string; description: string }> = {
   salesperson: { label: "Salesperson", description: "Sees + writes own leads" },
   data_scraper: {
     label: "Data scraper (legacy)",
-    description: "Same as Prospecting — use Prospecting for new members",
+    description: "Same as Prospecting, use Prospecting for new members",
   },
   prospecting: {
     label: "Prospecting & data",

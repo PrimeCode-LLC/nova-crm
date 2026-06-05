@@ -76,7 +76,7 @@ export function LeadOverview({
               {openQueue ? (
                 <div className="flex flex-col gap-1">
                   <Badge variant="secondary" className="w-fit text-[10px] font-normal">
-                    Open queue — unclaimed
+                    Open queue, unclaimed
                   </Badge>
                   <span className="text-xs text-muted-foreground">
                     Visible to everyone until someone claims it. Use the Timeline tab for stage changes and activity.

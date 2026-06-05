@@ -286,7 +286,7 @@ export default function AdminPermissionsPage() {
     <>
       <PageHeader
         title="Permission Overrides"
-        description="CRM record access overrides and per-user admin feature grants — without changing roles."
+        description="CRM record access overrides and per-user admin feature grants, without changing roles."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New override
@@ -592,7 +592,7 @@ export default function AdminPermissionsPage() {
               </Select>
               {users.length === 0 ? (
                 <p className="text-[11px] text-muted-foreground">
-                  No workspace members loaded yet — check org membership or try refreshing.
+                  No workspace members loaded yet, check org membership or try refreshing.
                 </p>
               ) : null}
             </div>
@@ -704,7 +704,7 @@ export default function AdminPermissionsPage() {
                   </p>
                   {usersWhoManageOthers.length === 0 ? (
                     <p className="text-[11px] text-muted-foreground">
-                      No managers with direct reports in the roster — anchor is unavailable.
+                      No managers with direct reports in the roster, anchor is unavailable.
                     </p>
                   ) : (
                     <Select

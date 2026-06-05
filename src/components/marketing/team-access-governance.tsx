@@ -113,7 +113,7 @@ export function TeamAccessGovernance() {
           <div className="mt-4 flex items-center gap-2 text-xs text-muted-foreground">
             <Eye className="h-3.5 w-3.5 text-muted-foreground/80" />
             <span>
-              Optional shared views and handoffs stay explicit — visibility
+              Optional shared views and handoffs stay explicit, visibility
               changes leave a trail.
             </span>
           </div>

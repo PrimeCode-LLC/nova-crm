@@ -34,8 +34,8 @@ export const INSTANTLY_MERGE_VARIABLES: InstantlyMergeVariable[] = [
   col("temperature", "temperature", "Cold / warm / hot"),
   col("priority", "priority", "Low → urgent"),
   col("value", "estimated_value", "Estimated deal value"),
-  col("contact", "trigger_event", "Research — trigger event"),
-  col("contact", "ps_line", "Research — P.S. line"),
-  col("company", "pain_points", "Research — pain points"),
-  col("company", "business_focus", "Research — business focus"),
+  col("contact", "trigger_event", "Research, trigger event"),
+  col("contact", "ps_line", "Research, P.S. line"),
+  col("company", "pain_points", "Research, pain points"),
+  col("company", "business_focus", "Research, business focus"),
 ];

@@ -104,12 +104,12 @@ export default function NewOrganizationPage() {
       toast.success(
         data.ownerLoginProvisioned
           ? data.linkedExistingFirebaseUser
-            ? "Organization created — existing login linked as owner"
-            : "Organization created — owner can sign in with the password you set"
+            ? "Organization created, existing login linked as owner"
+            : "Organization created, owner can sign in with the password you set"
           : data.ownerLinked
             ? "Organization created and owner linked"
             : data.ownerEmail
-              ? "Organization created — owner setup link ready"
+              ? "Organization created, owner setup link ready"
               : "Organization created",
       );
     } catch (err) {
@@ -148,7 +148,7 @@ export default function NewOrganizationPage() {
             id="slug"
             value={slug}
             onChange={(e) => setSlug(e.target.value)}
-            placeholder="acme-corp — auto if empty"
+            placeholder="acme-corp, auto if empty"
           />
         </div>
         <div className="space-y-2">
@@ -319,7 +319,7 @@ export default function NewOrganizationPage() {
           )}
           {created.ownerLoginProvisioned && (
             <p className="mt-2 text-xs text-muted-foreground">
-              No invitation email was sent for this flow — share access details directly if needed.
+              No invitation email was sent for this flow, share access details directly if needed.
             </p>
           )}
           {created.setupLink && (

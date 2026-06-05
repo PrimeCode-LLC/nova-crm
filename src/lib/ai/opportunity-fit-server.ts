@@ -210,7 +210,7 @@ export function formatScanForDiscussPrompt(scan: OpportunityFitScan): Record<str
     strongMatches: r.strongMatches.map((m) => `• ${m.point}`).join("\n") || "(none)",
     gaps: r.gaps.map((g) => `• [${g.severity}] ${g.point}`).join("\n") || "(none)",
     hooks: r.hooks
-      .map((h, i) => `${i + 1}. ${h.angle} — ${h.painPoint}\n   Opener: ${h.opener}`)
+      .map((h, i) => `${i + 1}. ${h.angle}, ${h.painPoint}\n   Opener: ${h.opener}`)
       .join("\n\n"),
     pursueHeadline: r.pursueRecommendation.headline,
     pursueReasoning: r.pursueRecommendation.reasoning,

@@ -46,7 +46,7 @@ export default async function JoinPendingPage() {
       </div>
       <p className="text-xs text-muted-foreground">
         Signed in as {session.email ?? session.uid}. You can close this tab and return after
-        you&apos;re approved — then sign in again if needed.
+        you&apos;re approved, then sign in again if needed.
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link

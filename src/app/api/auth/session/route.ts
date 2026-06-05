@@ -241,7 +241,7 @@ export async function POST(req: Request) {
         return NextResponse.json(
           {
             error:
-              "Could not resolve your workspace (Firestore index still deploying, or first-time setup). Run from `crm`: firebase deploy --only firestore:indexes — then wait until the `members` / `uid` index is Enabled in the Firebase console.",
+              "Could not resolve your workspace (Firestore index still deploying, or first-time setup). Run from `crm`: firebase deploy --only firestore:indexes, then wait until the `members` / `uid` index is Enabled in the Firebase console.",
           },
           { status: 503 },
         );

@@ -102,7 +102,7 @@ export function FitKnowledgeAdminPanel({
         return;
       }
       toast.success(
-        `Seeded global + ${OPPORTUNITY_SOURCE_TYPES.length} category libraries — ${data.documentsCreated ?? 0} docs, ${data.chunksIndexed ?? 0} chunks`,
+        `Seeded global + ${OPPORTUNITY_SOURCE_TYPES.length} category libraries, ${data.documentsCreated ?? 0} docs, ${data.chunksIndexed ?? 0} chunks`,
       );
       await load();
       onSeeded?.();
@@ -182,7 +182,7 @@ export function FitKnowledgeAdminPanel({
           </CardTitle>
           <CardDescription className="text-xs leading-relaxed">
             <strong>Global</strong> holds your website + ICP (embedded once). Each{" "}
-            <strong>category</strong> has a small playbook only (~1 doc) — no duplicate crawl.
+            <strong>category</strong> has a small playbook only (~1 doc), no duplicate crawl.
             Per check we pull up to {budget.globalChunks} global + {budget.categoryChunks}{" "}
             category chunks (cheap vs re-indexing everything).
           </CardDescription>
@@ -238,7 +238,7 @@ export function FitKnowledgeAdminPanel({
                 onClick={() =>
                   setDocSheet({
                     libraryId: globalLib.id,
-                    label: "Global knowledge — website & ICP",
+                    label: "Global knowledge, website & ICP",
                   })
                 }
               >
@@ -247,7 +247,7 @@ export function FitKnowledgeAdminPanel({
             </div>
           ) : (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Not seeded yet — run seed above.
+              Not seeded yet, run seed above.
             </p>
           )}
         </CardContent>
@@ -359,7 +359,7 @@ export function FitKnowledgeAdminPanel({
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Retrieval budget (cost control)</CardTitle>
           <CardDescription className="text-xs">
-            Max chunks per fit check — lower = smaller prompts and lower LLM cost.
+            Max chunks per fit check, lower = smaller prompts and lower LLM cost.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-4">

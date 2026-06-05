@@ -106,7 +106,7 @@ export function FitCheckDiscussSheet({
         <SheetHeader className="px-4 pt-4 pb-2 border-b shrink-0">
           <SheetTitle className="text-base">Discuss this check</SheetTitle>
           <SheetDescription className="text-xs line-clamp-2">
-            {scan?.title ?? "Opportunity"} — scoped to this scan only.
+            {scan?.title ?? "Opportunity"}, scoped to this scan only.
           </SheetDescription>
         </SheetHeader>
 
@@ -119,7 +119,7 @@ export function FitCheckDiscussSheet({
             )}
             {!loadingHistory && messages.length === 0 && (
               <p className="text-sm text-muted-foreground">
-                Ask anything about this opportunity — score, hooks, or whether to spend time on it.
+                Ask anything about this opportunity, score, hooks, or whether to spend time on it.
               </p>
             )}
             {messages.map((m) => (

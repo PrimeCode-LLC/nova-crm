@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -9,9 +10,9 @@ import { FunnelChart } from "@/components/dashboard/funnel-chart";
 import { PipelineDistribution } from "@/components/dashboard/pipeline-distribution";
 import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { IdleLeads } from "@/components/dashboard/idle-leads";
-import { TrendChart } from "@/components/dashboard/trend-chart";
 import { ChannelMix } from "@/components/dashboard/channel-mix";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
@@ -73,6 +74,16 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 
+const TrendChart = dynamic(
+  () => import("@/components/dashboard/trend-chart").then((m) => ({ default: m.TrendChart })),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="h-[280px] animate-pulse rounded-lg border bg-muted/20" aria-hidden />
+    ),
+  },
+);
+
 const DASHBOARD_RANGE_OPTIONS = [
   { key: "7d", label: "Last 7 days" },
   { key: "30d", label: "Last 30 days" },
@@ -86,6 +97,7 @@ export default function DashboardPage() {
     leads,
     deals,
     isDemo,
+    workspaceLoading,
     users,
     activityCounters,
     activityRecords,
@@ -303,7 +315,7 @@ export default function DashboardPage() {
         { label: "Idle leads", value: String(idleCount) },
         {
           label: "Avg response (minutes)",
-          value: avgResponseMin != null ? String(Math.round(avgResponseMin)) : "—",
+          value: avgResponseMin != null ? String(Math.round(avgResponseMin)) : "-",
         },
       ],
       "nova-dashboard-overview",
@@ -447,7 +459,9 @@ export default function DashboardPage() {
       </Dialog>
 
       <PageBody>
-        {!isDemo && leads.length === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && leads.length === 0 ? (
           <div className="py-8">
             <WorkspaceEmptyHint
               title="Your workspace is empty"
@@ -519,7 +533,7 @@ export default function DashboardPage() {
               />
               <KpiCard
                 label="Avg response"
-                value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "—"}
+                value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "-"}
                 hint="Email: created → first outbound (leads & prospects)"
                 deltaType="positive-down"
                 icon={Clock}

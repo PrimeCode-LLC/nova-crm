@@ -209,7 +209,7 @@ export default function IntakePoolPage() {
       setItems((prev) => prev.filter((i) => i.id !== itemId));
       const viewHref = data.leadId ? `/leads/${data.leadId}?from=prospects` : null;
       if (assignToMe) {
-        toast.success("Prospect created — you are the owner", {
+        toast.success("Prospect created, you are the owner", {
           description: "Find it anytime under Prospects → Owned by me.",
           action: viewHref
             ? {

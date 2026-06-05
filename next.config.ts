@@ -12,6 +12,15 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /** Temporarily surface readable component names in production error stacks while we diagnose runtime crashes (React #185). Safe to remove once stable. */
   productionBrowserSourceMaps: true,
+  experimental: {
+    optimizePackageImports: [
+      "lucide-react",
+      "date-fns",
+      "recharts",
+      "@tanstack/react-table",
+      "@base-ui/react",
+    ],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "*.googleusercontent.com" },

@@ -1,7 +1,19 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { PageBody, PageHeader } from "@/components/common/page-header";
-import { WorkspaceNotificationsView } from "@/components/inbox/workspace-notifications-view";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
+
+const WorkspaceNotificationsView = dynamic(
+  () =>
+    import("@/components/inbox/workspace-notifications-view").then((m) => ({
+      default: m.WorkspaceNotificationsView,
+    })),
+  {
+    ssr: false,
+    loading: () => <WorkspacePageSkeleton />,
+  },
+);
 
 export default function NotificationsPage() {
   return (

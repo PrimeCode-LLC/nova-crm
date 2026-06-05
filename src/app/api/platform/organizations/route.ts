@@ -336,7 +336,7 @@ export async function POST(req: Request) {
     if (!send.ok) {
       setupEmailNote =
         send.reason === "not_configured"
-          ? "SYSTEM_SMTP_* not set — share the link manually."
+          ? "SYSTEM_SMTP_* not set, share the link manually."
           : send.error;
     }
   }

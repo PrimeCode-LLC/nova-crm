@@ -90,7 +90,7 @@ export function CampaignWizard({
       }
 
       if (!connectionLoaded) {
-        toast.error("Still checking Instantly connection — try again in a moment");
+        toast.error("Still checking Instantly connection, try again in a moment");
         return;
       }
       if (!connected) {
@@ -134,7 +134,7 @@ export function CampaignWizard({
           <DialogTitle>New outreach campaign</DialogTitle>
           <DialogDescription>
             {isDemo
-              ? "Demo workspace — campaign is saved locally only."
+              ? "Demo workspace, campaign is saved locally only."
               : "Name your campaign now. Build the sequence, accounts, and options on the campaign page after it is created."}
           </DialogDescription>
         </DialogHeader>

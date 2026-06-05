@@ -25,7 +25,7 @@ export function demoFollowupSuggestions(
 
   const upworkCopy =
     channel === "upwork"
-      ? `Hi ${name} — following up on our conversation about ${company}. Happy to clarify scope or share a short case study if useful.`
+      ? `Hi ${name}, following up on our conversation about ${company}. Happy to clarify scope or share a short case study if useful.`
       : `Hi ${name}, checking in on our thread with ${company}. Let me know if timing still works on your side.`;
 
   return {
@@ -42,14 +42,14 @@ export function demoFollowupSuggestions(
         rationale: "Lead has gone quiet; short personalized check-in",
       },
       {
-        title: `Second touch — ${company}`,
+        title: `Second touch, ${company}`,
         offsetDays: 7,
         priority: "medium",
         channel: "other",
         messageBody:
           channel === "linkedin_outbound" || channel === "linkedin_1to1"
-            ? `Hi ${name} — still interested in connecting about ${company}. Open to a 15-min call if easier than async.`
-            : `Hi ${name},\n\nCircling back once more in case my last note missed your inbox. If priorities shifted at ${company}, no worries — just let me know.`,
+            ? `Hi ${name}, still interested in connecting about ${company}. Open to a 15-min call if easier than async.`
+            : `Hi ${name},\n\nCircling back once more in case my last note missed your inbox. If priorities shifted at ${company}, no worries, just let me know.`,
         description: "Break-up or value-add follow-up",
         rationale: "Give one more beat before marking cold",
       },

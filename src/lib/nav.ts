@@ -7,6 +7,7 @@ import {
   Kanban,
   Activity,
   CalendarClock,
+  CalendarDays,
   ListTodo,
   Inbox,
   Bell,
@@ -85,6 +86,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/deals", label: "Deals", icon: BarChart3 },
       { href: "/activity", label: "Activity", icon: Activity },
       { href: "/followups", label: "Followups", icon: CalendarClock },
+      { href: "/scheduling", label: "Scheduling", icon: CalendarDays },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
       { href: "/scripts", label: "Scripts", icon: FileCode2 },
       {

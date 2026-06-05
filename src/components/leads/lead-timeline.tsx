@@ -14,6 +14,7 @@ import {
   Workflow,
   CalendarCheck,
   CalendarClock,
+  CalendarX,
   ListChecks,
   ListTodo,
   Handshake,
@@ -47,6 +48,9 @@ const ICONS: Record<TimelineEventType, LucideIcon> = {
   assignment_changed: UserCog2,
   field_changed: FileEdit,
   ai_analysis: Sparkles,
+  meeting_scheduled: CalendarClock,
+  meeting_completed: CalendarCheck,
+  meeting_cancelled: CalendarX,
 };
 
 const TONES: Record<TimelineEventType, string> = {
@@ -65,6 +69,9 @@ const TONES: Record<TimelineEventType, string> = {
   assignment_changed: "bg-info/10 text-info border-info/20",
   field_changed: "bg-muted text-muted-foreground border-muted",
   ai_analysis: "bg-primary/10 text-primary border-primary/20",
+  meeting_scheduled: "bg-indigo-500/10 text-indigo-700 dark:text-indigo-400 border-indigo-500/20",
+  meeting_completed: "bg-success/10 text-success border-success/20",
+  meeting_cancelled: "bg-muted text-muted-foreground border-muted",
 };
 
 function newTeId() {

@@ -151,7 +151,7 @@ export function InstantlyIntegrationCard() {
 
         {state && !state.encryptionConfigured && (
           <p className="text-xs text-warning">
-            Server encryption key (AI_SECRETS_KEY_BASE64) is not configured — API keys cannot be stored.
+            Server encryption key (AI_SECRETS_KEY_BASE64) is not configured, API keys cannot be stored.
           </p>
         )}
 

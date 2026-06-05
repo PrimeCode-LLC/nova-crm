@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { QuickAddDialog, type QuickAddPill } from "@/components/layout/quick-add-dialog";
-import { NewProspectDialog } from "@/components/leads/new-prospect-dialog";
+import dynamic from "next/dynamic";
+import type { QuickAddPill } from "@/components/layout/quick-add-dialog";
 import type { ChannelKey, PipelineStage } from "@/lib/types";
 
 export type NewProspectPrefill = {
@@ -23,6 +23,16 @@ type QuickAddLauncherContextValue = {
 
 const QuickAddLauncherContext = React.createContext<QuickAddLauncherContextValue | null>(
   null,
+);
+
+const QuickAddDialog = dynamic(
+  () => import("@/components/layout/quick-add-dialog").then((m) => ({ default: m.QuickAddDialog })),
+  { ssr: false },
+);
+
+const NewProspectDialog = dynamic(
+  () => import("@/components/leads/new-prospect-dialog").then((m) => ({ default: m.NewProspectDialog })),
+  { ssr: false },
 );
 
 export function QuickAddLauncherProvider({ children }: { children: React.ReactNode }) {
@@ -49,20 +59,24 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
   return (
     <QuickAddLauncherContext.Provider value={value}>
       {children}
-      <QuickAddDialog
-        open={open}
-        onOpenChange={setOpen}
-        initialPill={opts.initialPill ?? "lead"}
-        initialLeadStage={opts.initialLeadStage}
-      />
-      <NewProspectDialog
-        open={newProspectOpen}
-        onOpenChange={(o) => {
-          setNewProspectOpen(o);
-          if (!o) setProspectPrefill(undefined);
-        }}
-        initialPrefill={prospectPrefill}
-      />
+      {open ? (
+        <QuickAddDialog
+          open={open}
+          onOpenChange={setOpen}
+          initialPill={opts.initialPill ?? "lead"}
+          initialLeadStage={opts.initialLeadStage}
+        />
+      ) : null}
+      {newProspectOpen ? (
+        <NewProspectDialog
+          open={newProspectOpen}
+          onOpenChange={(o) => {
+            setNewProspectOpen(o);
+            if (!o) setProspectPrefill(undefined);
+          }}
+          initialPrefill={prospectPrefill}
+        />
+      ) : null}
     </QuickAddLauncherContext.Provider>
   );
 }

@@ -55,7 +55,7 @@ export function EntityLabelPicker({
       {emphasizeAddAction && emptyButCanAdd ? (
         <div className="rounded-lg border border-dashed border-muted-foreground/25 bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
           <span className="font-medium text-foreground">No labels on this lead yet.</span> Use{" "}
-          <span className="text-foreground">Add labels</span> below — you can select{" "}
+          <span className="text-foreground">Add labels</span> below, you can select{" "}
           <span className="text-foreground">multiple</span> tags for one lead.
         </div>
       ) : null}
@@ -118,7 +118,7 @@ export function EntityLabelPicker({
           ) : (
             <div className="space-y-2 max-h-64 overflow-y-auto pr-1">
               <p className="text-xs text-muted-foreground">
-                Select any combination — all checked labels apply to this lead.
+                Select any combination, all checked labels apply to this lead.
               </p>
               {sorted.map((l) => (
                 <div key={l.id} className="flex items-center gap-2">

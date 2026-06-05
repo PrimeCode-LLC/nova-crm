@@ -369,7 +369,7 @@ export function ActivityLogsClient({
                           {labelForAuditEvent(row.event)}
                         </TableCell>
                         <TableCell className="align-top text-sm text-muted-foreground hidden lg:table-cell max-w-md truncate">
-                          {details || "—"}
+                          {details || "-"}
                         </TableCell>
                       </TableRow>
                     );

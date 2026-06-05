@@ -13,6 +13,7 @@ const APP_PROTECTED_PREFIXES = [
   "/deals",
   "/activity",
   "/followups",
+  "/scheduling",
   "/inbox",
   "/notifications",
   "/team-chat",

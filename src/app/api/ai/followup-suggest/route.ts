@@ -157,7 +157,7 @@ export async function POST(req: Request) {
     chunks.map((c) => ({ title: c.title, content: c.content })),
   );
 
-  const userPrompt = parsed.data.userPrompt?.trim() || "(none — use lead context only)";
+  const userPrompt = parsed.data.userPrompt?.trim() || "(none, use lead context only)";
 
   try {
     const result = await runAiStructuredFeature({

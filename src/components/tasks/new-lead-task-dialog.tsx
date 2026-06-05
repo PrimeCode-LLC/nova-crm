@@ -235,7 +235,7 @@ export function NewLeadTaskDialog({
             <DialogTitle>Assign a task</DialogTitle>
             <DialogDescription>
               Ask a teammate for a review, email, or other action. Only the assignee, you, and org admins / directors
-              can see this task — not other teammates.
+              can see this task, not other teammates.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
@@ -274,7 +274,7 @@ export function NewLeadTaskDialog({
                     else setLeadId(v);
                   }}
                   items={[
-                    { value: "__none__", label: "No lead — internal task" },
+                    { value: "__none__", label: "No lead, internal task" },
                     ...leads.map((l) => ({
                       value: l.id,
                       label: `${l.contactName} · ${l.companyName}`,
@@ -282,17 +282,17 @@ export function NewLeadTaskDialog({
                   ]}
                 >
                   <SelectTrigger id="task-lead">
-                    <SelectValue placeholder="No lead — internal task">
+                    <SelectValue placeholder="No lead, internal task">
                       {leadPickerTriggerLabelWithSentinel(
                         leadId || LEAD_NONE,
                         LEAD_NONE,
-                        "No lead — internal task",
+                        "No lead, internal task",
                         leads,
                       ) ?? undefined}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="__none__">No lead — internal task</SelectItem>
+                    <SelectItem value="__none__">No lead, internal task</SelectItem>
                     {leads.map((l) => (
                       <SelectItem key={l.id} value={l.id}>
                         {l.contactName} · {l.companyName}
@@ -361,10 +361,10 @@ export function NewLeadTaskDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="on_lead">
-                      Linked to lead — shows on this lead’s Tasks tab (still private to assignee, you, admins)
+                      Linked to lead, shows on this lead’s Tasks tab (still private to assignee, you, admins)
                     </SelectItem>
                     <SelectItem value="assignees_only">
-                      Handoff style — same privacy; optional for how you think about the request
+                      Handoff style, same privacy; optional for how you think about the request
                     </SelectItem>
                   </SelectContent>
                 </Select>

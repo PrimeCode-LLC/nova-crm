@@ -26,7 +26,6 @@ import {
   type NavAccessContext,
   type NavItem,
 } from "@/lib/nav";
-import { mockUsers } from "@/lib/mock-data";
 import { DEMO_ROLE_PRESETS } from "@/lib/demo-persona";
 import { ROLES, APP_NAME } from "@/lib/constants";
 import { cn } from "@/lib/utils";
@@ -251,12 +250,17 @@ export function AppSidebar({
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { user: fbUser, signOut } = useAuth();
-  const { isDemo, demoPersonaId, setDemoPersona } = useWorkspace();
+  const { isDemo, demoPersonaId, setDemoPersona, users } = useWorkspace();
   const { data: userDoc, loading: userDocLoading } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
   );
   const mockUser =
-    mockUsers.find((u) => u.id === demoPersonaId) ?? mockUsers[0]!;
+    users.find((u) => u.id === demoPersonaId) ?? users[0] ?? {
+      id: demoPersonaId,
+      displayName: "Demo user",
+      email: "demo@example.com",
+      roleId: "salesperson" as const,
+    };
   const useMockPersona = isDemo || isAuthDisabled() || !fbUser;
   const displayName = useMockPersona
     ? mockUser.displayName

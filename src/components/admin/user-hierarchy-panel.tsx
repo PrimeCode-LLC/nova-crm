@@ -398,7 +398,7 @@ function HorizontalOrgBlock({
             </div>
             <div className="text-sm font-medium leading-snug">{node.user.displayName}</div>
             <div className="text-[11px] text-muted-foreground">
-              {deptLabel(node.user, departments) ?? node.user.title ?? "—"}
+              {deptLabel(node.user, departments) ?? node.user.title ?? "-"}
             </div>
             <Badge variant="outline" className="mt-1 w-fit text-[10px]">
               {ROLES[node.user.roleId]?.label ?? node.user.roleId}
@@ -683,8 +683,8 @@ export function UserHierarchyPanel({
           <div className="flex flex-col gap-1 border-b px-3 py-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-xs font-medium text-muted-foreground">
               {layout === "vertical"
-                ? "Reporting tree — lines show nesting; grip to drag onto a manager."
-                : "Left-to-right flow — scroll sideways on wide teams."}
+                ? "Reporting tree, lines show nesting; grip to drag onto a manager."
+                : "Left-to-right flow, scroll sideways on wide teams."}
             </p>
             <RootDropBanner canEdit={canEdit} activeDragId={activeDragId} />
           </div>

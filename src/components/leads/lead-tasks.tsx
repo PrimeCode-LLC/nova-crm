@@ -96,7 +96,7 @@ export function LeadTasksPanel({ tasks, lead }: { tasks: LeadTask[]; lead: Lead 
           <p className="text-xs text-muted-foreground">
             Only the <strong className="font-medium text-foreground">assignee</strong>,{" "}
             <strong className="font-medium text-foreground">who requested it</strong>, and{" "}
-            <strong className="font-medium text-foreground">admins / directors</strong> can see these — not the rest of
+            <strong className="font-medium text-foreground">admins / directors</strong> can see these, not the rest of
             the org.
           </p>
         </div>

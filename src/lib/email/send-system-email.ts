@@ -139,7 +139,7 @@ export async function sendSystemEmail(
 /** Hint for operators when outbound mail is not configured. */
 export function systemEmailConfigHint(): string {
   return (
-    "Configure SYSTEM_SMTP_HOST, SYSTEM_SMTP_USER, SYSTEM_SMTP_PASS, and SYSTEM_SMTP_FROM — " +
+    "Configure SYSTEM_SMTP_HOST, SYSTEM_SMTP_USER, SYSTEM_SMTP_PASS, and SYSTEM_SMTP_FROM, " +
     "or set RESEND_API_KEY and RESEND_FROM (or SYSTEM_SMTP_FROM)."
   );
 }

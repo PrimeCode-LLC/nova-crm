@@ -1,9 +1,10 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import { PageBody, PageHeader } from "@/components/common/page-header";
-import { KanbanBoard } from "@/components/leads/kanban-board";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -21,8 +22,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+const KanbanBoard = dynamic(
+  () => import("@/components/leads/kanban-board").then((m) => ({ default: m.KanbanBoard })),
+  {
+    ssr: false,
+    loading: () => <WorkspacePageSkeleton />,
+  },
+);
+
 export default function PipelinePage() {
-  const { leads, isDemo } = useWorkspace();
+  const { leads, isDemo, workspaceLoading } = useWorkspace();
   const { openQuickAdd } = useOpenQuickAdd();
   const [boardQuery, setBoardQuery] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<LeadPriority[]>([]);
@@ -114,7 +123,9 @@ export default function PipelinePage() {
         }
       />
       <PageBody>
-        {!isDemo && leads.length === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && leads.length === 0 ? (
           <WorkspaceEmptyHint title="No leads to show on the board" />
         ) : (
           <KanbanBoard

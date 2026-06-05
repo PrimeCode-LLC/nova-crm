@@ -175,7 +175,7 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
     <>
       <PageHeader
         title={c.name}
-        description="Cold email campaign — synced with Instantly."
+        description="Cold email campaign, synced with Instantly."
         actions={
           <div className="flex flex-wrap gap-2">
             {connected && !isDemo && (
@@ -313,7 +313,7 @@ export function OutreachCampaignDetail({ campaignId }: { campaignId: string }) {
                 <StatCard
                   icon={<Calendar className="h-4 w-4" />}
                   label="Started"
-                  value={c.startedAt ? fmtDate(c.startedAt, "MMM d, yyyy") : "—"}
+                  value={c.startedAt ? fmtDate(c.startedAt, "MMM d, yyyy") : "-"}
                   sub={c.startedAt ? fmtRelative(c.startedAt) : undefined}
                 />
               </div>

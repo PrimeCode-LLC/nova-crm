@@ -108,7 +108,7 @@ export function FitCheckResultView({
                     {m.point}
                     {m.sourceTitle.trim() ? (
                       <span className="block text-xs text-muted-foreground mt-0.5">
-                        — {m.sourceTitle.trim()}
+                       , {m.sourceTitle.trim()}
                       </span>
                     ) : null}
                   </span>
@@ -124,7 +124,7 @@ export function FitCheckResultView({
               <AlertTriangle className="h-3.5 w-3.5 text-amber-600" /> Gaps in the opportunity
             </CardTitle>
             <CardDescription className="text-xs">
-              Mismatches vs your knowledge base — not missing items from your company profile.
+              Mismatches vs your knowledge base, not missing items from your company profile.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -161,7 +161,7 @@ export function FitCheckResultView({
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Outreach hooks</CardTitle>
-          <CardDescription className="text-xs">Two angles you can try — copy and personalize.</CardDescription>
+          <CardDescription className="text-xs">Two angles you can try, copy and personalize.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {result.hooks.map((h, i) => (

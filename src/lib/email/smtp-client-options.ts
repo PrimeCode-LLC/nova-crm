@@ -54,19 +54,19 @@ export function formatSmtpError(err: unknown): string {
   const msg = err.message || "";
 
   if (code === "ETIMEDOUT" || /timeout/i.test(msg)) {
-    return "Outgoing mail (SMTP) could not connect in time — receiving inbox uses IMAP, which is separate. Check the SMTP host/port and TLS mode (587 + implicit TLS off, or 465 + on), firewall/VPN blocking ports 587/465, and your provider’s outgoing-server docs.";
+    return "Outgoing mail (SMTP) could not connect in time, receiving inbox uses IMAP, which is separate. Check the SMTP host/port and TLS mode (587 + implicit TLS off, or 465 + on), firewall/VPN blocking ports 587/465, and your provider’s outgoing-server docs.";
   }
   if (code === "ECONNREFUSED") {
-    return "Connection refused — wrong port or the server is not accepting SMTP on this address.";
+    return "Connection refused, wrong port or the server is not accepting SMTP on this address.";
   }
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
-    return "Host not found — check the SMTP hostname spelling.";
+    return "Host not found, check the SMTP hostname spelling.";
   }
   if (/535|authentication failed|invalid login|auth failed|535 5\.7\.8/i.test(msg)) {
-    return "Login rejected — check username and password, or create an app password if your provider uses 2FA.";
+    return "Login rejected, check username and password, or create an app password if your provider uses 2FA.";
   }
   if (/certificate|SSL|TLS|UNABLE_TO_VERIFY_LEAF_SIGNATURE|self signed/i.test(msg)) {
-    return "TLS/SSL error — try port 587 with “TLS/SSL (implicit)” off, or 465 with it on, per your provider.";
+    return "TLS/SSL error, try port 587 with “TLS/SSL (implicit)” off, or 465 with it on, per your provider.";
   }
 
   return msg.length > 280 ? `${msg.slice(0, 280)}…` : msg;

@@ -88,7 +88,7 @@ export function KeywordListInput({
             key={`locked-${keyword}`}
             variant="outline"
             className={cn("h-6 font-normal", lockedBadgeClass)}
-            title="Team default — managed by admins"
+            title="Team default, managed by admins"
           >
             {keyword}
             <span className="text-[10px] uppercase tracking-wide opacity-70">Team</span>

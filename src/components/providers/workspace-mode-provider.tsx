@@ -25,7 +25,6 @@ import type {
   OrgMemberRole,
 } from "@/lib/types";
 import {
-  getWorkspaceSnapshot,
   createWorkspaceLookup,
   LIVE_SNAPSHOT,
   type WorkspaceSnapshot,
@@ -110,6 +109,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     liveFirestoreError: Error | null;
     /** Live mode: listener for the signed-in user document failed. */
     userProfileError: Error | null;
+    /** True while workspace data is still loading (live Firestore or demo bundle). */
+    workspaceLoading: boolean;
     setMode: (next: WorkspaceMode) => Promise<void>;
     setDemoPersona: (userId: string) => Promise<void>;
     addPermissionOverride: (override: PermissionOverride) => void;
@@ -200,6 +201,7 @@ export function WorkspaceModeProvider({
   const router = useRouter();
   const [mode, setModeState] = React.useState<WorkspaceMode>(initialMode);
   const [demoPersonaId, setDemoPersonaState] = React.useState(initialDemoPersonaId);
+  const [demoSnapshot, setDemoSnapshot] = React.useState<WorkspaceSnapshot | null>(null);
 
   const organizationName =
     organizationNameProp?.trim() || "Workspace";
@@ -211,6 +213,22 @@ export function WorkspaceModeProvider({
   React.useEffect(() => {
     setDemoPersonaState(initialDemoPersonaId);
   }, [initialDemoPersonaId]);
+
+  React.useEffect(() => {
+    if (mode !== "demo") {
+      setDemoSnapshot(null);
+      return;
+    }
+    let cancelled = false;
+    void import("@/lib/workspace-dataset-demo").then(({ getWorkspaceSnapshotDemo }) => {
+      if (!cancelled) {
+        setDemoSnapshot(getWorkspaceSnapshotDemo(demoPersonaId));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, demoPersonaId]);
 
   const setMode = React.useCallback(
     async (next: WorkspaceMode) => {
@@ -742,7 +760,7 @@ export function WorkspaceModeProvider({
           timelineAdded: [...s.timelineAdded, te],
         };
       });
-      toast.message("Lead replied — follow-up plan paused", {
+      toast.message("Lead replied, follow-up plan paused", {
         description: "Review the inbox and regenerate next steps when ready.",
         duration: 8000,
       });
@@ -1383,7 +1401,7 @@ export function WorkspaceModeProvider({
 
   const tenantBaseSnapshot = React.useMemo((): WorkspaceSnapshot => {
     if (mode === "demo") {
-      return getWorkspaceSnapshot(mode, demoPersonaId);
+      return demoSnapshot ?? LIVE_SNAPSHOT;
     }
     const uid = fbUser?.uid ?? "";
     /** Firestore query uses `organizationId`; if the member doc is missing that field, the roster is empty but leads still store `ownerId` as Firebase uid — merge the viewer so UserChip and owner pickers resolve. */
@@ -1424,6 +1442,7 @@ export function WorkspaceModeProvider({
     return applyLiveHierarchyScope(raw, viewer, roster);
   }, [
     mode,
+    demoSnapshot,
     demoPersonaId,
     fbUser?.uid,
     userDoc,
@@ -1610,6 +1629,7 @@ export function WorkspaceModeProvider({
       organizationName,
       liveFirestoreError: mode === "live" ? liveFs.error : null,
       userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
+      workspaceLoading: mode === "live" ? liveFs.loading : demoSnapshot == null,
       setMode,
       setDemoPersona,
       addPermissionOverride,
@@ -1664,6 +1684,8 @@ export function WorkspaceModeProvider({
     liveOrgId,
     organizationName,
     liveFs.error,
+    liveFs.loading,
+    demoSnapshot,
     userProfileLoadError,
     fbUser,
     userDoc,

@@ -228,8 +228,8 @@ export async function crawlStellixSoftSite(
 /** Curated ICP summary prepended to the library (always included). */
 export function stellixSoftFitCheckProfileDoc(): { title: string; content: string } {
   return {
-    title: "StellixSoft — Company fit profile (curated)",
-    content: `# StellixSoft — Company fit profile
+    title: "StellixSoft, Company fit profile (curated)",
+    content: `# StellixSoft, Company fit profile
 
 Use this document as the primary ICP and positioning reference for opportunity fit checks.
 

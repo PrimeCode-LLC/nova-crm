@@ -605,7 +605,7 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     title: "Outbound: SaaS founder opener",
     category: "pitch",
     primaryText:
-      "Noticed {{company}} is hiring AEs while still running outbound from spreadsheets — we help teams like yours keep Instantly + LinkedIn in one pipeline view.",
+      "Noticed {{company}} is hiring AEs while still running outbound from spreadsheets, we help teams like yours keep Instantly + LinkedIn in one pipeline view.",
     secondaryText:
       "Nova is a lightweight CRM for outbound-first teams. Worth a 12-min walkthrough this week?\n\nEither way, congrats on the traction.",
     tags: ["cold_email", "saas", "founders"],
@@ -619,7 +619,7 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     ownerName: "Chris Sullivan",
     title: "Rebuttal: “We already have HubSpot”",
     category: "rebuttal",
-    primaryText: "Totally fair — HubSpot is great as a system of record.",
+    primaryText: "Totally fair, HubSpot is great as a system of record.",
     secondaryText:
       "Teams usually keep HubSpot and use Nova on top for outbound execution: sequences, tasks, and rep activity in one place without ripping out CRM.",
     tags: ["rebuttal", "competitor"],
@@ -631,9 +631,9 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     organizationId: DEMO_WORKSPACE_ORG_ID,
     ownerUid: "u-director",
     ownerName: "James Mitchell",
-    title: "Enterprise pilot — follow-up email",
+    title: "Enterprise pilot, follow-up email",
     category: "followup_template",
-    primaryText: "Subject: Nova pilot — security + rollout checklist",
+    primaryText: "Subject: Nova pilot, security + rollout checklist",
     secondaryText:
       "Hi {{first_name}},\n\nFollowing up with the one-pager and our SOC2 summary. Happy to loop in your IT contact for SSO + audit logs.\n\nOpen to Thursday 2pm ET?\n\nJames",
     tags: ["enterprise", "follow_up"],
@@ -645,11 +645,11 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     organizationId: DEMO_WORKSPACE_ORG_ID,
     ownerUid: "u-sales-03",
     ownerName: "Ryan Cooper",
-    title: "Upwork proposal — first message",
+    title: "Upwork proposal, first message",
     category: "email_template",
-    primaryText: "Subject: {{project_title}} — delivery plan + similar work",
+    primaryText: "Subject: {{project_title}}, delivery plan + similar work",
     secondaryText:
-      "Hi — I’m Ryan from Nova. I’ve shipped similar CRM integrations for three B2B teams on Upwork (see portfolio). Here’s a tight plan for week 1…",
+      "Hi, I’m Ryan from Nova. I’ve shipped similar CRM integrations for three B2B teams on Upwork (see portfolio). Here’s a tight plan for week 1…",
     tags: ["upwork", "proposal"],
     createdAt: isoDaysAgo(18),
     updatedAt: isoDaysAgo(2),
@@ -659,7 +659,7 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     organizationId: DEMO_WORKSPACE_ORG_ID,
     ownerUid: "u-mgr-email",
     ownerName: "Sarah Chen",
-    title: "Discovery call — agenda",
+    title: "Discovery call, agenda",
     category: "meeting_agenda",
     primaryText: "20 min: goals, outbound stack, handoffs between SDR/AE.",
     secondaryText:
@@ -673,12 +673,12 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     organizationId: DEMO_WORKSPACE_ORG_ID,
     ownerUid: "u-sales-02",
     ownerName: "Emma Walsh",
-    title: "Cold call — first 60 seconds",
+    title: "Cold call, first 60 seconds",
     category: "call_script",
     primaryText:
-      "Hi {{first_name}}, this is Emma from Nova — did I catch you at an okay time? I’ll be brief.",
+      "Hi {{first_name}}, this is Emma from Nova, did I catch you at an okay time? I’ll be brief.",
     secondaryText:
-      "We work with outbound teams who outgrew spreadsheets but don’t want another heavy CRM. If nothing’s broken I’ll bow out — worth 20 seconds on what changed for you this quarter?",
+      "We work with outbound teams who outgrew spreadsheets but don’t want another heavy CRM. If nothing’s broken I’ll bow out, worth 20 seconds on what changed for you this quarter?",
     tags: ["call", "sdr"],
     createdAt: isoDaysAgo(8),
     updatedAt: isoDaysAgo(8),
@@ -688,9 +688,9 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
     organizationId: DEMO_WORKSPACE_ORG_ID,
     ownerUid: "u-tl-inbound",
     ownerName: "Michael Hayes",
-    title: "Website demo request — reply",
+    title: "Website demo request, reply",
     category: "email_template",
-    primaryText: "Subject: Re: Demo request — Nova",
+    primaryText: "Subject: Re: Demo request, Nova",
     secondaryText:
       "Thanks for reaching out! I’ve got {{slot_options}} open this week. Which works best on your side?\n\nMichael",
     tags: ["inbound", "demo"],
@@ -734,7 +734,7 @@ export const mockLeadTasks: LeadTask[] = [
   {
     id: "lt-3",
     title: "Approve discount band for Q2 outbound experiment",
-    description: "No lead — ops decision.",
+    description: "No lead, ops decision.",
     taskType: "other",
     visibility: "assignees_only",
     assigneeId: "u-director",

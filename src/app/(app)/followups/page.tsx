@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
@@ -34,7 +35,6 @@ import { KpiCard } from "@/components/common/kpi-card";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
-import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
@@ -69,6 +69,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+const NewFollowupDialog = dynamic(
+  () => import("@/components/followups/new-followup-dialog").then((m) => ({ default: m.NewFollowupDialog })),
+  { ssr: false },
+);
 
 function todayYmdLocal(): string {
   const d = new Date();
@@ -223,7 +228,7 @@ export default function FollowupsPage() {
     <>
       <PageHeader
         title="Followups"
-        description="Reminders for leads you can access in this workspace—filter by assignee and agenda date."
+        description="Reminders for leads you can access in this workspace, filter by assignee and agenda date."
         actions={
           <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New followup
@@ -553,13 +558,15 @@ export default function FollowupsPage() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <NewFollowupDialog
-        open={dialogOpen}
-        onOpenChange={setDialogOpen}
-        leads={leads}
-        currentUserId={currentUserId}
-        onCreate={addFollowup}
-      />
+      {dialogOpen ? (
+        <NewFollowupDialog
+          open={dialogOpen}
+          onOpenChange={setDialogOpen}
+          leads={leads}
+          currentUserId={currentUserId}
+          onCreate={addFollowup}
+        />
+      ) : null}
     </>
   );
 }
