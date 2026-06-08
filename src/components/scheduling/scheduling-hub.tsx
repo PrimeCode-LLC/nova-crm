@@ -58,6 +58,7 @@ import type {
   CalendarDelegation,
   Meeting,
   SchedulingLink,
+  User,
   WeekdayKey,
 } from "@/lib/types";
 import {
@@ -86,6 +87,25 @@ function linkPublicUrl(orgSlug: string, link: SchedulingLink): string {
   return publicBookingUrl(orgSlug, link.slug);
 }
 
+function formatDelegationLabel(d: CalendarDelegation, users: readonly User[]): string {
+  if (d.granteeType === "user") {
+    return d.granteeIds
+      .map((id) => users.find((u) => u.id === id)?.displayName ?? id)
+      .join(", ");
+  }
+  if (d.granteeType === "role") {
+    const preset = DELEGATION_ROLE_PRESETS.find(
+      (p) =>
+        p.roles.length === d.granteeIds.length &&
+        p.roles.every((r) => d.granteeIds.includes(r)),
+    );
+    if (preset) return preset.label;
+    return d.granteeIds.join(", ");
+  }
+  if (d.granteeType === "org") return "Everyone in organization";
+  return d.granteeIds.join(", ") || d.granteeType;
+}
+
 export function SchedulingHub() {
   const { isDemo, users, currentUserId, organizationId } = useWorkspace();
   const { user: fbUser } = useAuth();
@@ -112,8 +132,12 @@ export function SchedulingHub() {
   const [newTitle, setNewTitle] = React.useState("");
   const [newDuration, setNewDuration] = React.useState("30");
   const [delegateOpen, setDelegateOpen] = React.useState(false);
+  const [delegateMode, setDelegateMode] = React.useState<"role" | "user">("role");
   const [delegatePreset, setDelegatePreset] = React.useState("all_sales");
+  const [delegateUserId, setDelegateUserId] = React.useState("");
   const [deleteLinkTarget, setDeleteLinkTarget] = React.useState<SchedulingLink | null>(null);
+  const [deleteDelegationTarget, setDeleteDelegationTarget] =
+    React.useState<CalendarDelegation | null>(null);
   const [deletingLink, setDeletingLink] = React.useState(false);
   const [activeTab, setActiveTab] = React.useState("calendar");
 
@@ -234,17 +258,29 @@ export function SchedulingHub() {
     void load();
   }
 
+  const delegationMemberOptions = React.useMemo(
+    () =>
+      buildWorkspaceOwnerPickerOptions(users, currentUserId, () => undefined).filter(
+        (o) => o.id !== currentUserId,
+      ),
+    [users, currentUserId],
+  );
+
   async function handleAddDelegation() {
     const preset = DELEGATION_ROLE_PRESETS.find((p) => p.id === delegatePreset);
+    const isUserMode = delegateMode === "user";
+    if (isUserMode && !delegateUserId) {
+      toast.error("Select a person");
+      return;
+    }
     if (isDemo) {
-      if (!preset) return;
       const d: CalendarDelegation = {
         id: `demo-del-${Date.now()}`,
         organizationId: organizationId ?? "demo-org",
         hostId: currentUserId,
         hostName: users.find((u) => u.id === currentUserId)?.displayName,
-        granteeType: "role",
-        granteeIds: preset.roles,
+        granteeType: isUserMode ? "user" : "role",
+        granteeIds: isUserMode ? [delegateUserId] : (preset?.roles ?? ["salesperson"]),
         permissions: ["view_availability", "book"],
         createdBy: currentUserId,
         createdAt: new Date().toISOString(),
@@ -252,6 +288,7 @@ export function SchedulingHub() {
       };
       setDelegations((prev) => [...prev, d]);
       setDelegateOpen(false);
+      setDelegateUserId("");
       toast.success("Delegation added (demo)");
       return;
     }
@@ -259,8 +296,8 @@ export function SchedulingHub() {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        granteeType: "role",
-        granteeIds: preset?.roles ?? ["salesperson"],
+        granteeType: isUserMode ? "user" : "role",
+        granteeIds: isUserMode ? [delegateUserId] : (preset?.roles ?? ["salesperson"]),
         permissions: ["view_availability", "book"],
       }),
     });
@@ -270,7 +307,31 @@ export function SchedulingHub() {
       return;
     }
     setDelegateOpen(false);
-    toast.success("Team can now book on your calendar");
+    setDelegateUserId("");
+    toast.success(isUserMode ? "Person can now book on your calendar" : "Team can now book on your calendar");
+    void load();
+  }
+
+  async function confirmDeleteDelegation() {
+    if (!deleteDelegationTarget) return;
+    const target = deleteDelegationTarget;
+    if (isDemo) {
+      setDelegations((prev) => prev.filter((d) => d.id !== target.id));
+      setDeleteDelegationTarget(null);
+      toast.success("Delegation removed (demo)");
+      return;
+    }
+    const res = await fetch(
+      `/api/scheduling/delegations?id=${encodeURIComponent(target.id)}`,
+      { method: "DELETE" },
+    );
+    const j = await res.json();
+    if (!j.ok) {
+      toast.error(j.error ?? "Could not remove delegation");
+      return;
+    }
+    setDeleteDelegationTarget(null);
+    toast.success("Delegation removed");
     void load();
   }
 
@@ -606,17 +667,26 @@ export function SchedulingHub() {
                     {delegations.map((d) => (
                       <li
                         key={d.id}
-                        className="flex items-center justify-between rounded-lg border px-3 py-2 text-sm"
+                        className="flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm"
                       >
-                        <span>
+                        <span className="min-w-0">
                           <Badge variant="secondary" className="mr-2">
-                            {d.granteeType}
+                            {d.granteeType === "user" ? "Person" : d.granteeType}
                           </Badge>
-                          {d.granteeIds.join(", ") || "everyone"}
+                          {formatDelegationLabel(d, users)}
                           <span className="ml-2 text-muted-foreground">
                             ({d.permissions.join(", ")})
                           </span>
                         </span>
+                        <Button
+                          variant="ghost"
+                          size="icon-sm"
+                          className="shrink-0 text-destructive hover:text-destructive"
+                          aria-label={`Remove access for ${formatDelegationLabel(d, users)}`}
+                          onClick={() => setDeleteDelegationTarget(d)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
                       </li>
                     ))}
                   </ul>
@@ -718,7 +788,41 @@ export function SchedulingHub() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <Dialog open={delegateOpen} onOpenChange={setDelegateOpen}>
+      <AlertDialog
+        open={deleteDelegationTarget != null}
+        onOpenChange={(open) => !open && setDeleteDelegationTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove calendar access?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteDelegationTarget
+                ? `${formatDelegationLabel(deleteDelegationTarget, users)} will no longer be able to view your availability or book on your calendar.`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => void confirmDeleteDelegation()}
+            >
+              Remove
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <Dialog
+        open={delegateOpen}
+        onOpenChange={(open) => {
+          setDelegateOpen(open);
+          if (!open) {
+            setDelegateMode("role");
+            setDelegateUserId("");
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Delegate calendar access</DialogTitle>
@@ -727,23 +831,63 @@ export function SchedulingHub() {
             <div>
               <Label>Grant access to</Label>
               <Select
-                value={delegatePreset}
+                value={delegateMode}
                 onValueChange={(v) => {
-                  if (v) setDelegatePreset(v);
+                  if (v === "role" || v === "user") setDelegateMode(v);
                 }}
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {DELEGATION_ROLE_PRESETS.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.label}
-                    </SelectItem>
-                  ))}
+                  <SelectItem value="role">A role or group</SelectItem>
+                  <SelectItem value="user">A single person</SelectItem>
                 </SelectContent>
               </Select>
             </div>
+            {delegateMode === "role" ? (
+              <div>
+                <Label>Role or group</Label>
+                <Select
+                  value={delegatePreset}
+                  onValueChange={(v) => {
+                    if (v) setDelegatePreset(v);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DELEGATION_ROLE_PRESETS.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div>
+                <Label>Person</Label>
+                <Select
+                  value={delegateUserId || undefined}
+                  onValueChange={(v) => {
+                    if (v) setDelegateUserId(v);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select a team member" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {delegationMemberOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
             <p className="text-sm text-muted-foreground">
               They can view your free/busy slots and book meetings linked to their leads. Personal event titles stay private.
             </p>
