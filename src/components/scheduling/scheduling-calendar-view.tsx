@@ -406,6 +406,7 @@ export function SchedulingCalendarView({
     setSyncingExternal(true);
     try {
       const result = await syncGoogleCalendarClient({ hostId });
+      if ("redirecting" in result && result.redirecting) return;
       if (result.ok) {
         toast.success(
           result.eventCount === 0

@@ -6,7 +6,8 @@ import type { CalendarConnection } from "@/lib/types";
 export type CalendarOauthConfig = {
   google: boolean;
   microsoft: boolean;
-  googleMethod?: "firebase" | "oauth" | "none";
+  googleMethod?: "firebase" | "oauth" | "gis" | "none";
+  googleCalendarClientId?: string;
 };
 
 type CacheEntry = {

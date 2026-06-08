@@ -4,7 +4,7 @@ import { isFirebaseWebConfiguredServer } from "@/lib/firebase/server-configured"
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { CalendarConnection, CalendarProvider } from "@/lib/types";
 
-export type CalendarGoogleConnectMethod = "firebase" | "oauth" | "none";
+export type CalendarGoogleConnectMethod = "firebase" | "oauth" | "gis" | "none";
 
 function tsToIso(t: Timestamp | undefined | null): string {
   if (!t || !t.toDate) return new Date().toISOString();
@@ -40,15 +40,27 @@ export function calendarOAuthConfigured(): {
   google: boolean;
   microsoft: boolean;
   googleMethod: CalendarGoogleConnectMethod;
+  /** Public OAuth client id for calendar-only connect (any Google account). */
+  googleCalendarClientId?: string;
 } {
-  const dedicatedGoogle = Boolean(
-    process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim() &&
-      process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim(),
+  const clientId =
+    process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim() ||
+    process.env.NEXT_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CALENDAR_CLIENT_SECRET?.trim();
+  const dedicatedOAuth = Boolean(
+    process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim() && clientSecret,
   );
+  const gisOnly = Boolean(clientId && !dedicatedOAuth);
   const firebaseGoogle = isFirebaseWebConfiguredServer();
+  let googleMethod: CalendarGoogleConnectMethod = "none";
+  if (dedicatedOAuth) googleMethod = "oauth";
+  else if (gisOnly) googleMethod = "gis";
+  else if (firebaseGoogle) googleMethod = "firebase";
+
   return {
-    google: dedicatedGoogle || firebaseGoogle,
-    googleMethod: dedicatedGoogle ? "oauth" : firebaseGoogle ? "firebase" : "none",
+    google: dedicatedOAuth || gisOnly || firebaseGoogle,
+    googleMethod,
+    googleCalendarClientId: clientId || undefined,
     microsoft: Boolean(
       process.env.MICROSOFT_CALENDAR_CLIENT_ID?.trim() &&
         process.env.MICROSOFT_CALENDAR_CLIENT_SECRET?.trim(),

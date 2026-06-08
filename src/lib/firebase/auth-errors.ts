@@ -34,6 +34,12 @@ export function formatFirebaseAuthError(error: unknown): string {
     "auth/popup-closed-by-user": "Sign-in was cancelled.",
     "auth/account-exists-with-different-credential":
       "This email is linked to a different sign-in method. Use email/password or Google, whichever you used originally.",
+    "auth/user-mismatch":
+      "That Google account does not match your Nova sign-in. Use the same Google account you signed into Nova with, or sign in to Nova with email/password and connect any Google calendar.",
+    "auth/credential-already-in-use":
+      "This Google account is already linked to another Nova user.",
+    "auth/provider-already-linked":
+      "Google is already linked to this Nova account. Try Sync now again.",
   };
 
   return messages[code] ?? fallback;

@@ -9,7 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { GoogleConnectButton } from "@/components/scheduling/google-connect-button";
-import { connectGoogleCalendarPopup } from "@/lib/scheduling/connect-google-calendar";
+import {
+  connectGoogleCalendarClient,
+  isGoogleCalendarConnectRedirect,
+} from "@/lib/scheduling/connect-google-calendar-client";
 import { syncGoogleCalendarClient } from "@/lib/scheduling/sync-google-calendar-client";
 import { useCalendarConnections } from "@/lib/scheduling/use-calendar-connections";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -52,19 +55,20 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
       return;
     }
 
-    if (oauth.googleMethod === "oauth") {
-      window.location.href = "/api/scheduling/oauth/google";
-      return;
-    }
-
-    if (!isFirebaseWebConfigured()) {
-      toast.error("Firebase is not configured. Add NEXT_PUBLIC_FIREBASE_* to your environment.");
+    if (!oauth.google && !isFirebaseWebConfigured()) {
+      toast.error("Google Calendar connect is not configured.");
       return;
     }
 
     setConnectingGoogle(true);
     try {
-      const tokens = await connectGoogleCalendarPopup();
+      const connectResult = await connectGoogleCalendarClient({
+        googleMethod: oauth.googleMethod,
+        googleCalendarClientId: oauth.googleCalendarClientId,
+        preferAnyGoogleAccount: true,
+      });
+      if (isGoogleCalendarConnectRedirect(connectResult)) return;
+      const tokens = connectResult;
       const res = await fetch("/api/scheduling/calendar-connections", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -117,6 +121,7 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
     setSyncingId(connectionId);
     try {
       const result = await syncGoogleCalendarClient({ forceRefresh });
+      if ("redirecting" in result && result.redirecting) return;
       if (result.ok) {
         toast.success(
           result.eventCount === 0
@@ -269,10 +274,13 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
               Connect Microsoft Outlook
             </Button>
           </div>
-          {!isDemo && oauth.google && oauth.googleMethod === "firebase" && (
+          {!isDemo && oauth.google && (
             <p className="text-xs text-muted-foreground">
-              Uses your Nova Google sign-in, no extra API keys needed. Approve calendar access when
-              Google prompts you. Reconnect if sync stops after about an hour.
+              {oauth.googleMethod === "oauth" || oauth.googleMethod === "gis"
+                ? "Your Nova login and Google Calendar can be different accounts — pick whichever Google account has the calendar you want."
+                : "Without a Google Calendar client id, email/password Nova users can connect a different Google account. Google Nova sign-in must use the same Google account unless you add GOOGLE_CALENDAR_CLIENT_ID (see .env.example)."}
+              {" "}
+              Reconnect if sync stops after about an hour.
             </p>
           )}
         </CardContent>
