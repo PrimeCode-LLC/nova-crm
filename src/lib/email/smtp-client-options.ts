@@ -65,6 +65,16 @@ export function formatSmtpError(err: unknown): string {
   if (/535|authentication failed|invalid login|auth failed|535 5\.7\.8/i.test(msg)) {
     return "Login rejected, check username and password, or create an app password if your provider uses 2FA.";
   }
+  if (
+    /550|5\.1\.1|5\.1\.0|no such user|user unknown|mailbox unavailable|all recipients were rejected|recipient address rejected|invalid recipient/i.test(
+      msg,
+    )
+  ) {
+    return "The mail server rejected the recipient (550). Check the To address for typos and confirm that mailbox exists. If the address is correct, your SMTP provider may not relay to that domain — verify outgoing mail settings and that your From address matches your SMTP account.";
+  }
+  if (/553|sender address rejected|5\.7\.1.*from/i.test(msg)) {
+    return "The mail server rejected the From address. In Settings → Email, set your mailbox email to the same address you use for SMTP login.";
+  }
   if (/certificate|SSL|TLS|UNABLE_TO_VERIFY_LEAF_SIGNATURE|self signed/i.test(msg)) {
     return "TLS/SSL error, try port 587 with “TLS/SSL (implicit)” off, or 465 with it on, per your provider.";
   }

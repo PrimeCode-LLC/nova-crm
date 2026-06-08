@@ -34,6 +34,7 @@ export async function POST(req: Request) {
 
     const b = (await req.json()) as Record<string, unknown>;
     const smtp = b.smtp as Record<string, unknown> | undefined;
+    const imap = b.imap as Record<string, unknown> | undefined;
     const mailboxId = String(b.mailboxId ?? "").trim();
     const host = normalizeMailHost(String(smtp?.host ?? ""));
     const port = Number(smtp?.port ?? 587);
@@ -65,11 +66,21 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: parsedAttachments.error }, { status: 400 });
     }
 
+    const imapHost = normalizeMailHost(String(imap?.host ?? ""));
     const result = await sendOutboundMailServer({
       organizationId: g.ctx.session.organizationId,
       uid: dataOwnerUid,
       mailboxId,
       smtp: { host, port, secure, user, pass },
+      imap: imapHost
+        ? {
+            host: imapHost,
+            port: Number(imap?.port ?? 993),
+            secure: Boolean(imap?.secure),
+            user: String(imap?.user ?? ""),
+            pass: String(imap?.pass ?? ""),
+          }
+        : undefined,
       from,
       displayName,
       replyTo,
@@ -85,7 +96,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
     }
 
-    return NextResponse.json({ ok: true });
+    return NextResponse.json({ ok: true, sentSavedToMailbox: result.sentSavedToMailbox });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error }, { status: 400 });

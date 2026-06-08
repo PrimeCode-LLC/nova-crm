@@ -24,38 +24,58 @@ function hasSentSpecialUse(specialUse: string | string[] | undefined): boolean {
   return list.some((s) => String(s).toLowerCase().replace(/\\/g, "") === "sent");
 }
 
+async function sentFolderMessageCount(client: ImapFlow, path: string): Promise<number> {
+  try {
+    const status = await client.status(path, { messages: true });
+    return typeof status.messages === "number" && Number.isFinite(status.messages) ? status.messages : 0;
+  } catch {
+    return -1;
+  }
+}
+
+function collectSentFolderCandidates(boxes: Awaited<ReturnType<ImapFlow["list"]>>): string[] {
+  const withSpecial = boxes.filter((b) => hasSentSpecialUse(b.specialUse as string | string[] | undefined));
+  const paths = new Set<string>();
+
+  if (withSpecial.length > 0) {
+    const ranked = [...withSpecial].sort(
+      (a, b) => scoreSentPath(b.path) - scoreSentPath(a.path),
+    );
+    for (const b of ranked) {
+      if (b.path) paths.add(b.path);
+    }
+  } else {
+    const ranked = [...boxes]
+      .filter((b) => scoreSentPath(b.path) > 0)
+      .sort((a, b) => scoreSentPath(b.path) - scoreSentPath(a.path));
+    for (const b of ranked) {
+      if (b.path) paths.add(b.path);
+    }
+  }
+
+  return [...paths];
+}
+
 /**
  * Pick the server Sent folder path (Gmail, Outlook, generic IMAP).
  * Always returns a path exactly as reported by LIST (required for Gmail namespaces).
+ * When multiple Sent mailboxes exist, prefers the one with the most messages so Gmail web
+ * sent mail is not missed in favor of an empty provider-specific folder.
  */
 export async function resolveSentMailboxPath(client: ImapFlow): Promise<string | null> {
   const boxes = await client.list();
+  const candidates = collectSentFolderCandidates(boxes);
+  if (candidates.length === 0) return null;
+  if (candidates.length === 1) return candidates[0]!;
 
-  const withSpecial = boxes.filter((b) => hasSentSpecialUse(b.specialUse as string | string[] | undefined));
-  if (withSpecial.length === 1 && withSpecial[0]?.path) {
-    return withSpecial[0].path;
-  }
-  if (withSpecial.length > 1) {
-    let best = withSpecial[0]!;
-    let bestScore = scoreSentPath(best.path);
-    for (const b of withSpecial.slice(1)) {
-      const s = scoreSentPath(b.path);
-      if (s > bestScore) {
-        bestScore = s;
-        best = b;
-      }
-    }
-    return best.path;
-  }
-
-  let best: (typeof boxes)[number] | null = null;
-  let bestScore = 0;
-  for (const b of boxes) {
-    const s = scoreSentPath(b.path);
-    if (s > bestScore) {
-      bestScore = s;
-      best = b;
+  let bestPath = candidates[0]!;
+  let bestCount = await sentFolderMessageCount(client, bestPath);
+  for (const path of candidates.slice(1)) {
+    const count = await sentFolderMessageCount(client, path);
+    if (count > bestCount) {
+      bestCount = count;
+      bestPath = path;
     }
   }
-  return bestScore > 0 && best?.path ? best.path : null;
+  return bestPath;
 }

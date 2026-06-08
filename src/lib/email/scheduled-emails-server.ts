@@ -203,6 +203,13 @@ async function sendScheduledDoc(
       user: mailbox.smtp.user,
       pass: mailbox.smtp.password,
     },
+    imap: {
+      host: mailbox.imap.host,
+      port: mailbox.imap.port,
+      secure: mailbox.imap.secure,
+      user: mailbox.imap.user,
+      pass: mailbox.imap.password,
+    },
     from: String(data.from ?? mailbox.emailAddress),
     displayName: String(data.displayName ?? mailbox.displayName),
     replyTo: String(data.replyTo ?? mailbox.replyTo),

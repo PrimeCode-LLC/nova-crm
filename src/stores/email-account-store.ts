@@ -71,8 +71,10 @@ export interface EmailAccountStore {
    */
   reconcileInboundHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
   reconcileTrashHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
-  /** Apply offset-0 IMAP Sent list; keeps compose-only rows and older loaded pages. */
+  /** Apply offset-0 IMAP Sent list; keeps older loaded pages. */
   reconcileSentHeadFromSync: (mailboxId: string, headRows: MailInbound[]) => void;
+  /** Append older Sent rows (dedupe by IMAP `uid`). */
+  appendSentServer: (mailboxId: string, messages: MailInbound[]) => void;
   mergeSentBodies: (
     mailboxId: string,
     updates: Array<{ uid: number; bodyText?: string; bodyHtml?: string; preview?: string; bodySynced?: boolean }>,
@@ -393,7 +395,22 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         return mergeSentMailRow(prevByUid.get(server.uid!), server);
       });
       const tail = prevForBox.filter((m) => m.uid != null && m.uid! < minHeadUid);
-      const combined = [...localOnly, ...mergedHead, ...tail].sort(
+      const combined = [...mergedHead, ...tail].sort(
+        (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+      );
+      return { sent: [...otherMailboxes, ...combined] };
+    }),
+  appendSentServer: (mailboxId, messages) =>
+    set((s) => {
+      if (messages.length === 0) return s;
+      const otherMailboxes = s.sent.filter((m) => m.mailboxId !== mailboxId);
+      const prevForBox = s.sent.filter((m) => m.mailboxId === mailboxId && m.uid != null);
+      const byUid = new Map(prevForBox.map((m) => [m.uid!, m]));
+      for (const row of messages) {
+        const server = mailInboundToSent(mailboxId, row);
+        byUid.set(server.uid!, mergeSentMailRow(byUid.get(server.uid!), server));
+      }
+      const combined = [...byUid.values()].sort(
         (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
       );
       return { sent: [...otherMailboxes, ...combined] };

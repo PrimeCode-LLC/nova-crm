@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { diffAddedUnreadUids, snapshotUnreadMailUids } from "@/lib/email/snapshot-unread-mail-uids";
 import { syncImapInboxHead } from "@/lib/email/sync-imap-inbox-head";
+import { syncImapSentHead } from "@/lib/email/sync-imap-sent-head";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import {
@@ -55,6 +56,10 @@ export function InboxBackgroundSync() {
         mailViewAsUid,
         currentUserId,
         inboxReadOnly: mailboxDataReadOnly,
+      });
+      await syncImapSentHead({
+        mailViewAsUid,
+        currentUserId,
       });
       const after = snapshotUnreadMailUids(
         useEmailAccountStore.getState().inboundByMailbox[acct.id] ?? [],

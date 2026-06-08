@@ -101,6 +101,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
+import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
 import {
   fallbackOwnerPickerLabel,
@@ -405,6 +406,7 @@ export default function InboxWorkspace() {
   const reconcileInboundHeadFromSync = useEmailAccountStore((s) => s.reconcileInboundHeadFromSync);
   const reconcileTrashHeadFromSync = useEmailAccountStore((s) => s.reconcileTrashHeadFromSync);
   const reconcileSentHeadFromSync = useEmailAccountStore((s) => s.reconcileSentHeadFromSync);
+  const appendSentServer = useEmailAccountStore((s) => s.appendSentServer);
   const setTrashInbound = useEmailAccountStore((s) => s.setTrashInbound);
   const mergeSentBodies = useEmailAccountStore((s) => s.mergeSentBodies);
   const mergeInboundBodies = useEmailAccountStore((s) => s.mergeInboundBodies);
@@ -512,6 +514,7 @@ export default function InboxWorkspace() {
   const [trashSyncing, setTrashSyncing] = React.useState(false);
   const [sentLoading, setSentLoading] = React.useState(false);
   const [sentSyncing, setSentSyncing] = React.useState(false);
+  const [sentLoadingMore, setSentLoadingMore] = React.useState(false);
   const [sentFetchError, setSentFetchError] = React.useState<string | null>(null);
   /** Total messages in INBOX on server (from last IMAP list); may exceed loaded rows. */
   const [imapMailboxTotal, setImapMailboxTotal] = React.useState<number | null>(null);
@@ -811,12 +814,7 @@ export default function InboxWorkspace() {
               setSentFetchError(err);
               toast.error("Couldn’t load Sent messages", { description: err });
             } else if (serverTotal === 0) {
-              const pathHint = data.mailboxPath ? ` (${data.mailboxPath})` : "";
-              const msg = `Your Sent folder on the mail server is empty${pathHint}. Messages sent from Nova appear here after SMTP send.`;
-              setSentFetchError(msg);
-              toast.message("Sent folder is empty", {
-                description: msg,
-              });
+              setSentFetchError(null);
             }
           } else {
             setSentFetchError(null);
@@ -858,6 +856,71 @@ export default function InboxWorkspace() {
   const fetchInboundMail = React.useCallback(() => fetchImapListFolder("inbox"), [fetchImapListFolder]);
   const fetchTrashMail = React.useCallback(() => fetchImapListFolder("trash"), [fetchImapListFolder]);
   const fetchSentMail = React.useCallback(() => fetchImapListFolder("sent"), [fetchImapListFolder]);
+
+  const loadMoreSentMail = React.useCallback(async () => {
+    if (isDemo || sentLoadingMore) return;
+    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    if (!isImapInboxConfigured(acct)) return;
+    const offset = sentForMailbox.filter((m) => m.uid != null).length;
+    if (imapSentTotal != null && offset >= imapSentTotal) return;
+
+    setSentLoadingMore(true);
+    try {
+      const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailViewAsUid, currentUserId);
+      const res = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mailboxId: acct.id,
+          folder: "sent",
+          limit: INBOX_IMAP_PAGE_LIMIT,
+          offset,
+          imap: {
+            host: acct.imap.host,
+            port: acct.imap.port,
+            secure: acct.imap.secure,
+            user: acct.imap.user,
+            pass: acct.imap.password,
+          },
+        }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        messages?: MailInbound[];
+        mailboxTotal?: number;
+      };
+      if (!data.ok) {
+        const err = data.error ?? "Unknown error from the mail server.";
+        toast.error("Couldn’t load older sent mail", {
+          description: err.length > 400 ? `${err.slice(0, 400)}…` : err,
+        });
+        return;
+      }
+      const batch = Array.isArray(data.messages) ? data.messages : [];
+      appendSentServer(acct.id, batch);
+      const total =
+        typeof data.mailboxTotal === "number" && Number.isFinite(data.mailboxTotal) ? data.mailboxTotal : null;
+      if (total != null) setImapSentTotal(total);
+      if (batch.length === 0) {
+        toast.message("No additional sent messages loaded", {
+          description: "Try refreshing Sent.",
+        });
+      }
+    } catch {
+      toast.error("Could not reach the server");
+    } finally {
+      setSentLoadingMore(false);
+    }
+  }, [
+    isDemo,
+    sentLoadingMore,
+    sentForMailbox,
+    imapSentTotal,
+    appendSentServer,
+    mailViewAsUid,
+    currentUserId,
+  ]);
 
   const loadMoreInboundMail = React.useCallback(async () => {
     if (isDemo || inboundLoadingMore) return;
@@ -1189,8 +1252,20 @@ export default function InboxWorkspace() {
   }
 
   async function handleSend() {
-    if (!composeTo.trim()) {
-      toast.error("Add a recipient");
+    const toParsed = normalizeRecipientList(composeTo, "To");
+    if (!toParsed.ok) {
+      toast.error(toParsed.error);
+      return;
+    }
+    const ccParsed = composeCc.trim() ? normalizeRecipientList(composeCc, "Cc") : null;
+    if (ccParsed && !ccParsed.ok) {
+      toast.error(ccParsed.error);
+      return;
+    }
+    const toLine = toParsed.addresses.join(", ");
+    const ccLine = ccParsed?.addresses.join(", ");
+    if (!account.emailAddress.trim()) {
+      toast.error("Set your From email in Settings → Email before sending.");
       return;
     }
     if (isDemo) {
@@ -1199,7 +1274,7 @@ export default function InboxWorkspace() {
         addSent({
           mailboxId: account.id,
           from: account.emailAddress.trim() || "demo@nova.local",
-          to: composeTo.trim(),
+          to: toLine,
           subject: composeSubject.trim() || "(no subject)",
           body: composeBody,
         });
@@ -1241,8 +1316,8 @@ export default function InboxWorkspace() {
           from: account.emailAddress,
           displayName: account.displayName,
           replyTo: account.replyTo,
-          to: composeTo.trim(),
-          cc: composeCc.trim() || undefined,
+          to: toLine,
+          cc: ccLine || undefined,
           subject: composeSubject.trim(),
           text,
           html,
@@ -1261,28 +1336,48 @@ export default function InboxWorkspace() {
             user: account.smtp.user,
             pass: account.smtp.password,
           },
+          imap: isImapInboxConfigured(account)
+            ? {
+                host: account.imap.host,
+                port: account.imap.port,
+                secure: account.imap.secure,
+                user: account.imap.user,
+                pass: account.imap.password,
+              }
+            : undefined,
         }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
+      const data = (await res.json()) as { ok?: boolean; error?: string; sentSavedToMailbox?: boolean };
       if (!data.ok) {
-        toast.error(data.error ?? "Send failed");
+        const err = data.error ?? "Send failed";
+        toast.error("Couldn't send email", {
+          description: err.length > 320 ? `${err.slice(0, 320)}…` : err,
+        });
         return;
       }
-      addSent({
-        mailboxId: account.id,
-        from: account.emailAddress,
-        to: composeTo.trim(),
-        subject: composeSubject.trim(),
-        body: composeBody,
-      });
       if (composeDraftId) deleteDraft(composeDraftId);
-      toast.success("Message sent");
+      toast.success("Message sent", {
+        description:
+          data.sentSavedToMailbox === false && isImapInboxConfigured(account)
+            ? "Delivered, but could not save a copy to your mail server Sent folder. Refresh Sent to check."
+            : undefined,
+      });
       setComposeAttachments([]);
       setComposeOpen(false);
       setMailFolder("sent");
       setSelectedMail(null);
       setSelectedThread(null);
-      if (isImapInboxConfigured(account)) void fetchSentMail();
+      if (isImapInboxConfigured(account)) {
+        await fetchImapListFolder("sent");
+      } else {
+        addSent({
+          mailboxId: account.id,
+          from: account.emailAddress,
+          to: toLine,
+          subject: composeSubject.trim(),
+          body: composeBody,
+        });
+      }
     } catch {
       toast.error("Could not reach the server");
     } finally {
@@ -1291,10 +1386,18 @@ export default function InboxWorkspace() {
   }
 
   async function handleScheduleSend() {
-    if (!composeTo.trim()) {
-      toast.error("Add a recipient");
+    const toParsed = normalizeRecipientList(composeTo, "To");
+    if (!toParsed.ok) {
+      toast.error(toParsed.error);
       return;
     }
+    const ccParsed = composeCc.trim() ? normalizeRecipientList(composeCc, "Cc") : null;
+    if (ccParsed && !ccParsed.ok) {
+      toast.error(ccParsed.error);
+      return;
+    }
+    const toLine = toParsed.addresses.join(", ");
+    const ccLine = ccParsed?.addresses.join(", ");
     if (!composeScheduledAt.trim()) {
       toast.error("Pick a date and time");
       return;
@@ -1315,8 +1418,8 @@ export default function InboxWorkspace() {
         addScheduled({
           mailboxId: account.id,
           from: account.emailAddress.trim() || "demo@nova.local",
-          to: composeTo.trim(),
-          cc: composeCc.trim() || undefined,
+          to: toLine,
+          cc: ccLine || undefined,
           subject: composeSubject.trim() || "(no subject)",
           body: composeBody,
           text: composeBody,
@@ -1359,8 +1462,8 @@ export default function InboxWorkspace() {
           from: account.emailAddress,
           displayName: account.displayName,
           replyTo: account.replyTo,
-          to: composeTo.trim(),
-          cc: composeCc.trim() || undefined,
+          to: toLine,
+          cc: ccLine || undefined,
           subject: composeSubject.trim(),
           text,
           html,
@@ -3275,8 +3378,8 @@ export default function InboxWorkspace() {
                       <Link href="/settings?tab=email" className="text-primary underline-offset-2 hover:underline">
                         Settings → Email
                       </Link>{" "}
-                      to load Sent mail from your server. Messages you send from Nova still appear here after SMTP is
-                      configured.
+                      to sync your mail server Sent folder (Gmail web, mobile, Nova, and other clients). SMTP alone only
+                      sends mail; it does not load Sent.
                     </p>
                   </div>
                 )}
@@ -3288,7 +3391,11 @@ export default function InboxWorkspace() {
                       <Loader2 className="h-6 w-6 animate-spin" />
                     </div>
                   )}
-                {mailFolder === "sent" && sentFetchError && !sentLoading && !sentSyncing && (
+                {mailFolder === "sent" &&
+                  sentFetchError &&
+                  !sentLoading &&
+                  !sentSyncing &&
+                  sentForMailbox.length === 0 && (
                   <div className="p-4 text-center text-sm text-muted-foreground space-y-2">
                     <p>{sentFetchError}</p>
                     {isImapInboxConfigured(account) && !inboxReadOnly ? (
@@ -3299,13 +3406,16 @@ export default function InboxWorkspace() {
                   </div>
                 )}
                 {mailFolder === "sent" &&
-                  !sentFetchError &&
                   !sentLoading &&
                   !sentSyncing &&
                   mailListRows.length === 0 &&
                   (isImapInboxConfigured(account) || isDemo) && (
                     <div className="p-6 text-center text-sm text-muted-foreground">
-                      {isDemo ? "Nothing here yet." : "No messages in Sent."}
+                      {isDemo
+                        ? "Nothing here yet."
+                        : sentFetchError
+                          ? sentFetchError
+                          : "No messages in Sent. With IMAP configured, mail sent from Gmail and other clients appears here."}
                     </div>
                   )}
                 {mailFolder === "drafts" && mailListRows.length === 0 && (
@@ -3431,6 +3541,29 @@ export default function InboxWorkspace() {
                           <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
                         )}
                         Load older messages ({inbound.length} of {imapMailboxTotal})
+                      </Button>
+                    </div>
+                  )}
+                {mailFolder === "sent" &&
+                  !isDemo &&
+                  isImapInboxConfigured(account) &&
+                  imapSentTotal != null &&
+                  imapSentTotal > sentForMailbox.filter((m) => m.uid != null).length && (
+                    <div className="sticky bottom-0 border-t bg-background/95 p-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        size="sm"
+                        className="w-full gap-2 text-xs"
+                        disabled={sentLoading || sentLoadingMore || sentSyncing}
+                        onClick={() => void loadMoreSentMail()}
+                      >
+                        {sentLoadingMore ? (
+                          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        )}
+                        Load older sent ({sentForMailbox.filter((m) => m.uid != null).length} of {imapSentTotal})
                       </Button>
                     </div>
                   )}
