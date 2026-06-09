@@ -395,7 +395,7 @@ export default function ActivityPage() {
         )}
 
         {hasHistoryRows && (
-          <Card className="mb-4">
+          <Card className="mb-4 overflow-visible">
             <CardHeader className="py-3 px-4">
               <CardTitle className="text-sm flex items-center gap-2">
                 <Filter className="h-3.5 w-3.5 text-muted-foreground" />

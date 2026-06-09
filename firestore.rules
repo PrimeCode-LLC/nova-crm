@@ -145,14 +145,25 @@ service cloud.firestore {
         || request.auth.uid in rosterUser(ownerId).get('managerAncestorIds', []);
     }
 
+    /** Matches client `leadOwnerIdsVisibleToViewer` department peers (same `departmentId`). */
+    function callerSharesDepartmentWith(otherUid) {
+      let dept = userDoc().get('departmentId', '');
+      return dept != ''
+        && otherUid != ''
+        && dept == rosterUser(otherUid).get('departmentId', '');
+    }
+
     function canReadCrmOwnedBy(ownerId) {
-      return crmTenantReadAll() || callerManagesCrmOwner(ownerId);
+      return crmTenantReadAll()
+        || callerManagesCrmOwner(ownerId)
+        || callerSharesDepartmentWith(ownerId);
     }
 
     function canReadCrmActivityUser(activityUserId) {
       return crmTenantReadAll()
         || activityUserId == request.auth.uid
-        || callerManagesCrmOwner(activityUserId);
+        || callerManagesCrmOwner(activityUserId)
+        || callerSharesDepartmentWith(activityUserId);
     }
 
     function workspaceChatChannelDoc(channelId) {
@@ -187,10 +198,13 @@ service cloud.firestore {
       return signedIn()
         && inCallerOrg(data)
         && (
-          leadTaskParticipant(data)
+          crmTenantReadAll()
+          || leadTaskParticipant(data)
           || leadTaskElevated()
           || callerManagesCrmOwner(data.assigneeId)
           || callerManagesCrmOwner(data.createdById)
+          || callerSharesDepartmentWith(data.assigneeId)
+          || callerSharesDepartmentWith(data.createdById)
         );
     }
 

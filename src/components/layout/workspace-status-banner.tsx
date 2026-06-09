@@ -46,11 +46,17 @@ export function WorkspaceStatusBanner() {
         ? "Couldn’t keep live data in sync"
         : "Couldn’t load your profile";
 
+  const liveErrMsg = errorSummary(liveErr).toLowerCase();
+  const livePermissionDenied =
+    liveErrMsg.includes("permission") || liveErrMsg.includes("insufficient");
+
   const subline =
     liveErr && profileErr
       ? "Live CRM data and your user profile both reported errors. Information on this page may be incomplete until this clears."
       : liveErr
-        ? "Lists and counts may be outdated or empty until the connection recovers. Check your network, then try Retry."
+        ? livePermissionDenied
+          ? "Firestore rejected a live query for your role (rules may be out of date). Deploy firestore.rules, sign out and back in, then Retry."
+          : "Lists and counts may be outdated or empty until the connection recovers. Check your network, then try Retry."
         : "Your role and permissions may be wrong until your profile loads. Try Retry or sign out and back in.";
 
   return (
