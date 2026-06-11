@@ -1,9 +1,22 @@
 import type { ActivityCounterRow, ActivityRecord, Deal, Lead } from "@/lib/types";
 
-export type DashboardTimeRangeKey = "7d" | "30d" | "90d" | "qtd" | "ytd";
+export type DashboardTimeRangeKey = "1d" | "7d" | "30d" | "90d" | "qtd" | "ytd";
+
+export const DASHBOARD_TIME_RANGE_LABELS: Record<DashboardTimeRangeKey, string> = {
+  "1d": "Last 1 day",
+  "7d": "Last 7 days",
+  "30d": "Last 30 days",
+  "90d": "Last 90 days",
+  qtd: "Quarter to date",
+  ytd: "Year to date",
+};
 
 export function getDashboardRangeStart(key: DashboardTimeRangeKey, now = new Date()): Date {
   const d = new Date(now);
+  if (key === "1d") {
+    d.setUTCDate(d.getUTCDate() - 1);
+    return d;
+  }
   if (key === "7d") {
     d.setUTCDate(d.getUTCDate() - 7);
     return d;

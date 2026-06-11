@@ -40,6 +40,9 @@ import { Badge } from "@/components/ui/badge";
 import { STAGE_TONE_CLASS } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { ChannelTagsRow } from "@/components/common/channel-tags-row";
+import { channelLabelFromValue, buildChannelOptions } from "@/lib/channel-options";
+import { buildChannelTagTooltipMap } from "@/lib/prospects/channel-tag-display";
+import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { UserChip } from "@/components/common/user-chip";
 import { LeadTimeline } from "@/components/leads/lead-timeline";
 import { LeadOverview } from "@/components/leads/lead-overview";
@@ -139,6 +142,17 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         ? "Back to prospects"
         : "Back to leads";
   const lead = ws.getLeadById(leadId);
+  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const channelOptions = React.useMemo(() => buildChannelOptions(customChannels), [customChannels]);
+  const channelTagTooltips = React.useMemo(() => {
+    if (!lead) return undefined;
+    return buildChannelTagTooltipMap(
+      lead,
+      ws.leads,
+      ws.getOwnerDisplayName,
+      (ch) => channelLabelFromValue(ch, channelOptions) || ch,
+    );
+  }, [lead, ws.leads, ws.getOwnerDisplayName, channelOptions]);
 
   const viewerForTasks = React.useMemo(
     () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
@@ -358,7 +372,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <ChannelTagsRow channelTags={lead.channelTags} fallbackChannel={lead.channel} />
+                <ChannelTagsRow
+                  channelTags={lead.channelTags}
+                  fallbackChannel={lead.channel}
+                  tagTooltips={channelTagTooltips}
+                />
                 {lead.intakeKind === "prospect" && (
                   <Badge variant="outline" className={cn("h-7 font-normal", INTAKE_KIND_META.prospect.className)}>
                     {INTAKE_KIND_META.prospect.short}

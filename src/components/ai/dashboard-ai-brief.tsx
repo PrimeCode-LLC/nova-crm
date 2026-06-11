@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import type { ChannelKey } from "@/lib/types";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
 import { DASHBOARD_BRIEF_CACHE_DAYS } from "@/lib/ai/dashboard-brief-cache";
 
 type BriefResult = {
@@ -118,7 +119,7 @@ export function DashboardAiBrief({
               AI overview
             </CardTitle>
             <CardDescription className="text-xs mt-1 leading-relaxed">
-              {ownerLabel} · Last {timeRange.replace("d", " days").replace("qtd", "quarter").replace("ytd", "year")}
+              {ownerLabel} · {DASHBOARD_TIME_RANGE_LABELS[timeRange]}
               {channelScope.length > 0 ? ` · ${channelScope.length} channel(s)` : ""}
               {brief?.cachedAt && (
                 <span className="text-muted-foreground">

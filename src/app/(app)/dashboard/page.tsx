@@ -40,6 +40,7 @@ import {
   filterActivityRecordsByDateRange,
   filterActivityCountersByDateRange,
   type DashboardTimeRangeKey,
+  DASHBOARD_TIME_RANGE_LABELS,
 } from "@/lib/dashboard-date-range";
 import {
   OWNER_SCOPE_PREFIX,
@@ -84,13 +85,9 @@ const TrendChart = dynamic(
   },
 );
 
-const DASHBOARD_RANGE_OPTIONS = [
-  { key: "7d", label: "Last 7 days" },
-  { key: "30d", label: "Last 30 days" },
-  { key: "90d", label: "Last 90 days" },
-  { key: "qtd", label: "Quarter to date" },
-  { key: "ytd", label: "Year to date" },
-] as const;
+const DASHBOARD_RANGE_OPTIONS = (
+  Object.entries(DASHBOARD_TIME_RANGE_LABELS) as [DashboardTimeRangeKey, string][]
+).map(([key, label]) => ({ key, label }));
 
 export default function DashboardPage() {
   const {
@@ -344,11 +341,13 @@ export default function DashboardPage() {
                 </SelectValue>
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="7d">Last 7 days</SelectItem>
-                <SelectItem value="30d">Last 30 days</SelectItem>
-                <SelectItem value="90d">Last 90 days</SelectItem>
-                <SelectItem value="qtd">Quarter to date</SelectItem>
-                <SelectItem value="ytd">Year to date</SelectItem>
+                {(Object.entries(DASHBOARD_TIME_RANGE_LABELS) as [DashboardTimeRangeKey, string][]).map(
+                  ([value, label]) => (
+                    <SelectItem key={value} value={value}>
+                      {label}
+                    </SelectItem>
+                  ),
+                )}
               </SelectContent>
             </Select>
             <Select

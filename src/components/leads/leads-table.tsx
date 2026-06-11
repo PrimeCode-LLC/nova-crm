@@ -9,7 +9,9 @@ import {
   flexRender,
   getCoreRowModel,
   getFilteredRowModel,
+  getPaginationRowModel,
   getSortedRowModel,
+  type PaginationState,
   SortingState,
   useReactTable,
   ColumnFiltersState,
@@ -50,6 +52,8 @@ import {
   ArrowUpDown,
   Check,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   Columns3,
   Filter,
   MoreHorizontal,
@@ -72,6 +76,8 @@ import {
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { ChannelTagsRow } from "@/components/common/channel-tags-row";
+import { buildChannelTagTooltipMap } from "@/lib/prospects/channel-tag-display";
+import { channelLabelFromValue } from "@/lib/channel-options";
 import { UserChip } from "@/components/common/user-chip";
 import { fmtRelative, fmtDate, fmtCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -115,6 +121,7 @@ const LABEL_FILTER_NONE = "__unlabeled__";
 const INBOX_MAIL_LEAD_FILTER_ALL = "all";
 const INBOX_MAIL_LEAD_FILTER_SYNCED = "synced";
 const INBOX_MAIL_LEAD_FILTER_NONE = "none";
+const LEADS_TABLE_PAGE_SIZE = 10;
 
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
@@ -126,12 +133,47 @@ function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]
 }
 
 function LeadChannelCell({ lead }: { lead: Lead }) {
-  const { patchLead, bumpLeadActivity } = useWorkspace();
+  const { patchLead, bumpLeadActivity, leads, getOwnerDisplayName } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
     () => buildLeadsChannelOptions(customChannels),
     [customChannels],
   );
+  const getChannelLabel = React.useCallback(
+    (channel: ChannelKey) => channelLabelFromValue(channel, channelOptions) || channel,
+    [channelOptions],
+  );
+  const tagTooltips = React.useMemo(
+    () => buildChannelTagTooltipMap(lead, leads, getOwnerDisplayName, getChannelLabel),
+    [lead, leads, getOwnerDisplayName, getChannelLabel],
+  );
+
+  if (lead.intakeKind === "prospect") {
+    const assignments = lead.prospectChannelAssignments ?? [];
+    if (!assignments.length) {
+      return <span className="text-xs text-muted-foreground">-</span>;
+    }
+    const channels = [...new Set(assignments.map((a) => a.channel))];
+    return (
+      <div onClick={(e) => e.stopPropagation()}>
+        <ChannelTagsRow channelTags={channels} compact tagTooltips={tagTooltips} />
+      </div>
+    );
+  }
+
+  if (lead.channelTags?.length) {
+    return (
+      <div onClick={(e) => e.stopPropagation()}>
+        <ChannelTagsRow
+          channelTags={lead.channelTags}
+          fallbackChannel={lead.channel}
+          compact
+          tagTooltips={tagTooltips}
+        />
+      </div>
+    );
+  }
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -336,6 +378,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     mergeUrlColumnFilters(preset, initialChannels, initialStages),
   );
   const [rowSelection, setRowSelection] = React.useState({});
+  const [pagination, setPagination] = React.useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: LEADS_TABLE_PAGE_SIZE,
+  });
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
     profileId: false,
   });
@@ -618,11 +664,16 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     },
     {
       id: "channel",
-      accessorKey: "channel",
+      accessorFn: (row) =>
+        row.channelTags?.length ? row.channelTags.join("\0") : (row.channel ?? ""),
       header: COL.channel,
       cell: ({ row }) => <LeadChannelCell lead={row.original} />,
-      filterFn: (row, id, value: string[]) =>
-        !value?.length || value.includes(row.getValue<string>(id)),
+      filterFn: (row, id, value: string[]) => {
+        if (!value?.length) return true;
+        const lead = row.original;
+        const tags = lead.channelTags?.length ? lead.channelTags : lead.channel ? [lead.channel] : [];
+        return tags.some((t) => value.includes(t));
+      },
     },
     {
       id: "profileId",
@@ -833,15 +884,17 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     data: dataForTable,
     columns,
     getRowId: (row) => row.id,
-    state: { sorting, globalFilter, columnFilters, rowSelection, columnVisibility },
+    state: { sorting, globalFilter, columnFilters, rowSelection, columnVisibility, pagination },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
     onColumnFiltersChange: setColumnFilters,
     onRowSelectionChange: setRowSelection,
     onColumnVisibilityChange: setColumnVisibility,
+    onPaginationChange: setPagination,
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
     globalFilterFn: (row, _colId, filterValue) => {
       const q = String(filterValue ?? "").toLowerCase();
       if (!q) return true;
@@ -877,7 +930,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   React.useEffect(() => {
     setRowSelection({});
-  }, [ownerScope, effectiveIntakeScope, inboxMailLeadFilter]);
+    setPagination((prev) => ({ ...prev, pageIndex: 0 }));
+  }, [ownerScope, effectiveIntakeScope, inboxMailLeadFilter, globalFilter, columnFilters]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
@@ -1385,11 +1439,64 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         </div>
       </div>
 
-      <div className="flex shrink-0 items-center justify-between text-xs text-muted-foreground">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 text-xs text-muted-foreground">
         <span>
-          Showing <span className="font-medium text-foreground tabular-nums">{table.getRowModel().rows.length}</span> of{" "}
-          <span className="tabular-nums">{table.getCoreRowModel().rows.length}</span> leads
+          {(() => {
+            const total = table.getFilteredRowModel().rows.length;
+            const { pageIndex, pageSize } = table.getState().pagination;
+            const entityLabel =
+              effectiveIntakeScope === "prospect"
+                ? total === 1
+                  ? "prospect"
+                  : "prospects"
+                : total === 1
+                  ? "lead"
+                  : "leads";
+            if (total === 0) {
+              return `No ${entityLabel} match your filters`;
+            }
+            const start = pageIndex * pageSize + 1;
+            const end = Math.min((pageIndex + 1) * pageSize, total);
+            return (
+              <>
+                Showing{" "}
+                <span className="font-medium text-foreground tabular-nums">
+                  {start}–{end}
+                </span>{" "}
+                of <span className="tabular-nums">{total}</span> {entityLabel}
+              </>
+            );
+          })()}
         </span>
+        <div className="flex items-center gap-1">
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            className="h-8 gap-1"
+            disabled={!table.getCanPreviousPage()}
+            onClick={() => table.previousPage()}
+            aria-label="Previous page"
+          >
+            <ChevronLeft className="h-3.5 w-3.5" />
+            Previous
+          </Button>
+          <span className="min-w-[5.5rem] px-1 text-center text-xs font-medium tabular-nums text-foreground">
+            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            className="h-8 gap-1"
+            disabled={!table.getCanNextPage()}
+            onClick={() => table.nextPage()}
+            aria-label="Next page"
+          >
+            Next
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        </div>
       </div>
     </div>
   );

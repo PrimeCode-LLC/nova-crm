@@ -19,6 +19,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import {
+  MailReaderDialog,
+  MailZoomButton,
+  mailReaderContentFromInbound,
+  mailReaderContentFromSent,
+  MailReadingZoomActions,
+} from "@/components/inbox/mail-reader-dialog";
 import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
 import { format } from "date-fns";
@@ -3850,13 +3857,16 @@ export default function InboxWorkspace() {
               ) : selectedMail ? (
                 "sentAt" in selectedMail ? (
                   <div className="space-y-4 max-w-xl">
-                    <div>
-                      <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
-                      <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
-                      {selectedMail.from ? (
-                        <p className="text-xs text-muted-foreground">From: {selectedMail.from}</p>
-                      ) : null}
-                      <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.sentAt)}</p>
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <h3 className="text-sm font-semibold">{selectedMail.subject || "(no subject)"}</h3>
+                        <p className="text-xs text-muted-foreground mt-1">To: {selectedMail.to}</p>
+                        {selectedMail.from ? (
+                          <p className="text-xs text-muted-foreground">From: {selectedMail.from}</p>
+                        ) : null}
+                        <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.sentAt)}</p>
+                      </div>
+                      <MailReadingZoomActions content={mailReaderContentFromSent(selectedMail)} />
                     </div>
                     {selectedMail.bodySynced === false && !selectedMail.body ? (
                       <div className="flex items-center gap-2 text-sm text-muted-foreground py-6">
@@ -3993,6 +4003,7 @@ export default function InboxWorkspace() {
                           blockedSenderDomains={blockedSenderDomains}
                           onRequestBlockDomain={openBlockDomainDialog}
                         />
+                        <MailReadingZoomActions content={mailReaderContentFromInbound(selectedMail)} />
                       </div>
                     </div>
                     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-3 pr-1">
@@ -4585,6 +4596,7 @@ function InboundMessageCard({
   showHeader = true,
   className,
 }: InboundMessageCardProps) {
+  const [readerOpen, setReaderOpen] = React.useState(false);
   const html = m.bodyHtml?.trim();
   const srcDoc =
     html &&
@@ -4609,13 +4621,20 @@ function InboundMessageCard({
         <div className="shrink-0 space-y-1 border-b border-border/60 bg-muted/20 px-4 py-3">
           <div className="flex flex-wrap items-baseline justify-between gap-2">
             <span className="text-sm font-medium">{senderDisplayLabel(m.from)}</span>
-            <span className="text-[11px] text-muted-foreground tabular-nums">{fmtRelative(m.date)}</span>
+            <div className="flex items-center gap-1">
+              <span className="text-[11px] text-muted-foreground tabular-nums">{fmtRelative(m.date)}</span>
+              <MailZoomButton onClick={() => setReaderOpen(true)} />
+            </div>
           </div>
           <p className="text-xs text-muted-foreground break-all">{m.from}</p>
           {m.to ? <p className="text-[11px] text-muted-foreground">To: {m.to}</p> : null}
           {m.cc ? <p className="text-[11px] text-muted-foreground">Cc: {m.cc}</p> : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="flex justify-end px-3 pt-2">
+          <MailZoomButton onClick={() => setReaderOpen(true)} />
+        </div>
+      )}
       <div className={cn("flex flex-col gap-3 p-4", fillHeight && "min-h-0 flex-1", !showHeader && "pt-3")}>
         {m.attachments && m.attachments.length > 0 ? (
           <div className="shrink-0 space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
@@ -4653,6 +4672,11 @@ function InboundMessageCard({
           </div>
         )}
       </div>
+      <MailReaderDialog
+        open={readerOpen}
+        onOpenChange={setReaderOpen}
+        content={mailReaderContentFromInbound(m)}
+      />
     </div>
   );
 }
