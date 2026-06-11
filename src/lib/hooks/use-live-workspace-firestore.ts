@@ -38,6 +38,7 @@ import type {
   CrmLabel,
 } from "@/lib/types";
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
+import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 
 export type LiveWorkspaceFirestoreState = {
   loading: boolean;
@@ -121,13 +122,7 @@ function asUser(id: string, raw: Record<string, unknown>): User {
 }
 
 function asLead(id: string, raw: Record<string, unknown>): Lead {
-  const base = { ...raw, id } as unknown as Lead;
-  return {
-    ...base,
-    id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
-  };
+  return mapLeadDoc(id, raw);
 }
 
 function asAccount(id: string, raw: Record<string, unknown>): Account {
@@ -532,29 +527,88 @@ export function useLiveWorkspaceFirestore(
       ),
     );
 
-    const qLeads = singleOwner
-      ? query(
-          collection(db, COLLECTIONS.leads),
-          where("organizationId", "==", organizationId),
-          where("ownerId", "==", ownerIds[0]),
-        )
-      : multiOwner
-        ? query(
+    const leadSlices = new Map<string, Lead[]>();
+
+    const mergeLeadSlices = () => {
+      const byId = new Map<string, Lead>();
+      for (const slice of leadSlices.values()) {
+        for (const lead of slice) {
+          byId.set(lead.id, lead);
+        }
+      }
+      applySnapshot("leads", "leads", Array.from(byId.values()));
+    };
+
+    const subscribeLeads = (key: string, q: ReturnType<typeof query>) => {
+      unsubs.push(
+        onSnapshot(
+          q,
+          (snap) => {
+            leadSlices.set(
+              key,
+              snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>)),
+            );
+            mergeLeadSlices();
+          },
+          (err) => applyListenerError(`leads:${key}`, err),
+        ),
+      );
+    };
+
+    if (memberScope) {
+      if (singleOwner) {
+        subscribeLeads(
+          "owner",
+          query(
+            collection(db, COLLECTIONS.leads),
+            where("organizationId", "==", organizationId),
+            where("ownerId", "==", ownerIds[0]),
+          ),
+        );
+      } else if (multiOwner) {
+        subscribeLeads(
+          "owner",
+          query(
             collection(db, COLLECTIONS.leads),
             where("organizationId", "==", organizationId),
             where("ownerId", "in", ownerIds),
-          )
-        : query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId));
-    unsubs.push(
-      onSnapshot(
-        qLeads,
-        (snap) => {
-          const leads = snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>));
-          applySnapshot("leads", "leads", leads);
-        },
-        (err) => applyListenerError("leads", err),
-      ),
-    );
+          ),
+        );
+      }
+
+      subscribeLeads(
+        "openProspects",
+        query(
+          collection(db, COLLECTIONS.leads),
+          where("organizationId", "==", organizationId),
+          where("intakeKind", "==", "prospect"),
+          where("prospectVisibility", "==", "open"),
+        ),
+      );
+
+      subscribeLeads(
+        "prospectAssignee",
+        query(
+          collection(db, COLLECTIONS.leads),
+          where("organizationId", "==", organizationId),
+          where("prospectAssigneeIds", "array-contains", uid),
+        ),
+      );
+
+      subscribeLeads(
+        "sharedOwner",
+        query(
+          collection(db, COLLECTIONS.leads),
+          where("organizationId", "==", organizationId),
+          where("sharedOwnerIds", "array-contains", uid),
+        ),
+      );
+    } else {
+      subscribeLeads(
+        "all",
+        query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId)),
+      );
+    }
 
     const qAccounts = singleOwner
       ? query(

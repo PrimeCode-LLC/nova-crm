@@ -62,6 +62,20 @@ export type CompanySize =
 /** Top-of-funnel rows from research/scraping before sales treats them as pipeline leads. */
 export type LeadIntakeKind = "prospect" | "sales_lead";
 
+/** Who may see a prospect before/after channel assignments. */
+export type ProspectVisibility = "open" | "assigned";
+
+/** Channel + responsible user on a prospect (owner assigns; assignee pushes to shared Lead). */
+export interface ProspectChannelAssignment {
+  id: string;
+  channel: ChannelKey;
+  assigneeId: string;
+  assignedAt: ISODate;
+  assignedById: string;
+  pushedAt?: ISODate;
+  pushedByUserId?: string;
+}
+
 export type BusinessStatus = "active" | "new" | "dormant";
 
 export type WebsiteStatus = "live" | "under_construction" | "none";
@@ -420,6 +434,23 @@ export interface Lead {
    */
   intakeKind?: LeadIntakeKind;
 
+  /** Prospect creator / channel manager; set when `intakeKind === "prospect"`. */
+  prospectOwnerId?: string;
+  /** `open` = whole org until first channel assignment; then `assigned`. */
+  prospectVisibility?: ProspectVisibility;
+  prospectChannelAssignments?: ProspectChannelAssignment[];
+  /** Denormalized assignee user ids for Firestore queries. */
+  prospectAssigneeIds?: string[];
+  /** Shared sales Lead id after first channel push. */
+  linkedSalesLeadId?: string;
+
+  /** Back-link to prospect row when this Lead was created via channel push. */
+  prospectSourceId?: string;
+  /** Accumulated channel tags from assignee pushes. */
+  channelTags?: ChannelKey[];
+  /** Users who pushed their assigned channel into this shared Lead. */
+  sharedOwnerIds?: string[];
+
   // Snapshot of contact & account for table rendering
   contactName: string;
   contactTitle?: string;
@@ -631,7 +662,8 @@ export type TimelineEventType =
   | "ai_analysis"
   | "meeting_scheduled"
   | "meeting_completed"
-  | "meeting_cancelled";
+  | "meeting_cancelled"
+  | "prospect_channel_pushed";
 
 /** Scheduling / calendar module */
 export type MeetingLocationType =

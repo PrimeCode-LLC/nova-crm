@@ -47,7 +47,7 @@ function ProspectsPageInner() {
     <AppPage>
       <PageHeader
         title="Prospects"
-        description="Intake records from research and scraping. Promote to a sales lead when someone shows interest."
+        description="Intake records from research. Prospect owners assign channels and teammates; assignees push their channel into one shared sales lead."
         actions={
           <>
             <Button size="sm" type="button" onClick={() => openNewProspectForm()}>

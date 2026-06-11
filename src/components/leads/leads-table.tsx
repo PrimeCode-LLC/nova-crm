@@ -71,6 +71,7 @@ import {
 } from "@/lib/constants";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
+import { ChannelTagsRow } from "@/components/common/channel-tags-row";
 import { UserChip } from "@/components/common/user-chip";
 import { fmtRelative, fmtDate, fmtCurrency } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -350,6 +351,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [reassignOpen, setReassignOpen] = React.useState(false);
   const [campaignDialogOpen, setCampaignDialogOpen] = React.useState(false);
   const [campaignLeadIds, setCampaignLeadIds] = React.useState<string[]>([]);
+  const [prospectAssignedToMe, setProspectAssignedToMe] = React.useState(false);
   const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
 
   const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
@@ -825,7 +827,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, effectiveIntakeScope]);
 
   const table = useReactTable({
     data: dataForTable,

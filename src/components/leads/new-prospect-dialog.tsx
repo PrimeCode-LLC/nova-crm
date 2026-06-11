@@ -379,7 +379,11 @@ export function NewProspectDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const oid = ownerId.trim();
+    const oid = effectiveUid?.trim() ?? "";
+    if (!oid) {
+      toast.error("Sign in to create a prospect.");
+      return;
+    }
     const bn = bizName.trim();
     if (!bn) {
       toast.error("Business name is required.");
@@ -392,16 +396,6 @@ export function NewProspectDialog({
       return;
     }
     const fullName = `${fn} ${ln}`.trim();
-
-    if (channelNeedsProfile) {
-      const opts = profiles.filter((p) => p.channel === channel && p.active !== false);
-      if (opts.length > 0 && !profileId.trim()) {
-        toast.error(
-          channel === "upwork" ? "Select an Upwork profile." : "Select a CV / apply profile.",
-        );
-        return;
-      }
-    }
 
     const emailTrim = email.trim().toLowerCase();
     if (emailTrim) {
@@ -490,23 +484,22 @@ export function NewProspectDialog({
       updatedAt: now,
     };
 
-    const profileIdTrim = profileId.trim();
-    const scraperTrim = scraperId.trim();
-
-    const createdById = effectiveUid?.trim() || undefined;
+    const createdById = oid;
+    const placeholderChannel: ChannelKey = "website_form";
     const lead: Lead = {
       id: leadId,
       accountId,
       contactId,
-      channel,
-      profileId: profileIdTrim || undefined,
+      channel: placeholderChannel,
       stage,
       temperature,
       priority,
       ownerId: oid,
-      ...(createdById ? { createdById } : {}),
-      scraperId: scraperTrim || undefined,
+      createdById,
+      scraperId: oid,
       intakeKind: "prospect",
+      prospectOwnerId: oid,
+      prospectVisibility: "open",
       contactName: fullName,
       contactTitle: title.trim() || undefined,
       contactEmail: emailTrim || undefined,
@@ -524,11 +517,10 @@ export function NewProspectDialog({
     };
 
     const creatorLabel =
-      getOwnerDisplayName(effectiveUid ?? "")?.trim() ||
+      getOwnerDisplayName(oid)?.trim() ||
       liveUserDoc?.displayName?.trim() ||
       (fbUser?.email?.includes("@") ? fbUser.email.split("@")[0]!.trim() : "") ||
       "Teammate";
-    const assignedToLabel = ownerOptions.find((o) => o.id === oid)?.label ?? "owner";
 
     setSubmitting(true);
     try {
@@ -545,12 +537,10 @@ export function NewProspectDialog({
         leadId,
         type: "lead_created",
         actorId: createdById,
-        summary: oid
-          ? `Prospect created by ${creatorLabel}. Assigned to ${assignedToLabel}.`
-          : `Prospect created by ${creatorLabel}. Left in the open queue, anyone may claim.`,
+        summary: `Prospect created by ${creatorLabel}. Add channels when ready.`,
         createdAt: now,
       });
-      toast.success("Prospect created");
+      toast.success("Prospect created — add channels when ready.");
       onOpenChange(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -573,106 +563,17 @@ export function NewProspectDialog({
           <DialogHeader className="px-6 pt-6 pb-3 shrink-0 border-b">
             <DialogTitle>New prospect</DialogTitle>
             <DialogDescription>
-              Full intake record for research and scraping. Pick &quot;Open queue&quot; so everyone sees the prospect
-              until someone claims it, or assign an owner now. Lead by credits the source. Promote to a sales lead from
-              the prospect&apos;s detail page when they show interest.
+              Create an intake record for research. You become the Prospect owner. Add channels and assign teammates
+              from the prospect detail page, then assignees push their channel into a shared sales lead.
             </DialogDescription>
           </DialogHeader>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6">
             <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Assignment & routing
+                Intake defaults
               </p>
               <div className="grid sm:grid-cols-2 gap-3">
-                <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Assigned to</Label>
-                  <Select value={ownerId} onValueChange={(v) => setOwnerId(v ?? "")}>
-                    <SelectTrigger className="w-full min-w-0">
-                      <SelectValue placeholder="Select owner">
-                        {(value) =>
-                          value == null || value === ""
-                            ? "Select owner"
-                            : ownerPickerTriggerLabel(String(value), ownerOptions)
-                        }
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="">Open queue (anyone can claim)</SelectItem>
-                      {ownerOptions.map((o) => (
-                        <SelectItem key={o.id} value={o.id}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[11px] text-muted-foreground leading-snug">
-                    Open-queue prospects appear for all teammates under <span className="font-medium">All owners</span>{" "}
-                    until someone uses <span className="font-medium">Claim</span> on the record.
-                  </p>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Lead by (sourced by)</Label>
-                  <Select
-                    value={scraperId.trim() ? scraperId : UNSET_SCRAPER}
-                    onValueChange={(v) => v && setScraperId(v === UNSET_SCRAPER ? "" : v)}
-                  >
-                    <SelectTrigger className="w-full min-w-0">
-                      <SelectValue placeholder="Optional">
-                        {(value) => {
-                          if (value == null || value === "" || value === UNSET_SCRAPER) return "Optional";
-                          return ownerPickerTriggerLabel(String(value), ownerOptions);
-                        }}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={UNSET_SCRAPER}>Not set</SelectItem>
-                      {ownerOptions.map((o) => (
-                        <SelectItem key={`s-${o.id}`} value={o.id}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-1.5">
-                  <Label>Channel</Label>
-                  <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
-                    <SelectTrigger>
-                      <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {channelOptions.map((c) => (
-                        <SelectItem key={c.key} value={c.key}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                {channelNeedsProfile && (
-                  <div className="grid gap-1.5 sm:col-span-2">
-                    <Label>{outreachProfileFieldLabel(channel)}</Label>
-                    {profileOptionsForChannel.length === 0 ? (
-                      <p className="text-xs text-muted-foreground">
-                        No active profiles for this channel. Add one under Admin → Profiles.
-                      </p>
-                    ) : (
-                      <Select value={profileId} onValueChange={(v) => v != null && setProfileId(v)}>
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select profile" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {profileOptionsForChannel.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                )}
                 <div className="grid gap-1.5">
                   <Label>Pipeline stage</Label>
                   <Select value={stage} onValueChange={(v) => v && setStage(v as PipelineStage)}>

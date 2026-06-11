@@ -139,7 +139,7 @@ export function EditLeadDialog({
   const [intakeKind, setIntakeKind] = React.useState<LeadIntakeKind>("sales_lead");
   const [scraperId, setScraperId] = React.useState<string | UnsetToken>(UNSET);
   const [labelIds, setLabelIds] = React.useState<string[]>([]);
-  const { profiles, users, currentUserId, getOwnerDisplayName } = useWorkspace();
+  const { profiles, users, currentUserId, getOwnerDisplayName, canEditLead } = useWorkspace();
 
   const ownerPickerIds = React.useMemo(() => {
     const ids = new Set<string>();
@@ -290,6 +290,7 @@ export function EditLeadDialog({
   }
 
   if (!lead) return null;
+  const readOnly = !canEditLead(lead);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -298,6 +299,7 @@ export function EditLeadDialog({
           <DialogHeader>
             <DialogTitle>Edit lead</DialogTitle>
             <DialogDescription>
+            {readOnly ? "This lead was created from a prospect push. Only workspace admins can edit it." : null}
               Update research, routing, qualification, and next steps for {lead.contactName}. Changes apply for this
               browser session.
             </DialogDescription>
@@ -747,7 +749,7 @@ export function EditLeadDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit">Save changes</Button>
+            <Button type="submit" disabled={readOnly}>Save changes</Button>
           </DialogFooter>
         </form>
       </DialogContent>

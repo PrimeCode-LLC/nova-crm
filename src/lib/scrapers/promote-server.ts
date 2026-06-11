@@ -8,16 +8,7 @@ import {
   contactNameFromRaw,
 } from "@/lib/scrapers/raw-item-field-parser";
 import { getScraperRawItemServer, markRawItemPromotedServer } from "@/lib/scrapers/raw-items-server";
-
-function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
-  const base = { ...raw, id } as unknown as Lead;
-  return {
-    ...base,
-    id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
-  };
-}
+import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 
 function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
   const base = { ...raw, id } as unknown as Account;
@@ -175,10 +166,12 @@ export async function promoteRawItemToProspectServer(input: {
     stage: "new",
     temperature: "cold",
     priority: item.category === "problem" ? "high" : "medium",
-    ownerId,
+    ownerId: input.ownerId.trim() || input.userId,
     createdById: input.userId,
     scraperId: input.scraperId?.trim() || item.feedId || input.userId,
     intakeKind: "prospect",
+    prospectOwnerId: input.ownerId.trim() || input.userId,
+    prospectVisibility: "open",
     contactName: fullName,
     companyName,
     touches: 0,

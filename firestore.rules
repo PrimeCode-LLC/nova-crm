@@ -155,8 +155,41 @@ service cloud.firestore {
 
     function canReadCrmOwnedBy(ownerId) {
       return crmTenantReadAll()
+        || ownsCrmDoc({'ownerId': ownerId})
         || callerManagesCrmOwner(ownerId)
         || callerSharesDepartmentWith(ownerId);
+    }
+
+    /** Open prospects (no channel assignments yet) are readable by all org members. */
+    function isOpenProspect(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && data.get('prospectVisibility', 'open') == 'open';
+    }
+
+    function isProspectAssignee(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && request.auth.uid in data.get('prospectAssigneeIds', []);
+    }
+
+    function isProspectOwner(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && (
+          data.get('prospectOwnerId', '') == request.auth.uid
+          || data.get('createdById', '') == request.auth.uid
+        );
+    }
+
+    function isSharedLeadCoOwner(data) {
+      return request.auth.uid in data.get('sharedOwnerIds', []);
+    }
+
+    function canReadLead(data) {
+      return crmTenantReadAll()
+        || isOpenProspect(data)
+        || isProspectAssignee(data)
+        || isProspectOwner(data)
+        || isSharedLeadCoOwner(data)
+        || canReadCrmOwnedBy(data.get('ownerId', ''));
     }
 
     function canReadCrmActivityUser(activityUserId) {
@@ -209,11 +242,16 @@ service cloud.firestore {
     }
 
     match /leads/{id} {
-      allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow read: if tenantReadable() && canReadLead(resource.data);
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
         && inCallerOrg(resource.data)
-        && request.resource.data.organizationId == resource.data.organizationId;
+        && request.resource.data.organizationId == resource.data.organizationId
+        && (
+          !('prospectSourceId' in resource.data)
+          || resource.data.get('prospectSourceId', '') == ''
+          || isOrgAtLeast('admin')
+        );
       allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 

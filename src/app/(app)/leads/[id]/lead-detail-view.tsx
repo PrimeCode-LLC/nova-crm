@@ -39,6 +39,7 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { STAGE_TONE_CLASS } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
+import { ChannelTagsRow } from "@/components/common/channel-tags-row";
 import { UserChip } from "@/components/common/user-chip";
 import { LeadTimeline } from "@/components/leads/lead-timeline";
 import { LeadOverview } from "@/components/leads/lead-overview";
@@ -76,6 +77,7 @@ import {
 } from "@/components/ui/select";
 import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
 import { LeadSourceButton, LeadScraperSourceSummary } from "@/components/leads/lead-source-button";
+import { ProspectChannelPanel } from "@/components/prospects/prospect-channel-panel";
 import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
 import { LeadAnalyzeDialog } from "@/components/ai/lead-analyze-dialog";
 import type { Lead, PipelineStage } from "@/lib/types";
@@ -356,7 +358,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     ))}
                   </SelectContent>
                 </Select>
-                <ChannelChip channel={lead.channel} />
+                <ChannelTagsRow channelTags={lead.channelTags} fallbackChannel={lead.channel} />
                 {lead.intakeKind === "prospect" && (
                   <Badge variant="outline" className={cn("h-7 font-normal", INTAKE_KIND_META.prospect.className)}>
                     {INTAKE_KIND_META.prospect.short}
@@ -444,9 +446,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             >
               <Share2 className="h-3.5 w-3.5" /> Share
             </Button>
-            <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
-              <Pencil className="h-3.5 w-3.5" /> Edit
-            </Button>
+            {ws.canEditLead(lead) ? (
+              <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
+            ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={
@@ -667,31 +671,26 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 </CardTitle>
               </CardHeader>
               <CardContent className="pt-0 space-y-3">
-                <p className="text-xs text-muted-foreground">
-                  Prospecting rows feed integrations and campaigns. When a contact responds with interest, promote to a
-                  sales lead for normal pipeline work.
-                </p>
                 <LeadScraperSourceSummary lead={lead} />
+                {lead.intakeKind === "prospect" ? (
+                  <ProspectChannelPanel prospect={lead} />
+                ) : null}
                 <div className="flex flex-wrap gap-2">
                   <LeadSourceButton lead={lead} />
-                  {account && contact && (
+                  {account && contact && lead.intakeKind === "prospect" && ws.canEditLead(lead) ? (
                     <Button type="button" size="sm" variant="outline" onClick={() => setProspectFieldsOpen(true)}>
                       Edit prospect fields
                     </Button>
-                  )}
-                  {lead.intakeKind === "prospect" && (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => {
-                        handleSaveLead({ intakeKind: undefined });
-                        toast.success("Promoted to sales lead");
-                      }}
-                    >
-                      Promote to sales lead
-                    </Button>
-                  )}
+                  ) : null}
                 </div>
+                {lead.sharedOwnerIds?.length ? (
+                  <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+                    <span>Co-owners:</span>
+                    {lead.sharedOwnerIds.map((uid) => (
+                      <UserChip key={uid} userId={uid} size="xs" />
+                    ))}
+                  </div>
+                ) : null}
               </CardContent>
             </Card>
 

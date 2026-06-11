@@ -1,6 +1,10 @@
 import type { User, Lead, TimelineEvent, Followup } from "./types";
 import type { WorkspaceSnapshot } from "./workspace-dataset";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
+import {
+  prospectVisibleToViewer,
+  salesLeadVisibleViaSharedOwnership,
+} from "./prospects/prospect-access";
 
 /** Direct reports (recursive), excluding the root id. */
 export function collectDescendantUserIds(
@@ -67,6 +71,12 @@ export function leadVisibleForLiveViewer(
   orgUsers: readonly User[],
 ): boolean {
   if (seesAllLeadsInTenant(viewer)) return true;
+
+  if (lead.intakeKind === "prospect") {
+    return prospectVisibleToViewer(lead, viewer, orgUsers);
+  }
+
+  if (salesLeadVisibleViaSharedOwnership(lead, viewer.id)) return true;
 
   /** Unassigned leads are only visible to owner / admin / manager (see Firestore `crmTenantReadAll`). */
   if (!lead.ownerId?.trim()) return false;

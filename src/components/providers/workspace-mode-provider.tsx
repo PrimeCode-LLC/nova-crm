@@ -95,6 +95,7 @@ import { STAGES_BY_KEY } from "@/lib/constants";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
+import { canEditProspectDerivedLead } from "@/lib/prospects/prospect-access";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
   WorkspaceLookup & {
@@ -159,6 +160,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     deleteLead: (leadId: string, options?: { quiet?: boolean }) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
     canDeleteLeads: boolean;
+    /** Whether the active user may edit this lead (prospect-derived leads are admin-only). */
+    canEditLead: (lead: Lead) => boolean;
     /** Org role for the signed-in user (defaults to member when missing on the user row). */
     viewerOrgRole: OrgMemberRole;
     /** May open another member’s linked inbox (read-only): admins or managers with reports. */
@@ -202,6 +205,7 @@ export function WorkspaceModeProvider({
   const [mode, setModeState] = React.useState<WorkspaceMode>(initialMode);
   const [demoPersonaId, setDemoPersonaState] = React.useState(initialDemoPersonaId);
   const [demoSnapshot, setDemoSnapshot] = React.useState<WorkspaceSnapshot | null>(null);
+  const snapshotRef = React.useRef<WorkspaceSnapshot>(LIVE_SNAPSHOT);
 
   const organizationName =
     organizationNameProp?.trim() || "Workspace";
@@ -1083,6 +1087,15 @@ export function WorkspaceModeProvider({
 
   const patchLead = React.useCallback(
     (leadId: string, patch: Partial<Lead>) => {
+      const viewerRole: OrgMemberRole =
+        snapshotRef.current.users.find((u) => u.id === snapshotRef.current.currentUserId)?.orgRole ??
+        userDoc?.orgRole ??
+        "member";
+      const lead = snapshotRef.current.leads.find((l) => l.id === leadId);
+      if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
+        toast.error("Only workspace admins can edit this lead.");
+        return;
+      }
       const iso = new Date().toISOString();
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
@@ -1102,7 +1115,7 @@ export function WorkspaceModeProvider({
         leadPatches: { ...s.leadPatches, [leadId]: { ...s.leadPatches[leadId], ...patch, updatedAt: iso } },
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, userDoc?.orgRole],
   );
 
   const patchAccount = React.useCallback(
@@ -1559,7 +1572,6 @@ export function WorkspaceModeProvider({
     return { ...preSessionSnapshot, ...merged, followupPlans };
   }, [preSessionSnapshot, sessionV2]);
 
-  const snapshotRef = React.useRef(snapshot);
   snapshotRef.current = snapshot;
 
   const setLeadTaskCompleted = React.useCallback(
@@ -1605,6 +1617,7 @@ export function WorkspaceModeProvider({
     const viewerRole: OrgMemberRole =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
     const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
+    const canEditLead = (lead: Lead) => canEditProspectDerivedLead(lead, viewerRole);
     const viewer =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId) ??
       (userDoc && fbUser?.uid ? ({ ...userDoc, id: fbUser.uid } as User) : undefined);
@@ -1667,6 +1680,7 @@ export function WorkspaceModeProvider({
       removeCrmLabel,
       deleteLead,
       canDeleteLeads,
+      canEditLead,
       viewerOrgRole: viewerRole,
       canViewMemberMailboxes,
       mailboxViewableUserIds,
