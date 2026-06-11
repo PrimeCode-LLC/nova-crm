@@ -1,6 +1,7 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import {
@@ -50,7 +51,6 @@ function buildSalesLeadFromProspect(
     id: salesLeadId,
     channel,
     ownerId,
-    intakeKind: undefined,
     prospectSourceId: prospect.id,
     channelTags: [channel],
     sharedOwnerIds: [pusherId],
@@ -152,7 +152,7 @@ export async function pushProspectChannelToLeadServer(input: {
           salesRef,
           stampForCreate(
             input.organizationId,
-            salesLead as unknown as Record<string, unknown>,
+            stripUndefined(salesLead as unknown as Record<string, unknown>),
             input.userId,
           ),
         );
