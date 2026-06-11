@@ -154,6 +154,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addLeadTouchpoint: (t: Touchpoint) => void;
     addTimelineEvent: (e: TimelineEvent) => void;
     patchLead: (leadId: string, patch: Partial<Lead>) => void;
+    /** Like `patchLead` but awaits the Firestore write (live mode). Throws on permission or network errors. */
+    patchLeadAsync: (leadId: string, patch: Partial<Lead>) => Promise<void>;
     patchAccount: (accountId: string, patch: Partial<Account>) => void;
     patchContact: (contactId: string, patch: Partial<Contact>) => void;
     /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
@@ -1085,30 +1087,22 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
-  const patchLead = React.useCallback(
-    (leadId: string, patch: Partial<Lead>) => {
+  const patchLeadAsync = React.useCallback(
+    async (leadId: string, patch: Partial<Lead>) => {
       const viewerRole: OrgMemberRole =
         snapshotRef.current.users.find((u) => u.id === snapshotRef.current.currentUserId)?.orgRole ??
         userDoc?.orgRole ??
         "member";
       const lead = snapshotRef.current.leads.find((l) => l.id === leadId);
       if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
-        toast.error("Only workspace admins can edit this lead.");
-        return;
+        throw new Error("Only workspace admins can edit this lead.");
       }
       const iso = new Date().toISOString();
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       if (writeFs) {
-        void (async () => {
-          try {
-            const db = getFirebaseDb();
-            await persistLeadPatchClient(db, leadId, patch);
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save lead", { description: msg });
-          }
-        })();
+        const db = getFirebaseDb();
+        await persistLeadPatchClient(db, leadId, patch);
       }
       setSessionV2((s) => ({
         ...s,
@@ -1116,6 +1110,20 @@ export function WorkspaceModeProvider({
       }));
     },
     [mode, userDoc?.organizationId, userDoc?.orgRole],
+  );
+
+  const patchLead = React.useCallback(
+    (leadId: string, patch: Partial<Lead>) => {
+      void patchLeadAsync(leadId, patch).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        if (msg.includes("Only workspace admins")) {
+          toast.error(msg);
+        } else {
+          toast.error("Could not save lead", { description: msg });
+        }
+      });
+    },
+    [patchLeadAsync],
   );
 
   const patchAccount = React.useCallback(
@@ -1672,6 +1680,7 @@ export function WorkspaceModeProvider({
       addLeadTouchpoint,
       addTimelineEvent,
       patchLead,
+      patchLeadAsync,
       patchAccount,
       patchContact,
       patchDeal,
@@ -1732,6 +1741,7 @@ export function WorkspaceModeProvider({
     addLeadTouchpoint,
     addTimelineEvent,
     patchLead,
+    patchLeadAsync,
     patchAccount,
     patchContact,
     patchDeal,

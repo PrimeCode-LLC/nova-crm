@@ -480,8 +480,13 @@ export function useLiveWorkspaceFirestore(
     const multiOwner = memberScope && ownerIds.length > 1;
 
     const firstAggregateError = (): Error | null => {
-      const v = listenerErrorsRef.current.values().next();
-      return v.done ? null : v.value;
+      const entries = [...listenerErrorsRef.current.entries()];
+      if (entries.length === 0) return null;
+      const lines = entries.map(([key, err]) => {
+        const msg = err.message?.trim() || err.name || "Unknown error";
+        return `${key}: ${msg}`;
+      });
+      return new Error(lines.join(" | "));
     };
 
     const applySnapshot = <K extends keyof LiveWorkspaceFirestoreState>(
@@ -591,6 +596,7 @@ export function useLiveWorkspaceFirestore(
         query(
           collection(db, COLLECTIONS.leads),
           where("organizationId", "==", organizationId),
+          where("intakeKind", "==", "prospect"),
           where("prospectAssigneeIds", "array-contains", uid),
         ),
       );

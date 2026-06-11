@@ -61,6 +61,9 @@ import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
+import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
+import { COLLECTIONS } from "@/lib/firestore/collections";
+import { doc, getDoc } from "firebase/firestore";
 import { findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
@@ -527,6 +530,19 @@ export function NewProspectDialog({
       if (!isDemo && liveUserDoc?.organizationId && isFirebaseWebConfigured()) {
         const db = getFirebaseDb();
         await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
+        const saved = await getDoc(doc(db, COLLECTIONS.leads, leadId));
+        if (saved.exists()) {
+          const data = saved.data();
+          const needsRepair =
+            data.intakeKind !== "prospect" || data.prospectVisibility !== "open";
+          if (needsRepair) {
+            await persistLeadPatchClient(db, leadId, {
+              intakeKind: "prospect",
+              prospectVisibility: "open",
+              prospectOwnerId: oid,
+            });
+          }
+        }
       } else {
         await addAccount(account);
         await addContact(contact);

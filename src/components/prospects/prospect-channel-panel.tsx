@@ -142,7 +142,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
 
     setSaving(true);
     try {
-      ws.patchLead(prospect.id, {
+      await ws.patchLeadAsync(prospect.id, {
         prospectChannelAssignments: assignments,
         prospectAssigneeIds: prospectAssigneeIdsFromAssignments(assignments),
         prospectVisibility: "assigned",

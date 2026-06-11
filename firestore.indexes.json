@@ -49,6 +49,15 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "organizationId", "order": "ASCENDING" },
+        { "fieldPath": "intakeKind", "order": "ASCENDING" },
+        { "fieldPath": "prospectAssigneeIds", "arrayConfig": "CONTAINS" }
+      ]
+    },
+    {
+      "collectionGroup": "leads",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "organizationId", "order": "ASCENDING" },
         { "fieldPath": "sharedOwnerIds", "arrayConfig": "CONTAINS" }
       ]
     },
