@@ -86,6 +86,24 @@ function markAssignmentPushed(
   );
 }
 
+/** Firestore rejects nested `undefined` in assignment maps (e.g. unpushed channels). */
+function assignmentsForFirestore(
+  assignments: ProspectChannelAssignment[],
+): Record<string, unknown>[] {
+  return assignments.map((a) => {
+    const row: Record<string, unknown> = {
+      id: a.id,
+      channel: a.channel,
+      assigneeId: a.assigneeId,
+      assignedAt: a.assignedAt,
+      assignedById: a.assignedById,
+    };
+    if (a.pushedAt) row.pushedAt = a.pushedAt;
+    if (a.pushedByUserId) row.pushedByUserId = a.pushedByUserId;
+    return row;
+  });
+}
+
 export async function pushProspectChannelToLeadServer(input: {
   organizationId: string;
   prospectId: string;
@@ -197,7 +215,7 @@ export async function pushProspectChannelToLeadServer(input: {
         stampForUpdate(
           {
             linkedSalesLeadId: salesLeadId,
-            prospectChannelAssignments: updatedAssignments,
+            prospectChannelAssignments: assignmentsForFirestore(updatedAssignments),
           },
           input.userId,
         ),
