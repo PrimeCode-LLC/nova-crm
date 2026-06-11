@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -199,27 +198,25 @@ export function MailReaderDialog({
           <DialogTitle className="text-base leading-snug">
             {content.subject?.trim() || "(no subject)"}
           </DialogTitle>
-          <DialogDescription asChild>
-            <div className="space-y-0.5 text-xs text-muted-foreground">
-              {content.from ? (
-                <p>
-                  <span className="font-medium text-foreground">From:</span> {senderDisplayLabel(content.from)}{" "}
-                  <span className="break-all">({content.from})</span>
-                </p>
-              ) : null}
-              {content.to ? (
-                <p>
-                  <span className="font-medium text-foreground">To:</span> {content.to}
-                </p>
-              ) : null}
-              {content.cc ? (
-                <p>
-                  <span className="font-medium text-foreground">Cc:</span> {content.cc}
-                </p>
-              ) : null}
-              {content.date ? <p>{fmtRelative(content.date)}</p> : null}
-            </div>
-          </DialogDescription>
+          <div className="space-y-0.5 text-xs text-muted-foreground">
+            {content.from ? (
+              <p>
+                <span className="font-medium text-foreground">From:</span> {senderDisplayLabel(content.from)}{" "}
+                <span className="break-all">({content.from})</span>
+              </p>
+            ) : null}
+            {content.to ? (
+              <p>
+                <span className="font-medium text-foreground">To:</span> {content.to}
+              </p>
+            ) : null}
+            {content.cc ? (
+              <p>
+                <span className="font-medium text-foreground">Cc:</span> {content.cc}
+              </p>
+            ) : null}
+            {content.date ? <p>{fmtRelative(content.date)}</p> : null}
+          </div>
         </DialogHeader>
         <div className="min-h-0 flex-1 overflow-y-auto p-5">
           <MailReaderBody content={content} />
