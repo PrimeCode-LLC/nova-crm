@@ -179,6 +179,18 @@ service cloud.firestore {
         );
     }
 
+    function prospectCreatorId(data) {
+      let po = data.get('prospectOwnerId', '');
+      return po != ''
+        ? po
+        : data.get('createdById', data.get('ownerId', ''));
+    }
+
+    function isProspectHierarchyManager(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && callerManagesCrmOwner(prospectCreatorId(data));
+    }
+
     function isSharedLeadCoOwner(data) {
       return request.auth.uid in data.get('sharedOwnerIds', []);
     }
@@ -188,6 +200,7 @@ service cloud.firestore {
         || isOpenProspect(data)
         || isProspectAssignee(data)
         || isProspectOwner(data)
+        || isProspectHierarchyManager(data)
         || isSharedLeadCoOwner(data)
         || canReadCrmOwnedBy(data.get('ownerId', ''));
     }

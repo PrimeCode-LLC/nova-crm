@@ -1,6 +1,31 @@
 import type { Lead, OrgMemberRole, ProspectChannelAssignment, User } from "@/lib/types";
 import { seesAllLeadsInTenant } from "@/lib/workspace-hierarchy";
 
+/** Direct + indirect managers of `userId` from Admin → Hierarchy (reporting line only). */
+function managerAncestorIdsOf(userId: string, orgUsers: readonly User[]): string[] {
+  const byId = new Map(orgUsers.map((u) => [u.id, u]));
+  const ancestors: string[] = [];
+  const seen = new Set<string>();
+  let mid = byId.get(userId)?.managerId;
+  while (mid && !seen.has(mid)) {
+    seen.add(mid);
+    ancestors.push(mid);
+    mid = byId.get(mid)?.managerId;
+  }
+  return ancestors;
+}
+
+/** True when `viewer` is above the prospect creator in the org chart. */
+export function viewerManagesProspectOwner(
+  viewer: User,
+  prospect: Lead,
+  orgUsers: readonly User[],
+): boolean {
+  const ownerId = prospectOwnerIdOf(prospect);
+  if (!ownerId) return false;
+  return managerAncestorIdsOf(ownerId, orgUsers).includes(viewer.id);
+}
+
 export function prospectOwnerIdOf(prospect: Lead): string {
   return (
     prospect.prospectOwnerId?.trim() ||
@@ -34,9 +59,15 @@ export function canEditProspectDerivedLead(
   return viewerOrgRole === "owner" || viewerOrgRole === "admin";
 }
 
-export function canManageProspectChannels(viewerId: string | undefined, prospect: Lead): boolean {
-  if (!viewerId?.trim() || !isProspectRow(prospect)) return false;
-  return prospectOwnerIdOf(prospect) === viewerId;
+export function canManageProspectChannels(
+  viewer: User | undefined,
+  prospect: Lead,
+  orgUsers: readonly User[],
+): boolean {
+  if (!viewer?.id?.trim() || !isProspectRow(prospect)) return false;
+  const ownerId = prospectOwnerIdOf(prospect);
+  if (ownerId && viewer.id === ownerId) return true;
+  return viewerManagesProspectOwner(viewer, prospect, orgUsers);
 }
 
 export function canPushProspectChannel(
@@ -53,7 +84,7 @@ export function canPushProspectChannel(
 export function prospectVisibleToViewer(
   prospect: Lead,
   viewer: User,
-  _orgUsers: readonly User[],
+  orgUsers: readonly User[],
 ): boolean {
   if (!isProspectRow(prospect)) return true;
 
@@ -66,6 +97,8 @@ export function prospectVisibleToViewer(
 
   const ownerId = prospectOwnerIdOf(prospect);
   if (ownerId && viewer.id === ownerId) return true;
+
+  if (viewerManagesProspectOwner(viewer, prospect, orgUsers)) return true;
 
   const assigneeIds = prospect.prospectAssigneeIds?.length
     ? prospect.prospectAssigneeIds

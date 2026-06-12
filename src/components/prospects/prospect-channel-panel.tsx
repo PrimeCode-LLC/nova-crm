@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
-import type { ChannelKey, Lead, ProspectChannelAssignment } from "@/lib/types";
+import type { ChannelKey, Lead, ProspectChannelAssignment, User } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
@@ -64,7 +64,11 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   const channelOptions = React.useMemo(() => buildChannelOptions(customChannels), [customChannels]);
 
   const viewerId = ws.currentUserId ?? "";
-  const isOwner = canManageProspectChannels(viewerId, prospect);
+  const viewer = React.useMemo((): User | undefined => {
+    if (!viewerId) return undefined;
+    return ws.users.find((u) => u.id === viewerId) ?? ({ id: viewerId } as User);
+  }, [viewerId, ws.users]);
+  const canManageChannels = canManageProspectChannels(viewer, prospect, ws.users);
   const ownerId = prospectOwnerIdOf(prospect);
 
   const [drafts, setDrafts] = React.useState<DraftRow[]>(() =>
@@ -108,7 +112,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   }
 
   async function saveAssignments() {
-    if (!isOwner) return;
+    if (!canManageChannels) return;
     const rows = drafts.filter((d) => d.channel && d.assigneeId.trim());
     if (rows.length === 0) {
       toast.error("Add at least one channel with a responsible person.");
@@ -136,7 +140,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
         channel: row.channel as ChannelKey,
         assigneeId: row.assigneeId.trim(),
         assignedAt: prev?.assignedAt ?? now,
-        assignedById: ownerId,
+        assignedById: viewerId,
       };
     });
 
@@ -205,8 +209,9 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Prospect owner assigns outreach channels and responsible teammates. Each assignee pushes their
-        channel into one shared sales lead with matching tags.
+        The prospect creator or their managers in the org chart assign outreach channels and
+        responsible teammates. Each assignee pushes their channel into one shared sales lead with
+        matching tags.
       </p>
 
       {prospect.linkedSalesLeadId ? (
@@ -218,7 +223,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
         </p>
       ) : null}
 
-      {isOwner ? (
+      {canManageChannels ? (
         <div className="space-y-3">
           {drafts.map((row) => {
             const pushed = prospect.prospectChannelAssignments?.find(
