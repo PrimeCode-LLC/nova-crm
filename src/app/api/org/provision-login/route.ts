@@ -3,7 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
-  findMembershipForUserServer,
+  assertNotMemberOfOtherOrgServer,
   getMemberServer,
   hasSeatAvailableServer,
   upsertMemberServer,
@@ -122,44 +122,8 @@ export async function POST(req: Request) {
       );
     }
 
-    let otherMembership: Awaited<
-      ReturnType<typeof findMembershipForUserServer>
-    > = null;
-    try {
-      otherMembership = await findMembershipForUserServer(uid);
-    } catch (err: unknown) {
-      if (!isFirestoreFailedPrecondition(err)) throw err;
-      // Collection-group `members` query needs a deployed index (see `firestore.indexes.json`).
-      // When the index is missing or still building, fall back to `users/{uid}.organizationId`.
-      const db = getAdminDb();
-      if (db) {
-        const snap = await db.collection("users").doc(uid).get();
-        const mirrorOrg = snap.data()?.organizationId;
-        if (
-          typeof mirrorOrg === "string" &&
-          mirrorOrg.trim() &&
-          mirrorOrg.trim() !== orgId
-        ) {
-          if (createdNewFirebaseUser) {
-            try {
-              await g.ctx.adminAuth.deleteUser(uid);
-            } catch {
-              /* best-effort rollback */
-            }
-          }
-          return NextResponse.json(
-            {
-              error:
-                "This account already belongs to another workspace. They must leave it before joining here.",
-            },
-            { status: 400 },
-          );
-        }
-      }
-      otherMembership = null;
-    }
-
-    if (otherMembership && otherMembership.organizationId !== orgId) {
+    const membershipCheck = await assertNotMemberOfOtherOrgServer(uid, orgId);
+    if ("error" in membershipCheck) {
       if (createdNewFirebaseUser) {
         try {
           await g.ctx.adminAuth.deleteUser(uid);
@@ -167,13 +131,7 @@ export async function POST(req: Request) {
           /* best-effort rollback */
         }
       }
-      return NextResponse.json(
-        {
-          error:
-            "This account already belongs to another workspace. They must leave it before joining here.",
-        },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
     }
 
     const up = await upsertMemberServer({

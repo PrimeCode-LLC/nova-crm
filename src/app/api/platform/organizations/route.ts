@@ -7,7 +7,7 @@ import {
   sanitizeOrganizationForApi,
 } from "@/lib/platform/organizations-server";
 import {
-  findMembershipForUserServer,
+  assertUserHasNoWorkspaceServer,
   upsertMemberServer,
 } from "@/lib/platform/members-server";
 import { setAppClaims } from "@/lib/auth/claims";
@@ -16,7 +16,6 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getRequestOrigin } from "@/lib/invite-link";
 import { sendSystemEmail } from "@/lib/email/send-system-email";
 import { renderInviteEmail } from "@/lib/email/invite-email";
-import { isFirestoreFailedPrecondition } from "@/lib/firestore/errors";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { recordAudit } from "@/lib/firestore/audit";
 
@@ -144,42 +143,10 @@ export async function POST(req: Request) {
       }
     }
 
-    let otherMembership: Awaited<
-      ReturnType<typeof findMembershipForUserServer>
-    > = null;
-    try {
-      otherMembership = await findMembershipForUserServer(uid);
-    } catch (err: unknown) {
-      if (!isFirestoreFailedPrecondition(err)) throw err;
-      const db = getAdminDb();
-      if (db) {
-        const snap = await db.collection("users").doc(uid).get();
-        const mirrorOrg = snap.data()?.organizationId;
-        if (
-          typeof mirrorOrg === "string" &&
-          mirrorOrg.trim() &&
-          mirrorOrg.trim().length > 0
-        ) {
-          if (createdNewFirebaseUser) {
-            try {
-              await g.ctx.adminAuth.deleteUser(uid);
-            } catch {
-              /* best-effort rollback */
-            }
-          }
-          return NextResponse.json(
-            {
-              error:
-                "This account already belongs to another workspace. They must leave it before becoming owner here.",
-            },
-            { status: 400 },
-          );
-        }
-      }
-      otherMembership = null;
-    }
-
-    if (otherMembership) {
+    const membershipCheck = await assertUserHasNoWorkspaceServer(uid, {
+      context: "owner",
+    });
+    if ("error" in membershipCheck) {
       if (createdNewFirebaseUser) {
         try {
           await g.ctx.adminAuth.deleteUser(uid);
@@ -187,13 +154,7 @@ export async function POST(req: Request) {
           /* best-effort rollback */
         }
       }
-      return NextResponse.json(
-        {
-          error:
-            "This account already belongs to another workspace. They must leave it before becoming owner here.",
-        },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
     }
 
     resolvedOwnerUid = uid;
@@ -205,6 +166,12 @@ export async function POST(req: Request) {
     // `pendingOwnerEmail` is set so the org claims itself when they sign up.
     try {
       const u = await g.ctx.adminAuth.getUserByEmail(ownerEmail);
+      const membershipCheck = await assertUserHasNoWorkspaceServer(u.uid, {
+        context: "owner",
+      });
+      if ("error" in membershipCheck) {
+        return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
+      }
       resolvedOwnerUid = u.uid;
     } catch {
       resolvedOwnerUid = null;

@@ -10,6 +10,7 @@ import {
   findOrganizationByPendingEmailServer,
 } from "@/lib/platform/organizations-server";
 import {
+  assertNotMemberOfOtherOrgServer,
   findMembershipForUserServer,
   getMemberServer,
   hasSeatAvailableServer,
@@ -132,6 +133,13 @@ export async function POST(req: Request) {
     const seat = await hasSeatAvailableServer(invite.organizationId);
     if ("error" in seat) {
       return NextResponse.json({ error: seat.error }, { status: 400 });
+    }
+    const membershipCheck = await assertNotMemberOfOtherOrgServer(
+      uid,
+      invite.organizationId,
+    );
+    if ("error" in membershipCheck) {
+      return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
     }
     await upsertMemberServer({
       organizationId: invite.organizationId,

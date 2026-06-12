@@ -6,7 +6,10 @@ import {
   listInvitesServer,
   revokeInviteServer,
 } from "@/lib/platform/invites-server";
-import { hasSeatAvailableServer } from "@/lib/platform/members-server";
+import {
+  assertNotMemberOfOtherOrgServer,
+  hasSeatAvailableServer,
+} from "@/lib/platform/members-server";
 import { getRequestOrigin, inviteAcceptUrl } from "@/lib/invite-link";
 import { renderInviteEmail } from "@/lib/email/invite-email";
 import {
@@ -62,9 +65,24 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: seat.error }, { status: 400 });
   }
 
+  const inviteEmail = parsed.data.email.trim().toLowerCase();
+  const orgId = g.ctx.session.organizationId;
+  try {
+    const existingUser = await g.ctx.adminAuth.getUserByEmail(inviteEmail);
+    const membershipCheck = await assertNotMemberOfOtherOrgServer(
+      existingUser.uid,
+      orgId,
+    );
+    if ("error" in membershipCheck) {
+      return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
+    }
+  } catch {
+    /* No Firebase account yet — invite is fine. */
+  }
+
   const result = await createInviteServer({
-    organizationId: g.ctx.session.organizationId,
-    email: parsed.data.email,
+    organizationId: orgId,
+    email: inviteEmail,
     role: parsed.data.role,
     createdByUid: g.ctx.session.uid,
   });

@@ -5,6 +5,7 @@ import {
 } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { isFirestoreFailedPrecondition } from "@/lib/firestore/errors";
 import type {
   ISODate,
   OrganizationMember,
@@ -87,6 +88,79 @@ export async function findMembershipForUserServer(
   const d = snap.docs[0]!;
   const orgId = d.ref.parent.parent?.id ?? "";
   return docToMember(orgId, d.id, d.data());
+}
+
+export const OTHER_WORKSPACE_JOIN_ERROR =
+  "This account already belongs to another workspace. They must leave it before joining here.";
+
+export const OTHER_WORKSPACE_OWNER_ERROR =
+  "This account already belongs to another workspace. They must leave it before becoming owner here.";
+
+/**
+ * Resolves which workspace a user belongs to (active or pending).
+ * Falls back to `users/{uid}` when the collection-group index is unavailable.
+ */
+export async function resolveUserTenantIdServer(
+  uid: string,
+): Promise<string | null> {
+  try {
+    const m = await findMembershipForUserServer(uid);
+    if (m) return m.organizationId;
+  } catch (err: unknown) {
+    if (!isFirestoreFailedPrecondition(err)) throw err;
+  }
+
+  const db = getAdminDb();
+  if (!db) return null;
+  const snap = await db.collection(COLLECTIONS.users).doc(uid).get();
+  if (!snap.exists) return null;
+  const data = snap.data() ?? {};
+  const active =
+    typeof data.organizationId === "string" && data.organizationId.trim()
+      ? data.organizationId.trim()
+      : undefined;
+  if (active) return active;
+  const pending =
+    typeof data.membershipPendingOrgId === "string" &&
+    data.membershipPendingOrgId.trim()
+      ? data.membershipPendingOrgId.trim()
+      : undefined;
+  return pending ?? null;
+}
+
+/** Blocks adding a user to `targetOrgId` when they already belong elsewhere. */
+export async function assertNotMemberOfOtherOrgServer(
+  uid: string,
+  targetOrgId: string,
+  opts?: { context?: "join" | "owner" },
+): Promise<{ ok: true } | { error: string }> {
+  const tenantId = await resolveUserTenantIdServer(uid);
+  if (tenantId && tenantId !== targetOrgId) {
+    return {
+      error:
+        opts?.context === "owner"
+          ? OTHER_WORKSPACE_OWNER_ERROR
+          : OTHER_WORKSPACE_JOIN_ERROR,
+    };
+  }
+  return { ok: true };
+}
+
+/** Blocks linking a user as owner of a new workspace when they already have one. */
+export async function assertUserHasNoWorkspaceServer(
+  uid: string,
+  opts?: { context?: "join" | "owner" },
+): Promise<{ ok: true } | { error: string }> {
+  const tenantId = await resolveUserTenantIdServer(uid);
+  if (tenantId) {
+    return {
+      error:
+        opts?.context === "owner"
+          ? OTHER_WORKSPACE_OWNER_ERROR
+          : OTHER_WORKSPACE_JOIN_ERROR,
+    };
+  }
+  return { ok: true };
 }
 
 export async function upsertMemberServer(input: {
