@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { AlertTriangle } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
 import { LeadSourceButton } from "@/components/leads/lead-source-button";
+import { LeadCampaignBadge } from "@/components/leads/lead-campaign-badge";
 import { getLeadScraperSource } from "@/lib/scrapers/lead-scraper-source";
 import {
   getScraperCategoryLabel,
@@ -200,6 +201,11 @@ export function LeadOverview({
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
+            {lead.campaignId?.trim() ? (
+              <Field label="Instantly campaign">
+                <LeadCampaignBadge lead={lead} link />
+              </Field>
+            ) : null}
             {lead.pushToInstantly && (
               <Field label="Push to Instantly">
                 <Badge variant="outline" className={cn("rounded-md", PUSH_STATUS_TONE[lead.pushToInstantly].className)}>

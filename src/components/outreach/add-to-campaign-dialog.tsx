@@ -56,17 +56,16 @@ export function AddToCampaignDialog({
     }
     setSubmitting(true);
     try {
-      if (isDemo) {
-        for (const id of leadIds) {
-          patchLead(id, {
-            campaignId,
-            pushToInstantly: "pushed",
-            channel: "cold_email",
-          });
-        }
-      }
       const result = await pushLeadsToCampaign(campaignId, leadIds, { isDemo });
       if (result.ok) {
+        const patch = {
+          campaignId,
+          pushToInstantly: "pushed" as const,
+          channel: "cold_email" as const,
+        };
+        for (const id of leadIds) {
+          patchLead(id, patch);
+        }
         onOpenChange(false);
         onSuccess?.();
       }

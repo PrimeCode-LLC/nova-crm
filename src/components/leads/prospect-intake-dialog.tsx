@@ -263,12 +263,21 @@ export function ProspectIntakeDialog({
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Company</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Business name</Label>
-                  <Input value={bizName} onChange={(e) => setBizName(e.target.value)} required />
+                  <Label>Company</Label>
+                  <Input
+                    value={bizName}
+                    onChange={(e) => setBizName(e.target.value)}
+                    required
+                    placeholder="Stellixsoft, Acme Inc."
+                  />
                 </div>
                 <div className="grid gap-1.5">
-                  <Label>Category / industry</Label>
-                  <Input value={industry} onChange={(e) => setIndustry(e.target.value)} placeholder="SaaS, Logistics…" />
+                  <Label>Industry</Label>
+                  <Input
+                    value={industry}
+                    onChange={(e) => setIndustry(e.target.value)}
+                    placeholder="Real estate, Software house…"
+                  />
                 </div>
                 <div className="grid gap-1.5">
                   <Label>Year founded</Label>

@@ -2,6 +2,7 @@
 export const LEAD_TABLE_COLUMN_LABELS = {
   contact: "Contact",
   company: "Company",
+  industry: "Industry",
   intakeKind: "Intake",
   labelIds: "Labels",
   channel: "Channel",
@@ -12,6 +13,7 @@ export const LEAD_TABLE_COLUMN_LABELS = {
   temperature: "Temp",
   priority: "Priority",
   push: "Push",
+  campaign: "Campaign",
   value: "Value",
   created: "Added date",
   idle: "Idle",

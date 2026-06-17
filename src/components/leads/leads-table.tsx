@@ -92,6 +92,7 @@ import {
   getOwnerFilterTriggerLabel,
 } from "@/lib/owner-scope";
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
+import { LeadCampaignBadge } from "@/components/leads/lead-campaign-badge";
 import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { useEmailAccountStore } from "@/stores/email-account-store";
@@ -117,6 +118,12 @@ const PROFILE_FILTER_NONE = "__none__";
 
 /** Column filter token: leads with no workspace labels. */
 const LABEL_FILTER_NONE = "__unlabeled__";
+
+/** Column filter token: leads with no company name set. */
+const COMPANY_FILTER_NONE = "__no_company__";
+
+/** Column filter token: leads with no industry set. */
+const INDUSTRY_FILTER_NONE = "__no_industry__";
 
 const INBOX_MAIL_LEAD_FILTER_ALL = "all";
 const INBOX_MAIL_LEAD_FILTER_SYNCED = "synced";
@@ -384,6 +391,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   });
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
     profileId: false,
+    ...(lockedIntakeScope !== "prospect" ? { campaign: false } : {}),
   });
   const [ownerScope, setOwnerScope] = React.useState(initialOwnerScope);
   React.useEffect(() => {
@@ -540,6 +548,30 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     inboxSyncedLeadIds,
   ]);
 
+  const companyFilterOptions = React.useMemo(() => {
+    const names = new Set<string>();
+    let hasUnset = false;
+    for (const lead of dataForTable) {
+      const name = lead.companyName?.trim();
+      if (name) names.add(name);
+      else hasUnset = true;
+    }
+    const sorted = Array.from(names).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return { sorted, hasUnset };
+  }, [dataForTable]);
+
+  const industryFilterOptions = React.useMemo(() => {
+    const industries = new Set<string>();
+    let hasUnset = false;
+    for (const lead of dataForTable) {
+      const industry = lead.companyIndustry?.trim();
+      if (industry) industries.add(industry);
+      else hasUnset = true;
+    }
+    const sorted = Array.from(industries).sort((a, b) => a.localeCompare(b, undefined, { sensitivity: "base" }));
+    return { sorted, hasUnset };
+  }, [dataForTable]);
+
   const ownerFilterTriggerLabel = React.useMemo(
     () => getOwnerFilterTriggerLabel(ownerScope, personOwnerOptions),
     [ownerScope, personOwnerOptions],
@@ -592,15 +624,40 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       accessorKey: "companyName",
       header: COL.company,
       cell: ({ row }) => (
-        <div className="min-w-0">
-          <div className="text-sm truncate">{row.original.companyName}</div>
-          {row.original.companyIndustry && (
-            <div className="text-xs text-muted-foreground truncate">
-              {row.original.companyIndustry}
-            </div>
-          )}
-        </div>
+        <div className="min-w-0 text-sm truncate">{row.original.companyName}</div>
       ),
+      filterFn: (row, _id, value: string[]) => {
+        const selected = value as string[];
+        if (!selected?.length) return true;
+        const name = row.original.companyName?.trim() ?? "";
+        const wantsUnset = selected.includes(COMPANY_FILTER_NONE);
+        const namesOnly = selected.filter((v) => v !== COMPANY_FILTER_NONE);
+        const unsetMatch = wantsUnset && !name;
+        const nameMatch = Boolean(name) && namesOnly.includes(name);
+        return unsetMatch || nameMatch;
+      },
+    },
+    {
+      id: "industry",
+      accessorKey: "companyIndustry",
+      header: COL.industry,
+      cell: ({ row }) => {
+        const industry = row.original.companyIndustry?.trim();
+        if (!industry) {
+          return <span className="text-xs text-muted-foreground">-</span>;
+        }
+        return <div className="min-w-0 text-sm truncate">{industry}</div>;
+      },
+      filterFn: (row, _id, value: string[]) => {
+        const selected = value as string[];
+        if (!selected?.length) return true;
+        const industry = row.original.companyIndustry?.trim() ?? "";
+        const wantsUnset = selected.includes(INDUSTRY_FILTER_NONE);
+        const industriesOnly = selected.filter((v) => v !== INDUSTRY_FILTER_NONE);
+        const unsetMatch = wantsUnset && !industry;
+        const industryMatch = Boolean(industry) && industriesOnly.includes(industry);
+        return unsetMatch || industryMatch;
+      },
     },
     {
       id: "intakeKind",
@@ -673,6 +730,17 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         const lead = row.original;
         const tags = lead.channelTags?.length ? lead.channelTags : lead.channel ? [lead.channel] : [];
         return tags.some((t) => value.includes(t));
+      },
+    },
+    {
+      id: "campaign",
+      accessorKey: "campaignId",
+      header: COL.campaign,
+      cell: ({ row }) => {
+        if (!row.original.campaignId?.trim()) {
+          return <span className="text-xs text-muted-foreground">-</span>;
+        }
+        return <LeadCampaignBadge lead={row.original} />;
       },
     },
     {
@@ -901,6 +969,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       return [
         row.original.contactName,
         row.original.companyName,
+        row.original.companyIndustry,
         row.original.contactEmail,
         row.original.companyDomain,
         row.original.contactTitle,
@@ -938,6 +1007,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const channelFilter = (columnFilters.find((f) => f.id === "channel")?.value as string[]) ?? [];
   const profileFilter = (columnFilters.find((f) => f.id === "profileId")?.value as string[]) ?? [];
   const labelFilter = (columnFilters.find((f) => f.id === "labelIds")?.value as string[]) ?? [];
+  const companyFilter = (columnFilters.find((f) => f.id === "company")?.value as string[]) ?? [];
+  const industryFilter = (columnFilters.find((f) => f.id === "industry")?.value as string[]) ?? [];
 
   function toggleStage(key: PipelineStage) {
     const next = stageFilter.includes(key)
@@ -962,6 +1033,18 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ? labelFilter.filter((s) => s !== key)
       : [...labelFilter, key];
     table.getColumn("labelIds")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleCompanyFilter(key: string) {
+    const next = companyFilter.includes(key)
+      ? companyFilter.filter((s) => s !== key)
+      : [...companyFilter, key];
+    table.getColumn("company")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleIndustryFilter(key: string) {
+    const next = industryFilter.includes(key)
+      ? industryFilter.filter((s) => s !== key)
+      : [...industryFilter, key];
+    table.getColumn("industry")?.setFilterValue(next.length ? next : undefined);
   }
 
   return (
@@ -1020,12 +1103,110 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search name, company, email…"
+            placeholder="Search name, company, industry, email…"
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
             className="pl-8 h-8"
           />
         </div>
+
+        {lockedIntakeScope === "prospect" ? (
+          <>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <Filter className="h-3.5 w-3.5" />
+                    Company
+                    {companyFilter.length > 0 && (
+                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                        {companyFilter.length}
+                      </Badge>
+                    )}
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    Match any selected company
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
+                {companyFilterOptions.hasUnset ? (
+                  <DropdownMenuCheckboxItem
+                    checked={companyFilter.includes(COMPANY_FILTER_NONE)}
+                    onCheckedChange={() => toggleCompanyFilter(COMPANY_FILTER_NONE)}
+                  >
+                    Not set
+                  </DropdownMenuCheckboxItem>
+                ) : null}
+                {companyFilterOptions.hasUnset && companyFilterOptions.sorted.length > 0 ? (
+                  <DropdownMenuSeparator />
+                ) : null}
+                {companyFilterOptions.sorted.map((name) => (
+                  <DropdownMenuCheckboxItem
+                    key={name}
+                    checked={companyFilter.includes(name)}
+                    onCheckedChange={() => toggleCompanyFilter(name)}
+                  >
+                    <span className="truncate">{name}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+                {companyFilterOptions.sorted.length === 0 && !companyFilterOptions.hasUnset ? (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">No companies yet.</div>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" size="sm" className="gap-1.5">
+                    <Filter className="h-3.5 w-3.5" />
+                    Industry
+                    {industryFilter.length > 0 && (
+                      <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                        {industryFilter.length}
+                      </Badge>
+                    )}
+                    <ChevronDown className="h-3 w-3 opacity-60" />
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
+                <DropdownMenuGroup>
+                  <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                    Match any selected industry
+                  </DropdownMenuLabel>
+                </DropdownMenuGroup>
+                {industryFilterOptions.hasUnset ? (
+                  <DropdownMenuCheckboxItem
+                    checked={industryFilter.includes(INDUSTRY_FILTER_NONE)}
+                    onCheckedChange={() => toggleIndustryFilter(INDUSTRY_FILTER_NONE)}
+                  >
+                    Not set
+                  </DropdownMenuCheckboxItem>
+                ) : null}
+                {industryFilterOptions.hasUnset && industryFilterOptions.sorted.length > 0 ? (
+                  <DropdownMenuSeparator />
+                ) : null}
+                {industryFilterOptions.sorted.map((industry) => (
+                  <DropdownMenuCheckboxItem
+                    key={industry}
+                    checked={industryFilter.includes(industry)}
+                    onCheckedChange={() => toggleIndustryFilter(industry)}
+                  >
+                    <span className="truncate">{industry}</span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+                {industryFilterOptions.sorted.length === 0 && !industryFilterOptions.hasUnset ? (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">No industries yet.</div>
+                ) : null}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        ) : null}
 
         <DropdownMenu>
           <DropdownMenuTrigger

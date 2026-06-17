@@ -123,7 +123,16 @@ export function CampaignLeadsPanel({
       }
 
       const result = await pushLeadsToCampaign(campaignId, selectedIds);
-      if (result.ok) setSelected({});
+      if (result.ok) {
+        for (const id of selectedIds) {
+          patchLead(id, {
+            campaignId,
+            pushToInstantly: "pushed",
+            channel: "cold_email",
+          });
+        }
+        setSelected({});
+      }
     } finally {
       setPushing(false);
     }
