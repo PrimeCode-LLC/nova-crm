@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import type { DocumentData } from "firebase-admin/firestore";
 import type { AdminFeatureKey } from "@/lib/admin-features";
-import { userHasAdminFeature } from "@/lib/admin-feature-access";
+import { userHasAdminFeature, normalizeFeatureGrants } from "@/lib/admin-feature-access";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
@@ -21,9 +21,7 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
     roleId: (r.roleId as Role) ?? "salesperson",
     isSuperAdmin: Boolean(r.isSuperAdmin),
     orgRole: r.orgRole as User["orgRole"],
-    featureGrants: Array.isArray(r.featureGrants)
-      ? (r.featureGrants as User["featureGrants"])
-      : undefined,
+    featureGrants: normalizeFeatureGrants(r.featureGrants),
     status: (r.status as User["status"]) ?? "active",
     createdAt: firestoreValueToIso(r.createdAt),
   };

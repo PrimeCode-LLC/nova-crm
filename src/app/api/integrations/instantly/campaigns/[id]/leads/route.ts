@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import { guardInstantlyApi } from "@/lib/integrations/instantly/guard";
+import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
 import { addInstantlyLeadsBulk } from "@/lib/integrations/instantly/client";
 import { leadSnapshotFromFirestore, mapNovaLeadToInstantly } from "@/lib/integrations/instantly/lead-mapper";
@@ -16,7 +16,7 @@ const bodySchema = z.object({
 type RouteCtx = { params: Promise<{ id: string }> };
 
 export async function POST(req: Request, ctx: RouteCtx) {
-  const g = await guardInstantlyApi({ minRole: "manager" });
+  const g = await guardInstantlyOutreachApi();
   if (!g.ok) return g.response;
 
   const { id: campaignDocId } = await ctx.params;

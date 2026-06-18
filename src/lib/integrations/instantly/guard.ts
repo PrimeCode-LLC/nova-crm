@@ -5,6 +5,7 @@ import { userHasAdminFeature } from "@/lib/admin-feature-access";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import type { OrgMemberRole, Role, User } from "@/lib/types";
 import { getInstantlyApiKeyServer, hasInstantlyApiKeyServer } from "./secrets";
@@ -23,6 +24,40 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
       : undefined,
     status: (r.status as User["status"]) ?? "active",
     createdAt: typeof r.createdAt === "string" ? r.createdAt : "",
+  };
+}
+
+/** Same access rule as the /outreach page — CRM role, org role, or explicit Email outreach grant. */
+export async function guardInstantlyOutreachApi(): Promise<
+  | { ok: true; organizationId: string; uid: string; apiKey: string }
+  | { ok: false; response: NextResponse }
+> {
+  const feature = await guardAdminFeature("email_outreach");
+  if (!feature.ok) return { ok: false, response: feature.response };
+
+  const organizationId = feature.ctx.session.organizationId;
+  const connected = await hasInstantlyApiKeyServer(organizationId);
+  if (!connected) {
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: "Instantly is not connected. Add your API key in Settings → Integrations." },
+        { status: 400 },
+      ),
+    };
+  }
+  const apiKey = await getInstantlyApiKeyServer(organizationId);
+  if (!apiKey) {
+    return {
+      ok: false,
+      response: NextResponse.json({ error: "Instantly API key unavailable" }, { status: 503 }),
+    };
+  }
+  return {
+    ok: true,
+    organizationId,
+    uid: feature.ctx.session.uid,
+    apiKey,
   };
 }
 

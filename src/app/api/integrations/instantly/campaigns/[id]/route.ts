@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import { guardInstantlyApi } from "@/lib/integrations/instantly/guard";
+import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
 import {
   getInstantlyCampaign,
@@ -60,7 +60,7 @@ function asCampaignFromDoc(id: string, raw: Record<string, unknown>): Campaign {
 type RouteCtx = { params: Promise<{ id: string }> };
 
 export async function GET(_req: Request, ctx: RouteCtx) {
-  const g = await guardInstantlyApi({ minRole: "member" });
+  const g = await guardInstantlyOutreachApi();
   if (!g.ok) return g.response;
 
   const { id } = await ctx.params;
@@ -89,7 +89,7 @@ export async function GET(_req: Request, ctx: RouteCtx) {
 }
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
-  const g = await guardInstantlyApi({ minRole: "manager" });
+  const g = await guardInstantlyOutreachApi();
   if (!g.ok) return g.response;
 
   const { id } = await ctx.params;

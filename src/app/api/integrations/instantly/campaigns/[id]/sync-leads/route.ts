@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { recordAudit } from "@/lib/firestore/audit";
-import { guardInstantlyApi } from "@/lib/integrations/instantly/guard";
+import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
 import { syncInstantlyCampaignLeadsToNova } from "@/lib/integrations/instantly/sync-campaign-leads-server";
 import { instantlyErrorResponse } from "@/lib/integrations/instantly/api-error";
@@ -10,7 +10,7 @@ import { instantlyErrorResponse } from "@/lib/integrations/instantly/api-error";
 type RouteCtx = { params: Promise<{ id: string }> };
 
 export async function POST(_req: Request, ctx: RouteCtx) {
-  const g = await guardInstantlyApi({ minRole: "manager" });
+  const g = await guardInstantlyOutreachApi();
   if (!g.ok) return g.response;
 
   const { id: campaignDocId } = await ctx.params;

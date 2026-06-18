@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import { guardInstantlyApi } from "@/lib/integrations/instantly/guard";
+import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { listInstantlyAccounts } from "@/lib/integrations/instantly/client";
 import { instantlyErrorResponse } from "@/lib/integrations/instantly/api-error";
 
 export async function GET() {
-  const g = await guardInstantlyApi({ minRole: "member" });
+  const g = await guardInstantlyOutreachApi();
   if (!g.ok) return g.response;
 
   try {
