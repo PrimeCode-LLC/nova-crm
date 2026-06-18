@@ -67,7 +67,7 @@ export function SequenceEditor({
               value={s.subject}
               onChange={(e) => updateStep(i, { subject: e.target.value })}
               className="h-8"
-              placeholder="Quick question about {{company_name}}"
+              placeholder="Quick question about {{business_name}}"
             />
           </div>
           <div className="grid gap-1.5">

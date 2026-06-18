@@ -389,7 +389,7 @@ export function NewProspectDialog({
     }
     const bn = bizName.trim();
     if (!bn) {
-      toast.error("Company is required.");
+      toast.error("Business name is required.");
       return;
     }
     const fn = firstName.trim();
@@ -654,10 +654,10 @@ export function NewProspectDialog({
             <Separator />
 
             <section className="space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Company</p>
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Business</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5 sm:col-span-2">
-                  <Label>Company</Label>
+                  <Label>Business Name</Label>
                   <Input
                     value={bizName}
                     onChange={(e) => setBizName(e.target.value)}

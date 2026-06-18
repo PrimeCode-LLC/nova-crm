@@ -25,7 +25,7 @@ export const INSTANTLY_MERGE_VARIABLES: InstantlyMergeVariable[] = [
   col("contact", "email", "Email address"),
   col("contact", "contact_title", "Job title"),
   col("contact", "linkedin", "LinkedIn URL"),
-  col("company", "company_name", "Company name"),
+  col("businessName", "business_name", "Business name"),
   col("company", "company_domain", "Company domain"),
   col("company", "company_industry", "Industry"),
   col("intakeKind", "intake_kind", "Prospect vs sales lead"),

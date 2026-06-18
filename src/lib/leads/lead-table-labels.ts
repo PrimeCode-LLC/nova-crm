@@ -2,6 +2,8 @@
 export const LEAD_TABLE_COLUMN_LABELS = {
   contact: "Contact",
   company: "Company",
+  /** Prospects table: business name (maps to `companyName` / Instantly `business_name`). */
+  businessName: "Business Name",
   industry: "Industry",
   intakeKind: "Intake",
   labelIds: "Labels",

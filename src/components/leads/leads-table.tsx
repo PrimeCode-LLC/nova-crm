@@ -622,7 +622,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "company",
       accessorKey: "companyName",
-      header: COL.company,
+      header: lockedIntakeScope === "prospect" ? COL.businessName : COL.company,
       cell: ({ row }) => (
         <div className="min-w-0 text-sm truncate">{row.original.companyName}</div>
       ),
@@ -946,7 +946,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, effectiveIntakeScope]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, effectiveIntakeScope, lockedIntakeScope]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -1103,7 +1103,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         <div className="relative flex-1 min-w-[220px] max-w-sm">
           <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
-            placeholder="Search name, company, industry, email…"
+            placeholder={
+              lockedIntakeScope === "prospect"
+                ? "Search name, business name, industry, email…"
+                : "Search name, company, industry, email…"
+            }
             value={globalFilter}
             onChange={(e) => setGlobalFilter(e.target.value)}
             className="pl-8 h-8"
@@ -1117,7 +1121,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 render={
                   <Button variant="outline" size="sm" className="gap-1.5">
                     <Filter className="h-3.5 w-3.5" />
-                    Company
+                    Business Name
                     {companyFilter.length > 0 && (
                       <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
                         {companyFilter.length}
@@ -1130,7 +1134,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               <DropdownMenuContent align="start" className="w-56 max-h-72 overflow-y-auto">
                 <DropdownMenuGroup>
                   <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
-                    Match any selected company
+                    Match any selected business name
                   </DropdownMenuLabel>
                 </DropdownMenuGroup>
                 {companyFilterOptions.hasUnset ? (
@@ -1154,7 +1158,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                   </DropdownMenuCheckboxItem>
                 ))}
                 {companyFilterOptions.sorted.length === 0 && !companyFilterOptions.hasUnset ? (
-                  <div className="px-2 py-2 text-xs text-muted-foreground">No companies yet.</div>
+                  <div className="px-2 py-2 text-xs text-muted-foreground">No business names yet.</div>
                 ) : null}
               </DropdownMenuContent>
             </DropdownMenu>

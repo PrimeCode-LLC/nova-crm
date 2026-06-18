@@ -69,12 +69,16 @@ export function mapInstantlyLeadToContact(remote: InstantlyLead): InstantlyLeadC
   const contactName = fromParts || fromEmail;
 
   const payload = remote.payload && typeof remote.payload === "object" ? remote.payload : {};
-  const companyFromPayload =
-    typeof payload.company_name === "string" ? payload.company_name.trim() : "";
+  const businessFromPayload =
+    typeof payload.business_name === "string"
+      ? payload.business_name.trim()
+      : typeof payload.company_name === "string"
+        ? payload.company_name.trim()
+        : "";
 
   const companyName =
     remote.company_name?.trim() ||
-    companyFromPayload ||
+    businessFromPayload ||
     remote.company_domain?.trim() ||
     (email.includes("@") ? email.split("@")[1]! : "Unknown");
 
@@ -100,7 +104,7 @@ export function mapNovaLeadToInstantly(lead: Lead): InstantlyLeadInput | null {
   const last_name = parts.length > 1 ? parts.slice(1).join(" ") : undefined;
 
   const custom_variables: Record<string, string> = {};
-  setCustom(custom_variables, "company_name", lead.companyName);
+  setCustom(custom_variables, "business_name", lead.companyName);
   setCustom(custom_variables, "company_domain", lead.companyDomain);
   setCustom(custom_variables, "company_industry", lead.companyIndustry);
   setCustom(custom_variables, "contact_title", lead.contactTitle);
