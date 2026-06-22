@@ -58,6 +58,11 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
     id,
     createdAt: firestoreValueToIso(raw.createdAt),
     updatedAt: firestoreValueToIso(raw.updatedAt),
+    firstContactAt: raw.firstContactAt ? firestoreValueToIso(raw.firstContactAt) : undefined,
+    lastActivityAt: raw.lastActivityAt ? firestoreValueToIso(raw.lastActivityAt) : undefined,
+    expectedCloseDate: raw.expectedCloseDate
+      ? firestoreValueToIso(raw.expectedCloseDate)
+      : undefined,
     prospectOwnerId:
       typeof raw.prospectOwnerId === "string" ? raw.prospectOwnerId : undefined,
     prospectVisibility,

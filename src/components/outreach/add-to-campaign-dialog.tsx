@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import { pushLeadsToCampaign } from "@/lib/outreach/push-leads";
 
 export function AddToCampaignDialog({
@@ -87,7 +88,9 @@ export function AddToCampaignDialog({
           <Label className="text-xs">Campaign</Label>
           <Select value={campaignId} onValueChange={(v) => v && setCampaignId(v)}>
             <SelectTrigger>
-              <SelectValue placeholder="Select campaign" />
+              <SelectValue placeholder="Select campaign">
+                {selectTriggerLabelByIdName(campaignId, coldCampaigns) ?? undefined}
+              </SelectValue>
             </SelectTrigger>
             <SelectContent>
               {coldCampaigns.map((c) => (
