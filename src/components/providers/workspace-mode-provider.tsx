@@ -95,7 +95,11 @@ import { STAGES_BY_KEY } from "@/lib/constants";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
-import { canEditProspectDerivedLead } from "@/lib/prospects/prospect-access";
+import {
+  canEditProspectDerivedLead,
+  isProspectRow,
+  prospectPatchForSalesLeadSync,
+} from "@/lib/prospects/prospect-access";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
   WorkspaceLookup & {
@@ -1087,6 +1091,16 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
+  const applyLeadPatchToSession = React.useCallback(
+    (leadId: string, patch: Partial<Lead>, iso: string) => {
+      setSessionV2((s) => ({
+        ...s,
+        leadPatches: { ...s.leadPatches, [leadId]: { ...s.leadPatches[leadId], ...patch, updatedAt: iso } },
+      }));
+    },
+    [],
+  );
+
   const patchLeadAsync = React.useCallback(
     async (leadId: string, patch: Partial<Lead>) => {
       const viewerRole: OrgMemberRole =
@@ -1104,12 +1118,21 @@ export function WorkspaceModeProvider({
         const db = getFirebaseDb();
         await persistLeadPatchClient(db, leadId, patch);
       }
-      setSessionV2((s) => ({
-        ...s,
-        leadPatches: { ...s.leadPatches, [leadId]: { ...s.leadPatches[leadId], ...patch, updatedAt: iso } },
-      }));
+      applyLeadPatchToSession(leadId, patch, iso);
+
+      const linkedSalesLeadId = lead?.linkedSalesLeadId?.trim();
+      if (lead && isProspectRow(lead) && linkedSalesLeadId) {
+        const salesPatch = prospectPatchForSalesLeadSync(patch);
+        if (Object.keys(salesPatch).length > 0) {
+          if (writeFs) {
+            const db = getFirebaseDb();
+            await persistLeadPatchClient(db, linkedSalesLeadId, salesPatch);
+          }
+          applyLeadPatchToSession(linkedSalesLeadId, salesPatch, iso);
+        }
+      }
     },
-    [mode, userDoc?.organizationId, userDoc?.orgRole],
+    [mode, userDoc?.organizationId, userDoc?.orgRole, applyLeadPatchToSession],
   );
 
   const patchLead = React.useCallback(
@@ -1364,6 +1387,15 @@ export function WorkspaceModeProvider({
 
   const updateLeadStage = React.useCallback(
     (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => {
+      const snap = snapshotRef.current;
+      const viewerRole: OrgMemberRole =
+        snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? userDoc?.orgRole ?? "member";
+      const lead = snap.leads.find((l) => l.id === leadId);
+      if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
+        toast.error("Only workspace admins can edit this lead.");
+        return;
+      }
+
       const iso = new Date().toISOString();
       const ev: TimelineEvent = {
         id: newLocalId("te-local"),
@@ -1376,6 +1408,9 @@ export function WorkspaceModeProvider({
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
+      const linkedSalesLeadId = lead?.linkedSalesLeadId?.trim();
+      const syncSalesLeadStage = Boolean(lead && isProspectRow(lead) && linkedSalesLeadId);
+
       if (writeFs && orgId) {
         void (async () => {
           try {
@@ -1385,22 +1420,38 @@ export function WorkspaceModeProvider({
               updatedAt: serverTimestamp(),
             });
             await persistTimelineEventCreate(db, orgId, ev, leadOwnerIdForFirestore(leadId));
+            if (syncSalesLeadStage && linkedSalesLeadId) {
+              await updateDoc(doc(db, COLLECTIONS.leads, linkedSalesLeadId), {
+                stage: nextStage,
+                updatedAt: serverTimestamp(),
+              });
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save stage", { description: msg });
           }
         })();
       }
-      setSessionV2((s) => ({
-        ...s,
-        leadPatches: {
+      setSessionV2((s) => {
+        const leadPatches = {
           ...s.leadPatches,
           [leadId]: { ...s.leadPatches[leadId], stage: nextStage, updatedAt: iso },
-        },
-        timelineAdded: [...s.timelineAdded, ev],
-      }));
+        };
+        if (syncSalesLeadStage && linkedSalesLeadId) {
+          leadPatches[linkedSalesLeadId] = {
+            ...s.leadPatches[linkedSalesLeadId],
+            stage: nextStage,
+            updatedAt: iso,
+          };
+        }
+        return {
+          ...s,
+          leadPatches,
+          timelineAdded: [...s.timelineAdded, ev],
+        };
+      });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+    [mode, userDoc?.organizationId, userDoc?.orgRole, leadOwnerIdForFirestore],
   );
 
   const toggleLeadPin = React.useCallback((leadId: string) => {

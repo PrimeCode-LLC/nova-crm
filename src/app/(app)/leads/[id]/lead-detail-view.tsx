@@ -37,7 +37,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { STAGE_TONE_CLASS } from "@/components/common/stage-badge";
+import { STAGE_TONE_CLASS, StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { ChannelTagsRow } from "@/components/common/channel-tags-row";
 import { channelLabelFromValue, buildChannelOptions } from "@/lib/channel-options";
@@ -248,6 +248,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     );
   }
 
+  const canEditLead = ws.canEditLead(lead);
+  const prospectSourceId = lead.prospectSourceId?.trim();
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
   const deal = ws.deals.find((d) => d.leadId === lead.id);
@@ -341,37 +343,41 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             <div>
               <div className="flex items-center gap-2">
                 <span className="truncate">{lead.contactName}</span>
-                <Select
-                  value={lead.stage}
-                  onValueChange={(v) => {
-                    if (!v || v === lead.stage) return;
-                    const next = v as PipelineStage;
-                    handleSaveLead({ stage: next });
-                    toast.success(`Stage → ${STAGES_BY_KEY[next].label}`);
-                  }}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className={cn(
-                      "h-7 w-fit min-w-30 gap-1 rounded-md border font-medium capitalize shadow-none",
-                      STAGE_TONE_CLASS[STAGES_BY_KEY[lead.stage].tone],
-                    )}
+                {canEditLead ? (
+                  <Select
+                    value={lead.stage}
+                    onValueChange={(v) => {
+                      if (!v || v === lead.stage) return;
+                      const next = v as PipelineStage;
+                      handleSaveLead({ stage: next });
+                      toast.success(`Stage → ${STAGES_BY_KEY[next].label}`);
+                    }}
                   >
-                    <SelectValue>
-                      <span className="flex items-center gap-1.5">
-                        <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
-                        {STAGES_BY_KEY[lead.stage].label}
-                      </span>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PIPELINE_STAGES.map((s) => (
-                      <SelectItem key={s.key} value={s.key}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                    <SelectTrigger
+                      size="sm"
+                      className={cn(
+                        "h-7 w-fit min-w-30 gap-1 rounded-md border font-medium capitalize shadow-none",
+                        STAGE_TONE_CLASS[STAGES_BY_KEY[lead.stage].tone],
+                      )}
+                    >
+                      <SelectValue>
+                        <span className="flex items-center gap-1.5">
+                          <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-current opacity-80" />
+                          {STAGES_BY_KEY[lead.stage].label}
+                        </span>
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PIPELINE_STAGES.map((s) => (
+                        <SelectItem key={s.key} value={s.key}>
+                          {s.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <StageBadge stage={lead.stage} className="h-7" />
+                )}
                 <ChannelTagsRow
                   channelTags={lead.channelTags}
                   fallbackChannel={lead.channel}
@@ -468,6 +474,17 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-3.5 w-3.5" /> Edit
               </Button>
+            ) : prospectSourceId ? (
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={
+                  <Link href={`/leads/${prospectSourceId}?from=prospects`}>
+                    <Pencil className="h-3.5 w-3.5" /> Edit in prospect
+                  </Link>
+                }
+              />
             ) : null}
             <DropdownMenu>
               <DropdownMenuTrigger
@@ -554,6 +571,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               </TabsList>
 
               <div className="mt-4">
+                {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
+                  <p className="mb-4 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    This lead is synced from a prospect. Update channel, stage, and other fields on the{" "}
+                    <Link href={`/leads/${prospectSourceId}?from=prospects`} className="text-primary hover:underline">
+                      prospect record
+                    </Link>
+                    . Only workspace admins can edit the lead directly.
+                  </p>
+                ) : null}
                 <TabsContent value="overview">
                   <LeadOverview
                     lead={lead}

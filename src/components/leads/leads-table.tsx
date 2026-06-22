@@ -139,7 +139,7 @@ function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]
   ];
 }
 
-function LeadChannelCell({ lead }: { lead: Lead }) {
+function LeadChannelCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
   const { patchLead, bumpLeadActivity, leads, getOwnerDisplayName } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
   const channelOptions = React.useMemo(
@@ -177,6 +177,14 @@ function LeadChannelCell({ lead }: { lead: Lead }) {
           compact
           tagTooltips={tagTooltips}
         />
+      </div>
+    );
+  }
+
+  if (readOnly) {
+    return (
+      <div onClick={(e) => e.stopPropagation()}>
+        <ChannelChip channel={lead.channel} />
       </div>
     );
   }
@@ -229,8 +237,15 @@ function LeadChannelCell({ lead }: { lead: Lead }) {
   );
 }
 
-function LeadStageCell({ lead }: { lead: Lead }) {
+function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
   const { updateLeadStage, bumpLeadActivity, currentUserId } = useWorkspace();
+  if (readOnly) {
+    return (
+      <div onClick={(e) => e.stopPropagation()}>
+        <StageBadge stage={lead.stage} />
+      </div>
+    );
+  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -360,6 +375,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     crmLabels,
     isDemo,
     canDeleteLeads,
+    canEditLead,
     deleteLead,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
@@ -409,6 +425,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
 
   const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
+  const salesLeadTableReadOnly = lockedIntakeScope === "sales_lead";
 
   React.useEffect(() => {
     if (lockedIntakeScope) {
@@ -724,7 +741,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       accessorFn: (row) =>
         row.channelTags?.length ? row.channelTags.join("\0") : (row.channel ?? ""),
       header: COL.channel,
-      cell: ({ row }) => <LeadChannelCell lead={row.original} />,
+      cell: ({ row }) => <LeadChannelCell lead={row.original} readOnly={salesLeadTableReadOnly} />,
       filterFn: (row, id, value: string[]) => {
         if (!value?.length) return true;
         const lead = row.original;
@@ -773,7 +790,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       id: "stage",
       accessorKey: "stage",
       header: COL.stage,
-      cell: ({ row }) => <LeadStageCell lead={row.original} />,
+      cell: ({ row }) => <LeadStageCell lead={row.original} readOnly={salesLeadTableReadOnly} />,
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
     },
@@ -903,6 +920,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       header: "",
       cell: ({ row }) => {
         const id = row.original.id;
+        const lead = row.original;
+        const canEdit = canEditLead(lead);
+        const prospectSourceId = lead.prospectSourceId?.trim();
         return (
           <DropdownMenu>
             <DropdownMenuTrigger
@@ -917,7 +937,18 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               }
             />
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => router.push(buildLeadHref(id))}>Edit</DropdownMenuItem>
+              {canEdit ? (
+                <DropdownMenuItem onClick={() => router.push(buildLeadHref(id))}>Edit</DropdownMenuItem>
+              ) : (
+                <DropdownMenuItem onClick={() => router.push(buildLeadHref(id))}>View</DropdownMenuItem>
+              )}
+              {!canEdit && prospectSourceId ? (
+                <DropdownMenuItem
+                  onClick={() => router.push(buildLeadHref(prospectSourceId, "from=prospects"))}
+                >
+                  Edit in prospect
+                </DropdownMenuItem>
+              ) : null}
               <DropdownMenuItem
                 onClick={(e) => {
                   e.stopPropagation();
@@ -929,16 +960,20 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               <DropdownMenuItem onClick={() => router.push(buildLeadHref(id, "tab=notes"))}>
                 Add note
               </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  openArchiveForIds([id]);
-                }}
-              >
-                Archive
-              </DropdownMenuItem>
+              {canDeleteLeads ? (
+                <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    variant="destructive"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openArchiveForIds([id]);
+                    }}
+                  >
+                    Archive
+                  </DropdownMenuItem>
+                </>
+              ) : null}
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -946,7 +981,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, effectiveIntakeScope, lockedIntakeScope]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref]);
 
   const table = useReactTable({
     data: dataForTable,

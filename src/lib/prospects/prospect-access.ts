@@ -50,6 +50,34 @@ export function isProspectDerivedSalesLead(lead: Lead): boolean {
   return Boolean(lead.prospectSourceId?.trim());
 }
 
+const PROSPECT_ONLY_PATCH_KEYS = new Set([
+  "intakeKind",
+  "prospectOwnerId",
+  "prospectVisibility",
+  "prospectChannelAssignments",
+  "prospectAssigneeIds",
+  "linkedSalesLeadId",
+]);
+
+/** Fields on shared sales leads that channel push manages — do not overwrite from prospect edits. */
+const SALES_LEAD_PUSH_MANAGED_PATCH_KEYS = new Set([
+  "channelTags",
+  "sharedOwnerIds",
+  "prospectSourceId",
+]);
+
+/** Subset of a prospect patch that should propagate to its linked sales lead. */
+export function prospectPatchForSalesLeadSync(patch: Partial<Lead>): Partial<Lead> {
+  const out: Partial<Lead> = {};
+  for (const key of Object.keys(patch) as (keyof Lead)[]) {
+    if (PROSPECT_ONLY_PATCH_KEYS.has(key)) continue;
+    if (SALES_LEAD_PUSH_MANAGED_PATCH_KEYS.has(key)) continue;
+    if (key === "id" || key === "createdAt" || key === "updatedAt") continue;
+    (out as Record<string, unknown>)[key] = patch[key];
+  }
+  return out;
+}
+
 /** Admin-only edit/delete for leads created from prospect channel pushes. */
 export function canEditProspectDerivedLead(
   lead: Lead,

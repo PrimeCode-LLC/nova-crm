@@ -41,6 +41,7 @@ export function LeadOverview({
   outreachProfileFieldLabel?: string;
 }) {
   const ws = useWorkspace();
+  const canEdit = ws.canEditLead(lead);
   const emailResponseCtx = useLeadEmailResponseContext();
   const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
@@ -55,6 +56,7 @@ export function LeadOverview({
           <EntityLabelPicker
             emphasizeAddAction
             labelIds={lead.labelIds ?? []}
+            disabled={!canEdit}
             onChange={(next) => ws.patchLead(lead.id, { labelIds: next.length ? next : undefined })}
           />
         </CardContent>

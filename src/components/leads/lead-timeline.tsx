@@ -105,6 +105,7 @@ export function LeadTimeline({
     leads,
     leadTasks,
     addFollowup,
+    canEditLead,
   } = useWorkspace();
   const visibleEvents = React.useMemo(
     () => events.filter((e) => leadTaskTimelineEventVisible(e, viewerForTasks, leadTasks)),
@@ -171,9 +172,11 @@ export function LeadTimeline({
           <Button variant="outline" size="sm" type="button" onClick={openFollowup}>
             <CalendarClock className="h-3.5 w-3.5" /> Followup
           </Button>
-          <Button variant="outline" size="sm" type="button" onClick={() => setStageOpen(true)}>
-            <RefreshCw className="h-3.5 w-3.5" /> Stage
-          </Button>
+          {canEditLead(lead) ? (
+            <Button variant="outline" size="sm" type="button" onClick={() => setStageOpen(true)}>
+              <RefreshCw className="h-3.5 w-3.5" /> Stage
+            </Button>
+          ) : null}
           <div className="ml-auto">
             <Button size="sm" disabled={!note.trim()} type="button" onClick={appendNoteFromComposer}>
               <NotebookPen className="h-3.5 w-3.5" /> Add note
