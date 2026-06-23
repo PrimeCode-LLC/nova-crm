@@ -6,6 +6,7 @@ import {
   CLIENT_TRACKABLE_AUDIT_EVENTS,
   featureLabelForPath,
 } from "@/lib/firestore/audit-events";
+import { withAuditActor } from "@/lib/firestore/audit-helpers";
 
 const bodySchema = z.object({
   event: z.enum(CLIENT_TRACKABLE_AUDIT_EVENTS),
@@ -14,6 +15,8 @@ const bodySchema = z.object({
       path: z.string().max(500).optional(),
       feature: z.string().max(120).optional(),
       label: z.string().max(200).optional(),
+      leadId: z.string().max(120).optional(),
+      leadName: z.string().max(200).optional(),
     })
     .passthrough()
     .optional(),
@@ -54,12 +57,32 @@ export async function POST(req: Request) {
     }
   }
 
-  await recordAudit({
-    organizationId: g.ctx.session.organizationId,
-    actorUid: g.ctx.session.uid,
-    event: parsed.data.event as AuditEvent,
-    meta: safeMeta,
-  });
+  const path = typeof safeMeta.path === "string" ? safeMeta.path : undefined;
+  const feature =
+    typeof safeMeta.feature === "string"
+      ? safeMeta.feature
+      : path
+        ? featureLabelForPath(path)
+        : undefined;
+  const leadName = typeof safeMeta.leadName === "string" ? safeMeta.leadName : undefined;
+  const displayTarget = leadName ?? feature ?? path ?? "page";
+
+  await recordAudit(
+    withAuditActor(g.ctx.session, {
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      event: parsed.data.event as AuditEvent,
+      operation: "view",
+      tableName: "pages",
+      fieldName: leadName ? "lead" : "path",
+      message:
+        parsed.data.event === "feature.outreach_view"
+          ? `Opened email outreach${path ? ` (${displayTarget})` : ""}`
+          : `Visited ${displayTarget}`,
+      updatedValue: leadName ?? path ?? null,
+      meta: safeMeta,
+    }),
+  );
 
   return NextResponse.json({ ok: true });
 }

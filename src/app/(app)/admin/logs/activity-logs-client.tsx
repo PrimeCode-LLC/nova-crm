@@ -9,6 +9,8 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
+  Calendar,
+  BarChart3,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -41,12 +43,16 @@ import {
 } from "@/components/ui/table";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import {
-  labelForAuditEvent,
   categoryForAuditEvent,
   type AuditEventCategory,
 } from "@/lib/firestore/audit-events";
+import type { AuditOperation } from "@/lib/firestore/audit";
 import type { OrgMemberRole } from "@/lib/types";
 import { roleAtLeast } from "@/lib/platform/org-role";
+import { CHANNEL_LIST } from "@/lib/constants";
+import { Input } from "@/components/ui/input";
+import type { AuditAnalyticsResult } from "@/lib/audit-analytics";
+import { ActivityLogsDashboard } from "./activity-logs-dashboard";
 
 type AuditRow = {
   id: string;
@@ -58,11 +64,25 @@ type AuditRow = {
   category: AuditEventCategory;
   meta: Record<string, unknown>;
   createdAt: string | null;
+  operation: AuditOperation | null;
+  tableName: string | null;
+  fieldName: string | null;
+  message: string | null;
+  prevValue: string | null;
+  updatedValue: string | null;
 };
 
 type MemberOption = { uid: string; label: string };
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+
+const TIME_RANGE_OPTIONS = [
+  { value: "1d", label: "Last day" },
+  { value: "7d", label: "Last 7 days" },
+  { value: "30d", label: "Last 30 days" },
+  { value: "90d", label: "Last 90 days" },
+  { value: "custom", label: "Custom range" },
+] as const;
 
 const CATEGORY_LABELS: Record<AuditEventCategory, string> = {
   team: "Team",
@@ -85,32 +105,21 @@ const CATEGORY_VARIANT: Record<
   usage: "default",
 };
 
-function metaSummary(meta: Record<string, unknown>): string {
-  const parts: string[] = [];
-  if (typeof meta.feature === "string") parts.push(meta.feature);
-  else if (typeof meta.label === "string") parts.push(meta.label);
-  if (typeof meta.path === "string" && !parts.includes(meta.path)) {
-    parts.push(meta.path);
-  }
-  if (typeof meta.leadId === "string") parts.push(`Lead ${meta.leadId.slice(0, 8)}…`);
-  if (typeof meta.email === "string") parts.push(meta.email);
-  if (typeof meta.role === "string") parts.push(`role → ${meta.role}`);
-  if (typeof meta.status === "string") parts.push(meta.status);
-  if (typeof meta.campaignId === "string") {
-    parts.push(`campaign ${meta.campaignId.slice(0, 8)}…`);
-  }
-  if (typeof meta.scanId === "string") {
-    parts.push(`scan ${meta.scanId.slice(0, 8)}…`);
-  }
-  if (parts.length === 0 && Object.keys(meta).length > 0) {
-    try {
-      const raw = JSON.stringify(meta);
-      return raw.length > 120 ? `${raw.slice(0, 117)}…` : raw;
-    } catch {
-      return "";
-    }
-  }
-  return parts.join(" · ");
+function ScrollableValue({ value }: { value: string | null | undefined }) {
+  if (!value) return <span className="text-muted-foreground">—</span>;
+  return (
+    <div
+      className="max-w-[140px] overflow-x-auto overscroll-x-contain [scrollbar-width:thin]"
+      title={value}
+    >
+      <span className="font-mono text-xs whitespace-nowrap inline-block">{value}</span>
+    </div>
+  );
+}
+
+function formatOperation(op: AuditOperation | null): string {
+  if (!op) return "—";
+  return op.charAt(0).toUpperCase() + op.slice(1);
 }
 
 export function ActivityLogsClient({
@@ -130,6 +139,13 @@ export function ActivityLogsClient({
     React.useState<(typeof PAGE_SIZE_OPTIONS)[number]>(25);
   const [category, setCategory] = React.useState<string>("all");
   const [actorUid, setActorUid] = React.useState<string>("all");
+  const [channel, setChannel] = React.useState<string>("all");
+  const [timeRange, setTimeRange] = React.useState<string>("30d");
+  const [dateFrom, setDateFrom] = React.useState("");
+  const [dateTo, setDateTo] = React.useState("");
+  const [analytics, setAnalytics] = React.useState<AuditAnalyticsResult | null>(null);
+  const [analyticsLabels, setAnalyticsLabels] = React.useState<Record<string, string>>({});
+  const [analyticsLoading, setAnalyticsLoading] = React.useState(true);
   const [filterMembers, setFilterMembers] = React.useState<MemberOption[]>(members);
   const cursorsRef = React.useRef<(string | null)[]>([null]);
 
@@ -196,9 +212,53 @@ export function ActivityLogsClient({
     [canView, category, actorUid, pageSize],
   );
 
+  const loadAnalytics = React.useCallback(async () => {
+    if (!canView) return;
+    const params = new URLSearchParams({ range: timeRange });
+    if (actorUid !== "all") params.set("actorUid", actorUid);
+    if (channel !== "all") params.set("channel", channel);
+    if (timeRange === "custom") {
+      if (dateFrom) params.set("from", dateFrom);
+      if (dateTo) params.set("to", dateTo);
+    }
+
+    setAnalyticsLoading(true);
+    try {
+      const res = await fetch(`/api/org/audit-analytics?${params}`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.error ?? `Failed (${res.status})`);
+      }
+      const data = (await res.json()) as {
+        analytics: AuditAnalyticsResult;
+        memberLabels: Record<string, string>;
+      };
+      setAnalytics(data.analytics);
+      setAnalyticsLabels(data.memberLabels);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not load analytics");
+    } finally {
+      setAnalyticsLoading(false);
+    }
+  }, [canView, timeRange, actorUid, channel, dateFrom, dateTo]);
+
+  const refreshAll = React.useCallback(() => {
+    cursorsRef.current = [null];
+    if (page === 1) {
+      void load(1);
+    } else {
+      setPage(1);
+    }
+    void loadAnalytics();
+  }, [page, load, loadAnalytics]);
+
   React.useEffect(() => {
     void load(page);
   }, [page, load]);
+
+  React.useEffect(() => {
+    void loadAnalytics();
+  }, [loadAnalytics]);
 
   if (!canView) {
     return (
@@ -225,19 +285,15 @@ export function ActivityLogsClient({
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Activity logs"
-        description="Audit trail of team changes, integrations, AI usage, and feature visits across your workspace."
+        description="Team intelligence from the audit log — analytics above, detailed event trail below."
         actions={
           <Button
             variant="outline"
             size="sm"
-            disabled={loading}
-            onClick={() => {
-              cursorsRef.current = [null];
-              if (page === 1) void load(1);
-              else setPage(1);
-            }}
+            disabled={loading || analyticsLoading}
+            onClick={refreshAll}
           >
-            {loading ? (
+            {loading || analyticsLoading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RefreshCw className="h-4 w-4" />
@@ -250,29 +306,55 @@ export function ActivityLogsClient({
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
-              <Filter className="h-3 w-3" />
-              Category
+              <Calendar className="h-3 w-3" />
+              Period
             </span>
             <Select
-              value={category}
+              value={timeRange}
               onValueChange={(v) => {
-                setCategory(v ?? "all");
-                resetPagination();
+                if (v) setTimeRange(v);
               }}
             >
-              <SelectTrigger className="w-[180px]">
-                <SelectValue placeholder="All categories" />
+              <SelectTrigger className="w-[160px]">
+                <SelectValue placeholder="Period" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All categories</SelectItem>
-                {(Object.keys(CATEGORY_LABELS) as AuditEventCategory[]).map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {CATEGORY_LABELS[c]}
+                {TIME_RANGE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
+          {timeRange === "custom" ? (
+            <>
+              <div className="space-y-1.5">
+                <Label htmlFor="audit-from" className="text-xs text-muted-foreground">
+                  From
+                </Label>
+                <Input
+                  id="audit-from"
+                  type="date"
+                  className="w-[150px] h-9"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label htmlFor="audit-to" className="text-xs text-muted-foreground">
+                  To
+                </Label>
+                <Input
+                  id="audit-to"
+                  type="date"
+                  className="w-[150px] h-9"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                />
+              </div>
+            </>
+          ) : null}
           <div className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
               <User className="h-3 w-3" />
@@ -298,16 +380,67 @@ export function ActivityLogsClient({
               </SelectContent>
             </Select>
           </div>
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <BarChart3 className="h-3 w-3" />
+              Channel
+            </span>
+            <Select value={channel} onValueChange={(v) => setChannel(v ?? "all")}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All channels" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All channels</SelectItem>
+                {CHANNEL_LIST.map((c) => (
+                  <SelectItem key={c.key} value={c.key}>
+                    {c.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1.5">
+            <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">
+              <Filter className="h-3 w-3" />
+              Log category
+            </span>
+            <Select
+              value={category}
+              onValueChange={(v) => {
+                setCategory(v ?? "all");
+                resetPagination();
+              }}
+            >
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="All categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All categories</SelectItem>
+                {(Object.keys(CATEGORY_LABELS) as AuditEventCategory[]).map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {CATEGORY_LABELS[c]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
+
+        <ActivityLogsDashboard
+          analytics={analytics}
+          memberLabels={analyticsLabels}
+          loading={analyticsLoading}
+          channelFilter={channel}
+        />
 
         <Card className="overflow-visible">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
               <ScrollText className="h-4 w-4" />
-              Recent activity
+              Detailed audit trail
             </CardTitle>
             <CardDescription>
-              Newest events first. Page visits are recorded at most once per minute per screen.
+              Newest events first. Stage changes on leads and prospects are recorded here automatically.
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -323,53 +456,65 @@ export function ActivityLogsClient({
                   : "No activity recorded yet. Events appear as your team uses the CRM, AI tools, and admin settings."}
               </p>
             ) : (
-              <Table>
+              <Table className="min-w-[1060px] table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[140px]">When</TableHead>
-                    <TableHead className="w-[160px]">Who</TableHead>
-                    <TableHead className="w-[110px]">Type</TableHead>
-                    <TableHead>Activity</TableHead>
-                    <TableHead className="hidden lg:table-cell">Details</TableHead>
+                    <TableHead className="w-[130px]">Created at</TableHead>
+                    <TableHead className="w-[80px]">Operation</TableHead>
+                    <TableHead className="w-[100px]">Table</TableHead>
+                    <TableHead className="w-[90px]">Field</TableHead>
+                    <TableHead className="w-[200px]">Message</TableHead>
+                    <TableHead className="w-[150px]">Previous</TableHead>
+                    <TableHead className="w-[150px]">Updated</TableHead>
+                    <TableHead className="w-[180px]">Account</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((row) => {
                     const cat = categoryForAuditEvent(row.event);
-                    const details = metaSummary(row.meta);
+                    const accountLabel = row.actorEmail ?? row.actorDisplayName ?? "—";
                     return (
                       <TableRow key={row.id}>
-                        <TableCell className="align-top text-sm">
+                        <TableCell className="align-top whitespace-normal text-sm">
                           <div className="font-medium tabular-nums">
                             {fmtRelative(row.createdAt ?? undefined)}
                           </div>
-                          <div className="text-xs text-muted-foreground">
-                            {fmtDate(row.createdAt ?? undefined, "MMM d, h:mm a")}
+                          <div className="text-xs text-muted-foreground whitespace-nowrap">
+                            {fmtDate(row.createdAt ?? undefined, "MMM d, yyyy h:mm a")}
                           </div>
                         </TableCell>
-                        <TableCell className="align-top text-sm">
-                          <div className="font-medium">{row.actorDisplayName}</div>
-                          {row.actorEmail && (
-                            <div className="text-xs text-muted-foreground truncate max-w-[200px]">
-                              {row.actorEmail}
+                        <TableCell className="align-top whitespace-normal text-sm capitalize">
+                          {formatOperation(row.operation)}
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal text-xs font-mono">
+                          {row.tableName ?? "—"}
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal text-xs font-mono">
+                          {row.fieldName ?? "—"}
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal text-sm">
+                          <div className="flex flex-col gap-1 min-w-0">
+                            <span className="line-clamp-2">{row.message ?? "—"}</span>
+                            <Badge variant={CATEGORY_VARIANT[cat]} className="w-fit text-[10px]">
+                              {CATEGORY_LABELS[cat]}
+                            </Badge>
+                          </div>
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal overflow-hidden">
+                          <ScrollableValue value={row.prevValue} />
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal overflow-hidden">
+                          <ScrollableValue value={row.updatedValue} />
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal text-sm">
+                          <div className="font-medium truncate" title={accountLabel}>
+                            {accountLabel}
+                          </div>
+                          {row.actorEmail && row.actorDisplayName && (
+                            <div className="text-xs text-muted-foreground truncate">
+                              {row.actorDisplayName}
                             </div>
                           )}
-                          {row.actorOrgRole && (
-                            <div className="text-xs text-muted-foreground capitalize">
-                              {row.actorOrgRole}
-                            </div>
-                          )}
-                        </TableCell>
-                        <TableCell className="align-top">
-                          <Badge variant={CATEGORY_VARIANT[cat]} className="text-[10px]">
-                            {CATEGORY_LABELS[cat]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="align-top text-sm">
-                          {labelForAuditEvent(row.event)}
-                        </TableCell>
-                        <TableCell className="align-top text-sm text-muted-foreground hidden lg:table-cell max-w-md truncate">
-                          {details || "-"}
                         </TableCell>
                       </TableRow>
                     );

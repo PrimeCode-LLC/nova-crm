@@ -38,6 +38,10 @@ export function userHasAdminFeature(
   const meta = ADMIN_FEATURES[feature];
   const effectiveOrgRole = orgRole ?? user.orgRole;
 
+  if (feature === "activity_logs") {
+    return Boolean(effectiveOrgRole && roleAtLeast(effectiveOrgRole, "admin"));
+  }
+
   if (meta.minOrgRole && effectiveOrgRole && roleAtLeast(effectiveOrgRole, meta.minOrgRole)) {
     return true;
   }

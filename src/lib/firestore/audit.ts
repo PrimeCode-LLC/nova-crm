@@ -9,6 +9,16 @@ import {
   categoryForAuditEvent,
   type AuditEventCategory,
 } from "@/lib/firestore/audit-events";
+import {
+  AUDIT_EVENT_DEFAULTS,
+  buildAuditMessage,
+  formatAuditValue,
+  type AuditLogDetail,
+  type AuditOperation,
+} from "@/lib/firestore/audit-detail";
+
+export type { AuditLogDetail, AuditOperation } from "@/lib/firestore/audit-detail";
+export { projectLegacyAuditRow, formatAuditValue } from "@/lib/firestore/audit-detail";
 
 export type AuditEvent =
   | "member.invited"
@@ -25,8 +35,10 @@ export type AuditEvent =
   | "lead.created"
   | "lead.stage_changed"
   | "deal.created"
+  | "deal.stage_changed"
   | "deal.won"
   | "deal.lost"
+  | "activity.counter_logged"
   | "settings.updated"
   | "channel_admin.updated"
   | "user.hierarchy_updated"
@@ -62,7 +74,22 @@ export type AuditLogRecord = {
   event: AuditEvent;
   meta: Record<string, unknown>;
   createdAt: string | null;
+  operation?: AuditOperation | null;
+  tableName?: string | null;
+  fieldName?: string | null;
+  message?: string | null;
+  prevValue?: string | null;
+  updatedValue?: string | null;
+  actorEmail?: string | null;
 };
+
+export type RecordAuditInput = {
+  organizationId: string;
+  actorUid: string;
+  event: AuditEvent;
+  meta?: Record<string, unknown>;
+  actorEmail?: string | null;
+} & AuditLogDetail;
 
 function timestampToIso(value: unknown): string | null {
   if (!value) return null;
@@ -75,33 +102,67 @@ function timestampToIso(value: unknown): string | null {
   return null;
 }
 
+function normalizeDetailFields(input: RecordAuditInput): Required<AuditLogDetail> {
+  const meta = input.meta ?? {};
+  const defaults = AUDIT_EVENT_DEFAULTS[input.event];
+  const prevValue =
+    input.prevValue !== undefined ? input.prevValue : formatAuditValue(meta.prevValue);
+  const updatedValue =
+    input.updatedValue !== undefined ? input.updatedValue : formatAuditValue(meta.updatedValue);
+  const operation = input.operation ?? defaults?.operation ?? null;
+  const tableName = input.tableName ?? defaults?.tableName ?? null;
+  const fieldName = input.fieldName ?? defaults?.fieldName ?? null;
+  const message = buildAuditMessage(input.event, meta, {
+    operation,
+    tableName,
+    fieldName,
+    message: input.message,
+    prevValue,
+    updatedValue,
+    actorEmail: input.actorEmail,
+  });
+
+  return {
+    operation,
+    tableName,
+    fieldName,
+    message,
+    prevValue: prevValue ?? null,
+    updatedValue: updatedValue ?? null,
+    actorEmail: input.actorEmail ?? null,
+  };
+}
+
 /**
  * Append-only per-tenant audit log. Always-on side-channel — failures
  * are swallowed because audit must never break a primary write.
  */
-export async function recordAudit(input: {
-  organizationId: string;
-  actorUid: string;
-  event: AuditEvent;
-  /** Free-form payload (must be JSON-serialisable). */
-  meta?: Record<string, unknown>;
-}): Promise<void> {
+export async function recordAudit(input: RecordAuditInput): Promise<void> {
   try {
     const db = getAdminDb();
     if (!db) return;
+    const detail = normalizeDetailFields(input);
+    const payload: Record<string, unknown> = {
+      organizationId: input.organizationId,
+      actorUid: input.actorUid,
+      event: input.event,
+      meta: input.meta ?? {},
+      createdAt: FieldValue.serverTimestamp(),
+    };
+    if (detail.operation) payload.operation = detail.operation;
+    if (detail.tableName) payload.tableName = detail.tableName;
+    if (detail.fieldName) payload.fieldName = detail.fieldName;
+    if (detail.message) payload.message = detail.message;
+    if (detail.prevValue != null) payload.prevValue = detail.prevValue;
+    if (detail.updatedValue != null) payload.updatedValue = detail.updatedValue;
+    if (detail.actorEmail) payload.actorEmail = detail.actorEmail;
+
     await db
       .collection(COLLECTIONS.organizations)
       .doc(input.organizationId)
       .collection(ORG_SUBCOLLECTIONS.audit)
-      .add({
-        organizationId: input.organizationId,
-        actorUid: input.actorUid,
-        event: input.event,
-        meta: input.meta ?? {},
-        createdAt: FieldValue.serverTimestamp(),
-      });
+      .add(payload);
   } catch (e) {
-    // Surface in logs but never throw.
     console.error("[audit]", input.event, e);
   }
 }
@@ -120,6 +181,13 @@ function docToAuditRecord(
     event: data.event as AuditEvent,
     meta: (data.meta as Record<string, unknown>) ?? {},
     createdAt: timestampToIso(data.createdAt),
+    operation: (data.operation as AuditOperation) ?? null,
+    tableName: typeof data.tableName === "string" ? data.tableName : null,
+    fieldName: typeof data.fieldName === "string" ? data.fieldName : null,
+    message: typeof data.message === "string" ? data.message : null,
+    prevValue: typeof data.prevValue === "string" ? data.prevValue : null,
+    updatedValue: typeof data.updatedValue === "string" ? data.updatedValue : null,
+    actorEmail: typeof data.actorEmail === "string" ? data.actorEmail : null,
   };
 }
 
@@ -372,4 +440,38 @@ export async function listAuditLogsFilteredServer(input: {
   }
 
   return { items: accumulated, nextCursor: null, totalCount: rawTotal };
+}
+
+export async function listAuditRecordsInRangeServer(input: {
+  organizationId: string;
+  actorUid?: string;
+  fromIso?: string;
+  toIso?: string;
+}): Promise<AuditLogRecord[]> {
+  let sorted = await listAllAuditRecordsServer({
+    organizationId: input.organizationId,
+    actorUid: input.actorUid,
+  });
+
+  if (input.fromIso) {
+    const fromMs = new Date(input.fromIso).getTime();
+    if (Number.isFinite(fromMs)) {
+      sorted = sorted.filter((row) => {
+        const t = row.createdAt ? new Date(row.createdAt).getTime() : 0;
+        return t >= fromMs;
+      });
+    }
+  }
+
+  if (input.toIso) {
+    const toMs = new Date(input.toIso).getTime();
+    if (Number.isFinite(toMs)) {
+      sorted = sorted.filter((row) => {
+        const t = row.createdAt ? new Date(row.createdAt).getTime() : 0;
+        return t <= toMs;
+      });
+    }
+  }
+
+  return sorted;
 }

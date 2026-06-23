@@ -6,6 +6,8 @@ import {
   featureLabelForPath,
   PAGE_PATH_TO_FEATURE,
 } from "@/lib/firestore/audit-events";
+import { leadDisplayLabel, leadIdFromPath } from "@/lib/leads/lead-display-label";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
 const TRACKED_PREFIXES = Object.keys(PAGE_PATH_TO_FEATURE);
 
@@ -24,6 +26,7 @@ function shouldTrackPath(pathname: string): boolean {
  */
 export function ActivityAuditTracker() {
   const pathname = usePathname();
+  const { getLeadById } = useWorkspace();
   const lastSentRef = React.useRef<{ path: string; at: number } | null>(null);
 
   React.useEffect(() => {
@@ -34,7 +37,11 @@ export function ActivityAuditTracker() {
     const last = lastSentRef.current;
     if (last && last.path === base && now - last.at < 60_000) return;
 
-    const feature = featureLabelForPath(base);
+    const leadId = leadIdFromPath(base);
+    const lead = leadId ? getLeadById(leadId) : undefined;
+    const feature = lead
+      ? leadDisplayLabel(lead)
+      : featureLabelForPath(base);
     if (!feature) return;
 
     lastSentRef.current = { path: base, at: now };
@@ -44,12 +51,17 @@ export function ActivityAuditTracker() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         event: "feature.page_view",
-        meta: { path: base, feature, label: feature },
+        meta: {
+          path: base,
+          feature,
+          label: feature,
+          ...(leadId ? { leadId, leadName: feature } : {}),
+        },
       }),
     }).catch(() => {
       /* non-blocking */
     });
-  }, [pathname]);
+  }, [pathname, getLeadById]);
 
   return null;
 }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { listAuditLogsFilteredServer } from "@/lib/firestore/audit";
+import { projectLegacyAuditRow } from "@/lib/firestore/audit-detail";
 import {
   categoryForAuditEvent,
   type AuditEventCategory,
@@ -9,6 +10,7 @@ import { listMembersServer } from "@/lib/platform/members-server";
 import { listMembersForDisplayServer, memberDisplayLabel } from "@/lib/platform/member-display";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { enrichAuditRowsWithLeadNames } from "@/lib/firestore/audit-display-enrich";
 
 const CATEGORIES = new Set<string>([
   "team",
@@ -95,16 +97,19 @@ export async function GET(req: Request) {
     }
   }
 
-  const enriched = items.map((row) => {
+  let enriched = items.map((row) => {
     const actor = memberByUid.get(row.actorUid);
+    const projected = projectLegacyAuditRow(row);
     return {
-      ...row,
+      ...projected,
       actorDisplayName: actor?.displayName ?? (row.actorUid || "System"),
-      actorEmail: actor?.email ?? null,
+      actorEmail: projected.actorEmail ?? actor?.email ?? null,
       actorOrgRole: actor?.role ?? null,
       category: categoryForAuditEvent(row.event),
     };
   });
+
+  enriched = await enrichAuditRowsWithLeadNames(enriched, orgId);
 
   return NextResponse.json({
     items: enriched,

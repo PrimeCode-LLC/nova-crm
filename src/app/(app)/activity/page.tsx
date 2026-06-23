@@ -39,6 +39,7 @@ import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import type { ActivityCounterRow, ChannelKey } from "@/lib/types";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { recordActivityCounterLoggedClient } from "@/lib/firestore/audit-change-client";
 import {
   persistActivityCounterCreate,
   persistActivityCounterDelete,
@@ -663,6 +664,12 @@ function DailyRollupForm({
     try {
       if (onPersistLive) {
         await onPersistLive(row);
+        recordActivityCounterLoggedClient({
+          channel: row.channel,
+          date: row.date,
+          counters: row.counters,
+          profileId: row.profileId,
+        });
       } else {
         upsertLocalRollup(row);
       }

@@ -790,7 +790,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       id: "stage",
       accessorKey: "stage",
       header: COL.stage,
-      cell: ({ row }) => <LeadStageCell lead={row.original} readOnly={salesLeadTableReadOnly} />,
+      cell: ({ row }) => (
+        <LeadStageCell lead={row.original} readOnly={!canEditLead(row.original)} />
+      ),
       filterFn: (row, id, value: string[]) =>
         !value?.length || value.includes(row.getValue<string>(id)),
     },

@@ -33,6 +33,7 @@ import { fmtCurrency, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AlertTriangle, Calendar, Plus } from "lucide-react";
 import { toast } from "sonner";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
 type LeadMap = Record<PipelineStage, Lead[]>;
 
@@ -78,6 +79,7 @@ export function KanbanBoard({
   boardFilter?: PipelineBoardFilter;
   onAddToStage?: (stage: PipelineStage) => void;
 }) {
+  const { updateLeadStage, currentUserId } = useWorkspace();
   const [leads, setLeads] = React.useState(initialLeads);
   const [activeId, setActiveId] = React.useState<string | null>(null);
 
@@ -154,6 +156,7 @@ export function KanbanBoard({
     });
 
     if (activeLead.stage !== destStage) {
+      updateLeadStage(activeLead.id, destStage, activeLead.stage, currentUserId);
       toast.success(
         `Moved ${activeLead.contactName} · ${STAGES_BY_KEY[activeLead.stage].label} → ${STAGES_BY_KEY[destStage].label}`,
       );

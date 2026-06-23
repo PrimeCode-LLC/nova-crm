@@ -24,6 +24,7 @@ import { Plus, Search, DollarSign, TrendingUp, Trophy, Target, ArrowUpDown } fro
 import { STAGES_BY_KEY } from "@/lib/constants";
 import type { Deal } from "@/lib/types";
 import { useLocalDeals } from "@/hooks/use-local-deals";
+import { recordDealCreatedClient } from "@/lib/firestore/audit-change-client";
 import { cn } from "@/lib/utils";
 
 const NewDealDialog = dynamic(
@@ -47,6 +48,20 @@ export default function DealsPage() {
   const [sortDir, setSortDir] = React.useState<SortDir>("asc");
   const [newOpen, setNewOpen] = React.useState(false);
   const [newDealFormKey, setNewDealFormKey] = React.useState(0);
+
+  const handleCreateDeal = React.useCallback(
+    (deal: Deal) => {
+      addLocalDeal(deal);
+      const lead = ws.getLeadById(deal.leadId);
+      recordDealCreatedClient({
+        dealId: deal.id,
+        dealName: deal.name,
+        leadId: deal.leadId,
+        channel: lead?.channel,
+      });
+    },
+    [addLocalDeal, ws],
+  );
 
   const deals = React.useMemo(() => [...localDeals, ...ws.deals], [localDeals, ws.deals]);
 
@@ -272,7 +287,7 @@ export default function DealsPage() {
           users={ws.users}
           currentUserId={ws.currentUserId || ws.users[0]?.id || ""}
           getOwnerDisplayName={ws.getOwnerDisplayName}
-          onCreate={addLocalDeal}
+          onCreate={handleCreateDeal}
         />
       ) : null}
     </>

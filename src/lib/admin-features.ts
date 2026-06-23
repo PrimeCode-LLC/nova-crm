@@ -69,7 +69,6 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     label: "Activity logs",
     description: "Workspace audit and usage history",
     cluster: "access",
-    minWorkspaceRole: "director",
     minOrgRole: "admin",
     href: "/admin/logs",
   },
@@ -144,7 +143,7 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
 export const GRANTABLE_ADMIN_FEATURES: AdminFeatureKey[] = (
   Object.entries(ADMIN_FEATURES) as [AdminFeatureKey, AdminFeatureMeta][]
 )
-  .filter(([, m]) => m.minWorkspaceRole != null || m.minOrgRole != null)
+  .filter(([key, m]) => key !== "activity_logs" && (m.minWorkspaceRole != null || m.minOrgRole != null))
   .map(([k]) => k);
 
 export const ADMIN_FEATURE_BY_HREF: Record<string, AdminFeatureKey> = Object.fromEntries(

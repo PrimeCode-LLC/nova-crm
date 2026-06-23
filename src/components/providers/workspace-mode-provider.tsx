@@ -92,6 +92,12 @@ import {
   type WorkspaceSessionV2,
 } from "@/lib/workspace-session";
 import { STAGES_BY_KEY } from "@/lib/constants";
+import {
+  recordDealStageChangeClient,
+  recordLeadCreatedClient,
+  recordLeadStageChangeClient,
+} from "@/lib/firestore/audit-change-client";
+import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
@@ -551,6 +557,12 @@ export function WorkspaceModeProvider({
         try {
           const db = getFirebaseDb();
           await persistLeadCreateClient(db, orgId, lead);
+          recordLeadCreatedClient({
+            leadId: lead.id,
+            leadName: leadDisplayLabel(lead),
+            channel: lead.channel,
+            isProspect: isProspectRow(lead),
+          });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           toast.error("Could not save lead", { description: msg });
@@ -1206,6 +1218,12 @@ export function WorkspaceModeProvider({
   const patchDeal = React.useCallback(
     (dealId: string, patch: Partial<Deal>) => {
       const iso = new Date().toISOString();
+      const snap = snapshotRef.current;
+      const existing = snap.deals.find((d) => d.id === dealId);
+      const merged = existing ? { ...existing, ...patch } : null;
+      const linkedLead = merged?.leadId
+        ? snap.leads.find((l) => l.id === merged.leadId)
+        : undefined;
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       if (writeFs) {
@@ -1213,6 +1231,15 @@ export function WorkspaceModeProvider({
           try {
             const db = getFirebaseDb();
             await persistDealPatchClient(db, dealId, { ...patch, updatedAt: iso });
+            if (existing && patch.stage && patch.stage !== existing.stage) {
+              recordDealStageChangeClient({
+                dealId,
+                dealName: merged?.name,
+                prevStage: existing.stage,
+                nextStage: patch.stage,
+                channel: linkedLead?.channel,
+              });
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save deal", { description: msg });
@@ -1426,6 +1453,14 @@ export function WorkspaceModeProvider({
                 updatedAt: serverTimestamp(),
               });
             }
+            recordLeadStageChangeClient({
+              leadId,
+              leadName: lead ? leadDisplayLabel(lead) : undefined,
+              prevStage: previousStage,
+              nextStage,
+              isProspect: lead ? isProspectRow(lead) : false,
+              channel: lead?.channel,
+            });
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save stage", { description: msg });
