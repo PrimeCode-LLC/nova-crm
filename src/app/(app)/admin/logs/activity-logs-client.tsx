@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Loader2,
   RefreshCw,
@@ -11,6 +13,9 @@ import {
   ChevronRight,
   Calendar,
   BarChart3,
+  GitBranch,
+  X,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -53,6 +58,8 @@ import { CHANNEL_LIST } from "@/lib/constants";
 import { Input } from "@/components/ui/input";
 import type { AuditAnalyticsResult } from "@/lib/audit-analytics";
 import { ActivityLogsDashboard } from "./activity-logs-dashboard";
+import { cn } from "@/lib/utils";
+import type { StageHistoryEntry } from "@/lib/audit-stage-history";
 
 type AuditRow = {
   id: string;
@@ -70,6 +77,8 @@ type AuditRow = {
   message: string | null;
   prevValue: string | null;
   updatedValue: string | null;
+  leadId: string | null;
+  leadLabel: string | null;
 };
 
 type MemberOption = { uid: string; label: string };
@@ -122,6 +131,81 @@ function formatOperation(op: AuditOperation | null): string {
   return op.charAt(0).toUpperCase() + op.slice(1);
 }
 
+function leadIdFromRow(row: AuditRow): string | null {
+  if (row.leadId?.trim()) return row.leadId.trim();
+  const fromMeta = row.meta?.leadId;
+  return typeof fromMeta === "string" && fromMeta.trim() ? fromMeta.trim() : null;
+}
+
+function LeadStageHistoryStrip({
+  loading,
+  history,
+}: {
+  loading: boolean;
+  history: StageHistoryEntry[];
+}) {
+  return (
+    <div className="rounded-lg border border-border bg-card">
+      <div className="border-b border-border/60 px-4 py-3">
+        <h3 className="flex items-center gap-2 text-sm font-semibold leading-none">
+          <GitBranch className="h-4 w-4 shrink-0 text-primary" aria-hidden />
+          Stage history
+        </h3>
+        <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+          Creation and stage changes for this lead, oldest first.
+        </p>
+      </div>
+
+      <div className="px-4 py-4">
+        {loading ? (
+          <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading stage history…
+          </div>
+        ) : history.length === 0 ? (
+          <div className="rounded-md border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-center">
+            <p className="text-sm text-muted-foreground">
+              No stage changes recorded for this lead yet.
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground/80">
+              Changes appear here after a stage is updated in live mode.
+            </p>
+          </div>
+        ) : (
+          <ol className="relative space-y-0 border-l border-border/80 pl-4">
+            {history.map((entry, index) => (
+              <li key={entry.id} className={cn("relative pb-4", index === history.length - 1 && "pb-0")}>
+                <span
+                  className="absolute top-1.5 -left-[calc(0.25rem+1px)] h-2 w-2 rounded-full border-2 border-background bg-primary"
+                  aria-hidden
+                />
+                <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+                    <time className="tabular-nums" title={fmtDate(entry.at, "PPpp")}>
+                      {entry.at ? fmtDate(entry.at, "MMM d, yyyy h:mm a") : "—"}
+                    </time>
+                    {entry.source === "timeline" ? (
+                      <Badge variant="outline" className="h-5 text-[10px] font-normal">
+                        timeline
+                      </Badge>
+                    ) : null}
+                  </div>
+                  <p className="mt-1.5 text-sm leading-snug">
+                    <span className="font-medium text-foreground">{entry.actorName ?? "Unknown"}</span>
+                    <span className="text-muted-foreground">
+                      {entry.kind === "created" ? " created this lead" : ` · ${entry.summary}`}
+                    </span>
+                  </p>
+                </div>
+              </li>
+            ))}
+          </ol>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function ActivityLogsClient({
   orgRole,
   members,
@@ -130,7 +214,15 @@ export function ActivityLogsClient({
   members: MemberOption[];
 }) {
   const canView = roleAtLeast(orgRole, "admin");
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const pathname = usePathname();
+  const leadIdFilter = searchParams.get("leadId")?.trim() || null;
+
   const [items, setItems] = React.useState<AuditRow[]>([]);
+  const [stageHistory, setStageHistory] = React.useState<StageHistoryEntry[]>([]);
+  const [stageHistoryLoading, setStageHistoryLoading] = React.useState(false);
+  const [stageHistoryLabel, setStageHistoryLabel] = React.useState<string | null>(null);
   const [hasNextPage, setHasNextPage] = React.useState(false);
   const [totalCount, setTotalCount] = React.useState(0);
   const [loading, setLoading] = React.useState(true);
@@ -172,6 +264,33 @@ export function ActivityLogsClient({
     setPage(1);
   }, []);
 
+  const setLeadIdFilter = React.useCallback(
+    (leadId: string | null) => {
+      const params = new URLSearchParams(searchParams.toString());
+      if (leadId) params.set("leadId", leadId);
+      else params.delete("leadId");
+      const qs = params.toString();
+      router.replace(qs ? `${pathname}?${qs}` : pathname);
+      resetPagination();
+    },
+    [searchParams, router, pathname, resetPagination],
+  );
+
+  const trackingLabel = React.useMemo(() => {
+    if (!leadIdFilter) return null;
+    if (stageHistoryLabel?.trim()) return stageHistoryLabel.trim();
+    for (const row of items) {
+      if (row.leadId === leadIdFilter && row.leadLabel?.trim()) {
+        return row.leadLabel.trim();
+      }
+    }
+    const fromMeta = items.find(
+      (r) => leadIdFromRow(r) === leadIdFilter && typeof r.meta.leadName === "string",
+    )?.meta.leadName;
+    if (typeof fromMeta === "string" && fromMeta.trim()) return fromMeta.trim();
+    return leadIdFilter;
+  }, [leadIdFilter, items, stageHistoryLabel]);
+
   const load = React.useCallback(
     async (pageNum: number) => {
       if (!canView) return;
@@ -180,6 +299,7 @@ export function ActivityLogsClient({
       if (cursor) params.set("cursor", cursor);
       if (category !== "all") params.set("category", category);
       if (actorUid !== "all") params.set("actorUid", actorUid);
+      if (leadIdFilter) params.set("leadId", leadIdFilter);
 
       setLoading(true);
 
@@ -209,14 +329,41 @@ export function ActivityLogsClient({
         setLoading(false);
       }
     },
-    [canView, category, actorUid, pageSize],
+    [canView, category, actorUid, pageSize, leadIdFilter],
   );
+
+  const loadStageHistory = React.useCallback(async () => {
+    if (!canView || !leadIdFilter) {
+      setStageHistory([]);
+      setStageHistoryLabel(null);
+      return;
+    }
+    setStageHistoryLoading(true);
+    try {
+      const res = await fetch(`/api/org/leads/${encodeURIComponent(leadIdFilter)}/stage-history`);
+      if (!res.ok) {
+        setStageHistory([]);
+        return;
+      }
+      const data = (await res.json()) as {
+        history: StageHistoryEntry[];
+        leadLabel?: string | null;
+      };
+      setStageHistory(data.history ?? []);
+      setStageHistoryLabel(data.leadLabel ?? null);
+    } catch {
+      setStageHistory([]);
+    } finally {
+      setStageHistoryLoading(false);
+    }
+  }, [canView, leadIdFilter]);
 
   const loadAnalytics = React.useCallback(async () => {
     if (!canView) return;
     const params = new URLSearchParams({ range: timeRange });
     if (actorUid !== "all") params.set("actorUid", actorUid);
     if (channel !== "all") params.set("channel", channel);
+    if (leadIdFilter) params.set("leadId", leadIdFilter);
     if (timeRange === "custom") {
       if (dateFrom) params.set("from", dateFrom);
       if (dateTo) params.set("to", dateTo);
@@ -240,7 +387,7 @@ export function ActivityLogsClient({
     } finally {
       setAnalyticsLoading(false);
     }
-  }, [canView, timeRange, actorUid, channel, dateFrom, dateTo]);
+  }, [canView, timeRange, actorUid, channel, dateFrom, dateTo, leadIdFilter]);
 
   const refreshAll = React.useCallback(() => {
     cursorsRef.current = [null];
@@ -250,7 +397,8 @@ export function ActivityLogsClient({
       setPage(1);
     }
     void loadAnalytics();
-  }, [page, load, loadAnalytics]);
+    void loadStageHistory();
+  }, [page, load, loadAnalytics, loadStageHistory]);
 
   React.useEffect(() => {
     void load(page);
@@ -259,6 +407,10 @@ export function ActivityLogsClient({
   React.useEffect(() => {
     void loadAnalytics();
   }, [loadAnalytics]);
+
+  React.useEffect(() => {
+    void loadStageHistory();
+  }, [loadStageHistory]);
 
   if (!canView) {
     return (
@@ -433,6 +585,36 @@ export function ActivityLogsClient({
           channelFilter={channel}
         />
 
+        {leadIdFilter ? (
+          <div className="flex flex-col gap-3 rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="min-w-0">
+              <p className="text-sm font-medium">
+                Tracking: <span className="text-primary">{trackingLabel}</span>
+              </p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Showing all audit events linked to this lead. Click a lead name in the table to switch.
+              </p>
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              <Link
+                href={`/leads/${leadIdFilter}`}
+                className="inline-flex h-7 items-center gap-1 rounded-[min(var(--radius-md),12px)] border border-border bg-background px-2.5 text-[0.8rem] font-medium hover:bg-muted"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Open lead
+              </Link>
+              <Button variant="secondary" size="sm" onClick={() => setLeadIdFilter(null)}>
+                <X className="h-3.5 w-3.5" />
+                Clear filter
+              </Button>
+            </div>
+          </div>
+        ) : null}
+
+        {leadIdFilter ? (
+          <LeadStageHistoryStrip loading={stageHistoryLoading} history={stageHistory} />
+        ) : null}
+
         <Card className="overflow-visible">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
@@ -440,7 +622,9 @@ export function ActivityLogsClient({
               Detailed audit trail
             </CardTitle>
             <CardDescription>
-              Newest events first. Stage changes on leads and prospects are recorded here automatically.
+              {leadIdFilter
+                ? "All recorded events for this lead, newest first. Click any other lead row to track a different lead."
+                : "Newest events first. Click a lead name to track all activity for that lead."}
             </CardDescription>
           </CardHeader>
           <CardContent className="p-0">
@@ -451,12 +635,14 @@ export function ActivityLogsClient({
               </div>
             ) : items.length === 0 ? (
               <p className="py-16 text-center text-sm text-muted-foreground">
-                {actorUid !== "all" || category !== "all"
-                  ? "No activity matches these filters. Try Everyone or a different category."
-                  : "No activity recorded yet. Events appear as your team uses the CRM, AI tools, and admin settings."}
+                {leadIdFilter
+                  ? "No audit events found for this lead."
+                  : actorUid !== "all" || category !== "all"
+                    ? "No activity matches these filters. Try Everyone or a different category."
+                    : "No activity recorded yet. Events appear as your team uses the CRM, AI tools, and admin settings."}
               </p>
             ) : (
-              <Table className="min-w-[1060px] table-fixed">
+              <Table className="min-w-[1180px] table-fixed">
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[130px]">Created at</TableHead>
@@ -464,17 +650,39 @@ export function ActivityLogsClient({
                     <TableHead className="w-[100px]">Table</TableHead>
                     <TableHead className="w-[90px]">Field</TableHead>
                     <TableHead className="w-[200px]">Message</TableHead>
-                    <TableHead className="w-[150px]">Previous</TableHead>
-                    <TableHead className="w-[150px]">Updated</TableHead>
-                    <TableHead className="w-[180px]">Account</TableHead>
+                    <TableHead className="w-[140px]">Lead</TableHead>
+                    <TableHead className="w-[130px]">Previous</TableHead>
+                    <TableHead className="w-[130px]">Updated</TableHead>
+                    <TableHead className="w-[160px]">Account</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {items.map((row) => {
                     const cat = categoryForAuditEvent(row.event);
                     const accountLabel = row.actorEmail ?? row.actorDisplayName ?? "—";
+                    const rowLeadId = leadIdFromRow(row);
+                    const rowLeadLabel =
+                      row.leadLabel?.trim() ||
+                      (typeof row.meta.leadName === "string" ? row.meta.leadName.trim() : null);
+                    const isTrackable = Boolean(rowLeadId);
+                    const isTracked = rowLeadId === leadIdFilter;
+
                     return (
-                      <TableRow key={row.id}>
+                      <TableRow
+                        key={row.id}
+                        className={cn(
+                          isTrackable && "cursor-pointer hover:bg-muted/40",
+                          isTracked && "bg-primary/5",
+                        )}
+                        onClick={
+                          isTrackable
+                            ? () => setLeadIdFilter(rowLeadId)
+                            : undefined
+                        }
+                        aria-label={
+                          isTrackable ? "Track all activity for this lead" : undefined
+                        }
+                      >
                         <TableCell className="align-top whitespace-normal text-sm">
                           <div className="font-medium tabular-nums">
                             {fmtRelative(row.createdAt ?? undefined)}
@@ -499,6 +707,25 @@ export function ActivityLogsClient({
                               {CATEGORY_LABELS[cat]}
                             </Badge>
                           </div>
+                        </TableCell>
+                        <TableCell className="align-top whitespace-normal text-sm">
+                          {rowLeadId ? (
+                            <button
+                              type="button"
+                              className={cn(
+                                "max-w-full truncate text-left font-medium hover:text-primary hover:underline",
+                                isTracked && "text-primary",
+                              )}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLeadIdFilter(rowLeadId);
+                              }}
+                            >
+                              {rowLeadLabel ?? rowLeadId}
+                            </button>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          )}
                         </TableCell>
                         <TableCell className="align-top whitespace-normal overflow-hidden">
                           <ScrollableValue value={row.prevValue} />

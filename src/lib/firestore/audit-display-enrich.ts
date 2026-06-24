@@ -3,6 +3,12 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { AuditLogRecordWithDetail } from "@/lib/firestore/audit-detail";
 import { leadDisplayLabel, leadIdFromPath } from "@/lib/leads/lead-display-label";
 
+/** Primary lead id for audit drill-down (meta.leadId only — explicit CRM link). */
+export function leadIdFromAuditRow(row: { meta?: Record<string, unknown> }): string | null {
+  const id = row.meta?.leadId;
+  return typeof id === "string" && id.trim() ? id.trim() : null;
+}
+
 function collectLeadIdsFromRow(row: AuditLogRecordWithDetail): string[] {
   const ids = new Set<string>();
   for (const val of [row.updatedValue, row.prevValue]) {
