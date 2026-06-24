@@ -193,7 +193,6 @@ export function LeadTimeline({
         onConfirm={(next) => {
           if (next === lead.stage) return;
           updateLeadStage(lead.id, next, lead.stage, currentUserId);
-          bumpLeadActivity(lead.id);
           toast.success("Stage updated");
         }}
       />

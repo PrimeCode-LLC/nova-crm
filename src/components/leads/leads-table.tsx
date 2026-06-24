@@ -238,7 +238,7 @@ function LeadChannelCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean })
 }
 
 function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
-  const { updateLeadStage, bumpLeadActivity, currentUserId } = useWorkspace();
+  const { updateLeadStage, currentUserId } = useWorkspace();
   if (readOnly) {
     return (
       <div onClick={(e) => e.stopPropagation()}>
@@ -275,7 +275,6 @@ function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
                 e.stopPropagation();
                 if (s.key === lead.stage) return;
                 updateLeadStage(lead.id, s.key, lead.stage, currentUserId);
-                bumpLeadActivity(lead.id);
                 toast.success(`Stage → ${s.label}`);
               }}
             >
@@ -1000,6 +999,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     getSortedRowModel: getSortedRowModel(),
     getFilteredRowModel: getFilteredRowModel(),
     getPaginationRowModel: getPaginationRowModel(),
+    autoResetPageIndex: false,
     globalFilterFn: (row, _colId, filterValue) => {
       const q = String(filterValue ?? "").toLowerCase();
       if (!q) return true;

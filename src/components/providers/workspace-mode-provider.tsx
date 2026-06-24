@@ -1444,13 +1444,11 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await updateDoc(doc(db, COLLECTIONS.leads, leadId), {
               stage: nextStage,
-              updatedAt: serverTimestamp(),
             });
             await persistTimelineEventCreate(db, orgId, ev, leadOwnerIdForFirestore(leadId));
             if (syncSalesLeadStage && linkedSalesLeadId) {
               await updateDoc(doc(db, COLLECTIONS.leads, linkedSalesLeadId), {
                 stage: nextStage,
-                updatedAt: serverTimestamp(),
               });
             }
             recordLeadStageChangeClient({
@@ -1470,13 +1468,12 @@ export function WorkspaceModeProvider({
       setSessionV2((s) => {
         const leadPatches = {
           ...s.leadPatches,
-          [leadId]: { ...s.leadPatches[leadId], stage: nextStage, updatedAt: iso },
+          [leadId]: { ...s.leadPatches[leadId], stage: nextStage },
         };
         if (syncSalesLeadStage && linkedSalesLeadId) {
           leadPatches[linkedSalesLeadId] = {
             ...s.leadPatches[linkedSalesLeadId],
             stage: nextStage,
-            updatedAt: iso,
           };
         }
         return {

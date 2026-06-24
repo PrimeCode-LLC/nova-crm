@@ -285,8 +285,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     const { stage: _removed, ...rest } = patch;
     if (Object.keys(rest).length > 0) {
       ws.patchLead(latest.id, rest);
+      ws.bumpLeadActivity(latest.id);
     }
-    ws.bumpLeadActivity(latest.id);
   }
 
   return (
