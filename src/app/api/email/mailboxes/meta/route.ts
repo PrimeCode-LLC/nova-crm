@@ -7,6 +7,17 @@ const schema = z.object({
   activeMailboxId: z.string().optional(),
   linkedLeadByMessageId: z.record(z.string(), z.string()).optional(),
   blockedSenderDomains: z.array(z.string()).optional(),
+  mailLabels: z
+    .array(
+      z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        color: z.string(),
+      }),
+    )
+    .optional(),
+  labelsByMessageId: z.record(z.string(), z.array(z.string())).optional(),
+  flagByMessageId: z.record(z.string(), z.enum(["orange", "red", "purple", "blue", "yellow", "green", "gray"])).optional(),
 });
 
 export async function PATCH(req: Request) {

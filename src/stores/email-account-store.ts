@@ -11,6 +11,16 @@ import { buildDemoEmailSeed } from "@/lib/demo-email-seed";
 import { mailInboundToSent, mergeSentMailRow } from "@/lib/email/mail-inbound-to-sent";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { normalizeBlockedSenderDomain } from "@/lib/email/blocked-sender-domains";
+import {
+  type MailLabel,
+  createMailLabelId,
+  defaultMailLabelColor,
+  inboundMessageMetaKey,
+} from "@/lib/email/mail-labels";
+import {
+  type MailFlagId,
+  DEFAULT_MAIL_FLAG_ID,
+} from "@/lib/email/mail-flags";
 
 export interface EmailAccountStore {
   /** Live workspace: true after /api/email/mailboxes load (or failed); demo: true immediately. */
@@ -32,6 +42,10 @@ export interface EmailAccountStore {
   linkedLeadByMessageId: Record<string, string>;
   /** Sender domains whose INBOX messages are auto-moved to Trash. */
   blockedSenderDomains: string[];
+  /** Gmail-style user labels for inbox mail. */
+  mailLabels: MailLabel[];
+  labelsByMessageId: Record<string, string[]>;
+  flagByMessageId: Record<string, MailFlagId>;
   inboundByMailbox: Record<string, MailInbound[]>;
   /** Messages shown in Email → Trash (loaded from server Trash folder or demo moves). */
   trashInboundByMailbox: Record<string, MailInbound[]>;
@@ -45,6 +59,9 @@ export interface EmailAccountStore {
     activeMailboxId: string;
     linkedLeadByMessageId: Record<string, string>;
     blockedSenderDomains?: string[];
+    mailLabels?: MailLabel[];
+    labelsByMessageId?: Record<string, string[]>;
+    flagByMessageId?: Record<string, MailFlagId>;
     mailboxReadOnly?: boolean;
   }) => void;
   addBlockedSenderDomain: (domain: string) => void;
@@ -104,6 +121,14 @@ export interface EmailAccountStore {
   processDueScheduledLocal: () => void;
   linkMessageToLead: (messageId: string, leadId: string) => void;
   unlinkMessageToLead: (messageId: string) => void;
+  createMailLabel: (name: string, color?: string) => string;
+  renameMailLabel: (labelId: string, name: string) => void;
+  deleteMailLabel: (labelId: string) => void;
+  addLabelsToMessages: (messageKeys: string[], labelIds: string[]) => void;
+  removeLabelFromMessages: (messageKeys: string[], labelId: string) => void;
+  toggleMessageLabel: (messageKeys: string[], labelId: string) => void;
+  setMessageFlag: (messageKeys: string[], flagId: MailFlagId | null) => void;
+  toggleMessageFlag: (messageKeys: string[]) => void;
   clearLocalMail: () => void;
   /** Demo workspace: discard server-backed mailboxes and use a fresh local template. */
   resetForDemoMode: () => void;
@@ -148,6 +173,9 @@ function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
         activeMailboxId: s.activeMailboxId,
         linkedLeadByMessageId: s.linkedLeadByMessageId,
         blockedSenderDomains: s.blockedSenderDomains,
+        mailLabels: s.mailLabels,
+        labelsByMessageId: s.labelsByMessageId,
+        flagByMessageId: s.flagByMessageId,
       }),
     });
   }, 800);
@@ -162,6 +190,9 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   activeMailboxId: "",
   linkedLeadByMessageId: {},
   blockedSenderDomains: [],
+  mailLabels: [],
+  labelsByMessageId: {},
+  flagByMessageId: {},
   inboundByMailbox: {},
   trashInboundByMailbox: {},
   drafts: [],
@@ -187,6 +218,9 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       activeMailboxId: active,
       linkedLeadByMessageId: payload.linkedLeadByMessageId,
       blockedSenderDomains: [...new Set(blocked)],
+      mailLabels: payload.mailLabels ?? [],
+      labelsByMessageId: payload.labelsByMessageId ?? {},
+      flagByMessageId: payload.flagByMessageId ?? {},
       mailboxDataReadOnly: Boolean(payload.mailboxReadOnly),
     });
   },
@@ -223,6 +257,9 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         sent: [],
         linkedLeadByMessageId: {},
         blockedSenderDomains: [],
+        mailLabels: [],
+        labelsByMessageId: {},
+        flagByMessageId: {},
         mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
         activeMailboxId: "",
       };
@@ -455,12 +492,20 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       const prev = s.inboundByMailbox[mailboxId] ?? [];
       const nextInbound = prev.filter((m) => !uidSet.has(m.uid));
       const nextLinks = { ...s.linkedLeadByMessageId };
-      for (const uid of uids) {
-        delete nextLinks[`${mailboxId}:in:uid-${uid}`];
+      const nextLabels = { ...s.labelsByMessageId };
+      const nextFlags = { ...s.flagByMessageId };
+      for (const m of prev) {
+        if (!uidSet.has(m.uid)) continue;
+        const key = inboundMessageMetaKey(mailboxId, m);
+        delete nextLinks[key];
+        delete nextLabels[key];
+        delete nextFlags[key];
       }
       return {
         inboundByMailbox: { ...s.inboundByMailbox, [mailboxId]: nextInbound },
         linkedLeadByMessageId: nextLinks,
+        labelsByMessageId: nextLabels,
+        flagByMessageId: nextFlags,
       };
     });
     scheduleEmailMetaPersist(get);
@@ -612,6 +657,99 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     });
     scheduleEmailMetaPersist(get);
   },
+  createMailLabel: (name, color) => {
+    if (get().mailboxDataReadOnly) return "";
+    const trimmed = name.trim();
+    if (!trimmed) return "";
+    const id = createMailLabelId();
+    set((s) => ({
+      mailLabels: [
+        ...s.mailLabels,
+        { id, name: trimmed, color: color ?? defaultMailLabelColor(s.mailLabels.length) },
+      ],
+    }));
+    scheduleEmailMetaPersist(get);
+    return id;
+  },
+  renameMailLabel: (labelId, name) => {
+    if (get().mailboxDataReadOnly) return;
+    const trimmed = name.trim();
+    if (!trimmed) return;
+    set((s) => ({
+      mailLabels: s.mailLabels.map((l) => (l.id === labelId ? { ...l, name: trimmed } : l)),
+    }));
+    scheduleEmailMetaPersist(get);
+  },
+  deleteMailLabel: (labelId) => {
+    if (get().mailboxDataReadOnly) return;
+    set((s) => {
+      const nextLabels = { ...s.labelsByMessageId };
+      for (const [key, ids] of Object.entries(nextLabels)) {
+        const filtered = ids.filter((id) => id !== labelId);
+        if (filtered.length === 0) delete nextLabels[key];
+        else nextLabels[key] = filtered;
+      }
+      return {
+        mailLabels: s.mailLabels.filter((l) => l.id !== labelId),
+        labelsByMessageId: nextLabels,
+      };
+    });
+    scheduleEmailMetaPersist(get);
+  },
+  addLabelsToMessages: (messageKeys, labelIds) => {
+    if (get().mailboxDataReadOnly || messageKeys.length === 0 || labelIds.length === 0) return;
+    set((s) => {
+      const next = { ...s.labelsByMessageId };
+      for (const key of messageKeys) {
+        const prev = new Set(next[key] ?? []);
+        for (const id of labelIds) prev.add(id);
+        next[key] = [...prev];
+      }
+      return { labelsByMessageId: next };
+    });
+    scheduleEmailMetaPersist(get);
+  },
+  removeLabelFromMessages: (messageKeys, labelId) => {
+    if (get().mailboxDataReadOnly || messageKeys.length === 0) return;
+    set((s) => {
+      const next = { ...s.labelsByMessageId };
+      for (const key of messageKeys) {
+        const prev = next[key];
+        if (!prev) continue;
+        const filtered = prev.filter((id) => id !== labelId);
+        if (filtered.length === 0) delete next[key];
+        else next[key] = filtered;
+      }
+      return { labelsByMessageId: next };
+    });
+    scheduleEmailMetaPersist(get);
+  },
+  toggleMessageLabel: (messageKeys, labelId) => {
+    if (get().mailboxDataReadOnly || messageKeys.length === 0) return;
+    const s = get();
+    const hasAny = messageKeys.some((key) => s.labelsByMessageId[key]?.includes(labelId));
+    if (hasAny) get().removeLabelFromMessages(messageKeys, labelId);
+    else get().addLabelsToMessages(messageKeys, [labelId]);
+  },
+  setMessageFlag: (messageKeys, flagId) => {
+    if (get().mailboxDataReadOnly || messageKeys.length === 0) return;
+    set((s) => {
+      const next = { ...s.flagByMessageId };
+      for (const key of messageKeys) {
+        if (flagId == null) delete next[key];
+        else next[key] = flagId;
+      }
+      return { flagByMessageId: next };
+    });
+    scheduleEmailMetaPersist(get);
+  },
+  toggleMessageFlag: (messageKeys) => {
+    if (get().mailboxDataReadOnly || messageKeys.length === 0) return;
+    const s = get();
+    const hasAny = messageKeys.some((key) => s.flagByMessageId[key] != null);
+    if (hasAny) get().setMessageFlag(messageKeys, null);
+    else get().setMessageFlag(messageKeys, DEFAULT_MAIL_FLAG_ID);
+  },
   clearLocalMail: () => set({ drafts: [], sent: [], scheduled: [], inboundByMailbox: {}, trashInboundByMailbox: {} }),
   resetForDemoMode: () => {
     const seed = buildDemoEmailSeed();
@@ -620,6 +758,9 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       activeMailboxId: seed.activeMailboxId,
       linkedLeadByMessageId: seed.linkedLeadByMessageId,
       blockedSenderDomains: [],
+      mailLabels: seed.mailLabels,
+      labelsByMessageId: seed.labelsByMessageId,
+      flagByMessageId: seed.flagByMessageId,
       inboundByMailbox: seed.inboundByMailbox,
       trashInboundByMailbox: {},
       drafts: seed.drafts,

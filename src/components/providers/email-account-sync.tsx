@@ -6,6 +6,7 @@ import { useEmailAccountStore } from "@/stores/email-account-store";
 import { defaultEmailMailboxSettings } from "@/lib/email-account-types";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
+import type { MailFlagId } from "@/lib/email/mail-flags";
 
 /**
  * Loads saved SMTP/IMAP mailboxes from Firestore after login (live workspace).
@@ -53,6 +54,9 @@ export function EmailAccountSync() {
           activeMailboxId?: string;
           linkedLeadByMessageId?: Record<string, string>;
           blockedSenderDomains?: string[];
+          mailLabels?: { id: string; name: string; color: string }[];
+          labelsByMessageId?: Record<string, string[]>;
+          flagByMessageId?: Record<string, string>;
           mailboxReadOnly?: boolean;
           dataOwnerUid?: string;
         };
@@ -76,6 +80,9 @@ export function EmailAccountSync() {
           activeMailboxId: active,
           linkedLeadByMessageId: data.linkedLeadByMessageId ?? {},
           blockedSenderDomains: data.blockedSenderDomains ?? [],
+          mailLabels: data.mailLabels ?? [],
+          labelsByMessageId: data.labelsByMessageId ?? {},
+          flagByMessageId: (data.flagByMessageId ?? {}) as Record<string, MailFlagId>,
           mailboxReadOnly: data.mailboxReadOnly,
         });
         const readOnly = Boolean(data.mailboxReadOnly);

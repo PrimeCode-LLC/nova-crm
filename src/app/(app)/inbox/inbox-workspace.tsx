@@ -26,6 +26,32 @@ import {
   mailReaderContentFromSent,
   MailReadingZoomActions,
 } from "@/components/inbox/mail-reader-dialog";
+import {
+  MailLabelChips,
+  MailLabelsSidebarSection,
+} from "@/components/inbox/mail-labels-sidebar";
+import { MailLabelPicker } from "@/components/inbox/mail-label-picker";
+import {
+  MailFlagIcon,
+  MailFlagPicker,
+  MailFlagsSidebarSection,
+} from "@/components/inbox/mail-flag-picker";
+import {
+  collectMessageMetaKeysFromRow,
+  countMessagesWithLabel,
+  labelIdsForRow,
+  messageMetaKeysForInbound,
+  rowHasMailLabel,
+} from "@/lib/email/mail-labels";
+import {
+  MAIL_FLAG_IDS,
+  countFlaggedMessages,
+  countMessagesWithFlag,
+  flagIdForRow,
+  mailFlagById,
+  rowHasMailFlag,
+  type MailFlagId,
+} from "@/lib/email/mail-flags";
 import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
 import { format } from "date-fns";
@@ -402,6 +428,8 @@ export default function InboxWorkspace() {
   const [entitySubFilter, setEntitySubFilter] = React.useState<string>(ENTITY_SUB_FILTER_ALL);
   const [leadsFilterOpen, setLeadsFilterOpen] = React.useState(true);
   const [contactsFilterOpen, setContactsFilterOpen] = React.useState(true);
+  const [selectedMailLabelId, setSelectedMailLabelId] = React.useState<string | null>(null);
+  const [selectedMailFlagId, setSelectedMailFlagId] = React.useState<MailFlagId | null>(null);
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -428,6 +456,16 @@ export default function InboxWorkspace() {
   const blockedSenderDomains = useEmailAccountStore((s) => s.blockedSenderDomains);
   const addBlockedSenderDomain = useEmailAccountStore((s) => s.addBlockedSenderDomain);
   const linkMessageToLead = useEmailAccountStore((s) => s.linkMessageToLead);
+  const mailLabels = useEmailAccountStore((s) => s.mailLabels);
+  const labelsByMessageId = useEmailAccountStore((s) => s.labelsByMessageId);
+  const createMailLabel = useEmailAccountStore((s) => s.createMailLabel);
+  const deleteMailLabel = useEmailAccountStore((s) => s.deleteMailLabel);
+  const toggleMessageLabel = useEmailAccountStore((s) => s.toggleMessageLabel);
+  const addLabelsToMessages = useEmailAccountStore((s) => s.addLabelsToMessages);
+  const removeLabelFromMessages = useEmailAccountStore((s) => s.removeLabelFromMessages);
+  const flagByMessageId = useEmailAccountStore((s) => s.flagByMessageId);
+  const setMessageFlag = useEmailAccountStore((s) => s.setMessageFlag);
+  const toggleMessageFlag = useEmailAccountStore((s) => s.toggleMessageFlag);
   const drafts = useEmailAccountStore((s) => s.drafts);
   const sent = useEmailAccountStore((s) => s.sent);
   const upsertDraft = useEmailAccountStore((s) => s.upsertDraft);
@@ -2072,6 +2110,16 @@ export default function InboxWorkspace() {
     if (mailFolder === "inbox" || mailFolder === "trash") {
       rows = rows.filter((row) => rowMatchesReadStatusFilter(row, readStatusFilter));
     }
+    if (selectedMailLabelId) {
+      rows = rows.filter((row) =>
+        rowHasMailLabel(row, account.id, mailFolder, labelsByMessageId, selectedMailLabelId),
+      );
+    }
+    if (selectedMailFlagId) {
+      rows = rows.filter((row) =>
+        rowHasMailFlag(row, account.id, mailFolder, flagByMessageId, selectedMailFlagId),
+      );
+    }
     return rows.filter((row) => mailListRowMatchesSearch(row, q));
   }, [
     mailListRows,
@@ -2084,6 +2132,10 @@ export default function InboxWorkspace() {
     linkedLeadByMessageId,
     leads,
     contacts,
+    selectedMailLabelId,
+    labelsByMessageId,
+    selectedMailFlagId,
+    flagByMessageId,
   ]);
 
   const selectMailRowRange = React.useCallback((anchorIdx: number, endIdx: number) => {
@@ -2103,6 +2155,283 @@ export default function InboxWorkspace() {
     },
     [selectMailRowRange, selectedMailRowIds, toggleRowSelected],
   );
+
+  const collectMessageKeysFromMailRows = React.useCallback(
+    (rowIds: Set<string>, rows: MailListRow[]) => {
+      const keys = new Set<string>();
+      for (const row of rows) {
+        if (!rowIds.has(row.id)) continue;
+        for (const key of collectMessageMetaKeysFromRow(row, account.id, mailFolder)) {
+          keys.add(key);
+        }
+      }
+      return [...keys];
+    },
+    [account.id, mailFolder],
+  );
+
+  const mailLabelCounts = React.useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const label of mailLabels) {
+      counts[label.id] = countMessagesWithLabel(
+        inboxMailListRows,
+        account.id,
+        "inbox",
+        labelsByMessageId,
+        label.id,
+      );
+    }
+    return counts;
+  }, [mailLabels, inboxMailListRows, account.id, labelsByMessageId]);
+
+  const selectedMailLabel = React.useMemo(
+    () => mailLabels.find((l) => l.id === selectedMailLabelId) ?? null,
+    [mailLabels, selectedMailLabelId],
+  );
+
+  const openThreadLabelIds = React.useMemo(() => {
+    if (!selectedThread) return [] as string[];
+    const folder = mailFolder === "trash" ? "trash" : "inbox";
+    const keys = selectedThread.messages.flatMap((m) =>
+      messageMetaKeysForInbound(account.id, m, folder),
+    );
+    const ids = new Set<string>();
+    for (const key of keys) {
+      for (const id of labelsByMessageId[key] ?? []) ids.add(id);
+    }
+    return [...ids];
+  }, [selectedThread, account.id, mailFolder, labelsByMessageId]);
+
+  const handleCreateMailLabel = React.useCallback(
+    (name: string, color: string) => {
+      const id = createMailLabel(name, color);
+      if (!id) return;
+      toast.success(`Label “${name.trim()}” created`);
+      const keys = collectMessageKeysFromMailRows(selectedMailRowIds, visibleMailRows);
+      if (keys.length > 0) addLabelsToMessages(keys, [id]);
+    },
+    [
+      createMailLabel,
+      collectMessageKeysFromMailRows,
+      selectedMailRowIds,
+      visibleMailRows,
+      addLabelsToMessages,
+    ],
+  );
+
+  const handleToggleLabelOnSelection = React.useCallback(
+    (labelId: string) => {
+      const keys = collectMessageKeysFromMailRows(selectedMailRowIds, visibleMailRows);
+      if (keys.length === 0) {
+        toast.message("Select messages first, or open a conversation to label it.");
+        return;
+      }
+      toggleMessageLabel(keys, labelId);
+    },
+    [collectMessageKeysFromMailRows, selectedMailRowIds, visibleMailRows, toggleMessageLabel],
+  );
+
+  const handleToggleLabelOnOpenThread = React.useCallback(
+    (labelId: string) => {
+      if (!selectedThread) return;
+      const folder = mailFolder === "trash" ? "trash" : "inbox";
+      const keys = selectedThread.messages.flatMap((m) =>
+        messageMetaKeysForInbound(account.id, m, folder),
+      );
+      toggleMessageLabel(keys, labelId);
+    },
+    [selectedThread, mailFolder, account.id, toggleMessageLabel],
+  );
+
+  const handleRemoveLabelFromSelection = React.useCallback(
+    (labelId: string) => {
+      const keys = collectMessageKeysFromMailRows(selectedMailRowIds, visibleMailRows);
+      if (keys.length === 0) {
+        toast.message("Select messages first, or open a conversation.");
+        return;
+      }
+      removeLabelFromMessages(keys, labelId);
+      const name = mailLabels.find((l) => l.id === labelId)?.name ?? "label";
+      toast.success(`Removed from “${name}”`);
+    },
+    [
+      collectMessageKeysFromMailRows,
+      selectedMailRowIds,
+      visibleMailRows,
+      removeLabelFromMessages,
+      mailLabels,
+    ],
+  );
+
+  const handleRemoveLabelFromOpenThread = React.useCallback(
+    (labelId: string) => {
+      if (!selectedThread) return;
+      const folder = mailFolder === "trash" ? "trash" : "inbox";
+      const keys = selectedThread.messages.flatMap((m) =>
+        messageMetaKeysForInbound(account.id, m, folder),
+      );
+      removeLabelFromMessages(keys, labelId);
+      const name = mailLabels.find((l) => l.id === labelId)?.name ?? "label";
+      toast.success(`Removed from “${name}”`);
+    },
+    [selectedThread, mailFolder, account.id, removeLabelFromMessages, mailLabels],
+  );
+
+  const handleRemoveFromActiveLabelFilter = React.useCallback(() => {
+    if (!selectedMailLabelId) return;
+    if (selectedMailRowIds.size > 0) {
+      handleRemoveLabelFromSelection(selectedMailLabelId);
+      return;
+    }
+    if (selectedThread) {
+      handleRemoveLabelFromOpenThread(selectedMailLabelId);
+      return;
+    }
+    toast.message("Select messages or open a conversation to remove from this label.");
+  }, [
+    selectedMailLabelId,
+    selectedMailRowIds.size,
+    selectedThread,
+    handleRemoveLabelFromSelection,
+    handleRemoveLabelFromOpenThread,
+  ]);
+
+  const handleRemoveLabelFromMailRow = React.useCallback(
+    (row: MailListRow, labelId: string) => {
+      const keys = collectMessageMetaKeysFromRow(row, account.id, mailFolder);
+      if (keys.length === 0) return;
+      removeLabelFromMessages(keys, labelId);
+    },
+    [account.id, mailFolder, removeLabelFromMessages],
+  );
+
+  const handleDeleteMailLabel = React.useCallback(
+    (labelId: string) => {
+      const name = mailLabels.find((l) => l.id === labelId)?.name ?? "Label";
+      deleteMailLabel(labelId);
+      if (selectedMailLabelId === labelId) setSelectedMailLabelId(null);
+      toast.success(`Deleted “${name}”`);
+    },
+    [deleteMailLabel, mailLabels, selectedMailLabelId],
+  );
+
+  const selectedRowsLabelIds = React.useMemo(() => {
+    const ids = new Set<string>();
+    for (const row of visibleMailRows) {
+      if (!selectedMailRowIds.has(row.id)) continue;
+      for (const id of labelIdsForRow(row, account.id, mailFolder, labelsByMessageId)) {
+        ids.add(id);
+      }
+    }
+    return [...ids];
+  }, [visibleMailRows, selectedMailRowIds, account.id, mailFolder, labelsByMessageId]);
+
+  const mailFlagCounts = React.useMemo(() => {
+    const counts = Object.fromEntries(MAIL_FLAG_IDS.map((id) => [id, 0])) as Record<
+      MailFlagId,
+      number
+    >;
+    for (const id of MAIL_FLAG_IDS) {
+      counts[id] = countMessagesWithFlag(
+        inboxMailListRows,
+        account.id,
+        "inbox",
+        flagByMessageId,
+        id,
+      );
+    }
+    return counts;
+  }, [inboxMailListRows, account.id, flagByMessageId]);
+
+  const flaggedMailTotal = React.useMemo(
+    () => countFlaggedMessages(inboxMailListRows, account.id, "inbox", flagByMessageId),
+    [inboxMailListRows, account.id, flagByMessageId],
+  );
+
+  const openThreadFlagId = React.useMemo(() => {
+    if (!selectedThread) return null;
+    const folder = mailFolder === "trash" ? "trash" : "inbox";
+    const latest = selectedThread.latest;
+    const keys = messageMetaKeysForInbound(account.id, latest, folder);
+    for (let i = keys.length - 1; i >= 0; i--) {
+      const hit = flagByMessageId[keys[i]!];
+      if (hit) return hit;
+    }
+    return null;
+  }, [selectedThread, account.id, mailFolder, flagByMessageId]);
+
+  const selectedRowsFlagId = React.useMemo((): MailFlagId | null => {
+    const flags = new Set<MailFlagId>();
+    for (const row of visibleMailRows) {
+      if (!selectedMailRowIds.has(row.id)) continue;
+      const f = flagIdForRow(row, account.id, mailFolder, flagByMessageId);
+      if (f) flags.add(f);
+    }
+    return flags.size === 1 ? [...flags][0]! : null;
+  }, [visibleMailRows, selectedMailRowIds, account.id, mailFolder, flagByMessageId]);
+
+  const handleSetFlagOnSelection = React.useCallback(
+    (flagId: MailFlagId) => {
+      const keys = collectMessageKeysFromMailRows(selectedMailRowIds, visibleMailRows);
+      if (keys.length === 0) {
+        toast.message("Select messages first, or open a conversation.");
+        return;
+      }
+      setMessageFlag(keys, flagId);
+      const name = mailFlagById(flagId)?.name ?? flagId;
+      toast.success(`Flagged ${name}`);
+    },
+    [collectMessageKeysFromMailRows, selectedMailRowIds, visibleMailRows, setMessageFlag],
+  );
+
+  const handleClearFlagOnSelection = React.useCallback(() => {
+    const keys = collectMessageKeysFromMailRows(selectedMailRowIds, visibleMailRows);
+    if (keys.length === 0) {
+      toast.message("Select messages first, or open a conversation.");
+      return;
+    }
+    setMessageFlag(keys, null);
+    toast.success("Flag cleared");
+  }, [collectMessageKeysFromMailRows, selectedMailRowIds, visibleMailRows, setMessageFlag]);
+
+  const handleToggleFlagOnSelection = React.useCallback(() => {
+    const keys = collectMessageKeysFromMailRows(selectedMailRowIds, visibleMailRows);
+    if (keys.length === 0) {
+      toast.message("Select messages first, or open a conversation.");
+      return;
+    }
+    toggleMessageFlag(keys);
+  }, [collectMessageKeysFromMailRows, selectedMailRowIds, visibleMailRows, toggleMessageFlag]);
+
+  const handleSetFlagOnOpenThread = React.useCallback(
+    (flagId: MailFlagId) => {
+      if (!selectedThread) return;
+      const folder = mailFolder === "trash" ? "trash" : "inbox";
+      const keys = selectedThread.messages.flatMap((m) =>
+        messageMetaKeysForInbound(account.id, m, folder),
+      );
+      setMessageFlag(keys, flagId);
+    },
+    [selectedThread, mailFolder, account.id, setMessageFlag],
+  );
+
+  const handleClearFlagOnOpenThread = React.useCallback(() => {
+    if (!selectedThread) return;
+    const folder = mailFolder === "trash" ? "trash" : "inbox";
+    const keys = selectedThread.messages.flatMap((m) =>
+      messageMetaKeysForInbound(account.id, m, folder),
+    );
+    setMessageFlag(keys, null);
+  }, [selectedThread, mailFolder, account.id, setMessageFlag]);
+
+  const handleToggleFlagOnOpenThread = React.useCallback(() => {
+    if (!selectedThread) return;
+    const folder = mailFolder === "trash" ? "trash" : "inbox";
+    const keys = selectedThread.messages.flatMap((m) =>
+      messageMetaKeysForInbound(account.id, m, folder),
+    );
+    toggleMessageFlag(keys);
+  }, [selectedThread, mailFolder, account.id, toggleMessageFlag]);
 
   const showEntitySubFilter =
     entityMailFilter === ENTITY_LEAD_LINKED || entityMailFilter === ENTITY_CONTACT_LINKED;
@@ -2132,7 +2461,14 @@ export default function InboxWorkspace() {
   const readStatusFilterActive =
     (mailFolder === "inbox" || mailFolder === "trash") &&
     readStatusFilter !== READ_STATUS_FILTER_ALL;
-  const listFilterActive = mailSearchActive || entityMailFilterActive || readStatusFilterActive;
+  const mailLabelFilterActive = selectedMailLabelId != null;
+  const mailFlagFilterActive = selectedMailFlagId != null;
+  const listFilterActive =
+    mailSearchActive ||
+    entityMailFilterActive ||
+    readStatusFilterActive ||
+    mailLabelFilterActive ||
+    mailFlagFilterActive;
   const activeEntityFilterLabel = React.useMemo(() => {
     const base = entityMailFilterLabel(entityMailFilter, leads, contacts);
     const sub = entitySubFilterLabel(entityMailFilter, entitySubFilter, leads, contacts);
@@ -2142,6 +2478,11 @@ export default function InboxWorkspace() {
     const parts: string[] = [];
     if (readStatusFilterActive) parts.push(readStatusFilterLabel(readStatusFilter));
     if (entityMailFilterActive) parts.push(activeEntityFilterLabel);
+    if (mailLabelFilterActive && selectedMailLabel) parts.push(`Label “${selectedMailLabel.name}”`);
+    if (mailFlagFilterActive && selectedMailFlagId) {
+      const flagName = mailFlagById(selectedMailFlagId)?.name ?? selectedMailFlagId;
+      parts.push(`Flag ${flagName}`);
+    }
     if (mailSearchActive) parts.push(`Search “${listSearchQuery.trim()}”`);
     return parts.join(" · ");
   }, [
@@ -2149,6 +2490,10 @@ export default function InboxWorkspace() {
     readStatusFilter,
     entityMailFilterActive,
     activeEntityFilterLabel,
+    mailLabelFilterActive,
+    selectedMailLabel,
+    mailFlagFilterActive,
+    selectedMailFlagId,
     mailSearchActive,
     listSearchQuery,
   ]);
@@ -2158,6 +2503,8 @@ export default function InboxWorkspace() {
     setEntityMailFilter(ENTITY_MAIL_FILTER_ALL);
     setEntitySubFilter(ENTITY_SUB_FILTER_ALL);
     setListSearchQuery("");
+    setSelectedMailLabelId(null);
+    setSelectedMailFlagId(null);
   }
 
   const selectAllVisibleMailRows = React.useCallback(() => {
@@ -2920,6 +3267,8 @@ export default function InboxWorkspace() {
                   className="justify-start text-xs"
                   onClick={() => {
                     setMailFolder(f.id);
+                    setSelectedMailLabelId(null);
+                    setSelectedMailFlagId(null);
                     setSelectedMail(null);
                     setSelectedThread(null);
                     setSelectedScheduled(null);
@@ -2976,6 +3325,23 @@ export default function InboxWorkspace() {
                   )}
                 </Button>
               ))}
+              <MailFlagsSidebarSection
+                flagCounts={mailFlagCounts}
+                flaggedTotal={flaggedMailTotal}
+                selectedFlagId={selectedMailFlagId}
+                onSelectFlag={setSelectedMailFlagId}
+                onClearFlag={() => setSelectedMailFlagId(null)}
+              />
+              <MailLabelsSidebarSection
+                labels={mailLabels}
+                selectedLabelId={selectedMailLabelId}
+                labelCounts={mailLabelCounts}
+                disabled={inboxReadOnly}
+                onSelectLabel={setSelectedMailLabelId}
+                onClearLabel={() => setSelectedMailLabelId(null)}
+                onCreateLabel={handleCreateMailLabel}
+                onDeleteLabel={handleDeleteMailLabel}
+              />
               <div className="mt-auto pt-2 border-t">
                 <Button variant="outline" size="sm" className="w-full text-xs" disabled={inboxReadOnly} onClick={() => openCompose()}>
                   <PenLine className="h-3 w-3 mr-1" />
@@ -2987,7 +3353,15 @@ export default function InboxWorkspace() {
             <div className="w-full max-w-md flex flex-col border-r max-h-[calc(100vh-250px)] overflow-y-auto">
               <div className="px-3 py-2 border-b text-xs font-medium text-muted-foreground capitalize space-y-2">
                 <div className="flex items-center justify-between gap-2 normal-case">
-                  <span>{mailFolder === "scheduled" ? "Scheduled" : mailFolder}</span>
+                  <span>
+                    {selectedMailLabel
+                      ? selectedMailLabel.name
+                      : selectedMailFlagId
+                        ? mailFlagById(selectedMailFlagId)?.name ?? "Flagged"
+                        : mailFolder === "scheduled"
+                          ? "Scheduled"
+                          : mailFolder}
+                  </span>
                   {mailFolder === "scheduled" ? (
                     <Button
                       type="button"
@@ -3134,6 +3508,69 @@ export default function InboxWorkspace() {
                         </Button>
                       </>
                     )}
+                    {(mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent") && (
+                      <MailFlagPicker
+                        currentFlagId={
+                          selectedMailRowIds.size > 0 ? selectedRowsFlagId : openThreadFlagId
+                        }
+                        disabled={
+                          inboxReadOnly ||
+                          (selectedMailRowIds.size === 0 && !selectedThread)
+                        }
+                        onSetFlag={
+                          selectedThread && selectedMailRowIds.size === 0
+                            ? handleSetFlagOnOpenThread
+                            : handleSetFlagOnSelection
+                        }
+                        onClearFlag={
+                          selectedThread && selectedMailRowIds.size === 0
+                            ? handleClearFlagOnOpenThread
+                            : handleClearFlagOnSelection
+                        }
+                        onToggleFlag={
+                          selectedThread && selectedMailRowIds.size === 0
+                            ? handleToggleFlagOnOpenThread
+                            : handleToggleFlagOnSelection
+                        }
+                        size="sm"
+                        className="h-7 text-[10px] px-2"
+                      />
+                    )}
+                    {(mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent") && (
+                      <MailLabelPicker
+                        labels={mailLabels}
+                        selectedLabelIds={selectedRowsLabelIds}
+                        disabled={inboxReadOnly || selectedMailRowIds.size === 0}
+                        onToggleLabel={handleToggleLabelOnSelection}
+                        onRemoveLabel={handleRemoveLabelFromSelection}
+                        onCreateLabel={handleCreateMailLabel}
+                        filterLabel={selectedMailLabel}
+                        buttonLabel={
+                          selectedMailRowIds.size > 0
+                            ? `Label (${selectedMailRowIds.size})`
+                            : "Label"
+                        }
+                        size="sm"
+                        className="h-7 text-[10px] px-2"
+                      />
+                    )}
+                    {selectedMailLabel &&
+                    (mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent") ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 text-[10px] px-2 gap-1 text-destructive border-destructive/40 hover:bg-destructive/10 hover:text-destructive"
+                        disabled={
+                          inboxReadOnly ||
+                          (selectedMailRowIds.size === 0 && !selectedThread)
+                        }
+                        onClick={handleRemoveFromActiveLabelFilter}
+                      >
+                        <X className="h-3 w-3" />
+                        Remove from “{selectedMailLabel.name}”
+                      </Button>
+                    ) : null}
                     {mailFolder === "inbox" && (
                       <Button
                         type="button"
@@ -3456,6 +3893,8 @@ export default function InboxWorkspace() {
                       : selectedMail?.id === row.row.id && selectedThread == null;
                   const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
                   const bulkChecked = selectedMailRowIds.has(row.id);
+                  const rowLabelIds = labelIdsForRow(row, account.id, mailFolder, labelsByMessageId);
+                  const rowFlagId = flagIdForRow(row, account.id, mailFolder, flagByMessageId);
                   return (
                     <div
                       key={row.id}
@@ -3494,6 +3933,12 @@ export default function InboxWorkspace() {
                         )}
                       >
                         <div className="flex items-start gap-2 min-w-0">
+                          {rowFlagId ? (
+                            <MailFlagIcon
+                              flagId={rowFlagId}
+                              className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                            />
+                          ) : null}
                           <div className="flex-1 min-w-0">
                             <div
                               className={cn(
@@ -3514,6 +3959,13 @@ export default function InboxWorkspace() {
                               )}
                             </div>
                             <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
+                            <MailLabelChips
+                              labelIds={rowLabelIds}
+                              labels={mailLabels}
+                              className="mt-1"
+                              disabled={inboxReadOnly}
+                              onRemoveLabel={(labelId) => handleRemoveLabelFromMailRow(row, labelId)}
+                            />
                             <div className="text-[11px] text-muted-foreground mt-0.5">
                               {fmtRelative(row.at)}
                             </div>
@@ -3590,6 +4042,21 @@ export default function InboxWorkspace() {
                           </Badge>
                         ) : null}
                       </div>
+                      {openThreadLabelIds.length > 0 ? (
+                        <MailLabelChips
+                          labelIds={openThreadLabelIds}
+                          labels={mailLabels}
+                          max={6}
+                          disabled={inboxReadOnly}
+                          onRemoveLabel={handleRemoveLabelFromOpenThread}
+                        />
+                      ) : null}
+                      {openThreadFlagId ? (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <MailFlagIcon flagId={openThreadFlagId} className="h-3.5 w-3.5" />
+                          {mailFlagById(openThreadFlagId)?.name ?? "Flagged"}
+                        </div>
+                      ) : null}
                       <p className="text-xs text-muted-foreground mt-1">
                         Latest {fmtRelative(selectedThread.latest.date)}
                       </p>
@@ -3670,6 +4137,31 @@ export default function InboxWorkspace() {
                         blockedSenderDomains={blockedSenderDomains}
                         onRequestBlockDomain={openBlockDomainDialog}
                       />
+                      {(mailFolder === "inbox" || mailFolder === "trash") && (
+                        <MailFlagPicker
+                          currentFlagId={openThreadFlagId}
+                          disabled={inboxReadOnly}
+                          onSetFlag={handleSetFlagOnOpenThread}
+                          onClearFlag={handleClearFlagOnOpenThread}
+                          onToggleFlag={handleToggleFlagOnOpenThread}
+                        />
+                      )}
+                      {(mailFolder === "inbox" || mailFolder === "trash") && (
+                        <MailLabelPicker
+                          labels={mailLabels}
+                          selectedLabelIds={openThreadLabelIds}
+                          disabled={inboxReadOnly}
+                          onToggleLabel={handleToggleLabelOnOpenThread}
+                          onRemoveLabel={handleRemoveLabelFromOpenThread}
+                          onCreateLabel={handleCreateMailLabel}
+                          filterLabel={selectedMailLabel}
+                          buttonLabel={
+                            openThreadLabelIds.length > 0
+                              ? `Labels (${openThreadLabelIds.length})`
+                              : "Label"
+                          }
+                        />
+                      )}
                       {(mailFolder === "inbox" || mailFolder === "trash") &&
                         (selectedThread.hasUnread ? (
                           <Button

@@ -2,6 +2,15 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import {
+  type MailLabel,
+  parseLabelsByMessageIdFromFirestore,
+  parseMailLabelsFromFirestore,
+} from "@/lib/email/mail-labels";
+import {
+  type MailFlagId,
+  parseFlagByMessageIdFromFirestore,
+} from "@/lib/email/mail-flags";
+import {
   deleteMailboxSecretsServer,
   getMailboxSecretsServer,
   upsertMailboxSecretsServer,
@@ -15,6 +24,12 @@ export type EmailAccountMeta = {
   linkedLeadByMessageId: Record<string, string>;
   /** Sender domains (e.g. `bark.com`) whose INBOX mail is auto-moved to Trash. */
   blockedSenderDomains: string[];
+  /** User-defined inbox labels (Gmail-style). */
+  mailLabels: MailLabel[];
+  /** Message meta key → label ids assigned to that message. */
+  labelsByMessageId: Record<string, string[]>;
+  /** Message meta key → Apple Mail–style flag color id. */
+  flagByMessageId: Record<string, MailFlagId>;
 };
 
 function memberRoot(orgId: string, uid: string) {
@@ -103,11 +118,25 @@ export async function getEmailAccountMetaServer(input: {
 }): Promise<EmailAccountMeta> {
   const ref = metaRef(input.organizationId, input.uid);
   if (!ref) {
-    return { activeMailboxId: "", linkedLeadByMessageId: {}, blockedSenderDomains: [] };
+    return {
+      activeMailboxId: "",
+      linkedLeadByMessageId: {},
+      blockedSenderDomains: [],
+      mailLabels: [],
+      labelsByMessageId: {},
+      flagByMessageId: {},
+    };
   }
   const snap = await ref.get();
   if (!snap.exists) {
-    return { activeMailboxId: "", linkedLeadByMessageId: {}, blockedSenderDomains: [] };
+    return {
+      activeMailboxId: "",
+      linkedLeadByMessageId: {},
+      blockedSenderDomains: [],
+      mailLabels: [],
+      labelsByMessageId: {},
+      flagByMessageId: {},
+    };
   }
   const data = snap.data() as Record<string, unknown>;
   const active = String(data.activeMailboxId ?? "").trim();
@@ -120,7 +149,17 @@ export async function getEmailAccountMetaServer(input: {
   const blockedSenderDomains = Array.isArray(blockedRaw)
     ? blockedRaw.map((d) => String(d).trim().toLowerCase()).filter(Boolean)
     : [];
-  return { activeMailboxId: active, linkedLeadByMessageId, blockedSenderDomains };
+  const mailLabels = parseMailLabelsFromFirestore(data.mailLabels);
+  const labelsByMessageId = parseLabelsByMessageIdFromFirestore(data.labelsByMessageId);
+  const flagByMessageId = parseFlagByMessageIdFromFirestore(data.flagByMessageId);
+  return {
+    activeMailboxId: active,
+    linkedLeadByMessageId,
+    blockedSenderDomains,
+    mailLabels,
+    labelsByMessageId,
+    flagByMessageId,
+  };
 }
 
 export async function setEmailAccountMetaServer(input: {
@@ -139,6 +178,15 @@ export async function setEmailAccountMetaServer(input: {
   }
   if (input.meta.blockedSenderDomains !== undefined) {
     patch.blockedSenderDomains = input.meta.blockedSenderDomains;
+  }
+  if (input.meta.mailLabels !== undefined) {
+    patch.mailLabels = input.meta.mailLabels;
+  }
+  if (input.meta.labelsByMessageId !== undefined) {
+    patch.labelsByMessageId = input.meta.labelsByMessageId;
+  }
+  if (input.meta.flagByMessageId !== undefined) {
+    patch.flagByMessageId = input.meta.flagByMessageId;
   }
   await ref.set(patch, { merge: true });
   return { ok: true };

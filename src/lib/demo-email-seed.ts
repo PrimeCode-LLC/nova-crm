@@ -6,6 +6,7 @@ import type {
 } from "@/lib/email-account-types";
 import { defaultEmailMailboxSettings } from "@/lib/email-account-types";
 import { mockLeads } from "@/lib/mock-data";
+import type { MailFlagId } from "@/lib/email/mail-flags";
 
 export const DEMO_MB_WORK = "demo-mb-work";
 export const DEMO_MB_UPWORK = "demo-mb-upwork";
@@ -47,6 +48,9 @@ export function buildDemoEmailSeed(): {
   drafts: MailDraft[];
   sent: MailSent[];
   linkedLeadByMessageId: Record<string, string>;
+  mailLabels: { id: string; name: string; color: string }[];
+  labelsByMessageId: Record<string, string[]>;
+  flagByMessageId: Record<string, MailFlagId>;
 } {
   const L1 = mockLeads[0]!;
   const L2 = mockLeads[2] ?? mockLeads[1]!;
@@ -226,6 +230,18 @@ export function buildDemoEmailSeed(): {
     linkedLeadByMessageId[`${DEMO_MB_WORK}:in:${msgA1.id}`] = L1.id;
   }
 
+  const demoLabelFollowUp = { id: "demo-ml-followup", name: "Follow up", color: "hsl(38 92% 45%)" };
+  const demoLabelPriority = { id: "demo-ml-priority", name: "Priority", color: "hsl(350 72% 48%)" };
+  const mailLabels = [demoLabelFollowUp, demoLabelPriority];
+  const labelsByMessageId: Record<string, string[]> = {
+    [`${DEMO_MB_WORK}:in:${msgA1.id}`]: [demoLabelPriority.id],
+    [`${DEMO_MB_WORK}:in:${msgB.id}`]: [demoLabelFollowUp.id],
+  };
+  const flagByMessageId: Record<string, MailFlagId> = {
+    [`${DEMO_MB_WORK}:in:${msgA1.id}`]: "red",
+    [`${DEMO_MB_WORK}:in:${msgC.id}`]: "orange",
+  };
+
   return {
     mailboxes: [mbWork, mbUpwork],
     activeMailboxId: DEMO_MB_WORK,
@@ -236,5 +252,8 @@ export function buildDemoEmailSeed(): {
     drafts,
     sent,
     linkedLeadByMessageId,
+    mailLabels,
+    labelsByMessageId,
+    flagByMessageId,
   };
 }

@@ -241,53 +241,66 @@ export function EmailInboxSettingsCard() {
       </Card>
 
       <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm flex items-center gap-2">
-            <Ban className="h-4 w-4 shrink-0" />
-            Blocked sender domains
-          </CardTitle>
-          <CardDescription className="text-xs">
-            Mail from these domains is moved to Trash automatically when your inbox syncs. Unblock a domain to allow new
-            messages in your inbox again (existing Trash items stay until you delete them). You can also block a domain
-            from the{" "}
-            <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
-              Inbox
-            </Link>{" "}
-            reading toolbar.
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          {sortedBlockedDomains.length === 0 ? (
-            <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4">
-              No blocked domains. Open a message in Inbox and use{" "}
-              <span className="font-medium text-foreground">Block domain</span> to add one.
-            </p>
-          ) : (
-            <ul className="divide-y rounded-lg border">
-              {sortedBlockedDomains.map((domain) => (
-                <li
-                  key={domain}
-                  className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-                >
-                  <span className="font-mono text-xs tabular-nums">{domain}</span>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-7 text-xs"
-                    onClick={() => {
-                      removeBlockedSenderDomain(domain);
-                      toast.success(`Unblocked ${domain}`, {
-                        description: "New mail from this domain will appear in your inbox again.",
-                      });
-                    }}
-                  >
-                    Unblock
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
+        <CardContent className="px-2 pt-4 pb-2">
+          <Accordion defaultValue={[]} className="w-full">
+            <AccordionItem value="blocked-domains" className="border-b-0">
+              <AccordionHeader>
+                <AccordionTrigger className="px-2 py-3 hover:no-underline">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                    <Ban className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-medium">Blocked sender domains</span>
+                    {sortedBlockedDomains.length > 0 ? (
+                      <Badge variant="secondary" className="shrink-0 text-[10px] tabular-nums">
+                        {sortedBlockedDomains.length}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </AccordionTrigger>
+              </AccordionHeader>
+              <AccordionContent className="px-2 pb-3 pt-0">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Mail from these domains is moved to Trash automatically when your inbox syncs. Unblock a domain to allow
+                  new messages in your inbox again (existing Trash items stay until you delete them). You can also block a
+                  domain from the{" "}
+                  <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
+                    Inbox
+                  </Link>{" "}
+                  reading toolbar.
+                </p>
+                {sortedBlockedDomains.length === 0 ? (
+                  <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4">
+                    No blocked domains. Open a message in Inbox and use{" "}
+                    <span className="font-medium text-foreground">Block domain</span> to add one.
+                  </p>
+                ) : (
+                  <ul className="divide-y rounded-lg border max-h-64 overflow-y-auto">
+                    {sortedBlockedDomains.map((domain) => (
+                      <li
+                        key={domain}
+                        className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                      >
+                        <span className="font-mono text-xs tabular-nums">{domain}</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => {
+                            removeBlockedSenderDomain(domain);
+                            toast.success(`Unblocked ${domain}`, {
+                              description: "New mail from this domain will appear in your inbox again.",
+                            });
+                          }}
+                        >
+                          Unblock
+                        </Button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
         </CardContent>
       </Card>
 
