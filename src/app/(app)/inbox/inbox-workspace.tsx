@@ -3332,13 +3332,6 @@ export default function InboxWorkspace() {
                   )}
                 </Button>
               ))}
-              <MailFlagsSidebarSection
-                flagCounts={mailFlagCounts}
-                flaggedTotal={flaggedMailTotal}
-                selectedFlagId={selectedMailFlagId}
-                onSelectFlag={setSelectedMailFlagId}
-                onClearFlag={() => setSelectedMailFlagId(null)}
-              />
               <MailLabelsSidebarSection
                 labels={mailLabels}
                 selectedLabelId={selectedMailLabelId}
@@ -3348,6 +3341,13 @@ export default function InboxWorkspace() {
                 onClearLabel={() => setSelectedMailLabelId(null)}
                 onCreateLabel={handleCreateMailLabel}
                 onDeleteLabel={handleDeleteMailLabel}
+              />
+              <MailFlagsSidebarSection
+                flagCounts={mailFlagCounts}
+                flaggedTotal={flaggedMailTotal}
+                selectedFlagId={selectedMailFlagId}
+                onSelectFlag={setSelectedMailFlagId}
+                onClearFlag={() => setSelectedMailFlagId(null)}
               />
               <div className="mt-auto pt-2 border-t">
                 <Button variant="outline" size="sm" className="w-full text-xs" disabled={inboxReadOnly} onClick={() => openCompose()}>
@@ -3516,6 +3516,24 @@ export default function InboxWorkspace() {
                       </>
                     )}
                     {(mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent") && (
+                      <MailLabelPicker
+                        labels={mailLabels}
+                        selectedLabelIds={selectedRowsLabelIds}
+                        disabled={inboxReadOnly || selectedMailRowIds.size === 0}
+                        onToggleLabel={handleToggleLabelOnSelection}
+                        onRemoveLabel={handleRemoveLabelFromSelection}
+                        onCreateLabel={handleCreateMailLabel}
+                        filterLabel={selectedMailLabel}
+                        buttonLabel={
+                          selectedMailRowIds.size > 0
+                            ? `Label (${selectedMailRowIds.size})`
+                            : "Label"
+                        }
+                        size="sm"
+                        className="h-7 text-[10px] px-2"
+                      />
+                    )}
+                    {(mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent") && (
                       <MailFlagPicker
                         currentFlagId={
                           selectedMailRowIds.size > 0 ? selectedRowsFlagId : openThreadFlagId
@@ -3538,24 +3556,6 @@ export default function InboxWorkspace() {
                           selectedThread && selectedMailRowIds.size === 0
                             ? handleToggleFlagOnOpenThread
                             : handleToggleFlagOnSelection
-                        }
-                        size="sm"
-                        className="h-7 text-[10px] px-2"
-                      />
-                    )}
-                    {(mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent") && (
-                      <MailLabelPicker
-                        labels={mailLabels}
-                        selectedLabelIds={selectedRowsLabelIds}
-                        disabled={inboxReadOnly || selectedMailRowIds.size === 0}
-                        onToggleLabel={handleToggleLabelOnSelection}
-                        onRemoveLabel={handleRemoveLabelFromSelection}
-                        onCreateLabel={handleCreateMailLabel}
-                        filterLabel={selectedMailLabel}
-                        buttonLabel={
-                          selectedMailRowIds.size > 0
-                            ? `Label (${selectedMailRowIds.size})`
-                            : "Label"
                         }
                         size="sm"
                         className="h-7 text-[10px] px-2"
@@ -3940,10 +3940,14 @@ export default function InboxWorkspace() {
                         )}
                       >
                         <div className="flex items-start gap-2 min-w-0">
-                          {rowFlagId ? (
-                            <MailFlagIcon
-                              flagId={rowFlagId}
-                              className="mt-0.5 h-3.5 w-3.5 shrink-0"
+                          {rowLabelIds.length > 0 ? (
+                            <MailLabelChips
+                              labelIds={rowLabelIds}
+                              labels={mailLabels}
+                              className="mt-0.5 shrink-0 max-w-[5rem]"
+                              max={1}
+                              disabled={inboxReadOnly}
+                              onRemoveLabel={(labelId) => handleRemoveLabelFromMailRow(row, labelId)}
                             />
                           ) : null}
                           <div className="flex-1 min-w-0">
@@ -3966,13 +3970,12 @@ export default function InboxWorkspace() {
                               )}
                             </div>
                             <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
-                            <MailLabelChips
-                              labelIds={rowLabelIds}
-                              labels={mailLabels}
-                              className="mt-1"
-                              disabled={inboxReadOnly}
-                              onRemoveLabel={(labelId) => handleRemoveLabelFromMailRow(row, labelId)}
-                            />
+                            {rowFlagId ? (
+                              <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                                <MailFlagIcon flagId={rowFlagId} className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{mailFlagById(rowFlagId)?.name ?? "Flagged"}</span>
+                              </div>
+                            ) : null}
                             <div className="text-[11px] text-muted-foreground mt-0.5">
                               {fmtRelative(row.at)}
                             </div>
@@ -4049,6 +4052,12 @@ export default function InboxWorkspace() {
                           </Badge>
                         ) : null}
                       </div>
+                      {openThreadFlagId ? (
+                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                          <MailFlagIcon flagId={openThreadFlagId} className="h-3.5 w-3.5" />
+                          {mailFlagById(openThreadFlagId)?.name ?? "Flagged"}
+                        </div>
+                      ) : null}
                       {openThreadLabelIds.length > 0 ? (
                         <MailLabelChips
                           labelIds={openThreadLabelIds}
@@ -4057,12 +4066,6 @@ export default function InboxWorkspace() {
                           disabled={inboxReadOnly}
                           onRemoveLabel={handleRemoveLabelFromOpenThread}
                         />
-                      ) : null}
-                      {openThreadFlagId ? (
-                        <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                          <MailFlagIcon flagId={openThreadFlagId} className="h-3.5 w-3.5" />
-                          {mailFlagById(openThreadFlagId)?.name ?? "Flagged"}
-                        </div>
                       ) : null}
                       <p className="text-xs text-muted-foreground mt-1">
                         Latest {fmtRelative(selectedThread.latest.date)}
@@ -4145,15 +4148,6 @@ export default function InboxWorkspace() {
                         onRequestBlockDomain={openBlockDomainDialog}
                       />
                       {(mailFolder === "inbox" || mailFolder === "trash") && (
-                        <MailFlagPicker
-                          currentFlagId={openThreadFlagId}
-                          disabled={inboxReadOnly}
-                          onSetFlag={handleSetFlagOnOpenThread}
-                          onClearFlag={handleClearFlagOnOpenThread}
-                          onToggleFlag={handleToggleFlagOnOpenThread}
-                        />
-                      )}
-                      {(mailFolder === "inbox" || mailFolder === "trash") && (
                         <MailLabelPicker
                           labels={mailLabels}
                           selectedLabelIds={openThreadLabelIds}
@@ -4167,6 +4161,15 @@ export default function InboxWorkspace() {
                               ? `Labels (${openThreadLabelIds.length})`
                               : "Label"
                           }
+                        />
+                      )}
+                      {(mailFolder === "inbox" || mailFolder === "trash") && (
+                        <MailFlagPicker
+                          currentFlagId={openThreadFlagId}
+                          disabled={inboxReadOnly}
+                          onSetFlag={handleSetFlagOnOpenThread}
+                          onClearFlag={handleClearFlagOnOpenThread}
+                          onToggleFlag={handleToggleFlagOnOpenThread}
                         />
                       )}
                       {(mailFolder === "inbox" || mailFolder === "trash") &&
