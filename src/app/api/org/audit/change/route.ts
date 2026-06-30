@@ -8,6 +8,7 @@ import type { PipelineStage } from "@/lib/types";
 
 const pipelineStageSchema = z.enum([
   "new",
+  "viewed",
   "contacted",
   "replied",
   "qualified",

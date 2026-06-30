@@ -1,7 +1,7 @@
 import type { ChannelKey, PipelineStage } from "./types";
 
-const EARLY: PipelineStage[] = ["new", "contacted"];
-const POST_CONTACT: PipelineStage[] = ["contacted", "replied", "qualified", "discovery", "proposal", "negotiation", "won"];
+const EARLY: PipelineStage[] = ["new", "viewed", "contacted"];
+const POST_CONTACT: PipelineStage[] = ["viewed", "contacted", "replied", "qualified", "discovery", "proposal", "negotiation", "won"];
 const POST_REPLY: PipelineStage[] = ["replied", "qualified", "discovery", "proposal", "negotiation", "won"];
 const MEETING_LIKE: PipelineStage[] = ["qualified", "discovery", "proposal", "negotiation"];
 

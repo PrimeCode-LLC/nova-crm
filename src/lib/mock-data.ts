@@ -360,7 +360,7 @@ export const mockContacts: Contact[] = mockAccounts.flatMap((acc, i) => {
 
 // ───────────────────────── Leads ─────────────────────────
 const channels: ChannelKey[] = ["cold_email", "linkedin_outbound", "personalized_email", "website_form", "upwork", "job_apply", "linkedin_1to1"];
-const stages: PipelineStage[] = ["new", "contacted", "replied", "qualified", "discovery", "proposal", "negotiation", "won", "lost"];
+const stages: PipelineStage[] = ["new", "viewed", "contacted", "replied", "qualified", "discovery", "proposal", "negotiation", "won", "lost"];
 const temps: LeadTemperature[] = ["cold", "warm", "hot"];
 const prios: LeadPriority[] = ["low", "medium", "high", "urgent"];
 const pushes: PushStatus[] = ["not_ready", "ready", "pushed", "do_not_push"];

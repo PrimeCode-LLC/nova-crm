@@ -76,6 +76,7 @@ function pipelineStageToFunnelKey(channel: string, stageLabel: string): string |
   const normalized = stageLabel.toLowerCase();
   if (channel === "upwork" || channel === "job_apply") {
     if (normalized === "new") return "applied";
+    if (normalized === "viewed") return "viewed";
     if (normalized === "contacted") return "viewed";
     if (normalized === "replied") return "replied";
     if (normalized === "won") return channel === "upwork" ? "hired" : "offer";
@@ -85,6 +86,7 @@ function pipelineStageToFunnelKey(channel: string, stageLabel: string): string |
     return "meeting";
   }
   if (normalized === "replied") return "replied";
+  if (normalized === "viewed") return "viewed";
   if (normalized === "contacted") return "contacted";
   if (normalized === "new") return "sent";
   return null;

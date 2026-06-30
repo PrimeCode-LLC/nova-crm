@@ -26,6 +26,7 @@ export type ChannelKey =
 
 export type PipelineStage =
   | "new"
+  | "viewed"
   | "contacted"
   | "replied"
   | "qualified"

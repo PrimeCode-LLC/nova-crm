@@ -47,6 +47,7 @@ export const PIPELINE_STAGES: {
   isWon?: boolean;
 }[] = [
   { key: "new", label: "New", tone: "neutral" },
+  { key: "viewed", label: "Viewed", tone: "cyan" },
   { key: "contacted", label: "Contacted", tone: "blue" },
   { key: "replied", label: "Replied", tone: "cyan" },
   { key: "qualified", label: "Qualified", tone: "blue" },
@@ -65,6 +66,7 @@ export const STAGES_BY_KEY: Record<PipelineStage, (typeof PIPELINE_STAGES)[numbe
 
 export const KANBAN_STAGES: PipelineStage[] = [
   "new",
+  "viewed",
   "contacted",
   "replied",
   "qualified",
@@ -228,6 +230,7 @@ export const CHANNEL_FUNNELS: Record<
 
 export const IDLE_THRESHOLD_DAYS: Record<PipelineStage, number> = {
   new: 3,
+  viewed: 4,
   contacted: 5,
   replied: 2,
   qualified: 5,
