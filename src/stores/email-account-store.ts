@@ -28,10 +28,12 @@ export interface EmailAccountStore {
   /** When true, PATCH mailboxes + meta to API (live workspace only). */
   emailServerSyncEnabled: boolean;
   /**
-   * Live workspace: viewing another member’s mailbox (admin). Link/import actions that persist
-   * to that member’s Firestore meta must not run.
+   * Live workspace: viewing another member's mailbox. Blocks persisting account meta
+   * (labels, blocked domains, lead links) to the signed-in user's Firestore doc.
    */
   mailboxDataReadOnly: boolean;
+  /** Live workspace: compose, trash, and other IMAP write actions disabled. */
+  inboxWriteDisabled: boolean;
   /**
    * Live workspace: Firebase uid of the member whose mailbox list/meta is loaded (`null` = signed-in user).
    * Admins set this to open another active member’s inbox (read-only).
@@ -63,6 +65,7 @@ export interface EmailAccountStore {
     labelsByMessageId?: Record<string, string[]>;
     flagByMessageId?: Record<string, MailFlagId>;
     mailboxReadOnly?: boolean;
+    mailboxAccountReadOnly?: boolean;
   }) => void;
   addBlockedSenderDomain: (domain: string) => void;
   removeBlockedSenderDomain: (domain: string) => void;
@@ -161,6 +164,7 @@ function mergeMailInboundRow(prev: MailInbound | undefined, server: MailInbound)
 function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
   if (typeof window === "undefined") return;
   if (!get().emailServerSyncEnabled) return;
+  if (get().mailboxDataReadOnly) return;
   if (metaPersistTimer) clearTimeout(metaPersistTimer);
   metaPersistTimer = setTimeout(() => {
     metaPersistTimer = null;
@@ -185,6 +189,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   emailServerHydrated: false,
   emailServerSyncEnabled: false,
   mailboxDataReadOnly: false,
+  inboxWriteDisabled: false,
   mailViewAsUid: null,
   mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
   activeMailboxId: "",
@@ -221,7 +226,8 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       mailLabels: payload.mailLabels ?? [],
       labelsByMessageId: payload.labelsByMessageId ?? {},
       flagByMessageId: payload.flagByMessageId ?? {},
-      mailboxDataReadOnly: Boolean(payload.mailboxReadOnly),
+      mailboxDataReadOnly: Boolean(payload.mailboxAccountReadOnly ?? payload.mailboxReadOnly),
+      inboxWriteDisabled: Boolean(payload.mailboxReadOnly),
     });
   },
   addBlockedSenderDomain: (domain) => {
@@ -250,6 +256,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       return {
         mailViewAsUid: next,
         mailboxDataReadOnly: next != null,
+        inboxWriteDisabled: next != null,
         emailServerHydrated: false,
         inboundByMailbox: {},
         trashInboundByMailbox: {},
@@ -768,6 +775,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       scheduled: [],
       mailViewAsUid: null,
       mailboxDataReadOnly: false,
+      inboxWriteDisabled: false,
     });
   },
 }));

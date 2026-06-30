@@ -29,6 +29,8 @@ export const COLLECTIONS = {
   availabilitySchedules: "availabilitySchedules",
   /** Explicit grants for booking on another member's calendar. */
   calendarDelegations: "calendarDelegations",
+  /** Explicit grants for viewing/sending from another member's mailbox. */
+  mailboxDelegations: "mailboxDelegations",
   /** Connected Google / Microsoft calendars per user (tokens server-only). */
   calendarConnections: "calendarConnections",
   ingestQueue: "ingestQueue",
@@ -95,6 +97,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.meetings,
   COLLECTIONS.availabilitySchedules,
   COLLECTIONS.calendarDelegations,
+  COLLECTIONS.mailboxDelegations,
   COLLECTIONS.calendarConnections,
   COLLECTIONS.auditLog,
   COLLECTIONS.workspaceChatChannels,

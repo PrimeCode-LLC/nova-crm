@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
 import { cancelScheduledEmailServer } from "@/lib/email/scheduled-emails-server";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -25,7 +25,7 @@ export async function DELETE(req: Request, context: RouteContext) {
   if (!resolved.ok) {
     return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
   }
-  if (!resolved.viewerIsMailboxOwner) {
+  if (!canMailboxSend(resolved)) {
     return NextResponse.json(
       { ok: false, error: "You cannot cancel scheduled mail for another member's mailbox." },
       { status: 403 },

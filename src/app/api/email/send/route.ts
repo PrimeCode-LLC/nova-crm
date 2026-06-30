@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
-import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
 import { parseOutboundAttachments } from "@/lib/email/outbound-attachments";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
     if (!resolved.ok) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
-    if (!resolved.viewerIsMailboxOwner) {
+    if (!canMailboxSend(resolved)) {
       return NextResponse.json(
         {
           ok: false,

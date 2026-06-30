@@ -4,7 +4,7 @@ import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
-import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
 import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 const MAX_UIDS_PER_REQUEST = 80;
@@ -33,7 +33,7 @@ export async function POST(req: Request) {
     if (!resolved.ok) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
-    if (!resolved.viewerIsMailboxOwner) {
+    if (!canMailboxSend(resolved)) {
       return NextResponse.json(
         {
           ok: false,

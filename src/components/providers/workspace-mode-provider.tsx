@@ -176,7 +176,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     canEditLead: (lead: Lead) => boolean;
     /** Org role for the signed-in user (defaults to member when missing on the user row). */
     viewerOrgRole: OrgMemberRole;
-    /** May open another member’s linked inbox (read-only): admins or managers with reports. */
+    /** May open another member's linked inbox: admins, managers with reports, or explicit delegation. */
     canViewMemberMailboxes: boolean;
     /** User ids whose mailboxes the viewer may open (empty when `canViewMemberMailboxes` is false). */
     mailboxViewableUserIds: string[];
@@ -325,6 +325,7 @@ export function WorkspaceModeProvider({
   }, []);
 
   const [orgMemberLabels, setOrgMemberLabels] = React.useState<Record<string, string>>({});
+  const [delegatedMailboxHostIds, setDelegatedMailboxHostIds] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (!liveOrgId) {
       setOrgMemberLabels({});
@@ -353,6 +354,29 @@ export function WorkspaceModeProvider({
       cancelled = true;
     };
   }, [liveOrgId]);
+
+  React.useEffect(() => {
+    if (mode !== "live" || !liveOrgId || !sessionHydrated) {
+      setDelegatedMailboxHostIds([]);
+      return;
+    }
+    let cancelled = false;
+    void fetch("/api/email/delegations?mode=accessible_hosts", {
+      credentials: "same-origin",
+      cache: "no-store",
+    })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { hostIds?: string[] };
+        if (!cancelled) setDelegatedMailboxHostIds(data.hostIds ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setDelegatedMailboxHostIds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, liveOrgId, sessionHydrated]);
 
   React.useEffect(() => {
     React.startTransition(() => {
@@ -1715,14 +1739,18 @@ export function WorkspaceModeProvider({
     const reportIds = viewer
       ? collectDescendantUserIds(viewer.id, snapshotWithIdle.users)
       : new Set<string>();
-    const canViewMemberMailboxes = roleAtLeast(viewerRole, "admin") || reportIds.size > 0;
-    const mailboxViewableUserIds = canViewMemberMailboxes
+    const canViewMemberMailboxes =
+      roleAtLeast(viewerRole, "admin") || reportIds.size > 0 || delegatedMailboxHostIds.length > 0;
+    const hierarchyMailboxIds = canViewMemberMailboxes
       ? roleAtLeast(viewerRole, "admin")
         ? snapshotWithIdle.users
             .filter((u) => u.status === "active" && u.id && u.id !== snapshotWithIdle.currentUserId)
             .map((u) => u.id)
         : [...reportIds]
       : [];
+    const mailboxViewableUserIds = [
+      ...new Set([...hierarchyMailboxIds, ...delegatedMailboxHostIds]),
+    ].filter((id) => id && id !== snapshotWithIdle.currentUserId);
     return {
       ...snapshotWithIdle,
       ...lookup,
@@ -1785,6 +1813,7 @@ export function WorkspaceModeProvider({
   }, [
     snapshot,
     orgMemberLabels,
+    delegatedMailboxHostIds,
     mode,
     demoPersonaId,
     liveOrgId,

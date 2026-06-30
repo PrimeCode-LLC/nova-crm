@@ -781,6 +781,20 @@ export interface CalendarDelegation {
   updatedAt: ISODate;
 }
 
+export type MailboxDelegatePermission = "view" | "send";
+
+/** One delegation doc per mailbox owner (host); grantees may read and send mail. */
+export interface MailboxDelegation {
+  id: string;
+  organizationId: string;
+  hostId: string;
+  granteeUserIds: string[];
+  permissions: MailboxDelegatePermission[];
+  createdBy: string;
+  createdAt: ISODate;
+  updatedAt: ISODate;
+}
+
 export type CalendarProvider = "google" | "microsoft";
 
 export interface CalendarConnection {

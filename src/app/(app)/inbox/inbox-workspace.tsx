@@ -479,10 +479,10 @@ export default function InboxWorkspace() {
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
-  const mailboxDataReadOnly = useEmailAccountStore((s) => s.mailboxDataReadOnly);
+  const inboxWriteDisabled = useEmailAccountStore((s) => s.inboxWriteDisabled);
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
 
-  const inboxReadOnly = !isDemo && mailboxDataReadOnly;
+  const inboxReadOnly = !isDemo && inboxWriteDisabled;
 
   const viewableMailboxIdSet = React.useMemo(
     () => new Set(mailboxViewableUserIds),
@@ -3085,17 +3085,24 @@ export default function InboxWorkspace() {
         title="Inbox"
         description={
           !isDemo && mailViewAsUid
-            ? `Viewing mail for ${getOwnerDisplayName(mailViewAsUid) ?? "a teammate"}, read only.`
+            ? inboxReadOnly
+              ? `Viewing mail for ${getOwnerDisplayName(mailViewAsUid) ?? "a teammate"}, read only.`
+              : `Viewing and sending mail for ${getOwnerDisplayName(mailViewAsUid) ?? "a teammate"}.`
             : "Threaded conversations (like Outlook) from the mailbox you connect in settings."
         }
         actions={pageActions}
       />
       <PageBody className="flex min-h-0 flex-1 flex-col space-y-0 overflow-hidden p-0">
         <div className="shrink-0 border-b px-4 pt-3 pb-2 flex flex-wrap items-center gap-2">
-          {inboxReadOnly ? (
+          {inboxReadOnly && mailViewAsUid ? (
             <p className="text-[11px] text-amber-700 dark:text-amber-500 max-w-[42rem]">
-              You are viewing another member&apos;s connected inbox. Messages load read-only; compose, trash, bulk
+              You are viewing another member&apos;s connected inbox in read-only mode. Compose, trash, bulk
               actions, and linking threads to leads are disabled.
+            </p>
+          ) : null}
+          {!inboxReadOnly && mailViewAsUid ? (
+            <p className="text-[11px] text-muted-foreground max-w-[42rem]">
+              You have shared send access to this inbox. Messages send from the owner&apos;s connected mailbox.
             </p>
           ) : null}
           {!isEmailAccountConfigured(account) && (

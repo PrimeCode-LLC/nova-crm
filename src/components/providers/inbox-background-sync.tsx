@@ -33,7 +33,7 @@ export function InboxBackgroundSync() {
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
-  const mailboxDataReadOnly = useEmailAccountStore((s) => s.mailboxDataReadOnly);
+  const inboxWriteDisabled = useEmailAccountStore((s) => s.inboxWriteDisabled);
 
   const bootstrappedRef = React.useRef(false);
   const syncingRef = React.useRef(false);
@@ -55,7 +55,7 @@ export function InboxBackgroundSync() {
       await syncImapInboxHead({
         mailViewAsUid,
         currentUserId,
-        inboxReadOnly: mailboxDataReadOnly,
+        inboxReadOnly: inboxWriteDisabled,
       });
       await syncImapSentHead({
         mailViewAsUid,
@@ -99,7 +99,7 @@ export function InboxBackgroundSync() {
     emailServerHydrated,
     emailServerSyncEnabled,
     mailViewAsUid,
-    mailboxDataReadOnly,
+    inboxWriteDisabled,
     pathname,
   ]);
 

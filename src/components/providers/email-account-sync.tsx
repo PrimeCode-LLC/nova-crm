@@ -58,6 +58,7 @@ export function EmailAccountSync() {
           labelsByMessageId?: Record<string, string[]>;
           flagByMessageId?: Record<string, string>;
           mailboxReadOnly?: boolean;
+          mailboxAccountReadOnly?: boolean;
           dataOwnerUid?: string;
         };
         if (cancelled) return;
@@ -84,6 +85,7 @@ export function EmailAccountSync() {
           labelsByMessageId: data.labelsByMessageId ?? {},
           flagByMessageId: (data.flagByMessageId ?? {}) as Record<string, MailFlagId>,
           mailboxReadOnly: data.mailboxReadOnly,
+          mailboxAccountReadOnly: data.mailboxAccountReadOnly,
         });
         const readOnly = Boolean(data.mailboxReadOnly);
         setEmailServerSyncEnabled(!readOnly);

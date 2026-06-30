@@ -21,9 +21,20 @@ import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-a
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
-import { Ban, Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2 } from "lucide-react";
+import { Ban, Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2, Users } from "lucide-react";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import type { MailboxDelegation } from "@/lib/types";
 
 export function EmailInboxSettingsCard() {
+  const { users, currentUserId, isDemo, getOwnerDisplayName } = useWorkspace();
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const setActiveMailbox = useEmailAccountStore((s) => s.setActiveMailbox);
@@ -45,6 +56,94 @@ export function EmailInboxSettingsCard() {
   const [openValues, setOpenValues] = React.useState<string[]>([]);
   /** `${mailboxId}:smtp` | `${mailboxId}:imap` → password field visible as plain text */
   const [passwordFieldVisible, setPasswordFieldVisible] = React.useState<Record<string, boolean>>({});
+  const [inboxDelegation, setInboxDelegation] = React.useState<MailboxDelegation | null>(null);
+  const [inboxDelegationLoading, setInboxDelegationLoading] = React.useState(false);
+  const [inboxDelegationSaving, setInboxDelegationSaving] = React.useState(false);
+  const [delegatePickUid, setDelegatePickUid] = React.useState("");
+
+  const inboxGranteeUserIds = inboxDelegation?.granteeUserIds ?? [];
+
+  const delegationMemberOptions = React.useMemo(
+    () =>
+      buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName).filter(
+        (o) => o.id !== currentUserId && !inboxGranteeUserIds.includes(o.id),
+      ),
+    [users, currentUserId, getOwnerDisplayName, inboxGranteeUserIds],
+  );
+
+  const granteeLabels = React.useMemo(() => {
+    const map = new Map(delegationMemberOptions.map((o) => [o.id, o.label]));
+    for (const o of buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName)) {
+      map.set(o.id, o.label);
+    }
+    return map;
+  }, [delegationMemberOptions, users, currentUserId, getOwnerDisplayName]);
+
+  React.useEffect(() => {
+    if (isDemo) {
+      setInboxDelegation(null);
+      return;
+    }
+    let cancelled = false;
+    setInboxDelegationLoading(true);
+    void fetch("/api/email/delegations", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { item?: MailboxDelegation };
+        if (!cancelled) setInboxDelegation(data.item ?? null);
+      })
+      .catch(() => {
+        if (!cancelled) setInboxDelegation(null);
+      })
+      .finally(() => {
+        if (!cancelled) setInboxDelegationLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemo]);
+
+  async function saveInboxDelegation(nextGranteeIds: string[]) {
+    if (isDemo) {
+      toast.message("Inbox sharing is not available in demo mode.");
+      return;
+    }
+    setInboxDelegationSaving(true);
+    try {
+      const res = await fetch("/api/email/delegations", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ granteeUserIds: nextGranteeIds }),
+      });
+      const data = (await res.json()) as { ok?: boolean; item?: MailboxDelegation; error?: string };
+      if (!res.ok || !data.ok || !data.item) {
+        toast.error(data.error ?? "Could not save inbox access");
+        return;
+      }
+      setInboxDelegation(data.item);
+      toast.success(
+        nextGranteeIds.length === 0 ? "Inbox sharing removed" : "Inbox access updated",
+      );
+    } catch {
+      toast.error("Could not save inbox access");
+    } finally {
+      setInboxDelegationSaving(false);
+    }
+  }
+
+  async function removeInboxGrantee(granteeUid: string) {
+    const next = inboxGranteeUserIds.filter((id) => id !== granteeUid);
+    await saveInboxDelegation(next);
+  }
+
+  async function addInboxGrantee() {
+    const uid = delegatePickUid.trim();
+    if (!uid) return;
+    if (inboxGranteeUserIds.includes(uid)) return;
+    await saveInboxDelegation([...inboxGranteeUserIds, uid]);
+    setDelegatePickUid("");
+  }
 
   const persistKey = React.useMemo(() => JSON.stringify(mailboxes), [mailboxes]);
 
@@ -297,6 +396,109 @@ export function EmailInboxSettingsCard() {
                       </li>
                     ))}
                   </ul>
+                )}
+              </AccordionContent>
+            </AccordionItem>
+          </Accordion>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardContent className="px-2 pt-4 pb-2">
+          <Accordion defaultValue={[]} className="w-full">
+            <AccordionItem value="share-inbox" className="border-b-0">
+              <AccordionHeader>
+                <AccordionTrigger className="px-2 py-3 hover:no-underline">
+                  <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
+                    <Users className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-medium">Share inbox access</span>
+                    {inboxGranteeUserIds.length > 0 ? (
+                      <Badge variant="secondary" className="shrink-0 text-[10px] tabular-nums">
+                        {inboxGranteeUserIds.length}
+                      </Badge>
+                    ) : null}
+                  </div>
+                </AccordionTrigger>
+              </AccordionHeader>
+              <AccordionContent className="px-2 pb-3 pt-0">
+                <p className="text-xs text-muted-foreground mb-3">
+                  Let teammates read and send mail from your connected mailbox in{" "}
+                  <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
+                    Inbox
+                  </Link>
+                  . They cannot change your SMTP/IMAP credentials or mailbox settings.
+                </p>
+                {inboxDelegationLoading ? (
+                  <p className="text-xs text-muted-foreground flex items-center gap-2 px-1 py-2">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Loading shared access…
+                  </p>
+                ) : (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <div className="min-w-[12rem] flex-1 space-y-1">
+                        <Label className="text-xs">Add workspace member</Label>
+                        <Select
+                          value={delegatePickUid || undefined}
+                          onValueChange={(v) => setDelegatePickUid(v ?? "")}
+                          disabled={isDemo || inboxDelegationSaving || delegationMemberOptions.length === 0}
+                        >
+                          <SelectTrigger className="h-9 w-full text-xs">
+                            <SelectValue placeholder="Select a person" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {delegationMemberOptions.map((o) => (
+                              <SelectItem key={o.id} value={o.id}>
+                                {o.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        className="h-9"
+                        disabled={isDemo || !delegatePickUid || inboxDelegationSaving}
+                        onClick={() => void addInboxGrantee()}
+                      >
+                        {inboxDelegationSaving ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Plus className="h-3.5 w-3.5" />
+                        )}
+                        Add
+                      </Button>
+                    </div>
+                    {inboxGranteeUserIds.length === 0 ? (
+                      <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4">
+                        No one else can open your inbox yet. Add a teammate to grant read and send access.
+                      </p>
+                    ) : (
+                      <ul className="divide-y rounded-lg border max-h-64 overflow-y-auto">
+                        {inboxGranteeUserIds.map((uid) => (
+                          <li
+                            key={uid}
+                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                          >
+                            <span className="truncate text-xs">
+                              {granteeLabels.get(uid) ?? getOwnerDisplayName(uid) ?? uid}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="h-7 text-xs"
+                              disabled={isDemo || inboxDelegationSaving}
+                              onClick={() => void removeInboxGrantee(uid)}
+                            >
+                              Remove
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
                 )}
               </AccordionContent>
             </AccordionItem>

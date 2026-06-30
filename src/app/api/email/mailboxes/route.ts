@@ -7,7 +7,7 @@ import {
   listMailboxesForMemberServer,
   upsertMailboxWithSecretsMerged,
 } from "@/lib/email/mailbox-profiles-server";
-import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { resolveMailboxDataOwnerUid, mailboxReadOnlyForClient } from "@/lib/email/mailbox-data-owner-server";
 
 const mailboxSchema = z.object({
   id: z.string().min(1),
@@ -52,7 +52,7 @@ export async function GET(req: Request) {
   }
 
   const { organizationId } = g.ctx.session;
-  const { dataOwnerUid, viewerIsMailboxOwner } = resolved;
+  const { dataOwnerUid } = resolved;
   const [mailboxes, meta] = await Promise.all([
     listMailboxesForMemberServer({ organizationId, uid: dataOwnerUid }),
     getEmailAccountMetaServer({ organizationId, uid: dataOwnerUid }),
@@ -61,7 +61,8 @@ export async function GET(req: Request) {
   return NextResponse.json({
     ok: true,
     dataOwnerUid,
-    mailboxReadOnly: !viewerIsMailboxOwner,
+    mailboxReadOnly: mailboxReadOnlyForClient(resolved),
+    mailboxAccountReadOnly: !resolved.viewerIsMailboxOwner,
     mailboxes,
     activeMailboxId: meta.activeMailboxId,
     linkedLeadByMessageId: meta.linkedLeadByMessageId,
