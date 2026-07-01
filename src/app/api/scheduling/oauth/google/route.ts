@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { publicSiteOriginFromRequest } from "@/lib/auth/site-origin";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { upsertCalendarConnectionServer } from "@/lib/scheduling/calendar-connection-server";
 const SCOPES = [
@@ -16,7 +17,8 @@ function redirectUri(origin: string): string {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  const origin = url.origin;
+  // Firebase App Hosting serves on 0.0.0.0:8080 internally; use public origin for OAuth redirects.
+  const origin = publicSiteOriginFromRequest(req);
 
   if (!code) {
     const g = await guardTenantApi();
