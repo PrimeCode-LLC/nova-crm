@@ -17,7 +17,6 @@ function redirectUri(origin: string): string {
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const code = url.searchParams.get("code");
-  // Firebase App Hosting serves on 0.0.0.0:8080 internally; use public origin for OAuth redirects.
   const origin = publicSiteOriginFromRequest(req);
 
   if (!code) {
