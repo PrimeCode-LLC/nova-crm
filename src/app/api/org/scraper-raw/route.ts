@@ -3,6 +3,8 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { listScraperRawItemsServer } from "@/lib/scrapers/raw-items-server";
 import type { ScraperCategory, ScraperPlatform, ScraperRawItemStatus } from "@/lib/types";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: Request) {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;

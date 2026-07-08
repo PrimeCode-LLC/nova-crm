@@ -160,7 +160,10 @@ export default function IntakePoolPage() {
       const params = new URLSearchParams({ status: "available", limit: "200" });
       if (platform !== ALL) params.set("platform", platform);
       if (category !== ALL) params.set("category", category);
-      const res = await fetch(`/api/org/scraper-raw?${params}`, { credentials: "same-origin" });
+      const res = await fetch(`/api/org/scraper-raw?${params}`, {
+        credentials: "same-origin",
+        cache: "no-store",
+      });
       const data = (await res.json()) as { items?: ScraperRawItem[]; error?: string };
       if (!res.ok) {
         toast.error(data.error ?? "Could not load intake pool");
@@ -178,6 +181,15 @@ export default function IntakePoolPage() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  React.useEffect(() => {
+    if (ws.isDemo) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [load, ws.isDemo]);
 
   async function promote(itemId: string, assignToMe: boolean) {
     setBusy({ itemId, action: assignToMe ? "assign" : "queue" });

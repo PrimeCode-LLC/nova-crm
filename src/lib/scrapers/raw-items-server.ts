@@ -77,17 +77,28 @@ export async function listScraperRawItemsServer(
   if (!col) return [];
 
   const status = filter.status ?? "available";
-  const q = col
+  const limit = Math.min(500, Math.max(1, filter.limit ?? 200));
+  const now = new Date().toISOString();
+  // Over-fetch slightly so filtering expired rows still returns up to `limit` items.
+  const fetchLimit =
+    status === "available" ? Math.min(500, Math.ceil(limit * 1.25)) : limit;
+
+  let q = col
     .where("organizationId", "==", filter.organizationId)
     .where("status", "==", status);
+  if (filter.platform) q = q.where("platform", "==", filter.platform);
+  if (filter.category) q = q.where("category", "==", filter.category);
 
-  const limit = Math.min(500, Math.max(1, filter.limit ?? 200));
-  const snap = await q.limit(Math.min(500, limit * 3)).get();
+  const snap = await q.orderBy("publishedAt", "desc").limit(fetchLimit).get();
   let items = snap.docs.map((d) => mapScraperRawItem(d.id, d.data() as Record<string, unknown>));
-  if (filter.platform) items = items.filter((i) => i.platform === filter.platform);
-  if (filter.category) items = items.filter((i) => i.category === filter.category);
-  if (filter.feedId) items = items.filter((i) => i.feedId === filter.feedId);
-  items.sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
+
+  if (status === "available") {
+    items = items.filter((i) => !i.expiresAt || i.expiresAt > now);
+  }
+  if (filter.feedId) {
+    items = items.filter((i) => i.feedId === filter.feedId);
+  }
+
   return items.slice(0, limit);
 }
 
