@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { listScraperRawItemsServer } from "@/lib/scrapers/raw-items-server";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
+import {
+  dismissScraperRawItemsBulkServer,
+  listScraperRawItemsServer,
+} from "@/lib/scrapers/raw-items-server";
 import type { ScraperCategory, ScraperPlatform, ScraperRawItemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -26,4 +30,56 @@ export async function GET(req: Request) {
   });
 
   return NextResponse.json({ items });
+}
+
+export async function PATCH(req: Request) {
+  const g = await guardAdminFeature("delete_intake_pool");
+  if (!g.ok) return g.response;
+
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  if (typeof json !== "object" || json === null) {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const body = json as {
+    action?: unknown;
+    itemIds?: unknown;
+    allAvailable?: unknown;
+  };
+  const action = typeof body.action === "string" ? body.action : "";
+
+  if (action !== "dismiss") {
+    return NextResponse.json({ error: "Unknown action" }, { status: 400 });
+  }
+
+  const allAvailable = body.allAvailable === true;
+  const itemIds = Array.isArray(body.itemIds)
+    ? body.itemIds.filter((id): id is string => typeof id === "string")
+    : undefined;
+
+  if (!allAvailable && (!itemIds || itemIds.length === 0)) {
+    return NextResponse.json({ error: "No items selected" }, { status: 400 });
+  }
+
+  const result = await dismissScraperRawItemsBulkServer({
+    organizationId: g.ctx.session.organizationId,
+    userId: g.ctx.session.uid,
+    allAvailable,
+    itemIds: allAvailable ? undefined : itemIds,
+  });
+
+  if ("error" in result) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+
+  return NextResponse.json({
+    dismissedIds: result.dismissedIds,
+    count: result.dismissedIds.length,
+  });
 }

@@ -141,6 +141,72 @@ export async function dismissScraperRawItemServer(input: {
   return { ok: true, item: mapScraperRawItem(ref.id, next.data() as Record<string, unknown>) };
 }
 
+/** Soft-remove available items from the intake pool (status → dismissed). Max 500 ids. */
+export async function dismissScraperRawItemsBulkServer(input: {
+  organizationId: string;
+  userId: string;
+  itemIds?: string[];
+  /** When true, dismiss all currently available (non-expired) items for the org. */
+  allAvailable?: boolean;
+}): Promise<{ ok: true; dismissedIds: string[] } | { error: string }> {
+  const col = rawCol();
+  if (!col) return { error: "Database not configured" };
+
+  let ids: string[] = [];
+
+  if (input.allAvailable) {
+    const items = await listScraperRawItemsServer({
+      organizationId: input.organizationId,
+      status: "available",
+      limit: 500,
+    });
+    ids = items.map((i) => i.id);
+  } else {
+    const raw = input.itemIds ?? [];
+    if (raw.length === 0) return { error: "No items selected" };
+    if (raw.length > 500) return { error: "Too many items (max 500)" };
+    ids = Array.from(new Set(raw.map((id) => id.trim()).filter(Boolean)));
+    if (ids.length === 0) return { error: "No items selected" };
+  }
+
+  if (ids.length === 0) {
+    return { ok: true, dismissedIds: [] };
+  }
+
+  const now = new Date().toISOString();
+  const stamp = stampForUpdate({
+    status: "dismissed",
+    dismissedAt: now,
+    dismissedByUserId: input.userId,
+  });
+  const dismissedIds: string[] = [];
+  const db = getAdminDb()!;
+
+  for (let i = 0; i < ids.length; i += 500) {
+    const slice = ids.slice(i, i + 500);
+    const refs = slice.map((id) => col.doc(id));
+    const snaps = await db.getAll(...refs);
+    const batch = db.batch();
+    let writes = 0;
+    for (const snap of snaps) {
+      if (!snap.exists) continue;
+      const data = snap.data() as Record<string, unknown>;
+      if (data.organizationId !== input.organizationId) continue;
+      if (data.status === "promoted") continue;
+      if (data.status === "dismissed") {
+        dismissedIds.push(snap.id);
+        continue;
+      }
+      batch.update(snap.ref, stamp);
+      dismissedIds.push(snap.id);
+      writes += 1;
+    }
+    if (writes > 0) await batch.commit();
+  }
+
+  return { ok: true, dismissedIds };
+}
+
 export async function markRawItemPromotedServer(input: {
   organizationId: string;
   itemId: string;

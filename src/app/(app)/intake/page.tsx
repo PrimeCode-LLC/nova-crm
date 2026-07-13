@@ -4,12 +4,13 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import { Calendar, Loader2, RefreshCw, Search } from "lucide-react";
+import { Calendar, CheckSquare, Loader2, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -19,6 +20,22 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { Account, Contact, Lead, ScraperRawItem } from "@/lib/types";
@@ -40,6 +57,8 @@ import {
 import type { OrganizationIntakeFilterDefaults } from "@/lib/types";
 import { EMPTY_INTAKE_FILTER_DEFAULTS } from "@/lib/intake/intake-filter-defaults";
 import { roleAtLeast } from "@/lib/platform/org-role";
+import { userCanDeleteIntakePool } from "@/lib/admin-feature-access";
+import { cn } from "@/lib/utils";
 
 const ALL = "__all__" as const;
 
@@ -67,6 +86,8 @@ function passesPublishedDateRange(iso: string, fromYmd: string, toYmd: string): 
 export default function IntakePoolPage() {
   const ws = useWorkspace();
   const router = useRouter();
+  const viewer = ws.getUserById(ws.currentUserId);
+  const canDeleteIntake = userCanDeleteIntakePool(viewer, ws.viewerOrgRole);
   const [items, setItems] = React.useState<ScraperRawItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [platform, setPlatform] = React.useState<string>(ALL);
@@ -83,6 +104,10 @@ export default function IntakePoolPage() {
     itemId: string;
     action: "assign" | "queue" | "dismiss";
   } | null>(null);
+  const [selectMode, setSelectMode] = React.useState(false);
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
+  const [deleteConfirm, setDeleteConfirm] = React.useState<null | "all" | "selected">(null);
+  const [bulkBusy, setBulkBusy] = React.useState(false);
 
   const effectiveKeywords = React.useMemo(
     () =>
@@ -131,6 +156,10 @@ export default function IntakePoolPage() {
     dateFrom.length > 0 ||
     dateTo.length > 0 ||
     keywordFiltersActive;
+
+  const selectedCount = selectedIds.size;
+  const allFilteredSelected =
+    filteredItems.length > 0 && filteredItems.every((item) => selectedIds.has(item.id));
 
   React.useEffect(() => {
     if (ws.isDemo) return;
@@ -190,6 +219,58 @@ export default function IntakePoolPage() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load, ws.isDemo]);
+
+  React.useEffect(() => {
+    if (!canDeleteIntake && selectMode) {
+      setSelectMode(false);
+      setSelectedIds(new Set());
+      setDeleteConfirm(null);
+    }
+  }, [canDeleteIntake, selectMode]);
+
+  React.useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const available = new Set(items.map((i) => i.id));
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (available.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [items]);
+
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+
+  function toggleSelected(itemId: string, checked: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(itemId);
+      else next.delete(itemId);
+      return next;
+    });
+  }
+
+  function toggleSelectAllFiltered() {
+    if (allFilteredSelected) {
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const item of filteredItems) next.delete(item.id);
+        return next;
+      });
+      return;
+    }
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const item of filteredItems) next.add(item.id);
+      return next;
+    });
+  }
 
   async function promote(itemId: string, assignToMe: boolean) {
     setBusy({ itemId, action: assignToMe ? "assign" : "queue" });
@@ -259,7 +340,11 @@ export default function IntakePoolPage() {
       });
       const data = (await res.json()) as { error?: string };
       if (!res.ok) {
-        toast.error(data.error ?? "Dismiss failed");
+        toast.error(
+          res.status === 403
+            ? "You don’t have permission to delete intake posts"
+            : (data.error ?? "Dismiss failed"),
+        );
         return;
       }
       setItems((prev) => prev.filter((i) => i.id !== itemId));
@@ -271,8 +356,81 @@ export default function IntakePoolPage() {
     }
   }
 
+  async function confirmBulkDelete() {
+    if (!deleteConfirm) return;
+    setBulkBusy(true);
+    try {
+      const body =
+        deleteConfirm === "all"
+          ? { action: "dismiss", allAvailable: true }
+          : { action: "dismiss", itemIds: Array.from(selectedIds) };
+      const res = await fetch("/api/org/scraper-raw", {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = (await res.json()) as {
+        dismissedIds?: string[];
+        count?: number;
+        error?: string;
+      };
+      if (!res.ok) {
+        toast.error(
+          res.status === 403
+            ? "You don’t have permission to delete intake posts"
+            : (data.error ?? "Delete failed"),
+        );
+        return;
+      }
+      const removed = new Set(data.dismissedIds ?? []);
+      setItems((prev) => prev.filter((i) => !removed.has(i.id)));
+      const count = data.count ?? removed.size;
+      toast.success(count === 1 ? "Deleted 1 post" : `Deleted ${count} posts`);
+      setDeleteConfirm(null);
+      exitSelectMode();
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  const canDelete = canDeleteIntake && !loading && items.length > 0 && !bulkBusy;
+
   return (
     <>
+      <AlertDialog
+        open={deleteConfirm !== null}
+        onOpenChange={(open) => {
+          if (!bulkBusy && !open) setDeleteConfirm(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {deleteConfirm === "all"
+                ? `Delete all ${items.length} posts?`
+                : `Delete ${selectedCount} selected post${selectedCount === 1 ? "" : "s"}?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              They will leave the intake pool and won&apos;t be promoted. New posts can still appear
+              when feeds run again. This does not delete anything already promoted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={bulkBusy}
+              onClick={() => void confirmBulkDelete()}
+            >
+              {bulkBusy ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <PageHeader
         title="Intake pool"
         description={`Fresh posts from your RSS scrapers. Unclaimed rows expire after ${RAW_ITEM_RETENTION_DAYS} days unless promoted to a prospect.`}
@@ -281,6 +439,49 @@ export default function IntakePoolPage() {
             <Button variant="outline" size="sm" type="button" onClick={() => void load()} disabled={loading}>
               <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Refresh
             </Button>
+            {!ws.isDemo && canDeleteIntake ? (
+              selectMode ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  onClick={exitSelectMode}
+                  disabled={bulkBusy}
+                >
+                  Cancel select
+                </Button>
+              ) : (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    render={
+                      <Button variant="outline" size="sm" type="button" disabled={!canDelete}>
+                        <Trash2 className="h-3.5 w-3.5" /> Delete
+                      </Button>
+                    }
+                  />
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
+                      variant="destructive"
+                      disabled={!canDelete}
+                      onSelect={() => setDeleteConfirm("all")}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Delete all
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!canDelete}
+                      onSelect={() => {
+                        setSelectMode(true);
+                        setSelectedIds(new Set());
+                      }}
+                    >
+                      <CheckSquare className="h-3.5 w-3.5" />
+                      Select for delete
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )
+            ) : null}
             <Button
               variant="outline"
               size="sm"
@@ -415,6 +616,42 @@ export default function IntakePoolPage() {
               </div>
             </div>
 
+            {selectMode && filteredItems.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
+                <Checkbox
+                  checked={allFilteredSelected}
+                  onCheckedChange={() => toggleSelectAllFiltered()}
+                  aria-label="Select all visible posts"
+                />
+                <span className="font-medium">
+                  {selectedCount > 0
+                    ? `${selectedCount} selected`
+                    : "Select posts to delete"}
+                </span>
+                <div className="ml-auto flex flex-wrap items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    type="button"
+                    onClick={toggleSelectAllFiltered}
+                    disabled={bulkBusy || filteredItems.length === 0}
+                  >
+                    {allFilteredSelected ? "Deselect all" : "Select all"}
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    type="button"
+                    disabled={bulkBusy || selectedCount === 0}
+                    onClick={() => setDeleteConfirm("selected")}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete selected
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
             {loading ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading posts…
@@ -446,29 +683,45 @@ export default function IntakePoolPage() {
                   const snippet =
                     item.contentSnippet?.trim() ||
                     item.content.replace(/<[^>]+>/g, " ").slice(0, 280);
+                  const isSelected = selectedIds.has(item.id);
                   return (
                     <li key={item.id}>
-                      <Card>
+                      <Card
+                        className={cn(
+                          selectMode && isSelected && "ring-1 ring-primary/40",
+                        )}
+                      >
                         <CardHeader className="pb-2">
                           <div className="flex flex-wrap items-start justify-between gap-2">
-                            <div className="min-w-0 flex-1 space-y-1">
-                              <CardTitle className="text-base leading-snug">
-                                <a
-                                  href={item.link}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="hover:text-primary hover:underline underline-offset-2"
-                                  title="Open original post"
-                                >
-                                  {item.title}
-                                </a>
-                              </CardTitle>
-                              <div className="flex flex-wrap gap-1.5">
-                                <Badge variant="secondary">{getScraperPlatformLabel(item.platform)}</Badge>
-                                <Badge variant="outline">{getScraperCategoryLabel(item.category)}</Badge>
-                                <Badge variant="outline" className="font-normal text-muted-foreground">
-                                  {item.feedName}
-                                </Badge>
+                            <div className="flex min-w-0 flex-1 items-start gap-3">
+                              {selectMode ? (
+                                <Checkbox
+                                  className="mt-1"
+                                  checked={isSelected}
+                                  disabled={bulkBusy}
+                                  onCheckedChange={(v) => toggleSelected(item.id, v === true)}
+                                  aria-label={`Select ${item.title}`}
+                                />
+                              ) : null}
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <CardTitle className="text-base leading-snug">
+                                  <a
+                                    href={item.link}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="hover:text-primary hover:underline underline-offset-2"
+                                    title="Open original post"
+                                  >
+                                    {item.title}
+                                  </a>
+                                </CardTitle>
+                                <div className="flex flex-wrap gap-1.5">
+                                  <Badge variant="secondary">{getScraperPlatformLabel(item.platform)}</Badge>
+                                  <Badge variant="outline">{getScraperCategoryLabel(item.category)}</Badge>
+                                  <Badge variant="outline" className="font-normal text-muted-foreground">
+                                    {item.feedName}
+                                  </Badge>
+                                </div>
                               </div>
                             </div>
                             <span className="text-xs text-muted-foreground shrink-0">
@@ -478,13 +731,16 @@ export default function IntakePoolPage() {
                         </CardHeader>
                         <CardContent className="space-y-3">
                           <p className="text-sm text-muted-foreground line-clamp-3">{snippet}</p>
-                          <IntakeItemActions
-                            item={item}
-                            busyAction={itemBusy}
-                            onAssignToMe={() => promote(item.id, true)}
-                            onOpenQueue={() => promote(item.id, false)}
-                            onDismissConfirmed={() => dismiss(item.id)}
-                          />
+                          {!selectMode ? (
+                            <IntakeItemActions
+                              item={item}
+                              busyAction={itemBusy}
+                              canDismiss={canDeleteIntake}
+                              onAssignToMe={() => promote(item.id, true)}
+                              onOpenQueue={() => promote(item.id, false)}
+                              onDismissConfirmed={() => dismiss(item.id)}
+                            />
+                          ) : null}
                         </CardContent>
                       </Card>
                     </li>

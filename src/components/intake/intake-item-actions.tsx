@@ -19,12 +19,14 @@ import type { ScraperRawItem } from "@/lib/types";
 export function IntakeItemActions({
   item,
   busyAction,
+  canDismiss = true,
   onAssignToMe,
   onOpenQueue,
   onDismissConfirmed,
 }: {
   item: ScraperRawItem;
   busyAction: "assign" | "queue" | "dismiss" | null;
+  canDismiss?: boolean;
   onAssignToMe: () => void | Promise<void>;
   onOpenQueue: () => void | Promise<void>;
   onDismissConfirmed: () => void | Promise<void>;
@@ -87,17 +89,19 @@ export function IntakeItemActions({
             role="group"
             aria-label="Intake actions"
           >
-            <Button
-              variant="ghost"
-              size="sm"
-              type="button"
-              disabled={busy}
-              title="Remove from the pool without creating a prospect"
-              className="text-muted-foreground hover:text-destructive"
-              onClick={() => setDismissOpen(true)}
-            >
-              <X className="h-3.5 w-3.5" /> Dismiss
-            </Button>
+            {canDismiss ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                disabled={busy}
+                title="Remove from the pool without creating a prospect"
+                className="text-muted-foreground hover:text-destructive"
+                onClick={() => setDismissOpen(true)}
+              >
+                <X className="h-3.5 w-3.5" /> Dismiss
+              </Button>
+            ) : null}
 
             <Button
               variant="outline"
@@ -133,8 +137,9 @@ export function IntakeItemActions({
           </div>
         </div>
         <p className="text-[11px] leading-snug text-muted-foreground">
-          Review the source, then assign to yourself or the team queue. Dismiss only if the post is
-          not a fit.
+          {canDismiss
+            ? "Review the source, then assign to yourself or the team queue. Dismiss only if the post is not a fit."
+            : "Review the source, then assign to yourself or the team queue."}
         </p>
       </div>
     </>

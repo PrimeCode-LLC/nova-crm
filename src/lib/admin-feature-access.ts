@@ -67,6 +67,14 @@ export function userCanCreateCampaigns(
   return userHasAdminFeature(user, "create_campaigns", orgRole);
 }
 
+/** Whether the user may delete intake pool posts (org admin+ or explicit grant). */
+export function userCanDeleteIntakePool(
+  user: AdminFeatureAccessInput | undefined,
+  orgRole?: OrgMemberRole,
+): boolean {
+  return userHasAdminFeature(user, "delete_intake_pool", orgRole);
+}
+
 export function normalizeFeatureGrants(
   grants: unknown,
 ): AdminFeatureKey[] | undefined {

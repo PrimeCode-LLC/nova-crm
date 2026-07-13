@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import {
   dismissScraperRawItemServer,
   getScraperRawItemServer,
@@ -17,7 +18,7 @@ export async function GET(_req: Request, ctx: RouteCtx) {
 }
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
-  const g = await guardTenantApi();
+  const g = await guardAdminFeature("delete_intake_pool");
   if (!g.ok) return g.response;
   const { itemId } = await ctx.params;
 

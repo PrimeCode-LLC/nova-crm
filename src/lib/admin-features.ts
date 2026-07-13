@@ -16,7 +16,8 @@ export type AdminFeatureKey =
   | "channels"
   | "profiles"
   | "email_outreach"
-  | "create_campaigns";
+  | "create_campaigns"
+  | "delete_intake_pool";
 
 export type AdminFeatureMeta = {
   label: string;
@@ -136,6 +137,12 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     description: "Create new email outreach campaigns in Instantly",
     cluster: "workspace",
     minOrgRole: "manager",
+  },
+  delete_intake_pool: {
+    label: "Delete intake posts",
+    description: "Remove posts from the intake pool (dismiss / bulk delete)",
+    cluster: "programs",
+    minOrgRole: "admin",
   },
 };
 
