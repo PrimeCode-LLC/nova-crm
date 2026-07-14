@@ -149,6 +149,26 @@ export async function persistFollowupSetCompleted(
   });
 }
 
+export async function persistFollowupEmailSchedule(
+  db: Firestore,
+  followupId: string,
+  schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+): Promise<void> {
+  if (schedule) {
+    await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
+      scheduledEmailId: schedule.scheduledEmailId,
+      emailScheduledAt: schedule.emailScheduledAt,
+      updatedAt: serverTimestamp(),
+    });
+    return;
+  }
+  await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
+    scheduledEmailId: deleteField(),
+    emailScheduledAt: deleteField(),
+    updatedAt: serverTimestamp(),
+  });
+}
+
 export async function persistFollowupDelete(db: Firestore, followupId: string): Promise<void> {
   await deleteDoc(doc(db, COLLECTIONS.followups, followupId));
 }

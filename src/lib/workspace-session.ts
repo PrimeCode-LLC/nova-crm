@@ -17,11 +17,18 @@ import { mockLeads } from "./mock-data";
 export const WORKSPACE_SESSION_KEY = "nova-crm-workspace-session-v2";
 const LEGACY_FOLLOWUP_KEY = "nova-crm-followup-delta-v1";
 
+export type FollowupEmailSchedulePatch = {
+  scheduledEmailId: string;
+  emailScheduledAt: string;
+};
+
 export type FollowupSessionDelta = {
   extras: Followup[];
   completion: Record<string, string | null>;
   /** followupId → pausedAt ISO, or null to clear */
   paused: Record<string, string | null>;
+  /** followupId → schedule link, or null to clear */
+  emailSchedule: Record<string, FollowupEmailSchedulePatch | null>;
 };
 
 export type FollowupPlanSessionDelta = {
@@ -60,7 +67,7 @@ export type WorkspaceSessionV2 = {
 
 export function emptyWorkspaceSession(): WorkspaceSessionV2 {
   return {
-    followups: { extras: [], completion: {}, paused: {} },
+    followups: { extras: [], completion: {}, paused: {}, emailSchedule: {} },
     followupPlans: { extras: [], patches: {} },
     leadTasks: { extras: [], completion: {} },
     notes: { added: [], removedIds: [], updates: {} },
@@ -80,6 +87,7 @@ function mergeFollowup(
   f: Followup,
   completion: Record<string, string | null>,
   paused: Record<string, string | null>,
+  emailSchedule: Record<string, FollowupEmailSchedulePatch | null>,
 ): Followup {
   let next = f;
   if (Object.prototype.hasOwnProperty.call(completion, f.id)) {
@@ -89,6 +97,17 @@ function mergeFollowup(
   if (Object.prototype.hasOwnProperty.call(paused, f.id)) {
     const p = paused[f.id];
     next = p === null ? { ...next, pausedAt: undefined } : { ...next, pausedAt: p };
+  }
+  if (Object.prototype.hasOwnProperty.call(emailSchedule, f.id)) {
+    const s = emailSchedule[f.id];
+    next =
+      s === null
+        ? { ...next, scheduledEmailId: undefined, emailScheduledAt: undefined }
+        : {
+            ...next,
+            scheduledEmailId: s.scheduledEmailId,
+            emailScheduledAt: s.emailScheduledAt,
+          };
   }
   return next;
 }
@@ -127,8 +146,9 @@ export function readWorkspaceSession(): WorkspaceSessionV2 {
                 extras: parsed.extras,
                 completion: parsed.completion,
                 paused: {},
+                emailSchedule: {},
               }
-            : { extras: [], completion: {}, paused: {} },
+            : { extras: [], completion: {}, paused: {}, emailSchedule: {} },
         followupPlans: { extras: [], patches: {} },
         leadTasks: { extras: [], completion: {} },
       };
@@ -153,6 +173,10 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
           : {},
       paused:
         followupsRaw?.paused && typeof followupsRaw.paused === "object" ? followupsRaw.paused : {},
+      emailSchedule:
+        followupsRaw?.emailSchedule && typeof followupsRaw.emailSchedule === "object"
+          ? followupsRaw.emailSchedule
+          : {},
     },
     followupPlans: {
       extras: Array.isArray(parsed.followupPlans?.extras) ? parsed.followupPlans!.extras : [],
@@ -309,7 +333,14 @@ export function mergeSessionIntoSnapshot(
 
   const mergedBaseFollowups = base.followups
     .filter((f) => !f.leadId || visibleLeadIds.has(f.leadId))
-    .map((f) => mergeFollowup(f, session.followups.completion, session.followups.paused));
+    .map((f) =>
+      mergeFollowup(
+        f,
+        session.followups.completion,
+        session.followups.paused,
+        session.followups.emailSchedule,
+      ),
+    );
   const baseFollowupIds = new Set(mergedBaseFollowups.map((f) => f.id));
   const mergedExtras = session.followups.extras
     .filter(
@@ -319,7 +350,14 @@ export function mergeSessionIntoSnapshot(
           (f.leadId != null && visibleLeadIds.has(f.leadId)) ||
           (f.dealId != null && visibleDealIds.has(f.dealId))),
     )
-    .map((f) => mergeFollowup(f, session.followups.completion, session.followups.paused));
+    .map((f) =>
+      mergeFollowup(
+        f,
+        session.followups.completion,
+        session.followups.paused,
+        session.followups.emailSchedule,
+      ),
+    );
   const followups = [...mergedBaseFollowups, ...mergedExtras];
 
   const mergedBasePlans = (base.followupPlans ?? [])

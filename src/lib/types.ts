@@ -603,6 +603,10 @@ export interface Followup {
   ownerId: string;
   priority: LeadPriority;
   auto: boolean;
+  /** Queued outbound email id (`scheduledEmails` doc) while pending send. */
+  scheduledEmailId?: string;
+  /** When the linked scheduled email is set to send. */
+  emailScheduledAt?: ISODate;
 }
 
 /** Assigned work between teammates (review, email, etc.). Optional lead context + visibility. */

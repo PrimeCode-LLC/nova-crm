@@ -1,4 +1,5 @@
 import type { DocumentReference } from "firebase-admin/firestore";
+import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import type { ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
@@ -58,6 +59,12 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     createdAt: String(data.createdAt ?? ""),
     sentAt: data.sentAt ? String(data.sentAt) : undefined,
     error: data.error ? String(data.error) : undefined,
+    followupId:
+      typeof data.followupId === "string" && data.followupId.trim()
+        ? data.followupId.trim()
+        : undefined,
+    leadId:
+      typeof data.leadId === "string" && data.leadId.trim() ? data.leadId.trim() : undefined,
   };
 }
 
@@ -101,6 +108,8 @@ export async function createScheduledEmailServer(input: {
   html: string;
   attachments?: unknown;
   scheduledAt: string;
+  followupId?: string;
+  leadId?: string;
 }): Promise<{ ok: true; id: string } | { error: string }> {
   const ref = scheduledRef(input.organizationId, input.uid, `sch-${crypto.randomUUID()}`);
   if (!ref) return { error: "Database not configured" };
@@ -117,6 +126,8 @@ export async function createScheduledEmailServer(input: {
   if ("error" in parsedAttachments) return { error: parsedAttachments.error };
 
   const now = new Date().toISOString();
+  const followupId = input.followupId?.trim() || "";
+  const leadId = input.leadId?.trim() || "";
   await ref.set({
     organizationId: input.organizationId,
     uid: input.uid,
@@ -135,6 +146,8 @@ export async function createScheduledEmailServer(input: {
     status: "pending",
     createdAt: now,
     updatedAt: now,
+    ...(followupId ? { followupId } : {}),
+    ...(leadId ? { leadId } : {}),
   });
 
   return { ok: true, id: ref.id };
@@ -229,6 +242,22 @@ async function sendScheduledDoc(
       updatedAt: now,
       error: null,
     });
+    const followupId =
+      typeof data.followupId === "string" ? data.followupId.trim() : "";
+    if (followupId) {
+      try {
+        const db = getAdminDb();
+        if (db) {
+          await db.collection(COLLECTIONS.followups).doc(followupId).update({
+            scheduledEmailId: FieldValue.delete(),
+            emailScheduledAt: FieldValue.delete(),
+            updatedAt: now,
+          });
+        }
+      } catch {
+        /* Follow-up may already be deleted; send still succeeded. */
+      }
+    }
     return "sent";
   }
 

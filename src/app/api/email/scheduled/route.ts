@@ -94,6 +94,8 @@ export async function POST(req: Request) {
     html,
     attachments: body.attachments,
     scheduledAt,
+    followupId: String(body.followupId ?? "").trim() || undefined,
+    leadId: String(body.leadId ?? "").trim() || undefined,
   });
 
   if ("error" in result) {

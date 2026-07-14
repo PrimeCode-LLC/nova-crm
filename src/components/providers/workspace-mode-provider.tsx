@@ -61,6 +61,7 @@ import { persistLeadDeleteClient } from "@/lib/firestore/persist-lead-delete-cli
 import {
   persistFollowupCreate,
   persistFollowupDelete,
+  persistFollowupEmailSchedule,
   persistFollowupSetCompleted,
   persistFollowupSetPaused,
   persistFollowupPlanCreate,
@@ -146,6 +147,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addFollowup: (f: Followup) => void;
     createFollowupPlanWithFollowups: (plan: FollowupPlan, followups: Followup[]) => void;
     setFollowupCompleted: (id: string, completed: boolean) => void;
+    setFollowupEmailSchedule: (
+      id: string,
+      schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+    ) => void;
+    clearFollowupEmailSchedule: (id: string) => void;
     removeFollowup: (id: string) => void;
     pauseFollowupPlanForReply: (input: {
       planId: string;
@@ -873,6 +879,48 @@ export function WorkspaceModeProvider({
       });
     },
     [mode, userDoc?.organizationId],
+  );
+
+  const setFollowupEmailSchedule = React.useCallback(
+    (
+      id: string,
+      schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+    ) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupEmailSchedule(db, id, schedule);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update email schedule", { description: msg });
+          }
+        })();
+      }
+      // Live mode relies on Firestore listeners; session overlay would re-apply after cron clears.
+      if (mode !== "live") {
+        setSessionV2((s) => ({
+          ...s,
+          followups: {
+            ...s.followups,
+            emailSchedule: {
+              ...s.followups.emailSchedule,
+              [id]: schedule,
+            },
+          },
+        }));
+      }
+    },
+    [mode, userDoc?.organizationId],
+  );
+
+  const clearFollowupEmailSchedule = React.useCallback(
+    (id: string) => {
+      setFollowupEmailSchedule(id, null);
+    },
+    [setFollowupEmailSchedule],
   );
 
   const removeFollowup = React.useCallback(
@@ -1780,6 +1828,8 @@ export function WorkspaceModeProvider({
       addFollowup,
       createFollowupPlanWithFollowups,
       setFollowupCompleted,
+      setFollowupEmailSchedule,
+      clearFollowupEmailSchedule,
       removeFollowup,
       pauseFollowupPlanForReply,
       supersedeFollowupPlan,
@@ -1842,6 +1892,8 @@ export function WorkspaceModeProvider({
     addFollowup,
     createFollowupPlanWithFollowups,
     setFollowupCompleted,
+    setFollowupEmailSchedule,
+    clearFollowupEmailSchedule,
     removeFollowup,
     pauseFollowupPlanForReply,
     supersedeFollowupPlan,

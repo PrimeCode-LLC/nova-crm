@@ -266,6 +266,13 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     planId: typeof raw.planId === "string" ? raw.planId : undefined,
     aiGenerated: Boolean(raw.aiGenerated),
     pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
+    scheduledEmailId:
+      typeof raw.scheduledEmailId === "string" && raw.scheduledEmailId.trim()
+        ? raw.scheduledEmailId.trim()
+        : undefined,
+    emailScheduledAt: raw.emailScheduledAt
+      ? firestoreValueToIso(raw.emailScheduledAt)
+      : undefined,
   };
 }
 

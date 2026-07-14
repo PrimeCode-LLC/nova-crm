@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -36,10 +37,12 @@ import {
   type LeadFollowupAiContext,
 } from "@/components/ai/suggest-followups-dialog";
 import { FollowupPlanPausedBanner } from "@/components/leads/followup-plan-paused-banner";
+import { ScheduleFollowupEmailDialog } from "@/components/leads/schedule-followup-email-dialog";
 import { getPausedFollowupPlanForLead, mergeFollowupPlans } from "@/lib/followup-plans";
 import type { FollowupPlan } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { useEmailAccountStore } from "@/stores/email-account-store";
 import { toast } from "sonner";
 
 function channelBadgeLabel(channel: Followup["channel"]): string | null {
@@ -85,15 +88,22 @@ function FollowupRow({
   onComplete,
   onDelete,
   canDelete,
+  onSchedule,
+  onCancelSchedule,
+  cancellingSchedule,
 }: {
   f: Followup;
   overdue: boolean;
   onComplete: (done: boolean) => void;
   onDelete: () => void;
   canDelete: boolean;
+  onSchedule: () => void;
+  onCancelSchedule: () => void;
+  cancellingSchedule: boolean;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const chLabel = channelBadgeLabel(f.channel);
+  const isScheduled = Boolean(f.scheduledEmailId && f.emailScheduledAt);
 
   return (
     <li
@@ -129,6 +139,15 @@ function FollowupRow({
             {f.pausedAt && (
               <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-400">
                 Paused
+              </Badge>
+            )}
+            {isScheduled && (
+              <Badge variant="outline" className="text-[10px] gap-1 border-sky-500/40 text-sky-700 dark:text-sky-400">
+                <CalendarClock className="h-2.5 w-2.5" />
+                Scheduled
+                {f.emailScheduledAt
+                  ? ` ${format(new Date(f.emailScheduledAt), "MMM d, h:mm a")}`
+                  : ""}
               </Badge>
             )}
             {f.auto && !f.aiGenerated && (
@@ -194,7 +213,31 @@ function FollowupRow({
           <pre className="text-xs whitespace-pre-wrap font-mono text-foreground/90 max-h-40 overflow-y-auto">
             {f.messageBody}
           </pre>
-          <CopyBodyButton text={f.messageBody} />
+          <div className="flex flex-wrap items-center gap-2">
+            <CopyBodyButton text={f.messageBody} />
+            {isScheduled ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={cancellingSchedule}
+                onClick={onCancelSchedule}
+              >
+                {cancellingSchedule ? "Cancelling…" : "Cancel schedule"}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={onSchedule}
+              >
+                <CalendarClock className="h-3 w-3" /> Schedule
+              </Button>
+            )}
+          </div>
         </div>
       )}
     </li>
@@ -215,11 +258,19 @@ export function LeadFollowups({
   const [regeneratePlan, setRegeneratePlan] = React.useState<FollowupPlan | undefined>();
   const [dismissedPlanId, setDismissedPlanId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
+  const [scheduleTarget, setScheduleTarget] = React.useState<Followup | null>(null);
+  const [cancellingId, setCancellingId] = React.useState<string | null>(null);
+  /** Live optimistic schedule chip until Firestore listener catches up (or clears after send). */
+  const [optimisticSchedule, setOptimisticSchedule] = React.useState<
+    Record<string, { scheduledEmailId: string; emailScheduledAt: string } | null>
+  >({});
   const {
     addFollowup,
     createFollowupPlanWithFollowups,
     supersedeFollowupPlan,
     setFollowupCompleted,
+    setFollowupEmailSchedule,
+    clearFollowupEmailSchedule,
     removeFollowup,
     currentUserId,
     leads,
@@ -227,6 +278,9 @@ export function LeadFollowups({
     isDemo,
     followupPlans,
   } = useWorkspace();
+
+  const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
+  const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
 
   const plans = React.useMemo(
     () => mergeFollowupPlans(followupPlans, followups),
@@ -239,8 +293,47 @@ export function LeadFollowups({
   const showPausedBanner =
     pausedPlan && pausedPlan.id !== dismissedPlanId && !regeneratePlan;
 
-  const open = followups.filter((f) => !f.completedAt);
-  const done = followups.filter((f) => f.completedAt);
+  const displayFollowups = React.useMemo(() => {
+    return followups.map((f) => {
+      if (!Object.prototype.hasOwnProperty.call(optimisticSchedule, f.id)) return f;
+      const o = optimisticSchedule[f.id];
+      if (o === null) {
+        return { ...f, scheduledEmailId: undefined, emailScheduledAt: undefined };
+      }
+      return {
+        ...f,
+        scheduledEmailId: o.scheduledEmailId,
+        emailScheduledAt: o.emailScheduledAt,
+      };
+    });
+  }, [followups, optimisticSchedule]);
+
+  React.useEffect(() => {
+    setOptimisticSchedule((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      for (const id of Object.keys(prev)) {
+        const o = prev[id];
+        const f = followups.find((x) => x.id === id);
+        if (!f) continue;
+        if (o === null && !f.scheduledEmailId) {
+          delete next[id];
+          changed = true;
+        } else if (
+          o &&
+          f.scheduledEmailId === o.scheduledEmailId &&
+          f.emailScheduledAt === o.emailScheduledAt
+        ) {
+          delete next[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [followups]);
+
+  const open = displayFollowups.filter((f) => !f.completedAt);
+  const done = displayFollowups.filter((f) => f.completedAt);
 
   const canDelete =
     !isDemo && viewerHasElevatedWorkspaceRole(users.find((u) => u.id === currentUserId));
@@ -255,6 +348,33 @@ export function LeadFollowups({
       followups,
       tasks: [],
     } satisfies LeadFollowupAiContext);
+
+  // Demo cleanup: clear schedule link once the queued email is no longer pending.
+  React.useEffect(() => {
+    if (!isDemo) return;
+    for (const f of displayFollowups) {
+      if (!f.scheduledEmailId) continue;
+      const row = scheduledEmails.find((s) => s.id === f.scheduledEmailId);
+      if (!row || row.status === "pending") continue;
+      clearFollowupEmailSchedule(f.id);
+      setOptimisticSchedule((prev) => {
+        if (!Object.prototype.hasOwnProperty.call(prev, f.id)) return prev;
+        const next = { ...prev };
+        delete next[f.id];
+        return next;
+      });
+    }
+  }, [isDemo, displayFollowups, scheduledEmails, clearFollowupEmailSchedule]);
+
+  function applyScheduleOptimistic(
+    id: string,
+    schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+  ) {
+    setFollowupEmailSchedule(id, schedule);
+    if (!isDemo) {
+      setOptimisticSchedule((prev) => ({ ...prev, [id]: schedule }));
+    }
+  }
 
   function confirmDelete() {
     if (!deleteTarget) return;
@@ -275,6 +395,33 @@ export function LeadFollowups({
   function openSuggest(regenerate?: FollowupPlan) {
     setRegeneratePlan(regenerate);
     setSuggestOpen(true);
+  }
+
+  async function handleCancelSchedule(f: Followup) {
+    if (!f.scheduledEmailId) return;
+    setCancellingId(f.id);
+    try {
+      if (isDemo) {
+        cancelScheduled(f.scheduledEmailId);
+        applyScheduleOptimistic(f.id, null);
+        toast.success("Schedule cancelled");
+        return;
+      }
+      const res = await fetch(`/api/email/scheduled/${encodeURIComponent(f.scheduledEmailId)}`, {
+        method: "DELETE",
+      });
+      const data = (await res.json()) as { ok?: boolean; error?: string };
+      if (!data.ok) {
+        toast.error(data.error ?? "Could not cancel scheduled email");
+        return;
+      }
+      applyScheduleOptimistic(f.id, null);
+      toast.success("Schedule cancelled");
+    } catch {
+      toast.error("Could not reach the server");
+    } finally {
+      setCancellingId(null);
+    }
   }
 
   return (
@@ -327,6 +474,18 @@ export function LeadFollowups({
         onCreatePlanWithFollowups={handleCreatePlan}
       />
 
+      <ScheduleFollowupEmailDialog
+        open={scheduleTarget != null}
+        onOpenChange={(o) => {
+          if (!o) setScheduleTarget(null);
+        }}
+        followup={scheduleTarget}
+        lead={lead}
+        onScheduled={(followupId, schedule) => {
+          applyScheduleOptimistic(followupId, schedule);
+        }}
+      />
+
       <ul className="space-y-2">
         {open.map((f) => {
           const due = new Date(f.dueAt);
@@ -339,6 +498,9 @@ export function LeadFollowups({
               onComplete={(done) => setFollowupCompleted(f.id, done)}
               onDelete={() => setDeleteTarget(f)}
               canDelete={canDelete}
+              onSchedule={() => setScheduleTarget(f)}
+              onCancelSchedule={() => void handleCancelSchedule(f)}
+              cancellingSchedule={cancellingId === f.id}
             />
           );
         })}

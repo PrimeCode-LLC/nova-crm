@@ -124,6 +124,9 @@ export interface ScheduledEmail {
   createdAt: string;
   sentAt?: string;
   error?: string;
+  /** When created from a lead follow-up, link back for UI / cron cleanup. */
+  followupId?: string;
+  leadId?: string;
 }
 
 /** Message loaded from the mailbox via IMAP (server round-trip). */
