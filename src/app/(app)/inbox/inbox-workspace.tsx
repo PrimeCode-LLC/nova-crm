@@ -133,7 +133,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
+import { appendMailDataOwnerParam, resolveMailApiForUserUid } from "@/lib/email/mail-data-owner-query";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
 import {
@@ -481,6 +481,15 @@ export default function InboxWorkspace() {
   const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
   const inboxWriteDisabled = useEmailAccountStore((s) => s.inboxWriteDisabled);
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
+  const mailApiForUid = React.useMemo(
+    () =>
+      resolveMailApiForUserUid({
+        mailViewAsUid,
+        activeMailboxDataOwnerUid: account.dataOwnerUid,
+        selfUid: currentUserId,
+      }),
+    [mailViewAsUid, account.dataOwnerUid, currentUserId],
+  );
 
   const inboxReadOnly = !isDemo && inboxWriteDisabled;
 
@@ -688,7 +697,7 @@ export default function InboxWorkspace() {
           const need = thread.messages.filter((m) => m.bodySynced === false).map((m) => m.uid);
           if (need.length === 0) return;
           const part = need.slice(0, CHUNK);
-          const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailViewAsUid, currentUserId);
+          const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailApiForUid, currentUserId);
           const res = await fetch(url, {
             method: "POST",
             signal: ac.signal,
@@ -745,7 +754,7 @@ export default function InboxWorkspace() {
     account.imap.secure,
     account.imap.user,
     account.imap.password,
-    mailViewAsUid,
+    mailViewAsUid, mailApiForUid,
     currentUserId,
   ]);
 
@@ -786,7 +795,7 @@ export default function InboxWorkspace() {
         setTrashLoading(true);
       }
       try {
-        const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailViewAsUid, currentUserId);
+        const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailApiForUid, currentUserId);
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -892,7 +901,7 @@ export default function InboxWorkspace() {
       reconcileInboundHeadFromSync,
       reconcileTrashHeadFromSync,
       reconcileSentHeadFromSync,
-      mailViewAsUid,
+      mailViewAsUid, mailApiForUid,
       currentUserId,
       emailServerHydrated,
     ],
@@ -911,7 +920,7 @@ export default function InboxWorkspace() {
 
     setSentLoadingMore(true);
     try {
-      const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -963,7 +972,7 @@ export default function InboxWorkspace() {
     sentForMailbox,
     imapSentTotal,
     appendSentServer,
-    mailViewAsUid,
+    mailViewAsUid, mailApiForUid,
     currentUserId,
   ]);
 
@@ -976,7 +985,7 @@ export default function InboxWorkspace() {
 
     setInboundLoadingMore(true);
     try {
-      const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1036,7 +1045,7 @@ export default function InboxWorkspace() {
     inboundLoadingMore,
     imapMailboxTotal,
     appendInbound,
-    mailViewAsUid,
+    mailViewAsUid, mailApiForUid,
     currentUserId,
   ]);
 
@@ -1077,7 +1086,7 @@ export default function InboxWorkspace() {
     emailServerHydrated,
     mailFolder,
     account.id,
-    mailViewAsUid,
+    mailViewAsUid, mailApiForUid,
     currentUserId,
     fetchTrashMail,
   ]);
@@ -1110,7 +1119,7 @@ export default function InboxWorkspace() {
     fetchImapListFolder,
     setInbound,
     setTrashInbound,
-    mailViewAsUid,
+    mailViewAsUid, mailApiForUid,
     currentUserId,
   ]);
 
@@ -1130,7 +1139,7 @@ export default function InboxWorkspace() {
 
     void (async () => {
       try {
-        const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailViewAsUid, currentUserId);
+        const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailApiForUid, currentUserId);
         const res = await fetch(url, {
           method: "POST",
           signal: ac.signal,
@@ -1190,7 +1199,7 @@ export default function InboxWorkspace() {
     account.imap.secure,
     account.imap.user,
     account.imap.password,
-    mailViewAsUid,
+    mailViewAsUid, mailApiForUid,
     currentUserId,
   ]);
 
@@ -1225,7 +1234,7 @@ export default function InboxWorkspace() {
     if (isDemo) return;
     setScheduledLoading(true);
     try {
-      const url = appendMailDataOwnerParam("/api/email/scheduled", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/scheduled", mailApiForUid, currentUserId);
       const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
       const data = (await res.json()) as { ok?: boolean; items?: ScheduledEmail[] };
       if (res.ok && data.ok && Array.isArray(data.items)) {
@@ -1236,12 +1245,12 @@ export default function InboxWorkspace() {
     } finally {
       setScheduledLoading(false);
     }
-  }, [isDemo, mailViewAsUid, currentUserId, setScheduled]);
+  }, [isDemo, mailViewAsUid, mailApiForUid, currentUserId, setScheduled]);
 
   React.useEffect(() => {
     if (isDemo || !emailServerHydrated) return;
     void fetchScheduledEmails();
-  }, [isDemo, emailServerHydrated, fetchScheduledEmails, mailViewAsUid]);
+  }, [isDemo, emailServerHydrated, fetchScheduledEmails, mailViewAsUid, mailApiForUid]);
 
   React.useEffect(() => {
     if (!isDemo) return;
@@ -1352,7 +1361,7 @@ export default function InboxWorkspace() {
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const url = appendMailDataOwnerParam("/api/email/send", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/send", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1498,7 +1507,7 @@ export default function InboxWorkspace() {
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const url = appendMailDataOwnerParam("/api/email/scheduled", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/scheduled", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1554,8 +1563,7 @@ export default function InboxWorkspace() {
     }
     try {
       const url = appendMailDataOwnerParam(
-        `/api/email/scheduled/${encodeURIComponent(id)}`,
-        mailViewAsUid,
+        `/api/email/scheduled/${encodeURIComponent(id)}`, mailApiForUid,
         currentUserId,
       );
       const res = await fetch(url, { method: "DELETE", credentials: "same-origin" });
@@ -1666,7 +1674,7 @@ export default function InboxWorkspace() {
     const CHUNK = 60;
     for (let i = 0; i < uids.length; i += CHUNK) {
       const part = uids.slice(i, i + CHUNK);
-      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1695,7 +1703,7 @@ export default function InboxWorkspace() {
     const CHUNK = 60;
     for (let i = 0; i < uids.length; i += CHUNK) {
       const part = uids.slice(i, i + CHUNK);
-      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1724,7 +1732,7 @@ export default function InboxWorkspace() {
     const CHUNK = 60;
     for (let i = 0; i < uids.length; i += CHUNK) {
       const part = uids.slice(i, i + CHUNK);
-      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2549,7 +2557,7 @@ export default function InboxWorkspace() {
       try {
         for (let i = 0; i < uids.length; i += CHUNK) {
           const part = uids.slice(i, i + CHUNK);
-          const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailViewAsUid, currentUserId);
+          const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailApiForUid, currentUserId);
           const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2587,7 +2595,7 @@ export default function InboxWorkspace() {
       patchTrashSeen,
       isDemo,
       inboxReadOnly,
-      mailViewAsUid,
+      mailViewAsUid, mailApiForUid,
       currentUserId,
       fetchImapListFolder,
     ],

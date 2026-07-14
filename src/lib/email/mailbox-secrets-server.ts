@@ -2,14 +2,26 @@ import crypto from "crypto";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 
-type MailboxSecretsInput = {
+export type MailboxSecretsInput = {
   smtp: { user: string; password: string };
   imap: { user: string; password: string };
+  googleOAuth?: {
+    refreshToken: string;
+    accessToken: string;
+    tokenExpiresAt: string;
+    accountEmail: string;
+  } | null;
 };
 
-type MailboxSecretsStored = {
+export type MailboxSecretsStored = {
   smtp: { user: string; password: string };
   imap: { user: string; password: string };
+  googleOAuth?: {
+    refreshToken: string;
+    accessToken: string;
+    tokenExpiresAt: string;
+    accountEmail: string;
+  };
 };
 
 type EncryptedBlob = {
@@ -55,6 +67,16 @@ function sha256(input: string): string {
   return crypto.createHash("sha256").update(input).digest("hex");
 }
 
+function isEncryptedBlob(raw: unknown): raw is EncryptedBlob {
+  return (
+    typeof raw === "object" &&
+    raw !== null &&
+    typeof (raw as EncryptedBlob).iv === "string" &&
+    typeof (raw as EncryptedBlob).tag === "string" &&
+    typeof (raw as EncryptedBlob).value === "string"
+  );
+}
+
 function mailboxSecretDoc(orgId: string, uid: string, mailboxId: string) {
   const db = getAdminDb();
   if (!db) return null;
@@ -80,21 +102,79 @@ export async function upsertMailboxSecretsServer(input: {
   const ref = mailboxSecretDoc(input.organizationId, input.uid, input.mailboxId);
   if (!ref) return { error: "Database not configured" };
 
+  const payload: Record<string, unknown> = {
+    smtpUser: encryptValue(input.secrets.smtp.user, key),
+    smtpPassword: encryptValue(input.secrets.smtp.password, key),
+    imapUser: encryptValue(input.secrets.imap.user, key),
+    imapPassword: encryptValue(input.secrets.imap.password, key),
+    smtpUserHash: sha256(input.secrets.smtp.user),
+    smtpPasswordHash: sha256(input.secrets.smtp.password),
+    imapUserHash: sha256(input.secrets.imap.user),
+    imapPasswordHash: sha256(input.secrets.imap.password),
+    updatedAt: new Date().toISOString(),
+  };
+
+  if (input.secrets.googleOAuth === null) {
+    payload.googleRefreshToken = null;
+    payload.googleAccessToken = null;
+    payload.googleTokenExpiresAt = null;
+    payload.googleAccountEmail = null;
+  } else if (input.secrets.googleOAuth) {
+    const o = input.secrets.googleOAuth;
+    payload.googleRefreshToken = encryptValue(o.refreshToken, key);
+    payload.googleAccessToken = encryptValue(o.accessToken, key);
+    payload.googleTokenExpiresAt = o.tokenExpiresAt;
+    payload.googleAccountEmail = o.accountEmail;
+  }
+
+  await ref.set(payload, { merge: true });
+  return { ok: true };
+}
+
+/** Merge Google OAuth tokens without wiping SMTP/IMAP password secrets. */
+export async function upsertMailboxGoogleOAuthServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  googleOAuth: {
+    refreshToken: string;
+    accessToken: string;
+    tokenExpiresAt: string;
+    accountEmail: string;
+  };
+}): Promise<{ ok: true } | { error: string }> {
+  const key = getSecretsKey();
+  if (!key) {
+    return { error: "EMAIL_SECRETS_KEY_BASE64 is missing or invalid (must decode to 32 bytes)." };
+  }
+  const ref = mailboxSecretDoc(input.organizationId, input.uid, input.mailboxId);
+  if (!ref) return { error: "Database not configured" };
+
+  const existing = await getMailboxSecretsServer(input);
+  const email = input.googleOAuth.accountEmail.trim();
+  const smtpUser = existing?.smtp.user.trim() || email;
+  const imapUser = existing?.imap.user.trim() || email;
+  const smtpPassword = existing?.smtp.password ?? "";
+  const imapPassword = existing?.imap.password ?? "";
+
   await ref.set(
     {
-      smtpUser: encryptValue(input.secrets.smtp.user, key),
-      smtpPassword: encryptValue(input.secrets.smtp.password, key),
-      imapUser: encryptValue(input.secrets.imap.user, key),
-      imapPassword: encryptValue(input.secrets.imap.password, key),
-      smtpUserHash: sha256(input.secrets.smtp.user),
-      smtpPasswordHash: sha256(input.secrets.smtp.password),
-      imapUserHash: sha256(input.secrets.imap.user),
-      imapPasswordHash: sha256(input.secrets.imap.password),
+      smtpUser: encryptValue(smtpUser, key),
+      smtpPassword: encryptValue(smtpPassword, key),
+      imapUser: encryptValue(imapUser, key),
+      imapPassword: encryptValue(imapPassword, key),
+      smtpUserHash: sha256(smtpUser),
+      smtpPasswordHash: sha256(smtpPassword),
+      imapUserHash: sha256(imapUser),
+      imapPasswordHash: sha256(imapPassword),
+      googleRefreshToken: encryptValue(input.googleOAuth.refreshToken, key),
+      googleAccessToken: encryptValue(input.googleOAuth.accessToken, key),
+      googleTokenExpiresAt: input.googleOAuth.tokenExpiresAt,
+      googleAccountEmail: email,
       updatedAt: new Date().toISOString(),
     },
     { merge: true },
   );
-
   return { ok: true };
 }
 
@@ -122,17 +202,55 @@ export async function getMailboxSecretsServer(input: {
   if (!snap.exists) return null;
   const data = snap.data() as Record<string, unknown>;
   try {
-    return {
+    const stored: MailboxSecretsStored = {
       smtp: {
-        user: decryptValue(data.smtpUser as EncryptedBlob, key),
-        password: decryptValue(data.smtpPassword as EncryptedBlob, key),
+        user: isEncryptedBlob(data.smtpUser) ? decryptValue(data.smtpUser, key) : "",
+        password: isEncryptedBlob(data.smtpPassword)
+          ? decryptValue(data.smtpPassword, key)
+          : "",
       },
       imap: {
-        user: decryptValue(data.imapUser as EncryptedBlob, key),
-        password: decryptValue(data.imapPassword as EncryptedBlob, key),
+        user: isEncryptedBlob(data.imapUser) ? decryptValue(data.imapUser, key) : "",
+        password: isEncryptedBlob(data.imapPassword)
+          ? decryptValue(data.imapPassword, key)
+          : "",
       },
     };
+    if (
+      isEncryptedBlob(data.googleRefreshToken) &&
+      isEncryptedBlob(data.googleAccessToken) &&
+      typeof data.googleAccountEmail === "string"
+    ) {
+      stored.googleOAuth = {
+        refreshToken: decryptValue(data.googleRefreshToken, key),
+        accessToken: decryptValue(data.googleAccessToken, key),
+        tokenExpiresAt: String(data.googleTokenExpiresAt ?? ""),
+        accountEmail: data.googleAccountEmail.trim(),
+      };
+    }
+    return stored;
   } catch {
     return null;
   }
+}
+
+export async function patchMailboxGoogleAccessTokenServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  accessToken: string;
+  tokenExpiresAt: string;
+}): Promise<void> {
+  const key = getSecretsKey();
+  if (!key) return;
+  const ref = mailboxSecretDoc(input.organizationId, input.uid, input.mailboxId);
+  if (!ref) return;
+  await ref.set(
+    {
+      googleAccessToken: encryptValue(input.accessToken, key),
+      googleTokenExpiresAt: input.tokenExpiresAt,
+      updatedAt: new Date().toISOString(),
+    },
+    { merge: true },
+  );
 }

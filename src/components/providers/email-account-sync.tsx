@@ -69,7 +69,17 @@ export function EmailAccountSync() {
         }
         const mailboxes =
           data.mailboxes.length > 0
-            ? data.mailboxes
+            ? data.mailboxes.map((m) =>
+                defaultEmailMailboxSettings({
+                  ...m,
+                  smtp: m.smtp,
+                  imap: m.imap,
+                  assignedUserIds: m.assignedUserIds ?? [],
+                  dailySendLimit: m.dailySendLimit ?? null,
+                  connectionType: m.connectionType === "google_workspace" ? "google_workspace" : "custom",
+                  ...(m.dataOwnerUid ? { dataOwnerUid: m.dataOwnerUid } : {}),
+                }),
+              )
             : [defaultEmailMailboxSettings({ label: "Primary mailbox" })];
         const activeFromServer = (data.activeMailboxId ?? "").trim();
         const active =

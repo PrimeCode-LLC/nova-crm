@@ -11,7 +11,13 @@ function isSmtpConnectTimeout(err: unknown): boolean {
   return code === "ETIMEDOUT" || /connection timeout|socket timeout/i.test(msg);
 }
 
-type SmtpCred = { port: number; secure: boolean; user: string; pass: string };
+type SmtpCred = {
+  port: number;
+  secure: boolean;
+  user: string;
+  pass?: string;
+  accessToken?: string;
+};
 
 /**
  * Try SMTP connect + `fn`. If the TCP phase times out on an IPv4 literal, retry with the
@@ -56,6 +62,7 @@ export async function runWithSmtpTransporter<T>(
         secure: cred.secure,
         user: cred.user,
         pass: cred.pass,
+        accessToken: cred.accessToken,
         tlsServername: a.tlsServername,
       }),
     );

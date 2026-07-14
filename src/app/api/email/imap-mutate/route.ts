@@ -3,8 +3,8 @@ import { ImapFlow } from "imapflow";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
+import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";
 import { resolveTrashMailboxPath } from "@/lib/email/resolve-trash-mailbox";
 
 const MAX_UIDS_PER_REQUEST = 80;
@@ -24,11 +24,16 @@ export async function POST(req: Request) {
     if (!g.ok) return g.response;
 
     const forUser = new URL(req.url).searchParams.get("forUser");
+    const b = (await req.json()) as Record<string, unknown>;
+    const action = String(b.action ?? "").trim();
+    const imap = b.imap as Record<string, unknown> | undefined;
+    const mailboxId = String(b.mailboxId ?? "").trim();
     const resolved = await resolveMailboxDataOwnerUid({
       organizationId: g.ctx.session.organizationId,
       viewerUid: g.ctx.session.uid,
       viewerRole: g.ctx.role,
       forUserParam: forUser,
+      mailboxId,
     });
     if (!resolved.ok) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
@@ -43,11 +48,6 @@ export async function POST(req: Request) {
       );
     }
     const dataOwnerUid = resolved.dataOwnerUid;
-
-    const b = (await req.json()) as Record<string, unknown>;
-    const action = String(b.action ?? "").trim();
-    const imap = b.imap as Record<string, unknown> | undefined;
-    const mailboxId = String(b.mailboxId ?? "").trim();
     const uids = normalizeUids(b.uids);
 
     const validActions = new Set([
@@ -74,20 +74,17 @@ export async function POST(req: Request) {
     const host = normalizeMailHost(String(imap?.host ?? ""));
     const port = Number(imap?.port ?? 993);
     const secure = Boolean(imap?.secure);
-    let user = String(imap?.user ?? "").trim();
-    let pass = String(imap?.pass ?? "");
-    if (mailboxId) {
-      const secrets = await getMailboxSecretsServer({
-        organizationId: g.ctx.session.organizationId,
-        uid: dataOwnerUid,
-        mailboxId,
-      });
-      if (secrets) {
-        const fromVault = secrets.imap.user.trim();
-        if (fromVault) user = fromVault;
-        if (secrets.imap.password) pass = secrets.imap.password;
-      }
-    }
+    const auth = await resolveMailboxTransportAuthServer({
+      organizationId: g.ctx.session.organizationId,
+      uid: dataOwnerUid,
+      mailboxId,
+      fallbackUser: String(imap?.user ?? "").trim(),
+      fallbackPass: String(imap?.pass ?? ""),
+      prefer: "imap",
+    });
+    const user = auth.user;
+    const pass = auth.pass;
+    const accessToken = auth.accessToken;
 
     if (!host || !user) {
       return NextResponse.json(
@@ -95,9 +92,27 @@ export async function POST(req: Request) {
         { status: 400 },
       );
     }
+    if (!accessToken && !pass) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error:
+            "IMAP credentials missing. For Google Workspace, reconnect with Sign in with Google in Settings → Email.",
+        },
+        { status: 400 },
+      );
+    }
 
     const client = new ImapFlow(
-      imapFlowConnectionOptions({ host, port, secure, user, pass, purpose: "fetch" }),
+      imapFlowConnectionOptions({
+        host,
+        port,
+        secure,
+        user,
+        pass,
+        accessToken,
+        purpose: "fetch",
+      }),
     );
     client.on("error", () => undefined);
 

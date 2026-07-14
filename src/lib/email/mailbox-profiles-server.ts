@@ -1,6 +1,6 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
-import type { EmailMailboxSettings } from "@/lib/email-account-types";
+import type { EmailMailboxSettings, MailboxConnectionType } from "@/lib/email-account-types";
 import {
   type MailLabel,
   parseLabelsByMessageIdFromFirestore,
@@ -15,6 +15,8 @@ import {
   getMailboxSecretsServer,
   upsertMailboxSecretsServer,
 } from "@/lib/email/mailbox-secrets-server";
+import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
+import { withGoogleWorkspaceConnection } from "@/lib/email/mailbox-connection-presets";
 
 const META_COLLECTION = "emailAccountState";
 const META_DOC_ID = "default";
@@ -54,6 +56,22 @@ function metaRef(orgId: string, uid: string) {
   return root.collection(META_COLLECTION).doc(META_DOC_ID);
 }
 
+function parseConnectionType(raw: unknown): MailboxConnectionType {
+  return raw === "google_workspace" ? "google_workspace" : "custom";
+}
+
+function parseDailySendLimit(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function parseAssignedUserIds(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return [...new Set(raw.map((x) => String(x).trim()).filter(Boolean))];
+}
+
 function profileToFirestore(mb: EmailMailboxSettings): Record<string, unknown> {
   return {
     label: mb.label,
@@ -71,6 +89,9 @@ function profileToFirestore(mb: EmailMailboxSettings): Record<string, unknown> {
     syncIntervalMinutes: mb.syncIntervalMinutes,
     archiveOnSend: mb.archiveOnSend,
     readReceipts: mb.readReceipts,
+    connectionType: mb.connectionType === "google_workspace" ? "google_workspace" : "custom",
+    dailySendLimit: mb.dailySendLimit == null ? null : Math.floor(mb.dailySendLimit),
+    assignedUserIds: parseAssignedUserIds(mb.assignedUserIds),
     updatedAt: new Date().toISOString(),
   };
 }
@@ -78,13 +99,19 @@ function profileToFirestore(mb: EmailMailboxSettings): Record<string, unknown> {
 function firestoreToMailbox(
   mailboxId: string,
   data: Record<string, unknown>,
-  secrets: { smtp: { user: string; password: string }; imap: { user: string; password: string } } | null,
+  secrets: {
+    smtp: { user: string; password: string };
+    imap: { user: string; password: string };
+    googleOAuth?: { accountEmail: string };
+  } | null,
+  options?: { dataOwnerUid?: string; stripSecrets?: boolean },
 ): EmailMailboxSettings {
-  const smtpUser = secrets?.smtp.user ?? "";
-  const smtpPassword = secrets?.smtp.password ?? "";
-  const imapUser = secrets?.imap.user ?? "";
-  const imapPassword = secrets?.imap.password ?? "";
-  return {
+  const strip = Boolean(options?.stripSecrets);
+  const smtpUser = strip ? "" : (secrets?.smtp.user ?? "");
+  const smtpPassword = strip ? "" : (secrets?.smtp.password ?? "");
+  const imapUser = strip ? "" : (secrets?.imap.user ?? "");
+  const imapPassword = strip ? "" : (secrets?.imap.password ?? "");
+  const mailbox: EmailMailboxSettings = {
     id: mailboxId,
     label: String(data.label ?? "Mailbox"),
     enabled: Boolean(data.enabled),
@@ -109,7 +136,15 @@ function firestoreToMailbox(
     syncIntervalMinutes: Math.max(5, Number(data.syncIntervalMinutes ?? 15)),
     archiveOnSend: Boolean(data.archiveOnSend),
     readReceipts: Boolean(data.readReceipts),
+    connectionType: parseConnectionType(data.connectionType),
+    dailySendLimit: parseDailySendLimit(data.dailySendLimit),
+    assignedUserIds: parseAssignedUserIds(data.assignedUserIds),
+    googleAuthConnected: Boolean(secrets?.googleOAuth?.accountEmail),
   };
+  if (options?.dataOwnerUid) {
+    mailbox.dataOwnerUid = options.dataOwnerUid;
+  }
+  return mailbox;
 }
 
 export async function getEmailAccountMetaServer(input: {
@@ -212,6 +247,76 @@ export async function listMailboxesForMemberServer(input: {
   return out;
 }
 
+export async function getMailboxProfileServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+}): Promise<EmailMailboxSettings | null> {
+  const ref = mailboxProfileRef(input.organizationId, input.uid, input.mailboxId);
+  if (!ref) return null;
+  const snap = await ref.get();
+  if (!snap.exists) return null;
+  const secrets = await getMailboxSecretsServer(input);
+  return firestoreToMailbox(snap.id, snap.data() as Record<string, unknown>, secrets);
+}
+
+/** Mailboxes on other members where `assignedUserIds` includes the viewer (secrets stripped). */
+export async function listMailboxesAssignedToViewerServer(input: {
+  organizationId: string;
+  viewerUid: string;
+}): Promise<EmailMailboxSettings[]> {
+  const users = await listOrgUsersServer(input.organizationId);
+  const out: EmailMailboxSettings[] = [];
+  for (const u of users) {
+    if (!u.id || u.id === input.viewerUid) continue;
+    const root = memberRoot(input.organizationId, u.id);
+    if (!root) continue;
+    try {
+      const snap = await root
+        .collection("emailMailboxes")
+        .where("assignedUserIds", "array-contains", input.viewerUid)
+        .get();
+      for (const doc of snap.docs) {
+        const secrets = await getMailboxSecretsServer({
+          organizationId: input.organizationId,
+          uid: u.id,
+          mailboxId: doc.id,
+        });
+        out.push(
+          firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, secrets, {
+            dataOwnerUid: u.id,
+            stripSecrets: true,
+          }),
+        );
+      }
+    } catch {
+      // Older profiles without the indexable field — skip.
+    }
+  }
+  out.sort((a, b) => a.label.localeCompare(b.label));
+  return out;
+}
+
+/** True when the host has at least one mailbox assigned to the viewer. */
+export async function viewerHasAssignedMailboxOnHostServer(input: {
+  organizationId: string;
+  hostId: string;
+  viewerUid: string;
+}): Promise<boolean> {
+  const root = memberRoot(input.organizationId, input.hostId);
+  if (!root) return false;
+  try {
+    const snap = await root
+      .collection("emailMailboxes")
+      .where("assignedUserIds", "array-contains", input.viewerUid)
+      .limit(1)
+      .get();
+    return !snap.empty;
+  } catch {
+    return false;
+  }
+}
+
 export async function upsertMailboxProfileServer(input: {
   organizationId: string;
   uid: string;
@@ -229,16 +334,30 @@ export async function upsertMailboxWithSecretsMerged(input: {
   uid: string;
   mailbox: EmailMailboxSettings;
 }): Promise<{ ok: true } | { error: string }> {
+  let mailbox = input.mailbox;
+  if (mailbox.connectionType === "google_workspace") {
+    mailbox = withGoogleWorkspaceConnection(mailbox);
+  }
+
   const existing = await getMailboxSecretsServer({
     organizationId: input.organizationId,
     uid: input.uid,
-    mailboxId: input.mailbox.id,
+    mailboxId: mailbox.id,
   });
 
-  let smtpUser = input.mailbox.smtp.user.trim();
-  let smtpPassword = input.mailbox.smtp.password;
-  let imapUser = input.mailbox.imap.user.trim();
-  let imapPassword = input.mailbox.imap.password;
+  let smtpUser = mailbox.smtp.user.trim();
+  let smtpPassword = mailbox.smtp.password;
+  let imapUser = mailbox.imap.user.trim();
+  let imapPassword = mailbox.imap.password;
+
+  if (mailbox.connectionType === "google_workspace") {
+    const email = mailbox.emailAddress.trim();
+    if (email) {
+      smtpUser = email;
+      imapUser = email;
+    }
+    if (smtpPassword && !imapPassword) imapPassword = smtpPassword;
+  }
 
   if (existing) {
     if (!smtpUser) smtpUser = existing.smtp.user;
@@ -251,9 +370,9 @@ export async function upsertMailboxWithSecretsMerged(input: {
     organizationId: input.organizationId,
     uid: input.uid,
     mailbox: {
-      ...input.mailbox,
-      smtp: { ...input.mailbox.smtp, user: smtpUser, password: "" },
-      imap: { ...input.mailbox.imap, user: imapUser, password: "" },
+      ...mailbox,
+      smtp: { ...mailbox.smtp, user: smtpUser, password: "" },
+      imap: { ...mailbox.imap, user: imapUser, password: "" },
     },
   });
   if ("error" in profileResult) return profileResult;
@@ -261,7 +380,7 @@ export async function upsertMailboxWithSecretsMerged(input: {
   const secretsResult = await upsertMailboxSecretsServer({
     organizationId: input.organizationId,
     uid: input.uid,
-    mailboxId: input.mailbox.id,
+    mailboxId: mailbox.id,
     secrets: {
       smtp: { user: smtpUser, password: smtpPassword },
       imap: { user: imapUser, password: imapPassword },

@@ -2,9 +2,14 @@ import { NextResponse } from "next/server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
 import { parseOutboundAttachments } from "@/lib/email/outbound-attachments";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
+import {
+  assertMailboxDailySendQuotaServer,
+  incrementMailboxSendCountServer,
+} from "@/lib/email/mailbox-send-quota-server";
 
 export async function POST(req: Request) {
   try {
@@ -12,11 +17,20 @@ export async function POST(req: Request) {
     if (!g.ok) return g.response;
 
     const forUser = new URL(req.url).searchParams.get("forUser");
+    let b: Record<string, unknown>;
+    try {
+      b = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return NextResponse.json({ ok: false, error: "Invalid JSON" }, { status: 400 });
+    }
+
+    const mailboxId = String(b.mailboxId ?? "").trim();
     const resolved = await resolveMailboxDataOwnerUid({
       organizationId: g.ctx.session.organizationId,
       viewerUid: g.ctx.session.uid,
       viewerRole: g.ctx.role,
       forUserParam: forUser,
+      mailboxId,
     });
     if (!resolved.ok) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
@@ -32,10 +46,8 @@ export async function POST(req: Request) {
     }
     const dataOwnerUid = resolved.dataOwnerUid;
 
-    const b = (await req.json()) as Record<string, unknown>;
     const smtp = b.smtp as Record<string, unknown> | undefined;
     const imap = b.imap as Record<string, unknown> | undefined;
-    const mailboxId = String(b.mailboxId ?? "").trim();
     const host = normalizeMailHost(String(smtp?.host ?? ""));
     const port = Number(smtp?.port ?? 587);
     const secure = Boolean(smtp?.secure);
@@ -66,6 +78,26 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: parsedAttachments.error }, { status: 400 });
     }
 
+    if (mailboxId) {
+      const profile = await getMailboxProfileServer({
+        organizationId: g.ctx.session.organizationId,
+        uid: dataOwnerUid,
+        mailboxId,
+      });
+      const quota = await assertMailboxDailySendQuotaServer({
+        organizationId: g.ctx.session.organizationId,
+        uid: dataOwnerUid,
+        mailboxId,
+        dailySendLimit: profile?.dailySendLimit ?? null,
+      });
+      if (!quota.ok) {
+        return NextResponse.json(
+          { ok: false, error: quota.error, used: quota.used, limit: quota.limit },
+          { status: quota.status },
+        );
+      }
+    }
+
     const imapHost = normalizeMailHost(String(imap?.host ?? ""));
     const result = await sendOutboundMailServer({
       organizationId: g.ctx.session.organizationId,
@@ -94,6 +126,14 @@ export async function POST(req: Request) {
 
     if (!result.ok) {
       return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
+    }
+
+    if (mailboxId) {
+      await incrementMailboxSendCountServer({
+        organizationId: g.ctx.session.organizationId,
+        uid: dataOwnerUid,
+        mailboxId,
+      });
     }
 
     return NextResponse.json({ ok: true, sentSavedToMailbox: result.sentSavedToMailbox });

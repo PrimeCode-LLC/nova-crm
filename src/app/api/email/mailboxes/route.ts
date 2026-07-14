@@ -4,10 +4,12 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   deleteMailboxForMemberServer,
   getEmailAccountMetaServer,
+  listMailboxesAssignedToViewerServer,
   listMailboxesForMemberServer,
   upsertMailboxWithSecretsMerged,
 } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, mailboxReadOnlyForClient } from "@/lib/email/mailbox-data-owner-server";
+import { getMailboxSendCountForDayServer, utcSendDayKey } from "@/lib/email/mailbox-send-quota-server";
 
 const mailboxSchema = z.object({
   id: z.string().min(1),
@@ -34,6 +36,10 @@ const mailboxSchema = z.object({
   syncIntervalMinutes: z.number(),
   archiveOnSend: z.boolean(),
   readReceipts: z.boolean(),
+  connectionType: z.enum(["google_workspace", "custom"]).optional().default("custom"),
+  dailySendLimit: z.number().int().positive().nullable().optional().default(null),
+  assignedUserIds: z.array(z.string()).optional().default([]),
+  dataOwnerUid: z.string().optional(),
 });
 
 export async function GET(req: Request) {
@@ -51,12 +57,44 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
   }
 
-  const { organizationId } = g.ctx.session;
+  const { organizationId, uid: viewerUid } = g.ctx.session;
   const { dataOwnerUid } = resolved;
-  const [mailboxes, meta] = await Promise.all([
+  const [ownMailboxes, meta] = await Promise.all([
     listMailboxesForMemberServer({ organizationId, uid: dataOwnerUid }),
     getEmailAccountMetaServer({ organizationId, uid: dataOwnerUid }),
   ]);
+
+  let mailboxes = ownMailboxes;
+  /** Only merge per-mailbox assignments when loading the viewer's own account (not view-as). */
+  if (dataOwnerUid === viewerUid && resolved.viewerIsMailboxOwner) {
+    const assigned = await listMailboxesAssignedToViewerServer({
+      organizationId,
+      viewerUid,
+    });
+    if (assigned.length > 0) {
+      const ownIds = new Set(ownMailboxes.map((m) => m.id));
+      mailboxes = [...ownMailboxes, ...assigned.filter((m) => !ownIds.has(m.id))];
+    }
+  }
+
+  const dayKey = utcSendDayKey();
+  const sendUsageByMailboxId: Record<string, { dayKey: string; used: number; limit: number | null }> = {};
+  await Promise.all(
+    mailboxes.map(async (mb) => {
+      const ownerUid = mb.dataOwnerUid?.trim() || dataOwnerUid;
+      const used = await getMailboxSendCountForDayServer({
+        organizationId,
+        uid: ownerUid,
+        mailboxId: mb.id,
+        dayKey,
+      });
+      sendUsageByMailboxId[mb.id] = {
+        dayKey,
+        used,
+        limit: mb.dailySendLimit,
+      };
+    }),
+  );
 
   return NextResponse.json({
     ok: true,
@@ -64,6 +102,7 @@ export async function GET(req: Request) {
     mailboxReadOnly: mailboxReadOnlyForClient(resolved),
     mailboxAccountReadOnly: !resolved.viewerIsMailboxOwner,
     mailboxes,
+    sendUsageByMailboxId,
     activeMailboxId: meta.activeMailboxId,
     linkedLeadByMessageId: meta.linkedLeadByMessageId,
     blockedSenderDomains: meta.blockedSenderDomains,
@@ -90,10 +129,16 @@ export async function PATCH(req: Request) {
   }
 
   const { organizationId, uid } = g.ctx.session;
+  const { dataOwnerUid: _ignore, ...mailboxRest } = parsed.data.mailbox;
   const result = await upsertMailboxWithSecretsMerged({
     organizationId,
     uid,
-    mailbox: parsed.data.mailbox,
+    mailbox: {
+      ...mailboxRest,
+      connectionType: mailboxRest.connectionType ?? "custom",
+      dailySendLimit: mailboxRest.dailySendLimit ?? null,
+      assignedUserIds: mailboxRest.assignedUserIds ?? [],
+    },
   });
   if ("error" in result) {
     return NextResponse.json({ ok: false, error: result.error }, { status: 503 });

@@ -1,7 +1,7 @@
 import { ImapFlow } from "imapflow";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { formatImapError, imapFlowConnectionOptions } from "@/lib/email/imap-client-options";
-import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";
 import { resolveSentMailboxPath } from "@/lib/email/resolve-sent-mailbox";
 
 export type AppendSentMailInput = {
@@ -17,22 +17,16 @@ export async function appendSentMailServer(
   input: AppendSentMailInput,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
   const host = normalizeMailHost(input.imap.host);
-  let user = input.imap.user.trim();
-  let pass = input.imap.pass;
-  if (input.mailboxId) {
-    const secrets = await getMailboxSecretsServer({
-      organizationId: input.organizationId,
-      uid: input.uid,
-      mailboxId: input.mailboxId,
-    });
-    if (secrets) {
-      const fromVault = secrets.imap.user.trim();
-      if (fromVault) user = fromVault;
-      if (secrets.imap.password) pass = secrets.imap.password;
-    }
-  }
+  const auth = await resolveMailboxTransportAuthServer({
+    organizationId: input.organizationId,
+    uid: input.uid,
+    mailboxId: input.mailboxId,
+    fallbackUser: input.imap.user,
+    fallbackPass: input.imap.pass,
+    prefer: "imap",
+  });
 
-  if (!host || !user) {
+  if (!host || !auth.user) {
     return { ok: false, error: "IMAP host and username are required to save to Sent." };
   }
 
@@ -41,8 +35,9 @@ export async function appendSentMailServer(
       host,
       port: input.imap.port,
       secure: input.imap.secure,
-      user,
-      pass,
+      user: auth.user,
+      pass: auth.pass,
+      accessToken: auth.accessToken,
       purpose: "fetch",
     }),
   );

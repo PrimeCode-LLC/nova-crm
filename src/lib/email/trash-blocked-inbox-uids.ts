@@ -1,5 +1,8 @@
 import type { MailInbound } from "@/lib/email-account-types";
-import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
+import {
+  appendMailDataOwnerParam,
+  resolveMailApiForUserUid,
+} from "@/lib/email/mail-data-owner-query";
 import {
   collectBlockedUidsFromInbound,
   partitionInboxByBlockedDomains,
@@ -16,10 +19,17 @@ async function moveUidsToServerTrashChunked(input: {
   mailViewAsUid: string | null;
   currentUserId: string;
 }): Promise<void> {
+  const st = useEmailAccountStore.getState();
+  const acct = getActiveMailbox(st);
+  const forUid = resolveMailApiForUserUid({
+    mailViewAsUid: input.mailViewAsUid,
+    activeMailboxDataOwnerUid: acct.dataOwnerUid,
+    selfUid: input.currentUserId,
+  });
   const CHUNK = 60;
   for (let i = 0; i < input.uids.length; i += CHUNK) {
     const part = input.uids.slice(i, i + CHUNK);
-    const url = appendMailDataOwnerParam("/api/email/imap-mutate", input.mailViewAsUid, input.currentUserId);
+    const url = appendMailDataOwnerParam("/api/email/imap-mutate", forUid, input.currentUserId);
     const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

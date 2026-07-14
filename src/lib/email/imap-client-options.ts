@@ -13,16 +13,21 @@ export function imapFlowConnectionOptions(input: {
   port: number;
   secure: boolean;
   user: string;
-  pass: string;
+  pass?: string;
+  /** Google Workspace / Gmail XOAUTH2 access token. */
+  accessToken?: string;
   /** Use `fetch` when downloading many bodies so imapflow doesn’t hit “Socket timeout” mid-fetch. */
   purpose?: "verify" | "fetch";
 }): ImapFlowOptions {
   const socketTimeout = input.purpose === "fetch" ? SOCKET_MS_FETCH : SOCKET_MS;
+  const accessToken = input.accessToken?.trim();
   return {
     host: input.host,
     port: input.port,
     secure: input.secure,
-    auth: { user: input.user, pass: input.pass },
+    auth: accessToken
+      ? { user: input.user, accessToken }
+      : { user: input.user, pass: input.pass ?? "" },
     logger: false,
     connectionTimeout: CONNECTION_MS,
     greetingTimeout: GREETING_MS,
@@ -50,7 +55,7 @@ function imapServerResponseSnippet(err: unknown): string | undefined {
 }
 
 const IMAP_AUTH_ACTION =
-  "Use your full email as the IMAP username (when in doubt), re-type the mailbox password, and with Google/Microsoft 2FA create an app password and paste that instead of your normal login.";
+  "For Google Workspace: use Sign in with Google in Settings → Email (Google no longer accepts normal passwords for IMAP). For other hosts, use your full email as the username and re-type the password (or an app password if 2FA is on).";
 
 function formatImapLoginRejected(err: unknown): string {
   const server = imapServerResponseSnippet(err);

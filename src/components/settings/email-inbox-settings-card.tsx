@@ -19,6 +19,12 @@ import {
 } from "@/components/ui/accordion";
 import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-account-store";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
+import { isAssignedMailbox } from "@/lib/email-account-types";
+import {
+  GOOGLE_WORKSPACE_DEFAULT_DAILY_SEND_LIMIT,
+  applyGoogleWorkspacePreset,
+  withGoogleWorkspaceConnection,
+} from "@/lib/email/mailbox-connection-presets";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
 import { Ban, Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2, Users } from "lucide-react";
@@ -32,6 +38,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { MailboxDelegation } from "@/lib/types";
+import { cn } from "@/lib/utils";
 
 export function EmailInboxSettingsCard() {
   const { users, currentUserId, isDemo, getOwnerDisplayName } = useWorkspace();
@@ -60,6 +67,15 @@ export function EmailInboxSettingsCard() {
   const [inboxDelegationLoading, setInboxDelegationLoading] = React.useState(false);
   const [inboxDelegationSaving, setInboxDelegationSaving] = React.useState(false);
   const [delegatePickUid, setDelegatePickUid] = React.useState("");
+  const [assignPickByMailbox, setAssignPickByMailbox] = React.useState<Record<string, string>>({});
+  const [sendUsageByMailboxId, setSendUsageByMailboxId] = React.useState<
+    Record<string, { used: number; limit: number | null }>
+  >({});
+
+  const ownedMailboxes = React.useMemo(
+    () => mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId)),
+    [mailboxes, currentUserId],
+  );
 
   const inboxGranteeUserIds = inboxDelegation?.granteeUserIds ?? [];
 
@@ -80,8 +96,40 @@ export function EmailInboxSettingsCard() {
   }, [delegationMemberOptions, users, currentUserId, getOwnerDisplayName]);
 
   React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const connected = params.get("google_mail_connected");
+    const err = params.get("google_mail_error");
+    const warning = params.get("google_mail_warning");
+    if (!connected && !err) return;
+
+    if (connected) {
+      toast.success("Google Workspace mailbox connected", {
+        description:
+          warning === "no_refresh"
+            ? "Connected, but Google did not return a refresh token. Reconnect with consent if mail stops working."
+            : "OAuth tokens saved. Run Test connection, then Enable mail.",
+      });
+    } else if (err) {
+      const messages: Record<string, string> = {
+        not_configured: "Google OAuth is not configured on the server.",
+        invalid_state: "OAuth state was invalid. Try Sign in with Google again.",
+        token_exchange: "Google token exchange failed. Check client id/secret and redirect URI.",
+        no_email: "Google did not return an account email.",
+        vault: "Could not store OAuth tokens (check EMAIL_SECRETS_KEY_BASE64).",
+      };
+      toast.error("Google mail connection failed", {
+        description: messages[err] ?? err,
+      });
+    }
+
+    window.history.replaceState({}, "", `${window.location.pathname}?tab=email`);
+  }, []);
+
+  React.useEffect(() => {
     if (isDemo) {
       setInboxDelegation(null);
+      setSendUsageByMailboxId({});
       return;
     }
     let cancelled = false;
@@ -98,6 +146,17 @@ export function EmailInboxSettingsCard() {
       .finally(() => {
         if (!cancelled) setInboxDelegationLoading(false);
       });
+    void fetch("/api/email/mailboxes", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          sendUsageByMailboxId?: Record<string, { used: number; limit: number | null }>;
+        };
+        if (!cancelled && data.sendUsageByMailboxId) {
+          setSendUsageByMailboxId(data.sendUsageByMailboxId);
+        }
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -145,10 +204,13 @@ export function EmailInboxSettingsCard() {
     setDelegatePickUid("");
   }
 
-  const persistKey = React.useMemo(() => JSON.stringify(mailboxes), [mailboxes]);
+  const persistKey = React.useMemo(
+    () => JSON.stringify(ownedMailboxes),
+    [ownedMailboxes],
+  );
 
   /**
-   * Persists all mailboxes to the server.
+   * Persists owned mailboxes to the server (skips boxes assigned from teammates).
    * @param manual — when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
    */
   const persistMailboxesRemote = React.useCallback(async (manual?: boolean): Promise<boolean> => {
@@ -163,7 +225,7 @@ export function EmailInboxSettingsCard() {
       }
       return false;
     }
-    const all = s.mailboxes;
+    const all = s.mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId));
     setSavingRemote(true);
     try {
       for (const mb of all) {
@@ -206,20 +268,20 @@ export function EmailInboxSettingsCard() {
     } finally {
       setSavingRemote(false);
     }
-  }, []);
+  }, [currentUserId]);
 
   React.useEffect(() => {
-    if (mailboxes.length === 0) {
+    if (ownedMailboxes.length === 0) {
       setOpenValues([]);
       return;
     }
     setOpenValues((prev) => {
-      const kept = prev.filter((id) => mailboxes.some((m) => m.id === id));
+      const kept = prev.filter((id) => ownedMailboxes.some((m) => m.id === id));
       if (kept.length > 0) return kept;
-      const preferred = activeMailboxId && mailboxes.some((m) => m.id === activeMailboxId);
-      return [preferred ? activeMailboxId! : mailboxes[0]!.id];
+      const preferred = activeMailboxId && ownedMailboxes.some((m) => m.id === activeMailboxId);
+      return [preferred ? activeMailboxId! : ownedMailboxes[0]!.id];
     });
-  }, [mailboxes, activeMailboxId]);
+  }, [ownedMailboxes, activeMailboxId]);
 
   /** Debounced persist; flush when the timer is cancelled (refresh / route change) so edits are not lost. */
   React.useEffect(() => {
@@ -248,19 +310,29 @@ export function EmailInboxSettingsCard() {
   }, [emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
 
   async function testConnectionsFor(mb: EmailMailboxSettings) {
-    const smtpHost = normalizeMailHost(mb.smtp.host);
-    const smtpUser = mb.smtp.user.trim();
+    const prepared =
+      mb.connectionType === "google_workspace" ? { ...mb, ...applyGoogleWorkspacePreset(mb) } : mb;
+    const smtpHost = normalizeMailHost(prepared.smtp.host);
+    const smtpUser = prepared.smtp.user.trim() || prepared.emailAddress.trim();
     if (!smtpHost) {
-      toast.error("Enter SMTP host first.");
+      toast.error(
+        prepared.connectionType === "google_workspace"
+          ? "Enter the Google Workspace email address first."
+          : "Enter SMTP host first.",
+      );
       return;
     }
     if (!smtpUser) {
-      toast.error("Enter SMTP username first.");
+      toast.error(
+        prepared.connectionType === "google_workspace"
+          ? "Enter the Google Workspace email address first."
+          : "Enter SMTP username first.",
+      );
       return;
     }
 
-    const imapHost = normalizeMailHost(mb.imap.host);
-    const imapUser = mb.imap.user.trim();
+    const imapHost = normalizeMailHost(prepared.imap.host);
+    const imapUser = prepared.imap.user.trim() || smtpUser;
     const testImap = Boolean(imapHost);
     if (testImap && !imapUser) {
       toast.error("Enter IMAP username first (or clear IMAP host to test SMTP only).");
@@ -275,10 +347,10 @@ export function EmailInboxSettingsCard() {
         body: JSON.stringify({
           mailboxId: mb.id,
           host: smtpHost,
-          port: mb.smtp.port,
-          secure: mb.smtp.secure,
+          port: prepared.smtp.port,
+          secure: prepared.smtp.secure,
           user: smtpUser,
-          pass: mb.smtp.password,
+          pass: prepared.smtp.password,
         }),
       });
       const smtpData = (await smtpRes.json()) as { ok?: boolean; error?: string };
@@ -291,10 +363,10 @@ export function EmailInboxSettingsCard() {
           body: JSON.stringify({
             mailboxId: mb.id,
             host: imapHost,
-            port: mb.imap.port,
-            secure: mb.imap.secure,
+            port: prepared.imap.port,
+            secure: prepared.imap.secure,
             user: imapUser,
-            pass: mb.imap.password,
+            pass: prepared.imap.password || prepared.smtp.password,
           }),
         });
         imapData = (await imapRes.json()) as { ok?: boolean; error?: string };
@@ -322,6 +394,23 @@ export function EmailInboxSettingsCard() {
     } finally {
       setTestingMailboxId(null);
     }
+  }
+
+  function setConnectionType(mb: EmailMailboxSettings, type: "google_workspace" | "custom") {
+    if (type === "google_workspace") {
+      const next = withGoogleWorkspaceConnection({
+        ...mb,
+        connectionType: "google_workspace",
+        dailySendLimit:
+          mb.dailySendLimit == null ? GOOGLE_WORKSPACE_DEFAULT_DAILY_SEND_LIMIT : mb.dailySendLimit,
+      });
+      updateMailbox(mb.id, next);
+      toast.message("Google Workspace preset applied", {
+        description: "SMTP/IMAP hosts are filled. Enter the inbox email and preferred password.",
+      });
+      return;
+    }
+    updateMailbox(mb.id, { connectionType: "custom" });
   }
 
   return (
@@ -514,12 +603,12 @@ export function EmailInboxSettingsCard() {
               Unified inbox (SMTP / IMAP)
             </CardTitle>
             <CardDescription className="text-xs">
-              Add your mailbox like you would in Outlook: use the same address, SMTP to send, and IMAP to load your
-              Inbox on the{" "}
+              Add Google Workspace boxes (email + preferred password) or custom SMTP/IMAP. Assign mailboxes to
+              teammates and set a daily send limit. Connected mail shows on the{" "}
               <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
                 Inbox
               </Link>{" "}
-              → Email tab. Open each mailbox below to edit. Use Test connection inside a mailbox to verify SMTP/IMAP.
+              → Email tab.
             </CardDescription>
           </div>
           <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
@@ -565,7 +654,7 @@ export function EmailInboxSettingsCard() {
             }}
             className="rounded-lg border px-2"
           >
-            {mailboxes.map((mb) => (
+            {ownedMailboxes.map((mb) => (
               <AccordionItem key={mb.id} value={mb.id} className="border-b-0 not-last:border-b">
                 <AccordionHeader>
                   <AccordionTrigger className="py-3 hover:no-underline">
@@ -604,7 +693,7 @@ export function EmailInboxSettingsCard() {
                         )}
                         Test connection
                       </Button>
-                      {mailboxes.length > 1 && (
+                      {ownedMailboxes.length > 1 && (
                         <Button
                           type="button"
                           variant="ghost"
@@ -633,6 +722,35 @@ export function EmailInboxSettingsCard() {
                       />
                     </div>
 
+                    <div className="space-y-2">
+                      <Label className="text-xs">Connection type</Label>
+                      <div className="flex flex-wrap gap-2">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={mb.connectionType === "google_workspace" ? "default" : "outline"}
+                          className={cn("h-8")}
+                          onClick={() => setConnectionType(mb, "google_workspace")}
+                        >
+                          Google Workspace
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={mb.connectionType !== "google_workspace" ? "default" : "outline"}
+                          className={cn("h-8")}
+                          onClick={() => setConnectionType(mb, "custom")}
+                        >
+                          Custom SMTP
+                        </Button>
+                      </div>
+                      <p className="text-[11px] text-muted-foreground">
+                        {mb.connectionType === "google_workspace"
+                          ? "For Inboxlogy / warmed Google Workspace: Sign in with Google (OAuth). Preferred passwords no longer work for SMTP/IMAP."
+                          : "Full SMTP and IMAP fields for Microsoft or other custom mail hosts."}
+                      </p>
+                    </div>
+
                     <div className="grid gap-4 sm:grid-cols-2">
                       <div className="space-y-1.5 sm:col-span-2">
                         <Label className="text-xs">Mailbox label</Label>
@@ -658,7 +776,18 @@ export function EmailInboxSettingsCard() {
                           className="h-9"
                           type="email"
                           value={mb.emailAddress}
-                          onChange={(e) => updateMailbox(mb.id, { emailAddress: e.target.value })}
+                          onChange={(e) => {
+                            const emailAddress = e.target.value;
+                            if (mb.connectionType === "google_workspace") {
+                              updateMailbox(mb.id, {
+                                emailAddress,
+                                smtp: { ...mb.smtp, user: emailAddress.trim() },
+                                imap: { ...mb.imap, user: emailAddress.trim() },
+                              });
+                            } else {
+                              updateMailbox(mb.id, { emailAddress });
+                            }
+                          }}
                           placeholder="you@company.com"
                         />
                       </div>
@@ -672,10 +801,100 @@ export function EmailInboxSettingsCard() {
                           placeholder="support@company.com"
                         />
                       </div>
+                      <div className="space-y-1.5 sm:col-span-1">
+                        <Label className="text-xs">Daily send limit</Label>
+                        <Input
+                          className="h-9"
+                          type="number"
+                          min={1}
+                          placeholder="Unlimited"
+                          value={mb.dailySendLimit ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value.trim();
+                            if (!raw) {
+                              updateMailbox(mb.id, { dailySendLimit: null });
+                              return;
+                            }
+                            const n = Math.floor(Number(raw));
+                            updateMailbox(mb.id, {
+                              dailySendLimit: Number.isFinite(n) && n > 0 ? n : null,
+                            });
+                          }}
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Empty = unlimited. Counts successful sends per UTC day.
+                          {sendUsageByMailboxId[mb.id]
+                            ? ` Used today: ${sendUsageByMailboxId[mb.id]!.used}${
+                                mb.dailySendLimit != null ? ` / ${mb.dailySendLimit}` : ""
+                              }.`
+                            : null}
+                        </p>
+                      </div>
                     </div>
 
                     <Separator />
 
+                    {mb.connectionType === "google_workspace" ? (
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Google Workspace authentication
+                        </h4>
+                        <div className="rounded-lg border p-3 space-y-3">
+                          <p className="text-xs text-muted-foreground">
+                            Google no longer accepts Inboxlogy preferred passwords (or normal Workspace
+                            passwords) for SMTP/IMAP. Sign in with Google once — use the inbox email and
+                            preferred password on Google&apos;s login screen — then Nova uses OAuth tokens.
+                          </p>
+                          {mb.googleAuthConnected ? (
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge variant="secondary" className="text-[10px]">
+                                Google connected
+                              </Badge>
+                              <span className="text-xs text-muted-foreground truncate">
+                                {mb.emailAddress.trim() || "Mailbox linked"}
+                              </span>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-warning">Not connected with Google yet.</p>
+                          )}
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="gap-1.5"
+                            disabled={isDemo}
+                            onClick={() => {
+                              if (isDemo) {
+                                toast.message("Google sign-in is not available in demo mode.");
+                                return;
+                              }
+                              window.location.href = `/api/email/oauth/google?mailboxId=${encodeURIComponent(mb.id)}`;
+                            }}
+                          >
+                            {mb.googleAuthConnected ? "Reconnect Google" : "Sign in with Google"}
+                          </Button>
+                          <p className="text-[11px] text-muted-foreground">
+                            Requires GOOGLE_CALENDAR_CLIENT_ID / SECRET (or GOOGLE_MAIL_*) with redirect URI{" "}
+                            <code className="text-foreground">/api/email/oauth/google</code> and scope{" "}
+                            <code className="text-foreground">https://mail.google.com/</code>.
+                          </p>
+                        </div>
+                        <div className="space-y-1.5 max-w-[120px]">
+                          <Label className="text-xs">Sync interval (minutes)</Label>
+                          <Input
+                            className="h-9"
+                            type="number"
+                            min={5}
+                            value={mb.syncIntervalMinutes}
+                            onChange={(e) =>
+                              updateMailbox(mb.id, {
+                                syncIntervalMinutes: Math.max(5, Number(e.target.value) || 15),
+                              })
+                            }
+                          />
+                        </div>
+                      </div>
+                    ) : (
+                      <>
                     <div>
                       <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-3">
                         Outgoing (SMTP)
@@ -870,6 +1089,105 @@ export function EmailInboxSettingsCard() {
                         </div>
                       </div>
                     </div>
+                      </>
+                    )}
+
+                    <Separator />
+
+                    <div className="space-y-3">
+                      <div>
+                        <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          Assign to users
+                        </h4>
+                        <p className="mt-1 text-[11px] text-muted-foreground">
+                          Teammates can view and send from this mailbox in Inbox. They cannot edit credentials.
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2">
+                        <div className="min-w-[12rem] flex-1 space-y-1">
+                          <Label className="text-xs">Add teammate</Label>
+                          <Select
+                            value={assignPickByMailbox[mb.id] || undefined}
+                            onValueChange={(v) =>
+                              setAssignPickByMailbox((prev) => ({ ...prev, [mb.id]: v ?? "" }))
+                            }
+                            disabled={isDemo}
+                          >
+                            <SelectTrigger className="h-9 w-full text-xs">
+                              <SelectValue placeholder="Select a person" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {buildWorkspaceOwnerPickerOptions(
+                                users,
+                                currentUserId,
+                                getOwnerDisplayName,
+                              )
+                                .filter(
+                                  (o) =>
+                                    o.id !== currentUserId &&
+                                    !(mb.assignedUserIds ?? []).includes(o.id),
+                                )
+                                .map((o) => (
+                                  <SelectItem key={o.id} value={o.id}>
+                                    {o.label}
+                                  </SelectItem>
+                                ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <Button
+                          type="button"
+                          size="sm"
+                          className="h-9"
+                          disabled={isDemo || !assignPickByMailbox[mb.id]}
+                          onClick={() => {
+                            const uid = (assignPickByMailbox[mb.id] ?? "").trim();
+                            if (!uid) return;
+                            const next = [...new Set([...(mb.assignedUserIds ?? []), uid])];
+                            updateMailbox(mb.id, { assignedUserIds: next });
+                            setAssignPickByMailbox((prev) => ({ ...prev, [mb.id]: "" }));
+                            toast.success("User assigned to mailbox");
+                          }}
+                        >
+                          <Plus className="h-3.5 w-3.5" />
+                          Assign
+                        </Button>
+                      </div>
+                      {(mb.assignedUserIds ?? []).length === 0 ? (
+                        <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4">
+                          No teammates assigned to this mailbox yet.
+                        </p>
+                      ) : (
+                        <ul className="divide-y rounded-lg border max-h-48 overflow-y-auto">
+                          {(mb.assignedUserIds ?? []).map((uid) => (
+                            <li
+                              key={uid}
+                              className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
+                            >
+                              <span className="truncate text-xs">
+                                {granteeLabels.get(uid) ?? getOwnerDisplayName(uid) ?? uid}
+                              </span>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 text-xs"
+                                disabled={isDemo}
+                                onClick={() => {
+                                  updateMailbox(mb.id, {
+                                    assignedUserIds: (mb.assignedUserIds ?? []).filter(
+                                      (id) => id !== uid,
+                                    ),
+                                  });
+                                }}
+                              >
+                                Remove
+                              </Button>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
 
                     <Separator />
 
@@ -917,8 +1235,8 @@ export function EmailInboxSettingsCard() {
             Non-sensitive fields sync to your workspace; credentials are encrypted on the server. Changes also save
             automatically after you stop typing, use <span className="font-medium text-foreground">Save settings</span>{" "}
             to write immediately and confirm the server accepted them.
-            {savingRemote ? " Saving to workspace..." : ""} Use an app-specific password for Gmail / Microsoft when 2FA
-            is on.
+            {savingRemote ? " Saving to workspace..." : ""} For Google Workspace, use Sign in with Google (OAuth).
+            Custom SMTP can still use a provider password or app password when 2FA is on.
           </p>
         </CardContent>
       </Card>

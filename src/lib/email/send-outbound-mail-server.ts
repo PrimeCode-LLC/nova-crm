@@ -4,7 +4,7 @@ import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { formatSmtpError } from "@/lib/email/smtp-client-options";
 import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
-import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
+import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";
 import type { OutboundAttachment } from "@/lib/email/outbound-attachments";
 
 export type SendOutboundMailInput = {
@@ -29,20 +29,17 @@ export async function sendOutboundMailServer(
   input: SendOutboundMailInput,
 ): Promise<{ ok: true; sentSavedToMailbox: boolean } | { ok: false; error: string }> {
   const host = normalizeMailHost(input.smtp.host);
-  let user = input.smtp.user.trim();
-  let pass = input.smtp.pass;
-  if (input.mailboxId) {
-    const secrets = await getMailboxSecretsServer({
-      organizationId: input.organizationId,
-      uid: input.uid,
-      mailboxId: input.mailboxId,
-    });
-    if (secrets) {
-      const fromVault = secrets.smtp.user.trim();
-      if (fromVault) user = fromVault;
-      if (secrets.smtp.password) pass = secrets.smtp.password;
-    }
-  }
+  const auth = await resolveMailboxTransportAuthServer({
+    organizationId: input.organizationId,
+    uid: input.uid,
+    mailboxId: input.mailboxId,
+    fallbackUser: input.smtp.user,
+    fallbackPass: input.smtp.pass,
+    prefer: "smtp",
+  });
+  const user = auth.user;
+  const pass = auth.pass;
+  const accessToken = auth.accessToken;
 
   const from = input.from.trim();
   const toParsed = normalizeRecipientList(input.to, "To");
@@ -54,6 +51,13 @@ export async function sendOutboundMailServer(
 
   if (!host || !user || !from) {
     return { ok: false, error: "SMTP host, user, and From address are required." };
+  }
+  if (!accessToken && !pass) {
+    return {
+      ok: false,
+      error:
+        "SMTP credentials missing. For Google Workspace, reconnect with Sign in with Google in Settings → Email.",
+    };
   }
 
   const displayName = input.displayName?.trim() ?? "";
@@ -82,7 +86,7 @@ export async function sendOutboundMailServer(
 
     await runWithSmtpTransporter(
       host,
-      { port: input.smtp.port, secure: input.smtp.secure, user, pass },
+      { port: input.smtp.port, secure: input.smtp.secure, user, pass, accessToken },
       async (transporter) =>
         transporter.sendMail({
           from: fromHeader,

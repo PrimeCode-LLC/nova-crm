@@ -1,4 +1,8 @@
 import { viewerHasMailboxDelegationServer } from "@/lib/email/mailbox-delegation-server";
+import {
+  getMailboxProfileServer,
+  viewerHasAssignedMailboxOnHostServer,
+} from "@/lib/email/mailbox-profiles-server";
 import { getMemberServer } from "@/lib/platform/members-server";
 import {
   listOrgUsersServer,
@@ -32,15 +36,21 @@ export function mailboxReadOnlyForClient(resolved: MailboxAccessResolved): boole
   return !canMailboxSend(resolved);
 }
 
+/**
+ * Resolve whose Firestore mailbox docs to read and what the viewer may do.
+ * Pass `mailboxId` when available so per-mailbox assignees get send access for that box only.
+ */
 export async function resolveMailboxDataOwnerUid(input: {
   organizationId: string;
   viewerUid: string;
   viewerRole: OrgMemberRole;
   forUserParam: string | null | undefined;
+  mailboxId?: string | null;
 }): Promise<MailboxAccessResolved | { ok: false; status: number; error: string }> {
   const self = input.viewerUid;
   const requested = (input.forUserParam ?? "").trim();
   const dataOwnerUid = requested && requested !== self ? requested : self;
+  const mailboxId = (input.mailboxId ?? "").trim();
 
   if (dataOwnerUid === self) {
     return {
@@ -58,6 +68,36 @@ export async function resolveMailboxDataOwnerUid(input: {
       status: 404,
       error: "That workspace member was not found.",
     };
+  }
+
+  if (mailboxId) {
+    const profile = await getMailboxProfileServer({
+      organizationId: input.organizationId,
+      uid: dataOwnerUid,
+      mailboxId,
+    });
+    if (profile?.assignedUserIds.includes(input.viewerUid)) {
+      return {
+        ok: true,
+        dataOwnerUid,
+        viewerIsMailboxOwner: false,
+        permissions: ["view", "send"],
+      };
+    }
+  } else {
+    const anyAssigned = await viewerHasAssignedMailboxOnHostServer({
+      organizationId: input.organizationId,
+      hostId: dataOwnerUid,
+      viewerUid: input.viewerUid,
+    });
+    if (anyAssigned) {
+      return {
+        ok: true,
+        dataOwnerUid,
+        viewerIsMailboxOwner: false,
+        permissions: ["view", "send"],
+      };
+    }
   }
 
   let hasHierarchyView = false;

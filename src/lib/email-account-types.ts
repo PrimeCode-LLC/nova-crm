@@ -14,6 +14,9 @@ export interface ImapConfig {
   password: string;
 }
 
+/** How this mailbox is connected in Settings (presets vs full SMTP/IMAP). */
+export type MailboxConnectionType = "google_workspace" | "custom";
+
 export interface EmailAccountSettings {
   /** Master switch, when off, mail UI stays in setup mode */
   enabled: boolean;
@@ -30,11 +33,27 @@ export interface EmailAccountSettings {
   archiveOnSend: boolean;
   /** Future: track opens via pixel (off by default) */
   readReceipts: boolean;
+  /**
+   * Google Workspace: Gmail hosts autofilled; Custom: full SMTP/IMAP.
+   * Existing mailboxes default to custom.
+   */
+  connectionType: MailboxConnectionType;
+  /** Max successful sends per UTC calendar day; `null` = unlimited. */
+  dailySendLimit: number | null;
+  /** Workspace member UIDs who may view/send this mailbox (credentials stay with owner). */
+  assignedUserIds: string[];
+  /** True when Google OAuth (XOAUTH2) tokens are stored for this mailbox. */
+  googleAuthConnected?: boolean;
 }
 
 export interface EmailMailboxSettings extends EmailAccountSettings {
   id: string;
   label: string;
+  /**
+   * Set on API responses when this mailbox is owned by another member and assigned to the viewer.
+   * Not persisted on the owner's Firestore profile.
+   */
+  dataOwnerUid?: string;
 }
 
 export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
@@ -60,6 +79,9 @@ export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
   syncIntervalMinutes: 15,
   archiveOnSend: false,
   readReceipts: false,
+  connectionType: "custom",
+  dailySendLimit: null,
+  assignedUserIds: [],
 });
 
 /** Parsed attachment from IMAP (small files may include base64 for download in the browser). */
@@ -159,12 +181,27 @@ export interface MailInbound {
 
 export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettings>): EmailMailboxSettings {
   const base = defaultEmailAccountSettings();
+  const { dataOwnerUid, ...restPartial } = partial ?? {};
   return {
-    id: partial?.id ?? `mb-${crypto.randomUUID()}`,
-    label: partial?.label ?? "Mailbox",
+    id: restPartial.id ?? `mb-${crypto.randomUUID()}`,
+    label: restPartial.label ?? "Mailbox",
     ...base,
-    ...partial,
-    smtp: { ...base.smtp, ...(partial?.smtp ?? {}) },
-    imap: { ...base.imap, ...(partial?.imap ?? {}) },
+    ...restPartial,
+    smtp: { ...base.smtp, ...(restPartial.smtp ?? {}) },
+    imap: { ...base.imap, ...(restPartial.imap ?? {}) },
+    assignedUserIds: restPartial.assignedUserIds ?? base.assignedUserIds,
+    dailySendLimit:
+      restPartial.dailySendLimit === undefined ? base.dailySendLimit : restPartial.dailySendLimit,
+    ...(dataOwnerUid ? { dataOwnerUid } : {}),
   };
+}
+
+/** True when the mailbox was assigned from another member (viewer cannot manage credentials). */
+export function isAssignedMailbox(
+  mailbox: EmailMailboxSettings,
+  viewerUid: string | null | undefined,
+): boolean {
+  const owner = mailbox.dataOwnerUid?.trim();
+  if (!owner || !viewerUid) return false;
+  return owner !== viewerUid;
 }

@@ -330,6 +330,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
               ...patch,
               smtp: { ...mb.smtp, ...(patch.smtp ?? {}) },
               imap: { ...mb.imap, ...(patch.imap ?? {}) },
+              assignedUserIds: patch.assignedUserIds ?? mb.assignedUserIds,
             }
           : mb,
       ),

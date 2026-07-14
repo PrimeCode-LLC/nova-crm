@@ -14,14 +14,18 @@ export function smtpTransportOptions(input: {
   port: number;
   secure: boolean;
   user: string;
-  pass: string;
+  pass?: string;
+  /** Google Workspace / Gmail XOAUTH2 access token. */
+  accessToken?: string;
   /** When `host` is an IPv4 literal, set SNI / cert hostname to the mail server name. */
   tlsServername?: string;
 }): {
   host: string;
   port: number;
   secure: boolean;
-  auth: { user: string; pass: string };
+  auth:
+    | { user: string; pass: string }
+    | { type: "OAuth2"; user: string; accessToken: string };
   connectionTimeout: number;
   greetingTimeout: number;
   socketTimeout: number;
@@ -34,11 +38,16 @@ export function smtpTransportOptions(input: {
       ? { servername: input.tlsServername }
       : undefined;
 
+  const accessToken = input.accessToken?.trim();
+  const auth = accessToken
+    ? ({ type: "OAuth2" as const, user: input.user, accessToken })
+    : { user: input.user, pass: input.pass ?? "" };
+
   return {
     host: input.host,
     port: input.port,
     secure: input.secure,
-    auth: { user: input.user, pass: input.pass },
+    auth,
     connectionTimeout: CONNECTION_MS,
     greetingTimeout: GREETING_MS,
     socketTimeout: SOCKET_MS,
@@ -62,8 +71,12 @@ export function formatSmtpError(err: unknown): string {
   if (code === "ENOTFOUND" || code === "EAI_AGAIN") {
     return "Host not found, check the SMTP hostname spelling.";
   }
-  if (/535|authentication failed|invalid login|auth failed|535 5\.7\.8/i.test(msg)) {
-    return "Login rejected, check username and password, or create an app password if your provider uses 2FA.";
+  if (
+    /535|authentication failed|invalid login|auth failed|535 5\.7\.8|Username and Password not accepted/i.test(
+      msg,
+    )
+  ) {
+    return "Login rejected. Google Workspace no longer accepts normal account passwords for SMTP — use Sign in with Google (OAuth) in Settings → Email, or an app password if your admin still allows it.";
   }
   if (
     /550|5\.1\.1|5\.1\.0|no such user|user unknown|mailbox unavailable|all recipients were rejected|recipient address rejected|invalid recipient/i.test(

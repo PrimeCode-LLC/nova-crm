@@ -10,6 +10,10 @@ import {
 } from "@/lib/email/outbound-attachments";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import { listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-server";
+import {
+  assertMailboxDailySendQuotaServer,
+  incrementMailboxSendCountServer,
+} from "@/lib/email/mailbox-send-quota-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 
@@ -195,6 +199,21 @@ async function sendScheduledDoc(
     return "failed";
   }
 
+  const quota = await assertMailboxDailySendQuotaServer({
+    organizationId,
+    uid,
+    mailboxId,
+    dailySendLimit: mailbox.dailySendLimit,
+  });
+  if (!quota.ok) {
+    await docRef.update({
+      status: "failed",
+      error: quota.error,
+      updatedAt: new Date().toISOString(),
+    });
+    return "failed";
+  }
+
   const parsedAttachments = parseOutboundAttachments(data.attachments);
   if ("error" in parsedAttachments) {
     await docRef.update({
@@ -236,6 +255,7 @@ async function sendScheduledDoc(
 
   const now = new Date().toISOString();
   if (result.ok) {
+    await incrementMailboxSendCountServer({ organizationId, uid, mailboxId });
     await docRef.update({
       status: "sent",
       sentAt: now,

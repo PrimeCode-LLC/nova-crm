@@ -40,24 +40,6 @@ export async function POST(req: Request) {
   if (!g.ok) return g.response;
 
   const forUser = new URL(req.url).searchParams.get("forUser");
-  const resolved = await resolveMailboxDataOwnerUid({
-    organizationId: g.ctx.session.organizationId,
-    viewerUid: g.ctx.session.uid,
-    viewerRole: g.ctx.role,
-    forUserParam: forUser,
-  });
-  if (!resolved.ok) {
-    return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
-  }
-  if (!canMailboxSend(resolved)) {
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "You can view this mailbox but cannot schedule mail on behalf of another member.",
-      },
-      { status: 403 },
-    );
-  }
 
   let body: Record<string, unknown>;
   try {
@@ -72,6 +54,26 @@ export async function POST(req: Request) {
   const from = String(body.from ?? "").trim();
   const text = String(body.text ?? "");
   const html = String(body.html ?? text.split("\n").map((l) => `<p>${l || "<br/>"}</p>`).join(""));
+
+  const resolved = await resolveMailboxDataOwnerUid({
+    organizationId: g.ctx.session.organizationId,
+    viewerUid: g.ctx.session.uid,
+    viewerRole: g.ctx.role,
+    forUserParam: forUser,
+    mailboxId,
+  });
+  if (!resolved.ok) {
+    return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+  }
+  if (!canMailboxSend(resolved)) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "You can view this mailbox but cannot schedule mail on behalf of another member.",
+      },
+      { status: 403 },
+    );
+  }
 
   if (!to || !scheduledAt || !mailboxId || !from) {
     return NextResponse.json(
