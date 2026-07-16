@@ -29,6 +29,8 @@ export type FollowupSessionDelta = {
   paused: Record<string, string | null>;
   /** followupId → schedule link, or null to clear */
   emailSchedule: Record<string, FollowupEmailSchedulePatch | null>;
+  /** Field patches for followups not only in extras (optimistic / demo). */
+  patches: Record<string, Partial<Followup>>;
 };
 
 export type FollowupPlanSessionDelta = {
@@ -67,7 +69,7 @@ export type WorkspaceSessionV2 = {
 
 export function emptyWorkspaceSession(): WorkspaceSessionV2 {
   return {
-    followups: { extras: [], completion: {}, paused: {}, emailSchedule: {} },
+    followups: { extras: [], completion: {}, paused: {}, emailSchedule: {}, patches: {} },
     followupPlans: { extras: [], patches: {} },
     leadTasks: { extras: [], completion: {} },
     notes: { added: [], removedIds: [], updates: {} },
@@ -88,6 +90,7 @@ function mergeFollowup(
   completion: Record<string, string | null>,
   paused: Record<string, string | null>,
   emailSchedule: Record<string, FollowupEmailSchedulePatch | null>,
+  patches: Record<string, Partial<Followup>>,
 ): Followup {
   let next = f;
   if (Object.prototype.hasOwnProperty.call(completion, f.id)) {
@@ -109,6 +112,8 @@ function mergeFollowup(
             emailScheduledAt: s.emailScheduledAt,
           };
   }
+  const fieldPatch = patches[f.id];
+  if (fieldPatch) next = { ...next, ...fieldPatch };
   return next;
 }
 
@@ -142,13 +147,14 @@ export function readWorkspaceSession(): WorkspaceSessionV2 {
         ...emptyWorkspaceSession(),
         followups:
           parsed && Array.isArray(parsed.extras) && typeof parsed.completion === "object"
-            ? {
-                extras: parsed.extras,
-                completion: parsed.completion,
-                paused: {},
-                emailSchedule: {},
-              }
-            : { extras: [], completion: {}, paused: {}, emailSchedule: {} },
+                      ? {
+                          extras: parsed.extras,
+                          completion: parsed.completion,
+                          paused: {},
+                          emailSchedule: {},
+                          patches: {},
+                        }
+            : { extras: [], completion: {}, paused: {}, emailSchedule: {}, patches: {} },
         followupPlans: { extras: [], patches: {} },
         leadTasks: { extras: [], completion: {} },
       };
@@ -176,6 +182,10 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
       emailSchedule:
         followupsRaw?.emailSchedule && typeof followupsRaw.emailSchedule === "object"
           ? followupsRaw.emailSchedule
+          : {},
+      patches:
+        followupsRaw?.patches && typeof followupsRaw.patches === "object"
+          ? followupsRaw.patches
           : {},
     },
     followupPlans: {
@@ -339,6 +349,7 @@ export function mergeSessionIntoSnapshot(
         session.followups.completion,
         session.followups.paused,
         session.followups.emailSchedule,
+        session.followups.patches ?? {},
       ),
     );
   const baseFollowupIds = new Set(mergedBaseFollowups.map((f) => f.id));
@@ -356,6 +367,7 @@ export function mergeSessionIntoSnapshot(
         session.followups.completion,
         session.followups.paused,
         session.followups.emailSchedule,
+        session.followups.patches ?? {},
       ),
     );
   const followups = [...mergedBaseFollowups, ...mergedExtras];

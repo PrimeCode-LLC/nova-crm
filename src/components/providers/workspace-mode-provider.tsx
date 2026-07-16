@@ -62,6 +62,7 @@ import {
   persistFollowupCreate,
   persistFollowupDelete,
   persistFollowupEmailSchedule,
+  persistFollowupPatch,
   persistFollowupSetCompleted,
   persistFollowupSetPaused,
   persistFollowupPlanCreate,
@@ -153,6 +154,22 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     ) => void;
     clearFollowupEmailSchedule: (id: string) => void;
     removeFollowup: (id: string) => void;
+    updateFollowup: (
+      id: string,
+      patch: Partial<
+        Pick<
+          Followup,
+          | "title"
+          | "description"
+          | "messageBody"
+          | "emailSubject"
+          | "channel"
+          | "dueAt"
+          | "priority"
+          | "ownerId"
+        >
+      >,
+    ) => void;
     pauseFollowupPlanForReply: (input: {
       planId: string;
       leadId: string;
@@ -921,6 +938,71 @@ export function WorkspaceModeProvider({
       setFollowupEmailSchedule(id, null);
     },
     [setFollowupEmailSchedule],
+  );
+
+  const updateFollowup = React.useCallback(
+    (
+      id: string,
+      patch: Partial<
+        Pick<
+          Followup,
+          | "title"
+          | "description"
+          | "messageBody"
+          | "emailSubject"
+          | "channel"
+          | "dueAt"
+          | "priority"
+          | "ownerId"
+        >
+      >,
+    ) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      if (writeFs) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistFollowupPatch(db, id, patch);
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            toast.error("Could not update follow-up", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => {
+        const inExtras = s.followups.extras.some((f) => f.id === id);
+        const normalized: typeof patch = { ...patch };
+        if (patch.description !== undefined) {
+          normalized.description = patch.description.trim() || undefined;
+        }
+        if (patch.messageBody !== undefined) {
+          normalized.messageBody = patch.messageBody.trim() || undefined;
+        }
+        if (patch.emailSubject !== undefined) {
+          normalized.emailSubject = patch.emailSubject.trim() || undefined;
+        }
+        if (patch.channel !== undefined && !patch.channel) {
+          normalized.channel = undefined;
+        }
+        return {
+          ...s,
+          followups: {
+            ...s.followups,
+            extras: inExtras
+              ? s.followups.extras.map((f) => (f.id === id ? { ...f, ...normalized } : f))
+              : s.followups.extras,
+            patches: inExtras
+              ? s.followups.patches
+              : {
+                  ...s.followups.patches,
+                  [id]: { ...(s.followups.patches[id] ?? {}), ...normalized },
+                },
+          },
+        };
+      });
+    },
+    [mode, userDoc?.organizationId],
   );
 
   const removeFollowup = React.useCallback(
@@ -1831,6 +1913,7 @@ export function WorkspaceModeProvider({
       setFollowupEmailSchedule,
       clearFollowupEmailSchedule,
       removeFollowup,
+      updateFollowup,
       pauseFollowupPlanForReply,
       supersedeFollowupPlan,
       addLeadTask,
@@ -1895,6 +1978,7 @@ export function WorkspaceModeProvider({
     setFollowupEmailSchedule,
     clearFollowupEmailSchedule,
     removeFollowup,
+    updateFollowup,
     pauseFollowupPlanForReply,
     supersedeFollowupPlan,
     addLeadTask,

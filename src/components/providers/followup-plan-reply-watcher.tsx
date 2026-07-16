@@ -8,7 +8,12 @@ import {
   inboundMessageLeadId,
   isInboundFromLeadContact,
 } from "@/lib/followup-plan-reply";
+import {
+  cancelScheduledEmailsForFollowups,
+  openFollowupsWithScheduledEmail,
+} from "@/lib/cancel-followup-scheduled-email-client";
 import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-store";
+import { toast } from "sonner";
 
 const PROCESSED_KEY = "nova-followup-reply-processed";
 
@@ -35,8 +40,9 @@ function writeProcessed(set: Set<string>) {
 }
 
 /**
- * When new unread inbound mail arrives from a lead with an active follow-up plan,
- * pause remaining steps and surface regenerate UX on the lead.
+ * When new unread inbound mail arrives from a lead:
+ * - Cancel pending scheduled emails on that lead's open followups
+ * - If an active AI plan exists, pause remaining steps and surface regenerate UX
  */
 export function FollowupPlanReplyWatcher() {
   const {
@@ -47,11 +53,13 @@ export function FollowupPlanReplyWatcher() {
     followups,
     followupPlans,
     pauseFollowupPlanForReply,
+    clearFollowupEmailSchedule,
   } = useWorkspace();
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
+  const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const processedRef = React.useRef(readProcessed());
 
   const plans = React.useMemo(
@@ -82,29 +90,45 @@ export function FollowupPlanReplyWatcher() {
       const lead = leads.find((l) => l.id === leadId);
       if (!lead || !isInboundFromLeadContact({ message, lead, mailboxEmail })) continue;
 
-      const plan = findActivePlanToPauseOnReply({ leadId, plans });
-      if (!plan) {
-        processedRef.current.add(mid);
-        continue;
-      }
-
-      const openIds = openFollowupsForPlan(followups, plan.id).map((f) => f.id);
-      if (openIds.length === 0) {
-        processedRef.current.add(mid);
-        continue;
-      }
-
       processedRef.current.add(mid);
       writeProcessed(processedRef.current);
 
-      pauseFollowupPlanForReply({
-        planId: plan.id,
-        leadId,
-        reason: "Lead replied by email",
-        replyMessageId: mid,
-        actorId: currentUserId,
-        openFollowupIds: openIds,
-      });
+      const scheduledOpen = openFollowupsWithScheduledEmail(followups, leadId);
+      const plan = findActivePlanToPauseOnReply({ leadId, plans });
+      const openIds = plan ? openFollowupsForPlan(followups, plan.id).map((f) => f.id) : [];
+
+      void (async () => {
+        const { cancelled, errors } = await cancelScheduledEmailsForFollowups({
+          followups: scheduledOpen,
+          isDemo: false,
+          cancelDemo: cancelScheduled,
+          clearSchedule: clearFollowupEmailSchedule,
+        });
+        if (errors.length > 0) {
+          toast.error("Could not cancel all scheduled followup emails", {
+            description: errors[0],
+          });
+        }
+
+        if (plan && openIds.length > 0) {
+          pauseFollowupPlanForReply({
+            planId: plan.id,
+            leadId,
+            reason: "Lead replied by email",
+            replyMessageId: mid,
+            actorId: currentUserId,
+            openFollowupIds: openIds,
+          });
+          return;
+        }
+
+        if (cancelled > 0) {
+          toast.message("Lead replied, scheduled followup emails cancelled", {
+            description: "Outbound steps will not send. Review the reply in Inbox.",
+            duration: 8000,
+          });
+        }
+      })();
     }
   }, [
     sessionHydrated,
@@ -118,6 +142,8 @@ export function FollowupPlanReplyWatcher() {
     mailboxes,
     activeMailboxId,
     pauseFollowupPlanForReply,
+    clearFollowupEmailSchedule,
+    cancelScheduled,
   ]);
 
   return null;

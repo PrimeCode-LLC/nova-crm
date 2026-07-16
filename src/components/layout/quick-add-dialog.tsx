@@ -499,8 +499,15 @@ function LeadFormBody({
       temperature: values.temperature as LeadTemperature,
       priority: values.priority as LeadPriority,
       ownerId,
+      createdById: sourcedBy || ownerId,
       ...(sourcedBy ? { scraperId: sourcedBy } : {}),
-      ...(isProspectingIntakeRole ? { intakeKind: "prospect" as const } : {}),
+      ...(isProspectingIntakeRole
+        ? {
+            intakeKind: "prospect" as const,
+            prospectOwnerId: ownerId,
+            prospectVisibility: "open" as const,
+          }
+        : {}),
       contactName: fullName,
       companyName: values.company.trim(),
       contactEmail: emailTrim || undefined,

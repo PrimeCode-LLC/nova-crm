@@ -437,7 +437,11 @@ export interface Lead {
 
   /** Prospect creator / channel manager; set when `intakeKind === "prospect"`. */
   prospectOwnerId?: string;
-  /** `open` = whole org until first channel assignment; then `assigned`. */
+  /**
+   * Channel workflow state only (not list visibility).
+   * `open` = no channel assignees yet; `assigned` = channels have been assigned.
+   * Read access follows the same owner/team/dept hierarchy as sales leads.
+   */
   prospectVisibility?: ProspectVisibility;
   prospectChannelAssignments?: ProspectChannelAssignment[];
   /** Denormalized assignee user ids for Firestore queries. */
@@ -567,6 +571,13 @@ export type FollowupChannel = ChannelKey | "other";
 
 export type FollowupPlanStatus = "active" | "paused" | "superseded" | "completed";
 
+/**
+ * How an AI sequence was scoped:
+ * - `full` — first touch through last email
+ * - `continue` — intro already sent; draft remaining touches only
+ */
+export type FollowupSequenceMode = "full" | "continue";
+
 /** AI-generated cadence for a lead; open follow-ups reference `planId`. */
 export interface FollowupPlan {
   id: string;
@@ -575,6 +586,9 @@ export interface FollowupPlan {
   status: FollowupPlanStatus;
   planSummary: string;
   createdAt: ISODate;
+  /** Multi-step cadence (vs one-off reminders). */
+  kind?: "sequence";
+  sequenceMode?: FollowupSequenceMode;
   pausedAt?: ISODate;
   /** Human-readable reason (e.g. lead replied by email). */
   pausedReason?: string;
@@ -592,6 +606,8 @@ export interface Followup {
   description?: string;
   /** Ready-to-send message (Upwork, LinkedIn, email, etc.). */
   messageBody?: string;
+  /** Subject line when this step is queued/sent as email. */
+  emailSubject?: string;
   channel?: FollowupChannel;
   /** Groups followups created together from one AI suggestion run. */
   planId?: string;

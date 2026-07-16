@@ -13,6 +13,13 @@ const InboxBackgroundSync = dynamic(
   () => import("@/components/providers/inbox-background-sync").then((m) => ({ default: m.InboxBackgroundSync })),
   { ssr: false },
 );
+const ScheduledEmailSendSync = dynamic(
+  () =>
+    import("@/components/providers/scheduled-email-send-sync").then((m) => ({
+      default: m.ScheduledEmailSendSync,
+    })),
+  { ssr: false },
+);
 const FollowupPlanReplyWatcher = dynamic(
   () =>
     import("@/components/providers/followup-plan-reply-watcher").then((m) => ({
@@ -80,6 +87,7 @@ export function DeferredAppSync() {
       <AlertSoundUnlock />
       <EmailAccountSync />
       <InboxBackgroundSync />
+      <ScheduledEmailSendSync />
       <PlatformNotificationsAlertSync />
       <ActivityAuditTracker />
       {needsFollowupReplyWatcher(pathname) ? <FollowupPlanReplyWatcher /> : null}

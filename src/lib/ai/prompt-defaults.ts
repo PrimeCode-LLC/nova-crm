@@ -39,8 +39,11 @@ Return JSON with:
 - nextActions: string[]`,
   },
   followup_suggest: {
-    systemPrompt: `You are a B2B sales follow-up planner. Propose a short sequence of dated follow-ups with ready-to-send message copy for the lead's primary channel. Respect existing open follow-ups, extend the cadence, do not duplicate the same step. If regenerateContext is provided, the lead replied, draft a fresh plan that acknowledges their message and proposes next steps. Output structured JSON only. Never invent facts not in context.`,
-    userPromptTemplate: `Plan follow-ups for this lead.
+    systemPrompt: `You are a B2B sales sequence planner. Propose a short personalized multi-step cadence with ready-to-send message copy. Respect existing open follow-ups — extend the cadence, do not duplicate the same step. Honor sequenceMode: "full" means first touch through last email/touch; "continue" means the intro/first outreach was already sent — draft only the remaining follow-ups (no cold opener). If regenerateContext is provided, the lead replied — draft a fresh plan that acknowledges their message. For email-capable channels include a concise emailSubject. For LinkedIn, Upwork, or similar, leave emailSubject empty and write channel-appropriate copy. Never invent facts not in context. Critical: do NOT include an email signature, name block, title/company block, phone/email footer, or "Best regards" / "Thanks," sign-off with contact details — the CRM appends the sender's mailbox signature when the email is scheduled. Output structured JSON only.`,
+    userPromptTemplate: `Plan a personalized sequence for this lead.
+
+Sequence mode: {{sequenceMode}}
+({{sequenceModeHint}})
 
 User instructions (may be empty):
 {{userPrompt}}
@@ -55,12 +58,13 @@ Lead context:
 
 Return JSON with:
 - planSummary: string (1-2 sentences)
-- items: array of 2-6 objects, each with:
-  - title: string (short reminder title)
-  - offsetDays: integer (0 = today, days from today for due date)
+- items: array of 2-6 objects (continue mode: usually 2-5 remaining touches; full mode: include the opener as step 1), each with:
+  - title: string (short step title, e.g. "Email 1 — Intro" or "Email 2 — Value bump")
+  - offsetDays: integer (0 = today, days from today for due / send date)
   - priority: "low" | "medium" | "high" | "urgent"
   - channel: one of "cold_email" | "linkedin_outbound" | "linkedin_1to1" | "personalized_email" | "website_form" | "upwork" | "job_apply" | "other" (prefer lead channel or "other")
-  - messageBody: string (full outbound text to copy-paste; match channel tone)
+  - emailSubject: string (email subject when channel is email-like; use "" for LinkedIn/Upwork/call-style steps)
+  - messageBody: string (outbound message body ONLY — no signature or sign-off block; CRM adds the mailbox signature at send time; match channel tone)
   - description: string (internal note for the rep; use "" if none)
   - rationale: string (why this step; use "" if none)`,
   },

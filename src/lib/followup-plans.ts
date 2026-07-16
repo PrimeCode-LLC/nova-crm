@@ -1,4 +1,4 @@
-import type { Followup, FollowupPlan, Lead } from "@/lib/types";
+import type { ChannelKey, Followup, FollowupChannel, FollowupPlan, Lead } from "@/lib/types";
 
 export function getActiveFollowupPlanForLead(
   plans: readonly FollowupPlan[],
@@ -7,6 +7,39 @@ export function getActiveFollowupPlanForLead(
   return plans
     .filter((p) => p.leadId === leadId && p.status === "active")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+/** Channels where we queue SMTP send; others stay copy + due-date reminders. */
+const REMIND_ONLY_CHANNELS = new Set<ChannelKey>([
+  "linkedin_outbound",
+  "linkedin_1to1",
+  "upwork",
+  "job_apply",
+]);
+
+export function resolveFollowupChannel(
+  channel: FollowupChannel | undefined,
+  leadChannel: ChannelKey,
+): ChannelKey {
+  if (!channel || channel === "other") return leadChannel;
+  return channel;
+}
+
+/** True when this step can be auto-scheduled as outbound email. */
+export function canAutoScheduleFollowupEmail(
+  f: Followup,
+  leadChannel: ChannelKey,
+): boolean {
+  if (!f.messageBody?.trim()) return false;
+  if (f.scheduledEmailId || f.pausedAt || f.completedAt) return false;
+  const resolved = resolveFollowupChannel(f.channel, leadChannel);
+  return !REMIND_ONLY_CHANNELS.has(resolved);
+}
+
+export function sequenceModeLabel(mode: FollowupPlan["sequenceMode"]): string {
+  if (mode === "continue") return "Continue";
+  if (mode === "full") return "Full outreach";
+  return "Sequence";
 }
 
 export function getPausedFollowupPlanForLead(
@@ -55,6 +88,7 @@ export function synthesizePlansFromFollowups(
       ownerId,
       status: items.some((f) => !f.completedAt && !f.pausedAt) ? "active" : "completed",
       planSummary: "Follow-up plan",
+      kind: "sequence",
       createdAt: earliest,
     });
     known.add(planId);

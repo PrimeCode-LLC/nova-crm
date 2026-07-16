@@ -22,6 +22,7 @@ import {
   Clock,
   Copy,
   Check,
+  Pencil,
   Plus,
   Sparkles,
   Trash2,
@@ -31,17 +32,28 @@ import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { UserChip } from "@/components/common/user-chip";
-import { NewFollowupDialog } from "@/components/followups/new-followup-dialog";
+import {
+  NewFollowupDialog,
+  type FollowupEditableFields,
+} from "@/components/followups/new-followup-dialog";
 import {
   SuggestFollowupsDialog,
   type LeadFollowupAiContext,
 } from "@/components/ai/suggest-followups-dialog";
 import { FollowupPlanPausedBanner } from "@/components/leads/followup-plan-paused-banner";
 import { ScheduleFollowupEmailDialog } from "@/components/leads/schedule-followup-email-dialog";
-import { getPausedFollowupPlanForLead, mergeFollowupPlans } from "@/lib/followup-plans";
+import { ScheduleSequenceEmailsDialog } from "@/components/leads/schedule-sequence-emails-dialog";
+import {
+  canAutoScheduleFollowupEmail,
+  getActiveFollowupPlanForLead,
+  getPausedFollowupPlanForLead,
+  mergeFollowupPlans,
+  sequenceModeLabel,
+} from "@/lib/followup-plans";
 import type { FollowupPlan } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { canMutateFollowup } from "@/lib/can-mutate-followup";
+import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { toast } from "sonner";
 
@@ -86,24 +98,35 @@ function FollowupRow({
   f,
   overdue,
   onComplete,
+  onEdit,
   onDelete,
-  canDelete,
+  canMutate,
   onSchedule,
   onCancelSchedule,
   cancellingSchedule,
+  stepIndex,
+  leadChannel,
 }: {
   f: Followup;
   overdue: boolean;
   onComplete: (done: boolean) => void;
+  onEdit: () => void;
   onDelete: () => void;
-  canDelete: boolean;
+  canMutate: boolean;
   onSchedule: () => void;
   onCancelSchedule: () => void;
   cancellingSchedule: boolean;
+  stepIndex?: number;
+  leadChannel: Lead["channel"];
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const chLabel = channelBadgeLabel(f.channel);
   const isScheduled = Boolean(f.scheduledEmailId && f.emailScheduledAt);
+  const channelSupportsEmail = canAutoScheduleFollowupEmail(
+    { ...f, scheduledEmailId: undefined, completedAt: undefined, pausedAt: undefined },
+    leadChannel,
+  );
+  const canScheduleNow = canAutoScheduleFollowupEmail(f, leadChannel);
 
   return (
     <li
@@ -122,6 +145,11 @@ function FollowupRow({
         />
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 flex-wrap">
+            {stepIndex != null ? (
+              <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                Step {stepIndex}
+              </span>
+            ) : null}
             <span className="text-sm font-medium truncate">{f.title}</span>
             <Badge
               className={cn(
@@ -150,6 +178,16 @@ function FollowupRow({
                   : ""}
               </Badge>
             )}
+            {!isScheduled && !f.pausedAt && channelSupportsEmail && f.messageBody ? (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                Email-ready
+              </Badge>
+            ) : null}
+            {!channelSupportsEmail && f.messageBody && !isScheduled ? (
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                Reminder + copy
+              </Badge>
+            ) : null}
             {f.auto && !f.aiGenerated && (
               <Badge variant="outline" className="text-[10px] gap-1">
                 <Sparkles className="h-2.5 w-2.5" /> Auto
@@ -161,6 +199,11 @@ function FollowupRow({
               </Badge>
             )}
           </div>
+          {f.emailSubject && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              Subject: {f.emailSubject}
+            </p>
+          )}
           {f.description && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">{f.description}</p>
           )}
@@ -194,17 +237,29 @@ function FollowupRow({
               {expanded ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
             </Button>
           ) : null}
-          {canDelete ? (
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              aria-label="Delete followup"
-              onClick={onDelete}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
+          {canMutate ? (
+            <>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground"
+                aria-label="Edit followup"
+                onClick={onEdit}
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                aria-label="Delete followup"
+                onClick={onDelete}
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </>
           ) : null}
         </div>
       </div>
@@ -226,7 +281,7 @@ function FollowupRow({
               >
                 {cancellingSchedule ? "Cancelling…" : "Cancel schedule"}
               </Button>
-            ) : (
+            ) : canScheduleNow ? (
               <Button
                 type="button"
                 variant="outline"
@@ -236,7 +291,7 @@ function FollowupRow({
               >
                 <CalendarClock className="h-3 w-3" /> Schedule
               </Button>
-            )}
+            ) : null}
           </div>
         </div>
       )}
@@ -254,11 +309,13 @@ export function LeadFollowups({
   aiContext?: LeadFollowupAiContext;
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [editTarget, setEditTarget] = React.useState<Followup | null>(null);
   const [suggestOpen, setSuggestOpen] = React.useState(false);
   const [regeneratePlan, setRegeneratePlan] = React.useState<FollowupPlan | undefined>();
   const [dismissedPlanId, setDismissedPlanId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
   const [scheduleTarget, setScheduleTarget] = React.useState<Followup | null>(null);
+  const [scheduleAllOpen, setScheduleAllOpen] = React.useState(false);
   const [cancellingId, setCancellingId] = React.useState<string | null>(null);
   /** Live optimistic schedule chip until Firestore listener catches up (or clears after send). */
   const [optimisticSchedule, setOptimisticSchedule] = React.useState<
@@ -272,6 +329,7 @@ export function LeadFollowups({
     setFollowupEmailSchedule,
     clearFollowupEmailSchedule,
     removeFollowup,
+    updateFollowup,
     currentUserId,
     leads,
     users,
@@ -281,10 +339,15 @@ export function LeadFollowups({
 
   const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const viewer = users.find((u) => u.id === currentUserId);
 
   const plans = React.useMemo(
     () => mergeFollowupPlans(followupPlans, followups),
     [followupPlans, followups],
+  );
+  const activePlan = React.useMemo(
+    () => getActiveFollowupPlanForLead(plans, lead.id),
+    [plans, lead.id],
   );
   const pausedPlan = React.useMemo(
     () => getPausedFollowupPlanForLead(plans, lead.id),
@@ -335,8 +398,31 @@ export function LeadFollowups({
   const open = displayFollowups.filter((f) => !f.completedAt);
   const done = displayFollowups.filter((f) => f.completedAt);
 
-  const canDelete =
-    !isDemo && viewerHasElevatedWorkspaceRole(users.find((u) => u.id === currentUserId));
+  const planOpen = React.useMemo(() => {
+    if (!activePlan) return [];
+    return open
+      .filter((f) => f.planId === activePlan.id)
+      .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
+  }, [activePlan, open]);
+
+  const reminderOpen = React.useMemo(() => {
+    if (!activePlan) return open;
+    return open.filter((f) => f.planId !== activePlan.id);
+  }, [activePlan, open]);
+
+  const scheduleAllCandidates = React.useMemo(
+    () => planOpen.filter((f) => canAutoScheduleFollowupEmail(f, lead.channel)),
+    [planOpen, lead.channel],
+  );
+
+  function canMutateRow(f: Followup): boolean {
+    return canMutateFollowup({
+      currentUserId,
+      viewer,
+      lead,
+      followup: f,
+    });
+  }
 
   const contextForAi: LeadFollowupAiContext | undefined =
     aiContext ??
@@ -376,11 +462,46 @@ export function LeadFollowups({
     }
   }
 
-  function confirmDelete() {
+  async function cancelLinkedSchedule(f: Followup): Promise<boolean> {
+    if (!f.scheduledEmailId) return true;
+    const result = await cancelScheduledEmailClient({
+      scheduledEmailId: f.scheduledEmailId,
+      isDemo,
+      cancelDemo: cancelScheduled,
+    });
+    if ("error" in result) {
+      toast.error(result.error);
+      return false;
+    }
+    applyScheduleOptimistic(f.id, null);
+    return true;
+  }
+
+  async function confirmDelete() {
     if (!deleteTarget) return;
-    removeFollowup(deleteTarget.id);
-    toast.success("Followup deleted");
+    const target = deleteTarget;
     setDeleteTarget(null);
+    if (target.scheduledEmailId) {
+      const ok = await cancelLinkedSchedule(target);
+      if (!ok) return;
+    }
+    removeFollowup(target.id);
+    toast.success("Followup deleted");
+  }
+
+  async function handleUpdate(id: string, patch: Partial<FollowupEditableFields>) {
+    const existing = displayFollowups.find((f) => f.id === id);
+    const dueChanged =
+      patch.dueAt !== undefined && existing != null && patch.dueAt !== existing.dueAt;
+    const bodyChanged =
+      patch.messageBody !== undefined &&
+      existing != null &&
+      (patch.messageBody || undefined) !== (existing.messageBody || undefined);
+    if (existing?.scheduledEmailId && (dueChanged || bodyChanged)) {
+      const ok = await cancelLinkedSchedule(existing);
+      if (!ok) return;
+    }
+    updateFollowup(id, patch);
   }
 
   function handleCreatePlan(plan: FollowupPlan, batch: Followup[]) {
@@ -401,27 +522,33 @@ export function LeadFollowups({
     if (!f.scheduledEmailId) return;
     setCancellingId(f.id);
     try {
-      if (isDemo) {
-        cancelScheduled(f.scheduledEmailId);
-        applyScheduleOptimistic(f.id, null);
-        toast.success("Schedule cancelled");
-        return;
-      }
-      const res = await fetch(`/api/email/scheduled/${encodeURIComponent(f.scheduledEmailId)}`, {
-        method: "DELETE",
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: string };
-      if (!data.ok) {
-        toast.error(data.error ?? "Could not cancel scheduled email");
-        return;
-      }
-      applyScheduleOptimistic(f.id, null);
-      toast.success("Schedule cancelled");
-    } catch {
-      toast.error("Could not reach the server");
+      const ok = await cancelLinkedSchedule(f);
+      if (ok) toast.success("Schedule cancelled");
     } finally {
       setCancellingId(null);
     }
+  }
+
+  function renderOpenRow(f: Followup, stepIndex?: number) {
+    const due = new Date(f.dueAt);
+    const overdue = due.getTime() < Date.now();
+    const mutate = canMutateRow(f);
+    return (
+      <FollowupRow
+        key={f.id}
+        f={f}
+        overdue={overdue}
+        stepIndex={stepIndex}
+        leadChannel={lead.channel}
+        onComplete={(done) => setFollowupCompleted(f.id, done)}
+        onEdit={() => setEditTarget(f)}
+        onDelete={() => setDeleteTarget(f)}
+        canMutate={mutate}
+        onSchedule={() => setScheduleTarget(f)}
+        onCancelSchedule={() => void handleCancelSchedule(f)}
+        cancellingSchedule={cancellingId === f.id}
+      />
+    );
   }
 
   return (
@@ -435,17 +562,18 @@ export function LeadFollowups({
       ) : null}
       <div className="flex items-center justify-between gap-2 flex-wrap">
         <div>
-          <p className="text-sm font-medium">Open followups</p>
+          <p className="text-sm font-medium">Reminders & sequences</p>
           <p className="text-xs text-muted-foreground">
-            Manual reminders, AI plans with copy-ready messages, and idle warnings.
+            One-off reminders, or AI sequences you can edit, verify, and schedule — email
+            autopilot or copy-ready steps for LinkedIn and other channels.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button size="sm" type="button" variant="outline" onClick={() => openSuggest()}>
-            <Sparkles className="h-3.5 w-3.5" /> Suggest with AI
+            <Sparkles className="h-3.5 w-3.5" /> Build sequence
           </Button>
           <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> Add followup
+            <Plus className="h-3.5 w-3.5" /> Add reminder
           </Button>
         </div>
       </div>
@@ -457,6 +585,20 @@ export function LeadFollowups({
         currentUserId={currentUserId}
         fixedLeadId={lead.id}
         onCreate={addFollowup}
+      />
+
+      <NewFollowupDialog
+        open={editTarget != null}
+        onOpenChange={(o) => {
+          if (!o) setEditTarget(null);
+        }}
+        leads={leads}
+        currentUserId={currentUserId}
+        fixedLeadId={lead.id}
+        editFollowup={editTarget}
+        onUpdate={(id, patch) => {
+          void handleUpdate(id, patch);
+        }}
       />
 
       <SuggestFollowupsDialog
@@ -486,31 +628,69 @@ export function LeadFollowups({
         }}
       />
 
-      <ul className="space-y-2">
-        {open.map((f) => {
-          const due = new Date(f.dueAt);
-          const overdue = due.getTime() < Date.now();
-          return (
-            <FollowupRow
-              key={f.id}
-              f={f}
-              overdue={overdue}
-              onComplete={(done) => setFollowupCompleted(f.id, done)}
-              onDelete={() => setDeleteTarget(f)}
-              canDelete={canDelete}
-              onSchedule={() => setScheduleTarget(f)}
-              onCancelSchedule={() => void handleCancelSchedule(f)}
-              cancellingSchedule={cancellingId === f.id}
-            />
-          );
-        })}
-        {open.length === 0 && (
-          <div className="rounded-md border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
-            <CalendarClock className="mx-auto h-5 w-5 mb-2 opacity-60" />
-            No open followups. Add one or use AI to suggest a cadence.
+      <ScheduleSequenceEmailsDialog
+        open={scheduleAllOpen}
+        onOpenChange={setScheduleAllOpen}
+        followups={planOpen}
+        lead={lead}
+        onScheduled={(followupId, schedule) => {
+          applyScheduleOptimistic(followupId, schedule);
+        }}
+      />
+
+      {activePlan && planOpen.length > 0 ? (
+        <div className="rounded-md border bg-card/50 p-3 space-y-3">
+          <div className="flex items-start justify-between gap-2 flex-wrap">
+            <div className="min-w-0 space-y-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-sm font-medium">Active sequence</p>
+                <Badge variant="secondary" className="text-[10px]">
+                  {sequenceModeLabel(activePlan.sequenceMode)}
+                </Badge>
+                <Badge variant="outline" className="text-[10px]">
+                  {planOpen.length} step{planOpen.length === 1 ? "" : "s"}
+                </Badge>
+              </div>
+              {activePlan.planSummary ? (
+                <p className="text-xs text-muted-foreground leading-relaxed">
+                  {activePlan.planSummary}
+                </p>
+              ) : null}
+            </div>
+            <Button
+              size="sm"
+              type="button"
+              variant="secondary"
+              onClick={() => setScheduleAllOpen(true)}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              Schedule all emails
+              {scheduleAllCandidates.length > 0
+                ? ` (${scheduleAllCandidates.length})`
+                : ""}
+            </Button>
           </div>
-        )}
-      </ul>
+          <ul className="space-y-2">{planOpen.map((f, i) => renderOpenRow(f, i + 1))}</ul>
+        </div>
+      ) : null}
+
+      {reminderOpen.length > 0 ? (
+        <div className="space-y-2">
+          {activePlan && planOpen.length > 0 ? (
+            <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+              Reminders
+            </p>
+          ) : null}
+          <ul className="space-y-2">{reminderOpen.map((f) => renderOpenRow(f))}</ul>
+        </div>
+      ) : null}
+
+      {open.length === 0 && (
+        <div className="rounded-md border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
+          <CalendarClock className="mx-auto h-5 w-5 mb-2 opacity-60" />
+          No open reminders or sequences. Add a reminder or build a personalized sequence.
+        </div>
+      )}
 
       {done.length > 0 && (
         <div>
@@ -534,17 +714,29 @@ export function LeadFollowups({
                   {f.title}
                 </span>
                 <span className="text-xs text-muted-foreground">{fmtRelative(f.completedAt)}</span>
-                {canDelete ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                    aria-label="Delete followup"
-                    onClick={() => setDeleteTarget(f)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                {canMutateRow(f) ? (
+                  <>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground"
+                      aria-label="Edit followup"
+                      onClick={() => setEditTarget(f)}
+                    >
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      aria-label="Delete followup"
+                      onClick={() => setDeleteTarget(f)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
                 ) : null}
               </li>
             ))}
@@ -557,12 +749,15 @@ export function LeadFollowups({
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this followup?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the reminder from the workspace for everyone.
+              This removes the reminder from the workspace for everyone
+              {deleteTarget?.scheduledEmailId
+                ? " and cancels any pending scheduled email."
+                : "."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={confirmDelete}>
+            <AlertDialogAction variant="destructive" onClick={() => void confirmDelete()}>
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>

@@ -16,7 +16,7 @@ import {
   upsertMailboxSecretsServer,
 } from "@/lib/email/mailbox-secrets-server";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
-import { withGoogleWorkspaceConnection } from "@/lib/email/mailbox-connection-presets";
+import { withGoogleWorkspaceConnection, withMicrosoftOutlookConnection } from "@/lib/email/mailbox-connection-presets";
 
 const META_COLLECTION = "emailAccountState";
 const META_DOC_ID = "default";
@@ -57,7 +57,14 @@ function metaRef(orgId: string, uid: string) {
 }
 
 function parseConnectionType(raw: unknown): MailboxConnectionType {
-  return raw === "google_workspace" ? "google_workspace" : "custom";
+  if (raw === "google_workspace") return "google_workspace";
+  if (raw === "microsoft_outlook") return "microsoft_outlook";
+  return "custom";
+}
+
+function serializeConnectionType(type: MailboxConnectionType): MailboxConnectionType {
+  if (type === "google_workspace" || type === "microsoft_outlook") return type;
+  return "custom";
 }
 
 function parseDailySendLimit(raw: unknown): number | null {
@@ -89,7 +96,7 @@ function profileToFirestore(mb: EmailMailboxSettings): Record<string, unknown> {
     syncIntervalMinutes: mb.syncIntervalMinutes,
     archiveOnSend: mb.archiveOnSend,
     readReceipts: mb.readReceipts,
-    connectionType: mb.connectionType === "google_workspace" ? "google_workspace" : "custom",
+    connectionType: serializeConnectionType(mb.connectionType),
     dailySendLimit: mb.dailySendLimit == null ? null : Math.floor(mb.dailySendLimit),
     assignedUserIds: parseAssignedUserIds(mb.assignedUserIds),
     updatedAt: new Date().toISOString(),
@@ -337,6 +344,8 @@ export async function upsertMailboxWithSecretsMerged(input: {
   let mailbox = input.mailbox;
   if (mailbox.connectionType === "google_workspace") {
     mailbox = withGoogleWorkspaceConnection(mailbox);
+  } else if (mailbox.connectionType === "microsoft_outlook") {
+    mailbox = withMicrosoftOutlookConnection(mailbox);
   }
 
   const existing = await getMailboxSecretsServer({

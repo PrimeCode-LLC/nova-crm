@@ -3,8 +3,8 @@
 import * as React from "react";
 import { Users } from "lucide-react";
 import { toast } from "sonner";
-import type { Followup, Lead, LeadPriority } from "@/lib/types";
-import { PRIORITY_TONE } from "@/lib/constants";
+import type { Followup, FollowupChannel, Lead, LeadPriority } from "@/lib/types";
+import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
 import { leadPickerTriggerLabel } from "@/lib/base-ui-select-label";
 import {
   buildWorkspaceOwnerPickerOptions,
@@ -77,12 +77,27 @@ function leadMatchesActivityDate(lead: Lead, ymd: string): boolean {
   return rowYmd === ymd;
 }
 
+export type FollowupEditableFields = Pick<
+  Followup,
+  | "title"
+  | "description"
+  | "messageBody"
+  | "emailSubject"
+  | "channel"
+  | "dueAt"
+  | "priority"
+  | "ownerId"
+>;
+
 export function NewFollowupDialog({
   open,
   onOpenChange,
   leads,
   currentUserId,
   onCreate,
+  /** When set, the dialog edits this followup instead of creating. */
+  editFollowup,
+  onUpdate,
   /** When set, the followup is always created for this lead (lead picker hidden). */
   fixedLeadId,
 }: {
@@ -90,13 +105,19 @@ export function NewFollowupDialog({
   onOpenChange: (open: boolean) => void;
   leads: Lead[];
   currentUserId: string;
-  onCreate: (followup: Followup) => void;
+  onCreate?: (followup: Followup) => void;
+  editFollowup?: Followup | null;
+  onUpdate?: (id: string, patch: Partial<FollowupEditableFields>) => void;
   fixedLeadId?: string;
 }) {
   const { users, getUserById, getOwnerDisplayName } = useWorkspace();
+  const isEdit = Boolean(editFollowup);
   const [leadId, setLeadId] = React.useState("");
   const [title, setTitle] = React.useState("");
   const [description, setDescription] = React.useState("");
+  const [messageBody, setMessageBody] = React.useState("");
+  const [emailSubject, setEmailSubject] = React.useState("");
+  const [channel, setChannel] = React.useState<FollowupChannel | "">("");
   const [dueDate, setDueDate] = React.useState(todayInputValue());
   const [priority, setPriority] = React.useState<LeadPriority>("medium");
   const [leadOwnerScope, setLeadOwnerScope] = React.useState("all-owners");
@@ -137,20 +158,38 @@ export function NewFollowupDialog({
 
   React.useEffect(() => {
     if (!open) return;
+    if (editFollowup) {
+      React.startTransition(() => {
+        setLeadId(editFollowup.leadId ?? fixedLeadId ?? "");
+        setTitle(editFollowup.title);
+        setDescription(editFollowup.description ?? "");
+        setMessageBody(editFollowup.messageBody ?? "");
+        setEmailSubject(editFollowup.emailSubject ?? "");
+        setChannel(editFollowup.channel ?? "");
+        setDueDate(localYmdFromIso(editFollowup.dueAt) || todayInputValue());
+        setPriority(editFollowup.priority);
+        setLeadOwnerScope("all-owners");
+        setLeadActivityDate("");
+      });
+      return;
+    }
     const lead = fixedLeadId ? leads.find((l) => l.id === fixedLeadId) : leads[0];
     React.startTransition(() => {
       setLeadId(fixedLeadId ?? lead?.id ?? "");
       setTitle(defaultFollowupTitle(lead));
       setDescription("");
+      setMessageBody("");
+      setEmailSubject("");
+      setChannel("");
       setDueDate(todayInputValue());
       setPriority("medium");
       setLeadOwnerScope("all-owners");
       setLeadActivityDate("");
     });
-  }, [open, leads, fixedLeadId]);
+  }, [open, leads, fixedLeadId, editFollowup]);
 
   React.useEffect(() => {
-    if (!open || fixedLeadId) return;
+    if (!open || fixedLeadId || isEdit) return;
     if (filteredLeads.some((l) => l.id === leadId)) return;
     const next = filteredLeads[0];
     const prevLead = leads.find((l) => l.id === leadId);
@@ -160,21 +199,42 @@ export function NewFollowupDialog({
     if (next && titleStillSynced) {
       setTitle(defaultFollowupTitle(next));
     }
-  }, [open, fixedLeadId, filteredLeads, leadId, leads, title]);
+  }, [open, fixedLeadId, isEdit, filteredLeads, leadId, leads, title]);
 
-  const selectedLead = filteredLeads.find((l) => l.id === leadId) ?? leads.find((l) => l.id === leadId);
+  const selectedLead =
+    filteredLeads.find((l) => l.id === leadId) ?? leads.find((l) => l.id === leadId);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selectedLead) {
-      toast.error("Add a lead in the workspace before creating a followup.");
-      return;
-    }
     const t = title.trim();
     if (!t) {
       toast.error("Enter a title for this followup.");
       return;
     }
+
+    if (isEdit && editFollowup && onUpdate) {
+      const patch: Partial<FollowupEditableFields> = {
+        title: t,
+        description: description.trim(),
+        messageBody: messageBody.trim(),
+        emailSubject: emailSubject.trim(),
+        channel: channel || undefined,
+        dueAt: isoFromDateInput(dueDate),
+        priority,
+        ownerId: editFollowup.ownerId,
+      };
+      onUpdate(editFollowup.id, patch);
+      toast.success("Followup updated");
+      onOpenChange(false);
+      return;
+    }
+
+    if (!selectedLead) {
+      toast.error("Add a lead in the workspace before creating a followup.");
+      return;
+    }
+    if (!onCreate) return;
+
     const id =
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? `f-local-${crypto.randomUUID()}`
@@ -184,6 +244,9 @@ export function NewFollowupDialog({
       leadId: selectedLead.id,
       title: t,
       description: description.trim() || undefined,
+      messageBody: messageBody.trim() || undefined,
+      emailSubject: emailSubject.trim() || undefined,
+      channel: channel || undefined,
       dueAt: isoFromDateInput(dueDate),
       ownerId: selectedLead.ownerId ?? currentUserId,
       priority,
@@ -199,13 +262,15 @@ export function NewFollowupDialog({
       <DialogContent className="sm:max-w-md" showCloseButton>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>New followup</DialogTitle>
+            <DialogTitle>{isEdit ? "Edit reminder" : "Add reminder"}</DialogTitle>
             <DialogDescription>
-              Create a reminder linked to a lead. Saved in this browser tab until you refresh or leave demo mode.
+              {isEdit
+                ? "Update the reminder details. Changing due date or message cancels any pending scheduled email."
+                : "Create a one-off reminder linked to this lead."}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            {!fixedLeadId && (
+            {!fixedLeadId && !isEdit && (
               <div className="grid gap-3">
                 <div className="grid grid-cols-2 gap-3">
                   <div className="grid gap-2">
@@ -323,6 +388,57 @@ export function NewFollowupDialog({
                 className="resize-none"
               />
             </div>
+            {isEdit || messageBody || channel ? (
+              <>
+                <div className="grid gap-2">
+                  <Label htmlFor="followup-email-subject">Email subject (optional)</Label>
+                  <Input
+                    id="followup-email-subject"
+                    value={emailSubject}
+                    onChange={(e) => setEmailSubject(e.target.value)}
+                    placeholder="Used when scheduling email"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="followup-message">Message body (optional)</Label>
+                  <Textarea
+                    id="followup-message"
+                    value={messageBody}
+                    onChange={(e) => setMessageBody(e.target.value)}
+                    rows={4}
+                    className="resize-none font-mono text-xs"
+                    placeholder="Copy-ready outreach message…"
+                  />
+                </div>
+                <div className="grid gap-2">
+                  <Label>Channel (optional)</Label>
+                  <Select
+                    value={channel || "__none__"}
+                    onValueChange={(v) => {
+                      if (!v || v === "__none__") setChannel("");
+                      else setChannel(v as FollowupChannel);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Any channel">
+                        {channel
+                          ? CHANNEL_LIST.find((c) => c.key === channel)?.label ?? channel
+                          : "Any channel"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Any channel</SelectItem>
+                      {CHANNEL_LIST.map((c) => (
+                        <SelectItem key={c.key} value={c.key}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                      <SelectItem value="other">Other</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </>
+            ) : null}
             <div className="grid grid-cols-2 gap-3">
               <div className="grid gap-2">
                 <Label htmlFor="followup-due">Due date</Label>
@@ -358,8 +474,8 @@ export function NewFollowupDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={!selectedLead}>
-              Create followup
+            <Button type="submit" disabled={!isEdit && !selectedLead}>
+              {isEdit ? "Save changes" : "Add reminder"}
             </Button>
           </DialogFooter>
         </form>

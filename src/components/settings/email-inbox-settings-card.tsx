@@ -18,12 +18,15 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-account-store";
-import type { EmailMailboxSettings } from "@/lib/email-account-types";
+import type { EmailMailboxSettings, MailboxConnectionType } from "@/lib/email-account-types";
 import { isAssignedMailbox } from "@/lib/email-account-types";
 import {
   GOOGLE_WORKSPACE_DEFAULT_DAILY_SEND_LIMIT,
+  MICROSOFT_OUTLOOK_DEFAULT_DAILY_SEND_LIMIT,
   applyGoogleWorkspacePreset,
+  applyMicrosoftOutlookPreset,
   withGoogleWorkspaceConnection,
+  withMicrosoftOutlookConnection,
 } from "@/lib/email/mailbox-connection-presets";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { toast } from "sonner";
@@ -311,7 +314,11 @@ export function EmailInboxSettingsCard() {
 
   async function testConnectionsFor(mb: EmailMailboxSettings) {
     const prepared =
-      mb.connectionType === "google_workspace" ? { ...mb, ...applyGoogleWorkspacePreset(mb) } : mb;
+      mb.connectionType === "google_workspace"
+        ? { ...mb, ...applyGoogleWorkspacePreset(mb) }
+        : mb.connectionType === "microsoft_outlook"
+          ? { ...mb, ...applyMicrosoftOutlookPreset(mb) }
+          : mb;
     const smtpHost = normalizeMailHost(prepared.smtp.host);
     const smtpUser = prepared.smtp.user.trim() || prepared.emailAddress.trim();
     if (!smtpHost) {
@@ -396,7 +403,7 @@ export function EmailInboxSettingsCard() {
     }
   }
 
-  function setConnectionType(mb: EmailMailboxSettings, type: "google_workspace" | "custom") {
+  function setConnectionType(mb: EmailMailboxSettings, type: MailboxConnectionType) {
     if (type === "google_workspace") {
       const next = withGoogleWorkspaceConnection({
         ...mb,
@@ -406,7 +413,20 @@ export function EmailInboxSettingsCard() {
       });
       updateMailbox(mb.id, next);
       toast.message("Google Workspace preset applied", {
-        description: "SMTP/IMAP hosts are filled. Enter the inbox email and preferred password.",
+        description: "SMTP/IMAP hosts are filled. Sign in with Google to connect.",
+      });
+      return;
+    }
+    if (type === "microsoft_outlook") {
+      const next = withMicrosoftOutlookConnection({
+        ...mb,
+        connectionType: "microsoft_outlook",
+        dailySendLimit:
+          mb.dailySendLimit == null ? MICROSOFT_OUTLOOK_DEFAULT_DAILY_SEND_LIMIT : mb.dailySendLimit,
+      });
+      updateMailbox(mb.id, next);
+      toast.message("Microsoft / Outlook preset applied", {
+        description: "SMTP/IMAP hosts are prefilled. Enter your email, username, and password.",
       });
       return;
     }
@@ -737,7 +757,16 @@ export function EmailInboxSettingsCard() {
                         <Button
                           type="button"
                           size="sm"
-                          variant={mb.connectionType !== "google_workspace" ? "default" : "outline"}
+                          variant={mb.connectionType === "microsoft_outlook" ? "default" : "outline"}
+                          className={cn("h-8")}
+                          onClick={() => setConnectionType(mb, "microsoft_outlook")}
+                        >
+                          Microsoft / Outlook
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant={mb.connectionType === "custom" ? "default" : "outline"}
                           className={cn("h-8")}
                           onClick={() => setConnectionType(mb, "custom")}
                         >
@@ -747,7 +776,9 @@ export function EmailInboxSettingsCard() {
                       <p className="text-[11px] text-muted-foreground">
                         {mb.connectionType === "google_workspace"
                           ? "For Inboxlogy / warmed Google Workspace: Sign in with Google (OAuth). Preferred passwords no longer work for SMTP/IMAP."
-                          : "Full SMTP and IMAP fields for Microsoft or other custom mail hosts."}
+                          : mb.connectionType === "microsoft_outlook"
+                            ? "Outlook / Microsoft 365 SMTP and IMAP hosts are prefilled. Use the same fields as Custom SMTP for credentials."
+                            : "Full SMTP and IMAP fields for other custom mail hosts."}
                       </p>
                     </div>
 
@@ -1223,6 +1254,10 @@ export function EmailInboxSettingsCard() {
                           placeholder="&#10;James Mitchell&#10;Director, Nova Inc."
                           className="text-sm resize-y min-h-[88px]"
                         />
+                        <p className="text-[10px] text-muted-foreground">
+                          Appended automatically when composing in Inbox and when scheduling
+                          follow-up / sequence emails from this mailbox.
+                        </p>
                       </div>
                     </div>
                   </div>

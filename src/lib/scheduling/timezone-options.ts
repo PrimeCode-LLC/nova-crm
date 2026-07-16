@@ -49,3 +49,34 @@ export function buildTimezoneOptions(current?: string): string[] {
 export function formatTimezoneLabel(tz: string): string {
   return tz.replace(/_/g, " ");
 }
+
+/** IANA zone from the current browser (e.g. Asia/Karachi). */
+export function getBrowserTimezone(): string {
+  if (typeof Intl === "undefined") return "UTC";
+  return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+/**
+ * Human label for the browser local zone used by `datetime-local` pickers,
+ * e.g. "Asia/Karachi (PKT)" or "America/New York (EST)".
+ */
+export function formatBrowserTimezoneLabel(at: Date = new Date()): string {
+  const tz = getBrowserTimezone();
+  const name = formatTimezoneLabel(tz);
+  let short = "";
+  try {
+    short =
+      new Intl.DateTimeFormat("en-US", {
+        timeZone: tz,
+        timeZoneName: "short",
+      })
+        .formatToParts(at)
+        .find((p) => p.type === "timeZoneName")?.value ?? "";
+  } catch {
+    /* ignore */
+  }
+  if (short && short !== name && !name.includes(short)) {
+    return `${name} (${short})`;
+  }
+  return name;
+}

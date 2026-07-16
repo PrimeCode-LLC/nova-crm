@@ -79,6 +79,7 @@ export async function persistFollowupCreate(
   if (f.contactId) data.contactId = f.contactId;
   if (f.description) data.description = f.description;
   if (f.messageBody) data.messageBody = f.messageBody;
+  if (f.emailSubject) data.emailSubject = f.emailSubject;
   if (f.channel) data.channel = f.channel;
   if (f.planId) data.planId = f.planId;
   if (f.aiGenerated) data.aiGenerated = f.aiGenerated;
@@ -115,6 +116,8 @@ export async function persistFollowupPlanCreate(
   if (plan.pausedReason) data.pausedReason = plan.pausedReason;
   if (plan.replyMessageId) data.replyMessageId = plan.replyMessageId;
   if (plan.supersededByPlanId) data.supersededByPlanId = plan.supersededByPlanId;
+  if (plan.kind) data.kind = plan.kind;
+  if (plan.sequenceMode) data.sequenceMode = plan.sequenceMode;
   await setDoc(doc(db, COLLECTIONS.followupPlans, plan.id), data);
 }
 
@@ -167,6 +170,45 @@ export async function persistFollowupEmailSchedule(
     emailScheduledAt: deleteField(),
     updatedAt: serverTimestamp(),
   });
+}
+
+export type FollowupEditablePatch = Partial<
+  Pick<
+    Followup,
+    | "title"
+    | "description"
+    | "messageBody"
+    | "emailSubject"
+    | "channel"
+    | "dueAt"
+    | "priority"
+    | "ownerId"
+  >
+>;
+
+export async function persistFollowupPatch(
+  db: Firestore,
+  followupId: string,
+  patch: FollowupEditablePatch,
+): Promise<void> {
+  const data: Record<string, unknown> = { updatedAt: serverTimestamp() };
+  if (patch.title !== undefined) data.title = patch.title;
+  if (patch.description !== undefined) {
+    data.description = patch.description.trim() ? patch.description : deleteField();
+  }
+  if (patch.messageBody !== undefined) {
+    data.messageBody = patch.messageBody.trim() ? patch.messageBody : deleteField();
+  }
+  if (patch.emailSubject !== undefined) {
+    data.emailSubject = patch.emailSubject.trim() ? patch.emailSubject : deleteField();
+  }
+  if (patch.channel !== undefined) {
+    data.channel = patch.channel ? patch.channel : deleteField();
+  }
+  if (patch.dueAt !== undefined) data.dueAt = patch.dueAt;
+  if (patch.priority !== undefined) data.priority = patch.priority;
+  if (patch.ownerId !== undefined) data.ownerId = patch.ownerId;
+  await updateDoc(doc(db, COLLECTIONS.followups, followupId), data);
 }
 
 export async function persistFollowupDelete(db: Firestore, followupId: string): Promise<void> {

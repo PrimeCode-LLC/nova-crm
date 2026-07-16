@@ -262,6 +262,7 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     priority: (raw.priority as Followup["priority"]) ?? "medium",
     auto: Boolean(raw.auto),
     messageBody: typeof raw.messageBody === "string" ? raw.messageBody : undefined,
+    emailSubject: typeof raw.emailSubject === "string" ? raw.emailSubject : undefined,
     channel: typeof raw.channel === "string" ? (raw.channel as Followup["channel"]) : undefined,
     planId: typeof raw.planId === "string" ? raw.planId : undefined,
     aiGenerated: Boolean(raw.aiGenerated),
@@ -284,6 +285,11 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
     status: (raw.status as FollowupPlan["status"]) ?? "active",
     planSummary: String(raw.planSummary ?? ""),
     createdAt: firestoreValueToIso(raw.createdAt),
+    kind: raw.kind === "sequence" ? "sequence" : undefined,
+    sequenceMode:
+      raw.sequenceMode === "full" || raw.sequenceMode === "continue"
+        ? raw.sequenceMode
+        : undefined,
     pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
     pausedReason: typeof raw.pausedReason === "string" ? raw.pausedReason : undefined,
     replyMessageId: typeof raw.replyMessageId === "string" ? raw.replyMessageId : undefined,
@@ -588,16 +594,8 @@ export function useLiveWorkspaceFirestore(
         );
       }
 
-      subscribeLeads(
-        "openProspects",
-        query(
-          collection(db, COLLECTIONS.leads),
-          where("organizationId", "==", organizationId),
-          where("intakeKind", "==", "prospect"),
-          where("prospectVisibility", "==", "open"),
-        ),
-      );
-
+      // Prospects follow owner/team scope (same as sales leads). Channel assignees
+      // still get a dedicated query so they can see work assigned to them.
       subscribeLeads(
         "prospectAssignee",
         query(

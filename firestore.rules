@@ -160,12 +160,7 @@ service cloud.firestore {
         || callerSharesDepartmentWith(ownerId);
     }
 
-    /** Open prospects (no channel assignments yet) are readable by all org members. */
-    function isOpenProspect(data) {
-      return data.get('intakeKind', '') == 'prospect'
-        && data.get('prospectVisibility', 'open') == 'open';
-    }
-
+    /** Channel assignees may read prospects they were assigned to work. */
     function isProspectAssignee(data) {
       return data.get('intakeKind', '') == 'prospect'
         && request.auth.uid in data.get('prospectAssigneeIds', []);
@@ -195,9 +190,9 @@ service cloud.firestore {
       return request.auth.uid in data.get('sharedOwnerIds', []);
     }
 
+    /** Prospects use the same owner/team/dept scope as sales leads (no org-wide open pool). */
     function canReadLead(data) {
       return crmTenantReadAll()
-        || isOpenProspect(data)
         || isProspectAssignee(data)
         || isProspectOwner(data)
         || isProspectHierarchyManager(data)

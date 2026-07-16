@@ -15,7 +15,6 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Badge } from "@/components/ui/badge";
 import {
   Select,
   SelectContent,
@@ -31,6 +30,7 @@ import type {
   Followup,
   FollowupPlan,
   FollowupChannel,
+  FollowupSequenceMode,
   Lead,
   LeadPriority,
   LeadTask,
@@ -63,6 +63,7 @@ type SuggestApiItem = {
   offsetDays: number;
   priority: LeadPriority;
   channel: FollowupChannel;
+  emailSubject?: string;
   messageBody: string;
   description?: string;
   rationale?: string;
@@ -85,8 +86,13 @@ function channelLabel(ch: FollowupChannel): string {
   return CHANNEL_LIST.find((c) => c.key === ch)?.label ?? ch;
 }
 
-function resolveChannel(ch: FollowupChannel, leadChannel: ChannelKey): ChannelKey {
-  return ch === "other" ? leadChannel : ch;
+function showsEmailSubject(ch: FollowupChannel): boolean {
+  return (
+    ch === "cold_email" ||
+    ch === "personalized_email" ||
+    ch === "website_form" ||
+    ch === "other"
+  );
 }
 
 export function SuggestFollowupsDialog({
@@ -99,6 +105,7 @@ export function SuggestFollowupsDialog({
   onCreatePlanWithFollowups,
   regenerateFromPlan,
   followupPlans = [],
+  initialSequenceMode = "full",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -110,8 +117,11 @@ export function SuggestFollowupsDialog({
   /** When set, accept supersedes this paused plan and pre-fills regenerate context. */
   regenerateFromPlan?: FollowupPlan;
   followupPlans?: FollowupPlan[];
+  initialSequenceMode?: FollowupSequenceMode;
 }) {
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
+  const [sequenceMode, setSequenceMode] =
+    React.useState<FollowupSequenceMode>(initialSequenceMode);
   const [userPrompt, setUserPrompt] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -122,6 +132,10 @@ export function SuggestFollowupsDialog({
   React.useEffect(() => {
     if (!open) return;
     setPhase("prompt");
+    setSequenceMode(
+      regenerateFromPlan?.sequenceMode ??
+        (regenerateFromPlan ? "continue" : initialSequenceMode),
+    );
     setUserPrompt(
       regenerateFromPlan
         ? `Regenerate after lead reply. Prior plan: ${regenerateFromPlan.planSummary}. ${regenerateFromPlan.pausedReason ?? ""}`.trim()
@@ -131,7 +145,7 @@ export function SuggestFollowupsDialog({
     setPlanSummary("");
     setItems([]);
     setLeadChannel(lead.channel);
-  }, [open, lead.id, lead.channel, regenerateFromPlan]);
+  }, [open, lead.id, lead.channel, regenerateFromPlan, initialSequenceMode]);
 
   function demoContextPayload(): LeadAiContextInput | undefined {
     if (!isDemo) return undefined;
@@ -160,6 +174,7 @@ export function SuggestFollowupsDialog({
     setItems(
       apiItems.map((it, i) => ({
         ...it,
+        emailSubject: it.emailSubject ?? "",
         key: `s-${i}`,
         included: true,
         dueDate: dateInputFromOffsetDays(it.offsetDays),
@@ -178,6 +193,7 @@ export function SuggestFollowupsDialog({
         body: JSON.stringify({
           leadId: lead.id,
           userPrompt: userPrompt.trim() || undefined,
+          sequenceMode,
           regenerateContext: regenerateFromPlan
             ? `${regenerateFromPlan.pausedReason ?? "Lead replied"}. Prior: ${regenerateFromPlan.planSummary}`
             : undefined,
@@ -194,7 +210,7 @@ export function SuggestFollowupsDialog({
       const data = await res.json();
       if (!res.ok) {
         if (isDemo) {
-          applyApiResult(demoFollowupSuggestions(lead, userPrompt));
+          applyApiResult(demoFollowupSuggestions(lead, userPrompt, sequenceMode));
           return;
         }
         setError(typeof data.error === "string" ? data.error : "Could not generate suggestions");
@@ -203,7 +219,7 @@ export function SuggestFollowupsDialog({
       applyApiResult(data);
     } catch {
       if (isDemo) {
-        applyApiResult(demoFollowupSuggestions(lead, userPrompt));
+        applyApiResult(demoFollowupSuggestions(lead, userPrompt, sequenceMode));
       } else {
         setError("Network error");
       }
@@ -219,7 +235,7 @@ export function SuggestFollowupsDialog({
   function accept() {
     const selected = items.filter((it) => it.included);
     if (selected.length === 0) {
-      toast.error("Select at least one follow-up to create");
+      toast.error("Select at least one step to activate");
       return;
     }
     const planId =
@@ -232,7 +248,9 @@ export function SuggestFollowupsDialog({
       leadId: lead.id,
       ownerId,
       status: "active",
-      planSummary: planSummary.trim() || "Follow-up plan",
+      planSummary: planSummary.trim() || "Personalized sequence",
+      kind: "sequence",
+      sequenceMode,
       createdAt: new Date().toISOString(),
       supersededByPlanId: undefined,
     };
@@ -242,6 +260,7 @@ export function SuggestFollowupsDialog({
       title: it.title.trim(),
       description: it.description?.trim() || undefined,
       messageBody: it.messageBody.trim(),
+      emailSubject: it.emailSubject?.trim() || undefined,
       channel: it.channel,
       planId,
       aiGenerated: true,
@@ -251,7 +270,9 @@ export function SuggestFollowupsDialog({
       auto: false,
     }));
     onCreatePlanWithFollowups(plan, created);
-    toast.success(`Created ${created.length} follow-up${created.length === 1 ? "" : "s"}`);
+    toast.success(
+      `Activated sequence · ${created.length} step${created.length === 1 ? "" : "s"}`,
+    );
     onOpenChange(false);
   }
 
@@ -261,17 +282,54 @@ export function SuggestFollowupsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-sm">
             <Sparkles className="h-4 w-4 text-primary" />
-            {regenerateFromPlan ? "Regenerate follow-ups" : "Suggest follow-ups"}
+            {regenerateFromPlan ? "Regenerate sequence" : "Build sequence"}
           </DialogTitle>
           <DialogDescription className="text-xs">
             {regenerateFromPlan
-              ? "Lead replied, draft a new cadence that reflects their message. Edit before creating."
-              : "AI analyzes this lead and proposes a cadence with copy-ready messages. Edit anything before creating."}
+              ? "Lead replied — draft a new cadence that reflects their message. Edit before activating."
+              : "AI proposes a personalized multi-step cadence. Edit, then activate. Email steps can be scheduled; other channels stay as copy-ready reminders."}
           </DialogDescription>
         </DialogHeader>
 
         {phase === "prompt" && (
           <div className="space-y-4">
+            {!regenerateFromPlan ? (
+              <div className="grid gap-2">
+                <Label className="text-xs">Sequence type</Label>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <button
+                    type="button"
+                    onClick={() => setSequenceMode("full")}
+                    className={cn(
+                      "rounded-md border px-3 py-2.5 text-left transition-colors",
+                      sequenceMode === "full"
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/50",
+                    )}
+                  >
+                    <p className="text-sm font-medium">Full outreach</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                      First touch through last email — complete autopilot sequence.
+                    </p>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSequenceMode("continue")}
+                    className={cn(
+                      "rounded-md border px-3 py-2.5 text-left transition-colors",
+                      sequenceMode === "continue"
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/50",
+                    )}
+                  >
+                    <p className="text-sm font-medium">Continue / follow-ups only</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                      Intro already sent — draft remaining touches starting from the next email.
+                    </p>
+                  </button>
+                </div>
+              </div>
+            ) : null}
             <div className="grid gap-2">
               <Label htmlFor="followup-ai-prompt" className="text-xs">
                 Instructions (optional)
@@ -280,7 +338,7 @@ export function SuggestFollowupsDialog({
                 id="followup-ai-prompt"
                 value={userPrompt}
                 onChange={(e) => setUserPrompt(e.target.value)}
-                placeholder='e.g. "Focus on Upwork proposal follow-up" or "Soft tone, 3 steps over 2 weeks"'
+                placeholder='e.g. "Soft tone, 4 emails over 2 weeks" or "LinkedIn first, then email"'
                 rows={3}
                 className="resize-none text-sm"
                 maxLength={500}
@@ -302,7 +360,7 @@ export function SuggestFollowupsDialog({
                   </>
                 ) : (
                   <>
-                    <Sparkles className="h-3.5 w-3.5" /> Generate suggestions
+                    <Sparkles className="h-3.5 w-3.5" /> Generate sequence
                   </>
                 )}
               </Button>
@@ -315,8 +373,15 @@ export function SuggestFollowupsDialog({
             {planSummary && (
               <p className="text-sm text-muted-foreground leading-relaxed">{planSummary}</p>
             )}
+            <p className="text-[11px] text-muted-foreground">
+              Mode:{" "}
+              <span className="font-medium text-foreground">
+                {sequenceMode === "continue" ? "Continue / follow-ups only" : "Full outreach"}
+              </span>
+              . Verify copy, then activate.
+            </p>
             <ul className="space-y-4">
-              {items.map((it) => (
+              {items.map((it, idx) => (
                 <li
                   key={it.key}
                   className={cn(
@@ -332,11 +397,16 @@ export function SuggestFollowupsDialog({
                       className="mt-1"
                     />
                     <div className="flex-1 grid gap-2 min-w-0">
-                      <Input
-                        value={it.title}
-                        onChange={(e) => updateItem(it.key, { title: e.target.value })}
-                        className="h-8 text-sm font-medium"
-                      />
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground shrink-0">
+                          Step {idx + 1}
+                        </span>
+                        <Input
+                          value={it.title}
+                          onChange={(e) => updateItem(it.key, { title: e.target.value })}
+                          className="h-8 text-sm font-medium"
+                        />
+                      </div>
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                         <div className="grid gap-1">
                           <Label className="text-[10px] text-muted-foreground">Due</Label>
@@ -394,6 +464,17 @@ export function SuggestFollowupsDialog({
                       {it.rationale && (
                         <p className="text-[10px] text-muted-foreground italic">{it.rationale}</p>
                       )}
+                      {showsEmailSubject(it.channel) ? (
+                        <div className="grid gap-1">
+                          <Label className="text-[10px] text-muted-foreground">Email subject</Label>
+                          <Input
+                            value={it.emailSubject ?? ""}
+                            onChange={(e) => updateItem(it.key, { emailSubject: e.target.value })}
+                            className="h-8 text-xs"
+                            placeholder="Subject line for scheduled send"
+                          />
+                        </div>
+                      ) : null}
                       <div className="grid gap-1">
                         <Label className="text-[10px] text-muted-foreground">Message to send</Label>
                         <Textarea
@@ -426,7 +507,7 @@ export function SuggestFollowupsDialog({
                 {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Regenerate"}
               </Button>
               <Button type="button" onClick={accept}>
-                Create {items.filter((i) => i.included).length} follow-up
+                Activate {items.filter((i) => i.included).length} step
                 {items.filter((i) => i.included).length === 1 ? "" : "s"}
               </Button>
             </DialogFooter>

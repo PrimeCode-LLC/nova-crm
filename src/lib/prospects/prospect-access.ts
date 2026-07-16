@@ -109,6 +109,11 @@ export function canPushProspectChannel(
   return assignment.assigneeId === viewerId;
 }
 
+/**
+ * Same hierarchy scope as sales leads: owner, managers up the org chart, same-department
+ * peers, plus channel assignees. Admins/managers (`seesAllLeadsInTenant`) see all.
+ * `prospectVisibility` only tracks channel-assignment state — not org-wide read access.
+ */
 export function prospectVisibleToViewer(
   prospect: Lead,
   viewer: User,
@@ -116,23 +121,30 @@ export function prospectVisibleToViewer(
 ): boolean {
   if (!isProspectRow(prospect)) return true;
 
-  const visibility = prospect.prospectVisibility ?? "open";
-  const hasAssignments = (prospect.prospectChannelAssignments?.length ?? 0) > 0;
-
-  if (visibility === "open" && !hasAssignments) return true;
-
   if (seesAllLeadsInTenant(viewer)) return true;
-
-  const ownerId = prospectOwnerIdOf(prospect);
-  if (ownerId && viewer.id === ownerId) return true;
-
-  if (viewerManagesProspectOwner(viewer, prospect, orgUsers)) return true;
 
   const assigneeIds = prospect.prospectAssigneeIds?.length
     ? prospect.prospectAssigneeIds
     : prospectAssigneeIdsFromAssignments(prospect.prospectChannelAssignments);
 
   if (assigneeIds.includes(viewer.id)) return true;
+
+  if (salesLeadVisibleViaSharedOwnership(prospect, viewer.id)) return true;
+
+  const ownerId = prospectOwnerIdOf(prospect);
+  if (!ownerId) return false;
+
+  if (viewer.id === ownerId) return true;
+  if (viewerManagesProspectOwner(viewer, prospect, orgUsers)) return true;
+
+  if (viewer.departmentId) {
+    const owner = orgUsers.find((u) => u.id === ownerId);
+    if (owner?.departmentId === viewer.departmentId) return true;
+  }
+
+  if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
+    return prospect.scraperId === viewer.id;
+  }
 
   return false;
 }

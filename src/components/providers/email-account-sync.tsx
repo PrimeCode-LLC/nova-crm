@@ -76,7 +76,10 @@ export function EmailAccountSync() {
                   imap: m.imap,
                   assignedUserIds: m.assignedUserIds ?? [],
                   dailySendLimit: m.dailySendLimit ?? null,
-                  connectionType: m.connectionType === "google_workspace" ? "google_workspace" : "custom",
+                  connectionType:
+                    m.connectionType === "google_workspace" || m.connectionType === "microsoft_outlook"
+                      ? m.connectionType
+                      : "custom",
                   ...(m.dataOwnerUid ? { dataOwnerUid: m.dataOwnerUid } : {}),
                 }),
               )

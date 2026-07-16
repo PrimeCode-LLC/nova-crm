@@ -36,7 +36,7 @@ const mailboxSchema = z.object({
   syncIntervalMinutes: z.number(),
   archiveOnSend: z.boolean(),
   readReceipts: z.boolean(),
-  connectionType: z.enum(["google_workspace", "custom"]).optional().default("custom"),
+  connectionType: z.enum(["google_workspace", "microsoft_outlook", "custom"]).optional().default("custom"),
   dailySendLimit: z.number().int().positive().nullable().optional().default(null),
   assignedUserIds: z.array(z.string()).optional().default([]),
   dataOwnerUid: z.string().optional(),

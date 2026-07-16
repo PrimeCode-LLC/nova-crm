@@ -179,6 +179,53 @@ export async function cancelScheduledEmailServer(input: {
   return { ok: true };
 }
 
+async function cancelDueToFollowupStop(
+  docRef: DocumentReference,
+  followupId: string,
+): Promise<"skipped"> {
+  const now = new Date().toISOString();
+  await docRef.update({
+    status: "cancelled",
+    error: "Cancelled: follow-up paused or completed after lead reply.",
+    updatedAt: now,
+  });
+  try {
+    const db = getAdminDb();
+    if (db) {
+      await db.collection(COLLECTIONS.followups).doc(followupId).update({
+        scheduledEmailId: FieldValue.delete(),
+        emailScheduledAt: FieldValue.delete(),
+        updatedAt: now,
+      });
+    }
+  } catch {
+    /* Follow-up may already be deleted. */
+  }
+  return "skipped";
+}
+
+/** Skip send when the linked followup (or its plan) was paused/completed after a reply. */
+async function shouldStopScheduledFollowupEmail(
+  followupId: string,
+): Promise<boolean> {
+  const db = getAdminDb();
+  if (!db) return false;
+  try {
+    const snap = await db.collection(COLLECTIONS.followups).doc(followupId).get();
+    if (!snap.exists) return true;
+    const f = snap.data() as Record<string, unknown>;
+    if (f.pausedAt != null || f.completedAt != null) return true;
+    const planId = typeof f.planId === "string" ? f.planId.trim() : "";
+    if (!planId) return false;
+    const planSnap = await db.collection(COLLECTIONS.followupPlans).doc(planId).get();
+    if (!planSnap.exists) return false;
+    const status = String((planSnap.data() as Record<string, unknown>).status ?? "");
+    return status === "paused" || status === "superseded" || status === "completed";
+  } catch {
+    return false;
+  }
+}
+
 async function sendScheduledDoc(
   docRef: DocumentReference,
   data: Record<string, unknown>,
@@ -187,6 +234,12 @@ async function sendScheduledDoc(
   const uid = String(data.uid ?? "");
   const mailboxId = String(data.mailboxId ?? "");
   if (!organizationId || !uid || !mailboxId) return "skipped";
+
+  const followupIdEarly =
+    typeof data.followupId === "string" ? data.followupId.trim() : "";
+  if (followupIdEarly && (await shouldStopScheduledFollowupEmail(followupIdEarly))) {
+    return cancelDueToFollowupStop(docRef, followupIdEarly);
+  }
 
   const mailboxes = await listMailboxesForMemberServer({ organizationId, uid });
   const mailbox = mailboxes.find((m) => m.id === mailboxId);
@@ -287,6 +340,54 @@ async function sendScheduledDoc(
     updatedAt: now,
   });
   return "failed";
+}
+
+async function processScheduledSnap(
+  docs: Array<{ ref: DocumentReference; data: () => Record<string, unknown> }>,
+): Promise<{ processed: number; sent: number; failed: number; skipped: number }> {
+  let sent = 0;
+  let failed = 0;
+  let skipped = 0;
+
+  for (const doc of docs) {
+    const outcome = await sendScheduledDoc(doc.ref, doc.data());
+    if (outcome === "sent") sent += 1;
+    else if (outcome === "failed") failed += 1;
+    else skipped += 1;
+  }
+
+  return { processed: docs.length, sent, failed, skipped };
+}
+
+/**
+ * Dev/local helper: process due emails for one mailbox owner.
+ * Production cron continues to use processDueScheduledEmailsServer (collection group).
+ */
+export async function processDueScheduledEmailsForMemberServer(input: {
+  organizationId: string;
+  uid: string;
+}): Promise<{ processed: number; sent: number; failed: number; skipped: number }> {
+  const db = getAdminDb();
+  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0 };
+
+  const now = new Date().toISOString();
+  const snap = await db
+    .collection(COLLECTIONS.organizations)
+    .doc(input.organizationId)
+    .collection(ORG_SUBCOLLECTIONS.members)
+    .doc(input.uid)
+    .collection(SCHEDULED_COLLECTION)
+    .where("status", "==", "pending")
+    .where("scheduledAt", "<=", now)
+    .limit(50)
+    .get();
+
+  return processScheduledSnap(
+    snap.docs.map((doc) => ({
+      ref: doc.ref,
+      data: () => doc.data() as Record<string, unknown>,
+    })),
+  );
 }
 
 export async function processDueScheduledEmailsServer(): Promise<{

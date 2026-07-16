@@ -34,6 +34,7 @@ const suggestSchema = z.object({
         offsetDays: z.number().int().min(0).max(90),
         priority: z.enum(["low", "medium", "high", "urgent"]),
         channel: z.enum(CHANNEL_VALUES),
+        emailSubject: z.string().max(200),
         messageBody: z.string().min(1).max(8_000),
         description: z.string().max(500),
         rationale: z.string().max(500),
@@ -48,6 +49,7 @@ function normalizeSuggestResult(result: z.infer<typeof suggestSchema>) {
     planSummary: result.planSummary,
     items: result.items.map((it) => ({
       ...it,
+      emailSubject: it.emailSubject.trim() || undefined,
       description: it.description.trim() || undefined,
       rationale: it.rationale.trim() || undefined,
     })),
@@ -57,6 +59,7 @@ function normalizeSuggestResult(result: z.infer<typeof suggestSchema>) {
 const bodySchema = z.object({
   leadId: z.string().min(1),
   userPrompt: z.string().max(500).optional(),
+  sequenceMode: z.enum(["full", "continue"]).optional(),
   regenerateContext: z.string().max(800).optional(),
   followupPlans: z
     .array(
@@ -158,6 +161,11 @@ export async function POST(req: Request) {
   );
 
   const userPrompt = parsed.data.userPrompt?.trim() || "(none, use lead context only)";
+  const sequenceMode = parsed.data.sequenceMode ?? "full";
+  const sequenceModeHint =
+    sequenceMode === "continue"
+      ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+)."
+      : "Full personalized outreach from first touch through last email/touch.";
 
   try {
     const result = await runAiStructuredFeature({
@@ -170,6 +178,8 @@ export async function POST(req: Request) {
         context,
         ragBlock: ragBlock || "(none)",
         userPrompt,
+        sequenceMode,
+        sequenceModeHint,
         regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
       },
       schema: suggestSchema,
@@ -182,11 +192,13 @@ export async function POST(req: Request) {
       meta: {
         leadId: parsed.data.leadId,
         itemCount: result.items.length,
+        sequenceMode,
       },
     });
     return NextResponse.json({
       ...normalizeSuggestResult(result),
       leadChannel: loaded.lead.channel as ChannelKey,
+      sequenceMode,
     });
   } catch (e) {
     return aiErrorResponse(e);

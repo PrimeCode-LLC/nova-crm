@@ -65,21 +65,28 @@ function directoryUserIdsFor(persona: User, allUsers: readonly User[]): Set<stri
 }
 
 function leadVisibleForPersona(lead: Lead, persona: User, allUsers: readonly User[]): boolean {
-  if (lead.intakeKind === "prospect") return true;
   if (persona.roleId === "director") return true;
+  if (lead.sharedOwnerIds?.includes(persona.id)) return true;
+  if (lead.intakeKind === "prospect" && lead.prospectAssigneeIds?.includes(persona.id)) {
+    return true;
+  }
+  const ownerKey =
+    lead.intakeKind === "prospect"
+      ? lead.prospectOwnerId?.trim() || lead.createdById?.trim() || lead.ownerId
+      : lead.ownerId;
   const descendants = collectDescendantUserIds(persona.id, allUsers);
   if (persona.roleId === "manager" || descendants.size > 0) {
     const owners = new Set<string>([persona.id]);
     for (const id of descendants) owners.add(id);
-    return owners.has(lead.ownerId);
+    return owners.has(ownerKey);
   }
   if (persona.id === "u-sales-01") {
-    return allUsers.some((u) => u.id === lead.ownerId && u.departmentId === "d-outbound");
+    return allUsers.some((u) => u.id === ownerKey && u.departmentId === "d-outbound");
   }
   if (persona.roleId === "prospecting" || persona.roleId === "data_scraper") {
-    return lead.ownerId === persona.id || lead.scraperId === persona.id;
+    return ownerKey === persona.id || lead.scraperId === persona.id;
   }
-  return lead.ownerId === persona.id;
+  return ownerKey === persona.id;
 }
 
 function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {

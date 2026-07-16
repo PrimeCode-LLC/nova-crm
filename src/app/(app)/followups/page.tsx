@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   Clock,
+  Pencil,
   Plus,
   Sparkles,
   Trash2,
@@ -40,7 +41,9 @@ import { fmtDate, fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead } from "@/lib/types";
-import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { canMutateFollowup } from "@/lib/can-mutate-followup";
+import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
+import { useEmailAccountStore } from "@/stores/email-account-store";
 import {
   buildWorkspaceOwnerPickerOptions,
   filterFollowupsByOwnerScope,
@@ -125,15 +128,20 @@ export default function FollowupsPage() {
     addFollowup,
     setFollowupCompleted,
     removeFollowup,
+    updateFollowup,
+    clearFollowupEmailSchedule,
     getOwnerDisplayName,
   } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [editTarget, setEditTarget] = React.useState<Followup | null>(null);
   const [tab, setTab] = React.useState<"open" | "completed">("open");
   const [bucketFilter, setBucketFilter] = React.useState<BucketFilter>("all");
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [viewDateYmd, setViewDateYmd] = React.useState(() => todayYmdLocal());
 
+  const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const viewer = users.find((u) => u.id === currentUserId);
   const followupOwnerIds = React.useMemo(
     () => [...new Set(allFollowups.map((f) => f.ownerId).filter(Boolean))],
     [allFollowups],
@@ -169,8 +177,16 @@ export default function FollowupsPage() {
   const dueAnchorBucketTitle = isViewToday ? "Due today" : `Due ${format(anchorDay, "MMM d")}`;
   const dueAnchorKpiLabel = isViewToday ? "Due today" : `Due ${format(anchorDay, "MMM d")}`;
 
-  const canDeleteFollowups =
-    !isDemo && viewerHasElevatedWorkspaceRole(users.find((u) => u.id === currentUserId));
+  const canMutateRow = React.useCallback(
+    (f: Followup) =>
+      canMutateFollowup({
+        currentUserId,
+        viewer,
+        lead: f.leadId ? ws.getLeadById(f.leadId) : undefined,
+        followup: f,
+      }),
+    [currentUserId, viewer, ws],
+  );
 
   const open = followups.filter((f) => !f.completedAt);
   const done = followups.filter((f) => f.completedAt);
@@ -217,13 +233,55 @@ export default function FollowupsPage() {
 
   const showGroup = (bucket: BucketFilter) => bucketFilter === "all" || bucketFilter === bucket;
 
-  const confirmDeleteFollowup = React.useCallback(() => {
+  const confirmDeleteFollowup = React.useCallback(async () => {
     if (!deleteTarget) return;
-    removeFollowup(deleteTarget.id);
-    toast.success("Followup deleted");
+    const target = deleteTarget;
     setDeleteTarget(null);
-  }, [deleteTarget, removeFollowup]);
+    if (target.scheduledEmailId) {
+      const result = await cancelScheduledEmailClient({
+        scheduledEmailId: target.scheduledEmailId,
+        isDemo,
+        cancelDemo: cancelScheduled,
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      clearFollowupEmailSchedule(target.id);
+    }
+    removeFollowup(target.id);
+    toast.success("Followup deleted");
+  }, [deleteTarget, removeFollowup, isDemo, cancelScheduled, clearFollowupEmailSchedule]);
 
+  function handleUpdateFollowup(
+    id: string,
+    patch: Parameters<typeof updateFollowup>[1],
+  ) {
+    const existing = allFollowups.find((f) => f.id === id);
+    const dueChanged =
+      patch.dueAt !== undefined && existing != null && patch.dueAt !== existing.dueAt;
+    const bodyChanged =
+      patch.messageBody !== undefined &&
+      existing != null &&
+      (patch.messageBody || undefined) !== (existing.messageBody || undefined);
+    if (existing?.scheduledEmailId && (dueChanged || bodyChanged)) {
+      void (async () => {
+        const result = await cancelScheduledEmailClient({
+          scheduledEmailId: existing.scheduledEmailId!,
+          isDemo,
+          cancelDemo: cancelScheduled,
+        });
+        if ("error" in result) {
+          toast.error(result.error);
+          return;
+        }
+        clearFollowupEmailSchedule(id);
+        updateFollowup(id, patch);
+      })();
+      return;
+    }
+    updateFollowup(id, patch);
+  }
   return (
     <>
       <PageHeader
@@ -399,8 +457,9 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canDelete={canDeleteFollowups}
+                      canMutate={canMutateRow}
                       onRequestDelete={setDeleteTarget}
+                      onRequestEdit={setEditTarget}
                     />
                   </div>
                 )}
@@ -421,8 +480,9 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canDelete={canDeleteFollowups}
+                      canMutate={canMutateRow}
                       onRequestDelete={setDeleteTarget}
+                      onRequestEdit={setEditTarget}
                     />
                   </div>
                 )}
@@ -437,8 +497,9 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canDelete={canDeleteFollowups}
+                      canMutate={canMutateRow}
                       onRequestDelete={setDeleteTarget}
+                      onRequestEdit={setEditTarget}
                     />
                   </div>
                 )}
@@ -453,8 +514,9 @@ export default function FollowupsPage() {
                       getLeadById={ws.getLeadById}
                       onToggleComplete={setFollowupCompleted}
                       onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canDelete={canDeleteFollowups}
+                      canMutate={canMutateRow}
                       onRequestDelete={setDeleteTarget}
+                      onRequestEdit={setEditTarget}
                     />
                   </div>
                 )}
@@ -475,7 +537,11 @@ export default function FollowupsPage() {
                             lead && "cursor-pointer hover:bg-muted/50",
                           )}
                           onClick={(e) => {
-                            if ((e.target as HTMLElement).closest("[data-slot=checkbox], [data-followup-delete]"))
+                            if (
+                              (e.target as HTMLElement).closest(
+                                "[data-slot=checkbox], [data-followup-delete], [data-followup-edit]",
+                              )
+                            )
                               return;
                             if (lead) router.push(`/leads/${lead.id}`);
                           }}
@@ -509,21 +575,37 @@ export default function FollowupsPage() {
                           <span className="text-xs text-muted-foreground shrink-0">
                             {fmtRelative(f.completedAt)}
                           </span>
-                          {canDeleteFollowups ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
-                              data-followup-delete
-                              aria-label="Delete followup"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setDeleteTarget(f);
-                              }}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
+                          {canMutateRow(f) ? (
+                            <>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0 text-muted-foreground"
+                                data-followup-edit
+                                aria-label="Edit followup"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setEditTarget(f);
+                                }}
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                                data-followup-delete
+                                aria-label="Delete followup"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setDeleteTarget(f);
+                                }}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </>
                           ) : null}
                         </div>
                       );
@@ -551,7 +633,10 @@ export default function FollowupsPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction variant="destructive" onClick={confirmDeleteFollowup}>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={() => void confirmDeleteFollowup()}
+            >
               Delete
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -567,10 +652,24 @@ export default function FollowupsPage() {
           onCreate={addFollowup}
         />
       ) : null}
+
+      {editTarget ? (
+        <NewFollowupDialog
+          open
+          onOpenChange={(o) => {
+            if (!o) setEditTarget(null);
+          }}
+          leads={leads}
+          currentUserId={currentUserId}
+          editFollowup={editTarget}
+          onUpdate={(id, patch) => {
+            handleUpdateFollowup(id, patch);
+          }}
+        />
+      ) : null}
     </>
   );
 }
-
 function FollowupGroup({
   title,
   description,
@@ -580,8 +679,9 @@ function FollowupGroup({
   getLeadById,
   onToggleComplete,
   onRowNavigate,
-  canDelete,
+  canMutate,
   onRequestDelete,
+  onRequestEdit,
 }: {
   title: string;
   description: string;
@@ -591,8 +691,9 @@ function FollowupGroup({
   getLeadById: (id: string) => Lead | undefined;
   onToggleComplete: (id: string, completed: boolean) => void;
   onRowNavigate: (leadId: string) => void;
-  canDelete: boolean;
+  canMutate: (f: Followup) => boolean;
   onRequestDelete: (f: Followup) => void;
+  onRequestEdit: (f: Followup) => void;
 }) {
   const toneRing =
     tone === "rose"
@@ -624,6 +725,7 @@ function FollowupGroup({
             {items.map((f) => {
               const lead = f.leadId ? getLeadById(f.leadId) : undefined;
               const done = Boolean(f.completedAt);
+              const mutate = canMutate(f);
               return (
                 <li
                   key={f.id}
@@ -634,7 +736,11 @@ function FollowupGroup({
                   role={lead ? "button" : undefined}
                   tabIndex={lead ? 0 : undefined}
                   onClick={(e) => {
-                    if ((e.target as HTMLElement).closest("[data-slot=checkbox], a, [data-followup-delete]"))
+                    if (
+                      (e.target as HTMLElement).closest(
+                        "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit]",
+                      )
+                    )
                       return;
                     if (f.leadId) onRowNavigate(f.leadId);
                   }}
@@ -683,21 +789,37 @@ function FollowupGroup({
                     <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
                       {fmtDate(f.dueAt, "MMM d")} · {fmtRelative(f.dueAt)}
                     </span>
-                    {canDelete ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                        data-followup-delete
-                        aria-label="Delete followup"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRequestDelete(f);
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
+                    {mutate ? (
+                      <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground"
+                          data-followup-edit
+                          aria-label="Edit followup"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRequestEdit(f);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                          data-followup-delete
+                          aria-label="Delete followup"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRequestDelete(f);
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </>
                     ) : null}
                   </div>
                 </li>

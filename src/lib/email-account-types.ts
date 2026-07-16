@@ -15,7 +15,7 @@ export interface ImapConfig {
 }
 
 /** How this mailbox is connected in Settings (presets vs full SMTP/IMAP). */
-export type MailboxConnectionType = "google_workspace" | "custom";
+export type MailboxConnectionType = "google_workspace" | "microsoft_outlook" | "custom";
 
 export interface EmailAccountSettings {
   /** Master switch, when off, mail UI stays in setup mode */
@@ -34,7 +34,7 @@ export interface EmailAccountSettings {
   /** Future: track opens via pixel (off by default) */
   readReceipts: boolean;
   /**
-   * Google Workspace: Gmail hosts autofilled; Custom: full SMTP/IMAP.
+   * Google Workspace / Microsoft Outlook: hosts autofilled; Custom: full SMTP/IMAP.
    * Existing mailboxes default to custom.
    */
   connectionType: MailboxConnectionType;
