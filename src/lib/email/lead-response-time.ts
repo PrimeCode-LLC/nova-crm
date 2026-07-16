@@ -2,6 +2,7 @@ import type { EmailMailboxSettings, MailInbound, MailSent } from "@/lib/email-ac
 import { OWNER_SCOPE_PREFIX } from "@/lib/owner-scope";
 import type { Lead } from "@/lib/types";
 import { extractPrimaryEmailFromMailField } from "@/lib/email/parse-mail-address";
+import { extractEmailAddresses } from "@/lib/email/reply-compose";
 
 export type ResponseTimeResolveMode = "prefer-email" | "prefer-stored" | "auto";
 
@@ -41,8 +42,7 @@ function rowMatchesLead(
   if (linked[messageKey] === lead.id) return true;
   const contact = lead.contactEmail?.trim().toLowerCase();
   if (!contact) return false;
-  const hay = `${message.from} ${message.to} ${message.cc ?? ""}`.toLowerCase();
-  return hay.includes(contact);
+  return extractEmailAddresses(message.from, message.to, message.cc).has(contact);
 }
 
 function collectLeadMailEvents(

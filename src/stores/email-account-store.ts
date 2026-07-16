@@ -97,7 +97,19 @@ export interface EmailAccountStore {
   appendSentServer: (mailboxId: string, messages: MailInbound[]) => void;
   mergeSentBodies: (
     mailboxId: string,
-    updates: Array<{ uid: number; bodyText?: string; bodyHtml?: string; preview?: string; bodySynced?: boolean }>,
+    updates: Array<{
+      uid: number;
+      bodyText?: string;
+      bodyHtml?: string;
+      preview?: string;
+      bodySynced?: boolean;
+      cc?: string;
+      replyTo?: string;
+      attachments?: MailInbound["attachments"];
+      messageId?: string;
+      inReplyTo?: string;
+      referenceIds?: string[];
+    }>,
   ) => void;
   mergeTrashBodies: (
     mailboxId: string,
@@ -149,6 +161,7 @@ function mergeMailInboundRow(prev: MailInbound | undefined, server: MailInbound)
       bodyHtml: prev.bodyHtml,
       bodySynced: true,
       preview: prev.preview || server.preview,
+      replyTo: prev.replyTo ?? server.replyTo,
       cc: prev.cc ?? server.cc,
       attachments: prev.attachments ?? server.attachments,
     };
@@ -156,9 +169,21 @@ function mergeMailInboundRow(prev: MailInbound | undefined, server: MailInbound)
   return {
     ...prev,
     ...server,
+    replyTo: server.replyTo ?? prev.replyTo,
     cc: server.cc ?? prev.cc,
     attachments: server.attachments ?? prev.attachments,
   };
+}
+
+function dedupeSentRowsByMessageId(rows: MailSent[]): MailSent[] {
+  const seen = new Set<string>();
+  return rows.filter((message) => {
+    const messageId = message.messageId?.trim().toLowerCase();
+    if (!messageId) return true;
+    if (seen.has(messageId)) return false;
+    seen.add(messageId);
+    return true;
+  });
 }
 
 function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
@@ -418,7 +443,8 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         },
       };
     }),
-  reconcileSentHeadFromSync: (mailboxId, headRows) =>
+  reconcileSentHeadFromSync: (mailboxId, headRows) => {
+    let linksMigrated = false;
     set((s) => {
       const prevForBox = s.sent.filter((m) => m.mailboxId === mailboxId);
       const localOnly = prevForBox.filter((m) => m.uid == null);
@@ -439,27 +465,82 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         const server = mailInboundToSent(mailboxId, row);
         return mergeSentMailRow(prevByUid.get(server.uid!), server);
       });
-      const tail = prevForBox.filter((m) => m.uid != null && m.uid! < minHeadUid);
-      const combined = [...mergedHead, ...tail].sort(
-        (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+      const serverMessageIds = new Set(
+        mergedHead.map((message) => message.messageId).filter(Boolean),
       );
-      return { sent: [...otherMailboxes, ...combined] };
-    }),
-  appendSentServer: (mailboxId, messages) =>
+      const localByMessageId = new Map(
+        localOnly
+          .filter((message) => message.messageId)
+          .map((message) => [message.messageId!, message]),
+      );
+      const nextLinks = { ...s.linkedLeadByMessageId };
+      for (const serverMessage of mergedHead) {
+        if (!serverMessage.messageId) continue;
+        const local = localByMessageId.get(serverMessage.messageId);
+        if (!local) continue;
+        const linkedLeadId = nextLinks[local.id];
+        if (linkedLeadId) {
+          nextLinks[serverMessage.id] = linkedLeadId;
+          delete nextLinks[local.id];
+          linksMigrated = true;
+        }
+      }
+      const uniqueLocalOnly = localOnly.filter(
+        (message) => !message.messageId || !serverMessageIds.has(message.messageId),
+      );
+      const tail = prevForBox.filter((m) => m.uid != null && m.uid! < minHeadUid);
+      const combined = dedupeSentRowsByMessageId(
+        [...mergedHead, ...tail, ...uniqueLocalOnly].sort(
+          (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+        ),
+      );
+      return { sent: [...otherMailboxes, ...combined], linkedLeadByMessageId: nextLinks };
+    });
+    if (linksMigrated) scheduleEmailMetaPersist(get);
+  },
+  appendSentServer: (mailboxId, messages) => {
+    let linksMigrated = false;
     set((s) => {
       if (messages.length === 0) return s;
       const otherMailboxes = s.sent.filter((m) => m.mailboxId !== mailboxId);
       const prevForBox = s.sent.filter((m) => m.mailboxId === mailboxId && m.uid != null);
+      const localOnly = s.sent.filter((m) => m.mailboxId === mailboxId && m.uid == null);
       const byUid = new Map(prevForBox.map((m) => [m.uid!, m]));
       for (const row of messages) {
         const server = mailInboundToSent(mailboxId, row);
         byUid.set(server.uid!, mergeSentMailRow(byUid.get(server.uid!), server));
       }
-      const combined = [...byUid.values()].sort(
-        (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+      const serverRows = [...byUid.values()];
+      const serverMessageIds = new Set(serverRows.map((message) => message.messageId).filter(Boolean));
+      const localByMessageId = new Map(
+        localOnly
+          .filter((message) => message.messageId)
+          .map((message) => [message.messageId!, message]),
       );
-      return { sent: [...otherMailboxes, ...combined] };
-    }),
+      const nextLinks = { ...s.linkedLeadByMessageId };
+      for (const serverMessage of serverRows) {
+        if (!serverMessage.messageId) continue;
+        const local = localByMessageId.get(serverMessage.messageId);
+        if (!local) continue;
+        const linkedLeadId = nextLinks[local.id];
+        if (linkedLeadId) {
+          nextLinks[serverMessage.id] = linkedLeadId;
+          delete nextLinks[local.id];
+          linksMigrated = true;
+        }
+      }
+      const uniqueLocalOnly = localOnly.filter(
+        (message) => !message.messageId || !serverMessageIds.has(message.messageId),
+      );
+      const combined = dedupeSentRowsByMessageId(
+        [...serverRows, ...uniqueLocalOnly].sort(
+          (a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime(),
+        ),
+      );
+      return { sent: [...otherMailboxes, ...combined], linkedLeadByMessageId: nextLinks };
+    });
+    if (linksMigrated) scheduleEmailMetaPersist(get);
+  },
   mergeSentBodies: (mailboxId, updates) =>
     set((s) => {
       if (updates.length === 0) return s;
@@ -475,6 +556,12 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
           bodyHtml: p.bodyHtml ?? m.bodyHtml,
           preview: p.preview ?? m.preview,
           bodySynced: p.bodySynced ?? true,
+          cc: p.cc ?? m.cc,
+          replyTo: p.replyTo ?? m.replyTo,
+          attachments: p.attachments ?? m.attachments,
+          messageId: p.messageId ?? m.messageId,
+          inReplyTo: p.inReplyTo ?? m.inReplyTo,
+          referenceIds: p.referenceIds ?? m.referenceIds,
         };
       });
       return { sent: next };
@@ -583,7 +670,17 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       };
     });
   },
-  upsertDraft: ({ id, mailboxId, to, cc, subject, body }) => {
+  upsertDraft: ({
+    id,
+    mailboxId,
+    to,
+    cc,
+    subject,
+    body,
+    attachments,
+    inReplyTo,
+    referenceIds,
+  }) => {
     const draftId = id ?? `d-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
     const prev = get().drafts;
@@ -596,7 +693,10 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       ...(ccTrim ? { cc: ccTrim } : {}),
       subject,
       body,
+      ...(attachments?.length ? { attachments } : {}),
       updatedAt: now,
+      ...(inReplyTo ? { inReplyTo } : {}),
+      ...(referenceIds?.length ? { referenceIds } : {}),
     };
     if (idx === -1) set({ drafts: [row, ...prev] });
     else {
@@ -642,8 +742,17 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         mailboxId: s.mailboxId,
         from: s.from,
         to: s.to,
+        cc: s.cc,
         subject: s.subject,
         body: s.body,
+        attachments: s.attachments?.map((attachment) => ({
+          filename: attachment.filename,
+          mimeType: attachment.mimeType,
+          sizeBytes: Math.floor((attachment.contentBase64.length * 3) / 4),
+          contentBase64: attachment.contentBase64,
+        })),
+        inReplyTo: s.inReplyTo,
+        referenceIds: s.referenceIds,
       });
       return { ...s, status: "sent" as const, sentAt };
     });

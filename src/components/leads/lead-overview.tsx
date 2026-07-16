@@ -1,14 +1,16 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { Lead } from "@/lib/types";
-import { PUSH_STATUS_TONE, TEMPERATURE_TONE, PRIORITY_TONE, REVENUE_RANGES } from "@/lib/constants";
+import { PUSH_STATUS_TONE, TEMPERATURE_TONE, PRIORITY_TONE } from "@/lib/constants";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, Pencil } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
+import type { LeadEditSection } from "@/components/leads/edit-lead-dialog";
 import { LeadSourceButton } from "@/components/leads/lead-source-button";
 import { LeadCampaignBadge } from "@/components/leads/lead-campaign-badge";
 import { getLeadScraperSource } from "@/lib/scrapers/lead-scraper-source";
@@ -34,11 +36,13 @@ export function LeadOverview({
   lead,
   outreachProfileSummary,
   outreachProfileFieldLabel,
+  onEditSection,
 }: {
   lead: Lead;
   /** When set (Upwork / job apply), show which workspace profile this lead uses. */
   outreachProfileSummary?: string;
   outreachProfileFieldLabel?: string;
+  onEditSection?: (section: Exclude<LeadEditSection, "all">) => void;
 }) {
   const ws = useWorkspace();
   const canEdit = ws.canEditLead(lead);
@@ -48,7 +52,7 @@ export function LeadOverview({
   const scraperSource = getLeadScraperSource(lead);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <Card className="lg:col-span-2">
+      <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Labels</CardTitle>
         </CardHeader>
@@ -62,7 +66,7 @@ export function LeadOverview({
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2">
+      <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Intake & ownership</CardTitle>
         </CardHeader>
@@ -124,6 +128,13 @@ export function LeadOverview({
       <Card className="lg:col-span-2">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Research & personalization</CardTitle>
+          {canEdit && onEditSection ? (
+            <CardAction>
+              <Button type="button" variant="ghost" size="sm" onClick={() => onEditSection("research")}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
@@ -165,6 +176,13 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Qualification</CardTitle>
+          {canEdit && onEditSection ? (
+            <CardAction>
+              <Button type="button" variant="ghost" size="sm" onClick={() => onEditSection("qualification")}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-0 space-y-3">
           <dl className="divide-y">
@@ -200,6 +218,13 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Campaign routing</CardTitle>
+          {canEdit && onEditSection ? (
+            <CardAction>
+              <Button type="button" variant="ghost" size="sm" onClick={() => onEditSection("routing")}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
@@ -239,10 +264,6 @@ export function LeadOverview({
                 <span>{outreachProfileSummary}</span>
               </Field>
             )}
-            <Field label="Company size">{lead.companySize ?? "-"}</Field>
-            <Field label="Revenue range">
-              {lead.revenueRange ? REVENUE_RANGES[lead.revenueRange] : "-"}
-            </Field>
           </dl>
         </CardContent>
       </Card>
@@ -267,6 +288,13 @@ export function LeadOverview({
       <Card className="lg:col-span-2">
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Next action</CardTitle>
+          {canEdit && onEditSection ? (
+            <CardAction>
+              <Button type="button" variant="ghost" size="sm" onClick={() => onEditSection("nextAction")}>
+                <Pencil className="h-3.5 w-3.5" /> Edit
+              </Button>
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-0 space-y-2 text-sm">
           <p className="font-medium">{lead.nextAction ?? "-"}</p>

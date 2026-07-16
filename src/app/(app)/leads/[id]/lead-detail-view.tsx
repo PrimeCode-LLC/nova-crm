@@ -35,7 +35,7 @@ import {
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
@@ -53,6 +53,7 @@ import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
 import { LeadSchedulingPanel } from "@/components/scheduling/lead-scheduling-panel";
 import { LeadTasksPanel } from "@/components/leads/lead-tasks";
+import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -80,7 +81,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { EditLeadDialog } from "@/components/leads/edit-lead-dialog";
+import { EditLeadDialog, type LeadEditSection } from "@/components/leads/edit-lead-dialog";
 import { LeadSourceButton, LeadScraperSourceSummary } from "@/components/leads/lead-source-button";
 import { ProspectChannelPanel } from "@/components/prospects/prospect-channel-panel";
 import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
@@ -90,6 +91,7 @@ import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
+import { extractEmailAddresses } from "@/lib/email/reply-compose";
 
 const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "tasks", "emails"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
@@ -109,7 +111,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const searchParams = useSearchParams();
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
   const activeTab = tabFromUrl;
-  const [editOpen, setEditOpen] = React.useState(false);
+  const [editingSection, setEditingSection] = React.useState<LeadEditSection | null>(null);
   const [prospectFieldsOpen, setProspectFieldsOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
@@ -185,27 +187,30 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     () => notes.length + (lead?.notes?.trim() ? 1 : 0),
     [lead?.notes, notes.length],
   );
+  const relatedEmailAddress = lead
+    ? ws.getContactById(lead.contactId)?.email || lead.contactEmail || ""
+    : "";
   const relatedEmails = React.useMemo(() => {
     if (!lead) return [];
-    const own = (lead.contactEmail ?? "").toLowerCase();
+    const own = relatedEmailAddress.toLowerCase();
     const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
     for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
       for (const m of messages) {
         const mid = `${mailboxId}:in:${m.id}`;
         const manual = linkedLeadByMessageId[mid] === lead.id;
-        const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
+        const auto = Boolean(own) && extractEmailAddresses(m.from, m.to, m.cc).has(own);
         if (!manual && !auto) continue;
         rows.push({ id: mid, subject: m.subject, at: m.date, from: m.from, to: m.to, body: m.bodyText });
       }
     }
     for (const m of sent) {
       const manual = linkedLeadByMessageId[m.id] === lead.id;
-      const auto = !!own && `${m.from} ${m.to}`.toLowerCase().includes(own);
+      const auto = Boolean(own) && extractEmailAddresses(m.from, m.to, m.cc).has(own);
       if (!manual && !auto) continue;
       rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
     }
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
-  }, [inboundByMailbox, linkedLeadByMessageId, lead, sent]);
+  }, [inboundByMailbox, linkedLeadByMessageId, lead, relatedEmailAddress, sent]);
 
   const followupAiContext = React.useMemo(() => {
     if (!lead) return undefined;
@@ -247,6 +252,22 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
   const canEditLead = ws.canEditLead(lead);
   const prospectSourceId = lead.prospectSourceId?.trim();
+  const linkedSourceProspect = ws.leads.find(
+    (candidate) =>
+      candidate.id !== lead.id &&
+      (candidate.linkedSalesLeadId?.trim() === lead.id ||
+        (candidate.intakeKind === "prospect" &&
+          candidate.accountId === lead.accountId &&
+          candidate.contactId === lead.contactId)),
+  );
+  const prospectForSidebar =
+    lead.intakeKind === "prospect" ||
+    Boolean(lead.linkedSalesLeadId?.trim()) ||
+    Boolean(lead.prospectChannelAssignments?.length)
+      ? lead
+      : prospectSourceId
+        ? ws.getLeadById(prospectSourceId)
+        : linkedSourceProspect ?? (backFrom === "prospects" ? lead : undefined);
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
   const deal = ws.deals.find((d) => d.leadId === lead.id);
@@ -463,7 +484,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} /> Pin
             </Button>
             {ws.canEditLead(lead) ? (
-              <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
+              <Button variant="outline" size="sm" type="button" onClick={() => setEditingSection("all")}>
                 <Pencil className="h-3.5 w-3.5" /> Edit
               </Button>
             ) : prospectSourceId ? (
@@ -533,7 +554,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               variant="link"
               size="sm"
               className="ml-auto h-auto p-0 text-destructive"
-              onClick={() => setEditOpen(true)}
+              onClick={() => setEditingSection("routing")}
             >
               Review setting
             </Button>
@@ -651,6 +672,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     lead={lead}
                     outreachProfileSummary={outreachProfileSummary}
                     outreachProfileFieldLabel={needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : undefined}
+                    onEditSection={setEditingSection}
                   />
                 </TabsContent>
                 <TabsContent value="timeline">
@@ -673,34 +695,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <LeadTasksPanel tasks={leadTasksForTab} lead={lead} />
                 </TabsContent>
                 <TabsContent value="emails">
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm">Email thread history</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-3">
-                      {relatedEmails.length === 0 ? (
-                        <p className="text-sm text-muted-foreground">
-                          No linked emails yet. Open Inbox and link a message to this lead.
-                        </p>
-                      ) : (
-                        relatedEmails.map((m) => (
-                          <div key={m.id} className="rounded-md border p-3 space-y-1">
-                            <p className="text-sm font-medium">{m.subject || "(no subject)"}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {fmtRelative(m.at)} - From {m.from} - To {m.to}
-                            </p>
-                            <p className="text-xs whitespace-pre-wrap text-muted-foreground">{m.body.slice(0, 3000)}</p>
-                          </div>
-                        ))
-                      )}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        nativeButton={false}
-                        render={<Link href="/inbox">Open inbox</Link>}
-                      />
-                    </CardContent>
-                  </Card>
+                  <LeadEmailsPanel lead={lead} contactEmail={primaryEmail} />
                 </TabsContent>
               </div>
             </Tabs>
@@ -801,19 +796,25 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">
                   Intake & prospecting
                 </CardTitle>
+                {account && contact && canEditLead ? (
+                  <CardAction>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 px-2 text-xs"
+                      onClick={() => setProspectFieldsOpen(true)}
+                    >
+                      <Pencil className="h-3 w-3" /> Edit
+                    </Button>
+                  </CardAction>
+                ) : null}
               </CardHeader>
               <CardContent className="pt-0 space-y-3">
-                <LeadScraperSourceSummary lead={lead} />
-                {lead.intakeKind === "prospect" ? (
-                  <ProspectChannelPanel prospect={lead} />
-                ) : null}
+                <LeadScraperSourceSummary lead={prospectForSidebar ?? lead} />
+                <ProspectChannelPanel prospect={prospectForSidebar ?? lead} />
                 <div className="flex flex-wrap gap-2">
-                  <LeadSourceButton lead={lead} />
-                  {account && contact && lead.intakeKind === "prospect" && ws.canEditLead(lead) ? (
-                    <Button type="button" size="sm" variant="outline" onClick={() => setProspectFieldsOpen(true)}>
-                      Edit prospect fields
-                    </Button>
-                  ) : null}
+                  <LeadSourceButton lead={prospectForSidebar ?? lead} />
                 </div>
                 {lead.sharedOwnerIds?.length ? (
                   <div className="flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
@@ -1025,10 +1026,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         }}
       />
       <EditLeadDialog
-        open={editOpen}
-        onOpenChange={setEditOpen}
+        open={editingSection !== null}
+        onOpenChange={(open) => {
+          if (!open) setEditingSection(null);
+        }}
         lead={lead}
         onSave={handleSaveLead}
+        section={editingSection ?? "all"}
       />
       {account && contact && (
         <ProspectIntakeDialog

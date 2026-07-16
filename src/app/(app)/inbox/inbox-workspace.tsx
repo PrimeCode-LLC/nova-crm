@@ -10,7 +10,6 @@ import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/common/empty-state";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
+import { EmailComposeForm } from "@/components/inbox/email-compose-form";
 import {
   MailReaderDialog,
   MailZoomButton,
@@ -80,7 +79,6 @@ import type {
   ScheduledEmail,
 } from "@/lib/email-account-types";
 import {
-  conversationSubject,
   groupInboundIntoThreads,
   type MailThread,
 } from "@/lib/email/thread-inbound";
@@ -99,15 +97,12 @@ import {
   Reply,
   ReplyAll,
   Forward,
-  Send,
-  CalendarClock,
   Trash2,
   ArchiveRestore,
   Search,
   ChevronDown,
   ChevronRight,
   Paperclip,
-  Sparkles,
   X,
   Ban,
   ExternalLink,
@@ -136,6 +131,25 @@ import {
 import { appendMailDataOwnerParam, resolveMailApiForUserUid } from "@/lib/email/mail-data-owner-query";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
+import {
+  MAX_COMPOSE_ATTACHMENTS,
+  MAX_COMPOSE_ATTACHMENT_BYTES,
+  composeAttachmentsFromInbound,
+  formatComposeFileSize,
+  readFileAsBase64,
+  type ComposeAttachment,
+} from "@/lib/email/compose-attachments";
+import {
+  extractReplyAddress,
+  forwardedBody,
+  forwardSubject,
+  replyAllRecipientLine,
+  replyContextForMessage,
+  replyQuotedBody,
+  replyRecipientAddress,
+  replySubject,
+  withMailboxSignature,
+} from "@/lib/email/reply-compose";
 import {
   fallbackOwnerPickerLabel,
   workspaceMemberPickerLabel,
@@ -189,35 +203,6 @@ const INBOX_VIEW_SELF = "__inbox_view_self__";
 type MailFilterStats = { total: number; unread: number };
 
 const EMPTY_MAIL_FILTER_STATS: MailFilterStats = { total: 0, unread: 0 };
-
-const MAX_COMPOSE_ATTACHMENTS = 5;
-const MAX_COMPOSE_ATTACHMENT_BYTES = 10 * 1024 * 1024;
-
-type ComposeAttachment = {
-  id: string;
-  filename: string;
-  mimeType: string;
-  sizeBytes: number;
-  contentBase64: string;
-};
-
-function formatComposeFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function readFileAsBase64(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = typeof reader.result === "string" ? reader.result : "";
-      resolve(dataUrl.split(",")[1] ?? "");
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("Could not read file"));
-    reader.readAsDataURL(file);
-  });
-}
 
 function isEntityMailFilterActive(filter: string): boolean {
   return filter !== ENTITY_MAIL_FILTER_ALL;
@@ -548,11 +533,12 @@ export default function InboxWorkspace() {
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
+  const [composeInReplyTo, setComposeInReplyTo] = React.useState<string | undefined>();
+  const [composeReferenceIds, setComposeReferenceIds] = React.useState<string[]>([]);
   const [composeAttachments, setComposeAttachments] = React.useState<ComposeAttachment[]>([]);
-  const composeFileInputRef = React.useRef<HTMLInputElement>(null);
   const [aiReplyGenerating, setAiReplyGenerating] = React.useState(false);
-  const [aiReplyTone, setAiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
-  const [aiReplyGoal, setAiReplyGoal] = React.useState("follow up");
+  const [aiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
+  const [aiReplyGoal] = React.useState("follow up");
   const [sending, setSending] = React.useState(false);
   const [composeScheduleEnabled, setComposeScheduleEnabled] = React.useState(false);
   const [composeScheduledAt, setComposeScheduledAt] = React.useState("");
@@ -1224,7 +1210,9 @@ export default function InboxWorkspace() {
     setComposeSubject(preset?.subject ?? "");
     setComposeBody(preset?.body ?? (account.signature ? `\n\n${account.signature}` : ""));
     setComposeDraftId(preset?.id);
-    setComposeAttachments([]);
+    setComposeInReplyTo(preset?.inReplyTo);
+    setComposeReferenceIds(preset?.referenceIds ?? []);
+    setComposeAttachments(preset?.attachments ?? []);
     setComposeScheduleEnabled(false);
     setComposeScheduledAt(defaultScheduleDatetimeLocal());
     setComposeOpen(true);
@@ -1298,7 +1286,12 @@ export default function InboxWorkspace() {
       }
     }
 
-    if (next.length > 0) setComposeAttachments((prev) => [...prev, ...next]);
+    if (next.length > 0) {
+      setComposeAttachments((prev) => [
+        ...prev,
+        ...next.slice(0, Math.max(0, MAX_COMPOSE_ATTACHMENTS - prev.length)),
+      ]);
+    }
   }
 
   function removeComposeAttachment(id: string) {
@@ -1329,8 +1322,11 @@ export default function InboxWorkspace() {
           mailboxId: account.id,
           from: account.emailAddress.trim() || "demo@nova.local",
           to: toLine,
+          cc: ccLine || undefined,
           subject: composeSubject.trim() || "(no subject)",
           body: composeBody,
+          inReplyTo: composeInReplyTo,
+          referenceIds: composeReferenceIds,
         });
         if (composeDraftId) deleteDraft(composeDraftId);
         toast.success("Message saved to Sent (demo)", {
@@ -1367,6 +1363,7 @@ export default function InboxWorkspace() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mailboxId: account.id,
+          leadId: selectedLead?.id,
           from: account.emailAddress,
           displayName: account.displayName,
           replyTo: account.replyTo,
@@ -1375,6 +1372,8 @@ export default function InboxWorkspace() {
           subject: composeSubject.trim(),
           text,
           html,
+          inReplyTo: composeInReplyTo,
+          referenceIds: composeReferenceIds,
           attachments:
             composeAttachments.length > 0
               ? composeAttachments.map((a) => ({
@@ -1401,7 +1400,12 @@ export default function InboxWorkspace() {
             : undefined,
         }),
       });
-      const data = (await res.json()) as { ok?: boolean; error?: string; sentSavedToMailbox?: boolean };
+      const data = (await res.json()) as {
+        ok?: boolean;
+        error?: string;
+        sentSavedToMailbox?: boolean;
+        messageId?: string;
+      };
       if (!data.ok) {
         const err = data.error ?? "Send failed";
         toast.error("Couldn't send email", {
@@ -1428,8 +1432,12 @@ export default function InboxWorkspace() {
           mailboxId: account.id,
           from: account.emailAddress,
           to: toLine,
+          cc: ccLine || undefined,
           subject: composeSubject.trim(),
           body: composeBody,
+          messageId: data.messageId,
+          inReplyTo: composeInReplyTo,
+          referenceIds: composeReferenceIds,
         });
       }
     } catch {
@@ -1478,6 +1486,8 @@ export default function InboxWorkspace() {
           body: composeBody,
           text: composeBody,
           scheduledAt: scheduledDate.toISOString(),
+          inReplyTo: composeInReplyTo,
+          referenceIds: composeReferenceIds,
         });
         if (composeDraftId) deleteDraft(composeDraftId);
         toast.success("Email scheduled (demo)", {
@@ -1513,6 +1523,7 @@ export default function InboxWorkspace() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mailboxId: account.id,
+          leadId: selectedLead?.id,
           from: account.emailAddress,
           displayName: account.displayName,
           replyTo: account.replyTo,
@@ -1522,6 +1533,8 @@ export default function InboxWorkspace() {
           text,
           html,
           scheduledAt: scheduledDate.toISOString(),
+          inReplyTo: composeInReplyTo,
+          referenceIds: composeReferenceIds,
           attachments:
             composeAttachments.length > 0
               ? composeAttachments.map((a) => ({
@@ -1588,9 +1601,12 @@ export default function InboxWorkspace() {
       cc: composeCc.trim() || undefined,
       subject: composeSubject,
       body: composeBody,
+      attachments: composeAttachments,
+      inReplyTo: composeInReplyTo,
+      referenceIds: composeReferenceIds,
     });
     setComposeDraftId(id);
-    toast.success("Draft saved");
+    toast.success("Draft saved for this session");
   }
 
   const toggleRowSelected = React.useCallback((rowId: string, checked: boolean) => {
@@ -4095,17 +4111,16 @@ export default function InboxWorkspace() {
                         disabled={inboxReadOnly}
                         onClick={() => {
                           const latest = selectedThread.latest;
-                          const addr = extractReplyAddress(latest.from);
+                          const addr = replyRecipientAddress(latest);
                           if (!addr) {
                             toast.error("Could not read a reply address from this conversation.");
                             return;
                           }
-                          const subj = conversationSubject(latest.subject ?? "");
-                          const reSubj = subj.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
                           openCompose({
                             to: addr,
-                            subject: reSubj,
-                            body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${(latest.bodyText || latest.preview || "").slice(0, 4000)}`,
+                            subject: replySubject(latest.subject),
+                            body: withMailboxSignature(replyQuotedBody(latest), account.signature),
+                            ...replyContextForMessage(latest),
                           });
                         }}
                       >
@@ -4124,13 +4139,12 @@ export default function InboxWorkspace() {
                             toast.error("Could not read a reply address from this conversation.");
                             return;
                           }
-                          const subj = conversationSubject(latest.subject ?? "");
-                          const reSubj = subj.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
                           openCompose({
                             to: pack.to,
                             cc: pack.cc,
-                            subject: reSubj,
-                            body: `\n\n---\nOn ${latest.date.slice(0, 10)}, ${latest.from} wrote:\n${(latest.bodyText || latest.preview || "").slice(0, 4000)}`,
+                            subject: replySubject(latest.subject),
+                            body: withMailboxSignature(replyQuotedBody(latest), account.signature),
+                            ...replyContextForMessage(latest),
                           });
                         }}
                       >
@@ -4144,13 +4158,12 @@ export default function InboxWorkspace() {
                         disabled={inboxReadOnly}
                         onClick={() => {
                           const latest = selectedThread.latest;
-                          const subj = conversationSubject(latest.subject ?? "");
-                          const fwd = subj.match(/^fwd:/i) ? subj : subj ? `Fwd: ${subj}` : "Fwd:";
                           openCompose({
                             to: "",
                             cc: "",
-                            subject: fwd,
-                            body: `\n\n---------- Forwarded message ----------\nFrom: ${latest.from}\nDate: ${latest.date}\nSubject: ${latest.subject}\nTo: ${latest.to}${latest.cc ? `\nCc: ${latest.cc}` : ""}\n\n${(latest.bodyText || latest.preview || "").slice(0, 8000)}`,
+                            subject: forwardSubject(latest.subject),
+                            body: withMailboxSignature(forwardedBody(latest), account.signature),
+                            attachments: composeAttachmentsFromInbound(latest.attachments),
                           });
                         }}
                       >
@@ -4359,6 +4372,8 @@ export default function InboxWorkspace() {
                             cc: selectedScheduled.cc,
                             subject: selectedScheduled.subject,
                             body: selectedScheduled.body,
+                            inReplyTo: selectedScheduled.inReplyTo,
+                            referenceIds: selectedScheduled.referenceIds,
                           })
                         }
                       >
@@ -4428,6 +4443,9 @@ export default function InboxWorkspace() {
                             cc: selectedMail.cc,
                             subject: selectedMail.subject,
                             body: selectedMail.body,
+                            attachments: selectedMail.attachments,
+                            inReplyTo: selectedMail.inReplyTo,
+                            referenceIds: selectedMail.referenceIds,
                           })
                         }
                       >
@@ -4458,17 +4476,16 @@ export default function InboxWorkspace() {
                           className="gap-1.5"
                           disabled={inboxReadOnly}
                           onClick={() => {
-                            const addr = extractReplyAddress(selectedMail.from);
+                            const addr = replyRecipientAddress(selectedMail);
                             if (!addr) {
                               toast.error("Could not read a reply address from this message.");
                               return;
                             }
-                            const subj = selectedMail.subject?.trim();
-                            const reSubj = subj?.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
                             openCompose({
                               to: addr,
-                              subject: reSubj,
-                              body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 4000)}`,
+                              subject: replySubject(selectedMail.subject),
+                              body: withMailboxSignature(replyQuotedBody(selectedMail), account.signature),
+                              ...replyContextForMessage(selectedMail),
                             });
                           }}
                         >
@@ -4486,13 +4503,12 @@ export default function InboxWorkspace() {
                               toast.error("Could not read a reply address from this message.");
                               return;
                             }
-                            const subj = selectedMail.subject?.trim();
-                            const reSubj = subj?.match(/^re:/i) ? subj : subj ? `Re: ${subj}` : "Re:";
                             openCompose({
                               to: pack.to,
                               cc: pack.cc,
-                              subject: reSubj,
-                              body: `\n\n---\nOn ${selectedMail.date.slice(0, 10)}, ${selectedMail.from} wrote:\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 4000)}`,
+                              subject: replySubject(selectedMail.subject),
+                              body: withMailboxSignature(replyQuotedBody(selectedMail), account.signature),
+                              ...replyContextForMessage(selectedMail),
                             });
                           }}
                         >
@@ -4505,13 +4521,12 @@ export default function InboxWorkspace() {
                           className="gap-1.5"
                           disabled={inboxReadOnly}
                           onClick={() => {
-                            const subj = selectedMail.subject?.trim() || "";
-                            const fwd = subj.match(/^fwd:/i) ? subj : subj ? `Fwd: ${subj}` : "Fwd:";
                             openCompose({
                               to: "",
                               cc: "",
-                              subject: fwd,
-                              body: `\n\n---------- Forwarded message ----------\nFrom: ${selectedMail.from}\nDate: ${selectedMail.date}\nSubject: ${selectedMail.subject}\nTo: ${selectedMail.to}${selectedMail.cc ? `\nCc: ${selectedMail.cc}` : ""}\n\n${(selectedMail.bodyText || selectedMail.preview || "").slice(0, 8000)}`,
+                              subject: forwardSubject(selectedMail.subject),
+                              body: withMailboxSignature(forwardedBody(selectedMail), account.signature),
+                              attachments: composeAttachmentsFromInbound(selectedMail.attachments),
                             });
                           }}
                         >
@@ -4740,180 +4755,35 @@ export default function InboxWorkspace() {
             <DialogTitle>Compose</DialogTitle>
             <DialogDescription>Send through your SMTP account saved in Settings.</DialogDescription>
           </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs">To</Label>
-              <Input value={composeTo} onChange={(e) => setComposeTo(e.target.value)} placeholder="name@company.com" />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Cc</Label>
-              <Input
-                value={composeCc}
-                onChange={(e) => setComposeCc(e.target.value)}
-                placeholder="Optional, comma-separated addresses"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Subject</Label>
-              <Input value={composeSubject} onChange={(e) => setComposeSubject(e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="text-xs">Message</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-                  disabled={!composeBody.trim() || aiReplyGenerating || inboxReadOnly}
-                  onClick={() => void improviseComposeWithAi()}
-                >
-                  {aiReplyGenerating ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Sparkles className="h-3.5 w-3.5" />
-                  )}
-                  Improvise with AI
-                </Button>
-              </div>
-              <Textarea
-                className="min-h-[280px] resize-y text-sm"
-                value={composeBody}
-                onChange={(e) => setComposeBody(e.target.value)}
-                placeholder="Write your message…"
-              />
-            </div>
-            <div className="space-y-2">
-              <input
-                ref={composeFileInputRef}
-                type="file"
-                multiple
-                className="sr-only"
-                onChange={(e) => {
-                  const files = e.target.files;
-                  if (files?.length) void addComposeAttachments(files);
-                  e.target.value = "";
-                }}
-              />
-              <div className="flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8 gap-1.5 text-xs"
-                  disabled={inboxReadOnly || composeAttachments.length >= MAX_COMPOSE_ATTACHMENTS}
-                  onClick={() => composeFileInputRef.current?.click()}
-                >
-                  <Paperclip className="h-3.5 w-3.5" />
-                  Attach files
-                </Button>
-                <span className="text-[11px] text-muted-foreground">
-                  Up to {MAX_COMPOSE_ATTACHMENTS} files, {formatComposeFileSize(MAX_COMPOSE_ATTACHMENT_BYTES)} each
-                </span>
-              </div>
-              {composeAttachments.length > 0 ? (
-                <ul className="space-y-1.5">
-                  {composeAttachments.map((att) => (
-                    <li
-                      key={att.id}
-                      className="flex items-center gap-2 rounded-md border bg-muted/30 px-2.5 py-1.5 text-xs"
-                    >
-                      <Paperclip className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                      <span className="min-w-0 flex-1 truncate font-medium">{att.filename}</span>
-                      <span className="shrink-0 text-muted-foreground">{formatComposeFileSize(att.sizeBytes)}</span>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon-sm"
-                        className="shrink-0"
-                        aria-label={`Remove ${att.filename}`}
-                        onClick={() => removeComposeAttachment(att.id)}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-            </div>
-            <div className="rounded-lg border bg-muted/20 px-3 py-3 space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="compose-schedule-toggle" className="text-xs font-medium">
-                    Schedule send
-                  </Label>
-                  <p className="text-[11px] text-muted-foreground">Send later at a specific date and time.</p>
-                </div>
-                <Switch
-                  id="compose-schedule-toggle"
-                  checked={composeScheduleEnabled}
-                  disabled={inboxReadOnly}
-                  onCheckedChange={(checked: boolean) => {
-                    setComposeScheduleEnabled(checked);
-                    if (checked && !composeScheduledAt) {
-                      setComposeScheduledAt(defaultScheduleDatetimeLocal());
-                    }
-                  }}
-                />
-              </div>
-              {composeScheduleEnabled ? (
-                <div className="space-y-1.5">
-                  <Label htmlFor="compose-scheduled-at" className="text-xs">
-                    Send on
-                  </Label>
-                  <Input
-                    id="compose-scheduled-at"
-                    type="datetime-local"
-                    value={composeScheduledAt}
-                    min={defaultScheduleDatetimeLocal()}
-                    disabled={inboxReadOnly}
-                    onChange={(e) => setComposeScheduledAt(e.target.value)}
-                  />
-                </div>
-              ) : null}
-            </div>
-          </div>
-          <div className="shrink-0 border-t bg-muted/30 px-5 pb-5 pt-4">
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5"
-                disabled={aiReplyGenerating || inboxReadOnly}
-                onClick={() => void generateAiReply()}
-              >
-                {aiReplyGenerating ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5" />
-                )}
-                AI draft
-              </Button>
-              <Button variant="outline" size="sm" onClick={saveDraft}>
-                Save draft
-              </Button>
-              {composeScheduleEnabled ? (
-                <Button
-                  size="sm"
-                  className="gap-1.5"
-                  disabled={sending || inboxReadOnly}
-                  onClick={() => void handleScheduleSend()}
-                >
-                  {sending ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <CalendarClock className="h-3.5 w-3.5" />
-                  )}
-                  Schedule send
-                </Button>
-              ) : (
-                <Button size="sm" className="gap-1.5" disabled={sending} onClick={() => void handleSend()}>
-                  {sending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
-                  Send
-                </Button>
-              )}
-            </div>
-          </div>
+          <EmailComposeForm
+            to={composeTo}
+            onToChange={setComposeTo}
+            cc={composeCc}
+            onCcChange={setComposeCc}
+            subject={composeSubject}
+            onSubjectChange={setComposeSubject}
+            body={composeBody}
+            onBodyChange={setComposeBody}
+            attachments={composeAttachments}
+            onAddAttachments={(files) => void addComposeAttachments(files)}
+            onRemoveAttachment={removeComposeAttachment}
+            disabled={inboxReadOnly}
+            sending={sending}
+            aiBusy={aiReplyGenerating}
+            onImproveWithAi={() => void improviseComposeWithAi()}
+            onGenerateAiDraft={() => void generateAiReply()}
+            onSaveDraft={saveDraft}
+            scheduleEnabled={composeScheduleEnabled}
+            onScheduleEnabledChange={(checked) => {
+              setComposeScheduleEnabled(checked);
+              if (checked && !composeScheduledAt) setComposeScheduledAt(defaultScheduleDatetimeLocal());
+            }}
+            scheduledAt={composeScheduledAt}
+            onScheduledAtChange={setComposeScheduledAt}
+            minimumScheduledAt={defaultScheduleDatetimeLocal()}
+            onSend={() => void handleSend()}
+            onScheduleSend={() => void handleScheduleSend()}
+          />
         </DialogContent>
       </Dialog>
     </>
@@ -4993,33 +4863,6 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10_240 ? 1 : 0)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function mailboxIdentityEmails(account: EmailMailboxSettings): Set<string> {
-  const s = new Set<string>();
-  for (const raw of [account.emailAddress, account.imap.user, account.replyTo]) {
-    const e = extractReplyAddress(String(raw ?? "")).toLowerCase();
-    if (e) s.add(e);
-  }
-  return s;
-}
-
-/** Reply-all: To = sender; Cc = other participants (To/Cc/From) minus you and the direct recipient. */
-function replyAllRecipientLine(m: MailInbound, account: EmailMailboxSettings): { to: string; cc: string } {
-  const sender = extractReplyAddress(m.from);
-  if (!sender) return { to: "", cc: "" };
-  const mine = mailboxIdentityEmails(account);
-  const pool = new Set<string>();
-  const collect = (header: string | undefined) => {
-    for (const x of (header ?? "").match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g) ?? []) pool.add(x.toLowerCase());
-  };
-  collect(m.to);
-  collect(m.cc);
-  collect(m.from);
-  const sl = sender.toLowerCase();
-  pool.delete(sl);
-  for (const x of mine) pool.delete(x);
-  return { to: sender, cc: [...pool].join(", ") };
 }
 
 function InboundAttachmentRow({ att }: { att: MailInboundAttachment }) {
@@ -5379,13 +5222,6 @@ function escapeHtml(s: string) {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
-function extractReplyAddress(fromHeader: string): string {
-  const angle = fromHeader.match(/<([^>]+)>/);
-  if (angle?.[1]) return angle[1].trim();
-  const bare = fromHeader.match(/[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/);
-  return bare?.[0]?.trim() ?? "";
 }
 
 function collectMessageEmails(message: MailDraft | MailSent | MailInbound) {

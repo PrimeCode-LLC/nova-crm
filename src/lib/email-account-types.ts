@@ -93,6 +93,14 @@ export interface MailInboundAttachment {
   contentBase64?: string;
 }
 
+export interface MailDraftAttachment {
+  id: string;
+  filename: string;
+  mimeType: string;
+  sizeBytes: number;
+  contentBase64: string;
+}
+
 export interface MailDraft {
   id: string;
   mailboxId: string;
@@ -101,14 +109,20 @@ export interface MailDraft {
   cc?: string;
   subject: string;
   body: string;
+  attachments?: MailDraftAttachment[];
   updatedAt: string;
+  /** RFC 5322 threading context retained when a reply is saved as a draft. */
+  inReplyTo?: string;
+  referenceIds?: string[];
 }
 
 export interface MailSent {
   id: string;
   mailboxId: string;
   from: string;
+  replyTo?: string;
   to: string;
+  cc?: string;
   subject: string;
   body: string;
   sentAt: string;
@@ -117,6 +131,10 @@ export interface MailSent {
   bodySynced?: boolean;
   preview?: string;
   bodyHtml?: string;
+  attachments?: MailInboundAttachment[];
+  messageId?: string;
+  inReplyTo?: string;
+  referenceIds?: string[];
 }
 
 export type ScheduledEmailStatus = "pending" | "processing" | "sent" | "failed" | "cancelled";
@@ -151,6 +169,9 @@ export interface ScheduledEmail {
   /** When created from a lead follow-up, link back for UI / cron cleanup. */
   followupId?: string;
   leadId?: string;
+  /** RFC 5322 threading context for a scheduled reply. */
+  inReplyTo?: string;
+  referenceIds?: string[];
 }
 
 /** Message loaded from the mailbox via IMAP (server round-trip). */
@@ -159,6 +180,7 @@ export interface MailInbound {
   uid: number;
   subject: string;
   from: string;
+  replyTo?: string;
   to: string;
   cc?: string;
   date: string;

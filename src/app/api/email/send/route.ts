@@ -10,6 +10,8 @@ import {
   assertMailboxDailySendQuotaServer,
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
+import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 
 export async function POST(req: Request) {
   try {
@@ -73,17 +75,37 @@ export async function POST(req: Request) {
     const subject = String(b.subject ?? "").trim();
     const text = String(b.text ?? "");
     const html = String(b.html ?? "");
+    const leadId = String(b.leadId ?? "").trim() || undefined;
+    const inReplyTo = normalizeMessageId(String(b.inReplyTo ?? ""));
+    const referenceIds = Array.isArray(b.referenceIds)
+      ? b.referenceIds
+          .map((value) => normalizeMessageId(String(value ?? "")))
+          .filter((value): value is string => Boolean(value))
+          .slice(-50)
+      : undefined;
     const parsedAttachments = parseOutboundAttachments(b.attachments);
     if ("error" in parsedAttachments) {
       return NextResponse.json({ ok: false, error: parsedAttachments.error }, { status: 400 });
     }
+    const contactPolicy = await assertLeadContactAllowedServer({
+      organizationId: g.ctx.session.organizationId,
+      leadId,
+    });
+    if (!contactPolicy.ok) {
+      return NextResponse.json(
+        { ok: false, error: contactPolicy.error },
+        { status: contactPolicy.status },
+      );
+    }
 
+    let connectionType: string | undefined;
     if (mailboxId) {
       const profile = await getMailboxProfileServer({
         organizationId: g.ctx.session.organizationId,
         uid: dataOwnerUid,
         mailboxId,
       });
+      connectionType = profile?.connectionType;
       const quota = await assertMailboxDailySendQuotaServer({
         organizationId: g.ctx.session.organizationId,
         uid: dataOwnerUid,
@@ -113,6 +135,10 @@ export async function POST(req: Request) {
             pass: String(imap?.pass ?? ""),
           }
         : undefined,
+      appendSentCopy:
+        connectionType === "google_workspace" || connectionType === "microsoft_outlook"
+          ? false
+          : undefined,
       from,
       displayName,
       replyTo,
@@ -121,6 +147,8 @@ export async function POST(req: Request) {
       subject,
       text,
       html,
+      inReplyTo,
+      referenceIds,
       attachments: parsedAttachments,
     });
 
@@ -136,7 +164,11 @@ export async function POST(req: Request) {
       });
     }
 
-    return NextResponse.json({ ok: true, sentSavedToMailbox: result.sentSavedToMailbox });
+    return NextResponse.json({
+      ok: true,
+      sentSavedToMailbox: result.sentSavedToMailbox,
+      messageId: result.messageId,
+    });
   } catch (e) {
     const error = e instanceof Error ? e.message : String(e);
     return NextResponse.json({ ok: false, error }, { status: 400 });

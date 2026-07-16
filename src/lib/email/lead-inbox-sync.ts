@@ -1,5 +1,6 @@
 import type { Lead } from "@/lib/types";
 import type { MailInbound, MailSent } from "@/lib/email-account-types";
+import { extractEmailAddresses } from "@/lib/email/reply-compose";
 
 /**
  * Whether this lead appears in unified inbox mail: manual message→lead link, or the lead’s
@@ -23,11 +24,11 @@ export function leadHasConnectedInboxMail(input: {
 
   for (const messages of Object.values(inboundByMailbox)) {
     for (const m of messages) {
-      if (`${m.from} ${m.to} ${m.cc ?? ""}`.toLowerCase().includes(own)) return true;
+      if (extractEmailAddresses(m.from, m.to, m.cc).has(own)) return true;
     }
   }
   for (const m of sent) {
-    if (`${m.from} ${m.to}`.toLowerCase().includes(own)) return true;
+    if (extractEmailAddresses(m.from, m.to, m.cc).has(own)) return true;
   }
   return false;
 }

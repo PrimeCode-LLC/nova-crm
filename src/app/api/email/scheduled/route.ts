@@ -5,6 +5,8 @@ import {
   createScheduledEmailServer,
   listScheduledEmailsForMemberServer,
 } from "@/lib/email/scheduled-emails-server";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
+import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 
 export async function GET(req: Request) {
   const g = await guardTenantApi();
@@ -81,6 +83,17 @@ export async function POST(req: Request) {
       { status: 400 },
     );
   }
+  const leadId = String(body.leadId ?? "").trim() || undefined;
+  const contactPolicy = await assertLeadContactAllowedServer({
+    organizationId: g.ctx.session.organizationId,
+    leadId,
+  });
+  if (!contactPolicy.ok) {
+    return NextResponse.json(
+      { ok: false, error: contactPolicy.error },
+      { status: contactPolicy.status },
+    );
+  }
 
   const result = await createScheduledEmailServer({
     organizationId: g.ctx.session.organizationId,
@@ -97,7 +110,14 @@ export async function POST(req: Request) {
     attachments: body.attachments,
     scheduledAt,
     followupId: String(body.followupId ?? "").trim() || undefined,
-    leadId: String(body.leadId ?? "").trim() || undefined,
+    leadId,
+    inReplyTo: normalizeMessageId(String(body.inReplyTo ?? "")),
+    referenceIds: Array.isArray(body.referenceIds)
+      ? body.referenceIds
+          .map((value) => normalizeMessageId(String(value ?? "")))
+          .filter((value): value is string => Boolean(value))
+          .slice(-50)
+      : undefined,
   });
 
   if ("error" in result) {

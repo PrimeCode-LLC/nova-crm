@@ -210,6 +210,7 @@ export async function POST(req: Request) {
           let bodyText = "";
           let bodyHtml: string | undefined;
           let cc = ccFromEnv.trim() ? ccFromEnv : undefined;
+          let replyTo: string | undefined;
           let attachments: MailInboundAttachment[] | undefined;
           let bodySynced: boolean;
 
@@ -223,13 +224,14 @@ export async function POST(req: Request) {
               if (parsed.inReplyTo) inReplyTo = parsed.inReplyTo ?? inReplyTo;
               if (parsed.referenceIds?.length) referenceIds = parsed.referenceIds;
               if (parsed.cc.trim()) cc = parsed.cc;
+              if (parsed.replyTo) replyTo = parsed.replyTo;
               if (parsed.attachments.length > 0) attachments = parsed.attachments;
               if (parsed.listUnsubscribe) listUnsubscribe = parsed.listUnsubscribe;
               bodySynced = true;
             } catch {
               preview = "";
               bodyText = "";
-              bodySynced = true;
+              bodySynced = false;
             }
           } else if (inBodyTier) {
             bodySynced = true;
@@ -245,6 +247,7 @@ export async function POST(req: Request) {
             uid: msg.uid,
             subject: subj,
             from,
+            ...(replyTo ? { replyTo } : {}),
             to,
             ...(cc ? { cc } : {}),
             date,

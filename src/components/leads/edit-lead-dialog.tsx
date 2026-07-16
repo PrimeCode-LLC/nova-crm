@@ -7,8 +7,6 @@ import type {
   LeadPriority,
   LeadTemperature,
   PipelineStage,
-  CompanySize,
-  RevenueRange,
   PushStatus,
   BANT,
   ChannelKey,
@@ -43,9 +41,6 @@ import {
   outreachProfileFieldLabel,
   TEMPERATURE_TONE,
   PRIORITY_TONE,
-  REVENUE_RANGES,
-  COMPANY_SIZES,
-  COMPANY_SIZE_LABELS,
   PUSH_STATUS_TONE,
   INTAKE_KIND_META,
 } from "@/lib/constants";
@@ -92,18 +87,21 @@ function clampBant(n: number): number {
 }
 
 const PUSH_KEYS = Object.keys(PUSH_STATUS_TONE) as PushStatus[];
-const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
+
+export type LeadEditSection = "all" | "research" | "qualification" | "routing" | "nextAction";
 
 export function EditLeadDialog({
   open,
   onOpenChange,
   lead,
   onSave,
+  section = "all",
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   lead: Lead | null;
   onSave: (patch: Partial<Lead>) => void;
+  section?: LeadEditSection;
 }) {
   const [channel, setChannel] = React.useState<ChannelKey>("cold_email");
   const [stage, setStage] = React.useState<PipelineStage>("new");
@@ -123,8 +121,6 @@ export function EditLeadDialog({
   const [toolsUsedStr, setToolsUsedStr] = React.useState("");
 
   const [doNotContact, setDoNotContact] = React.useState(false);
-  const [companySize, setCompanySize] = React.useState<CompanySize | UnsetToken>(UNSET);
-  const [revenueRange, setRevenueRange] = React.useState<RevenueRange | UnsetToken>(UNSET);
   const [pushToInstantly, setPushToInstantly] = React.useState<PushStatus | UnsetToken>(UNSET);
   const [pushToLinkedIn, setPushToLinkedIn] = React.useState<PushStatus | UnsetToken>(UNSET);
   const [campaignDialogOpen, setCampaignDialogOpen] = React.useState(false);
@@ -146,7 +142,7 @@ export function EditLeadDialog({
     if (lead?.ownerId) ids.add(lead.ownerId);
     if (lead?.scraperId) ids.add(lead.scraperId);
     return [...ids];
-  }, [lead?.ownerId, lead?.scraperId]);
+  }, [lead]);
 
   const scraperOptions = React.useMemo(
     () => buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName, ownerPickerIds),
@@ -179,8 +175,6 @@ export function EditLeadDialog({
       setToolsUsedStr(toolsUsedToString(lead.toolsUsed));
 
       setDoNotContact(!!lead.doNotContact);
-      setCompanySize(lead.companySize ?? UNSET);
-      setRevenueRange(lead.revenueRange ?? UNSET);
       setPushToInstantly(lead.pushToInstantly ?? UNSET);
       setPushToLinkedIn(lead.pushToLinkedIn ?? UNSET);
 
@@ -217,7 +211,10 @@ export function EditLeadDialog({
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!lead) return;
-    if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)) {
+    const editsRouting = section === "all" || section === "routing";
+    const editsQualification = section === "all" || section === "qualification";
+
+    if (editsRouting && CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)) {
       const opts = profiles.filter((p) => p.channel === channel && p.active !== false);
       if (opts.length > 0 && !profileId.trim()) {
         toast.error(
@@ -226,22 +223,22 @@ export function EditLeadDialog({
         return;
       }
     }
-    const evRaw = estimatedValue.trim();
+
     let estimatedValueNum: number | undefined;
-    if (evRaw) {
-      const n = Number(evRaw.replace(/,/g, ""));
-      if (!Number.isFinite(n) || n < 0) {
-        toast.error("Estimated value must be a valid number.");
-        return;
+    if (editsQualification) {
+      const evRaw = estimatedValue.trim();
+      if (evRaw) {
+        const n = Number(evRaw.replace(/,/g, ""));
+        if (!Number.isFinite(n) || n < 0) {
+          toast.error("Estimated value must be a valid number.");
+          return;
+        }
+        estimatedValueNum = n;
       }
-      estimatedValueNum = n;
-    } else {
-      estimatedValueNum = undefined;
     }
-    const expectedCloseDate = isoFromDateInput(expectedClose);
 
     let bant: BANT | undefined;
-    if (useBant) {
+    if (editsQualification && useBant) {
       bant = {
         budget: clampBant(Number(bantBudget)),
         authority: clampBant(Number(bantAuthority)),
@@ -250,62 +247,79 @@ export function EditLeadDialog({
       };
     }
 
-    const profileIdTrim = profileId.trim();
-    const profilePatch: Partial<Lead> = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)
-      ? { profileId: profileIdTrim || undefined }
-      : { profileId: undefined };
+    const patch: Partial<Lead> = {};
 
-    onSave({
-      ...profilePatch,
-      intakeKind: intakeKind === "sales_lead" ? undefined : "prospect",
-      scraperId: scraperId === UNSET ? undefined : scraperId,
-      channel,
-      stage,
-      temperature,
-      priority,
-      nextAction: nextAction.trim() || undefined,
-      notes: notes.trim() || undefined,
-      estimatedValue: estimatedValueNum,
-      expectedCloseDate,
+    if (section === "all") {
+      patch.intakeKind = intakeKind === "sales_lead" ? undefined : "prospect";
+      patch.scraperId = scraperId === UNSET ? undefined : scraperId;
+      patch.labelIds = labelIds.length ? labelIds : undefined;
+    }
 
-      triggerEvent: triggerEvent.trim() || undefined,
-      businessFocus: businessFocus.trim() || undefined,
-      painPoints: painPoints.trim() || undefined,
-      recentNews: recentNews.trim() || undefined,
-      hiringSignals: hiringSignals.trim() || undefined,
-      psLine: psLine.trim() || undefined,
-      toolsUsed: parseToolsUsed(toolsUsedStr),
+    if (section === "all" || section === "research") {
+      patch.triggerEvent = triggerEvent.trim() || undefined;
+      patch.businessFocus = businessFocus.trim() || undefined;
+      patch.painPoints = painPoints.trim() || undefined;
+      patch.recentNews = recentNews.trim() || undefined;
+      patch.hiringSignals = hiringSignals.trim() || undefined;
+      patch.psLine = psLine.trim() || undefined;
+      patch.toolsUsed = parseToolsUsed(toolsUsedStr);
+    }
 
-      doNotContact,
-      companySize: companySize === UNSET ? undefined : companySize,
-      revenueRange: revenueRange === UNSET ? undefined : revenueRange,
-      pushToInstantly: pushToInstantly === UNSET ? undefined : pushToInstantly,
-      pushToLinkedIn: pushToLinkedIn === UNSET ? undefined : pushToLinkedIn,
+    if (editsRouting) {
+      patch.channel = channel;
+      patch.profileId = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)
+        ? profileId.trim() || undefined
+        : undefined;
+      patch.doNotContact = doNotContact;
+      patch.pushToInstantly = pushToInstantly === UNSET ? undefined : pushToInstantly;
+      patch.pushToLinkedIn = pushToLinkedIn === UNSET ? undefined : pushToLinkedIn;
+    }
 
-      bant,
-      labelIds: labelIds.length ? labelIds : undefined,
-    });
+    if (editsQualification) {
+      patch.stage = stage;
+      patch.temperature = temperature;
+      patch.priority = priority;
+      patch.estimatedValue = estimatedValueNum;
+      patch.expectedCloseDate = isoFromDateInput(expectedClose);
+      patch.bant = bant;
+    }
+
+    if (section === "all" || section === "nextAction") {
+      patch.nextAction = nextAction.trim() || undefined;
+      patch.notes = notes.trim() || undefined;
+    }
+
+    onSave(patch);
     toast.success("Lead updated");
     onOpenChange(false);
   }
 
   if (!lead) return null;
   const readOnly = !canEditLead(lead);
+  const dialogTitle =
+    section === "research"
+      ? "Edit research & personalization"
+      : section === "qualification"
+        ? "Edit qualification"
+        : section === "routing"
+          ? "Edit campaign routing"
+          : section === "nextAction"
+            ? "Edit next action"
+            : "Edit lead";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl" showCloseButton>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Edit lead</DialogTitle>
+            <DialogTitle>{dialogTitle}</DialogTitle>
             <DialogDescription>
             {readOnly ? "This lead was created from a prospect push. Only workspace admins can edit it." : null}
-              Update research, routing, qualification, and next steps for {lead.contactName}. Changes apply for this
-              browser session.
+              Update {section === "all" ? "this lead" : "these fields"} for {lead.contactName}.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 max-h-[min(78vh,640px)] overflow-y-auto pr-1">
-            <section className="space-y-3">
+            {section === "all" && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Intake & attribution
               </p>
@@ -354,18 +368,18 @@ export function EditLeadDialog({
                   </Select>
                 </div>
               </div>
-            </section>
+            </section>}
 
-            <Separator />
+            {section === "all" && <Separator />}
 
-            <section className="space-y-3">
+            {section === "all" && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Labels</p>
               <EntityLabelPicker emphasizeAddAction labelIds={labelIds} onChange={setLabelIds} />
-            </section>
+            </section>}
 
-            <Separator />
+            {section === "all" && <Separator />}
 
-            <section className="space-y-3">
+            {(section === "all" || section === "research") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Research & personalization
               </p>
@@ -433,11 +447,11 @@ export function EditLeadDialog({
                   placeholder="Comma-separated, e.g. Salesforce, HubSpot"
                 />
               </div>
-            </section>
+            </section>}
 
-            <Separator />
+            {section === "all" && <Separator />}
 
-            <section className="space-y-3">
+            {(section === "all" || section === "routing") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Campaign routing</p>
               <div className="grid gap-2">
                 <Label>Channel</Label>
@@ -509,50 +523,6 @@ export function EditLeadDialog({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="grid gap-2">
-                  <Label>Company size</Label>
-                  <Select
-                    value={companySize}
-                    onValueChange={(v) => v && setCompanySize(v as CompanySize | UnsetToken)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Not set">
-                        {companySize === UNSET ? undefined : companySize}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={UNSET}>Not set</SelectItem>
-                      {COMPANY_SIZES.map((s) => (
-                        <SelectItem key={s} value={s}>
-                          {COMPANY_SIZE_LABELS[s]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="grid gap-2">
-                  <Label>Revenue range</Label>
-                  <Select
-                    value={revenueRange}
-                    onValueChange={(v) => v && setRevenueRange(v as RevenueRange | UnsetToken)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Not set">
-                        {revenueRange === UNSET ? undefined : REVENUE_RANGES[revenueRange as RevenueRange]}
-                      </SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={UNSET}>Not set</SelectItem>
-                      {REVENUE_KEYS.map((k) => (
-                        <SelectItem key={k} value={k}>
-                          {REVENUE_RANGES[k]}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div className="grid gap-2">
                   <Label>Push to Instantly</Label>
                   <Select
                     value={pushToInstantly}
@@ -606,11 +576,11 @@ export function EditLeadDialog({
                   </Select>
                 </div>
               </div>
-            </section>
+            </section>}
 
-            <Separator />
+            {section === "all" && <Separator />}
 
-            <section className="space-y-3">
+            {(section === "all" || section === "qualification") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Qualification</p>
               <div className="grid gap-2">
                 <Label>Stage</Label>
@@ -717,11 +687,11 @@ export function EditLeadDialog({
                   ))}
                 </div>
               )}
-            </section>
+            </section>}
 
-            <Separator />
+            {section === "all" && <Separator />}
 
-            <section className="space-y-3">
+            {(section === "all" || section === "nextAction") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Next steps</p>
               <div className="grid gap-2">
                 <Label htmlFor="edit-next">Next action</Label>
@@ -743,7 +713,7 @@ export function EditLeadDialog({
                   placeholder="Team-only context…"
                 />
               </div>
-            </section>
+            </section>}
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

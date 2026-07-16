@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { appendSentMailServer } from "@/lib/email/append-sent-mail-server";
 import { buildOutboundRawMail } from "@/lib/email/build-outbound-raw-mail";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
@@ -6,6 +7,13 @@ import { formatSmtpError } from "@/lib/email/smtp-client-options";
 import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
 import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";
 import type { OutboundAttachment } from "@/lib/email/outbound-attachments";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
+
+function sanitizeOutboundMessageId(raw: string | undefined): string | undefined {
+  const value = normalizeMessageId(raw);
+  if (!value || value.length > 998 || /[\r\n<>]/.test(value)) return undefined;
+  return value;
+}
 
 export type SendOutboundMailInput = {
   organizationId: string;
@@ -14,6 +22,8 @@ export type SendOutboundMailInput = {
   smtp: { host: string; port: number; secure: boolean; user: string; pass: string };
   /** When set, a copy of the message is appended to the server Sent folder after SMTP send. */
   imap?: { host: string; port: number; secure: boolean; user: string; pass: string };
+  /** Gmail and Outlook save SMTP submissions automatically; custom servers may require IMAP APPEND. */
+  appendSentCopy?: boolean;
   from: string;
   displayName?: string;
   replyTo?: string;
@@ -22,13 +32,21 @@ export type SendOutboundMailInput = {
   subject: string;
   text?: string;
   html?: string;
+  inReplyTo?: string;
+  referenceIds?: string[];
   attachments?: OutboundAttachment[];
 };
 
 export async function sendOutboundMailServer(
   input: SendOutboundMailInput,
-): Promise<{ ok: true; sentSavedToMailbox: boolean } | { ok: false; error: string }> {
+): Promise<{ ok: true; sentSavedToMailbox: boolean; messageId?: string } | { ok: false; error: string }> {
   const host = normalizeMailHost(input.smtp.host);
+  const providerAutoSavesSent =
+    host === "smtp.gmail.com" ||
+    host.endsWith(".smtp.gmail.com") ||
+    host === "smtp.office365.com" ||
+    host === "smtp-mail.outlook.com";
+  const shouldAppendSentCopy = input.appendSentCopy ?? !providerAutoSavesSent;
   const auth = await resolveMailboxTransportAuthServer({
     organizationId: input.organizationId,
     uid: input.uid,
@@ -63,6 +81,19 @@ export async function sendOutboundMailServer(
   const displayName = input.displayName?.trim() ?? "";
   const fromHeader = displayName ? `"${displayName.replace(/"/g, "")}" <${from}>` : from;
   const subject = input.subject.trim() || "(no subject)";
+  const messageIdDomain = from.split("@")[1]?.replace(/[^A-Za-z0-9.-]/g, "") || "nova.local";
+  const outboundMessageId = `<${randomUUID()}@${messageIdDomain}>`;
+  const inReplyToNormalized = sanitizeOutboundMessageId(input.inReplyTo);
+  const inReplyTo = inReplyToNormalized ? `<${inReplyToNormalized}>` : undefined;
+  const references = [
+    ...(input.referenceIds ?? []),
+    ...(inReplyToNormalized ? [inReplyToNormalized] : []),
+  ]
+    .map((value) => sanitizeOutboundMessageId(value))
+    .filter((value): value is string => Boolean(value))
+    .filter((value, index, all) => all.indexOf(value) === index)
+    .slice(-50)
+    .map((value) => `<${value}>`);
   const mailAttachments =
     input.attachments && input.attachments.length > 0
       ? input.attachments.map((att) => ({
@@ -81,10 +112,13 @@ export async function sendOutboundMailServer(
       text: input.text || undefined,
       html: input.html || undefined,
       replyTo: input.replyTo?.trim() || undefined,
+      messageId: outboundMessageId,
+      inReplyTo,
+      references,
       attachments: mailAttachments,
     });
 
-    await runWithSmtpTransporter(
+    const sentInfo = await runWithSmtpTransporter(
       host,
       { port: input.smtp.port, secure: input.smtp.secure, user, pass, accessToken },
       async (transporter) =>
@@ -96,12 +130,19 @@ export async function sendOutboundMailServer(
           text: input.text || undefined,
           html: input.html || undefined,
           replyTo: input.replyTo?.trim() || undefined,
+          messageId: outboundMessageId,
+          inReplyTo,
+          references: references.length > 0 ? references : undefined,
           attachments: mailAttachments,
         }),
     );
+    const messageId =
+      sentInfo && typeof sentInfo === "object" && "messageId" in sentInfo
+        ? normalizeMessageId(String(sentInfo.messageId ?? ""))
+        : normalizeMessageId(outboundMessageId);
 
     const imapHost = normalizeMailHost(input.imap?.host ?? "");
-    if (imapHost) {
+    if (imapHost && shouldAppendSentCopy) {
       const appendResult = await appendSentMailServer({
         organizationId: input.organizationId,
         uid: input.uid,
@@ -115,10 +156,14 @@ export async function sendOutboundMailServer(
         },
         rawMessage,
       });
-      return { ok: true, sentSavedToMailbox: appendResult.ok };
+      return { ok: true, sentSavedToMailbox: appendResult.ok, messageId };
     }
 
-    return { ok: true, sentSavedToMailbox: false };
+    return {
+      ok: true,
+      sentSavedToMailbox: Boolean(imapHost && !shouldAppendSentCopy),
+      messageId,
+    };
   } catch (e) {
     return { ok: false, error: formatSmtpError(e) };
   }

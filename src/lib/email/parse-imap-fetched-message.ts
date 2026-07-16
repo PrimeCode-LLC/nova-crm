@@ -71,6 +71,7 @@ export async function parseMailSourceFields(source: Buffer): Promise<{
   bodyText: string;
   bodyHtml?: string;
   cc: string;
+  replyTo?: string;
   attachments: MailInboundAttachment[];
   messageId?: string;
   inReplyTo?: string;
@@ -84,6 +85,7 @@ export async function parseMailSourceFields(source: Buffer): Promise<{
     bodyHtml = parsed.html;
   }
   const cc = formatAddressObjects(parsed.cc);
+  const replyTo = formatAddressObjects(parsed.replyTo);
   const attachments = extractAttachmentsFromParsed(parsed);
   const p = bodyText.replace(/\s+/g, " ").trim();
   const preview = p.length > 220 ? `${p.slice(0, 220)}…` : p;
@@ -116,6 +118,7 @@ export async function parseMailSourceFields(source: Buffer): Promise<{
     bodyText,
     bodyHtml,
     cc,
+    replyTo: replyTo || undefined,
     attachments,
     messageId: messageId ?? undefined,
     inReplyTo: inReplyTo ?? undefined,

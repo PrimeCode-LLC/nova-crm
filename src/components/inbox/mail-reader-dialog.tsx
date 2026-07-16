@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 export type MailReaderContent = {
   subject?: string;
   from?: string;
+  replyTo?: string;
   to?: string;
   cc?: string;
   date?: string;
@@ -31,6 +32,7 @@ export function mailReaderContentFromInbound(message: MailInbound): MailReaderCo
   return {
     subject: message.subject,
     from: message.from,
+    replyTo: message.replyTo,
     to: message.to,
     cc: message.cc,
     date: message.date,
@@ -46,12 +48,15 @@ export function mailReaderContentFromSent(message: MailSent): MailReaderContent 
   return {
     subject: message.subject,
     from: message.from,
+    replyTo: message.replyTo,
     to: message.to,
+    cc: message.cc,
     date: message.sentAt,
     bodyHtml: message.bodyHtml,
     bodyText: message.body,
     preview: message.preview,
     bodySynced: message.bodySynced,
+    attachments: message.attachments,
   };
 }
 
@@ -208,6 +213,11 @@ export function MailReaderDialog({
             {content.to ? (
               <p>
                 <span className="font-medium text-foreground">To:</span> {content.to}
+              </p>
+            ) : null}
+            {content.replyTo && content.replyTo !== content.from ? (
+              <p>
+                <span className="font-medium text-foreground">Reply-To:</span> {content.replyTo}
               </p>
             ) : null}
             {content.cc ? (

@@ -9,6 +9,9 @@ export type OutboundRawMailInput = {
   text?: string;
   html?: string;
   replyTo?: string;
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
   attachments?: Array<{ filename: string; content: Buffer; contentType: string }>;
 };
 
@@ -22,6 +25,9 @@ export async function buildOutboundRawMail(input: OutboundRawMailInput): Promise
     text: input.text || undefined,
     html: input.html || undefined,
     replyTo: input.replyTo || undefined,
+    messageId: input.messageId || undefined,
+    inReplyTo: input.inReplyTo || undefined,
+    references: input.references?.length ? input.references : undefined,
     date: new Date(),
     attachments:
       input.attachments && input.attachments.length > 0

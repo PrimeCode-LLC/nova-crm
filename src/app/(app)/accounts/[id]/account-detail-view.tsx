@@ -1,5 +1,6 @@
 "use client";
 
+import * as React from "react";
 import Link from "next/link";
 import { Building2, ArrowLeft, Globe, MapPin, Users2, Network as Linkedin, Plus, Pencil } from "lucide-react";
 
@@ -27,9 +28,13 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { REVENUE_RANGES } from "@/lib/constants";
 import { fmtCurrency, fmtRelative, fmtDate } from "@/lib/format";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
+import { AddAccountContactDialog } from "@/components/accounts/add-account-contact-dialog";
+import { EditAccountDialog } from "@/components/accounts/edit-account-dialog";
 
 export function AccountDetailView({ accountId }: { accountId: string }) {
   const ws = useWorkspace();
+  const [editOpen, setEditOpen] = React.useState(false);
+  const [addContactOpen, setAddContactOpen] = React.useState(false);
   const account = ws.accounts.find((a) => a.id === accountId);
 
   if (!account) {
@@ -87,10 +92,14 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
         }
         actions={
           <>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
               <Pencil className="h-3.5 w-3.5" /> Edit
             </Button>
-            <Button size="sm">
+            <Button
+              size="sm"
+              type="button"
+              onClick={() => setAddContactOpen(true)}
+            >
               <Plus className="h-3.5 w-3.5" /> Add contact
             </Button>
           </>
@@ -356,6 +365,17 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
           </aside>
         </div>
       </PageBody>
+      <EditAccountDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        account={account}
+        onSave={(patch) => ws.patchAccount(account.id, patch)}
+      />
+      <AddAccountContactDialog
+        open={addContactOpen}
+        onOpenChange={setAddContactOpen}
+        account={account}
+      />
     </>
   );
 }

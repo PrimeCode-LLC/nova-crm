@@ -14,6 +14,7 @@ import {
   assertMailboxDailySendQuotaServer,
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
+import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
@@ -72,6 +73,13 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
         : undefined,
     leadId:
       typeof data.leadId === "string" && data.leadId.trim() ? data.leadId.trim() : undefined,
+    inReplyTo:
+      typeof data.inReplyTo === "string" && data.inReplyTo.trim()
+        ? data.inReplyTo.trim()
+        : undefined,
+    referenceIds: Array.isArray(data.referenceIds)
+      ? data.referenceIds.map(String).filter(Boolean).slice(-50)
+      : undefined,
   };
 }
 
@@ -117,6 +125,8 @@ export async function createScheduledEmailServer(input: {
   scheduledAt: string;
   followupId?: string;
   leadId?: string;
+  inReplyTo?: string;
+  referenceIds?: string[];
 }): Promise<{ ok: true; id: string } | { error: string }> {
   const ref = scheduledRef(input.organizationId, input.uid, `sch-${crypto.randomUUID()}`);
   if (!ref) return { error: "Database not configured" };
@@ -155,6 +165,8 @@ export async function createScheduledEmailServer(input: {
     updatedAt: now,
     ...(followupId ? { followupId } : {}),
     ...(leadId ? { leadId } : {}),
+    ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+    ...(input.referenceIds?.length ? { referenceIds: input.referenceIds.slice(-50) } : {}),
   });
 
   return { ok: true, id: ref.id };
@@ -354,6 +366,23 @@ async function sendScheduledDoc(
   if (followupIdEarly && initialStopReason) {
     return cancelDueToFollowupStop(docRef, followupIdEarly, initialStopReason);
   }
+  const leadId = typeof data.leadId === "string" ? data.leadId.trim() : "";
+  if (leadId) {
+    const contactPolicy = await assertLeadContactAllowedServer({ organizationId, leadId });
+    if (!contactPolicy.ok) {
+      const now = new Date().toISOString();
+      const cancelled = contactPolicy.status === 409;
+      await docRef.update({
+        status: cancelled ? "cancelled" : "failed",
+        error: contactPolicy.error,
+        ...(cancelled ? { cancelledAt: now, cancelReason: contactPolicy.error } : {}),
+        updatedAt: now,
+        processingAt: FieldValue.delete(),
+        processingClaimId: FieldValue.delete(),
+      });
+      return cancelled ? "skipped" : "failed";
+    }
+  }
 
   const mailboxes = await listMailboxesForMemberServer({ organizationId, uid });
   const mailbox = mailboxes.find((m) => m.id === mailboxId);
@@ -449,6 +478,11 @@ async function sendScheduledDoc(
       user: mailbox.imap.user,
       pass: mailbox.imap.password,
     },
+    appendSentCopy:
+      mailbox.connectionType === "google_workspace" ||
+      mailbox.connectionType === "microsoft_outlook"
+        ? false
+        : undefined,
     from: String(data.from ?? mailbox.emailAddress),
     displayName: String(data.displayName ?? mailbox.displayName),
     replyTo: String(data.replyTo ?? mailbox.replyTo),
@@ -457,6 +491,10 @@ async function sendScheduledDoc(
     subject: String(data.subject ?? ""),
     text: String(data.text ?? data.body ?? ""),
     html: String(data.html ?? ""),
+    inReplyTo: String(data.inReplyTo ?? "") || undefined,
+    referenceIds: Array.isArray(data.referenceIds)
+      ? data.referenceIds.map(String).filter(Boolean).slice(-50)
+      : undefined,
     attachments: parsedAttachments,
   });
 

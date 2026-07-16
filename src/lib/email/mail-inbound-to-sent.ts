@@ -7,7 +7,9 @@ export function mailInboundToSent(mailboxId: string, m: MailInbound): MailSent {
     id: `${mailboxId}:sent:uid-${m.uid}`,
     mailboxId,
     from: m.from,
+    replyTo: m.replyTo,
     to: m.to,
+    cc: m.cc,
     subject: m.subject,
     body: bodySynced ? m.bodyText || m.preview || "" : "",
     sentAt: m.date,
@@ -15,6 +17,10 @@ export function mailInboundToSent(mailboxId: string, m: MailInbound): MailSent {
     bodySynced: m.bodySynced,
     preview: m.preview,
     bodyHtml: m.bodyHtml,
+    attachments: m.attachments,
+    messageId: m.messageId,
+    inReplyTo: m.inReplyTo,
+    referenceIds: m.referenceIds,
   };
 }
 
@@ -26,6 +32,11 @@ export function mergeSentMailRow(prev: MailSent | undefined, server: MailSent): 
       body: prev.body,
       bodyHtml: prev.bodyHtml,
       preview: prev.preview || server.preview,
+      replyTo: prev.replyTo,
+      attachments: prev.attachments,
+      messageId: prev.messageId,
+      inReplyTo: prev.inReplyTo,
+      referenceIds: prev.referenceIds,
       bodySynced: true,
     };
   }
@@ -33,5 +44,11 @@ export function mergeSentMailRow(prev: MailSent | undefined, server: MailSent): 
     ...prev,
     ...server,
     body: server.bodySynced !== false ? server.body || prev.body : prev.body,
+    replyTo: server.replyTo ?? prev.replyTo,
+    cc: server.cc ?? prev.cc,
+    attachments: server.attachments ?? prev.attachments,
+    messageId: server.messageId ?? prev.messageId,
+    inReplyTo: server.inReplyTo ?? prev.inReplyTo,
+    referenceIds: server.referenceIds ?? prev.referenceIds,
   };
 }

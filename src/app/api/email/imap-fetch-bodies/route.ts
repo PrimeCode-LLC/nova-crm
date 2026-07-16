@@ -132,6 +132,7 @@ export async function POST(req: Request) {
         bodyText: string;
         bodyHtml?: string;
         cc?: string;
+        replyTo?: string;
         attachments?: MailInboundAttachment[];
         messageId?: string;
         inReplyTo?: string;
@@ -195,6 +196,7 @@ export async function POST(req: Request) {
               bodyText,
               bodyHtml: parsed.bodyHtml,
               cc,
+              replyTo: parsed.replyTo,
               attachments,
               messageId,
               inReplyTo,
@@ -207,7 +209,7 @@ export async function POST(req: Request) {
               uid: row.uid,
               preview: subjFallback,
               bodyText: "",
-              bodySynced: true,
+              bodySynced: false,
             });
           }
         }
