@@ -85,6 +85,12 @@ export async function persistFollowupCreate(
   if (f.aiGenerated) data.aiGenerated = f.aiGenerated;
   if (f.pausedAt) data.pausedAt = f.pausedAt;
   if (f.completedAt) data.completedAt = f.completedAt;
+  if (f.deliveryStatus) data.deliveryStatus = f.deliveryStatus;
+  if (f.sentAt) data.sentAt = f.sentAt;
+  if (f.failedAt) data.failedAt = f.failedAt;
+  if (f.cancelledAt) data.cancelledAt = f.cancelledAt;
+  if (f.deliveryError) data.deliveryError = f.deliveryError;
+  if (f.cancelReason) data.cancelReason = f.cancelReason;
   await setDoc(doc(db, COLLECTIONS.followups, f.id), data);
 }
 
@@ -118,6 +124,7 @@ export async function persistFollowupPlanCreate(
   if (plan.supersededByPlanId) data.supersededByPlanId = plan.supersededByPlanId;
   if (plan.kind) data.kind = plan.kind;
   if (plan.sequenceMode) data.sequenceMode = plan.sequenceMode;
+  if (plan.completedAt) data.completedAt = plan.completedAt;
   await setDoc(doc(db, COLLECTIONS.followupPlans, plan.id), data);
 }
 
@@ -127,7 +134,7 @@ export async function persistFollowupPlanPatch(
   patch: Partial<
     Pick<
       import("@/lib/types").FollowupPlan,
-      "status" | "pausedAt" | "pausedReason" | "replyMessageId" | "supersededByPlanId" | "planSummary"
+      "status" | "pausedAt" | "pausedReason" | "replyMessageId" | "supersededByPlanId" | "planSummary" | "completedAt"
     >
   >,
 ): Promise<void> {
@@ -138,6 +145,7 @@ export async function persistFollowupPlanPatch(
   if (patch.pausedReason !== undefined) data.pausedReason = patch.pausedReason;
   if (patch.replyMessageId !== undefined) data.replyMessageId = patch.replyMessageId;
   if (patch.supersededByPlanId !== undefined) data.supersededByPlanId = patch.supersededByPlanId;
+  if (patch.completedAt !== undefined) data.completedAt = patch.completedAt;
   await updateDoc(doc(db, COLLECTIONS.followupPlans, planId), data);
 }
 
@@ -161,6 +169,11 @@ export async function persistFollowupEmailSchedule(
     await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
       scheduledEmailId: schedule.scheduledEmailId,
       emailScheduledAt: schedule.emailScheduledAt,
+      deliveryStatus: "scheduled",
+      failedAt: deleteField(),
+      cancelledAt: deleteField(),
+      deliveryError: deleteField(),
+      cancelReason: deleteField(),
       updatedAt: serverTimestamp(),
     });
     return;

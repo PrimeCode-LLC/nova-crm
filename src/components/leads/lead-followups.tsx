@@ -441,7 +441,7 @@ export function LeadFollowups({
     for (const f of displayFollowups) {
       if (!f.scheduledEmailId) continue;
       const row = scheduledEmails.find((s) => s.id === f.scheduledEmailId);
-      if (!row || row.status === "pending") continue;
+      if (!row || row.status === "pending" || row.status === "processing") continue;
       clearFollowupEmailSchedule(f.id);
       setOptimisticSchedule((prev) => {
         if (!Object.prototype.hasOwnProperty.call(prev, f.id)) return prev;

@@ -19,7 +19,6 @@ import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, ROLES } from "@/lib/constants";
-import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
 import {
   getDashboardOverviewDescription,
   getDashboardRoleFocusLine,
@@ -27,6 +26,7 @@ import {
   showTeamFollowupsOnDashboard,
 } from "@/lib/dashboard-role-focus";
 import { DashboardPendingOverview } from "@/components/dashboard/dashboard-pending-overview";
+import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
 import { DashboardAiBrief } from "@/components/ai/dashboard-ai-brief";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import {
@@ -52,7 +52,25 @@ import {
 } from "@/lib/owner-scope";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import type { ChannelKey } from "@/lib/types";
-import { Target, Clock, DollarSign, TrendingUp, Inbox, Calendar, Download, Filter, Users } from "lucide-react";
+import {
+  Target,
+  Clock,
+  DollarSign,
+  TrendingUp,
+  Calendar,
+  Download,
+  Filter,
+  Users,
+  UserRoundSearch,
+  CalendarClock,
+  Workflow,
+  ListTodo,
+  Send,
+  Megaphone,
+  MessageSquareReply,
+  CircleCheck,
+} from "lucide-react";
+import { computeDashboardWorkflowMetrics, isSalesLead } from "@/lib/dashboard-workflow";
 import {
   Select,
   SelectContent,
@@ -98,11 +116,13 @@ export default function DashboardPage() {
     users,
     activityCounters,
     activityRecords,
+    campaigns,
     currentUserId,
     getUserById,
     getOwnerDisplayName,
     leadTasks,
     followups,
+    followupPlans,
     setFollowupCompleted,
     setLeadTaskCompleted,
   } = useWorkspace();
@@ -154,11 +174,16 @@ export default function DashboardPage() {
   );
 
   const scopedLeadIds = React.useMemo(() => new Set(scopedLeads.map((l) => l.id)), [scopedLeads]);
+  const scopedSalesLeads = React.useMemo(() => scopedLeads.filter(isSalesLead), [scopedLeads]);
+  const scopedProspects = React.useMemo(
+    () => scopedLeads.filter((lead) => lead.intakeKind === "prospect"),
+    [scopedLeads],
+  );
 
   const ownerScopedDeals = React.useMemo(() => {
     if (channelScope.length === 0 && ownerScope === "all-owners") return deals;
     const ids = new Set(
-      filterLeadsByOwnerScope(channelScopedLeads, ownerScope, ownerScopeDeps).map((l) => l.id),
+      filterLeadsByOwnerScope(channelScopedLeads.filter(isSalesLead), ownerScope, ownerScopeDeps).map((l) => l.id),
     );
     return deals.filter((d) => ids.has(d.leadId));
   }, [deals, channelScopedLeads, ownerScope, ownerScopeDeps, channelScope.length]);
@@ -202,21 +227,50 @@ export default function DashboardPage() {
     [activityRecordsAfterChannel, ownerScope, ownerScopeDeps, timeRange],
   );
 
-  const totalOpen = scopedLeads.filter((l) => !["won", "lost"].includes(l.stage)).length;
-  const idleCount = scopedLeads.filter((l) => l.isIdle).length;
+  const workflowFollowups = React.useMemo(
+    () => followups.filter((followup) => !followup.leadId || scopedLeadIds.has(followup.leadId)),
+    [followups, scopedLeadIds],
+  );
+  const workflowPlans = React.useMemo(
+    () => followupPlans.filter((plan) => scopedLeadIds.has(plan.leadId)),
+    [followupPlans, scopedLeadIds],
+  );
+  const workflowTasks = React.useMemo(
+    () => leadTasks.filter((task) => !task.leadId || scopedLeadIds.has(task.leadId)),
+    [leadTasks, scopedLeadIds],
+  );
+  const workflowMetrics = React.useMemo(
+    () =>
+      computeDashboardWorkflowMetrics({
+        leads: scopedLeads,
+        followups: workflowFollowups,
+        plans: workflowPlans,
+        tasks: workflowTasks,
+        currentUserId,
+        range: timeRange as DashboardTimeRangeKey,
+      }),
+    [
+      scopedLeads,
+      workflowFollowups,
+      workflowPlans,
+      workflowTasks,
+      currentUserId,
+      timeRange,
+    ],
+  );
   const avgResponseMin = React.useMemo(
     () =>
-      computeAverageResponseTimeMinutes(scopedLeads, emailResponseCtx, {
+      computeAverageResponseTimeMinutes(scopedSalesLeads, emailResponseCtx, {
         ownerScope,
         currentUserId,
       }),
-    [scopedLeads, emailResponseCtx, ownerScope, currentUserId],
+    [scopedSalesLeads, emailResponseCtx, ownerScope, currentUserId],
   );
 
   const demoLeadsForBrief = React.useMemo(() => {
     if (!isDemo) return undefined;
     const mode = responseTimeModeForOwnerScope(ownerScope, currentUserId);
-    return leads.map((l) => {
+    return leads.filter(isSalesLead).map((l) => {
       const minutes = resolveLeadResponseTimeMinutes(l, emailResponseCtx, {
         mode,
         currentUserId,
@@ -225,8 +279,8 @@ export default function DashboardPage() {
     });
   }, [isDemo, leads, emailResponseCtx, ownerScope, currentUserId]);
   const pipelineMetrics = React.useMemo(
-    () => computeOpenPipelineMetrics(scopedLeads, scopedDeals),
-    [scopedLeads, scopedDeals],
+    () => computeOpenPipelineMetrics(scopedSalesLeads, scopedDeals),
+    [scopedSalesLeads, scopedDeals],
   );
   const pipelineValue = pipelineMetrics.total;
   const closedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
@@ -260,21 +314,35 @@ export default function DashboardPage() {
         return {
           channel: key,
           title: meta?.label ?? key,
-          counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedLeads, scopedDeals),
+          counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedSalesLeads, scopedDeals),
         };
       }),
-    [funnelChannelKeys, scopedActivityCounters, scopedLeads, scopedDeals],
+    [funnelChannelKeys, scopedActivityCounters, scopedSalesLeads, scopedDeals],
   );
 
   const pendingOverview = (
     <DashboardPendingOverview
       roleId={viewer?.roleId}
-      followups={followups}
-      leadTasks={leadTasks}
+      followups={workflowFollowups}
+      leadTasks={workflowTasks}
       currentUserId={currentUserId}
       setFollowupCompleted={setFollowupCompleted}
       setLeadTaskCompleted={setLeadTaskCompleted}
     />
+  );
+
+  const outreachMetrics = React.useMemo(
+    () =>
+      campaigns.reduce(
+        (totals, campaign) => ({
+          active: totals.active + (campaign.status === "active" ? 1 : 0),
+          sent: totals.sent + campaign.stats.sent,
+          replied: totals.replied + campaign.stats.replied,
+          completed: totals.completed + (campaign.stats.completed ?? 0),
+        }),
+        { active: 0, sent: 0, replied: 0, completed: 0 },
+      ),
+    [campaigns],
   );
 
   function toggleDraft(ch: ChannelKey) {
@@ -301,7 +369,16 @@ export default function DashboardPage() {
     downloadDashboardKpiCsv(
       [
         { label: "Scope", value: scope },
-        { label: "Open leads", value: String(totalOpen) },
+        { label: "Open sales leads", value: String(workflowMetrics.openSalesLeads) },
+        { label: "Prospects", value: String(workflowMetrics.prospects) },
+        { label: "Follow-ups due", value: String(workflowMetrics.followupsDue) },
+        { label: "Active sequences", value: String(workflowMetrics.activeSequences) },
+        { label: "Sequence steps remaining", value: String(workflowMetrics.remainingSequenceSteps) },
+        { label: "Sequences paused on reply", value: String(workflowMetrics.pausedOnReply) },
+        { label: "Emails sent in range", value: String(workflowMetrics.sentInRange) },
+        { label: "Emails scheduled", value: String(workflowMetrics.scheduledSteps) },
+        { label: "Email failures", value: String(workflowMetrics.failedDeliveries) },
+        { label: "My open tasks", value: String(workflowMetrics.myOpenTasks) },
         { label: "Pipeline value (USD)", value: String(Math.round(pipelineValue)) },
         { label: "Closed revenue (USD)", value: String(Math.round(closedValue)) },
         {
@@ -309,7 +386,7 @@ export default function DashboardPage() {
           value: String(pipelineMetrics.openDealCount),
         },
         { label: "Won deals", value: String(scopedDeals.filter((d) => d.stage === "won").length) },
-        { label: "Idle leads", value: String(idleCount) },
+        { label: "Idle leads", value: String(workflowMetrics.idleSalesLeads) },
         {
           label: "Avg response (minutes)",
           value: avgResponseMin != null ? String(Math.round(avgResponseMin)) : "-",
@@ -358,7 +435,7 @@ export default function DashboardPage() {
                 setOwnerScope(next);
               }}
             >
-              <SelectTrigger size="sm" className="min-w-[9.5rem] max-w-[13rem] gap-1.5">
+              <SelectTrigger size="sm" className="min-w-38 max-w-52 gap-1.5">
                 <Users className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
                 <SelectValue placeholder="Owner">
                   {ownerFilterTriggerLabel}
@@ -508,14 +585,52 @@ export default function DashboardPage() {
                 </button>
               </p>
             )}
-            <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
               <KpiCard
-                label="Open leads"
-                value={totalOpen}
-                hint="Across channels you can access"
+                label="Open sales leads"
+                value={workflowMetrics.openSalesLeads}
+                hint={`${workflowMetrics.idleSalesLeads} idle`}
                 icon={Target}
                 href="/leads"
               />
+              <KpiCard
+                label="Prospects"
+                value={scopedProspects.length}
+                hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsPushed} pushed`}
+                icon={UserRoundSearch}
+                href="/prospects"
+              />
+              <KpiCard
+                label="Follow-ups due"
+                value={workflowMetrics.followupsDue}
+                hint={`${workflowMetrics.overdueFollowups} overdue · ${workflowMetrics.scheduledSteps} scheduled`}
+                icon={CalendarClock}
+                href="/followups"
+              />
+              <KpiCard
+                label="Active sequences"
+                value={workflowMetrics.activeSequences}
+                hint={`${workflowMetrics.remainingSequenceSteps} steps remaining · ${workflowMetrics.pausedOnReply} stopped on reply`}
+                icon={Workflow}
+                href="/followups"
+              />
+              <KpiCard
+                label="Tasks"
+                value={workflowMetrics.myOpenTasks}
+                hint={`${workflowMetrics.overdueTasks} overdue · ${workflowMetrics.waitingOnOthers} waiting on others`}
+                icon={ListTodo}
+                href="/tasks"
+              />
+              <KpiCard
+                label="Email delivery"
+                value={workflowMetrics.sentInRange}
+                hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.failedDeliveries} failed`}
+                icon={Send}
+                href="/inbox?folder=scheduled"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <KpiCard
                 label="Pipeline value"
                 value={`$${(pipelineValue / 1000).toFixed(0)}k`}
@@ -524,7 +639,7 @@ export default function DashboardPage() {
                 href="/deals"
               />
               <KpiCard
-                label="Closed (30d)"
+                label={`Closed (${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey]})`}
                 value={`$${(closedValue / 1000).toFixed(0)}k`}
                 hint={`${scopedDeals.filter((d) => d.stage === "won").length} deals won`}
                 icon={DollarSign}
@@ -533,20 +648,20 @@ export default function DashboardPage() {
               <KpiCard
                 label="Avg response"
                 value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "-"}
-                hint="Email: created → first outbound (leads & prospects)"
+                hint="Sales lead created → first outbound email"
                 deltaType="positive-down"
                 icon={Clock}
                 href="/activity"
               />
-              <KpiCard
-                label="Idle leads"
-                value={idleCount}
-                hint={`No activity in ${IDLE_LEAD_THRESHOLD_DAYS}+ days (excl. won/lost)`}
-                deltaType="positive-down"
-                icon={Inbox}
-                href="/leads?filter=idle"
-              />
             </div>
+
+            <DashboardNeedsAttention
+              leads={scopedLeads}
+              followups={workflowFollowups}
+              plans={workflowPlans}
+              tasks={workflowTasks}
+              currentUserId={currentUserId}
+            />
 
             {!frontlineLayout && (
               <DashboardAiBrief
@@ -563,8 +678,8 @@ export default function DashboardPage() {
                     ? {
                         leads: demoLeadsForBrief ?? leads,
                         deals,
-                        followups,
-                        leadTasks,
+                        followups: workflowFollowups,
+                        leadTasks: workflowTasks,
                         users,
                       }
                     : undefined
@@ -577,12 +692,12 @@ export default function DashboardPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
               <div className="min-w-0 lg:col-span-2">
                 <TrendChart
-                  leads={scopedLeads}
+                  leads={scopedSalesLeads}
                   deals={scopedDeals}
                   activityRecords={scopedActivityRecords}
                 />
               </div>
-              <PipelineDistribution leads={scopedLeads} />
+              <PipelineDistribution leads={scopedSalesLeads} />
             </div>
 
             <div>
@@ -603,11 +718,28 @@ export default function DashboardPage() {
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
               <div className="xl:col-span-2 flex flex-col gap-4">
-                <PersonScorecard leads={scopedLeads} deals={scopedDeals} />
-                <ChannelMix leads={scopedLeads} />
+                <PersonScorecard leads={scopedSalesLeads} deals={scopedDeals} />
+                <ChannelMix leads={scopedSalesLeads} />
               </div>
-              <IdleLeads leads={scopedLeads} />
+              <IdleLeads leads={scopedSalesLeads} />
             </div>
+
+            {campaigns.length > 0 && (
+              <section className="space-y-3">
+                <div>
+                  <h2 className="text-sm font-semibold">Outreach campaigns</h2>
+                  <p className="text-xs text-muted-foreground">
+                    External campaign delivery is reported separately from CRM follow-up sequences.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                  <KpiCard label="Active campaigns" value={outreachMetrics.active} icon={Megaphone} href="/outreach" />
+                  <KpiCard label="Campaign sent" value={outreachMetrics.sent} icon={Send} href="/outreach" />
+                  <KpiCard label="Campaign replies" value={outreachMetrics.replied} icon={MessageSquareReply} href="/outreach" />
+                  <KpiCard label="Campaign completed" value={outreachMetrics.completed} icon={CircleCheck} href="/outreach" />
+                </div>
+              </section>
+            )}
           </>
         )}
       </PageBody>

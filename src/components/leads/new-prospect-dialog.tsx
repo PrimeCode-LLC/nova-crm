@@ -3,6 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 import type {
   Account,
   Contact,
@@ -23,6 +24,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Separator } from "@/components/ui/separator";
 import {
   Dialog,
@@ -43,7 +45,6 @@ import {
   REVENUE_RANGES,
   COMPANY_SIZES,
   COMPANY_SIZE_LABELS,
-  CHANNEL_LIST,
   PIPELINE_STAGES,
   PRIORITY_TONE,
   TEMPERATURE_TONE,
@@ -52,10 +53,6 @@ import {
 } from "@/lib/constants";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import {
-  buildWorkspaceOwnerPickerOptions,
-  ownerPickerTriggerLabel,
-} from "@/lib/owner-scope";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { getFirebaseDb } from "@/lib/firebase/client";
@@ -67,11 +64,11 @@ import { doc, getDoc } from "firebase/firestore";
 import { findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
-import { buildChannelOptions } from "@/lib/channel-options";
+import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
 import type { NewProspectPrefill } from "@/components/layout/quick-add-launcher";
+import { cn } from "@/lib/utils";
 
 const UNSET = "__unset__" as const;
-const UNSET_SCRAPER = "__unset_scraper__" as const;
 
 function newEntityId(prefix: string): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -102,10 +99,6 @@ function parseTechStack(raw: string): string[] | undefined {
   return uniq.length ? uniq : undefined;
 }
 
-function techStackToString(tools?: string[]): string {
-  return tools?.length ? tools.join(", ") : "";
-}
-
 function domainFromWebsiteOrEmail(website: string, email: string): string | undefined {
   const w = website.trim();
   if (w) {
@@ -123,6 +116,20 @@ function domainFromWebsiteOrEmail(website: string, email: string): string | unde
     if (d) return d;
   }
   return undefined;
+}
+
+function isValidOptionalUrl(raw: string): boolean {
+  if (!raw.trim()) return true;
+  try {
+    const value = new URL(raw.trim());
+    return value.protocol === "http:" || value.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function normalizedEmail(raw: string): string {
+  return raw.trim().toLowerCase();
 }
 
 const BUSINESS_STATUS_OPTS: { value: BusinessStatus; label: string }[] = [
@@ -157,16 +164,18 @@ const BEST_CHANNEL_OPTS: { value: BestContactChannel; label: string }[] = [
   { value: "form", label: "Form" },
 ];
 
-function emptyFormDefaults(uid: string | undefined) {
+function emptyFormDefaults() {
   return {
-    ownerId: uid ?? "",
-    scraperId: uid ?? "",
     channel: "cold_email" as ChannelKey,
     profileId: "",
     stage: "new" as PipelineStage,
     temperature: "cold" as LeadTemperature,
     priority: "medium" as LeadPriority,
     leadNotes: "",
+    triggerEvent: "",
+    painPoints: "",
+    doNotContact: false,
+    nextAction: "",
     bizName: "",
     industry: "",
     bizDesc: "",
@@ -188,6 +197,8 @@ function emptyFormDefaults(uid: string | undefined) {
     firstName: "",
     lastName: "",
     title: "",
+    seniority: "",
+    contactLocation: "",
     email: "",
     personalEmail: "",
     emailVerify: UNSET as typeof UNSET | EmailVerificationStatus,
@@ -209,7 +220,6 @@ export function NewProspectDialog({
 }) {
   const router = useRouter();
   const {
-    users,
     currentUserId,
     getOwnerDisplayName,
     profiles,
@@ -245,27 +255,7 @@ export function NewProspectDialog({
 
   const effectiveUid = currentUserId || sessionOwnerId || undefined;
 
-  const ownerLabelOverrides = React.useMemo(() => {
-    const out: Record<string, string> = {};
-    const uid = fbUser?.uid?.trim();
-    if (!uid) return out;
-    const fromDoc = liveUserDoc?.displayName?.trim();
-    const fromAuth =
-      typeof fbUser?.displayName === "string" && fbUser.displayName.trim().length > 0
-        ? fbUser.displayName.trim()
-        : "";
-    const fromEmail =
-      fbUser?.email && fbUser.email.includes("@")
-        ? fbUser.email.split("@")[0]!.trim()
-        : "";
-    const name = fromDoc || fromAuth || fromEmail;
-    if (name) out[uid] = name;
-    return out;
-  }, [fbUser?.uid, fbUser?.displayName, fbUser?.email, liveUserDoc?.displayName]);
-
-  const F = emptyFormDefaults(effectiveUid);
-  const [ownerId, setOwnerId] = React.useState(F.ownerId);
-  const [scraperId, setScraperId] = React.useState(F.scraperId);
+  const F = emptyFormDefaults();
   const [channel, setChannel] = React.useState<ChannelKey>(
     initialPrefill?.channel ?? F.channel,
   );
@@ -274,12 +264,11 @@ export function NewProspectDialog({
   const [temperature, setTemperature] = React.useState<LeadTemperature>(F.temperature);
   const [priority, setPriority] = React.useState<LeadPriority>(F.priority);
   const [leadNotes, setLeadNotes] = React.useState(initialPrefill?.leadNotes ?? F.leadNotes);
-
-  React.useEffect(() => {
-    if (!open || !initialPrefill) return;
-    if (initialPrefill.leadNotes !== undefined) setLeadNotes(initialPrefill.leadNotes);
-    if (initialPrefill.channel !== undefined) setChannel(initialPrefill.channel);
-  }, [open, initialPrefill]);
+  const [triggerEvent, setTriggerEvent] = React.useState(F.triggerEvent);
+  const [painPoints, setPainPoints] = React.useState(initialPrefill?.painPoints ?? F.painPoints);
+  const [doNotContact, setDoNotContact] = React.useState(F.doNotContact);
+  const [nextAction, setNextAction] = React.useState(F.nextAction);
+  const [showAdvancedCompany, setShowAdvancedCompany] = React.useState(false);
 
   const [bizName, setBizName] = React.useState(F.bizName);
   const [industry, setIndustry] = React.useState(F.industry);
@@ -303,6 +292,8 @@ export function NewProspectDialog({
   const [firstName, setFirstName] = React.useState(F.firstName);
   const [lastName, setLastName] = React.useState(F.lastName);
   const [title, setTitle] = React.useState(F.title);
+  const [seniority, setSeniority] = React.useState(F.seniority);
+  const [contactLocation, setContactLocation] = React.useState(F.contactLocation);
   const [email, setEmail] = React.useState(F.email);
   const [personalEmail, setPersonalEmail] = React.useState(F.personalEmail);
   const [emailVerify, setEmailVerify] = React.useState<typeof UNSET | EmailVerificationStatus>(F.emailVerify);
@@ -313,72 +304,34 @@ export function NewProspectDialog({
 
   const [submitting, setSubmitting] = React.useState(false);
 
-  const ownerOptions = React.useMemo(() => {
-    const ensure = [...new Set([effectiveUid, ownerId, scraperId].filter(Boolean) as string[])];
-    return buildWorkspaceOwnerPickerOptions(
-      users,
-      currentUserId || sessionOwnerId || "",
-      getOwnerDisplayName,
-      ensure,
-      ownerLabelOverrides,
-    );
-  }, [
-    users,
-    currentUserId,
-    sessionOwnerId,
-    getOwnerDisplayName,
-    effectiveUid,
-    ownerId,
-    scraperId,
-    ownerLabelOverrides,
-  ]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    const d = emptyFormDefaults(effectiveUid);
-    setOwnerId(d.ownerId);
-    setScraperId(d.scraperId);
-    setChannel(d.channel);
-    setProfileId(d.profileId);
-    setStage(d.stage);
-    setTemperature(d.temperature);
-    setPriority(d.priority);
-    setLeadNotes(d.leadNotes);
-    setBizName(d.bizName);
-    setIndustry(d.industry);
-    setBizDesc(d.bizDesc);
-    setCity(d.city);
-    setState(d.state);
-    setCountry(d.country);
-    setYearFounded(d.yearFounded);
-    setBizStatus(d.bizStatus);
-    setSize(d.size);
-    setRev(d.rev);
-    setWebsite(d.website);
-    setCompanyLinkedin(d.companyLinkedin);
-    setWebStatus(d.webStatus);
-    setTechStackStr(d.techStackStr);
-    setActivity(d.activity);
-    setLastSiteAt(d.lastSiteAt);
-    setLastSiteNote(d.lastSiteNote);
-    setCareersUrl(d.careersUrl);
-    setFirstName(d.firstName);
-    setLastName(d.lastName);
-    setTitle(d.title);
-    setEmail(d.email);
-    setPersonalEmail(d.personalEmail);
-    setEmailVerify(d.emailVerify);
-    setPhone(d.phone);
-    setContactSource(d.contactSource);
-    setBestChannel(d.bestChannel);
-    setLinkedin(d.linkedin);
-  }, [open, effectiveUid]);
-
   const channelNeedsProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel);
   const profileOptionsForChannel = React.useMemo(
     () => profiles.filter((p) => p.channel === channel && p.active !== false),
     [profiles, channel],
   );
+  const readinessIssues = React.useMemo(() => {
+    const issues: string[] = [];
+    if (doNotContact) return ["Outreach is blocked by do-not-contact"];
+    if (!triggerEvent.trim()) issues.push("Add a trigger event");
+    if ((channel === "cold_email" || channel === "personalized_email") && !email.trim()) {
+      issues.push("Add a company email");
+    }
+    if ((channel === "linkedin_outbound" || channel === "linkedin_1to1") && !linkedin.trim()) {
+      issues.push("Add a LinkedIn profile");
+    }
+    if (channelNeedsProfile && !profileId) issues.push(`Select ${outreachProfileFieldLabel(channel).toLowerCase()}`);
+    if (emailVerify === "bounced") issues.push("Replace the bounced email");
+    return issues;
+  }, [
+    channel,
+    channelNeedsProfile,
+    doNotContact,
+    email,
+    emailVerify,
+    linkedin,
+    profileId,
+    triggerEvent,
+  ]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -400,9 +353,16 @@ export function NewProspectDialog({
     }
     const fullName = `${fn} ${ln}`.trim();
 
-    const emailTrim = email.trim().toLowerCase();
+    const emailTrim = normalizedEmail(email);
+    const personalEmailTrim = normalizedEmail(personalEmail);
+    if (emailTrim && personalEmailTrim && emailTrim === personalEmailTrim) {
+      toast.error("Company and personal email must be different.");
+      return;
+    }
     if (emailTrim) {
-      const existing = findContactByEmail(contacts, emailTrim);
+      const existing =
+        findContactByEmail(contacts, emailTrim) ||
+        contacts.find((c) => normalizedEmail(c.personalEmail ?? "") === emailTrim);
       if (existing) {
         toast.error("Contact already exists", {
           description: existing.fullName || `${existing.firstName} ${existing.lastName}`,
@@ -417,6 +377,29 @@ export function NewProspectDialog({
         return;
       }
     }
+    if (personalEmailTrim) {
+      const existing = contacts.find((c) =>
+        [c.email, c.personalEmail].some((value) => normalizedEmail(value ?? "") === personalEmailTrim),
+      );
+      if (existing) {
+        toast.error("Personal email already belongs to a contact", {
+          description: existing.fullName,
+        });
+        return;
+      }
+    }
+
+    const urls: [string, string][] = [
+      ["Website", website],
+      ["Company LinkedIn", companyLinkedin],
+      ["Careers page", careersUrl],
+      ["Contact LinkedIn", linkedin],
+    ];
+    const invalidUrl = urls.find(([, value]) => !isValidOptionalUrl(value));
+    if (invalidUrl) {
+      toast.error(`${invalidUrl[0]} must be a complete http(s) URL.`);
+      return;
+    }
 
     const yf = yearFounded.trim();
     let yearFoundedNum: number | undefined;
@@ -427,6 +410,10 @@ export function NewProspectDialog({
         return;
       }
       yearFoundedNum = Math.round(n);
+    }
+    if (lastSiteAt && new Date(`${lastSiteAt}T12:00:00`).getTime() > Date.now()) {
+      toast.error("Last website activity cannot be in the future.");
+      return;
     }
 
     const locParts = [city.trim(), state.trim(), country.trim()].filter(Boolean);
@@ -475,10 +462,12 @@ export function NewProspectDialog({
       lastName: ln,
       fullName,
       email: emailTrim || undefined,
-      personalEmail: personalEmail.trim() || undefined,
+      personalEmail: personalEmailTrim || undefined,
       emailVerificationStatus: emailVerify === UNSET ? undefined : emailVerify,
       phone: phone.trim() || undefined,
       title: title.trim() || undefined,
+      seniority: seniority.trim() || undefined,
+      location: contactLocation.trim() || undefined,
       linkedin: linkedin.trim() || undefined,
       contactSource: contactSource.trim() || undefined,
       bestContactChannel: bestChannel === UNSET ? undefined : bestChannel,
@@ -488,12 +477,12 @@ export function NewProspectDialog({
     };
 
     const createdById = oid;
-    const placeholderChannel: ChannelKey = "website_form";
     const lead: Lead = {
       id: leadId,
       accountId,
       contactId,
-      channel: placeholderChannel,
+      channel,
+      profileId: profileId || undefined,
       stage,
       temperature,
       priority,
@@ -512,9 +501,13 @@ export function NewProspectDialog({
       companyIndustry: industry.trim() || undefined,
       companySize: size === UNSET ? undefined : size,
       revenueRange: rev === UNSET ? undefined : rev,
+      triggerEvent: triggerEvent.trim() || undefined,
+      painPoints: painPoints.trim() || undefined,
+      doNotContact,
       touches: 0,
       isIdle: false,
       notes: leadNotes.trim() || undefined,
+      nextAction: nextAction.trim() || undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -553,7 +546,7 @@ export function NewProspectDialog({
         leadId,
         type: "lead_created",
         actorId: createdById,
-        summary: `Prospect created by ${creatorLabel}. Add channels when ready.`,
+        summary: `Prospect created by ${creatorLabel} for ${channelLabelFromValue(channel, channelOptions) || channel}. Add channel assignments when ready.`,
         createdAt: now,
       });
       toast.success("Prospect created — add channels when ready.");
@@ -579,8 +572,7 @@ export function NewProspectDialog({
           <DialogHeader className="px-6 pt-6 pb-3 shrink-0 border-b">
             <DialogTitle>New prospect</DialogTitle>
             <DialogDescription>
-              Create an intake record for research. You become the Prospect owner. Add channels and assign teammates
-              from the prospect detail page, then assignees push their channel into a shared sales lead.
+              Add the essentials now. Company research can be completed later from the prospect record.
             </DialogDescription>
           </DialogHeader>
 
@@ -591,13 +583,56 @@ export function NewProspectDialog({
               </p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
+                  <Label>Intended channel</Label>
+                  <Select
+                    value={channel}
+                    onValueChange={(v) => {
+                      if (!v) return;
+                      setChannel(v as ChannelKey);
+                      setProfileId("");
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue>
+                        {selectTriggerLabelByKey(channel, channelOptions) ?? undefined}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {channelOptions.map((option) => (
+                        <SelectItem key={option.key} value={option.key}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {channelNeedsProfile ? (
+                  <div className="grid gap-1.5">
+                    <Label>{outreachProfileFieldLabel(channel)}</Label>
+                    <Select value={profileId || undefined} onValueChange={(v) => v && setProfileId(v)}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select profile">
+                          {profiles.find((profile) => profile.id === profileId)?.name}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {profileOptionsForChannel.map((profile) => (
+                          <SelectItem key={profile.id} value={profile.id}>
+                            {profile.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                <div className="grid gap-1.5">
                   <Label>Pipeline stage</Label>
                   <Select value={stage} onValueChange={(v) => v && setStage(v as PipelineStage)}>
                     <SelectTrigger>
                       <SelectValue>{selectTriggerLabelByKey(stage, PIPELINE_STAGES) ?? undefined}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {PIPELINE_STAGES.map((s) => (
+                      {PIPELINE_STAGES.filter((s) => !s.isTerminal).map((s) => (
                         <SelectItem key={s.key} value={s.key}>
                           {s.label}
                         </SelectItem>
@@ -639,6 +674,14 @@ export function NewProspectDialog({
                   </Select>
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
+                  <Label>Next action</Label>
+                  <Input
+                    value={nextAction}
+                    onChange={(e) => setNextAction(e.target.value)}
+                    placeholder="Research decision-maker, verify email, draft opener…"
+                  />
+                </div>
+                <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Internal notes (lead)</Label>
                   <Textarea
                     value={leadNotes}
@@ -654,7 +697,85 @@ export function NewProspectDialog({
             <Separator />
 
             <section className="space-y-3">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Business</p>
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Outreach readiness
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Capture why this prospect matters before assigning outreach.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label>Trigger event</Label>
+                  <Input
+                    value={triggerEvent}
+                    onChange={(e) => setTriggerEvent(e.target.value)}
+                    placeholder="Hiring, funding, expansion, outdated website…"
+                  />
+                </div>
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label>Pain points</Label>
+                  <Textarea
+                    value={painPoints}
+                    onChange={(e) => setPainPoints(e.target.value)}
+                    rows={2}
+                    className="resize-none"
+                    placeholder="Likely problems your outreach should address"
+                  />
+                </div>
+                <label className="flex items-start gap-3 rounded-md border p-3 sm:col-span-2">
+                  <Checkbox
+                    checked={doNotContact}
+                    onCheckedChange={(checked) => setDoNotContact(checked === true)}
+                    aria-label="Do not contact"
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium">Do not contact</span>
+                    <span className="block text-xs text-muted-foreground">
+                      Prevent scheduling and channel push actions for this prospect.
+                    </span>
+                  </span>
+                </label>
+                <div
+                  className={cn(
+                    "flex items-start gap-2 rounded-md border px-3 py-2 text-xs sm:col-span-2",
+                    readinessIssues.length
+                      ? "border-warning/30 bg-warning/10 text-warning"
+                      : "border-success/30 bg-success/10 text-success",
+                  )}
+                >
+                  {readinessIssues.length ? <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> : null}
+                  <span>
+                    {readinessIssues.length
+                      ? `Not ready for ${channelLabelFromValue(channel, channelOptions) || channel}: ${readinessIssues.join(
+                          " · ",
+                        )}`
+                      : `Ready for ${channelLabelFromValue(channel, channelOptions) || channel}`}
+                  </span>
+                </div>
+              </div>
+            </section>
+
+            <Separator />
+
+            <section className="space-y-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Business</p>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => setShowAdvancedCompany((value) => !value)}
+                >
+                  {showAdvancedCompany ? "Hide" : "Show"} advanced research
+                  <ChevronDown
+                    className={cn("h-3.5 w-3.5 transition-transform", showAdvancedCompany && "rotate-180")}
+                  />
+                </Button>
+              </div>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Business Name</Label>
@@ -673,7 +794,7 @@ export function NewProspectDialog({
                     placeholder="Real estate, Software house…"
                   />
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Year founded</Label>
                   <Input value={yearFounded} onChange={(e) => setYearFounded(e.target.value)} placeholder="2018" />
                 </div>
@@ -697,7 +818,7 @@ export function NewProspectDialog({
                   <Label>Country</Label>
                   <Input value={country} onChange={(e) => setCountry(e.target.value)} />
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Business status</Label>
                   <Select value={bizStatus} onValueChange={(v) => v && setBizStatus(v as BusinessStatus | typeof UNSET)}>
                     <SelectTrigger>
@@ -713,7 +834,7 @@ export function NewProspectDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Company size</Label>
                   <Select value={size} onValueChange={(v) => v && setSize(v as CompanySize | typeof UNSET)}>
                     <SelectTrigger>
@@ -729,7 +850,7 @@ export function NewProspectDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Revenue range (est.)</Label>
                   <Select value={rev} onValueChange={(v) => v && setRev(v as RevenueRange | typeof UNSET)}>
                     <SelectTrigger>
@@ -747,17 +868,23 @@ export function NewProspectDialog({
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Website URL</Label>
-                  <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://…" />
+                  <Input
+                    type="url"
+                    value={website}
+                    onChange={(e) => setWebsite(e.target.value)}
+                    placeholder="https://…"
+                  />
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Company LinkedIn URL</Label>
                   <Input
+                    type="url"
                     value={companyLinkedin}
                     onChange={(e) => setCompanyLinkedin(e.target.value)}
                     placeholder="https://linkedin.com/company/…"
                   />
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Website status</Label>
                   <Select
                     value={webStatus}
@@ -776,7 +903,7 @@ export function NewProspectDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Online activity score</Label>
                   <Select
                     value={activity}
@@ -795,11 +922,11 @@ export function NewProspectDialog({
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="grid gap-1.5">
+                <div className={cn("grid gap-1.5", !showAdvancedCompany && "hidden")}>
                   <Label>Last website update / activity (date)</Label>
                   <Input type="date" value={lastSiteAt} onChange={(e) => setLastSiteAt(e.target.value)} />
                 </div>
-                <div className="grid gap-1.5 sm:col-span-2">
+                <div className={cn("grid gap-1.5 sm:col-span-2", !showAdvancedCompany && "hidden")}>
                   <Label>Last website activity (observation)</Label>
                   <Textarea
                     value={lastSiteNote}
@@ -809,7 +936,7 @@ export function NewProspectDialog({
                     placeholder="Notes if no exact date"
                   />
                 </div>
-                <div className="grid gap-1.5 sm:col-span-2">
+                <div className={cn("grid gap-1.5 sm:col-span-2", !showAdvancedCompany && "hidden")}>
                   <Label>Tech stack / platform</Label>
                   <Input
                     value={techStackStr}
@@ -817,9 +944,14 @@ export function NewProspectDialog({
                     placeholder="WordPress, Shopify, Webflow, comma-separated"
                   />
                 </div>
-                <div className="grid gap-1.5 sm:col-span-2">
+                <div className={cn("grid gap-1.5 sm:col-span-2", !showAdvancedCompany && "hidden")}>
                   <Label>Careers page URL</Label>
-                  <Input value={careersUrl} onChange={(e) => setCareersUrl(e.target.value)} placeholder="https://…" />
+                  <Input
+                    type="url"
+                    value={careersUrl}
+                    onChange={(e) => setCareersUrl(e.target.value)}
+                    placeholder="https://…"
+                  />
                 </div>
               </div>
             </section>
@@ -840,6 +972,22 @@ export function NewProspectDialog({
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Role / title</Label>
                   <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Seniority</Label>
+                  <Input
+                    value={seniority}
+                    onChange={(e) => setSeniority(e.target.value)}
+                    placeholder="Manager, Director, VP…"
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Contact location</Label>
+                  <Input
+                    value={contactLocation}
+                    onChange={(e) => setContactLocation(e.target.value)}
+                    placeholder="City, region or timezone"
+                  />
                 </div>
                 <div className="grid gap-1.5">
                   <Label>Primary email (company)</Label>
@@ -901,7 +1049,12 @@ export function NewProspectDialog({
                 </div>
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>LinkedIn profile URL</Label>
-                  <Input value={linkedin} onChange={(e) => setLinkedin(e.target.value)} placeholder="https://…" />
+                  <Input
+                    type="url"
+                    value={linkedin}
+                    onChange={(e) => setLinkedin(e.target.value)}
+                    placeholder="https://…"
+                  />
                 </div>
               </div>
             </section>

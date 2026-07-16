@@ -53,7 +53,9 @@ export function DashboardPendingOverview({
   setFollowupCompleted: (id: string, completed: boolean) => void;
   setLeadTaskCompleted: (id: string, completed: boolean) => void;
 }) {
-  const open = followups.filter((f) => !f.completedAt);
+  const open = followups.filter(
+    (f) => !f.completedAt && !f.pausedAt && f.deliveryStatus !== "sent",
+  );
   const mineFollowups = React.useMemo(
     () =>
       open

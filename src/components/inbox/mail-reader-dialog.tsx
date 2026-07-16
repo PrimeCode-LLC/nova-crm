@@ -160,7 +160,7 @@ export function MailReaderBody({ content, className }: { content: MailReaderCont
           title={`HTML: ${content.subject || "message"}`}
           className="w-full shrink-0 rounded-md border bg-background"
           style={{ height: heightPx }}
-          sandbox=""
+          sandbox="allow-popups allow-popups-to-escape-sandbox"
           srcDoc={srcDoc}
         />
       ) : content.bodySynced === false && !content.bodyText?.trim() ? (

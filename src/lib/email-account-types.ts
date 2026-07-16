@@ -119,7 +119,7 @@ export interface MailSent {
   bodyHtml?: string;
 }
 
-export type ScheduledEmailStatus = "pending" | "sent" | "failed" | "cancelled";
+export type ScheduledEmailStatus = "pending" | "processing" | "sent" | "failed" | "cancelled";
 
 export interface ScheduledEmailAttachment {
   filename: string;
@@ -146,6 +146,8 @@ export interface ScheduledEmail {
   createdAt: string;
   sentAt?: string;
   error?: string;
+  cancelledAt?: string;
+  cancelReason?: string;
   /** When created from a lead follow-up, link back for UI / cron cleanup. */
   followupId?: string;
   leadId?: string;

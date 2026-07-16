@@ -10,6 +10,7 @@ import type {
   TimelineEvent,
   Touchpoint,
 } from "@/lib/types";
+import { buildFollowupPersonalizationProfile } from "@/lib/ai/followup-personalization";
 
 export function buildLeadAiContext(input: {
   lead: Lead;
@@ -26,6 +27,13 @@ export function buildLeadAiContext(input: {
   regenerateContext?: string;
 }): string {
   const { lead, account, contact, deal, notes, timeline, touchpoints, followups, tasks } = input;
+  const contactName = contact?.fullName?.trim() || lead.contactName;
+  const contactEmail = contact?.email?.trim() || lead.contactEmail;
+  const contactTitle = contact?.title?.trim() || lead.contactTitle;
+  const personalizationProfile = buildFollowupPersonalizationProfile({
+    title: contactTitle,
+    seniority: contact?.seniority,
+  });
   const payload = {
     lead: {
       id: lead.id,
@@ -41,15 +49,27 @@ export function buildLeadAiContext(input: {
       lastActivityAt: lead.lastActivityAt,
       painPoints: lead.painPoints,
       triggerEvent: lead.triggerEvent,
+      businessFocus: lead.businessFocus,
+      hiringSignals: lead.hiringSignals,
+      recentNews: lead.recentNews,
       psLine: lead.psLine,
+      toolsUsed: lead.toolsUsed,
       bant: lead.bant,
     },
-    account: account
-      ? { name: account.name, industry: account.industry, domain: account.domain }
-      : null,
-    contact: contact
-      ? { name: contact.fullName, email: contact.email, title: contact.title }
-      : null,
+    account: {
+      name: account?.name || lead.companyName,
+      industry: account?.industry || lead.companyIndustry,
+      domain: account?.domain || lead.companyDomain,
+      companySize: lead.companySize,
+      revenueRange: lead.revenueRange,
+    },
+    contact: {
+      name: contactName,
+      email: contactEmail,
+      title: contactTitle,
+      seniority: contact?.seniority,
+    },
+    personalizationProfile,
     deal: deal
       ? { stage: deal.stage, value: deal.value, expectedCloseDate: deal.expectedCloseDate }
       : null,

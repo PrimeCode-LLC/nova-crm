@@ -15,12 +15,21 @@ const POLL_MS = 15_000;
  * This component is a no-op when `NODE_ENV === "production"`.
  */
 export function ScheduledEmailSendSync() {
-  const { isDemo, sessionHydrated, currentUserId } = useWorkspace();
+  const {
+    isDemo,
+    sessionHydrated,
+    currentUserId,
+    setFollowupCompleted,
+    clearFollowupEmailSchedule,
+    syncFollowupDelivery,
+  } = useWorkspace();
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const processDueScheduledLocal = useEmailAccountStore((s) => s.processDueScheduledLocal);
   const setScheduled = useEmailAccountStore((s) => s.setScheduled);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
+  const scheduled = useEmailAccountStore((s) => s.scheduled);
   const runningRef = React.useRef(false);
+  const syncedDemoStatusRef = React.useRef(new Map<string, string>());
 
   const isLocalDev = process.env.NODE_ENV === "development";
 
@@ -105,6 +114,39 @@ export function ScheduledEmailSendSync() {
     emailServerHydrated,
     processDueScheduledLocal,
     runLive,
+  ]);
+
+  React.useEffect(() => {
+    if (!isDemo) return;
+    for (const item of scheduled) {
+      if (!item.followupId || item.status === "pending" || item.status === "processing") continue;
+      if (syncedDemoStatusRef.current.get(item.id) === item.status) continue;
+      syncedDemoStatusRef.current.set(item.id, item.status);
+      clearFollowupEmailSchedule(item.followupId);
+      if (item.status === "sent") {
+        const sentAt = item.sentAt ?? new Date().toISOString();
+        syncFollowupDelivery(item.followupId, { deliveryStatus: "sent", sentAt });
+        setFollowupCompleted(item.followupId, true);
+      } else if (item.status === "failed") {
+        syncFollowupDelivery(item.followupId, {
+          deliveryStatus: "failed",
+          failedAt: new Date().toISOString(),
+          deliveryError: item.error,
+        });
+      } else {
+        syncFollowupDelivery(item.followupId, {
+          deliveryStatus: "cancelled",
+          cancelledAt: item.cancelledAt ?? new Date().toISOString(),
+          cancelReason: item.cancelReason,
+        });
+      }
+    }
+  }, [
+    isDemo,
+    scheduled,
+    clearFollowupEmailSchedule,
+    setFollowupCompleted,
+    syncFollowupDelivery,
   ]);
 
   return null;

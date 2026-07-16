@@ -34,7 +34,11 @@ export function PageHeader({
         )}
         {children}
       </div>
-      {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
+      {actions && (
+        <div className="flex shrink-0 flex-wrap items-center gap-2 sm:justify-end">
+          {actions}
+        </div>
+      )}
     </div>
   );
 }

@@ -1957,7 +1957,11 @@ export default function InboxWorkspace() {
     if (mailFolder === "scheduled") {
       return scheduled
         .filter((m) => m.mailboxId === account.id)
-        .filter((m) => (scheduledTab === "pending" ? m.status === "pending" : m.status !== "pending"))
+        .filter((m) =>
+          scheduledTab === "pending"
+            ? m.status === "pending" || m.status === "processing"
+            : m.status !== "pending" && m.status !== "processing",
+        )
         .map((m) => ({
           id: m.id,
           title: m.subject || "(no subject)",
@@ -1975,7 +1979,12 @@ export default function InboxWorkspace() {
   }, [mailFolder, sentForMailbox, drafts, scheduled, scheduledTab, inboundThreads, trashThreads, account.id]);
 
   const scheduledPendingCount = React.useMemo(
-    () => scheduled.filter((m) => m.mailboxId === account.id && m.status === "pending").length,
+    () =>
+      scheduled.filter(
+        (m) =>
+          m.mailboxId === account.id &&
+          (m.status === "pending" || m.status === "processing"),
+      ).length,
     [scheduled, account.id],
   );
 
@@ -4306,7 +4315,8 @@ export default function InboxWorkspace() {
                       <h3 className="text-sm font-semibold">{selectedScheduled.subject || "(no subject)"}</h3>
                       <Badge
                         variant={
-                          selectedScheduled.status === "pending"
+                          selectedScheduled.status === "pending" ||
+                          selectedScheduled.status === "processing"
                             ? "secondary"
                             : selectedScheduled.status === "sent"
                               ? "outline"
@@ -4322,11 +4332,13 @@ export default function InboxWorkspace() {
                       <p className="text-xs text-muted-foreground">Cc: {selectedScheduled.cc}</p>
                     ) : null}
                     <p className="text-xs text-muted-foreground mt-1">
-                      {selectedScheduled.status === "pending"
-                        ? `Scheduled for ${format(new Date(selectedScheduled.scheduledAt), "MMM d, yyyy 'at' h:mm a")}`
-                        : selectedScheduled.sentAt
-                          ? `Sent ${format(new Date(selectedScheduled.sentAt), "MMM d, yyyy 'at' h:mm a")}`
-                          : fmtRelative(selectedScheduled.scheduledAt)}
+                      {selectedScheduled.status === "processing"
+                        ? "Sending now"
+                        : selectedScheduled.status === "pending"
+                          ? `Scheduled for ${format(new Date(selectedScheduled.scheduledAt), "MMM d, yyyy 'at' h:mm a")}`
+                          : selectedScheduled.sentAt
+                            ? `Sent ${format(new Date(selectedScheduled.sentAt), "MMM d, yyyy 'at' h:mm a")}`
+                            : fmtRelative(selectedScheduled.scheduledAt)}
                     </p>
                     {selectedScheduled.error ? (
                       <p className="text-xs text-destructive mt-1">{selectedScheduled.error}</p>
@@ -5165,7 +5177,7 @@ function InboundMessageCard({
             title={`HTML: ${m.subject || "message"}`}
             className="w-full shrink-0 rounded-md border bg-background"
             style={{ height: fillHeight ? Math.max(heightPx, 480) : heightPx }}
-            sandbox=""
+            sandbox="allow-popups allow-popups-to-escape-sandbox"
             srcDoc={srcDoc}
           />
         ) : m.bodySynced === false && !m.bodyText?.trim() ? (

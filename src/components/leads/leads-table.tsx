@@ -394,7 +394,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     () => (urlStageKey ? (urlStageKey.split("|").filter(Boolean) as PipelineStage[]) : []),
     [urlStageKey],
   );
-  const [sorting, setSorting] = React.useState<SortingState>([]);
+  const [sorting, setSorting] = React.useState<SortingState>([
+    { id: "created", desc: true },
+  ]);
   const [globalFilter, setGlobalFilter] = React.useState("");
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>(() =>
     mergeUrlColumnFilters(preset, initialChannels, initialStages),

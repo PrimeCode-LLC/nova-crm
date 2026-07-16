@@ -274,6 +274,18 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     emailScheduledAt: raw.emailScheduledAt
       ? firestoreValueToIso(raw.emailScheduledAt)
       : undefined,
+    deliveryStatus:
+      raw.deliveryStatus === "scheduled" ||
+      raw.deliveryStatus === "sent" ||
+      raw.deliveryStatus === "failed" ||
+      raw.deliveryStatus === "cancelled"
+        ? raw.deliveryStatus
+        : undefined,
+    sentAt: raw.sentAt ? firestoreValueToIso(raw.sentAt) : undefined,
+    failedAt: raw.failedAt ? firestoreValueToIso(raw.failedAt) : undefined,
+    cancelledAt: raw.cancelledAt ? firestoreValueToIso(raw.cancelledAt) : undefined,
+    deliveryError: typeof raw.deliveryError === "string" ? raw.deliveryError : undefined,
+    cancelReason: typeof raw.cancelReason === "string" ? raw.cancelReason : undefined,
   };
 }
 
@@ -295,6 +307,7 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
     replyMessageId: typeof raw.replyMessageId === "string" ? raw.replyMessageId : undefined,
     supersededByPlanId:
       typeof raw.supersededByPlanId === "string" ? raw.supersededByPlanId : undefined,
+    completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
   };
 }
 

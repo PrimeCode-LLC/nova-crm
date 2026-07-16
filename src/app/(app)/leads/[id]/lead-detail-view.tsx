@@ -18,6 +18,9 @@ import {
   MoreHorizontal,
   Trash2,
   UserPlus,
+  Copy,
+  ShieldAlert,
+  ListTodo,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -38,7 +41,6 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { STAGE_TONE_CLASS, StageBadge } from "@/components/common/stage-badge";
-import { ChannelChip } from "@/components/common/channel-chip";
 import { ChannelTagsRow } from "@/components/common/channel-tags-row";
 import { channelLabelFromValue, buildChannelOptions } from "@/lib/channel-options";
 import { buildChannelTagTooltipMap } from "@/lib/prospects/channel-tag-display";
@@ -106,7 +108,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
-  const [activeTab, setActiveTab] = React.useState<LeadTab>(tabFromUrl);
+  const activeTab = tabFromUrl;
   const [editOpen, setEditOpen] = React.useState(false);
   const [prospectFieldsOpen, setProspectFieldsOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
@@ -116,14 +118,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     summary: string;
     riskLevel: string;
   } | null>(null);
-  React.useEffect(() => {
-    setActiveTab(tabFromUrl);
-  }, [tabFromUrl]);
-
   const onTabChange = React.useCallback(
     (v: string) => {
       const t = v as LeadTab;
-      setActiveTab(t);
       const p = new URLSearchParams(searchParams.toString());
       p.set("tab", t);
       const qs = p.toString();
@@ -156,7 +153,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
   const viewerForTasks = React.useMemo(
     () => workspaceViewerForLeadTasks(ws.getUserById, ws.currentUserId),
-    [ws.currentUserId, ws.users, ws.getUserById],
+    [ws.currentUserId, ws.getUserById],
   );
   const leadTasksForTab = React.useMemo(
     () => filterLeadTasksForLeadDetail(ws.leadTasks, leadId, viewerForTasks),
@@ -253,6 +250,10 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
   const deal = ws.deals.find((d) => d.leadId === lead.id);
+  const primaryEmail = contact?.email || lead.contactEmail;
+  const primaryPhone = contact?.phone;
+  const openFollowupCount = followups.filter((f) => !f.completedAt).length;
+  const openTaskCount = leadTasksForTab.filter((t) => !t.completedAt).length;
   const campaign = ws.getCampaignById(lead.campaignId);
   const profile = ws.getProfileById(lead.profileId);
   const needsOutreachProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(lead.channel);
@@ -282,7 +283,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     if (nextStage != null && nextStage !== latest.stage) {
       ws.updateLeadStage(latest.id, nextStage, latest.stage, ws.currentUserId);
     }
-    const { stage: _removed, ...rest } = patch;
+    const rest: Partial<Lead> = { ...patch };
+    delete rest.stage;
     if (Object.keys(rest).length > 0) {
       ws.patchLead(latest.id, rest);
       ws.bumpLeadActivity(latest.id);
@@ -324,7 +326,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       </AlertDialog>
       <PageHeader
         title={
-          <div className="flex items-center gap-3">
+          <div className="flex min-w-0 items-center gap-3">
             <Button
               variant="ghost"
               size="icon-sm"
@@ -340,8 +342,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 {initials(lead.contactName)}
               </AvatarFallback>
             </Avatar>
-            <div>
-              <div className="flex items-center gap-2">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
                 <span className="truncate">{lead.contactName}</span>
                 {canEditLead ? (
                   <Select
@@ -388,6 +390,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     {INTAKE_KIND_META.prospect.short}
                   </Badge>
                 )}
+                {lead.doNotContact ? (
+                  <Badge
+                    variant="outline"
+                    className="h-7 gap-1 border-destructive/30 bg-destructive/10 text-destructive"
+                  >
+                    <ShieldAlert className="h-3.5 w-3.5" />
+                    Do not contact
+                  </Badge>
+                ) : null}
                 {needsOutreachProfile && (
                   <Badge
                     variant="outline"
@@ -451,25 +462,6 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             >
               <Star className={cn("h-3.5 w-3.5", pinned && "fill-current")} /> Pin
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={() => setAnalyzeOpen(true)}
-            >
-              <Sparkles className="h-3.5 w-3.5" /> Analyze
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={() => {
-                const url = typeof window !== "undefined" ? window.location.href : "";
-                void copyToClipboard(url, "Link copied");
-              }}
-            >
-              <Share2 className="h-3.5 w-3.5" /> Share
-            </Button>
             {ws.canEditLead(lead) ? (
               <Button variant="outline" size="sm" type="button" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-3.5 w-3.5" /> Edit
@@ -495,12 +487,17 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 }
               />
               <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={() => setAnalyzeOpen(true)}>
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Analyze
+                </DropdownMenuItem>
                 <DropdownMenuItem
                   onSelect={() => {
                     const url = typeof window !== "undefined" ? window.location.href : "";
                     void copyToClipboard(url, "Link copied");
                   }}
                 >
+                  <Share2 className="h-3.5 w-3.5" />
                   Copy link
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => void copyToClipboard(lead.id, "Lead ID copied")}>
@@ -526,12 +523,80 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </>
         }
       />
+      {lead.doNotContact ? (
+        <div className="flex items-center gap-2 border-b border-destructive/20 bg-destructive/10 px-4 py-2 text-sm text-destructive sm:px-6">
+          <ShieldAlert className="h-4 w-4 shrink-0" />
+          Outreach and scheduling actions are disabled for this record.
+          {canEditLead ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="ml-auto h-auto p-0 text-destructive"
+              onClick={() => setEditOpen(true)}
+            >
+              Review setting
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <PageBody className="p-0">
         <div className="grid grid-cols-1 xl:grid-cols-[1fr_360px] min-h-[calc(100vh-8rem)]">
-          <div className="p-6 border-r">
+          <div className="border-r p-4 sm:p-6">
+            <Card className="mb-4">
+              <CardContent className="grid gap-4 p-4 sm:grid-cols-[minmax(0,1fr)_auto_auto] sm:items-center">
+                <div className="min-w-0">
+                  <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    Next best action
+                  </p>
+                  <p className="mt-1 truncate text-sm font-medium">
+                    {lead.doNotContact
+                      ? "Review do-not-contact status before outreach"
+                      : lead.nextAction || "Add a next action to keep this record moving"}
+                  </p>
+                  {!lead.doNotContact && (primaryEmail || primaryPhone) ? (
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                      {primaryEmail ? (
+                        <a href={`mailto:${primaryEmail}`} className="inline-flex items-center gap-1 hover:text-primary">
+                          <Mail className="h-3 w-3" />
+                          {primaryEmail}
+                        </a>
+                      ) : null}
+                      {primaryPhone ? (
+                        <a href={`tel:${primaryPhone}`} className="inline-flex items-center gap-1 hover:text-primary">
+                          <Phone className="h-3 w-3" />
+                          {primaryPhone}
+                        </a>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="justify-start"
+                  onClick={() => onTabChange("followups")}
+                >
+                  <ListTodo className="h-3.5 w-3.5" />
+                  {openFollowupCount} followup{openFollowupCount === 1 ? "" : "s"}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="justify-start"
+                  onClick={() => onTabChange("tasks")}
+                >
+                  <ListTodo className="h-3.5 w-3.5" />
+                  {openTaskCount} task{openTaskCount === 1 ? "" : "s"}
+                </Button>
+              </CardContent>
+            </Card>
             <Tabs value={activeTab} onValueChange={onTabChange} className="w-full">
-              <TabsList>
-                <TabsTrigger value="overview">Overview</TabsTrigger>
+              <div className="-mx-1 overflow-x-auto px-1 pb-1 scrollbar-thin">
+                <TabsList className="min-w-max">
+                  <TabsTrigger value="overview">Overview</TabsTrigger>
                 <TabsTrigger value="timeline">
                   Timeline
                   <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
@@ -568,7 +633,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     {relatedEmails.length}
                   </Badge>
                 </TabsTrigger>
-              </TabsList>
+                </TabsList>
+              </div>
 
               <div className="mt-4">
                 {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
@@ -662,12 +728,22 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Contact</CardTitle>
               </CardHeader>
               <CardContent className="pt-0 space-y-2 text-sm">
-                {contact?.email && (
+                {primaryEmail && (
                   <div className="flex items-center gap-2">
                     <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <a href={`mailto:${contact.email}`} className="truncate hover:text-primary">
-                      {contact.email}
+                    <a href={`mailto:${primaryEmail}`} className="min-w-0 flex-1 truncate hover:text-primary">
+                      {primaryEmail}
                     </a>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6 shrink-0"
+                      aria-label="Copy email address"
+                      onClick={() => void copyToClipboard(primaryEmail, "Email copied")}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
                   </div>
                 )}
                 {contact?.personalEmail && (
@@ -678,10 +754,22 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     </a>
                   </div>
                 )}
-                {contact?.phone && (
+                {primaryPhone && (
                   <div className="flex items-center gap-2">
                     <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <span className="tabular-nums">{contact.phone}</span>
+                    <a href={`tel:${primaryPhone}`} className="min-w-0 flex-1 truncate tabular-nums hover:text-primary">
+                      {primaryPhone}
+                    </a>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6 shrink-0"
+                      aria-label="Copy phone number"
+                      onClick={() => void copyToClipboard(primaryPhone, "Phone number copied")}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
                   </div>
                 )}
                 {contact?.linkedin && (
@@ -946,7 +1034,6 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         <ProspectIntakeDialog
           open={prospectFieldsOpen}
           onOpenChange={setProspectFieldsOpen}
-          lead={lead}
           account={account}
           contact={contact}
           onSave={({ accountPatch, contactPatch, leadPatch }) => {

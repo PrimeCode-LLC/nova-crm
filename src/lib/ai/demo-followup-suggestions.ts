@@ -1,4 +1,8 @@
 import type { ChannelKey, FollowupChannel, FollowupSequenceMode, Lead } from "@/lib/types";
+import {
+  buildFollowupPersonalizationProfile,
+  type FollowupRoleFamily,
+} from "@/lib/ai/followup-personalization";
 
 export type FollowupSuggestResponse = {
   planSummary: string;
@@ -24,6 +28,71 @@ function isEmailishChannel(channel: ChannelKey): boolean {
   );
 }
 
+function cleanSignal(value: string): string {
+  const cleaned = value.trim().replace(/[.!?]+$/, "");
+  return cleaned.length > 180 ? `${cleaned.slice(0, 177).trimEnd()}…` : cleaned;
+}
+
+function getDemoSignal(lead: Lead): string | undefined {
+  if (lead.recentNews) return `I saw the recent update: ${cleanSignal(lead.recentNews)}.`;
+  if (lead.triggerEvent) return `I noticed ${cleanSignal(lead.triggerEvent)}.`;
+  if (lead.hiringSignals) return `I noticed ${cleanSignal(lead.hiringSignals)}.`;
+  if (lead.businessFocus) {
+    return `${lead.companyName}'s focus on ${cleanSignal(lead.businessFocus)} stood out.`;
+  }
+  if (lead.painPoints) return `You mentioned ${cleanSignal(lead.painPoints)}.`;
+  if (lead.toolsUsed?.length) {
+    return `I noticed ${lead.companyName} uses ${lead.toolsUsed.slice(0, 3).join(", ")}.`;
+  }
+  return undefined;
+}
+
+const ROLE_COPY: Record<
+  FollowupRoleFamily,
+  { relevance: string; offer: string; subject: string }
+> = {
+  executive: {
+    relevance: "There may be a direct way to improve the business outcome without adding management overhead.",
+    offer: "I can keep this to the decision, likely impact, and tradeoffs.",
+    subject: "one quick question",
+  },
+  technical_executive: {
+    relevance: "This may be relevant to integration effort, delivery risk, and technical leverage.",
+    offer: "I can share a concise technical overview covering workflow and integration.",
+    subject: "technical fit",
+  },
+  technical_practitioner: {
+    relevance: "This may be useful at the workflow and implementation level.",
+    offer: "I can share a concrete example with the mechanism and setup involved.",
+    subject: "implementation question",
+  },
+  operations: {
+    relevance: "This may help reduce process friction while keeping the workflow reliable.",
+    offer: "I can share a short example focused on time saved and adoption.",
+    subject: "workflow question",
+  },
+  revenue: {
+    relevance: "This may be useful for improving pipeline speed and conversion without adding manual work.",
+    offer: "I can share a short example focused on the measurable revenue workflow.",
+    subject: "pipeline question",
+  },
+  finance: {
+    relevance: "The useful question is whether the economic impact and risk justify a closer look.",
+    offer: "I can share a concise view of cost, expected impact, and tradeoffs.",
+    subject: "business case",
+  },
+  people: {
+    relevance: "This may help improve team capacity and experience without creating another heavy process.",
+    offer: "I can share a practical example focused on adoption and time saved.",
+    subject: "team workflow",
+  },
+  general: {
+    relevance: "There may be a practical opportunity worth comparing against your current approach.",
+    offer: "I can share a concise example if that would be useful.",
+    subject: "quick question",
+  },
+};
+
 export function demoFollowupSuggestions(
   lead: Lead,
   userPrompt?: string,
@@ -36,18 +105,22 @@ export function demoFollowupSuggestions(
   const emailish = isEmailishChannel(channel);
   const continueMode = sequenceMode === "continue";
   const emailChannel: FollowupChannel = emailish ? channel : "personalized_email";
+  const profile = buildFollowupPersonalizationProfile({ title: lead.contactTitle });
+  const roleCopy = ROLE_COPY[profile.roleFamily];
+  const signal = getDemoSignal(lead);
+  const relevanceOpener = signal ?? `I wanted to send a direct note about ${company}.`;
 
   const step1Body =
     channel === "upwork"
       ? `Hi ${name}, following up on our conversation about ${company}. Happy to clarify scope or share a short case study if useful.`
       : continueMode
-        ? `Hi ${name},\n\nCircling back on my note about ${company}. Happy to share a short example if that helps next steps.`
-        : `Hi ${name},\n\nI noticed ${company} and thought it was worth a quick intro. We help teams like yours move faster — open to a brief chat?`;
+        ? `Hi ${name},\n\nCircling back on my note about ${company}. ${roleCopy.offer}\n\nWould that be useful?`
+        : `Hi ${name},\n\n${relevanceOpener} ${roleCopy.relevance}\n\nOpen to a brief conversation?`;
 
   const step2Body =
     channel === "linkedin_outbound" || channel === "linkedin_1to1"
-      ? `Hi ${name}, still interested in connecting about ${company}. Open to a 15-min call if easier than async.`
-      : `Hi ${name},\n\nCircling back once more in case my last note missed your inbox. If priorities shifted at ${company}, no worries — just let me know.`;
+      ? `Hi ${name}, following up on ${company}. ${roleCopy.offer} Useful to connect?`
+      : `Hi ${name},\n\nOne useful follow-up to my earlier note: ${roleCopy.offer}\n\nWorth sending over?`;
 
   const items: FollowupSuggestResponse["items"] = [];
 
@@ -57,7 +130,7 @@ export function demoFollowupSuggestions(
       offsetDays: 0,
       priority: "high",
       channel: emailish ? emailChannel : channel,
-      emailSubject: emailish ? `${company} — quick intro` : undefined,
+      emailSubject: emailish ? `${company} — ${roleCopy.subject}` : undefined,
       messageBody: step1Body,
       description: "First personalized touch",
       rationale: "Open the thread with a specific hook",

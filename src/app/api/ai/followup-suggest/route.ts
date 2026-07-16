@@ -3,6 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { buildLeadAiContext } from "@/lib/ai/context/lead-context";
+import { buildFollowupPersonalizationProfile } from "@/lib/ai/followup-personalization";
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
@@ -25,23 +26,25 @@ const CHANNEL_VALUES = [
 ] as const;
 
 /** OpenAI structured output requires every object property in `required` (no .optional()). */
+const suggestItemSchema = z.object({
+  title: z.string().min(1).max(200),
+  offsetDays: z.number().int().min(0).max(90),
+  priority: z.enum(["low", "medium", "high", "urgent"]),
+  channel: z.enum(CHANNEL_VALUES),
+  emailSubject: z.string().max(200),
+  messageBody: z.string().min(1).max(8_000),
+  description: z.string().max(500),
+  rationale: z.string().max(500),
+});
+
 const suggestSchema = z.object({
   planSummary: z.string(),
-  items: z
-    .array(
-      z.object({
-        title: z.string().min(1).max(200),
-        offsetDays: z.number().int().min(0).max(90),
-        priority: z.enum(["low", "medium", "high", "urgent"]),
-        channel: z.enum(CHANNEL_VALUES),
-        emailSubject: z.string().max(200),
-        messageBody: z.string().min(1).max(8_000),
-        description: z.string().max(500),
-        rationale: z.string().max(500),
-      }),
-    )
-    .min(1)
-    .max(8),
+  items: z.array(suggestItemSchema).min(1).max(8),
+});
+
+const singleStepSuggestSchema = z.object({
+  planSummary: z.string(),
+  items: z.array(suggestItemSchema).length(1),
 });
 
 function normalizeSuggestResult(result: z.infer<typeof suggestSchema>) {
@@ -60,6 +63,7 @@ const bodySchema = z.object({
   leadId: z.string().min(1),
   userPrompt: z.string().max(500).optional(),
   sequenceMode: z.enum(["full", "continue"]).optional(),
+  singleStep: z.boolean().optional(),
   regenerateContext: z.string().max(800).optional(),
   followupPlans: z
     .array(
@@ -142,11 +146,27 @@ export async function POST(req: Request) {
     followupPlans: parsed.data.followupPlans as import("@/lib/types").FollowupPlan[] | undefined,
     regenerateContext: parsed.data.regenerateContext,
   });
+  const contactTitle = loaded.contact?.title?.trim() || loaded.lead.contactTitle;
+  const personalizationProfile = buildFollowupPersonalizationProfile({
+    title: contactTitle,
+    seniority: loaded.contact?.seniority,
+  });
   const feat = settings.features.followup_suggest;
   const ragMode = feat.ragMode ?? "reference";
   const chunks = await retrieveRagChunksServer({
     organizationId: orgId,
-    query: `${loaded.lead.stage} ${loaded.lead.channel} follow-up ${parsed.data.userPrompt ?? ""}`,
+    query: [
+      loaded.lead.stage,
+      loaded.lead.channel,
+      personalizationProfile.roleFamily,
+      contactTitle,
+      loaded.contact?.seniority,
+      loaded.account?.industry || loaded.lead.companyIndustry,
+      "follow-up",
+      parsed.data.userPrompt,
+    ]
+      .filter(Boolean)
+      .join(" "),
     libraryIds: feat.libraryIds,
     scope: {
       channel: loaded.lead.channel,
@@ -162,8 +182,9 @@ export async function POST(req: Request) {
 
   const userPrompt = parsed.data.userPrompt?.trim() || "(none, use lead context only)";
   const sequenceMode = parsed.data.sequenceMode ?? "full";
-  const sequenceModeHint =
-    sequenceMode === "continue"
+  const sequenceModeHint = parsed.data.singleStep
+    ? "Regenerate exactly ONE replacement follow-up step. Preserve its purpose and position in the cadence, but rewrite the title, subject, notes, and message using current lead context. Return exactly one item."
+    : sequenceMode === "continue"
       ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+)."
       : "Full personalized outreach from first touch through last email/touch.";
 
@@ -182,7 +203,7 @@ export async function POST(req: Request) {
         sequenceModeHint,
         regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
       },
-      schema: suggestSchema,
+      schema: parsed.data.singleStep ? singleStepSuggestSchema : suggestSchema,
       leadId: parsed.data.leadId,
     });
     void recordAudit({
@@ -193,6 +214,7 @@ export async function POST(req: Request) {
         leadId: parsed.data.leadId,
         itemCount: result.items.length,
         sequenceMode,
+        singleStep: parsed.data.singleStep === true,
       },
     });
     return NextResponse.json({

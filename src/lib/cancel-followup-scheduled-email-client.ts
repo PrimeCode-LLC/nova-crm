@@ -21,6 +21,7 @@ export async function cancelScheduledEmailClient(input: {
   scheduledEmailId: string;
   isDemo: boolean;
   cancelDemo: (id: string) => void;
+  reason?: string;
 }): Promise<{ ok: true } | { error: string }> {
   const id = input.scheduledEmailId.trim();
   if (!id) return { error: "Missing scheduled email id." };
@@ -31,7 +32,9 @@ export async function cancelScheduledEmailClient(input: {
   }
 
   try {
-    const res = await fetch(`/api/email/scheduled/${encodeURIComponent(id)}`, {
+    const reason = input.reason?.trim();
+    const query = reason ? `?reason=${encodeURIComponent(reason)}` : "";
+    const res = await fetch(`/api/email/scheduled/${encodeURIComponent(id)}${query}`, {
       method: "DELETE",
     });
     const data = (await res.json()) as { ok?: boolean; error?: string };
@@ -48,6 +51,7 @@ export async function cancelScheduledEmailsForFollowups(input: {
   isDemo: boolean;
   cancelDemo: (id: string) => void;
   clearSchedule: (followupId: string) => void;
+  reason?: string;
 }): Promise<{ cancelled: number; errors: string[] }> {
   let cancelled = 0;
   const errors: string[] = [];
@@ -59,6 +63,7 @@ export async function cancelScheduledEmailsForFollowups(input: {
       scheduledEmailId: sid,
       isDemo: input.isDemo,
       cancelDemo: input.cancelDemo,
+      reason: input.reason,
     });
     if ("error" in result) {
       errors.push(result.error);

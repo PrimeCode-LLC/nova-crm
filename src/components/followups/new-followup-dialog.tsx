@@ -1,10 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { Users } from "lucide-react";
+import { Loader2, Sparkles, Users } from "lucide-react";
 import { toast } from "sonner";
 import type { Followup, FollowupChannel, Lead, LeadPriority } from "@/lib/types";
 import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
+import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { leadPickerTriggerLabel } from "@/lib/base-ui-select-label";
 import {
   buildWorkspaceOwnerPickerOptions,
@@ -110,7 +111,7 @@ export function NewFollowupDialog({
   onUpdate?: (id: string, patch: Partial<FollowupEditableFields>) => void;
   fixedLeadId?: string;
 }) {
-  const { users, getUserById, getOwnerDisplayName } = useWorkspace();
+  const { users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
   const isEdit = Boolean(editFollowup);
   const [leadId, setLeadId] = React.useState("");
   const [title, setTitle] = React.useState("");
@@ -122,6 +123,7 @@ export function NewFollowupDialog({
   const [priority, setPriority] = React.useState<LeadPriority>("medium");
   const [leadOwnerScope, setLeadOwnerScope] = React.useState("all-owners");
   const [leadActivityDate, setLeadActivityDate] = React.useState("");
+  const [isRegenerating, setIsRegenerating] = React.useState(false);
 
   const leadOwnerIds = React.useMemo(
     () => [...new Set(leads.map((l) => l.ownerId).filter(Boolean))],
@@ -203,6 +205,66 @@ export function NewFollowupDialog({
 
   const selectedLead =
     filteredLeads.find((l) => l.id === leadId) ?? leads.find((l) => l.id === leadId);
+
+  async function regenerateStep() {
+    if (!editFollowup || !selectedLead) {
+      toast.error("This followup is not linked to an available lead.");
+      return;
+    }
+
+    setIsRegenerating(true);
+    const currentStep = [
+      `Current title: ${title.trim()}`,
+      `Current notes: ${description.trim() || "(none)"}`,
+      `Current channel: ${channel || "(none)"}`,
+      `Current email subject: ${emailSubject.trim() || "(none)"}`,
+      `Current message: ${messageBody.trim() || "(none)"}`,
+    ]
+      .join("\n")
+      .slice(0, 800);
+
+    try {
+      const res = await fetch("/api/ai/followup-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: selectedLead.id,
+          sequenceMode: "continue",
+          singleStep: true,
+          userPrompt: "Rewrite this one follow-up step with fresh, personalized copy.",
+          regenerateContext: currentStep,
+          demoContext: isDemo ? { lead: selectedLead } : undefined,
+        }),
+      });
+      const data = (await res.json()) as {
+        error?: unknown;
+        items?: Array<{
+          title: string;
+          description?: string;
+          emailSubject?: string;
+          messageBody: string;
+        }>;
+      };
+      let item = data.items?.[0];
+
+      if (!res.ok && isDemo) {
+        item = demoFollowupSuggestions(selectedLead, currentStep, "continue").items[0];
+      } else if (!res.ok) {
+        throw new Error(typeof data.error === "string" ? data.error : "Could not regenerate this step");
+      }
+      if (!item) throw new Error("AI did not return a replacement step");
+
+      setTitle(item.title);
+      setDescription(item.description ?? "");
+      setEmailSubject(item.emailSubject ?? "");
+      setMessageBody(item.messageBody);
+      toast.success("Step regenerated. Review before saving.");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not regenerate this step");
+    } finally {
+      setIsRegenerating(false);
+    }
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -470,13 +532,33 @@ export function NewFollowupDialog({
               </div>
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
-            </Button>
-            <Button type="submit" disabled={!isEdit && !selectedLead}>
-              {isEdit ? "Save changes" : "Add reminder"}
-            </Button>
+          <DialogFooter className={isEdit ? "sm:justify-between" : undefined}>
+            {isEdit ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={isRegenerating || !selectedLead}
+                onClick={() => void regenerateStep()}
+              >
+                {isRegenerating ? (
+                  <>
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" /> Regenerating…
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-3.5 w-3.5" /> Regenerate step
+                  </>
+                )}
+              </Button>
+            ) : null}
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isRegenerating || (!isEdit && !selectedLead)}>
+                {isEdit ? "Save changes" : "Add reminder"}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

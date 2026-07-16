@@ -16,6 +16,7 @@ import {
 } from "@/lib/email/mailbox-send-quota-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
+const PROCESSING_LEASE_MS = 5 * 60 * 1000;
 
 function scheduledRef(orgId: string, uid: string, id: string) {
   const db = getAdminDb();
@@ -63,6 +64,8 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     createdAt: String(data.createdAt ?? ""),
     sentAt: data.sentAt ? String(data.sentAt) : undefined,
     error: data.error ? String(data.error) : undefined,
+    cancelledAt: data.cancelledAt ? String(data.cancelledAt) : undefined,
+    cancelReason: data.cancelReason ? String(data.cancelReason) : undefined,
     followupId:
       typeof data.followupId === "string" && data.followupId.trim()
         ? data.followupId.trim()
@@ -161,6 +164,7 @@ export async function cancelScheduledEmailServer(input: {
   organizationId: string;
   uid: string;
   id: string;
+  reason?: string;
 }): Promise<{ ok: true } | { error: string }> {
   const ref = scheduledRef(input.organizationId, input.uid, input.id);
   if (!ref) return { error: "Database not configured" };
@@ -172,58 +176,165 @@ export async function cancelScheduledEmailServer(input: {
     return { error: "Only pending scheduled emails can be cancelled." };
   }
 
+  const now = new Date().toISOString();
+  const reason = (input.reason?.trim() || "Cancelled by user").slice(0, 500);
   await ref.update({
     status: "cancelled",
-    updatedAt: new Date().toISOString(),
+    cancelledAt: now,
+    cancelReason: reason,
+    updatedAt: now,
   });
+  const followupId =
+    typeof data.followupId === "string" ? data.followupId.trim() : "";
+  if (followupId) {
+    await updateFollowupDeliveryState(followupId, {
+      deliveryStatus: "cancelled",
+      cancelledAt: now,
+      cancelReason: reason,
+      clearSchedule: true,
+    });
+  }
   return { ok: true };
+}
+
+async function updateFollowupDeliveryState(
+  followupId: string,
+  input: {
+    deliveryStatus: "sent" | "failed" | "cancelled";
+    sentAt?: string;
+    failedAt?: string;
+    cancelledAt?: string;
+    deliveryError?: string;
+    cancelReason?: string;
+    completedAt?: string;
+    clearSchedule?: boolean;
+  },
+): Promise<string | undefined> {
+  const db = getAdminDb();
+  if (!db) return undefined;
+  try {
+    const ref = db.collection(COLLECTIONS.followups).doc(followupId);
+    const snap = await ref.get();
+    if (!snap.exists) return undefined;
+    const current = snap.data() as Record<string, unknown>;
+    const patch: Record<string, unknown> = {
+      deliveryStatus: input.deliveryStatus,
+      updatedAt: new Date().toISOString(),
+    };
+    if (input.sentAt) patch.sentAt = input.sentAt;
+    if (input.failedAt) patch.failedAt = input.failedAt;
+    if (input.cancelledAt) patch.cancelledAt = input.cancelledAt;
+    if (input.deliveryError) patch.deliveryError = input.deliveryError.slice(0, 500);
+    if (input.cancelReason) patch.cancelReason = input.cancelReason.slice(0, 500);
+    if (input.completedAt) patch.completedAt = input.completedAt;
+    if (input.clearSchedule) {
+      patch.scheduledEmailId = FieldValue.delete();
+      patch.emailScheduledAt = FieldValue.delete();
+    }
+    await ref.update(patch);
+    return typeof current.planId === "string" ? current.planId.trim() || undefined : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function completePlanWhenAllStepsDone(planId: string, completedAt: string): Promise<void> {
+  const db = getAdminDb();
+  if (!db) return;
+  try {
+    const steps = await db.collection(COLLECTIONS.followups).where("planId", "==", planId).get();
+    if (steps.empty) return;
+    const allDone = steps.docs.every((doc) => {
+      const step = doc.data() as Record<string, unknown>;
+      return step.completedAt != null || step.deliveryStatus === "sent";
+    });
+    if (!allDone) return;
+    const planRef = db.collection(COLLECTIONS.followupPlans).doc(planId);
+    const plan = await planRef.get();
+    if (!plan.exists) return;
+    const status = String((plan.data() as Record<string, unknown>).status ?? "");
+    if (status !== "active") return;
+    await planRef.update({ status: "completed", completedAt, updatedAt: completedAt });
+  } catch {
+    /* Best-effort reconciliation; the sent follow-up remains durable. */
+  }
 }
 
 async function cancelDueToFollowupStop(
   docRef: DocumentReference,
   followupId: string,
+  reason: string,
 ): Promise<"skipped"> {
   const now = new Date().toISOString();
   await docRef.update({
     status: "cancelled",
-    error: "Cancelled: follow-up paused or completed after lead reply.",
+    error: `Cancelled: ${reason}.`,
+    cancelledAt: now,
+    cancelReason: reason,
     updatedAt: now,
+    processingAt: FieldValue.delete(),
+    processingClaimId: FieldValue.delete(),
   });
-  try {
-    const db = getAdminDb();
-    if (db) {
-      await db.collection(COLLECTIONS.followups).doc(followupId).update({
-        scheduledEmailId: FieldValue.delete(),
-        emailScheduledAt: FieldValue.delete(),
-        updatedAt: now,
-      });
-    }
-  } catch {
-    /* Follow-up may already be deleted. */
-  }
+  await updateFollowupDeliveryState(followupId, {
+    deliveryStatus: "cancelled",
+    cancelledAt: now,
+    cancelReason: reason,
+    clearSchedule: true,
+  });
   return "skipped";
 }
 
 /** Skip send when the linked followup (or its plan) was paused/completed after a reply. */
 async function shouldStopScheduledFollowupEmail(
   followupId: string,
-): Promise<boolean> {
+): Promise<string | undefined> {
   const db = getAdminDb();
-  if (!db) return false;
+  if (!db) return undefined;
   try {
     const snap = await db.collection(COLLECTIONS.followups).doc(followupId).get();
-    if (!snap.exists) return true;
+    if (!snap.exists) return "Follow-up no longer exists";
     const f = snap.data() as Record<string, unknown>;
-    if (f.pausedAt != null || f.completedAt != null) return true;
+    if (f.pausedAt != null) return "Follow-up paused";
+    if (f.completedAt != null) return "Follow-up completed";
     const planId = typeof f.planId === "string" ? f.planId.trim() : "";
-    if (!planId) return false;
+    if (!planId) return undefined;
     const planSnap = await db.collection(COLLECTIONS.followupPlans).doc(planId).get();
-    if (!planSnap.exists) return false;
+    if (!planSnap.exists) return undefined;
     const status = String((planSnap.data() as Record<string, unknown>).status ?? "");
-    return status === "paused" || status === "superseded" || status === "completed";
+    if (status === "paused") return "Sequence paused";
+    if (status === "superseded") return "Sequence superseded";
+    if (status === "completed") return "Sequence completed";
+    return undefined;
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+async function claimScheduledDoc(
+  docRef: DocumentReference,
+): Promise<Record<string, unknown> | null> {
+  const db = getAdminDb();
+  if (!db) return null;
+  const claimId = crypto.randomUUID();
+  return db.runTransaction(async (transaction) => {
+    const snap = await transaction.get(docRef);
+    if (!snap.exists) return null;
+    const data = snap.data() as Record<string, unknown>;
+    const status = String(data.status ?? "");
+    const processingAt = new Date(String(data.processingAt ?? "")).getTime();
+    const staleProcessing =
+      status === "processing" &&
+      (!Number.isFinite(processingAt) || Date.now() - processingAt >= PROCESSING_LEASE_MS);
+    if (status !== "pending" && !staleProcessing) return null;
+    const now = new Date().toISOString();
+    transaction.update(docRef, {
+      status: "processing",
+      processingAt: now,
+      processingClaimId: claimId,
+      updatedAt: now,
+    });
+    return { ...data, status: "processing", processingAt: now, processingClaimId: claimId };
+  });
 }
 
 async function sendScheduledDoc(
@@ -237,18 +348,32 @@ async function sendScheduledDoc(
 
   const followupIdEarly =
     typeof data.followupId === "string" ? data.followupId.trim() : "";
-  if (followupIdEarly && (await shouldStopScheduledFollowupEmail(followupIdEarly))) {
-    return cancelDueToFollowupStop(docRef, followupIdEarly);
+  const initialStopReason = followupIdEarly
+    ? await shouldStopScheduledFollowupEmail(followupIdEarly)
+    : undefined;
+  if (followupIdEarly && initialStopReason) {
+    return cancelDueToFollowupStop(docRef, followupIdEarly, initialStopReason);
   }
 
   const mailboxes = await listMailboxesForMemberServer({ organizationId, uid });
   const mailbox = mailboxes.find((m) => m.id === mailboxId);
   if (!mailbox) {
+    const now = new Date().toISOString();
     await docRef.update({
       status: "failed",
       error: "Mailbox no longer exists.",
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      processingAt: FieldValue.delete(),
+      processingClaimId: FieldValue.delete(),
     });
+    if (followupIdEarly) {
+      await updateFollowupDeliveryState(followupIdEarly, {
+        deliveryStatus: "failed",
+        failedAt: now,
+        deliveryError: "Mailbox no longer exists.",
+        clearSchedule: true,
+      });
+    }
     return "failed";
   }
 
@@ -259,22 +384,51 @@ async function sendScheduledDoc(
     dailySendLimit: mailbox.dailySendLimit,
   });
   if (!quota.ok) {
+    const now = new Date().toISOString();
     await docRef.update({
       status: "failed",
       error: quota.error,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      processingAt: FieldValue.delete(),
+      processingClaimId: FieldValue.delete(),
     });
+    if (followupIdEarly) {
+      await updateFollowupDeliveryState(followupIdEarly, {
+        deliveryStatus: "failed",
+        failedAt: now,
+        deliveryError: quota.error,
+        clearSchedule: true,
+      });
+    }
     return "failed";
   }
 
   const parsedAttachments = parseOutboundAttachments(data.attachments);
   if ("error" in parsedAttachments) {
+    const now = new Date().toISOString();
     await docRef.update({
       status: "failed",
       error: parsedAttachments.error,
-      updatedAt: new Date().toISOString(),
+      updatedAt: now,
+      processingAt: FieldValue.delete(),
+      processingClaimId: FieldValue.delete(),
     });
+    if (followupIdEarly) {
+      await updateFollowupDeliveryState(followupIdEarly, {
+        deliveryStatus: "failed",
+        failedAt: now,
+        deliveryError: parsedAttachments.error,
+        clearSchedule: true,
+      });
+    }
     return "failed";
+  }
+
+  const finalStopReason = followupIdEarly
+    ? await shouldStopScheduledFollowupEmail(followupIdEarly)
+    : undefined;
+  if (followupIdEarly && finalStopReason) {
+    return cancelDueToFollowupStop(docRef, followupIdEarly, finalStopReason);
   }
 
   const result = await sendOutboundMailServer({
@@ -308,28 +462,29 @@ async function sendScheduledDoc(
 
   const now = new Date().toISOString();
   if (result.ok) {
-    await incrementMailboxSendCountServer({ organizationId, uid, mailboxId });
     await docRef.update({
       status: "sent",
       sentAt: now,
       updatedAt: now,
       error: null,
+      processingAt: FieldValue.delete(),
+      processingClaimId: FieldValue.delete(),
     });
     const followupId =
       typeof data.followupId === "string" ? data.followupId.trim() : "";
     if (followupId) {
-      try {
-        const db = getAdminDb();
-        if (db) {
-          await db.collection(COLLECTIONS.followups).doc(followupId).update({
-            scheduledEmailId: FieldValue.delete(),
-            emailScheduledAt: FieldValue.delete(),
-            updatedAt: now,
-          });
-        }
-      } catch {
-        /* Follow-up may already be deleted; send still succeeded. */
-      }
+      const planId = await updateFollowupDeliveryState(followupId, {
+        deliveryStatus: "sent",
+        sentAt: now,
+        completedAt: now,
+        clearSchedule: true,
+      });
+      if (planId) await completePlanWhenAllStepsDone(planId, now);
+    }
+    try {
+      await incrementMailboxSendCountServer({ organizationId, uid, mailboxId });
+    } catch {
+      /* Delivery is authoritative; quota accounting can recover independently. */
     }
     return "sent";
   }
@@ -338,7 +493,17 @@ async function sendScheduledDoc(
     status: "failed",
     error: result.error.slice(0, 500),
     updatedAt: now,
+    processingAt: FieldValue.delete(),
+    processingClaimId: FieldValue.delete(),
   });
+  if (followupIdEarly) {
+    await updateFollowupDeliveryState(followupIdEarly, {
+      deliveryStatus: "failed",
+      failedAt: now,
+      deliveryError: result.error,
+      clearSchedule: true,
+    });
+  }
   return "failed";
 }
 
@@ -350,10 +515,20 @@ async function processScheduledSnap(
   let skipped = 0;
 
   for (const doc of docs) {
-    const outcome = await sendScheduledDoc(doc.ref, doc.data());
-    if (outcome === "sent") sent += 1;
-    else if (outcome === "failed") failed += 1;
-    else skipped += 1;
+    const claimed = await claimScheduledDoc(doc.ref);
+    if (!claimed) {
+      skipped += 1;
+      continue;
+    }
+    try {
+      const outcome = await sendScheduledDoc(doc.ref, claimed);
+      if (outcome === "sent") sent += 1;
+      else if (outcome === "failed") failed += 1;
+      else skipped += 1;
+    } catch {
+      // Keep the processing lease. A later processor can safely reclaim it after expiry.
+      skipped += 1;
+    }
   }
 
   return { processed: docs.length, sent, failed, skipped };
@@ -377,7 +552,7 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     .collection(ORG_SUBCOLLECTIONS.members)
     .doc(input.uid)
     .collection(SCHEDULED_COLLECTION)
-    .where("status", "==", "pending")
+    .where("status", "in", ["pending", "processing"])
     .where("scheduledAt", "<=", now)
     .limit(50)
     .get();
@@ -402,7 +577,7 @@ export async function processDueScheduledEmailsServer(): Promise<{
   const now = new Date().toISOString();
   const snap = await db
     .collectionGroup(SCHEDULED_COLLECTION)
-    .where("status", "==", "pending")
+    .where("status", "in", ["pending", "processing"])
     .where("scheduledAt", "<=", now)
     .limit(50)
     .get();

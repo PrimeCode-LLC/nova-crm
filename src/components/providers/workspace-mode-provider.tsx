@@ -153,6 +153,14 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
       schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
     ) => void;
     clearFollowupEmailSchedule: (id: string) => void;
+    /** Apply server/demo delivery lifecycle fields to the local workspace snapshot. */
+    syncFollowupDelivery: (
+      id: string,
+      patch: Pick<
+        Followup,
+        "deliveryStatus" | "sentAt" | "failedAt" | "cancelledAt" | "deliveryError" | "cancelReason"
+      >,
+    ) => void;
     removeFollowup: (id: string) => void;
     updateFollowup: (
       id: string,
@@ -177,7 +185,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
       replyMessageId?: string;
       actorId: string;
       openFollowupIds: string[];
-    }) => void;
+    }) => Promise<void>;
     supersedeFollowupPlan: (oldPlanId: string, newPlanId: string) => void;
     addLeadTask: (t: LeadTask) => void;
     setLeadTaskCompleted: (id: string, completed: boolean) => void;
@@ -756,7 +764,7 @@ export function WorkspaceModeProvider({
   );
 
   const pauseFollowupPlanForReply = React.useCallback(
-    (input: {
+    async (input: {
       planId: string;
       leadId: string;
       reason: string;
@@ -775,28 +783,27 @@ export function WorkspaceModeProvider({
         replyMessageId: input.replyMessageId,
       };
       if (writeFs && orgId) {
-        void (async () => {
-          try {
-            const db = getFirebaseDb();
-            await persistFollowupPlanPatch(db, input.planId, planPatch);
-            for (const fid of input.openFollowupIds) {
-              await persistFollowupSetPaused(db, fid, true);
-            }
-            const te: TimelineEvent = {
-              id: newLocalId("te"),
-              leadId: input.leadId,
-              type: "followup_plan_paused",
-              actorId: input.actorId,
-              summary: `Follow-up plan paused: ${input.reason}`,
-              payload: { planId: input.planId, replyMessageId: input.replyMessageId },
-              createdAt: iso,
-            };
-            await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
-          } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not pause follow-up plan", { description: msg });
+        try {
+          const db = getFirebaseDb();
+          await persistFollowupPlanPatch(db, input.planId, planPatch);
+          for (const fid of input.openFollowupIds) {
+            await persistFollowupSetPaused(db, fid, true);
           }
-        })();
+          const te: TimelineEvent = {
+            id: newLocalId("te"),
+            leadId: input.leadId,
+            type: "followup_plan_paused",
+            actorId: input.actorId,
+            summary: `Follow-up plan paused: ${input.reason}`,
+            payload: { planId: input.planId, replyMessageId: input.replyMessageId },
+            createdAt: iso,
+          };
+          await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not pause follow-up plan", { description: msg });
+          throw e;
+        }
       }
       setSessionV2((s) => {
         const paused = { ...s.followups.paused };
@@ -926,6 +933,19 @@ export function WorkspaceModeProvider({
               ...s.followups.emailSchedule,
               [id]: schedule,
             },
+            patches: schedule
+              ? {
+                  ...s.followups.patches,
+                  [id]: {
+                    ...(s.followups.patches[id] ?? {}),
+                    deliveryStatus: "scheduled",
+                    failedAt: undefined,
+                    cancelledAt: undefined,
+                    deliveryError: undefined,
+                    cancelReason: undefined,
+                  },
+                }
+              : s.followups.patches,
           },
         }));
       }
@@ -938,6 +958,28 @@ export function WorkspaceModeProvider({
       setFollowupEmailSchedule(id, null);
     },
     [setFollowupEmailSchedule],
+  );
+
+  const syncFollowupDelivery = React.useCallback(
+    (
+      id: string,
+      patch: Pick<
+        Followup,
+        "deliveryStatus" | "sentAt" | "failedAt" | "cancelledAt" | "deliveryError" | "cancelReason"
+      >,
+    ) => {
+      setSessionV2((s) => ({
+        ...s,
+        followups: {
+          ...s.followups,
+          patches: {
+            ...s.followups.patches,
+            [id]: { ...(s.followups.patches[id] ?? {}), ...patch },
+          },
+        },
+      }));
+    },
+    [],
   );
 
   const updateFollowup = React.useCallback(
@@ -1912,6 +1954,7 @@ export function WorkspaceModeProvider({
       setFollowupCompleted,
       setFollowupEmailSchedule,
       clearFollowupEmailSchedule,
+      syncFollowupDelivery,
       removeFollowup,
       updateFollowup,
       pauseFollowupPlanForReply,
@@ -1977,6 +2020,7 @@ export function WorkspaceModeProvider({
     setFollowupCompleted,
     setFollowupEmailSchedule,
     clearFollowupEmailSchedule,
+    syncFollowupDelivery,
     removeFollowup,
     updateFollowup,
     pauseFollowupPlanForReply,

@@ -101,7 +101,20 @@ export function mergeFollowupPlans(
   followups: readonly Followup[],
 ): FollowupPlan[] {
   const synth = synthesizePlansFromFollowups(followups, stored);
-  return [...stored, ...synth];
+  const reconciled = stored.map((plan) => {
+    if (plan.status !== "active") return plan;
+    const steps = followupsForPlan(followups, plan.id);
+    if (steps.length === 0 || steps.some((step) => !step.completedAt && step.deliveryStatus !== "sent")) {
+      return plan;
+    }
+    const completedAt = steps
+      .map((step) => step.completedAt ?? step.sentAt)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1);
+    return { ...plan, status: "completed" as const, completedAt };
+  });
+  return [...reconciled, ...synth];
 }
 
 export function leadContactEmails(lead: Lead, contactEmail?: string | null): string[] {

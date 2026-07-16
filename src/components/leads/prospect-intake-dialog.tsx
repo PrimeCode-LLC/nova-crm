@@ -102,14 +102,12 @@ const BEST_CHANNEL_OPTS: { value: BestContactChannel; label: string }[] = [
 export function ProspectIntakeDialog({
   open,
   onOpenChange,
-  lead,
   account,
   contact,
   onSave,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  lead: Lead;
   account: Account | undefined;
   contact: Contact | undefined;
   onSave: (args: {
@@ -129,6 +127,7 @@ export function ProspectIntakeDialog({
   const [size, setSize] = React.useState<CompanySize | typeof UNSET>(UNSET);
   const [rev, setRev] = React.useState<RevenueRange | typeof UNSET>(UNSET);
   const [website, setWebsite] = React.useState("");
+  const [companyLinkedin, setCompanyLinkedin] = React.useState("");
   const [webStatus, setWebStatus] = React.useState<WebsiteStatus | typeof UNSET>(UNSET);
   const [techStackStr, setTechStackStr] = React.useState("");
   const [activity, setActivity] = React.useState<OnlineActivityScore | typeof UNSET>(UNSET);
@@ -139,6 +138,8 @@ export function ProspectIntakeDialog({
   const [firstName, setFirstName] = React.useState("");
   const [lastName, setLastName] = React.useState("");
   const [title, setTitle] = React.useState("");
+  const [seniority, setSeniority] = React.useState("");
+  const [contactLocation, setContactLocation] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [personalEmail, setPersonalEmail] = React.useState("");
   const [emailVerify, setEmailVerify] = React.useState<EmailVerificationStatus | typeof UNSET>(UNSET);
@@ -161,6 +162,7 @@ export function ProspectIntakeDialog({
       setSize(account.size ?? UNSET);
       setRev(account.revenueRange ?? UNSET);
       setWebsite(account.website ?? "");
+      setCompanyLinkedin(account.linkedin ?? "");
       setWebStatus(account.websiteStatus ?? UNSET);
       setTechStackStr(techStackToString(account.techStack));
       setActivity(account.onlineActivityScore ?? UNSET);
@@ -171,6 +173,8 @@ export function ProspectIntakeDialog({
       setFirstName(contact.firstName ?? "");
       setLastName(contact.lastName ?? "");
       setTitle(contact.title ?? "");
+      setSeniority(contact.seniority ?? "");
+      setContactLocation(contact.location ?? "");
       setEmail(contact.email ?? "");
       setPersonalEmail(contact.personalEmail ?? "");
       setEmailVerify(contact.emailVerificationStatus ?? UNSET);
@@ -213,6 +217,7 @@ export function ProspectIntakeDialog({
       size: size === UNSET ? undefined : size,
       revenueRange: rev === UNSET ? undefined : rev,
       website: website.trim() || undefined,
+      linkedin: companyLinkedin.trim() || undefined,
       websiteStatus: webStatus === UNSET ? undefined : webStatus,
       techStack: parseTechStack(techStackStr),
       onlineActivityScore: activity === UNSET ? undefined : activity,
@@ -230,6 +235,8 @@ export function ProspectIntakeDialog({
       lastName: ln,
       fullName,
       title: title.trim() || undefined,
+      seniority: seniority.trim() || undefined,
+      location: contactLocation.trim() || undefined,
       email: email.trim() || undefined,
       personalEmail: personalEmail.trim() || undefined,
       emailVerificationStatus: emailVerify === UNSET ? undefined : emailVerify,
@@ -358,6 +365,14 @@ export function ProspectIntakeDialog({
                   <Label>Website URL</Label>
                   <Input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="https://…" />
                 </div>
+                <div className="grid gap-1.5 sm:col-span-2">
+                  <Label>Company LinkedIn URL</Label>
+                  <Input
+                    value={companyLinkedin}
+                    onChange={(e) => setCompanyLinkedin(e.target.value)}
+                    placeholder="https://linkedin.com/company/…"
+                  />
+                </div>
                 <div className="grid gap-1.5">
                   <Label>Website status</Label>
                   <Select
@@ -439,6 +454,14 @@ export function ProspectIntakeDialog({
                 <div className="grid gap-1.5 sm:col-span-2">
                   <Label>Role / title</Label>
                   <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Seniority</Label>
+                  <Input value={seniority} onChange={(e) => setSeniority(e.target.value)} />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label>Contact location</Label>
+                  <Input value={contactLocation} onChange={(e) => setContactLocation(e.target.value)} />
                 </div>
                 <div className="grid gap-1.5">
                   <Label>Primary email (company)</Label>

@@ -577,6 +577,7 @@ export type FollowupPlanStatus = "active" | "paused" | "superseded" | "completed
  * - `continue` — intro already sent; draft remaining touches only
  */
 export type FollowupSequenceMode = "full" | "continue";
+export type FollowupDeliveryStatus = "scheduled" | "sent" | "failed" | "cancelled";
 
 /** AI-generated cadence for a lead; open follow-ups reference `planId`. */
 export interface FollowupPlan {
@@ -595,6 +596,8 @@ export interface FollowupPlan {
   /** `${mailboxId}:in:${uid}` when paused due to inbox reply. */
   replyMessageId?: string;
   supersededByPlanId?: string;
+  /** Set when every step in the sequence has been completed or sent. */
+  completedAt?: ISODate;
 }
 
 export interface Followup {
@@ -623,6 +626,13 @@ export interface Followup {
   scheduledEmailId?: string;
   /** When the linked scheduled email is set to send. */
   emailScheduledAt?: ISODate;
+  /** Durable outbound state retained after the scheduled-email link is cleared. */
+  deliveryStatus?: FollowupDeliveryStatus;
+  sentAt?: ISODate;
+  failedAt?: ISODate;
+  cancelledAt?: ISODate;
+  deliveryError?: string;
+  cancelReason?: string;
 }
 
 /** Assigned work between teammates (review, email, etc.). Optional lead context + visibility. */

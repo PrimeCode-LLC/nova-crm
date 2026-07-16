@@ -78,7 +78,9 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   const [pushingId, setPushingId] = React.useState<string | null>(null);
 
   React.useEffect(() => {
-    setDrafts(assignmentsToDrafts(prospect.prospectChannelAssignments));
+    React.startTransition(() => {
+      setDrafts(assignmentsToDrafts(prospect.prospectChannelAssignments));
+    });
   }, [prospect.id, prospect.prospectChannelAssignments, prospect.updatedAt]);
 
   const ownerOptions = React.useMemo(
@@ -172,6 +174,10 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   }
 
   async function pushToLead(assignmentId: string) {
+    if (prospect.doNotContact) {
+      toast.error("This prospect is marked do not contact.");
+      return;
+    }
     if (!canPushProspectChannel(viewerId, prospect, assignmentId)) return;
     setPushingId(assignmentId);
     try {
@@ -208,6 +214,11 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
 
   return (
     <div className="space-y-4">
+      {prospect.doNotContact ? (
+        <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Do not contact is active. Channel assignments can be prepared, but they cannot be pushed to outreach.
+        </p>
+      ) : null}
       <p className="text-xs text-muted-foreground">
         The prospect creator or their managers in the org chart assign outreach channels and
         responsible teammates. Each assignee pushes their channel into one shared sales lead with
@@ -299,6 +310,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
                     variant="ghost"
                     size="icon-sm"
                     className="shrink-0"
+                    aria-label="Remove channel assignment"
                     onClick={() => removeDraftRow(row.key)}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
@@ -354,7 +366,7 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
               <Button
                 type="button"
                 size="sm"
-                disabled={pushingId === a.id}
+                disabled={prospect.doNotContact || pushingId === a.id}
                 onClick={() => void pushToLead(a.id)}
               >
                 {pushingId === a.id ? (

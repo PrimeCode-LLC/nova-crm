@@ -61,6 +61,7 @@ export function FollowupPlanReplyWatcher() {
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const processedRef = React.useRef(readProcessed());
+  const inFlightRef = React.useRef(new Set<string>());
 
   const plans = React.useMemo(
     () => mergeFollowupPlans(followupPlans, followups),
@@ -77,7 +78,7 @@ export function FollowupPlanReplyWatcher() {
     for (const message of messages) {
       if (message.seen) continue;
       const mid = `${acct.id}:in:${message.id}`;
-      if (processedRef.current.has(mid)) continue;
+      if (processedRef.current.has(mid) || inFlightRef.current.has(mid)) continue;
 
       const leadId = inboundMessageLeadId({
         mailboxId: acct.id,
@@ -90,43 +91,50 @@ export function FollowupPlanReplyWatcher() {
       const lead = leads.find((l) => l.id === leadId);
       if (!lead || !isInboundFromLeadContact({ message, lead, mailboxEmail })) continue;
 
-      processedRef.current.add(mid);
-      writeProcessed(processedRef.current);
-
       const scheduledOpen = openFollowupsWithScheduledEmail(followups, leadId);
       const plan = findActivePlanToPauseOnReply({ leadId, plans });
       const openIds = plan ? openFollowupsForPlan(followups, plan.id).map((f) => f.id) : [];
 
+      inFlightRef.current.add(mid);
       void (async () => {
-        const { cancelled, errors } = await cancelScheduledEmailsForFollowups({
-          followups: scheduledOpen,
-          isDemo: false,
-          cancelDemo: cancelScheduled,
-          clearSchedule: clearFollowupEmailSchedule,
-        });
-        if (errors.length > 0) {
-          toast.error("Could not cancel all scheduled followup emails", {
-            description: errors[0],
-          });
-        }
+        try {
+          if (plan && openIds.length > 0) {
+            await pauseFollowupPlanForReply({
+              planId: plan.id,
+              leadId,
+              reason: "Lead replied by email",
+              replyMessageId: mid,
+              actorId: currentUserId,
+              openFollowupIds: openIds,
+            });
+          }
 
-        if (plan && openIds.length > 0) {
-          pauseFollowupPlanForReply({
-            planId: plan.id,
-            leadId,
+          const { cancelled, errors } = await cancelScheduledEmailsForFollowups({
+            followups: scheduledOpen,
+            isDemo: false,
+            cancelDemo: cancelScheduled,
+            clearSchedule: clearFollowupEmailSchedule,
             reason: "Lead replied by email",
-            replyMessageId: mid,
-            actorId: currentUserId,
-            openFollowupIds: openIds,
           });
-          return;
-        }
+          if (errors.length > 0) {
+            toast.error("Could not cancel all scheduled followup emails", {
+              description: errors[0],
+            });
+            return;
+          }
 
-        if (cancelled > 0) {
-          toast.message("Lead replied, scheduled followup emails cancelled", {
-            description: "Outbound steps will not send. Review the reply in Inbox.",
-            duration: 8000,
-          });
+          processedRef.current.add(mid);
+          writeProcessed(processedRef.current);
+          if (!plan && cancelled > 0) {
+            toast.message("Lead replied, scheduled followup emails cancelled", {
+              description: "Outbound steps will not send. Review the reply in Inbox.",
+              duration: 8000,
+            });
+          }
+        } catch {
+          /* Leave unprocessed so the next inbox sync retries the reply. */
+        } finally {
+          inFlightRef.current.delete(mid);
         }
       })();
     }

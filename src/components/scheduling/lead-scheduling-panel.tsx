@@ -32,9 +32,11 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
   React.useEffect(() => {
     if (isDemo) {
       const hosts = demoDelegatedHosts(users, currentUserId);
-      setBookableHosts(hosts);
-      setLinks(demoSchedulingLinks(users, currentUserId));
-      setMeetings(demoMeetings(users).filter((m) => m.leadId === lead.id));
+      React.startTransition(() => {
+        setBookableHosts(hosts);
+        setLinks(demoSchedulingLinks(users, currentUserId));
+        setMeetings(demoMeetings(users).filter((m) => m.leadId === lead.id));
+      });
       return;
     }
     void (async () => {
@@ -70,6 +72,10 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
   const shareLink = links[0];
 
   function copySchedulingLink() {
+    if (lead.doNotContact) {
+      toast.error("Scheduling outreach is disabled for do-not-contact records.");
+      return;
+    }
     if (!shareLink) {
       toast.error("Create a scheduling link in Scheduling first");
       return;
@@ -90,11 +96,16 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        {lead.doNotContact ? (
+          <p className="rounded-md border border-destructive/20 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            Outreach is disabled because this record is marked do not contact.
+          </p>
+        ) : null}
         <div className="flex flex-wrap gap-2">
-          <Button size="sm" onClick={() => setBookOpen(true)}>
+          <Button size="sm" disabled={lead.doNotContact} onClick={() => setBookOpen(true)}>
             Book meeting
           </Button>
-          <Button size="sm" variant="outline" onClick={copySchedulingLink}>
+          <Button size="sm" variant="outline" disabled={lead.doNotContact} onClick={copySchedulingLink}>
             <Copy className="h-3.5 w-3.5" /> Send scheduling link
           </Button>
           <Button

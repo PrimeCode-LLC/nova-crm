@@ -16,6 +16,7 @@ export async function DELETE(req: Request, context: RouteContext) {
   }
 
   const forUser = new URL(req.url).searchParams.get("forUser");
+  const reason = new URL(req.url).searchParams.get("reason")?.trim() || undefined;
   const resolved = await resolveMailboxDataOwnerUid({
     organizationId: g.ctx.session.organizationId,
     viewerUid: g.ctx.session.uid,
@@ -36,6 +37,7 @@ export async function DELETE(req: Request, context: RouteContext) {
     organizationId: g.ctx.session.organizationId,
     uid: resolved.dataOwnerUid,
     id: scheduledId,
+    reason,
   });
 
   if ("error" in result) {
