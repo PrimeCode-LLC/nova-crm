@@ -211,6 +211,8 @@ export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettin
     label: restPartial.label ?? "Mailbox",
     ...base,
     ...restPartial,
+    // Explicit so `signature: undefined` from a partial spread cannot wipe the default / prior value.
+    signature: typeof restPartial.signature === "string" ? restPartial.signature : base.signature,
     smtp: { ...base.smtp, ...(restPartial.smtp ?? {}) },
     imap: { ...base.imap, ...(restPartial.imap ?? {}) },
     assignedUserIds: restPartial.assignedUserIds ?? base.assignedUserIds,

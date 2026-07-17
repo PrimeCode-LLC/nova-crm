@@ -29,6 +29,7 @@ import {
   withMicrosoftOutlookConnection,
 } from "@/lib/email/mailbox-connection-presets";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
+import { normalizeCrmEmailKey } from "@/lib/crm-dedup-keys";
 import { toast } from "sonner";
 import { Ban, Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2, Users } from "lucide-react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -42,6 +43,20 @@ import {
 } from "@/components/ui/select";
 import type { MailboxDelegation } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+/** Another owned mailbox already using this From address (case-insensitive). */
+function findDuplicateMailboxByEmail(
+  mailboxes: readonly EmailMailboxSettings[],
+  emailAddress: string,
+  excludeMailboxId: string,
+): EmailMailboxSettings | undefined {
+  const key = normalizeCrmEmailKey(emailAddress);
+  if (!key) return undefined;
+  return mailboxes.find((m) => {
+    if (m.id === excludeMailboxId) return false;
+    return normalizeCrmEmailKey(m.emailAddress) === key;
+  });
+}
 
 export function EmailInboxSettingsCard() {
   const { users, currentUserId, isDemo, getOwnerDisplayName } = useWorkspace();
@@ -149,17 +164,6 @@ export function EmailInboxSettingsCard() {
       .finally(() => {
         if (!cancelled) setInboxDelegationLoading(false);
       });
-    void fetch("/api/email/mailboxes", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as {
-          sendUsageByMailboxId?: Record<string, { used: number; limit: number | null }>;
-        };
-        if (!cancelled && data.sendUsageByMailboxId) {
-          setSendUsageByMailboxId(data.sendUsageByMailboxId);
-        }
-      })
-      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -213,6 +217,16 @@ export function EmailInboxSettingsCard() {
   );
 
   /**
+   * Baseline snapshot after hydrate. Auto-save only runs when `persistKey` diverges from this
+   * (user edits). Prevents a race where the first post-hydrate persist (or effect cleanup)
+   * writes an empty/default mailbox and wipes fields like signature on the server.
+   */
+  const persistBaselineRef = React.useRef<string | null>(null);
+  const persistDirtyRef = React.useRef(false);
+  const latestPersistKeyRef = React.useRef(persistKey);
+  latestPersistKeyRef.current = persistKey;
+
+  /**
    * Persists owned mailboxes to the server (skips boxes assigned from teammates).
    * @param manual — when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
    */
@@ -229,6 +243,20 @@ export function EmailInboxSettingsCard() {
       return false;
     }
     const all = s.mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId));
+    const seenEmails = new Map<string, string>();
+    for (const mb of all) {
+      const key = normalizeCrmEmailKey(mb.emailAddress);
+      if (!key) continue;
+      const priorLabel = seenEmails.get(key);
+      if (priorLabel !== undefined) {
+        const msg = `${mb.emailAddress.trim()} is already added on “${priorLabel}”. Use a different address.`;
+        toast.error(manual ? "Duplicate mailbox email" : "Duplicate mailbox email", {
+          description: msg,
+        });
+        return false;
+      }
+      seenEmails.set(key, mb.label?.trim() || mb.emailAddress.trim() || "Mailbox");
+    }
     setSavingRemote(true);
     try {
       for (const mb of all) {
@@ -236,7 +264,13 @@ export function EmailInboxSettingsCard() {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           credentials: "same-origin",
-          body: JSON.stringify({ mailbox: mb }),
+          body: JSON.stringify({
+            mailbox: {
+              ...mb,
+              // Always send a string so Zod + Firestore never see `undefined`.
+              signature: typeof mb.signature === "string" ? mb.signature : "",
+            },
+          }),
         });
         let data: { ok?: boolean; error?: string } = {};
         try {
@@ -258,6 +292,8 @@ export function EmailInboxSettingsCard() {
           return false;
         }
       }
+      persistBaselineRef.current = latestPersistKeyRef.current;
+      persistDirtyRef.current = false;
       if (manual) {
         toast.success("Email settings saved");
       }
@@ -274,43 +310,124 @@ export function EmailInboxSettingsCard() {
   }, [currentUserId]);
 
   React.useEffect(() => {
+    // Avoid opening the store's placeholder "Primary mailbox" before server hydrate.
+    if (!isDemo && !emailServerHydrated) {
+      setOpenValues([]);
+      return;
+    }
     if (ownedMailboxes.length === 0) {
       setOpenValues([]);
       return;
     }
     setOpenValues((prev) => {
-      const kept = prev.filter((id) => ownedMailboxes.some((m) => m.id === id));
-      if (kept.length > 0) return kept;
-      const preferred = activeMailboxId && ownedMailboxes.some((m) => m.id === activeMailboxId);
-      return [preferred ? activeMailboxId! : ownedMailboxes[0]!.id];
+      const valid = prev.filter((id) => ownedMailboxes.some((m) => m.id === id));
+      // Prefer the active inbox mailbox so the signature field matches what compose uses.
+      if (activeMailboxId && ownedMailboxes.some((m) => m.id === activeMailboxId)) {
+        if (valid.includes(activeMailboxId)) return valid;
+        return [...valid, activeMailboxId];
+      }
+      if (valid.length > 0) return valid;
+      return [ownedMailboxes[0]!.id];
     });
-  }, [ownedMailboxes, activeMailboxId]);
+  }, [ownedMailboxes, activeMailboxId, isDemo, emailServerHydrated]);
 
-  /** Debounced persist; flush when the timer is cancelled (refresh / route change) so edits are not lost. */
+  // Capture hydrate baseline; do not auto-save until the user changes something.
+  React.useEffect(() => {
+    if (!emailServerSyncEnabled || !emailServerHydrated) {
+      persistBaselineRef.current = null;
+      persistDirtyRef.current = false;
+      return;
+    }
+    if (persistBaselineRef.current === null) {
+      persistBaselineRef.current = persistKey;
+      persistDirtyRef.current = false;
+      return;
+    }
+    if (persistKey !== persistBaselineRef.current) {
+      persistDirtyRef.current = true;
+    }
+  }, [persistKey, emailServerHydrated, emailServerSyncEnabled]);
+
+  /** Debounced persist of user edits only (never flush on every keystroke via effect cleanup). */
   React.useEffect(() => {
     if (!emailServerSyncEnabled || !emailServerHydrated) return;
+    if (!persistDirtyRef.current) return;
+    if (persistBaselineRef.current !== null && persistKey === persistBaselineRef.current) return;
 
-    let timerFired = false;
     const timer = window.setTimeout(() => {
-      timerFired = true;
       void persistMailboxesRemote(false);
     }, 600);
 
     return () => {
       window.clearTimeout(timer);
-      if (!timerFired) void persistMailboxesRemote(false);
     };
   }, [persistKey, emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
 
-  /** Hard refresh / tab close can tear down React before the debounced effect runs; flush once. */
+  /** Flush dirty edits on leave / hard refresh so a pending debounce is not lost. */
   React.useEffect(() => {
     if (!emailServerSyncEnabled || !emailServerHydrated) return;
-    const onPageHide = () => {
+    const flushIfDirty = () => {
+      if (!persistDirtyRef.current) return;
       void persistMailboxesRemote(false);
     };
-    window.addEventListener("pagehide", onPageHide);
-    return () => window.removeEventListener("pagehide", onPageHide);
+    window.addEventListener("pagehide", flushIfDirty);
+    return () => {
+      window.removeEventListener("pagehide", flushIfDirty);
+      flushIfDirty();
+    };
   }, [emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
+
+  /**
+   * If local signature is empty but the server still has one (e.g. after a prior wipe race),
+   * pull it back into the store for editing. Does not overwrite non-empty local edits.
+   */
+  React.useEffect(() => {
+    if (isDemo || !emailServerHydrated || !emailServerSyncEnabled) return;
+    let cancelled = false;
+    void fetch("/api/email/mailboxes", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as {
+          mailboxes?: EmailMailboxSettings[];
+          sendUsageByMailboxId?: Record<string, { used: number; limit: number | null }>;
+        };
+        if (cancelled) return;
+        if (data.sendUsageByMailboxId) {
+          setSendUsageByMailboxId(data.sendUsageByMailboxId);
+        }
+        if (!Array.isArray(data.mailboxes)) return;
+        const serverById = new Map(
+          data.mailboxes.map((m) => [m.id, typeof m.signature === "string" ? m.signature : ""]),
+        );
+        const local = useEmailAccountStore.getState().mailboxes;
+        let restored = false;
+        for (const mb of local) {
+          if (isAssignedMailbox(mb, currentUserId)) continue;
+          const serverSig = serverById.get(mb.id);
+          if (serverSig == null) continue;
+          const localSig = typeof mb.signature === "string" ? mb.signature : "";
+          if (!localSig.trim() && serverSig.trim()) {
+            updateMailbox(mb.id, { signature: serverSig });
+            restored = true;
+          }
+        }
+        // Restoring from server is not a user edit — refresh baseline after store updates.
+        if (restored) {
+          queueMicrotask(() => {
+            persistBaselineRef.current = JSON.stringify(
+              useEmailAccountStore
+                .getState()
+                .mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId)),
+            );
+            persistDirtyRef.current = false;
+          });
+        }
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemo, emailServerHydrated, emailServerSyncEnabled, currentUserId, updateMailbox]);
 
   async function testConnectionsFor(mb: EmailMailboxSettings) {
     const prepared =
@@ -637,7 +754,7 @@ export function EmailInboxSettingsCard() {
               variant="default"
               size="sm"
               className="gap-1.5"
-              disabled={savingRemote}
+              disabled={savingRemote || (!isDemo && !emailServerHydrated)}
               onClick={() => void persistMailboxesRemote(true)}
             >
               {savingRemote ? (
@@ -652,6 +769,7 @@ export function EmailInboxSettingsCard() {
               variant="outline"
               size="sm"
               className="gap-1.5"
+              disabled={!isDemo && !emailServerHydrated}
               onClick={() => {
                 const id = addMailbox();
                 setActiveMailbox(id);
@@ -664,8 +782,19 @@ export function EmailInboxSettingsCard() {
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
+          {!isDemo && !emailServerHydrated ? (
+            <div
+              className="flex items-center justify-center gap-2 rounded-lg border px-4 py-10 text-sm text-muted-foreground"
+              role="status"
+              aria-live="polite"
+            >
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Loading connected mailboxes…
+            </div>
+          ) : (
           <Accordion
             multiple
+            keepMounted
             value={openValues}
             onValueChange={(next, _details) => {
               setOpenValues(next);
@@ -819,8 +948,34 @@ export function EmailInboxSettingsCard() {
                               updateMailbox(mb.id, { emailAddress });
                             }
                           }}
+                          onBlur={(e) => {
+                            const emailAddress = e.target.value.trim();
+                            if (!emailAddress) return;
+                            const owned = useEmailAccountStore
+                              .getState()
+                              .mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId));
+                            const dup = findDuplicateMailboxByEmail(owned, emailAddress, mb.id);
+                            if (!dup) return;
+                            toast.error("This email is already added", {
+                              description: `${emailAddress} is already used by “${dup.label?.trim() || dup.emailAddress.trim() || "another mailbox"}”.`,
+                            });
+                          }}
                           placeholder="you@company.com"
+                          aria-invalid={
+                            Boolean(
+                              findDuplicateMailboxByEmail(
+                                ownedMailboxes,
+                                mb.emailAddress,
+                                mb.id,
+                              ),
+                            ) || undefined
+                          }
                         />
+                        {findDuplicateMailboxByEmail(ownedMailboxes, mb.emailAddress, mb.id) ? (
+                          <p className="text-[11px] text-destructive">
+                            This email is already added on another mailbox.
+                          </p>
+                        ) : null}
                       </div>
                       <div className="space-y-1.5 sm:col-span-2">
                         <Label className="text-xs">Reply-To (optional)</Label>
@@ -1246,13 +1401,16 @@ export function EmailInboxSettingsCard() {
                         </div>
                       </div>
                       <div className="space-y-1.5">
-                        <Label className="text-xs">Email signature</Label>
+                        <Label className="text-xs" htmlFor={`email-signature-${mb.id}`}>
+                          Email signature
+                        </Label>
                         <Textarea
+                          id={`email-signature-${mb.id}`}
                           rows={4}
-                          value={mb.signature}
+                          value={typeof mb.signature === "string" ? mb.signature : ""}
                           onChange={(e) => updateMailbox(mb.id, { signature: e.target.value })}
-                          placeholder="&#10;James Mitchell&#10;Director, Nova Inc."
-                          className="text-sm resize-y min-h-[88px]"
+                          placeholder={"James Mitchell\nDirector, Nova Inc."}
+                          className="text-sm resize-y min-h-[88px] font-normal text-foreground"
                         />
                         <p className="text-[10px] text-muted-foreground">
                           Appended automatically when composing in Inbox and when scheduling
@@ -1265,6 +1423,7 @@ export function EmailInboxSettingsCard() {
               </AccordionItem>
             ))}
           </Accordion>
+          )}
 
           <p className="text-[11px] text-muted-foreground">
             Non-sensitive fields sync to your workspace; credentials are encrypted on the server. Changes also save

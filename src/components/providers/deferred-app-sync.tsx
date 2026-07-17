@@ -4,11 +4,8 @@ import * as React from "react";
 import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import { AlertSoundUnlock } from "@/components/providers/alert-sound-unlock";
+import { EmailAccountSync } from "@/components/providers/email-account-sync";
 
-const EmailAccountSync = dynamic(
-  () => import("@/components/providers/email-account-sync").then((m) => ({ default: m.EmailAccountSync })),
-  { ssr: false },
-);
 const InboxBackgroundSync = dynamic(
   () => import("@/components/providers/inbox-background-sync").then((m) => ({ default: m.InboxBackgroundSync })),
   { ssr: false },
@@ -80,19 +77,22 @@ export function DeferredAppSync() {
     return () => window.clearTimeout(timer);
   }, []);
 
-  if (!ready) return null;
-
   return (
     <>
-      <AlertSoundUnlock />
+      {/* Mailbox hydrate must not wait on idle — settings/inbox need real boxes ASAP */}
       <EmailAccountSync />
-      <InboxBackgroundSync />
-      <ScheduledEmailSendSync />
-      <PlatformNotificationsAlertSync />
-      <ActivityAuditTracker />
-      {needsFollowupReplyWatcher(pathname) ? <FollowupPlanReplyWatcher /> : null}
-      {needsLeadResponseTimeSync(pathname) ? <LeadResponseTimeSync /> : null}
-      {needsChannelAdminSync(pathname) ? <ChannelAdminSync /> : null}
+      {ready ? (
+        <>
+          <AlertSoundUnlock />
+          <InboxBackgroundSync />
+          <ScheduledEmailSendSync />
+          <PlatformNotificationsAlertSync />
+          <ActivityAuditTracker />
+          {needsFollowupReplyWatcher(pathname) ? <FollowupPlanReplyWatcher /> : null}
+          {needsLeadResponseTimeSync(pathname) ? <LeadResponseTimeSync /> : null}
+          {needsChannelAdminSync(pathname) ? <ChannelAdminSync /> : null}
+        </>
+      ) : null}
     </>
   );
 }

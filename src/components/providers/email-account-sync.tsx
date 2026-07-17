@@ -72,6 +72,7 @@ export function EmailAccountSync() {
             ? data.mailboxes.map((m) =>
                 defaultEmailMailboxSettings({
                   ...m,
+                  signature: typeof m.signature === "string" ? m.signature : "",
                   smtp: m.smtp,
                   imap: m.imap,
                   assignedUserIds: m.assignedUserIds ?? [],

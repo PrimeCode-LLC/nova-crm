@@ -10,6 +10,7 @@ import {
 } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, mailboxReadOnlyForClient } from "@/lib/email/mailbox-data-owner-server";
 import { getMailboxSendCountForDayServer, utcSendDayKey } from "@/lib/email/mailbox-send-quota-server";
+import { normalizeCrmEmailKey } from "@/lib/crm-dedup-keys";
 
 const mailboxSchema = z.object({
   id: z.string().min(1),
@@ -130,6 +131,22 @@ export async function PATCH(req: Request) {
 
   const { organizationId, uid } = g.ctx.session;
   const { dataOwnerUid: _ignore, ...mailboxRest } = parsed.data.mailbox;
+  const emailKey = normalizeCrmEmailKey(mailboxRest.emailAddress);
+  if (emailKey) {
+    const existing = await listMailboxesForMemberServer({ organizationId, uid });
+    const duplicate = existing.find(
+      (m) => m.id !== mailboxRest.id && normalizeCrmEmailKey(m.emailAddress) === emailKey,
+    );
+    if (duplicate) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: `This email is already added on “${duplicate.label?.trim() || duplicate.emailAddress.trim() || "another mailbox"}”.`,
+        },
+        { status: 409 },
+      );
+    }
+  }
   const result = await upsertMailboxWithSecretsMerged({
     organizationId,
     uid,

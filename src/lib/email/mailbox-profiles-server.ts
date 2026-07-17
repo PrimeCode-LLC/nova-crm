@@ -380,6 +380,7 @@ export async function upsertMailboxWithSecretsMerged(input: {
     uid: input.uid,
     mailbox: {
       ...mailbox,
+      signature: typeof mailbox.signature === "string" ? mailbox.signature : "",
       smtp: { ...mailbox.smtp, user: smtpUser, password: "" },
       imap: { ...mailbox.imap, user: imapUser, password: "" },
     },
