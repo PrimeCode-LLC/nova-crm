@@ -308,6 +308,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     );
   }
 
+  const resolvedLead = lead;
   const canEditLead = ws.canEditLead(lead);
   const prospectSourceId = lead.prospectSourceId?.trim();
   const linkedSourceProspect = ws.leads.find(
@@ -389,19 +390,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   }
 
   function assignLeadOwner(nextOwnerId: string, options?: { claim?: boolean }) {
-    const currentOwnerId = lead.ownerId?.trim() || "";
+    const currentOwnerId = resolvedLead.ownerId?.trim() || "";
     const cleanNextOwnerId = nextOwnerId.trim();
     if (cleanNextOwnerId === currentOwnerId) return;
 
     const fromName = ownerDisplayName(currentOwnerId);
     const toName = ownerDisplayName(cleanNextOwnerId);
 
-    ws.patchLead(lead.id, { ownerId: cleanNextOwnerId });
-    ws.patchAccount(lead.accountId, { ownerId: cleanNextOwnerId });
-    ws.patchContact(lead.contactId, { ownerId: cleanNextOwnerId });
+    ws.patchLead(resolvedLead.id, { ownerId: cleanNextOwnerId });
+    ws.patchAccount(resolvedLead.accountId, { ownerId: cleanNextOwnerId });
+    ws.patchContact(resolvedLead.contactId, { ownerId: cleanNextOwnerId });
     ws.addTimelineEvent({
       id: newTimelineId(),
-      leadId: lead.id,
+      leadId: resolvedLead.id,
       type: "assignment_changed",
       actorId: ws.currentUserId,
       summary: options?.claim
@@ -409,7 +410,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         : `Reassigned from ${fromName} to ${toName}`,
       createdAt: new Date().toISOString(),
     });
-    ws.bumpLeadActivity(lead.id);
+    ws.bumpLeadActivity(resolvedLead.id);
     toast.success(cleanNextOwnerId ? "Owner updated" : "Moved to open queue");
   }
 
