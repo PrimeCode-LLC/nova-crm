@@ -34,7 +34,8 @@ export function buildActivityInboxNotifications(
   const rows: DemoNotification[] = [];
 
   for (const r of records) {
-    if (r.userId === viewerId) continue;
+    const isImportCompletion = r.type === "import_completed";
+    if (r.userId === viewerId && !isImportCompletion) continue;
     const ts = new Date(r.occurredAt).getTime();
     if (!Number.isFinite(ts) || ts < cutoff) continue;
 
@@ -52,7 +53,11 @@ export function buildActivityInboxNotifications(
       sender: r.userId,
       message: `${actor}: ${summary}${leadBit}`,
       target: summary.slice(0, 80),
-      targetHref: r.leadId ? `/leads/${r.leadId}` : "/activity",
+      targetHref: isImportCompletion
+        ? "/admin/import"
+        : r.leadId
+          ? `/leads/${r.leadId}`
+          : "/activity",
       timestamp: r.occurredAt,
     });
   }

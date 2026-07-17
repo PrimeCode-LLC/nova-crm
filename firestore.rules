@@ -483,6 +483,18 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /importJobs/{id} {
+      allow read, write: if false;
+    }
+
+    match /importJobChunks/{id} {
+      allow read, write: if false;
+    }
+
+    match /importIdentityKeys/{id} {
+      allow read, write: if false;
+    }
+
     match /scraperFeeds/{id} {
       allow read, write: if false;
     }

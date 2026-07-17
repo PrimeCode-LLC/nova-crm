@@ -49,6 +49,7 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     description: "Bulk CSV and spreadsheet import",
     cluster: "programs",
     minWorkspaceRole: "manager",
+    minOrgRole: "admin",
     href: "/admin/import",
   },
   scrapers: {

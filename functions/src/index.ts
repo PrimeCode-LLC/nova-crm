@@ -9,6 +9,11 @@ import {
   type Role,
 } from "./mergePermissions";
 
+export {
+  cleanupProspectImportTemporaryData,
+  processProspectImportChunk,
+} from "./prospectImportWorker";
+
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
 if (!getApps().length) {

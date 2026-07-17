@@ -34,6 +34,12 @@ export const COLLECTIONS = {
   /** Connected Google / Microsoft calendars per user (tokens server-only). */
   calendarConnections: "calendarConnections",
   ingestQueue: "ingestQueue",
+  /** Durable bulk prospect import job summaries. */
+  importJobs: "importJobs",
+  /** Temporary normalized row chunks consumed by Firebase Functions. */
+  importJobChunks: "importJobChunks",
+  /** Tenant-scoped hashed email/domain/linkedin/phone identity reservations. */
+  importIdentityKeys: "importIdentityKeys",
   /** RSS feed configs for social scraper (tenant-scoped). */
   scraperFeeds: "scraperFeeds",
   /** 7-day staging pool before promote to prospect/lead. */
@@ -99,6 +105,9 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.calendarDelegations,
   COLLECTIONS.mailboxDelegations,
   COLLECTIONS.calendarConnections,
+  COLLECTIONS.importJobs,
+  COLLECTIONS.importJobChunks,
+  COLLECTIONS.importIdentityKeys,
   COLLECTIONS.auditLog,
   COLLECTIONS.workspaceChatChannels,
   COLLECTIONS.workspaceChatMessages,
