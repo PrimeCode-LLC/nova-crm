@@ -2,6 +2,8 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import { FieldValue } from "firebase-admin/firestore";
 
+const SCHEDULED_COLLECTION = "scheduledEmails";
+
 function sendStatsRef(organizationId: string, uid: string, mailboxId: string, dayKey: string) {
   const db = getAdminDb();
   if (!db) return null;
@@ -16,9 +18,34 @@ function sendStatsRef(organizationId: string, uid: string, mailboxId: string, da
     .doc(dayKey);
 }
 
+function scheduledRoot(organizationId: string, uid: string) {
+  const db = getAdminDb();
+  if (!db) return null;
+  return db
+    .collection(COLLECTIONS.organizations)
+    .doc(organizationId)
+    .collection(ORG_SUBCOLLECTIONS.members)
+    .doc(uid)
+    .collection(SCHEDULED_COLLECTION);
+}
+
 /** UTC calendar day key `yyyy-mm-dd`. */
 export function utcSendDayKey(date = new Date()): string {
   return date.toISOString().slice(0, 10);
+}
+
+export function addUtcDayKeys(dayKey: string, days: number): string {
+  const d = new Date(`${dayKey}T00:00:00.000Z`);
+  if (Number.isNaN(d.getTime())) return dayKey;
+  d.setUTCDate(d.getUTCDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+function normalizeDailyLimit(dailySendLimit: number | null | undefined): number | null {
+  if (dailySendLimit == null || !Number.isFinite(dailySendLimit) || dailySendLimit <= 0) {
+    return null;
+  }
+  return Math.floor(dailySendLimit);
 }
 
 export async function getMailboxSendCountForDayServer(input: {
@@ -35,6 +62,112 @@ export async function getMailboxSendCountForDayServer(input: {
   return Math.max(0, Number((snap.data() as Record<string, unknown>).count ?? 0));
 }
 
+/**
+ * Counts pending/processing scheduled emails for a mailbox, bucketed by UTC day.
+ * Uses existing status + scheduledAt indexes; mailboxId filtered in memory.
+ */
+export async function countPendingScheduledByUtcDayServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  fromDayKey: string;
+  toDayKey: string;
+}): Promise<Record<string, number>> {
+  const root = scheduledRoot(input.organizationId, input.uid);
+  const out: Record<string, number> = {};
+  if (!root || !input.mailboxId.trim()) return out;
+
+  const fromIso = `${input.fromDayKey}T00:00:00.000Z`;
+  const toExclusive = addUtcDayKeys(input.toDayKey, 1);
+  const toIso = `${toExclusive}T00:00:00.000Z`;
+  if (Number.isNaN(new Date(fromIso).getTime()) || Number.isNaN(new Date(toIso).getTime())) {
+    return out;
+  }
+
+  const countsForStatus = async (status: "pending" | "processing") => {
+    const snap = await root
+      .where("status", "==", status)
+      .where("scheduledAt", ">=", fromIso)
+      .where("scheduledAt", "<", toIso)
+      .orderBy("scheduledAt", "asc")
+      .limit(2000)
+      .get();
+    for (const doc of snap.docs) {
+      const data = doc.data() as Record<string, unknown>;
+      if (String(data.mailboxId ?? "") !== input.mailboxId) continue;
+      const dayKey = utcSendDayKey(new Date(String(data.scheduledAt ?? "")));
+      if (!dayKey || dayKey < input.fromDayKey || dayKey > input.toDayKey) continue;
+      out[dayKey] = (out[dayKey] ?? 0) + 1;
+    }
+  };
+
+  await Promise.all([countsForStatus("pending"), countsForStatus("processing")]);
+  return out;
+}
+
+export type MailboxDayLoad = {
+  dayKey: string;
+  sent: number;
+  pending: number;
+  /** sent + pending already booked on this UTC day */
+  booked: number;
+  limit: number | null;
+  remaining: number | null;
+};
+
+export async function getMailboxDayLoadsServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  dailySendLimit: number | null | undefined;
+  /** Inclusive UTC day; defaults to today. */
+  fromDayKey?: string;
+  /** Inclusive UTC day; defaults to today + 59. */
+  toDayKey?: string;
+}): Promise<{
+  limit: number | null;
+  fromDayKey: string;
+  toDayKey: string;
+  days: MailboxDayLoad[];
+  byDay: Record<string, MailboxDayLoad>;
+}> {
+  const limit = normalizeDailyLimit(input.dailySendLimit);
+  const fromDayKey = input.fromDayKey ?? utcSendDayKey();
+  const toDayKey = input.toDayKey ?? addUtcDayKeys(fromDayKey, 59);
+  const pendingByDay = await countPendingScheduledByUtcDayServer({
+    organizationId: input.organizationId,
+    uid: input.uid,
+    mailboxId: input.mailboxId,
+    fromDayKey,
+    toDayKey,
+  });
+
+  const todayKey = utcSendDayKey();
+  const sentToday =
+    todayKey >= fromDayKey && todayKey <= toDayKey
+      ? await getMailboxSendCountForDayServer({
+          organizationId: input.organizationId,
+          uid: input.uid,
+          mailboxId: input.mailboxId,
+          dayKey: todayKey,
+        })
+      : 0;
+
+  const days: MailboxDayLoad[] = [];
+  const byDay: Record<string, MailboxDayLoad> = {};
+  for (let key = fromDayKey; key <= toDayKey; key = addUtcDayKeys(key, 1)) {
+    const pending = pendingByDay[key] ?? 0;
+    const sent = key === todayKey ? sentToday : 0;
+    const booked = sent + pending;
+    const remaining = limit == null ? null : Math.max(0, limit - booked);
+    const row: MailboxDayLoad = { dayKey: key, sent, pending, booked, limit, remaining };
+    days.push(row);
+    byDay[key] = row;
+  }
+
+  return { limit, fromDayKey, toDayKey, days, byDay };
+}
+
 export type MailboxQuotaCheck =
   | { ok: true; used: number; limit: number | null; remaining: number | null }
   | { ok: false; error: string; used: number; limit: number; status: 429 };
@@ -46,10 +179,7 @@ export async function assertMailboxDailySendQuotaServer(input: {
   mailboxId: string;
   dailySendLimit: number | null | undefined;
 }): Promise<MailboxQuotaCheck> {
-  const limit =
-    input.dailySendLimit == null || !Number.isFinite(input.dailySendLimit) || input.dailySendLimit <= 0
-      ? null
-      : Math.floor(input.dailySendLimit);
+  const limit = normalizeDailyLimit(input.dailySendLimit);
   const used = input.mailboxId
     ? await getMailboxSendCountForDayServer({
         organizationId: input.organizationId,
@@ -71,6 +201,70 @@ export async function assertMailboxDailySendQuotaServer(input: {
     };
   }
   return { ok: true, used, limit, remaining: Math.max(0, limit - used) };
+}
+
+/**
+ * Soft schedule-time check: blocks when that UTC day is already at/over capacity
+ * (successful sends today + pending/processing scheduled for that day).
+ */
+export async function assertMailboxScheduleDayQuotaServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  dailySendLimit: number | null | undefined;
+  scheduledAt: Date | string;
+}): Promise<
+  | { ok: true; dayKey: string; used: number; limit: number | null; remaining: number | null }
+  | {
+      ok: false;
+      error: string;
+      dayKey: string;
+      used: number;
+      limit: number;
+      remaining: number;
+      status: 429;
+    }
+> {
+  const limit = normalizeDailyLimit(input.dailySendLimit);
+  const scheduledDate =
+    input.scheduledAt instanceof Date ? input.scheduledAt : new Date(input.scheduledAt);
+  const dayKey = utcSendDayKey(scheduledDate);
+
+  if (limit == null || !input.mailboxId.trim()) {
+    return { ok: true, dayKey, used: 0, limit: null, remaining: null };
+  }
+
+  const [sent, pendingByDay] = await Promise.all([
+    dayKey === utcSendDayKey()
+      ? getMailboxSendCountForDayServer({
+          organizationId: input.organizationId,
+          uid: input.uid,
+          mailboxId: input.mailboxId,
+          dayKey,
+        })
+      : Promise.resolve(0),
+    countPendingScheduledByUtcDayServer({
+      organizationId: input.organizationId,
+      uid: input.uid,
+      mailboxId: input.mailboxId,
+      fromDayKey: dayKey,
+      toDayKey: dayKey,
+    }),
+  ]);
+  const pending = pendingByDay[dayKey] ?? 0;
+  const used = sent + pending;
+  if (used >= limit) {
+    return {
+      ok: false,
+      error: `Daily send limit full for ${dayKey} UTC (${used}/${limit} booked). Pick another day or mailbox.`,
+      dayKey,
+      used,
+      limit,
+      remaining: 0,
+      status: 429,
+    };
+  }
+  return { ok: true, dayKey, used, limit, remaining: Math.max(0, limit - used) };
 }
 
 export async function incrementMailboxSendCountServer(input: {

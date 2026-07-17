@@ -5,6 +5,8 @@ import {
   createScheduledEmailServer,
   listScheduledEmailsForMemberServer,
 } from "@/lib/email/scheduled-emails-server";
+import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
+import { assertMailboxScheduleDayQuotaServer } from "@/lib/email/mailbox-send-quota-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 
@@ -92,6 +94,32 @@ export async function POST(req: Request) {
     return NextResponse.json(
       { ok: false, error: contactPolicy.error },
       { status: contactPolicy.status },
+    );
+  }
+
+  const profile = await getMailboxProfileServer({
+    organizationId: g.ctx.session.organizationId,
+    uid: resolved.dataOwnerUid,
+    mailboxId,
+  });
+  const scheduleQuota = await assertMailboxScheduleDayQuotaServer({
+    organizationId: g.ctx.session.organizationId,
+    uid: resolved.dataOwnerUid,
+    mailboxId,
+    dailySendLimit: profile?.dailySendLimit ?? null,
+    scheduledAt,
+  });
+  if (!scheduleQuota.ok) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: scheduleQuota.error,
+        dayKey: scheduleQuota.dayKey,
+        used: scheduleQuota.used,
+        limit: scheduleQuota.limit,
+        remaining: scheduleQuota.remaining,
+      },
+      { status: scheduleQuota.status },
     );
   }
 

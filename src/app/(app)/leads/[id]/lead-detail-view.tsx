@@ -86,15 +86,42 @@ import { LeadSourceButton, LeadScraperSourceSummary } from "@/components/leads/l
 import { ProspectChannelPanel } from "@/components/prospects/prospect-channel-panel";
 import { ProspectIntakeDialog } from "@/components/leads/prospect-intake-dialog";
 import { LeadAnalyzeDialog } from "@/components/ai/lead-analyze-dialog";
-import type { Lead, PipelineStage } from "@/lib/types";
+import type { Lead, OrganizationMember, PipelineStage, User } from "@/lib/types";
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { extractEmailAddresses } from "@/lib/email/reply-compose";
+import {
+  buildWorkspaceOwnerPickerOptions,
+  ownerPickerTriggerLabel,
+} from "@/lib/owner-scope";
 
 const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "tasks", "emails"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
+const OPEN_QUEUE_OWNER_VALUE = "__open_queue__";
+
+type OwnerOption = { id: string; label: string };
+
+/** Org membership is authoritative for disabled teammates; CRM `users` alone can still list them. */
+function activeOrgMemberOwnerOptions(members: OrganizationMember[], crmUsers: User[]): OwnerOption[] {
+  const uidToUser = new Map(crmUsers.map((u) => [u.id, u]));
+  const opts: OwnerOption[] = [];
+  for (const m of members) {
+    if (m.status !== "active") continue;
+    const u = uidToUser.get(m.uid);
+    if (u?.status === "inactive") continue;
+    const label =
+      m.displayName?.trim() ||
+      u?.displayName?.trim() ||
+      (m.email.includes("@") ? m.email.split("@")[0] : m.email) ||
+      u?.email.split("@")[0] ||
+      m.uid;
+    opts.push({ id: m.uid, label });
+  }
+  opts.sort((a, b) => a.label.localeCompare(b.label));
+  return opts;
+}
 
 function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): LeadTab {
   const raw = searchParams.get("tab");
@@ -231,6 +258,37 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     };
   }, [lead, relatedEmails, viewerForTasks, ws]);
 
+  const fallbackOwnerOptions = React.useMemo(
+    () => buildWorkspaceOwnerPickerOptions(ws.users, ws.currentUserId, ws.getOwnerDisplayName),
+    [ws.users, ws.currentUserId, ws.getOwnerDisplayName],
+  );
+  const [activeMemberOptions, setActiveMemberOptions] = React.useState<OwnerOption[] | null>(null);
+
+  React.useEffect(() => {
+    if (ws.isDemo) return;
+
+    let cancelled = false;
+    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { members?: OrganizationMember[] };
+        if (cancelled) return;
+        const fromMembers = activeOrgMemberOwnerOptions(data.members ?? [], ws.users);
+        if (fromMembers.length > 0) setActiveMemberOptions(fromMembers);
+      })
+      .catch(() => {
+        /* keep CRM fallback */
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [ws.isDemo, ws.users]);
+
+  const ownerOptions = ws.isDemo
+    ? fallbackOwnerOptions
+    : (activeMemberOptions ?? fallbackOwnerOptions);
+
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
@@ -287,6 +345,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const showAttributionCard = Boolean(
     campaign || profile || lead.profileId || needsOutreachProfile,
   );
+  const ownerSelectValue = lead.ownerId?.trim() || OPEN_QUEUE_OWNER_VALUE;
 
   async function copyToClipboard(text: string, okMsg: string) {
     try {
@@ -310,6 +369,48 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       ws.patchLead(latest.id, rest);
       ws.bumpLeadActivity(latest.id);
     }
+  }
+
+  function newTimelineId(): string {
+    if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+      return `te-${crypto.randomUUID()}`;
+    }
+    return `te-${Date.now()}`;
+  }
+
+  function ownerDisplayName(ownerId: string): string {
+    if (!ownerId.trim()) return "Open queue";
+    return (
+      ownerOptions.find((o) => o.id === ownerId)?.label ||
+      ws.getUserById(ownerId)?.displayName?.trim() ||
+      ws.getOwnerDisplayName(ownerId)?.trim() ||
+      "Unknown owner"
+    );
+  }
+
+  function assignLeadOwner(nextOwnerId: string, options?: { claim?: boolean }) {
+    const currentOwnerId = lead.ownerId?.trim() || "";
+    const cleanNextOwnerId = nextOwnerId.trim();
+    if (cleanNextOwnerId === currentOwnerId) return;
+
+    const fromName = ownerDisplayName(currentOwnerId);
+    const toName = ownerDisplayName(cleanNextOwnerId);
+
+    ws.patchLead(lead.id, { ownerId: cleanNextOwnerId });
+    ws.patchAccount(lead.accountId, { ownerId: cleanNextOwnerId });
+    ws.patchContact(lead.contactId, { ownerId: cleanNextOwnerId });
+    ws.addTimelineEvent({
+      id: newTimelineId(),
+      leadId: lead.id,
+      type: "assignment_changed",
+      actorId: ws.currentUserId,
+      summary: options?.claim
+        ? `${toName} claimed this prospect from the open queue`
+        : `Reassigned from ${fromName} to ${toName}`,
+      createdAt: new Date().toISOString(),
+    });
+    ws.bumpLeadActivity(lead.id);
+    toast.success(cleanNextOwnerId ? "Owner updated" : "Moved to open queue");
   }
 
   return (
@@ -446,26 +547,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 onClick={() => {
                   const uid = ws.currentUserId;
                   if (!uid) return;
-                  const name =
-                    ws.getUserById(uid)?.displayName?.trim() ||
-                    ws.getOwnerDisplayName(uid)?.trim() ||
-                    "You";
-                  ws.patchLead(lead.id, { ownerId: uid });
-                  ws.patchAccount(lead.accountId, { ownerId: uid });
-                  ws.patchContact(lead.contactId, { ownerId: uid });
-                  ws.addTimelineEvent({
-                    id:
-                      typeof crypto !== "undefined" && "randomUUID" in crypto
-                        ? `te-${crypto.randomUUID()}`
-                        : `te-${Date.now()}`,
-                    leadId: lead.id,
-                    type: "assignment_changed",
-                    actorId: uid,
-                    summary: `${name} claimed this prospect from the open queue`,
-                    createdAt: new Date().toISOString(),
-                  });
-                  ws.bumpLeadActivity(lead.id);
-                  toast.success("You claimed this prospect");
+                  assignLeadOwner(uid, { claim: true });
                 }}
               >
                 <UserPlus className="h-3.5 w-3.5" /> Claim
@@ -708,6 +790,31 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               </CardHeader>
               <CardContent className="pt-0 space-y-2">
                 <UserChip userId={lead.ownerId} size="md" />
+                {canEditLead ? (
+                  <Select
+                    value={ownerSelectValue}
+                    onValueChange={(v) => {
+                      if (!v) return;
+                      assignLeadOwner(v === OPEN_QUEUE_OWNER_VALUE ? "" : v);
+                    }}
+                  >
+                    <SelectTrigger size="sm" className="h-8 w-full justify-between">
+                      <SelectValue placeholder="Add owner">
+                        {lead.ownerId?.trim()
+                          ? ownerPickerTriggerLabel(lead.ownerId, ownerOptions)
+                          : "Add owner"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={OPEN_QUEUE_OWNER_VALUE}>Open queue (unassigned)</SelectItem>
+                      {ownerOptions.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : null}
                 {lead.scraperId && (
                   <div className="text-xs text-muted-foreground flex items-center gap-2">
                     <span>Lead by</span>

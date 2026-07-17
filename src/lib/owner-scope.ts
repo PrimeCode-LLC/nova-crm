@@ -205,6 +205,7 @@ export function buildWorkspaceOwnerPickerOptions(
     const id = raw?.trim();
     if (!id || byId.has(id)) continue;
     const u = users.find((x) => x.id === id);
+    if (u?.status === "inactive") continue;
     const label =
       u?.displayName?.trim() ||
       getOwnerDisplayName(id)?.trim() ||

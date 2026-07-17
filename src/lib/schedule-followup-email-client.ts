@@ -90,8 +90,12 @@ export async function scheduleFollowupEmailClient(
 
   const text = outboundBody;
   const html = outboundBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
+  const owner = account.dataOwnerUid?.trim();
+  const scheduleUrl = owner
+    ? `/api/email/scheduled?forUser=${encodeURIComponent(owner)}`
+    : "/api/email/scheduled";
   try {
-    const res = await fetch("/api/email/scheduled", {
+    const res = await fetch(scheduleUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -108,7 +112,14 @@ export async function scheduleFollowupEmailClient(
         leadId: input.leadId,
       }),
     });
-    const data = (await res.json()) as { ok?: boolean; error?: string; id?: string };
+    const data = (await res.json()) as {
+      ok?: boolean;
+      error?: string;
+      id?: string;
+      dayKey?: string;
+      used?: number;
+      limit?: number;
+    };
     if (!data.ok || !data.id) {
       return { ok: false, error: data.error ?? "Could not schedule email" };
     }

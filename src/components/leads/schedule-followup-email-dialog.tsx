@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { format } from "date-fns";
+import { AlertTriangle, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import type { Followup, Lead } from "@/lib/types";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
@@ -16,7 +17,16 @@ import {
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
 import { formatBrowserTimezoneLabel } from "@/lib/scheduling/timezone-options";
+import {
+  autoFixScheduleDates,
+  buildDemoMailboxDayLoads,
+  fetchMailboxScheduleLoad,
+  formatUtcDayLabel,
+  projectStepCapacity,
+  type MailboxDayLoadClient,
+} from "@/lib/email/mailbox-schedule-capacity";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -68,6 +78,7 @@ export function ScheduleFollowupEmailDialog({
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const addScheduled = useEmailAccountStore((s) => s.addScheduled);
+  const scheduled = useEmailAccountStore((s) => s.scheduled);
 
   const mailboxOptions = React.useMemo(() => {
     if (mailboxes.length > 0) return mailboxes;
@@ -81,6 +92,8 @@ export function ScheduleFollowupEmailDialog({
   const [body, setBody] = React.useState("");
   const [includeSignature, setIncludeSignature] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
+  const [loadByDay, setLoadByDay] = React.useState<Record<string, MailboxDayLoadClient>>({});
+  const [loadLimit, setLoadLimit] = React.useState<number | null>(null);
 
   const account = React.useMemo(() => {
     return (
@@ -104,9 +117,88 @@ export function ScheduleFollowupEmailDialog({
     setSubmitting(false);
   }, [open, followup, lead.contactEmail, mailboxOptions, activeMailboxId]);
 
+  React.useEffect(() => {
+    if (!open || !mailboxId) {
+      setLoadByDay({});
+      setLoadLimit(null);
+      return;
+    }
+    let cancelled = false;
+    async function loadCapacity() {
+      if (isDemo) {
+        const demo = buildDemoMailboxDayLoads({
+          scheduled,
+          mailboxId,
+          dailySendLimit: account.dailySendLimit,
+        });
+        if (!cancelled) {
+          setLoadByDay(demo.byDay);
+          setLoadLimit(demo.limit);
+        }
+        return;
+      }
+      const result = await fetchMailboxScheduleLoad({
+        mailboxId,
+        dataOwnerUid: account.dataOwnerUid,
+      });
+      if (cancelled) return;
+      if (result.ok) {
+        setLoadByDay(result.byDay);
+        setLoadLimit(result.limit);
+      } else {
+        setLoadByDay({});
+        setLoadLimit(account.dailySendLimit ?? null);
+      }
+    }
+    void loadCapacity();
+    return () => {
+      cancelled = true;
+    };
+  }, [open, mailboxId, isDemo, scheduled, account.dailySendLimit, account.dataOwnerUid]);
+
+  const capacity = React.useMemo(
+    () =>
+      projectStepCapacity({
+        steps: [{ id: "single", scheduledAt, included: Boolean(scheduledAt) }],
+        byDay: loadByDay,
+        limit: loadLimit,
+      }),
+    [scheduledAt, loadByDay, loadLimit],
+  );
+
+  const info = capacity.byStepId.single;
+  const overLimit = Boolean(info?.overLimit);
+
+  function handleAutoFix() {
+    const result = autoFixScheduleDates(
+      [{ id: "single", scheduledAt, included: true }],
+      loadByDay,
+      loadLimit,
+    );
+    const next = result.steps[0]?.scheduledAt;
+    if (!next || (!result.changed && result.unresolvedIds.length === 0)) {
+      toast.message("Date already fits within the daily limit");
+      return;
+    }
+    if (result.unresolvedIds.length > 0) {
+      toast.error("No free day within 60 days", {
+        description: "Raise the daily limit or use another mailbox.",
+      });
+      return;
+    }
+    setScheduledAt(next);
+    toast.success("Moved to the next free day");
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!followup) return;
+    if (overLimit) {
+      toast.error("That day is over the send limit", {
+        description: "Change the date, use Auto-fix, or pick another mailbox.",
+      });
+      return;
+    }
 
     setSubmitting(true);
     try {
@@ -153,6 +245,32 @@ export function ScheduleFollowupEmailDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-2">
+            {overLimit ? (
+              <Alert className="border-amber-500/40 bg-amber-500/10 text-amber-950 dark:text-amber-100">
+                <AlertTriangle className="text-amber-700 dark:text-amber-400" />
+                <AlertTitle>Daily send limit full</AlertTitle>
+                <AlertDescription className="text-amber-900/90 dark:text-amber-100/90">
+                  <p>
+                    {info?.dayKey ? `${formatUtcDayLabel(info.dayKey)} UTC` : "That day"} is at
+                    capacity for {mailboxOptionLabel(account)}
+                    {loadLimit != null && info
+                      ? ` (${info.booked}/${loadLimit} booked)`
+                      : ""}
+                    . Change the date, use Auto-fix, or pick another mailbox.
+                  </p>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="mt-2 h-7 border-amber-500/40 bg-background/60"
+                    onClick={handleAutoFix}
+                  >
+                    <CalendarClock className="h-3.5 w-3.5" />
+                    Auto-fix date
+                  </Button>
+                </AlertDescription>
+              </Alert>
+            ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="followup-schedule-from">From</Label>
               <Select
@@ -178,6 +296,7 @@ export function ScheduleFollowupEmailDialog({
                 <p className="text-[11px] text-muted-foreground">
                   Sends via {account.emailAddress.trim()}
                   {account.displayName?.trim() ? ` (${account.displayName.trim()})` : ""}
+                  {loadLimit != null ? ` · limit ${loadLimit}/UTC day` : ""}
                 </p>
               ) : null}
             </div>
@@ -219,11 +338,33 @@ export function ScheduleFollowupEmailDialog({
                 value={scheduledAt}
                 min={toDatetimeLocalValue(new Date(Date.now() + 60_000))}
                 onChange={(e) => setScheduledAt(e.target.value)}
+                className={
+                  overLimit
+                    ? "border-amber-500/50 focus-visible:ring-amber-500/40"
+                    : undefined
+                }
                 required
               />
               {scheduledAt ? (
-                <p className="text-[10px] text-muted-foreground">
+                <p
+                  className={
+                    overLimit
+                      ? "text-[10px] text-amber-800 dark:text-amber-300"
+                      : "text-[10px] text-muted-foreground"
+                  }
+                >
                   {format(new Date(scheduledAt), "MMM d, yyyy 'at' h:mm a")} · {timezoneLabel}
+                  {loadLimit != null && info ? (
+                    <>
+                      {" "}
+                      · UTC {info.dayKey}
+                      {overLimit
+                        ? ` · over limit (${info.booked}/${loadLimit} booked)`
+                        : info.remainingBefore != null
+                          ? ` · ${info.remainingBefore} slot${info.remainingBefore === 1 ? "" : "s"} left`
+                          : ""}
+                    </>
+                  ) : null}
                 </p>
               ) : null}
             </div>
@@ -246,7 +387,7 @@ export function ScheduleFollowupEmailDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !followup || !mailboxId}>
+            <Button type="submit" disabled={submitting || !followup || !mailboxId || overLimit}>
               {submitting ? "Scheduling…" : "Schedule"}
             </Button>
           </DialogFooter>
