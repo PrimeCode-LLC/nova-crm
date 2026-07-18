@@ -7,6 +7,7 @@ import {
 } from "@/lib/scheduling/scheduling-server";
 const bookSchema = z.object({
   hostId: z.string().min(1),
+  internalHostIds: z.array(z.string().min(1)).max(20).optional(),
   schedulingLinkId: z.string().optional(),
   title: z.string().min(1).max(200),
   startAt: z.string().min(1),
@@ -60,6 +61,7 @@ export async function POST(req: Request) {
   const r = await bookMeetingServer({
     organizationId: g.ctx.session.organizationId,
     hostId: parsed.data.hostId,
+    internalHostIds: parsed.data.internalHostIds,
     schedulingLinkId: parsed.data.schedulingLinkId,
     title: parsed.data.title,
     startAt: parsed.data.startAt,
@@ -78,10 +80,14 @@ export async function POST(req: Request) {
     leadOwnerId: parsed.data.leadOwnerId ?? g.ctx.session.uid,
     contactId: parsed.data.contactId,
     actorUid: g.ctx.session.uid,
+    sendClientGoogleInvite: true,
   });
   if ("error" in r) {
     const status = r.error.includes("cannot book") ? 403 : 400;
     return NextResponse.json({ ok: false, error: r.error }, { status });
   }
-  return NextResponse.json({ ok: true, item: r.meeting }, { status: 201 });
+  return NextResponse.json(
+    { ok: true, item: r.meeting, googleErrors: r.googleErrors },
+    { status: 201 },
+  );
 }

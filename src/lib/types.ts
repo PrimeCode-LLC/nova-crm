@@ -717,7 +717,13 @@ export type CalendarGranteeType = "user" | "role" | "department" | "org" | "repo
 
 export type MeetingStatus = "scheduled" | "completed" | "cancelled" | "no_show";
 
-export type MeetingSource = "public_link" | "internal" | "manual";
+export type MeetingSource =
+  | "public_link"
+  | "internal"
+  | "manual"
+  | "invite_rsvp"
+  | "email_thread"
+  | "external_booking";
 
 export interface AvailabilityTimeSlot {
   start: string;
@@ -776,6 +782,10 @@ export interface Meeting {
   organizationId: string;
   hostId: string;
   hostName?: string;
+  /** Additional internal hosts who received a Google Calendar copy. */
+  internalHostIds?: string[];
+  /** Google Calendar event id per host uid. */
+  googleEventIdsByHost?: Record<string, string>;
   bookedById?: string;
   bookedByName?: string;
   leadId?: string;
@@ -794,6 +804,9 @@ export interface Meeting {
   locationType: MeetingLocationType;
   locationDetails?: string;
   source: MeetingSource;
+  /** ICS UID from an inbound calendar invite (RSVP correlation). */
+  inboundInviteUid?: string;
+  organizerEmail?: string;
   createdAt: ISODate;
   updatedAt: ISODate;
 }

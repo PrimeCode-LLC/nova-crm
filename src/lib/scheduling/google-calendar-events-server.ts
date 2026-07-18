@@ -10,6 +10,7 @@ type ConnectionCredentials = {
   accessToken?: string;
   refreshToken?: string;
   tokenExpiresAt?: string;
+  writeCalendarId?: string;
 };
 
 async function getHostConnectionCredentials(input: {
@@ -34,6 +35,7 @@ async function getHostConnectionCredentials(input: {
       refreshToken: typeof data.refreshToken === "string" ? data.refreshToken : undefined,
       tokenExpiresAt:
         typeof data.tokenExpiresAt === "string" ? data.tokenExpiresAt : undefined,
+      writeCalendarId: "primary",
     };
   });
 }
@@ -272,3 +274,220 @@ export async function syncHostCalendarServer(input: {
     lastSyncAt: new Date().toISOString(),
   };
 }
+
+export type GoogleCalendarEventWriteInput = {
+  organizationId: string;
+  hostUid: string;
+  summary: string;
+  description?: string;
+  location?: string;
+  startAt: string;
+  endAt: string;
+  timezone?: string;
+  /** Invite these emails on the Google event (primary host typically). */
+  attendeeEmails?: string[];
+  /** When true, Google sends invitation emails to attendees. */
+  sendUpdates?: boolean;
+};
+
+export async function insertGoogleCalendarEventServer(
+  input: GoogleCalendarEventWriteInput,
+): Promise<
+  | { ok: true; eventId: string; htmlLink?: string; hangoutLink?: string }
+  | { ok: false; error: string; needsReconnect?: boolean }
+> {
+  const connections = await getHostConnectionCredentials({
+    organizationId: input.organizationId,
+    hostUid: input.hostUid,
+  });
+  const conn = connections.find((c) => c.provider === "google");
+  if (!conn) {
+    return { ok: false, error: "No Google Calendar connected for this user." };
+  }
+
+  const tokenResult = await resolveAccessToken(conn);
+  if ("error" in tokenResult) {
+    return {
+      ok: false,
+      error: "Google Calendar access expired. Reconnect Google Calendar.",
+      needsReconnect: true,
+    };
+  }
+
+  const calendarId = encodeURIComponent(conn.writeCalendarId || "primary");
+  const body: Record<string, unknown> = {
+    summary: input.summary,
+    description: input.description ?? "",
+    location: input.location ?? "",
+    start: {
+      dateTime: input.startAt,
+      timeZone: input.timezone || "UTC",
+    },
+    end: {
+      dateTime: input.endAt,
+      timeZone: input.timezone || "UTC",
+    },
+  };
+  if (input.attendeeEmails?.length) {
+    body.attendees = input.attendeeEmails.map((email) => ({
+      email: email.trim().toLowerCase(),
+    }));
+  }
+
+  const params = new URLSearchParams();
+  if (input.sendUpdates && input.attendeeEmails?.length) {
+    params.set("sendUpdates", "all");
+  }
+
+  const url = `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events${
+    params.toString() ? `?${params.toString()}` : ""
+  }`;
+
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${tokenResult.token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (res.status === 401) {
+    return {
+      ok: false,
+      error: "Google Calendar access expired. Reconnect Google Calendar.",
+      needsReconnect: true,
+    };
+  }
+  if (!res.ok) {
+    const detail = await res.text().catch(() => "");
+    return {
+      ok: false,
+      error: detail.slice(0, 300) || `Google Calendar write failed (${res.status})`,
+    };
+  }
+
+  const created = (await res.json()) as {
+    id?: string;
+    htmlLink?: string;
+    hangoutLink?: string;
+  };
+  if (!created.id) {
+    return { ok: false, error: "Google Calendar did not return an event id." };
+  }
+
+  return {
+    ok: true,
+    eventId: created.id,
+    htmlLink: created.htmlLink,
+    hangoutLink: created.hangoutLink,
+  };
+}
+
+export async function deleteGoogleCalendarEventServer(input: {
+  organizationId: string;
+  hostUid: string;
+  eventId: string;
+}): Promise<{ ok: true } | { ok: false; error: string; needsReconnect?: boolean }> {
+  const connections = await getHostConnectionCredentials({
+    organizationId: input.organizationId,
+    hostUid: input.hostUid,
+  });
+  const conn = connections.find((c) => c.provider === "google");
+  if (!conn) {
+    return { ok: false, error: "No Google Calendar connected for this user." };
+  }
+
+  const tokenResult = await resolveAccessToken(conn);
+  if ("error" in tokenResult) {
+    return {
+      ok: false,
+      error: "Google Calendar access expired. Reconnect Google Calendar.",
+      needsReconnect: true,
+    };
+  }
+
+  const calendarId = encodeURIComponent(conn.writeCalendarId || "primary");
+  const eventId = encodeURIComponent(input.eventId);
+  const res = await fetch(
+    `https://www.googleapis.com/calendar/v3/calendars/${calendarId}/events/${eventId}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${tokenResult.token}` },
+    },
+  );
+
+  if (res.status === 401) {
+    return {
+      ok: false,
+      error: "Google Calendar access expired. Reconnect Google Calendar.",
+      needsReconnect: true,
+    };
+  }
+  if (res.status === 404 || res.status === 410) {
+    return { ok: true };
+  }
+  if (!res.ok && res.status !== 204) {
+    const detail = await res.text().catch(() => "");
+    return {
+      ok: false,
+      error: detail.slice(0, 300) || `Google Calendar delete failed (${res.status})`,
+    };
+  }
+  return { ok: true };
+}
+
+/** Insert the same event onto each host's Google calendar. Primary host may invite the client. */
+export async function insertGoogleEventsForHostsServer(input: {
+  organizationId: string;
+  hostIds: string[];
+  primaryHostId: string;
+  summary: string;
+  description?: string;
+  location?: string;
+  startAt: string;
+  endAt: string;
+  timezone?: string;
+  clientAttendeeEmail?: string;
+  sendClientInviteOnPrimary?: boolean;
+}): Promise<{
+  googleEventIdsByHost: Record<string, string>;
+  errors: { hostId: string; error: string; needsReconnect?: boolean }[];
+}> {
+  const googleEventIdsByHost: Record<string, string> = {};
+  const errors: { hostId: string; error: string; needsReconnect?: boolean }[] = [];
+  const uniqueHosts = [...new Set(input.hostIds.filter(Boolean))];
+
+  for (const hostId of uniqueHosts) {
+    const isPrimary = hostId === input.primaryHostId;
+    const result = await insertGoogleCalendarEventServer({
+      organizationId: input.organizationId,
+      hostUid: hostId,
+      summary: input.summary,
+      description: input.description,
+      location: input.location,
+      startAt: input.startAt,
+      endAt: input.endAt,
+      timezone: input.timezone,
+      attendeeEmails:
+        isPrimary && input.sendClientInviteOnPrimary && input.clientAttendeeEmail
+          ? [input.clientAttendeeEmail]
+          : undefined,
+      sendUpdates: Boolean(
+        isPrimary && input.sendClientInviteOnPrimary && input.clientAttendeeEmail,
+      ),
+    });
+    if (result.ok) {
+      googleEventIdsByHost[hostId] = result.eventId;
+    } else {
+      errors.push({
+        hostId,
+        error: result.error,
+        needsReconnect: result.needsReconnect,
+      });
+    }
+  }
+
+  return { googleEventIdsByHost, errors };
+}
+

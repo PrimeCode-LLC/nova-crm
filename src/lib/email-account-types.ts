@@ -91,6 +91,8 @@ export interface MailInboundAttachment {
   sizeBytes: number;
   /** Present when small enough to ship in the API response for client-side download. */
   contentBase64?: string;
+  /** True when this part is a calendar invite (text/calendar or .ics). */
+  isCalendarInvite?: boolean;
 }
 
 export interface MailDraftAttachment {

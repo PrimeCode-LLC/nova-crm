@@ -11,6 +11,8 @@ import {
   type BookableSlot,
 } from "@/lib/scheduling/availability-slots";
 import { renderMeetingConfirmationEmail } from "@/lib/scheduling/meeting-email";
+import { buildMeetingIcs } from "@/lib/scheduling/ics";
+import { insertGoogleEventsForHostsServer } from "@/lib/scheduling/google-calendar-events-server";
 import {
   DEFAULT_TIMEZONE,
   DEFAULT_WEEKLY_AVAILABILITY,
@@ -115,12 +117,32 @@ function docToLink(id: string, data: DocumentData): SchedulingLink {
 
 function docToMeeting(id: string, data: DocumentData): Meeting {
   const statuses: MeetingStatus[] = ["scheduled", "completed", "cancelled", "no_show"];
-  const sources: MeetingSource[] = ["public_link", "internal", "manual"];
+  const sources: MeetingSource[] = [
+    "public_link",
+    "internal",
+    "manual",
+    "invite_rsvp",
+    "email_thread",
+    "external_booking",
+  ];
+  const googleRaw = data.googleEventIdsByHost;
+  let googleEventIdsByHost: Record<string, string> | undefined;
+  if (googleRaw && typeof googleRaw === "object" && !Array.isArray(googleRaw)) {
+    googleEventIdsByHost = {};
+    for (const [k, v] of Object.entries(googleRaw as Record<string, unknown>)) {
+      if (typeof v === "string" && v.trim()) googleEventIdsByHost[k] = v.trim();
+    }
+    if (!Object.keys(googleEventIdsByHost).length) googleEventIdsByHost = undefined;
+  }
   return {
     id,
     organizationId: String(data.organizationId ?? ""),
     hostId: String(data.hostId ?? ""),
     hostName: typeof data.hostName === "string" ? data.hostName : undefined,
+    internalHostIds: Array.isArray(data.internalHostIds)
+      ? data.internalHostIds.map((x: unknown) => String(x).trim()).filter(Boolean)
+      : undefined,
+    googleEventIdsByHost,
     bookedById: typeof data.bookedById === "string" ? data.bookedById : undefined,
     bookedByName: typeof data.bookedByName === "string" ? data.bookedByName : undefined,
     leadId: typeof data.leadId === "string" ? data.leadId : undefined,
@@ -147,6 +169,14 @@ function docToMeeting(id: string, data: DocumentData): Meeting {
     source: sources.includes(data.source as MeetingSource)
       ? (data.source as MeetingSource)
       : "manual",
+    inboundInviteUid:
+      typeof data.inboundInviteUid === "string" && data.inboundInviteUid
+        ? data.inboundInviteUid
+        : undefined,
+    organizerEmail:
+      typeof data.organizerEmail === "string" && data.organizerEmail
+        ? data.organizerEmail
+        : undefined,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
   };
@@ -583,6 +613,8 @@ async function createTimelineForMeeting(
 export async function bookMeetingServer(input: {
   organizationId: string;
   hostId: string;
+  /** Extra internal hosts to receive a Google Calendar copy (delegation required). */
+  internalHostIds?: string[];
   schedulingLinkId?: string;
   title: string;
   startAt: string;
@@ -602,29 +634,72 @@ export async function bookMeetingServer(input: {
   contactId?: string;
   actorUid?: string;
   skipAccessCheck?: boolean;
-}): Promise<{ meeting: Meeting } | { error: string }> {
+  /** When true, invite the client on the primary host Google event. */
+  sendClientGoogleInvite?: boolean;
+  /** Organizer email for ICS (defaults to host email). */
+  organizerEmail?: string;
+}): Promise<{ meeting: Meeting; googleErrors?: { hostId: string; error: string }[] } | { error: string }> {
   const db = getAdminDb();
   if (!db) return { error: "Database not configured" };
 
+  const hostIds = [
+    input.hostId,
+    ...(input.internalHostIds ?? []).filter((id) => id && id !== input.hostId),
+  ];
+
   if (!input.skipAccessCheck && input.actorUid) {
-    const access = await resolveCalendarHostAccessServer({
-      organizationId: input.organizationId,
-      viewerUid: input.actorUid,
-      hostId: input.hostId,
-      action: "book",
-      schedulingLinkId: input.schedulingLinkId,
-    });
-    if (!access.allowed) return { error: "You cannot book on this calendar" };
+    for (const hostId of hostIds) {
+      const access = await resolveCalendarHostAccessServer({
+        organizationId: input.organizationId,
+        viewerUid: input.actorUid,
+        hostId,
+        action: "book",
+        schedulingLinkId: input.schedulingLinkId,
+      });
+      if (!access.allowed) return { error: "You cannot book on this calendar" };
+    }
   }
 
   const orgUsers = await listOrgUsersServer(input.organizationId);
   const host = orgUsers.find((u) => u.id === input.hostId);
   const hostName = host?.displayName?.trim() || host?.email?.split("@")[0] || input.hostId;
+  const organizerEmail =
+    input.organizerEmail?.trim().toLowerCase() ||
+    host?.email?.trim().toLowerCase() ||
+    "";
+
+  const locationLabel =
+    input.locationDetails?.trim() ||
+    (input.locationType === "google_meet"
+      ? "Google Meet"
+      : input.locationType === "zoom"
+        ? "Zoom"
+        : input.locationType === "teams"
+          ? "Microsoft Teams"
+          : input.locationType === "phone"
+            ? "Phone call"
+            : "Meeting");
+
+  const googlePlaced = await insertGoogleEventsForHostsServer({
+    organizationId: input.organizationId,
+    hostIds,
+    primaryHostId: input.hostId,
+    summary: input.title.trim(),
+    description: input.attendeeNotes?.trim(),
+    location: locationLabel,
+    startAt: input.startAt,
+    endAt: input.endAt,
+    timezone: input.timezone,
+    clientAttendeeEmail: input.attendeeEmail.trim().toLowerCase(),
+    sendClientInviteOnPrimary: input.sendClientGoogleInvite !== false,
+  });
 
   const payload = {
     organizationId: input.organizationId,
     hostId: input.hostId,
     hostName,
+    internalHostIds: hostIds.slice(1),
+    googleEventIdsByHost: googlePlaced.googleEventIdsByHost,
     bookedById: input.bookedById ?? "",
     bookedByName: input.bookedByName ?? "",
     leadId: input.leadId ?? "",
@@ -660,15 +735,31 @@ export async function bookMeetingServer(input: {
       organization: org,
       hostDisplayName: hostName,
     });
+    const ics =
+      organizerEmail
+        ? buildMeetingIcs(meeting, organizerEmail)
+        : null;
     await sendSystemEmail({
       to: meeting.attendeeEmail,
       subject: email.subject,
       html: email.html,
       text: email.text,
+      attachments: ics
+        ? [
+            {
+              filename: "invite.ics",
+              contentType: "text/calendar; method=REQUEST",
+              content: Buffer.from(ics, "utf8"),
+            },
+          ]
+        : undefined,
     }).catch(() => undefined);
   }
 
-  return { meeting };
+  return {
+    meeting,
+    googleErrors: googlePlaced.errors.length ? googlePlaced.errors : undefined,
+  };
 }
 
 export async function updateMeetingStatusServer(input: {

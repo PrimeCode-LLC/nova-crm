@@ -63,6 +63,7 @@ import {
   Tag,
   Mail,
   UserCog,
+  XCircle,
 } from "lucide-react";
 import type { Lead, PipelineStage, ChannelKey, LeadTemperature } from "@/lib/types";
 import {
@@ -377,6 +378,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     canDeleteLeads,
     canEditLead,
     deleteLead,
+    updateLeadStage,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
@@ -440,6 +442,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [archiveOpen, setArchiveOpen] = React.useState(false);
   const [archiveLeadIds, setArchiveLeadIds] = React.useState<string[]>([]);
   const [archiveBusy, setArchiveBusy] = React.useState(false);
+  const [markLostOpen, setMarkLostOpen] = React.useState(false);
+  const [markLostLeadIds, setMarkLostLeadIds] = React.useState<string[]>([]);
+  const [markLostBusy, setMarkLostBusy] = React.useState(false);
 
   const openReassignForIds = React.useCallback((ids: string[]) => {
     setReassignLeadIds(ids);
@@ -468,6 +473,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     [isDemo, canDeleteLeads],
   );
 
+  const openMarkLostForIds = React.useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    setMarkLostLeadIds(ids);
+    setMarkLostOpen(true);
+  }, []);
+
   const confirmArchive = React.useCallback(async () => {
     if (!archiveLeadIds.length) return;
     setArchiveBusy(true);
@@ -493,6 +504,50 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       });
     }
   }, [archiveLeadIds, deleteLead]);
+
+  const confirmMarkLost = React.useCallback(() => {
+    if (!markLostLeadIds.length) return;
+    setMarkLostBusy(true);
+    const byId = new Map(leads.map((l) => [l.id, l]));
+    let updated = 0;
+    let skipped = 0;
+    for (const id of markLostLeadIds) {
+      const lead = byId.get(id);
+      if (!lead) {
+        skipped += 1;
+        continue;
+      }
+      if (lead.stage === "lost") {
+        skipped += 1;
+        continue;
+      }
+      if (!canEditLead(lead)) {
+        skipped += 1;
+        continue;
+      }
+      updateLeadStage(lead.id, "lost", lead.stage, currentUserId);
+      updated += 1;
+    }
+    setMarkLostBusy(false);
+    if (updated > 0) {
+      toast.success(
+        updated === 1 ? "Marked as Lost" : `Marked ${updated} leads as Lost`,
+        skipped > 0
+          ? { description: `${skipped} skipped (already Lost or no permission).` }
+          : undefined,
+      );
+      setMarkLostOpen(false);
+      setMarkLostLeadIds([]);
+      setRowSelection({});
+    } else {
+      toast.error("Could not mark as Lost", {
+        description:
+          skipped > 0
+            ? "Selected leads are already Lost or you don’t have permission to edit them."
+            : "None of the selected leads could be updated.",
+      });
+    }
+  }, [markLostLeadIds, leads, canEditLead, updateLeadStage, currentUserId]);
 
   React.useEffect(() => {
     setColumnFilters(mergeUrlColumnFilters(preset, initialChannels, initialStages));
@@ -1139,6 +1194,46 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog
+        open={markLostOpen}
+        onOpenChange={(o) => {
+          if (!markLostBusy) {
+            setMarkLostOpen(o);
+            if (!o) setMarkLostLeadIds([]);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {markLostLeadIds.length === 1
+                ? "Mark this lead as Lost?"
+                : `Mark ${markLostLeadIds.length} leads as Lost?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {markLostLeadIds.length === 1
+                ? "This sets the pipeline stage to Lost. You can change the stage again later if needed."
+                : "This sets the pipeline stage to Lost for every selected lead you can edit. Stages can be changed again later if needed."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={markLostBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              disabled={markLostBusy}
+              onClick={() => {
+                confirmMarkLost();
+              }}
+            >
+              {markLostBusy
+                ? "Updating…"
+                : markLostLeadIds.length === 1
+                  ? "Mark as Lost"
+                  : "Mark all as Lost"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       {/* Toolbar */}
       <div className="flex shrink-0 flex-wrap items-center gap-2">
         <div className="relative flex-1 min-w-[220px] max-w-sm">
@@ -1575,6 +1670,17 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             }
           >
             <Tag className="h-3.5 w-3.5" /> Tag
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              openMarkLostForIds(ids);
+            }}
+          >
+            <XCircle className="h-3.5 w-3.5" /> Mark as Lost
           </Button>
           <Button
             variant="destructive"

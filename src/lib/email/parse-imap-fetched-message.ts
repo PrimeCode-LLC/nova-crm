@@ -8,6 +8,8 @@ import {
 
 /** Include attachment bytes in JSON only below this size (per file). */
 const MAX_ATTACHMENT_BYTES_EMBED = 450_000;
+/** Always embed calendar invites up to this size so RSVP can parse without a refetch. */
+const MAX_CALENDAR_BYTES_EMBED = 100_000;
 
 function formatAddressObjects(addr: AddressObject | AddressObject[] | undefined): string {
   if (!addr) return "";
@@ -18,6 +20,16 @@ function formatAddressObjects(addr: AddressObject | AddressObject[] | undefined)
     if (line) chunks.push(line);
   }
   return chunks.join(", ");
+}
+
+function isCalendarPart(filename: string, mimeType: string): boolean {
+  const mime = mimeType.toLowerCase();
+  const name = filename.toLowerCase();
+  return (
+    mime.includes("text/calendar") ||
+    mime === "application/ics" ||
+    name.endsWith(".ics")
+  );
 }
 
 function extractAttachmentsFromParsed(parsed: ParsedMail): MailInboundAttachment[] {
@@ -31,12 +43,19 @@ function extractAttachmentsFromParsed(parsed: ParsedMail): MailInboundAttachment
       a.filename?.trim() ||
       (a.cid ? `embedded-${String(a.cid).replace(/[<>]/g, "")}.bin` : "attachment");
     const mimeType = a.contentType || "application/octet-stream";
-    const row: MailInboundAttachment = { filename, mimeType, sizeBytes };
+    const calendar = isCalendarPart(filename, mimeType);
+    const row: MailInboundAttachment = {
+      filename,
+      mimeType,
+      sizeBytes,
+      isCalendarInvite: calendar || undefined,
+    };
+    const embedLimit = MAX_ATTACHMENT_BYTES_EMBED;
     const canEmbed =
       buf &&
       sizeBytes > 0 &&
-      sizeBytes <= MAX_ATTACHMENT_BYTES_EMBED &&
-      (!a.related || Boolean(a.filename?.trim()));
+      sizeBytes <= (calendar ? Math.max(embedLimit, MAX_CALENDAR_BYTES_EMBED) : embedLimit) &&
+      (!a.related || Boolean(a.filename?.trim()) || calendar);
     if (canEmbed) row.contentBase64 = buf.toString("base64");
     list.push(row);
   }

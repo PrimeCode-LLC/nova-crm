@@ -13,6 +13,7 @@ import {
 import { fmtRelative } from "@/lib/format";
 import type { MailInbound, MailInboundAttachment, MailSent } from "@/lib/email-account-types";
 import { cn } from "@/lib/utils";
+import { CalendarInviteBannerFromAttachments } from "@/components/inbox/calendar-invite-banner";
 
 export type MailReaderContent = {
   subject?: string;
@@ -146,6 +147,12 @@ export function MailReaderBody({ content, className }: { content: MailReaderCont
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
+      <CalendarInviteBannerFromAttachments
+        attachments={content.attachments}
+        from={content.from}
+        subject={content.subject}
+        bodyText={content.bodyText}
+      />
       {content.attachments && content.attachments.length > 0 ? (
         <div className="shrink-0 space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
           <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">

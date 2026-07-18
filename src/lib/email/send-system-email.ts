@@ -1,11 +1,18 @@
 import nodemailer from "nodemailer";
 
+export type SystemEmailAttachment = {
+  filename: string;
+  contentType?: string;
+  content: Buffer | string;
+};
+
 export type SystemEmailInput = {
   to: string;
   subject: string;
   html: string;
   text: string;
   replyTo?: string;
+  attachments?: SystemEmailAttachment[];
 };
 
 function systemFromAddress(): string | undefined {
@@ -14,6 +21,26 @@ function systemFromAddress(): string | undefined {
     process.env.SYSTEM_SMTP_FROM?.trim() ||
     process.env.SYSTEM_SMTP_USER?.trim()
   );
+}
+
+function toResendAttachments(attachments: SystemEmailAttachment[] | undefined) {
+  if (!attachments?.length) return undefined;
+  return attachments.map((a) => ({
+    filename: a.filename,
+    content: Buffer.isBuffer(a.content)
+      ? a.content.toString("base64")
+      : Buffer.from(a.content, "utf8").toString("base64"),
+    content_type: a.contentType,
+  }));
+}
+
+function toNodemailerAttachments(attachments: SystemEmailAttachment[] | undefined) {
+  if (!attachments?.length) return undefined;
+  return attachments.map((a) => ({
+    filename: a.filename,
+    content: a.content,
+    contentType: a.contentType,
+  }));
 }
 
 async function sendViaResend(
@@ -33,6 +60,8 @@ async function sendViaResend(
   if (input.replyTo) {
     body.reply_to = input.replyTo;
   }
+  const attachments = toResendAttachments(input.attachments);
+  if (attachments?.length) body.attachments = attachments;
   try {
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -100,6 +129,7 @@ export async function sendSystemEmail(
         html: input.html,
         text: input.text,
         replyTo: input.replyTo,
+        attachments: toNodemailerAttachments(input.attachments),
       });
       return { ok: true };
     } catch (e) {

@@ -106,7 +106,10 @@ import {
   X,
   Ban,
   ExternalLink,
+  CalendarPlus,
 } from "lucide-react";
+import { CalendarInviteBanner } from "@/components/inbox/calendar-invite-banner";
+import { ScheduleFromThreadDialog } from "@/components/inbox/schedule-from-thread-dialog";
 import {
   collectBlockedUidsFromInbound,
   extractSenderDomain,
@@ -528,6 +531,19 @@ export default function InboxWorkspace() {
   const [expandedThreadUids, setExpandedThreadUids] = React.useState<Set<number>>(() => new Set());
   const [selectedMail, setSelectedMail] = React.useState<MailDraft | MailSent | MailInbound | null>(null);
   const [composeOpen, setComposeOpen] = React.useState(false);
+  const [scheduleMeetingOpen, setScheduleMeetingOpen] = React.useState(false);
+  const [scheduleMeetingSource, setScheduleMeetingSource] = React.useState<
+    "email_thread" | "external_booking"
+  >("email_thread");
+  const [scheduleMeetingTitle, setScheduleMeetingTitle] = React.useState<string | undefined>();
+  const openScheduleMeeting = React.useCallback(
+    (opts?: { source?: "email_thread" | "external_booking"; title?: string }) => {
+      setScheduleMeetingSource(opts?.source ?? "email_thread");
+      setScheduleMeetingTitle(opts?.title);
+      setScheduleMeetingOpen(true);
+    },
+    [],
+  );
   const [composeTo, setComposeTo] = React.useState("");
   const [composeCc, setComposeCc] = React.useState("");
   const [composeSubject, setComposeSubject] = React.useState("");
@@ -4157,6 +4173,21 @@ export default function InboxWorkspace() {
                         className="gap-1.5"
                         disabled={inboxReadOnly}
                         onClick={() => {
+                          openScheduleMeeting({
+                            source: "email_thread",
+                            title: selectedThread.conversationSubject,
+                          });
+                        }}
+                      >
+                        <CalendarPlus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                        Schedule
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="gap-1.5"
+                        disabled={inboxReadOnly}
+                        onClick={() => {
                           const latest = selectedThread.latest;
                           openCompose({
                             to: "",
@@ -4238,6 +4269,13 @@ export default function InboxWorkspace() {
                         collapsible={selectedThread.messages.length > 1}
                         isLatest={msgIndex === selectedThread.messages.length - 1}
                         onToggle={() => toggleThreadMessageExpanded(m.uid)}
+                        leadId={selectedLead?.id}
+                        onRequestScheduleExternal={(title) =>
+                          openScheduleMeeting({
+                            source: "external_booking",
+                            title: title || selectedThread.conversationSubject,
+                          })
+                        }
                       />
                     ))}
                   </div>
@@ -4521,6 +4559,21 @@ export default function InboxWorkspace() {
                           className="gap-1.5"
                           disabled={inboxReadOnly}
                           onClick={() => {
+                            openScheduleMeeting({
+                              source: "email_thread",
+                              title: selectedMail.subject,
+                            });
+                          }}
+                        >
+                          <CalendarPlus className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                          Schedule
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="secondary"
+                          className="gap-1.5"
+                          disabled={inboxReadOnly}
+                          onClick={() => {
                             openCompose({
                               to: "",
                               cc: "",
@@ -4544,7 +4597,17 @@ export default function InboxWorkspace() {
                       </div>
                     </div>
                     <div className="flex min-h-0 flex-1 flex-col overflow-y-auto py-3 pr-1">
-                      <InboundMessageCard message={selectedMail} fillHeight />
+                      <InboundMessageCard
+                        message={selectedMail}
+                        fillHeight
+                        leadId={selectedLead?.id}
+                        onRequestScheduleExternal={(title) =>
+                          openScheduleMeeting({
+                            source: "external_booking",
+                            title: title || selectedMail.subject,
+                          })
+                        }
+                      />
                     </div>
                     <div className="shrink-0 flex flex-wrap gap-2 border-t pt-4 mt-2">
                       {mailFolder === "inbox" && canUseTrashFeatures && !inboxReadOnly && (
@@ -4739,6 +4802,38 @@ export default function InboxWorkspace() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <ScheduleFromThreadDialog
+        open={scheduleMeetingOpen}
+        onOpenChange={setScheduleMeetingOpen}
+        source={scheduleMeetingSource}
+        defaultTitle={scheduleMeetingTitle}
+        defaultAttendeeName={
+          selectedLead?.contactName ||
+          (selectedThread
+            ? senderDisplayLabel(selectedThread.latest.from)
+            : selectedMail && "from" in selectedMail
+              ? senderDisplayLabel(selectedMail.from)
+              : undefined)
+        }
+        defaultAttendeeEmail={
+          selectedLead?.contactEmail ||
+          (selectedThread
+            ? replyRecipientAddress(selectedThread.latest) || undefined
+            : selectedMail && "from" in selectedMail
+              ? replyRecipientAddress(selectedMail) || undefined
+              : undefined)
+        }
+        leadId={selectedLead?.id}
+        replyMessageId={
+          selectedThread?.latest.messageId ||
+          (selectedMail && "messageId" in selectedMail ? selectedMail.messageId : undefined)
+        }
+        replyReferenceIds={
+          selectedThread?.latest.referenceIds ||
+          (selectedMail && "referenceIds" in selectedMail ? selectedMail.referenceIds : undefined)
+        }
+      />
 
       <Dialog
         open={composeOpen}
@@ -4953,6 +5048,8 @@ type InboundMessageCardProps = {
   /** Hide header when embedded under a thread collapse row. */
   showHeader?: boolean;
   className?: string;
+  leadId?: string;
+  onRequestScheduleExternal?: (title?: string) => void;
 };
 
 function InboundMessageCard({
@@ -4960,6 +5057,8 @@ function InboundMessageCard({
   fillHeight = false,
   showHeader = true,
   className,
+  leadId,
+  onRequestScheduleExternal,
 }: InboundMessageCardProps) {
   const [readerOpen, setReaderOpen] = React.useState(false);
   const html = m.bodyHtml?.trim();
@@ -5001,6 +5100,15 @@ function InboundMessageCard({
         </div>
       )}
       <div className={cn("flex flex-col gap-3 p-4", fillHeight && "min-h-0 flex-1", !showHeader && "pt-3")}>
+        <CalendarInviteBanner
+          message={m}
+          leadId={leadId}
+          onExternalAdd={
+            onRequestScheduleExternal
+              ? () => onRequestScheduleExternal(m.subject)
+              : undefined
+          }
+        />
         {m.attachments && m.attachments.length > 0 ? (
           <div className="shrink-0 space-y-1.5 rounded-md border border-border/60 bg-muted/10 p-2">
             <p className="text-[11px] font-medium text-muted-foreground flex items-center gap-1.5">
@@ -5052,6 +5160,8 @@ type ThreadInboundMessageProps = {
   collapsible: boolean;
   isLatest: boolean;
   onToggle: () => void;
+  leadId?: string;
+  onRequestScheduleExternal?: (title?: string) => void;
 };
 
 function ThreadInboundMessage({
@@ -5060,9 +5170,19 @@ function ThreadInboundMessage({
   collapsible,
   isLatest,
   onToggle,
+  leadId,
+  onRequestScheduleExternal,
 }: ThreadInboundMessageProps) {
   if (!collapsible) {
-    return <InboundMessageCard message={m} fillHeight className="min-h-0 flex-1" />;
+    return (
+      <InboundMessageCard
+        message={m}
+        fillHeight
+        className="min-h-0 flex-1"
+        leadId={leadId}
+        onRequestScheduleExternal={onRequestScheduleExternal}
+      />
+    );
   }
 
   return (
@@ -5107,6 +5227,8 @@ function ThreadInboundMessage({
             message={m}
             showHeader={false}
             className="border-0 shadow-none rounded-none bg-transparent"
+            leadId={leadId}
+            onRequestScheduleExternal={onRequestScheduleExternal}
           />
         </div>
       ) : null}
