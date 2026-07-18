@@ -644,6 +644,7 @@ export default function DashboardPage() {
                 orgMeetingsScope={orgMeetingsScope}
                 widgets={w}
                 showWallLink
+                isDemo={isDemo}
               />
             ) : w.classicKpis ? (
               <>

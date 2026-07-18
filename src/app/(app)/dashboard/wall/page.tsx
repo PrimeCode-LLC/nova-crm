@@ -228,6 +228,7 @@ export default function DashboardWallPage() {
           orgMeetingsScope={orgMeetingsScope}
           widgets={DEFAULT_DASHBOARD_WIDGETS}
           wall
+          isDemo={isDemo}
         />
       </div>
     </div>

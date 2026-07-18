@@ -393,35 +393,49 @@ export function buildActionBoard(input: {
   followups: readonly Followup[];
   meetings: readonly Meeting[];
   now?: Date;
+  /**
+   * Cap per list bucket. Pass `null` for the expanded detail board (no cap).
+   * Compact dashboard widget defaults to 8.
+   */
+  limit?: number | null;
 }): ActionBoardBuckets {
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
   const dayStart = startOfLocalDay(now).getTime();
   const dayEnd = dayStart + 86_400_000;
+  const cap = input.limit === null ? undefined : (input.limit ?? 8);
+  const take = <T,>(items: T[]) => (cap === undefined ? items : items.slice(0, cap));
 
   const openTasks = input.tasks.filter((t) => !t.completedAt);
-  const urgentTasks = openTasks
+  const allUrgent = openTasks
     .filter((t) => {
       const due = validTime(t.dueAt);
       return due !== undefined && due < nowMs;
     })
-    .sort((a, b) => (validTime(a.dueAt) ?? 0) - (validTime(b.dueAt) ?? 0))
-    .slice(0, 8);
+    .sort((a, b) => (validTime(a.dueAt) ?? 0) - (validTime(b.dueAt) ?? 0));
+  const urgentTasks = take(allUrgent);
 
-  const urgentIds = new Set(urgentTasks.map((t) => t.id));
-  const pendingTasks = openTasks
-    .filter((t) => !urgentIds.has(t.id))
-    .sort((a, b) => (validTime(a.dueAt) ?? Number.POSITIVE_INFINITY) - (validTime(b.dueAt) ?? Number.POSITIVE_INFINITY))
-    .slice(0, 8);
+  // Exclude every overdue task from pending (not only the capped urgent slice).
+  const urgentIds = new Set(allUrgent.map((t) => t.id));
+  const pendingTasks = take(
+    openTasks
+      .filter((t) => !urgentIds.has(t.id))
+      .sort(
+        (a, b) =>
+          (validTime(a.dueAt) ?? Number.POSITIVE_INFINITY) -
+          (validTime(b.dueAt) ?? Number.POSITIVE_INFINITY),
+      ),
+  );
 
-  const overdueFollowups = input.followups
-    .filter((f) => {
-      if (f.completedAt || f.pausedAt || f.deliveryStatus === "sent") return false;
-      const due = validTime(f.dueAt);
-      return due !== undefined && due < nowMs;
-    })
-    .sort((a, b) => (validTime(a.dueAt) ?? 0) - (validTime(b.dueAt) ?? 0))
-    .slice(0, 8);
+  const overdueFollowups = take(
+    input.followups
+      .filter((f) => {
+        if (f.completedAt || f.pausedAt || f.deliveryStatus === "sent") return false;
+        const due = validTime(f.dueAt);
+        return due !== undefined && due < nowMs;
+      })
+      .sort((a, b) => (validTime(a.dueAt) ?? 0) - (validTime(b.dueAt) ?? 0)),
+  );
 
   const liveMeetings = input.meetings.filter((m) => m.status === "scheduled");
   const todayMeetings = liveMeetings
@@ -431,13 +445,14 @@ export function buildActionBoard(input: {
     })
     .sort((a, b) => (validTime(a.startAt) ?? 0) - (validTime(b.startAt) ?? 0));
 
-  const upcomingMeetings = liveMeetings
-    .filter((m) => {
-      const s = validTime(m.startAt);
-      return s !== undefined && s >= dayEnd;
-    })
-    .sort((a, b) => (validTime(a.startAt) ?? 0) - (validTime(b.startAt) ?? 0))
-    .slice(0, 8);
+  const upcomingMeetings = take(
+    liveMeetings
+      .filter((m) => {
+        const s = validTime(m.startAt);
+        return s !== undefined && s >= dayEnd;
+      })
+      .sort((a, b) => (validTime(a.startAt) ?? 0) - (validTime(b.startAt) ?? 0)),
+  );
 
   return { urgentTasks, pendingTasks, overdueFollowups, todayMeetings, upcomingMeetings };
 }

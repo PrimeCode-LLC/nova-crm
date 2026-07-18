@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AlertTriangle, Calendar, CheckSquare, Clock } from "lucide-react";
+import { AlertTriangle, Calendar, CheckSquare, Clock, Maximize2 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ActionBoardDetailDialog } from "@/components/dashboard/action-board-detail-dialog";
 import { buildActionBoard } from "@/lib/dashboard-ops-analytics";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -50,119 +52,149 @@ export function ActionBoardPanel({
   meetings: Meeting[];
   wall?: boolean;
 }) {
+  const [detailOpen, setDetailOpen] = React.useState(false);
   const board = React.useMemo(
     () => buildActionBoard({ tasks, followups, meetings }),
     [tasks, followups, meetings],
   );
 
   return (
-    <Card className="min-w-0">
-      <CardHeader className="pb-2">
-        <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
-          Action board
-        </CardTitle>
-        <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
-          Urgent work · pending tasks · meetings
-        </CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-5 pt-0 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
-        <Section title="Urgent tasks" icon={AlertTriangle} empty="No overdue tasks" wall={wall}>
-          {board.urgentTasks.map((t) => (
-            <li key={t.id}>
-              <Link
-                href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
-                className={cn(
-                  "block rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5",
-                  wall ? "text-sm" : "text-xs",
-                  !wall && "hover:bg-destructive/10",
-                )}
+    <>
+      <Card className="min-w-0">
+        <CardHeader className="pb-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0 space-y-1">
+              <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
+                Action board
+              </CardTitle>
+              <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
+                Urgent work · pending tasks · meetings
+              </CardDescription>
+            </div>
+            {!wall ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+                onClick={() => setDetailOpen(true)}
+                aria-label="Open full action board"
+                title="Open full action board"
               >
-                <span className="font-medium line-clamp-1">{t.title}</span>
-                {t.dueAt ? (
-                  <span className="mt-0.5 block text-[10px] text-destructive">
-                    Due {fmtRelative(t.dueAt)}
-                  </span>
-                ) : null}
-              </Link>
-            </li>
-          ))}
-        </Section>
+                <Maximize2 className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-5 pt-0 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+          <Section title="Urgent tasks" icon={AlertTriangle} empty="No overdue tasks" wall={wall}>
+            {board.urgentTasks.map((t) => (
+              <li key={t.id}>
+                <Link
+                  href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
+                  className={cn(
+                    "block rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5",
+                    wall ? "text-sm" : "text-xs",
+                    !wall && "hover:bg-destructive/10",
+                  )}
+                >
+                  <span className="font-medium line-clamp-1">{t.title}</span>
+                  {t.dueAt ? (
+                    <span className="mt-0.5 block text-[10px] text-destructive">
+                      Due {fmtRelative(t.dueAt)}
+                    </span>
+                  ) : null}
+                </Link>
+              </li>
+            ))}
+          </Section>
 
-        <Section title="Pending tasks" icon={CheckSquare} empty="Queue clear" wall={wall}>
-          {board.pendingTasks.map((t) => (
-            <li key={t.id}>
-              <Link
-                href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
-                className={cn(
-                  "block rounded-md border px-2.5 py-1.5",
-                  wall ? "text-sm" : "text-xs",
-                  !wall && "hover:bg-muted/40",
-                )}
-              >
-                <span className="line-clamp-1">{t.title}</span>
-                {t.dueAt ? (
+          <Section title="Pending tasks" icon={CheckSquare} empty="Queue clear" wall={wall}>
+            {board.pendingTasks.map((t) => (
+              <li key={t.id}>
+                <Link
+                  href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
+                  className={cn(
+                    "block rounded-md border px-2.5 py-1.5",
+                    wall ? "text-sm" : "text-xs",
+                    !wall && "hover:bg-muted/40",
+                  )}
+                >
+                  <span className="line-clamp-1">{t.title}</span>
+                  {t.dueAt ? (
+                    <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                      {fmtDate(t.dueAt, "MMM d")}
+                    </span>
+                  ) : null}
+                </Link>
+              </li>
+            ))}
+          </Section>
+
+          <Section title="Overdue follow-ups" icon={Clock} empty="None overdue" wall={wall}>
+            {board.overdueFollowups.map((f) => (
+              <li key={f.id}>
+                <Link
+                  href={f.leadId ? `/leads/${f.leadId}` : "/followups"}
+                  className={cn(
+                    "block rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5",
+                    wall ? "text-sm" : "text-xs",
+                    !wall && "hover:bg-amber-500/10",
+                  )}
+                >
+                  <span className="line-clamp-1 font-medium">{f.title}</span>
                   <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                    {fmtDate(t.dueAt, "MMM d")}
+                    Due {fmtRelative(f.dueAt)}
                   </span>
-                ) : null}
-              </Link>
-            </li>
-          ))}
-        </Section>
+                </Link>
+              </li>
+            ))}
+          </Section>
 
-        <Section title="Overdue follow-ups" icon={Clock} empty="None overdue" wall={wall}>
-          {board.overdueFollowups.map((f) => (
-            <li key={f.id}>
-              <Link
-                href={f.leadId ? `/leads/${f.leadId}` : "/followups"}
-                className={cn(
-                  "block rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5",
-                  wall ? "text-sm" : "text-xs",
-                  !wall && "hover:bg-amber-500/10",
-                )}
-              >
-                <span className="line-clamp-1 font-medium">{f.title}</span>
-                <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                  Due {fmtRelative(f.dueAt)}
-                </span>
-              </Link>
-            </li>
-          ))}
-        </Section>
-
-        <Section title="Meetings" icon={Calendar} empty="No meetings lined up" wall={wall}>
-          {board.todayMeetings.map((m) => (
-            <li key={m.id}>
-              <div
-                className={cn(
-                  "rounded-md border border-chart-1/30 bg-chart-1/5 px-2.5 py-1.5",
-                  wall ? "text-sm" : "text-xs",
-                )}
-              >
-                <div className="flex items-center gap-1.5">
-                  <Badge variant="secondary" className="h-4 px-1 text-[9px]">
-                    Today
-                  </Badge>
-                  <span className="line-clamp-1 font-medium">{m.title}</span>
+          <Section title="Meetings" icon={Calendar} empty="No meetings lined up" wall={wall}>
+            {board.todayMeetings.map((m) => (
+              <li key={m.id}>
+                <div
+                  className={cn(
+                    "rounded-md border border-chart-1/30 bg-chart-1/5 px-2.5 py-1.5",
+                    wall ? "text-sm" : "text-xs",
+                  )}
+                >
+                  <div className="flex items-center gap-1.5">
+                    <Badge variant="secondary" className="h-4 px-1 text-[9px]">
+                      Today
+                    </Badge>
+                    <span className="line-clamp-1 font-medium">{m.title}</span>
+                  </div>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                    {fmtDate(m.startAt, "h:mm a")} · {m.attendeeName}
+                  </span>
                 </div>
-                <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                  {fmtDate(m.startAt, "h:mm a")} · {m.attendeeName}
-                </span>
-              </div>
-            </li>
-          ))}
-          {board.upcomingMeetings.map((m) => (
-            <li key={m.id}>
-              <div className={cn("rounded-md border px-2.5 py-1.5", wall ? "text-sm" : "text-xs")}>
-                <span className="line-clamp-1">{m.title}</span>
-                <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                  {fmtDate(m.startAt, "MMM d · h:mm a")} · {m.attendeeName}
-                </span>
-              </div>
-            </li>
-          ))}
-        </Section>
-      </CardContent>
-    </Card>
+              </li>
+            ))}
+            {board.upcomingMeetings.map((m) => (
+              <li key={m.id}>
+                <div className={cn("rounded-md border px-2.5 py-1.5", wall ? "text-sm" : "text-xs")}>
+                  <span className="line-clamp-1">{m.title}</span>
+                  <span className="mt-0.5 block text-[10px] text-muted-foreground">
+                    {fmtDate(m.startAt, "MMM d · h:mm a")} · {m.attendeeName}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </Section>
+        </CardContent>
+      </Card>
+
+      {!wall ? (
+        <ActionBoardDetailDialog
+          open={detailOpen}
+          onOpenChange={setDetailOpen}
+          tasks={tasks}
+          followups={followups}
+          meetings={meetings}
+        />
+      ) : null}
+    </>
   );
 }

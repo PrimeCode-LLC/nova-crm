@@ -9,6 +9,7 @@ import { OpsPulseStrip } from "@/components/dashboard/ops-pulse-strip";
 import { cn } from "@/lib/utils";
 import { OpsActivityFeed } from "@/components/dashboard/ops-activity-feed";
 import { InboxPerformance } from "@/components/dashboard/inbox-performance";
+import { MailboxUtilizationPanel } from "@/components/dashboard/mailbox-utilization-panel";
 import { ActionBoardPanel } from "@/components/dashboard/action-board-panel";
 import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
@@ -63,6 +64,7 @@ export function OwnerOpsBoard({
   widgets,
   wall,
   showWallLink,
+  isDemo,
 }: {
   metrics: DashboardWorkflowMetrics;
   leads: Lead[];
@@ -78,6 +80,7 @@ export function OwnerOpsBoard({
   widgets: DashboardWidgets;
   wall?: boolean;
   showWallLink?: boolean;
+  isDemo?: boolean;
 }) {
   const { meetings } = useDashboardMeetings(true, orgMeetingsScope);
   const meetingsToday = React.useMemo(() => {
@@ -101,7 +104,11 @@ export function OwnerOpsBoard({
 
   const showCharts = widgets.emailVolume || widgets.followupSchedule;
   const showLeft =
-    showCharts || widgets.scorecard || widgets.needsAttention || widgets.inboxPerformance;
+    showCharts ||
+    widgets.scorecard ||
+    widgets.needsAttention ||
+    widgets.inboxPerformance ||
+    widgets.mailboxUtilization;
   const showRight = widgets.activityFeed || widgets.actionBoard;
 
   return (
@@ -179,13 +186,20 @@ export function OwnerOpsBoard({
                   wall={wall}
                 />
               ) : null}
+              {widgets.mailboxUtilization ? (
+                <MailboxUtilizationPanel
+                  isDemo={Boolean(isDemo)}
+                  currentUserId={currentUserId}
+                  wall={wall}
+                />
+              ) : null}
             </div>
           ) : null}
 
           {showRight ? (
             <div
               className={cn(
-                "flex min-w-0 flex-col gap-4",
+                "flex min-h-0 min-w-0 flex-col gap-4 xl:h-full",
                 showLeft ? "xl:col-span-4" : "xl:col-span-12",
               )}
             >
@@ -193,7 +207,10 @@ export function OwnerOpsBoard({
                 <OpsActivityFeed
                   timelineByLead={timelineByLead}
                   wall={wall}
-                  className="min-h-[320px] flex-1"
+                  className={cn(
+                    "min-h-[320px]",
+                    widgets.actionBoard ? "max-h-[min(70vh,560px)] xl:max-h-none xl:flex-1" : "flex-1",
+                  )}
                 />
               ) : null}
               {widgets.actionBoard ? (

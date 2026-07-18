@@ -10,6 +10,7 @@ export type DashboardWidgetKey =
   | "scorecard"
   | "needsAttention"
   | "inboxPerformance"
+  | "mailboxUtilization"
   | "activityFeed"
   | "actionBoard"
   | "replyReviews"
@@ -71,6 +72,7 @@ export const DASHBOARD_WIDGET_META: {
   { key: "scorecard", label: "Team scorecard", group: "ops" },
   { key: "needsAttention", label: "Needs attention", group: "shared" },
   { key: "inboxPerformance", label: "Top performers", group: "ops" },
+  { key: "mailboxUtilization", label: "Inbox utilization", group: "ops" },
   { key: "activityFeed", label: "Live activity", group: "ops" },
   { key: "actionBoard", label: "Action board", group: "ops" },
   { key: "wallLink", label: "Wall mode link", group: "ops" },
@@ -93,6 +95,7 @@ export const DEFAULT_DASHBOARD_WIDGETS: DashboardWidgets = {
   scorecard: true,
   needsAttention: true,
   inboxPerformance: true,
+  mailboxUtilization: true,
   activityFeed: true,
   actionBoard: true,
   replyReviews: true,

@@ -91,8 +91,14 @@ export function OpsActivityFeed({
   );
 
   return (
-    <Card className={cn("flex min-h-0 flex-col", className)}>
-      <CardHeader className="pb-2">
+    <Card
+      className={cn(
+        "flex min-h-0 flex-col",
+        wall && "max-h-[min(70vh,640px)]",
+        className,
+      )}
+    >
+      <CardHeader className="shrink-0 pb-2">
         <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
           Live activity
         </CardTitle>
@@ -100,18 +106,13 @@ export function OpsActivityFeed({
           Who added prospects, sent email, scheduled follow-ups
         </CardDescription>
       </CardHeader>
-      <CardContent className="min-h-0 flex-1 overflow-hidden pt-0">
+      <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">
         {items.length === 0 ? (
           <p className="px-2 py-6 text-center text-xs text-muted-foreground">
             Activity will appear here as the team works.
           </p>
         ) : (
-          <div
-            className={cn(
-              "h-full space-y-0.5 overflow-y-auto pr-1",
-              wall && "max-h-[min(70vh,640px)]",
-            )}
-          >
+          <div className="space-y-0.5 pr-1">
             {items.map((item) => (
               <FeedRow key={item.id} item={item} wall={wall} />
             ))}
