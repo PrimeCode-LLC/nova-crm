@@ -75,6 +75,7 @@ export function AppTopbar() {
   }, [mergedNotifications]);
 
   const segments = pathname.split("/").filter(Boolean);
+  const isWallMode = pathname === "/dashboard/wall" || pathname.startsWith("/dashboard/wall/");
 
   React.useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -86,6 +87,8 @@ export function AppTopbar() {
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
+
+  if (isWallMode) return null;
 
   return (
     <>

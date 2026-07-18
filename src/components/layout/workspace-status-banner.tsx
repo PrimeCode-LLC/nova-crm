@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, RefreshCw, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -24,9 +24,11 @@ function sanitizeBannerDetailText(raw: string, maxLen = 900): string {
 
 export function WorkspaceStatusBanner() {
   const router = useRouter();
+  const pathname = usePathname();
   const { mode, isDemo, liveFirestoreError, userProfileError } = useWorkspace();
   const [dismissedFor, setDismissedFor] = React.useState<string | null>(null);
 
+  const isWallMode = pathname === "/dashboard/wall" || pathname.startsWith("/dashboard/wall/");
   const liveErr = mode === "live" && !isDemo ? liveFirestoreError : null;
   const profileErr = mode === "live" && !isDemo ? userProfileError : null;
 
@@ -37,6 +39,7 @@ export function WorkspaceStatusBanner() {
     if (!hasIssue) setDismissedFor(null);
   }, [hasIssue]);
 
+  if (isWallMode) return null;
   if (!hasIssue || dismissedFor === sig) return null;
 
   const headline =

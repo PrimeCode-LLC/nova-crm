@@ -323,6 +323,10 @@ export function AppSidebar({
   const { state: sidebarState } = useSidebar();
   const sidebarIsCollapsed = sidebarState === "collapsed";
 
+  if (pathname === "/dashboard/wall" || pathname.startsWith("/dashboard/wall/")) {
+    return null;
+  }
+
   return (
     <Sidebar collapsible="icon" className="border-r">
       <SidebarHeader>
