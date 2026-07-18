@@ -39,7 +39,7 @@ import type {
   Touchpoint,
 } from "@/lib/types";
 import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
-import { dateInputFromOffsetDays, isoFromDateInput } from "@/lib/followup-date";
+import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { cn } from "@/lib/utils";
 import type { LeadAiContextInput } from "@/lib/ai/load-lead-ai-context-server";
@@ -163,21 +163,26 @@ export function SuggestFollowupsDialog({
     };
   }
 
-  function applyApiResult(data: {
-    planSummary?: string;
-    leadChannel?: ChannelKey;
-    items?: SuggestApiItem[];
-  }) {
+  function applyApiResult(
+    data: {
+      planSummary?: string;
+      leadChannel?: ChannelKey;
+      items?: SuggestApiItem[];
+    },
+    mode: FollowupSequenceMode = sequenceMode,
+  ) {
     setPlanSummary(data.planSummary ?? "");
     setLeadChannel(data.leadChannel ?? lead.channel);
     const apiItems = (data.items ?? []) as SuggestApiItem[];
+    const includeInitial = mode === "full";
     setItems(
       apiItems.map((it, i) => ({
         ...it,
         emailSubject: it.emailSubject ?? "",
         key: `s-${i}`,
         included: true,
-        dueDate: dateInputFromOffsetDays(it.offsetDays),
+        // Cadence: Initial Day 0 → +3 BD → +5 BD → +7 BD (weekends skipped)
+        dueDate: dateInputForSequenceStep(i, { includeInitial }),
       })),
     );
     setPhase("review");
@@ -378,7 +383,11 @@ export function SuggestFollowupsDialog({
               <span className="font-medium text-foreground">
                 {sequenceMode === "continue" ? "Continue / follow-ups only" : "Full outreach"}
               </span>
-              . Verify copy, then activate.
+              . Due dates skip weekends
+              {sequenceMode === "full"
+                ? ": Day 0, then +3 / +5 / +7 business days."
+                : " (+3 / +5 / +7 business days from today)."}{" "}
+              Verify copy, then activate.
             </p>
             <ul className="space-y-4">
               {items.map((it, idx) => (

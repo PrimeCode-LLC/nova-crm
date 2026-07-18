@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MergeVariablesList } from "@/components/outreach/merge-variables-list";
 import {
-  DEFAULT_SEQUENCE_STEP,
+  defaultSequenceStepAt,
   type SequenceStepDraft,
 } from "@/lib/integrations/instantly/sequence-utils";
 
@@ -33,7 +33,9 @@ export function SequenceEditor({
           <div className="flex items-center justify-between">
             <span className="text-xs font-medium text-muted-foreground">
               Step {i + 1}
-              {i > 0 ? ` · wait ${s.delay} day${s.delay === 1 ? "" : "s"} after previous` : " · initial email"}
+              {i > 0
+                ? ` · wait ${s.delay} day${s.delay === 1 ? "" : "s"} after previous`
+                : " · initial email (Day 0)"}
             </span>
             {steps.length > 1 && !disabled && (
               <Button
@@ -87,13 +89,14 @@ export function SequenceEditor({
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => onChange([...steps, { ...DEFAULT_SEQUENCE_STEP }])}
+          onClick={() => onChange([...steps, defaultSequenceStepAt(steps.length)])}
         >
           <Plus className="h-3.5 w-3.5" /> Add follow-up email
         </Button>
       )}
       <p className="text-[11px] text-muted-foreground">
-        Add leads on the <strong>Leads</strong> tab so Instantly fills variable values per contact.
+        Default gaps: Day 0, then +3 / +5 / +7 days (same cadence as prospect follow-ups). Add leads on
+        the <strong>Leads</strong> tab so Instantly fills variable values per contact.
       </p>
     </div>
   );

@@ -124,6 +124,8 @@ export function demoFollowupSuggestions(
 
   const items: FollowupSuggestResponse["items"] = [];
 
+  // offsetDays mirrors relative business-day gaps (UI assigns dates via dateInputForSequenceStep):
+  // Full: Day 0 → +3 BD → +5 BD → +7 BD. Continue: +3 BD → +5 BD → +7 BD.
   if (!continueMode) {
     items.push({
       title: emailish ? `Email 1 — Intro to ${name}` : `Touch 1 — Reach ${name}`,
@@ -145,7 +147,7 @@ export function demoFollowupSuggestions(
       : emailish
         ? `Email 2 — Value bump`
         : `Second touch, ${company}`,
-    offsetDays: continueMode ? 2 : 3,
+    offsetDays: 3,
     priority: "high",
     channel: emailish ? emailChannel : channel === "upwork" ? "upwork" : "other",
     emailSubject: emailish ? `Re: ${company} — helpful next step` : undefined,
@@ -160,7 +162,7 @@ export function demoFollowupSuggestions(
     title: emailish
       ? `Email ${continueMode ? "3" : "3"} — Break-up`
       : `Final check-in, ${company}`,
-    offsetDays: continueMode ? 7 : 10,
+    offsetDays: 5,
     priority: "medium",
     channel: emailish ? emailChannel : "other",
     emailSubject: emailish ? `Should I close the loop on ${company}?` : undefined,
@@ -170,6 +172,20 @@ export function demoFollowupSuggestions(
         : `Hi ${name},\n\nI'll close the loop on my side unless you want to reopen. If ${company} still wants help later, just reply here.`,
     description: "Break-up or soft close",
     rationale: "One more beat before marking cold",
+  });
+
+  items.push({
+    title: emailish ? `Email ${continueMode ? "4" : "4"} — Final nudge` : `Last touch, ${company}`,
+    offsetDays: 7,
+    priority: "medium",
+    channel: emailish ? emailChannel : "other",
+    emailSubject: emailish ? `Closing the loop on ${company}` : undefined,
+    messageBody:
+      channel === "linkedin_outbound" || channel === "linkedin_1to1"
+        ? `Hi ${name}, last note from me on ${company}. Happy to reconnect whenever timing is better.`
+        : `Hi ${name},\n\nLast note from me on ${company}. If a better time opens up, just reply here.`,
+    description: "Final follow-up in the cadence",
+    rationale: "Complete the +3 / +5 / +7 business-day cadence",
   });
 
   return {
