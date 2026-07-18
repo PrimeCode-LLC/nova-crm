@@ -110,6 +110,13 @@ import {
   isProspectRow,
   prospectPatchForSalesLeadSync,
 } from "@/lib/prospects/prospect-access";
+import { defaultIntentPlaybook } from "@/lib/intent/playbook-templates";
+import { parseIntentPlaybook } from "@/lib/intent/parse-playbook";
+import {
+  withInitialQualityScore,
+  withQualityScorePatch,
+} from "@/lib/intent/apply-quality-score";
+import type { IntentPlaybook } from "@/lib/intent/types";
 
 export type WorkspaceContextValue = WorkspaceSnapshot &
   WorkspaceLookup & {
@@ -118,6 +125,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     demoPersonaId: string;
     /** Live mode: tenant id from the signed-in user doc (for writes / diagnostics). */
     organizationId?: string;
+    /** Org Intent Playbook used for Quality Score (defaults to modernization template). */
+    intentPlaybook: IntentPlaybook;
+    /** Replace the in-memory playbook after admin save (also persists via API). */
+    setIntentPlaybook: (playbook: IntentPlaybook) => void;
     /** Display name for the signed-in tenant (from Firestore org). */
     organizationName: string;
     /** Live mode: Firestore workspace listeners hit an error (partial data may be stale). */
@@ -264,6 +275,16 @@ export function WorkspaceModeProvider({
   const organizationName =
     organizationNameProp?.trim() || "Workspace";
 
+  const [intentPlaybook, setIntentPlaybookState] = React.useState<IntentPlaybook>(() =>
+    defaultIntentPlaybook(),
+  );
+  const intentPlaybookRef = React.useRef(intentPlaybook);
+  intentPlaybookRef.current = intentPlaybook;
+
+  const setIntentPlaybook = React.useCallback((playbook: IntentPlaybook) => {
+    setIntentPlaybookState(parseIntentPlaybook(playbook));
+  }, []);
+
   React.useEffect(() => {
     setModeState(initialMode);
   }, [initialMode]);
@@ -346,6 +367,30 @@ export function WorkspaceModeProvider({
     if (!userDoc || !fbUser?.uid) return null;
     return { ...userDoc, id: fbUser.uid } as User;
   }, [fbUser?.uid, userDoc]);
+
+  React.useEffect(() => {
+    if (mode === "demo") {
+      setIntentPlaybookState(defaultIntentPlaybook());
+      return;
+    }
+    if (!liveOrgId) return;
+    let cancelled = false;
+    void fetch("/api/org/intent-playbook")
+      .then(async (res) => {
+        if (!res.ok) return;
+        const data = (await res.json()) as { playbook?: unknown };
+        if (!cancelled && data.playbook) {
+          setIntentPlaybookState(parseIntentPlaybook(data.playbook));
+        }
+      })
+      .catch(() => {
+        /* keep default playbook */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [mode, liveOrgId]);
+
   /** Align Firestore queries with rules: narrow unless viewer sees the full tenant (directors / owner / admin / manager org roles). */
   const narrowMemberCrm = viewerForMemberScope
     ? !seesAllLeadsInTenant(viewerForMemberScope)
@@ -616,18 +661,23 @@ export function WorkspaceModeProvider({
 
   const addLead = React.useCallback(
     async (lead: Lead): Promise<void> => {
+      const scored = withInitialQualityScore(
+        lead,
+        intentPlaybookRef.current,
+        snapshotRef.current.crmLabels,
+      );
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         try {
           const db = getFirebaseDb();
-          await persistLeadCreateClient(db, orgId, lead);
+          await persistLeadCreateClient(db, orgId, scored);
           recordLeadCreatedClient({
-            leadId: lead.id,
-            leadName: leadDisplayLabel(lead),
-            channel: lead.channel,
-            isProspect: isProspectRow(lead),
+            leadId: scored.id,
+            leadName: leadDisplayLabel(scored),
+            channel: scored.channel,
+            isProspect: isProspectRow(scored),
           });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
@@ -635,7 +685,7 @@ export function WorkspaceModeProvider({
           throw e;
         }
       }
-      setLeadsAdded((prev) => [...prev, lead]);
+      setLeadsAdded((prev) => [...prev, scored]);
     },
     [mode, userDoc?.organizationId],
   );
@@ -1330,18 +1380,26 @@ export function WorkspaceModeProvider({
       if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
         throw new Error("Only workspace admins can edit this lead.");
       }
+      const scoredPatch = lead
+        ? withQualityScorePatch(
+            lead,
+            patch,
+            intentPlaybookRef.current,
+            snapshotRef.current.crmLabels,
+          )
+        : patch;
       const iso = new Date().toISOString();
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         const db = getFirebaseDb();
-        await persistLeadPatchClient(db, leadId, patch);
+        await persistLeadPatchClient(db, leadId, scoredPatch);
       }
-      applyLeadPatchToSession(leadId, patch, iso);
+      applyLeadPatchToSession(leadId, scoredPatch, iso);
 
       const linkedSalesLeadId = lead?.linkedSalesLeadId?.trim();
       if (lead && isProspectRow(lead) && linkedSalesLeadId) {
-        const salesPatch = prospectPatchForSalesLeadSync(patch);
+        const salesPatch = prospectPatchForSalesLeadSync(scoredPatch);
         if (Object.keys(salesPatch).length > 0) {
           if (writeFs) {
             const db = getFirebaseDb();
@@ -2045,6 +2103,8 @@ export function WorkspaceModeProvider({
       demoPersonaId,
       organizationId: liveOrgId,
       organizationName,
+      intentPlaybook,
+      setIntentPlaybook,
       liveFirestoreError: mode === "live" ? liveFs.error : null,
       userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
       workspaceLoading: mode === "live" ? liveFs.loading : demoSnapshot == null,
@@ -2109,6 +2169,8 @@ export function WorkspaceModeProvider({
     demoPersonaId,
     liveOrgId,
     organizationName,
+    intentPlaybook,
+    setIntentPlaybook,
     liveFs.error,
     liveFs.loading,
     demoSnapshot,

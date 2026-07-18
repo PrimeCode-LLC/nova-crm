@@ -56,6 +56,7 @@ export type AuditEvent =
   | "feature.page_view"
   | "feature.fit_check"
   | "feature.lead_analyze"
+  | "feature.intent_suggest"
   | "feature.followup_suggest"
   | "feature.dashboard_brief"
   | "feature.outreach_view"
@@ -65,7 +66,9 @@ export type AuditEvent =
   | "scraper.feed_create"
   | "scraper.feed_delete"
   | "scraper.raw_promote"
-  | "intake_filter_defaults.updated";
+  | "intake_filter_defaults.updated"
+  | "intent_playbook.updated"
+  | "intent_playbook.template_applied";
 
 export type AuditLogRecord = {
   id: string;

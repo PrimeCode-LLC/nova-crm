@@ -17,7 +17,8 @@ export type AdminFeatureKey =
   | "profiles"
   | "email_outreach"
   | "create_campaigns"
-  | "delete_intake_pool";
+  | "delete_intake_pool"
+  | "intent_playbook";
 
 export type AdminFeatureMeta = {
   label: string;
@@ -87,6 +88,14 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     cluster: "access",
     minWorkspaceRole: "team_lead",
     href: "/admin/profiles",
+  },
+  intent_playbook: {
+    label: "Intent playbook",
+    description: "Quality scoring signals, weights, and outreach threshold",
+    cluster: "programs",
+    minWorkspaceRole: "manager",
+    minOrgRole: "admin",
+    href: "/admin/intent-playbook",
   },
   organization: {
     label: "Organization",

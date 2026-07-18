@@ -32,6 +32,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
+import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
+import { useQualityOutreachGate } from "@/components/leads/use-quality-outreach-gate";
 import type { MailInbound, MailSent } from "@/lib/email-account-types";
 import {
   appendGlobalEmailFooter,
@@ -258,6 +261,21 @@ export function LeadEmailsPanel({
       (workspace.isDemo || smtpMailboxes.length > 0 || isEmailAccountConfigured(activeMailbox)),
   );
 
+  const qualityResult = React.useMemo(
+    () =>
+      resolveLeadQuality(
+        lead,
+        workspace.intentPlaybook,
+        labelNamesForLead(lead, workspace.crmLabels),
+      ),
+    [lead, workspace.intentPlaybook, workspace.crmLabels],
+  );
+  const { confirmOrProceed: confirmQualityOutreach, dialog: qualityGateDialog } =
+    useQualityOutreachGate({
+      result: qualityResult,
+      threshold: workspace.intentPlaybook.outreachThreshold,
+    });
+
   const syncConversationLists = React.useCallback(
     async (force: boolean) => {
       if (workspace.isDemo || !emailServerHydrated) return;
@@ -472,28 +490,30 @@ export function LeadEmailsPanel({
       toast.error("Compose is disabled while viewing another member’s mailbox.");
       return;
     }
-    const mailbox = smtpMailboxes[0]
-      ? (smtpMailboxes.find((item) => item.id === activeMailbox.id) ?? smtpMailboxes[0])
-      : activeMailbox;
-    if (!workspace.isDemo && !isEmailAccountConfigured(mailbox)) {
-      toast.error("Configure SMTP in Settings → Email first.");
-      return;
-    }
-    setSelectedId(null);
-    setComposeMailboxId(mailbox.id);
-    setTo(contactEmail?.trim() || "");
-    setCc("");
-    setSubject("");
-    setBody("");
-    setInReplyTo(undefined);
-    setReferenceIds([]);
-    setAttachments([]);
-    setScheduleEnabled(false);
-    setScheduledAt(defaultScheduleDatetimeLocal());
-    setDraftId(undefined);
-    setIncludeSignature(true);
-    setIncludeFooter(Boolean(globalEmailFooter.trim()));
-    setComposeMode("compose");
+    confirmQualityOutreach(() => {
+      const mailbox = smtpMailboxes[0]
+        ? (smtpMailboxes.find((item) => item.id === activeMailbox.id) ?? smtpMailboxes[0])
+        : activeMailbox;
+      if (!workspace.isDemo && !isEmailAccountConfigured(mailbox)) {
+        toast.error("Configure SMTP in Settings → Email first.");
+        return;
+      }
+      setSelectedId(null);
+      setComposeMailboxId(mailbox.id);
+      setTo(contactEmail?.trim() || "");
+      setCc("");
+      setSubject("");
+      setBody("");
+      setInReplyTo(undefined);
+      setReferenceIds([]);
+      setAttachments([]);
+      setScheduleEnabled(false);
+      setScheduledAt(defaultScheduleDatetimeLocal());
+      setDraftId(undefined);
+      setIncludeSignature(true);
+      setIncludeFooter(Boolean(globalEmailFooter.trim()));
+      setComposeMode("compose");
+    });
   }
 
   function openComposer(mode: Exclude<ComposeMode, "compose">) {
@@ -882,6 +902,7 @@ export function LeadEmailsPanel({
 
   return (
     <>
+      {qualityGateDialog}
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center justify-between gap-3 text-sm">

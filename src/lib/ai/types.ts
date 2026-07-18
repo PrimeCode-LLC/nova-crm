@@ -7,6 +7,7 @@ export type AiProvider = "openai" | "anthropic" | "google";
 export type AiFeatureKey =
   | "dashboard_brief"
   | "lead_analyze"
+  | "intent_suggest"
   | "followup_suggest"
   | "email_reply"
   | "opportunity_fit"
@@ -146,6 +147,10 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
     lead_analyze: {
       enabled: true,
       ragMode: "reference",
+    },
+    intent_suggest: {
+      enabled: true,
+      ragMode: "open",
     },
     followup_suggest: {
       enabled: true,

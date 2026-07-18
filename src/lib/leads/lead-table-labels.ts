@@ -13,6 +13,7 @@ export const LEAD_TABLE_COLUMN_LABELS = {
   owner: "Owner",
   addedBy: "Added by",
   temperature: "Temp",
+  quality: "Quality",
   priority: "Priority",
   push: "Push",
   campaign: "Campaign",

@@ -28,6 +28,7 @@ import {
   Rss,
   Sparkles,
   ScrollText,
+  Crosshair,
   type LucideIcon,
 } from "lucide-react";
 
@@ -177,6 +178,14 @@ export const NAV_SECTIONS: NavSection[] = [
         label: "Labels",
         icon: Tag,
         adminFeature: "labels",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/intent-playbook",
+        label: "Intent playbook",
+        icon: Crosshair,
+        minWorkspaceRole: "manager",
+        adminFeature: "intent_playbook",
         adminCluster: "programs",
       },
       {

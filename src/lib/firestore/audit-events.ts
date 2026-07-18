@@ -37,6 +37,7 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "feature.page_view": "Page visited",
   "feature.fit_check": "Fit Check run",
   "feature.lead_analyze": "Lead AI analysis",
+  "feature.intent_suggest": "Intent signal suggestions",
   "feature.followup_suggest": "AI follow-up suggestions",
   "feature.dashboard_brief": "Dashboard AI brief",
   "feature.outreach_view": "Email outreach opened",
@@ -47,6 +48,8 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "scraper.feed_delete": "Scraper feed deleted",
   "scraper.raw_promote": "Intake item promoted to prospect",
   "intake_filter_defaults.updated": "Team intake filters updated",
+  "intent_playbook.updated": "Intent playbook updated",
+  "intent_playbook.template_applied": "Intent playbook template applied",
 };
 
 export type AuditEventCategory =
@@ -93,6 +96,7 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "feature.page_view": "usage",
   "feature.fit_check": "usage",
   "feature.lead_analyze": "usage",
+  "feature.intent_suggest": "usage",
   "feature.followup_suggest": "usage",
   "feature.dashboard_brief": "usage",
   "feature.outreach_view": "usage",
@@ -103,6 +107,8 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "scraper.feed_delete": "crm",
   "scraper.raw_promote": "crm",
   "intake_filter_defaults.updated": "settings",
+  "intent_playbook.updated": "settings",
+  "intent_playbook.template_applied": "settings",
 };
 
 export function labelForAuditEvent(event: string): string {

@@ -252,6 +252,11 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     tableName: "leads",
     message: (m) => `Lead AI analysis (${String(m.leadId ?? "")})`,
   },
+  "feature.intent_suggest": {
+    operation: "action",
+    tableName: "leads",
+    message: (m) => `Intent signal suggestions (${String(m.leadId ?? "")})`,
+  },
   "feature.followup_suggest": {
     operation: "action",
     tableName: "leads",
@@ -316,6 +321,19 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     fieldName: "intakeFilterDefaults",
     message: (m) =>
       `Team intake filters updated (${String(m.includeCount ?? 0)} include, ${String(m.excludeCount ?? 0)} exclude)`,
+  },
+  "intent_playbook.updated": {
+    operation: "update",
+    tableName: "organizations",
+    fieldName: "intentPlaybook",
+    message: (m) =>
+      `Intent playbook updated (${String(m.signalCount ?? 0)} signals, threshold ${String(m.threshold ?? "")})`,
+  },
+  "intent_playbook.template_applied": {
+    operation: "update",
+    tableName: "organizations",
+    fieldName: "intentPlaybook",
+    message: (m) => `Intent playbook template applied (${String(m.templateId ?? "")})`,
   },
 };
 

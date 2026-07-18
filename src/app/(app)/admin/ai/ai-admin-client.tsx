@@ -43,6 +43,7 @@ import { FitKnowledgeAdminPanel } from "@/components/admin/fit-knowledge-admin-p
 const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "dashboard_brief", label: "Dashboard overview" },
   { key: "lead_analyze", label: "Lead analysis" },
+  { key: "intent_suggest", label: "Intent signal suggest" },
   { key: "followup_suggest", label: "Follow-up suggestions" },
   { key: "email_reply", label: "Email reply" },
   { key: "opportunity_fit", label: "Opportunity fit check" },

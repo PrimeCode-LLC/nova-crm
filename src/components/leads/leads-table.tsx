@@ -86,6 +86,9 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { downloadLeadsCsv } from "@/lib/leads-csv";
 import { LEAD_TABLE_COLUMN_LABELS as COL } from "@/lib/leads/lead-table-labels";
+import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
+import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
+import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
 import {
   OWNER_SCOPE_PREFIX,
   buildPersonOwnerOptions,
@@ -294,7 +297,7 @@ function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
   );
 }
 
-export type LeadsTablePreset = "default" | "high-priority";
+export type LeadsTablePreset = "default" | "high-priority" | "ready-outreach";
 
 export type LeadsTableRef = {
   /** Downloads CSV for rows currently visible after toolbar filters (search, stage, channel, priority preset, etc.). */
@@ -304,6 +307,9 @@ export type LeadsTableRef = {
 function initialColumnFiltersForPreset(preset: LeadsTablePreset | undefined): ColumnFiltersState {
   if (preset === "high-priority") {
     return [{ id: "priority", value: ["high", "urgent"] }];
+  }
+  if (preset === "ready-outreach") {
+    return [{ id: "qualityReady", value: true }];
   }
   return [];
 }
@@ -374,6 +380,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     getProfileById,
     profiles,
     crmLabels,
+    intentPlaybook,
     isDemo,
     canDeleteLeads,
     canEditLead,
@@ -411,6 +418,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   });
   const [columnVisibility, setColumnVisibility] = React.useState<Record<string, boolean>>({
     profileId: false,
+    qualityReady: false,
     ...(lockedIntakeScope !== "prospect" ? { campaign: false } : {}),
   });
   const [ownerScope, setOwnerScope] = React.useState(initialOwnerScope);
@@ -893,6 +901,37 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       },
     },
     {
+      id: "quality",
+      accessorFn: (row) =>
+        resolveLeadQuality(row, intentPlaybook, labelNamesForLead(row, crmLabels)).score,
+      header: COL.quality,
+      cell: ({ row }) => (
+        <LeadQualityBadge
+          lead={row.original}
+          playbook={intentPlaybook}
+          crmLabels={crmLabels}
+        />
+      ),
+      sortingFn: "basic",
+    },
+    {
+      id: "qualityReady",
+      accessorFn: (row) =>
+        resolveLeadQuality(row, intentPlaybook, labelNamesForLead(row, crmLabels))
+          .meetsThreshold,
+      header: () => null,
+      cell: () => null,
+      enableHiding: true,
+      filterFn: (row, _id, value: boolean) => {
+        if (!value) return true;
+        return resolveLeadQuality(
+          row.original,
+          intentPlaybook,
+          labelNamesForLead(row.original, crmLabels),
+        ).meetsThreshold;
+      },
+    },
+    {
       id: "priority",
       accessorKey: "priority",
       header: COL.priority,
@@ -1040,7 +1079,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref]);
 
   const table = useReactTable({
     data: dataForTable,

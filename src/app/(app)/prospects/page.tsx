@@ -73,6 +73,13 @@ function ProspectsPageInner() {
                 >
                   High priority
                 </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    setTableSession((s) => ({ key: s.key + 1, preset: "ready-outreach" }))
+                  }
+                >
+                  Ready to outreach
+                </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
             <Button

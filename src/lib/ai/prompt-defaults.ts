@@ -38,6 +38,26 @@ Return JSON with:
 - riskLevel: "low" | "medium" | "high"
 - nextActions: string[]`,
   },
+  intent_suggest: {
+    systemPrompt: `You help sales teams fill missing research fields that match an Intent Playbook. Only suggest values grounded in existing lead context. Never invent company facts. Prefer short, specific phrases. Output structured JSON only.`,
+    userPromptTemplate: `Suggest research field fills that would unlock Intent Playbook signals for this lead.
+
+Playbook signals (id, label, keywords):
+{{playbookSignals}}
+
+Already matched signal ids:
+{{matchedSignalIds}}
+
+Lead context:
+{{context}}
+
+Return JSON with:
+- suggestions: array of 0-5 objects, each with:
+  - field: "hiringSignals" | "triggerEvent" | "painPoints" | "recentNews" | "businessFocus"
+  - value: string (1-2 sentences max, suitable to paste into that CRM field)
+  - signalLabel: string (which playbook signal this supports)
+  - rationale: string (why this is grounded in the lead context)`,
+  },
   followup_suggest: {
     systemPrompt: `You are a B2B sales sequence planner. Propose a short, highly personalized multi-step cadence with ready-to-send message copy.
 

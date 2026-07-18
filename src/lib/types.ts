@@ -159,6 +159,16 @@ export type OrganizationIntakeFilterDefaults = {
   excludeKeywords: string[];
 };
 
+/** Re-export Intent Playbook types for consumers that import from `@/lib/types`. */
+export type {
+  IntentPlaybook,
+  IntentPlaybookTemplateId,
+  IntentSignalDefinition,
+  IntentSignalCategory,
+  QualityMatchedSignal,
+  QualityScoreResult,
+} from "@/lib/intent/types";
+
 export interface Organization {
   id: string;
   name: string;
@@ -182,6 +192,11 @@ export interface Organization {
   channelAdmin?: OrganizationChannelAdminConfig;
   /** Team-wide intake pool keyword defaults; readable by all members. */
   intakeFilterDefaults?: OrganizationIntakeFilterDefaults;
+  /**
+   * Workspace Intent Playbook — drives prospect/lead Quality Score.
+   * Stored on the org doc; parsed via `parseIntentPlaybook`.
+   */
+  intentPlaybook?: import("@/lib/intent/types").IntentPlaybook;
   createdAt: ISODate;
   updatedAt: ISODate;
   /** Populated by platform GET APIs after stripping `settings.inboundWebhookSecret`. */
@@ -488,6 +503,22 @@ export interface Lead {
   bant?: BANT;
   estimatedValue?: number;
   expectedCloseDate?: ISODate;
+
+  /**
+   * Intent Quality Score (0–100) from the org Intent Playbook.
+   * Also recomputed live in the UI when the playbook changes.
+   */
+  qualityScore?: number;
+  /** Count of matched intent signals (excludes engagement boosts). */
+  qualitySignalCount?: number;
+  /** Matched signal ids from last score run. */
+  qualityMatchedSignalIds?: string[];
+  qualityScoredAt?: ISODate;
+  /** Highest-scoring service lane for outreach angle (from Intent Playbook routes). */
+  primaryOpportunityId?: string;
+  primaryOpportunityLabel?: string;
+  /** When true, auto-temperature from Quality Score will not overwrite `temperature`. */
+  temperatureLocked?: boolean;
 
   // Activity metrics
   firstContactAt?: ISODate;

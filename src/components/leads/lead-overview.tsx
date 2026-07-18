@@ -22,6 +22,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
+import { LeadIntentQualityCard } from "@/components/leads/lead-intent-quality-card";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -52,6 +53,13 @@ export function LeadOverview({
   const scraperSource = getLeadScraperSource(lead);
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <LeadIntentQualityCard
+        lead={lead}
+        playbook={ws.intentPlaybook}
+        crmLabels={ws.crmLabels}
+        canEdit={canEdit}
+      />
+
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Labels</CardTitle>

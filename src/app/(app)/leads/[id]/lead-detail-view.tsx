@@ -55,6 +55,7 @@ import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-bann
 import { LeadSchedulingPanel } from "@/components/scheduling/lead-scheduling-panel";
 import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
+import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -523,6 +524,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     Do not contact
                   </Badge>
                 ) : null}
+                <LeadQualityBadge
+                  lead={lead}
+                  playbook={ws.intentPlaybook}
+                  crmLabels={ws.crmLabels}
+                  className="h-7"
+                />
                 {needsOutreachProfile && (
                   <Badge
                     variant="outline"
