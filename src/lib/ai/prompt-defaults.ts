@@ -39,13 +39,13 @@ Return JSON with:
 - nextActions: string[]`,
   },
   intent_suggest: {
-    systemPrompt: `You help sales teams fill missing research fields that match an Intent Playbook. Only suggest values grounded in existing lead context. Never invent company facts. Prefer short, specific phrases. Output structured JSON only.`,
-    userPromptTemplate: `Suggest research field fills that would unlock Intent Playbook signals for this lead.
+    systemPrompt: `You help sales teams capture Intent Playbook signals in CRM research fields. Only suggest values grounded in existing lead context. Never invent company facts. Prefer short, specific phrases that include playbook keyword language when the evidence supports it. Suggest even when fields are already filled if a clearer signal phrase can be appended. Output structured JSON only.`,
+    userPromptTemplate: `Suggest research field fills that would unlock unmatched Intent Playbook signals for this lead.
 
 Playbook signals (id, label, keywords):
 {{playbookSignals}}
 
-Already matched signal ids:
+Already matched signal ids (do not re-suggest these):
 {{matchedSignalIds}}
 
 Lead context:
@@ -54,8 +54,9 @@ Lead context:
 Return JSON with:
 - suggestions: array of 0-5 objects, each with:
   - field: "hiringSignals" | "triggerEvent" | "painPoints" | "recentNews" | "businessFocus"
-  - value: string (1-2 sentences max, suitable to paste into that CRM field)
-  - signalLabel: string (which playbook signal this supports)
+  - value: string (1-2 sentences max, suitable to paste or append into that CRM field; use concrete playbook keywords when evidence supports them)
+  - signalLabel: string (human label of the playbook signal)
+  - signalId: string (playbook signal id, e.g. stellix_hiring)
   - rationale: string (why this is grounded in the lead context)`,
   },
   followup_suggest: {

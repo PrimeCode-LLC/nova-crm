@@ -67,6 +67,31 @@ describe("computeQualityScore", () => {
     assert.ok(result.meetsThreshold);
   });
 
+  it("Stellix: scores naturalistic research (hiring, fragmented platforms, acquisition, AI)", () => {
+    const playbook = stellixSoftPlaybook();
+    const result = computeQualityScore(
+      {
+        hiringSignals:
+          "Hiring software developers experienced in BI and cloud systems; tech team is actively scaling",
+        painPoints:
+          "Disjointed tech stacks and fragmented platforms; teams are manually rekeying data between systems",
+        recentNews:
+          "Completed the strategic acquisition of Seez AI and took full ownership of Pinewood North America",
+        businessFocus:
+          "Cloud-based Automotive Intelligence Platform integrating accounting, sales, CRM, and logistics; deploying AI agent applications",
+        touches: 3,
+      },
+      playbook,
+    );
+    assert.ok(result.matchedSignals.some((s) => s.signalId === "stellix_hiring"));
+    assert.ok(result.matchedSignals.some((s) => s.signalId === "stellix_tech_debt"));
+    assert.ok(result.matchedSignals.some((s) => s.signalId === "stellix_manual_pain"));
+    assert.ok(result.matchedSignals.some((s) => s.signalId === "stellix_funding"));
+    assert.ok(result.score >= playbook.outreachThreshold);
+    assert.equal(result.meetsThreshold, true);
+    assert.ok(result.primaryOpportunity);
+  });
+
   it("adds engagement boost on reply", () => {
     const playbook = modernizationServicesPlaybook();
     const base = computeQualityScore({ touches: 0 }, playbook);

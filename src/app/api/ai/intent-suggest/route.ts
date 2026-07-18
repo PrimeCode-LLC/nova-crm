@@ -26,6 +26,9 @@ const suggestionsSchema = z.object({
       value: z.string(),
       signalLabel: z.string(),
       rationale: z.string(),
+      // OpenAI structured output requires every property to be in `required`
+      // (optional Zod fields are rejected with invalid_json_schema).
+      signalId: z.string(),
     }),
   ),
 });

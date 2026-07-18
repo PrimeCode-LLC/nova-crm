@@ -8,6 +8,7 @@ import type {
   QualityMatchedSignal,
   QualityScoreResult,
 } from "@/lib/intent/types";
+import { corpusConcepts, firstMatchingKeyword } from "@/lib/intent/text-match";
 
 const DEFAULT_SCAN_FIELDS: IntentScanFieldKey[] = [
   "triggerEvent",
@@ -63,12 +64,6 @@ function fieldText(lead: QualityScoreLeadInput, key: IntentScanFieldKey): string
     default:
       return "";
   }
-}
-
-function includesKeyword(haystack: string, keyword: string): boolean {
-  const k = keyword.trim().toLowerCase();
-  if (!k || !haystack) return false;
-  return haystack.includes(k);
 }
 
 function densityFor(count: number): QualityScoreResult["density"] {
@@ -228,11 +223,12 @@ export function computeQualityScore(
       .map((f) => fieldText(lead, f))
       .join("\n")
       .toLowerCase();
+    const concepts = corpusConcepts(corpus);
 
     let reason = "";
 
     if (signal.keywords.length) {
-      const hit = signal.keywords.find((kw) => includesKeyword(corpus, kw));
+      const hit = firstMatchingKeyword(corpus, concepts, signal.keywords);
       if (hit) reason = `Matched “${hit}”`;
     }
 
