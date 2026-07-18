@@ -1,5 +1,8 @@
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
-import { appendMailboxSignature } from "@/lib/email/append-mailbox-signature";
+import {
+  appendGlobalEmailFooter,
+  appendMailboxSignature,
+} from "@/lib/email/append-mailbox-signature";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { isEmailAccountConfigured } from "@/stores/email-account-store";
 
@@ -17,10 +20,16 @@ export type ScheduleFollowupEmailInput = {
   mailbox: EmailMailboxSettings;
   to: string;
   subject: string;
-  /** Message body without signature; signature is appended when includeSignature is true. */
+  /** Message body without signature/footer; trailers appended when flags are true. */
   body: string;
   /** Default true — append mailbox.signature at queue time. */
   includeSignature?: boolean;
+  /**
+   * Account-wide footer text (Settings → Email). Applied when includeFooter is true.
+   */
+  globalEmailFooter?: string;
+  /** Default true — append globalEmailFooter after the signature. */
+  includeFooter?: boolean;
   scheduledAtIso: string;
   isDemo: boolean;
   addDemoScheduled: (row: {
@@ -63,9 +72,13 @@ export async function scheduleFollowupEmailClient(
   const emailScheduledAt = scheduledDate.toISOString();
   const account = input.mailbox;
   const includeSignature = input.includeSignature !== false;
-  const outboundBody = includeSignature
+  const includeFooter = input.includeFooter !== false;
+  let outboundBody = includeSignature
     ? appendMailboxSignature(input.body, account.signature)
     : input.body.replace(/\s+$/u, "");
+  if (includeFooter) {
+    outboundBody = appendGlobalEmailFooter(outboundBody, input.globalEmailFooter);
+  }
 
   if (input.isDemo) {
     const id = input.addDemoScheduled({

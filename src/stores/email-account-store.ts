@@ -44,6 +44,11 @@ export interface EmailAccountStore {
   linkedLeadByMessageId: Record<string, string>;
   /** Sender domains whose INBOX messages are auto-moved to Trash. */
   blockedSenderDomains: string[];
+  /**
+   * Shared footer for all mailboxes — appended after signature on followup /
+   * sequence schedule when includeFooter is on.
+   */
+  globalEmailFooter: string;
   /** Gmail-style user labels for inbox mail. */
   mailLabels: MailLabel[];
   labelsByMessageId: Record<string, string[]>;
@@ -61,6 +66,7 @@ export interface EmailAccountStore {
     activeMailboxId: string;
     linkedLeadByMessageId: Record<string, string>;
     blockedSenderDomains?: string[];
+    globalEmailFooter?: string;
     mailLabels?: MailLabel[];
     labelsByMessageId?: Record<string, string[]>;
     flagByMessageId?: Record<string, MailFlagId>;
@@ -69,6 +75,7 @@ export interface EmailAccountStore {
   }) => void;
   addBlockedSenderDomain: (domain: string) => void;
   removeBlockedSenderDomain: (domain: string) => void;
+  setGlobalEmailFooter: (footer: string) => void;
   /** Live: switch inbox subject (admin). Clears cached threads until the next mailbox hydrate. */
   setMailViewAsUid: (uid: string | null) => void;
   setActiveMailbox: (mailboxId: string) => void;
@@ -202,6 +209,7 @@ function scheduleEmailMetaPersist(get: () => EmailAccountStore) {
         activeMailboxId: s.activeMailboxId,
         linkedLeadByMessageId: s.linkedLeadByMessageId,
         blockedSenderDomains: s.blockedSenderDomains,
+        globalEmailFooter: s.globalEmailFooter,
         mailLabels: s.mailLabels,
         labelsByMessageId: s.labelsByMessageId,
         flagByMessageId: s.flagByMessageId,
@@ -220,6 +228,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   activeMailboxId: "",
   linkedLeadByMessageId: {},
   blockedSenderDomains: [],
+  globalEmailFooter: "",
   mailLabels: [],
   labelsByMessageId: {},
   flagByMessageId: {},
@@ -248,6 +257,8 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       activeMailboxId: active,
       linkedLeadByMessageId: payload.linkedLeadByMessageId,
       blockedSenderDomains: [...new Set(blocked)],
+      globalEmailFooter:
+        typeof payload.globalEmailFooter === "string" ? payload.globalEmailFooter : "",
       mailLabels: payload.mailLabels ?? [],
       labelsByMessageId: payload.labelsByMessageId ?? {},
       flagByMessageId: payload.flagByMessageId ?? {},
@@ -274,6 +285,11 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     }));
     scheduleEmailMetaPersist(get);
   },
+  setGlobalEmailFooter: (footer) => {
+    if (get().mailboxDataReadOnly) return;
+    set({ globalEmailFooter: footer });
+    scheduleEmailMetaPersist(get);
+  },
   setMailViewAsUid: (uid) =>
     set((s) => {
       const next = !uid?.trim() ? null : uid.trim();
@@ -289,6 +305,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         sent: [],
         linkedLeadByMessageId: {},
         blockedSenderDomains: [],
+        globalEmailFooter: "",
         mailLabels: [],
         labelsByMessageId: {},
         flagByMessageId: {},
@@ -875,6 +892,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       activeMailboxId: seed.activeMailboxId,
       linkedLeadByMessageId: seed.linkedLeadByMessageId,
       blockedSenderDomains: [],
+      globalEmailFooter: "",
       mailLabels: seed.mailLabels,
       labelsByMessageId: seed.labelsByMessageId,
       flagByMessageId: seed.flagByMessageId,

@@ -7,6 +7,7 @@ const schema = z.object({
   activeMailboxId: z.string().optional(),
   linkedLeadByMessageId: z.record(z.string(), z.string()).optional(),
   blockedSenderDomains: z.array(z.string()).optional(),
+  globalEmailFooter: z.string().optional(),
   mailLabels: z
     .array(
       z.object({

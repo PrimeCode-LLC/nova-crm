@@ -26,6 +26,11 @@ export type EmailAccountMeta = {
   linkedLeadByMessageId: Record<string, string>;
   /** Sender domains (e.g. `bark.com`) whose INBOX mail is auto-moved to Trash. */
   blockedSenderDomains: string[];
+  /**
+   * Plain-text footer appended after the mailbox signature on outbound followup /
+   * sequence emails when the scheduler includes the footer (default on).
+   */
+  globalEmailFooter: string;
   /** User-defined inbox labels (Gmail-style). */
   mailLabels: MailLabel[];
   /** Message meta key → label ids assigned to that message. */
@@ -164,6 +169,7 @@ export async function getEmailAccountMetaServer(input: {
       activeMailboxId: "",
       linkedLeadByMessageId: {},
       blockedSenderDomains: [],
+      globalEmailFooter: "",
       mailLabels: [],
       labelsByMessageId: {},
       flagByMessageId: {},
@@ -175,6 +181,7 @@ export async function getEmailAccountMetaServer(input: {
       activeMailboxId: "",
       linkedLeadByMessageId: {},
       blockedSenderDomains: [],
+      globalEmailFooter: "",
       mailLabels: [],
       labelsByMessageId: {},
       flagByMessageId: {},
@@ -191,6 +198,8 @@ export async function getEmailAccountMetaServer(input: {
   const blockedSenderDomains = Array.isArray(blockedRaw)
     ? blockedRaw.map((d) => String(d).trim().toLowerCase()).filter(Boolean)
     : [];
+  const globalEmailFooter =
+    typeof data.globalEmailFooter === "string" ? data.globalEmailFooter : "";
   const mailLabels = parseMailLabelsFromFirestore(data.mailLabels);
   const labelsByMessageId = parseLabelsByMessageIdFromFirestore(data.labelsByMessageId);
   const flagByMessageId = parseFlagByMessageIdFromFirestore(data.flagByMessageId);
@@ -198,6 +207,7 @@ export async function getEmailAccountMetaServer(input: {
     activeMailboxId: active,
     linkedLeadByMessageId,
     blockedSenderDomains,
+    globalEmailFooter,
     mailLabels,
     labelsByMessageId,
     flagByMessageId,
@@ -220,6 +230,9 @@ export async function setEmailAccountMetaServer(input: {
   }
   if (input.meta.blockedSenderDomains !== undefined) {
     patch.blockedSenderDomains = input.meta.blockedSenderDomains;
+  }
+  if (input.meta.globalEmailFooter !== undefined) {
+    patch.globalEmailFooter = input.meta.globalEmailFooter;
   }
   if (input.meta.mailLabels !== undefined) {
     patch.mailLabels = input.meta.mailLabels;

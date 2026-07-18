@@ -27,6 +27,7 @@ import {
   type MailboxDayLoadClient,
 } from "@/lib/email/mailbox-schedule-capacity";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
+import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -88,6 +89,7 @@ export function ScheduleSequenceEmailsDialog({
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const addScheduled = useEmailAccountStore((s) => s.addScheduled);
   const scheduled = useEmailAccountStore((s) => s.scheduled);
+  const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
 
   const mailboxOptions = React.useMemo(() => {
     if (mailboxes.length > 0) return mailboxes;
@@ -98,6 +100,7 @@ export function ScheduleSequenceEmailsDialog({
   const [to, setTo] = React.useState("");
   const [steps, setSteps] = React.useState<StepDraft[]>([]);
   const [includeSignature, setIncludeSignature] = React.useState(true);
+  const [includeFooter, setIncludeFooter] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [loadByDay, setLoadByDay] = React.useState<Record<string, MailboxDayLoadClient>>({});
   const [loadLimit, setLoadLimit] = React.useState<number | null>(null);
@@ -128,6 +131,7 @@ export function ScheduleSequenceEmailsDialog({
     setMailboxId(defaultId);
     setTo(lead.contactEmail?.trim() ?? "");
     setIncludeSignature(true);
+    setIncludeFooter(true);
     setSteps(
       schedulable.map((f) => ({
         followupId: f.id,
@@ -266,6 +270,8 @@ export function ScheduleSequenceEmailsDialog({
           subject: step.subject,
           body: step.body,
           includeSignature,
+          globalEmailFooter,
+          includeFooter,
           scheduledAtIso: new Date(step.scheduledAt).toISOString(),
           isDemo,
           addDemoScheduled: addScheduled,
@@ -372,6 +378,12 @@ export function ScheduleSequenceEmailsDialog({
               includeSignature={includeSignature}
               onIncludeChange={setIncludeSignature}
               mailboxLabel={mailboxOptionLabel(account)}
+            />
+            <GlobalEmailFooterPreview
+              id="seq-include-global-email-footer"
+              footer={globalEmailFooter}
+              includeFooter={includeFooter}
+              onIncludeChange={setIncludeFooter}
             />
             <div className="space-y-1.5">
               <Label htmlFor="seq-schedule-to">To</Label>

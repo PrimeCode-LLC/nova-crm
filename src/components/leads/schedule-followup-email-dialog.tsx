@@ -26,6 +26,7 @@ import {
   type MailboxDayLoadClient,
 } from "@/lib/email/mailbox-schedule-capacity";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
+import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -79,6 +80,7 @@ export function ScheduleFollowupEmailDialog({
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const addScheduled = useEmailAccountStore((s) => s.addScheduled);
   const scheduled = useEmailAccountStore((s) => s.scheduled);
+  const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
 
   const mailboxOptions = React.useMemo(() => {
     if (mailboxes.length > 0) return mailboxes;
@@ -91,6 +93,7 @@ export function ScheduleFollowupEmailDialog({
   const [scheduledAt, setScheduledAt] = React.useState("");
   const [body, setBody] = React.useState("");
   const [includeSignature, setIncludeSignature] = React.useState(true);
+  const [includeFooter, setIncludeFooter] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [loadByDay, setLoadByDay] = React.useState<Record<string, MailboxDayLoadClient>>({});
   const [loadLimit, setLoadLimit] = React.useState<number | null>(null);
@@ -114,6 +117,7 @@ export function ScheduleFollowupEmailDialog({
     setScheduledAt(defaultScheduleDatetimeLocal(followup.dueAt));
     setBody(followup.messageBody ?? "");
     setIncludeSignature(true);
+    setIncludeFooter(true);
     setSubmitting(false);
   }, [open, followup, lead.contactEmail, mailboxOptions, activeMailboxId]);
 
@@ -210,6 +214,8 @@ export function ScheduleFollowupEmailDialog({
         subject,
         body,
         includeSignature,
+        globalEmailFooter,
+        includeFooter,
         scheduledAtIso: new Date(scheduledAt).toISOString(),
         isDemo,
         addDemoScheduled: addScheduled,
@@ -305,6 +311,11 @@ export function ScheduleFollowupEmailDialog({
               includeSignature={includeSignature}
               onIncludeChange={setIncludeSignature}
               mailboxLabel={mailboxOptionLabel(account)}
+            />
+            <GlobalEmailFooterPreview
+              footer={globalEmailFooter}
+              includeFooter={includeFooter}
+              onIncludeChange={setIncludeFooter}
             />
             <div className="space-y-1.5">
               <Label htmlFor="followup-schedule-to">To</Label>

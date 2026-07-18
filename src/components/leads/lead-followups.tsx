@@ -54,12 +54,72 @@ import type { FollowupPlan } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canMutateFollowup } from "@/lib/can-mutate-followup";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
-import { useEmailAccountStore } from "@/stores/email-account-store";
+import {
+  getActiveMailbox,
+  useEmailAccountStore,
+} from "@/stores/email-account-store";
+import {
+  globalEmailFooterTrimmed,
+  mailboxSignatureTrimmed,
+} from "@/lib/email/append-mailbox-signature";
 import { toast } from "sonner";
 
 function channelBadgeLabel(channel: Followup["channel"]): string | null {
   if (!channel || channel === "other") return null;
   return CHANNEL_LIST.find((c) => c.key === channel)?.label ?? channel;
+}
+
+/**
+ * Shows how mailbox signature + shared footer will sit under the draft body
+ * (same blank-line gap as schedule/send append).
+ */
+function OutboundTrailersPreview() {
+  const mailboxes = useEmailAccountStore((s) => s.mailboxes);
+  const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
+  const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
+  const mailbox = getActiveMailbox({ mailboxes, activeMailboxId });
+  const signature = mailboxSignatureTrimmed(mailbox.signature);
+  const footer = globalEmailFooterTrimmed(globalEmailFooter);
+  const mailboxLabel =
+    mailbox.label?.trim() ||
+    mailbox.emailAddress?.trim() ||
+    mailbox.displayName?.trim() ||
+    "Active mailbox";
+
+  return (
+    <div
+      className="rounded-md border border-dashed border-muted-foreground/25 bg-muted/10 px-2.5 py-2"
+      aria-label="Outbound email preview trailers"
+    >
+      <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
+        How it lands in inbox · {mailboxLabel}
+      </p>
+      {/* Blank line after body — matches `\n\n` before signature at schedule time */}
+      <div className="h-5 border-t border-dotted border-muted-foreground/20" aria-hidden />
+      {signature ? (
+        <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground/90">
+          {signature}
+        </pre>
+      ) : (
+        <div className="space-y-1">
+          <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground/50 italic">
+            {`Best regards,\nYour Name\nTitle · Company`}
+          </pre>
+          <p className="text-[10px] text-amber-700 dark:text-amber-400">
+            Placeholder — set a real signature in Settings → Email
+          </p>
+        </div>
+      )}
+      {footer ? (
+        <>
+          <div className="h-5 border-t border-dotted border-muted-foreground/20 mt-2" aria-hidden />
+          <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground/80">
+            {footer}
+          </pre>
+        </>
+      ) : null}
+    </div>
+  );
 }
 
 function CopyBodyButton({ text }: { text: string }) {
@@ -265,9 +325,10 @@ function FollowupRow({
       </div>
       {expanded && f.messageBody && (
         <div className="mt-2 ml-9 space-y-2 border-t pt-2">
-          <pre className="text-xs whitespace-pre-wrap font-mono text-foreground/90 max-h-40 overflow-y-auto">
+          <pre className="text-xs whitespace-pre-wrap font-mono text-foreground/90 max-h-52 overflow-y-auto">
             {f.messageBody}
           </pre>
+          {channelSupportsEmail ? <OutboundTrailersPreview /> : null}
           <div className="flex flex-wrap items-center gap-2">
             <CopyBodyButton text={f.messageBody} />
             {isScheduled ? (

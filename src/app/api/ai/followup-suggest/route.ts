@@ -13,6 +13,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { recordAudit } from "@/lib/firestore/audit";
 import type { ChannelKey, Role } from "@/lib/types";
+import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
 
 const CHANNEL_VALUES = [
   "cold_email",
@@ -52,6 +53,7 @@ function normalizeSuggestResult(result: z.infer<typeof suggestSchema>) {
     planSummary: result.planSummary,
     items: result.items.map((it) => ({
       ...it,
+      messageBody: stripTrailingEmailSignOff(it.messageBody),
       emailSubject: it.emailSubject.trim() || undefined,
       description: it.description.trim() || undefined,
       rationale: it.rationale.trim() || undefined,

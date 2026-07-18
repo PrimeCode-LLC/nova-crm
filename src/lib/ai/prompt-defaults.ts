@@ -59,7 +59,7 @@ Role adaptation:
 
 Every message must be easy to scan: short paragraphs, plain language, one primary idea, and one low-friction call to action. Vary the sequence instead of repeating the opener: lead with relevance, then add useful proof or a role-relevant angle, then use a brief bump or graceful close. Do not over-personalize with irrelevant personal details.
 
-Respect existing open follow-ups — extend the cadence, do not duplicate the same step. Honor sequenceMode: "full" means first touch through last email/touch; "continue" means the intro/first outreach was already sent — draft only the remaining follow-ups (no cold opener). If regenerateContext is provided, the lead replied — draft a fresh plan that directly acknowledges their message. For email-capable channels include a concise emailSubject. For LinkedIn, Upwork, or similar, leave emailSubject empty and write channel-appropriate copy. Never invent facts not in context. Critical: do NOT include an email signature, name block, title/company block, phone/email footer, or "Best regards" / "Thanks," sign-off with contact details — the CRM appends the sender's mailbox signature when the email is scheduled. Output structured JSON only.`,
+Respect existing open follow-ups — extend the cadence, do not duplicate the same step. Honor sequenceMode: "full" means first touch through last email/touch; "continue" means the intro/first outreach was already sent — draft only the remaining follow-ups (no cold opener). If regenerateContext is provided, the lead replied — draft a fresh plan that directly acknowledges their message. For email-capable channels include a concise emailSubject. For LinkedIn, Upwork, or similar, leave emailSubject empty and write channel-appropriate copy. Never invent facts not in context. Critical: End every email messageBody on the call to action or final sentence — do NOT add any closing/sign-off line at all (no "Best,", "Best regards,", "Thanks,", "Thank you,", "Cheers,", "Regards,", "Sincerely,", "Warmly,", or similar), and do NOT include a name, title, company, phone, or email footer. The CRM appends the sender's mailbox signature (which already includes the closing) when the email is scheduled. Output structured JSON only.`,
     userPromptTemplate: `Plan a personalized sequence for this lead.
 
 Sequence mode: {{sequenceMode}}
@@ -84,12 +84,12 @@ Return JSON with:
   - priority: "low" | "medium" | "high" | "urgent"
   - channel: one of "cold_email" | "linkedin_outbound" | "linkedin_1to1" | "personalized_email" | "website_form" | "upwork" | "job_apply" | "other" (prefer lead channel or "other")
   - emailSubject: string (email subject when channel is email-like; use "" for LinkedIn/Upwork/call-style steps)
-  - messageBody: string (outbound message body ONLY — no signature or sign-off block; CRM adds the mailbox signature at send time; match channel tone)
+  - messageBody: string (outbound message body ONLY — end on the ask/CTA; never a closing line like "Best," or "Thanks,"; never a signature/name block; CRM adds the mailbox signature at send time; match channel tone)
   - description: string (internal note for the rep; use "" if none)
   - rationale: string (why this step; use "" if none)`,
   },
   email_reply: {
-    systemPrompt: `You are drafting a professional sales email reply. Match the thread tone. Do not invent facts not in context. Output only the email body text (no subject line unless asked).`,
+    systemPrompt: `You are drafting a professional sales email reply. Match the thread tone. Do not invent facts not in context. Output only the email body text (no subject line unless asked). End on the reply content or CTA — do NOT add a closing/sign-off ("Best,", "Thanks,", "Regards,", etc.) or signature; the CRM appends the mailbox signature.`,
     userPromptTemplate: `Draft a reply for this email thread.
 
 Tone: {{tone}}
@@ -103,7 +103,7 @@ Lead context (if any):
 
 {{ragBlock}}
 
-Write the reply body only.`,
+Write the reply body only (no closing line, no signature).`,
   },
   opportunity_fit: {
     systemPrompt: `You are an opportunity qualification analyst for a B2B services company. Score how well a pasted opportunity fits the company's positioning using ONLY the knowledge base in strict mode. Be honest about mismatches.

@@ -36,6 +36,7 @@ import {
   CheckCircle2,
   Eye,
   EyeOff,
+  FileText,
   Gauge,
   Loader2,
   Mail,
@@ -49,7 +50,7 @@ import {
   Users,
 } from "lucide-react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
+import { buildWorkspaceOwnerPickerOptions, ownerPickerTriggerLabel } from "@/lib/owner-scope";
 import {
   Select,
   SelectContent,
@@ -58,7 +59,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import type { MailboxDelegation } from "@/lib/types";
+import type { OrganizationMember, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /** Another owned mailbox already using this From address (case-insensitive). */
@@ -81,6 +82,58 @@ function isMailboxTransportConnected(mb: EmailMailboxSettings): boolean {
     return Boolean(mb.googleAuthConnected);
   }
   return Boolean(mb.emailAddress.trim() && normalizeMailHost(mb.smtp.host));
+}
+
+/** Active teammates only — skips disabled/inactive/invited org members and inactive CRM users. */
+function buildActiveAssignableOptions(
+  users: readonly User[],
+  members: readonly OrganizationMember[] | null,
+  currentUserId: string,
+  getOwnerDisplayName: (id: string) => string | undefined,
+): { id: string; label: string }[] {
+  const opts: { id: string; label: string }[] = [];
+  if (members) {
+    const uidToUser = new Map(users.map((u) => [u.id, u]));
+    for (const m of members) {
+      if (m.status !== "active") continue;
+      if (!m.uid || m.uid === currentUserId) continue;
+      const u = uidToUser.get(m.uid);
+      if (u && u.status !== "active") continue;
+      const label =
+        m.displayName?.trim() ||
+        u?.displayName?.trim() ||
+        getOwnerDisplayName(m.uid)?.trim() ||
+        (m.email.includes("@") ? m.email.split("@")[0] : m.email) ||
+        u?.email.split("@")[0] ||
+        m.uid;
+      opts.push({ id: m.uid, label });
+    }
+  } else {
+    for (const u of users) {
+      if (u.status !== "active") continue;
+      if (!u.id || u.id === currentUserId) continue;
+      const label =
+        u.displayName?.trim() ||
+        getOwnerDisplayName(u.id)?.trim() ||
+        u.email.split("@")[0] ||
+        u.id;
+      opts.push({ id: u.id, label });
+    }
+  }
+  return opts.sort((a, b) => a.label.localeCompare(b.label, undefined, { sensitivity: "base" }));
+}
+
+function assignTeammateTriggerLabel(
+  uid: string | undefined,
+  options: readonly { id: string; label: string }[],
+  assignedInboxCounts: ReadonlyMap<string, number>,
+  resolveFallback: (id: string) => string | undefined,
+): string | null {
+  const id = uid?.trim() ?? "";
+  if (!id) return null;
+  const opt = options.find((o) => o.id === id);
+  if (opt) return `${opt.label} (${assignedInboxCounts.get(id) ?? 0})`;
+  return resolveFallback(id) ?? ownerPickerTriggerLabel(id, options);
 }
 
 type StatusTone = "ok" | "warn" | "muted";
@@ -199,46 +252,125 @@ export function EmailInboxSettingsCard() {
   const emailServerSyncEnabled = useEmailAccountStore((s) => s.emailServerSyncEnabled);
   const blockedSenderDomains = useEmailAccountStore((s) => s.blockedSenderDomains);
   const removeBlockedSenderDomain = useEmailAccountStore((s) => s.removeBlockedSenderDomain);
+  const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
+  const setGlobalEmailFooter = useEmailAccountStore((s) => s.setGlobalEmailFooter);
   const sortedBlockedDomains = React.useMemo(
     () => [...blockedSenderDomains].sort((a, b) => a.localeCompare(b)),
     [blockedSenderDomains],
   );
+  const [footerDraft, setFooterDraft] = React.useState(globalEmailFooter);
+  const [footerSaving, setFooterSaving] = React.useState(false);
+
+  React.useEffect(() => {
+    setFooterDraft(globalEmailFooter);
+  }, [globalEmailFooter]);
+
+  const footerDirty = footerDraft !== globalEmailFooter;
+
+  function saveGlobalFooter() {
+    if (isDemo) {
+      toast.message("Email footer is not saved in demo mode.");
+      setGlobalEmailFooter(footerDraft);
+      return;
+    }
+    setFooterSaving(true);
+    setGlobalEmailFooter(footerDraft);
+    // Meta persist is debounced in the store; give light feedback.
+    window.setTimeout(() => {
+      setFooterSaving(false);
+      toast.success("Email footer saved");
+    }, 200);
+  }
   const [savingRemote, setSavingRemote] = React.useState(false);
   const [testingMailboxId, setTestingMailboxId] = React.useState<string | null>(null);
   const [openValues, setOpenValues] = React.useState<string[]>([]);
   /** `${mailboxId}:smtp` | `${mailboxId}:imap` → password field visible as plain text */
   const [passwordFieldVisible, setPasswordFieldVisible] = React.useState<Record<string, boolean>>({});
-  const [inboxDelegation, setInboxDelegation] = React.useState<MailboxDelegation | null>(null);
-  const [inboxDelegationLoading, setInboxDelegationLoading] = React.useState(false);
-  const [inboxDelegationSaving, setInboxDelegationSaving] = React.useState(false);
-  const [delegatePickUid, setDelegatePickUid] = React.useState("");
   const [assignPickByMailbox, setAssignPickByMailbox] = React.useState<Record<string, string>>({});
   const [sendUsageByMailboxId, setSendUsageByMailboxId] = React.useState<
     Record<string, { used: number; limit: number | null }>
   >({});
+  /** `null` until live org members load (demo uses CRM users only). */
+  const [orgMembers, setOrgMembers] = React.useState<OrganizationMember[] | null>(null);
 
   const ownedMailboxes = React.useMemo(
     () => mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId)),
     [mailboxes, currentUserId],
   );
 
-  const inboxGranteeUserIds = inboxDelegation?.granteeUserIds ?? [];
+  const mailboxOverviewStats = React.useMemo(() => {
+    let connected = 0;
+    let enabled = 0;
+    let withSignature = 0;
+    let withAssignees = 0;
+    for (const mb of ownedMailboxes) {
+      if (isMailboxTransportConnected(mb)) connected += 1;
+      if (mb.enabled) enabled += 1;
+      if (mb.signature?.trim()) withSignature += 1;
+      if ((mb.assignedUserIds ?? []).length > 0) withAssignees += 1;
+    }
+    return {
+      total: ownedMailboxes.length,
+      connected,
+      enabled,
+      withSignature,
+      withAssignees,
+      needsAttention: ownedMailboxes.filter(
+        (mb) => !isMailboxTransportConnected(mb) || !mb.signature?.trim(),
+      ).length,
+    };
+  }, [ownedMailboxes]);
 
-  const delegationMemberOptions = React.useMemo(
+  const assignedInboxCountByUserId = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const mb of ownedMailboxes) {
+      for (const uid of mb.assignedUserIds ?? []) {
+        counts.set(uid, (counts.get(uid) ?? 0) + 1);
+      }
+    }
+    return counts;
+  }, [ownedMailboxes]);
+
+  const activeAssignableOptions = React.useMemo(
     () =>
-      buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName).filter(
-        (o) => o.id !== currentUserId && !inboxGranteeUserIds.includes(o.id),
+      buildActiveAssignableOptions(
+        users,
+        isDemo ? null : orgMembers,
+        currentUserId,
+        getOwnerDisplayName,
       ),
-    [users, currentUserId, getOwnerDisplayName, inboxGranteeUserIds],
+    [users, isDemo, orgMembers, currentUserId, getOwnerDisplayName],
   );
 
   const granteeLabels = React.useMemo(() => {
-    const map = new Map(delegationMemberOptions.map((o) => [o.id, o.label]));
+    const map = new Map<string, string>();
+    for (const o of activeAssignableOptions) map.set(o.id, o.label);
     for (const o of buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName)) {
-      map.set(o.id, o.label);
+      if (!map.has(o.id)) map.set(o.id, o.label);
     }
     return map;
-  }, [delegationMemberOptions, users, currentUserId, getOwnerDisplayName]);
+  }, [activeAssignableOptions, users, currentUserId, getOwnerDisplayName]);
+
+  React.useEffect(() => {
+    if (isDemo) {
+      setOrgMembers(null);
+      setSendUsageByMailboxId({});
+      return;
+    }
+    let cancelled = false;
+    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const data = (await res.json()) as { members?: OrganizationMember[] };
+        if (!cancelled) setOrgMembers(data.members ?? []);
+      })
+      .catch(() => {
+        if (!cancelled) setOrgMembers(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDemo]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;
@@ -270,73 +402,6 @@ export function EmailInboxSettingsCard() {
 
     window.history.replaceState({}, "", `${window.location.pathname}?tab=email`);
   }, []);
-
-  React.useEffect(() => {
-    if (isDemo) {
-      setInboxDelegation(null);
-      setSendUsageByMailboxId({});
-      return;
-    }
-    let cancelled = false;
-    setInboxDelegationLoading(true);
-    void fetch("/api/email/delegations", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { item?: MailboxDelegation };
-        if (!cancelled) setInboxDelegation(data.item ?? null);
-      })
-      .catch(() => {
-        if (!cancelled) setInboxDelegation(null);
-      })
-      .finally(() => {
-        if (!cancelled) setInboxDelegationLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isDemo]);
-
-  async function saveInboxDelegation(nextGranteeIds: string[]) {
-    if (isDemo) {
-      toast.message("Inbox sharing is not available in demo mode.");
-      return;
-    }
-    setInboxDelegationSaving(true);
-    try {
-      const res = await fetch("/api/email/delegations", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ granteeUserIds: nextGranteeIds }),
-      });
-      const data = (await res.json()) as { ok?: boolean; item?: MailboxDelegation; error?: string };
-      if (!res.ok || !data.ok || !data.item) {
-        toast.error(data.error ?? "Could not save inbox access");
-        return;
-      }
-      setInboxDelegation(data.item);
-      toast.success(
-        nextGranteeIds.length === 0 ? "Inbox sharing removed" : "Inbox access updated",
-      );
-    } catch {
-      toast.error("Could not save inbox access");
-    } finally {
-      setInboxDelegationSaving(false);
-    }
-  }
-
-  async function removeInboxGrantee(granteeUid: string) {
-    const next = inboxGranteeUserIds.filter((id) => id !== granteeUid);
-    await saveInboxDelegation(next);
-  }
-
-  async function addInboxGrantee() {
-    const uid = delegatePickUid.trim();
-    if (!uid) return;
-    if (inboxGranteeUserIds.includes(uid)) return;
-    await saveInboxDelegation([...inboxGranteeUserIds, uid]);
-    setDelegatePickUid("");
-  }
 
   const persistKey = React.useMemo(
     () => JSON.stringify(ownedMailboxes),
@@ -759,15 +824,15 @@ export function EmailInboxSettingsCard() {
       <Card>
         <CardContent className="px-2 pt-4 pb-2">
           <Accordion defaultValue={[]} className="w-full">
-            <AccordionItem value="share-inbox" className="border-b-0">
+            <AccordionItem value="email-footer" className="border-b-0">
               <AccordionHeader>
                 <AccordionTrigger className="px-2 py-3 hover:no-underline">
                   <div className="flex min-w-0 flex-1 items-center gap-2 text-left">
-                    <Users className="h-4 w-4 shrink-0" />
-                    <span className="text-sm font-medium">Share inbox access</span>
-                    {inboxGranteeUserIds.length > 0 ? (
-                      <Badge variant="secondary" className="shrink-0 text-[10px] tabular-nums">
-                        {inboxGranteeUserIds.length}
+                    <FileText className="h-4 w-4 shrink-0" />
+                    <span className="text-sm font-medium">Email footer</span>
+                    {globalEmailFooter.trim() ? (
+                      <Badge variant="secondary" className="shrink-0 text-[10px]">
+                        Set
                       </Badge>
                     ) : null}
                   </div>
@@ -775,84 +840,54 @@ export function EmailInboxSettingsCard() {
               </AccordionHeader>
               <AccordionContent className="px-2 pb-3 pt-0">
                 <p className="text-xs text-muted-foreground mb-3">
-                  Let teammates read and send mail from your connected mailbox in{" "}
-                  <Link href="/inbox" className="text-primary underline-offset-2 hover:underline">
-                    Inbox
-                  </Link>
-                  . They cannot change your SMTP/IMAP credentials or mailbox settings.
+                  Applies to all mailboxes. When you schedule followup or sequence emails, this footer is
+                  included by default (after the mailbox signature). You can uncheck it per send.
                 </p>
-                {inboxDelegationLoading ? (
-                  <p className="text-xs text-muted-foreground flex items-center gap-2 px-1 py-2">
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    Loading shared access…
-                  </p>
-                ) : (
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap items-end gap-2">
-                      <div className="min-w-[12rem] flex-1 space-y-1">
-                        <Label className="text-xs">Add workspace member</Label>
-                        <Select
-                          value={delegatePickUid || undefined}
-                          onValueChange={(v) => setDelegatePickUid(v ?? "")}
-                          disabled={isDemo || inboxDelegationSaving || delegationMemberOptions.length === 0}
+                <div className="space-y-2">
+                  <Label htmlFor="global-email-footer" className="text-xs">
+                    Footer text
+                  </Label>
+                  <Textarea
+                    id="global-email-footer"
+                    rows={4}
+                    value={footerDraft}
+                    onChange={(e) => setFooterDraft(e.target.value)}
+                    placeholder={`Not relevant? Reply “unsubscribe,” and we will not contact you again.`}
+                    className="text-xs font-mono"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-[11px] text-muted-foreground">
+                      Plain text only. Leave empty to skip the footer option entirely.
+                    </p>
+                    <div className="flex items-center gap-2">
+                      {footerDirty ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs"
+                          onClick={() => setFooterDraft(globalEmailFooter)}
                         >
-                          <SelectTrigger className="h-9 w-full text-xs">
-                            <SelectValue placeholder="Select a person" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {delegationMemberOptions.map((o) => (
-                              <SelectItem key={o.id} value={o.id}>
-                                {o.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
+                          Discard
+                        </Button>
+                      ) : null}
                       <Button
                         type="button"
                         size="sm"
-                        className="h-9"
-                        disabled={isDemo || !delegatePickUid || inboxDelegationSaving}
-                        onClick={() => void addInboxGrantee()}
+                        className="h-8 gap-1.5"
+                        disabled={!footerDirty || footerSaving}
+                        onClick={saveGlobalFooter}
                       >
-                        {inboxDelegationSaving ? (
+                        {footerSaving ? (
                           <Loader2 className="h-3.5 w-3.5 animate-spin" />
                         ) : (
-                          <Plus className="h-3.5 w-3.5" />
+                          <Save className="h-3.5 w-3.5" />
                         )}
-                        Add
+                        Save footer
                       </Button>
                     </div>
-                    {inboxGranteeUserIds.length === 0 ? (
-                      <p className="text-xs text-muted-foreground rounded-md border border-dashed px-3 py-4">
-                        No one else can open your inbox yet. Add a teammate to grant read and send access.
-                      </p>
-                    ) : (
-                      <ul className="divide-y rounded-lg border max-h-64 overflow-y-auto">
-                        {inboxGranteeUserIds.map((uid) => (
-                          <li
-                            key={uid}
-                            className="flex flex-wrap items-center justify-between gap-2 px-3 py-2.5 text-sm"
-                          >
-                            <span className="truncate text-xs">
-                              {granteeLabels.get(uid) ?? getOwnerDisplayName(uid) ?? uid}
-                            </span>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-7 text-xs"
-                              disabled={isDemo || inboxDelegationSaving}
-                              onClick={() => void removeInboxGrantee(uid)}
-                            >
-                              Remove
-                            </Button>
-                          </li>
-                        ))}
-                      </ul>
-                    )}
                   </div>
-                )}
+                </div>
               </AccordionContent>
             </AccordionItem>
           </Accordion>
@@ -919,6 +954,96 @@ export function EmailInboxSettingsCard() {
               Loading connected mailboxes…
             </div>
           ) : (
+          <>
+          <div
+            className="grid grid-cols-2 gap-2 sm:grid-cols-3"
+            aria-label="Mailbox overview stats"
+          >
+            {(
+              [
+                {
+                  label: "Total",
+                  value: mailboxOverviewStats.total,
+                  hint: "Owned mailboxes",
+                  tone: "default" as const,
+                },
+                {
+                  label: "Connected",
+                  value: mailboxOverviewStats.connected,
+                  hint: "OAuth / SMTP ready",
+                  tone:
+                    mailboxOverviewStats.connected === mailboxOverviewStats.total &&
+                    mailboxOverviewStats.total > 0
+                      ? ("ok" as const)
+                      : mailboxOverviewStats.connected < mailboxOverviewStats.total
+                        ? ("warn" as const)
+                        : ("default" as const),
+                },
+                {
+                  label: "Enabled",
+                  value: mailboxOverviewStats.enabled,
+                  hint: "Active in Nova",
+                  tone: "default" as const,
+                },
+                {
+                  label: "Signatures",
+                  value: mailboxOverviewStats.withSignature,
+                  hint: "Have a signature",
+                  tone:
+                    mailboxOverviewStats.withSignature < mailboxOverviewStats.total
+                      ? ("warn" as const)
+                      : ("ok" as const),
+                },
+                {
+                  label: "Assigned",
+                  value: mailboxOverviewStats.withAssignees,
+                  hint: "Shared with teammates",
+                  tone: "default" as const,
+                },
+                {
+                  label: "Needs fix",
+                  value: mailboxOverviewStats.needsAttention,
+                  hint: "Missing connection or signature",
+                  tone:
+                    mailboxOverviewStats.needsAttention > 0
+                      ? ("warn" as const)
+                      : ("ok" as const),
+                },
+              ] as const
+            ).map((stat) => (
+              <div
+                key={stat.label}
+                className={cn(
+                  "rounded-lg border px-2.5 py-2",
+                  stat.tone === "ok" && "border-success/25 bg-success/5",
+                  stat.tone === "warn" && "border-warning/25 bg-warning/5",
+                  stat.tone === "default" && "bg-muted/20",
+                )}
+                title={stat.hint}
+              >
+                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {stat.label}
+                </p>
+                <p
+                  className={cn(
+                    "mt-0.5 text-lg font-semibold tabular-nums leading-none",
+                    stat.tone === "ok" && "text-success",
+                    stat.tone === "warn" && "text-warning",
+                    stat.tone === "default" && "text-foreground",
+                  )}
+                >
+                  {stat.value}
+                  {stat.label !== "Total" &&
+                  stat.label !== "Needs fix" &&
+                  mailboxOverviewStats.total > 0 ? (
+                    <span className="ml-1 text-xs font-normal text-muted-foreground">
+                      / {mailboxOverviewStats.total}
+                    </span>
+                  ) : null}
+                </p>
+              </div>
+            ))}
+          </div>
           <Accordion
             multiple
             keepMounted
@@ -1457,24 +1582,27 @@ export function EmailInboxSettingsCard() {
                             disabled={isDemo}
                           >
                             <SelectTrigger className="h-9 w-full text-xs">
-                              <SelectValue placeholder="Select a person" />
+                              <SelectValue placeholder="Select a person">
+                                {assignTeammateTriggerLabel(
+                                  assignPickByMailbox[mb.id],
+                                  activeAssignableOptions,
+                                  assignedInboxCountByUserId,
+                                  (id) =>
+                                    granteeLabels.get(id) ?? getOwnerDisplayName(id) ?? undefined,
+                                )}
+                              </SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              {buildWorkspaceOwnerPickerOptions(
-                                users,
-                                currentUserId,
-                                getOwnerDisplayName,
-                              )
-                                .filter(
-                                  (o) =>
-                                    o.id !== currentUserId &&
-                                    !(mb.assignedUserIds ?? []).includes(o.id),
-                                )
-                                .map((o) => (
-                                  <SelectItem key={o.id} value={o.id}>
-                                    {o.label}
-                                  </SelectItem>
-                                ))}
+                              {activeAssignableOptions
+                                .filter((o) => !(mb.assignedUserIds ?? []).includes(o.id))
+                                .map((o) => {
+                                  const inboxCount = assignedInboxCountByUserId.get(o.id) ?? 0;
+                                  return (
+                                    <SelectItem key={o.id} value={o.id}>
+                                      {o.label} ({inboxCount})
+                                    </SelectItem>
+                                  );
+                                })}
                             </SelectContent>
                           </Select>
                         </div>
@@ -1580,6 +1708,7 @@ export function EmailInboxSettingsCard() {
               </AccordionItem>
             ))}
           </Accordion>
+          </>
           )}
 
           <p className="text-[11px] text-muted-foreground">

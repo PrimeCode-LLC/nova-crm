@@ -107,6 +107,7 @@ export async function GET(req: Request) {
     activeMailboxId: meta.activeMailboxId,
     linkedLeadByMessageId: meta.linkedLeadByMessageId,
     blockedSenderDomains: meta.blockedSenderDomains,
+    globalEmailFooter: meta.globalEmailFooter,
     mailLabels: meta.mailLabels,
     labelsByMessageId: meta.labelsByMessageId,
     flagByMessageId: meta.flagByMessageId,

@@ -8,6 +8,7 @@ import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
 import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
 import type { Lead, Role } from "@/lib/types";
 
 const bodySchema = z.object({
@@ -101,7 +102,7 @@ ${parsed.data.leadContext ?? "(no lead linked)"}
 
 ${ragBlock || "(none)"}
 
-Output only the improved email body text.`
+Output only the improved email body text (no closing line like "Best,", no signature).`
       : undefined;
 
     const body = await runAiTextFeature({
@@ -120,7 +121,7 @@ Output only the improved email body text.`
       userPromptOverride,
       leadId: parsed.data.leadId,
     });
-    return NextResponse.json({ body });
+    return NextResponse.json({ body: stripTrailingEmailSignOff(body) });
   } catch (e) {
     return aiErrorResponse(e);
   }

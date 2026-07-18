@@ -54,6 +54,7 @@ export function EmailAccountSync() {
           activeMailboxId?: string;
           linkedLeadByMessageId?: Record<string, string>;
           blockedSenderDomains?: string[];
+          globalEmailFooter?: string;
           mailLabels?: { id: string; name: string; color: string }[];
           labelsByMessageId?: Record<string, string[]>;
           flagByMessageId?: Record<string, string>;
@@ -95,6 +96,7 @@ export function EmailAccountSync() {
           activeMailboxId: active,
           linkedLeadByMessageId: data.linkedLeadByMessageId ?? {},
           blockedSenderDomains: data.blockedSenderDomains ?? [],
+          globalEmailFooter: data.globalEmailFooter ?? "",
           mailLabels: data.mailLabels ?? [],
           labelsByMessageId: data.labelsByMessageId ?? {},
           flagByMessageId: (data.flagByMessageId ?? {}) as Record<string, MailFlagId>,
