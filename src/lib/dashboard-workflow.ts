@@ -1,5 +1,19 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
-import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
+import { PIPELINE_STAGES } from "@/lib/constants";
+import type { Followup, FollowupPlan, Lead, LeadTask, PipelineStage } from "@/lib/types";
+import { hasPendingReplyReview } from "@/lib/leads/reply-review";
+
+const STAGE_ORDER = PIPELINE_STAGES.map((s) => s.key);
+
+function stageAtOrAfterReplied(stage: PipelineStage): boolean {
+  const index = STAGE_ORDER.indexOf(stage);
+  const repliedIndex = STAGE_ORDER.indexOf("replied");
+  return index >= 0 && repliedIndex >= 0 && index >= repliedIndex && stage !== "lost";
+}
+
+function leadHasReply(lead: Lead): boolean {
+  return Boolean(lead.lastReplyAt) || stageAtOrAfterReplied(lead.stage);
+}
 
 export type DashboardWorkflowMetrics = {
   openSalesLeads: number;
@@ -16,6 +30,11 @@ export type DashboardWorkflowMetrics = {
   activeSequences: number;
   remainingSequenceSteps: number;
   pausedOnReply: number;
+  /** Leads with a detected reply (`lastReplyAt`) or stage at/after `replied`. */
+  totalReplies: number;
+  /** Leads whose `lastReplyAt` falls in the selected dashboard range. */
+  repliesInRange: number;
+  repliesPendingReview: number;
   myOpenTasks: number;
   overdueTasks: number;
   waitingOnOthers: number;
@@ -100,6 +119,12 @@ export function computeDashboardWorkflowMetrics(input: {
     pausedOnReply: input.plans.filter(
       (plan) => plan.status === "paused" && Boolean(plan.replyMessageId),
     ).length,
+    totalReplies: input.leads.filter(leadHasReply).length,
+    repliesInRange: input.leads.filter((lead) => {
+      const repliedAt = validTime(lead.lastReplyAt);
+      return repliedAt !== undefined && repliedAt >= start;
+    }).length,
+    repliesPendingReview: input.leads.filter(hasPendingReplyReview).length,
     myOpenTasks: openTasks.filter((task) => task.assigneeId === input.currentUserId).length,
     overdueTasks: openTasks.filter((task) => {
       const due = validTime(task.dueAt);

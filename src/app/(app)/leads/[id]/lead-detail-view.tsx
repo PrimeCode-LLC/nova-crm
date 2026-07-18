@@ -51,6 +51,7 @@ import { LeadOverview } from "@/components/leads/lead-overview";
 import { LeadTouchpoints } from "@/components/leads/lead-touchpoints";
 import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
+import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-banner";
 import { LeadSchedulingPanel } from "@/components/scheduling/lead-scheduling-panel";
 import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
@@ -741,15 +742,18 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               </div>
 
               <div className="mt-4">
-                {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
-                  <p className="mb-4 rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                    This lead is synced from a prospect. Update channel, stage, and other fields on the{" "}
-                    <Link href={`/leads/${prospectSourceId}?from=prospects`} className="text-primary hover:underline">
-                      prospect record
-                    </Link>
-                    . Only workspace admins can edit the lead directly.
-                  </p>
-                ) : null}
+                <div className="mb-4 space-y-3">
+                  <LeadReplyReviewBanner lead={lead} />
+                  {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
+                    <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                      This lead is synced from a prospect. Update channel, stage, and other fields on the{" "}
+                      <Link href={`/leads/${prospectSourceId}?from=prospects`} className="text-primary hover:underline">
+                        prospect record
+                      </Link>
+                      . Only workspace admins can edit the lead directly.
+                    </p>
+                  ) : null}
+                </div>
                 <TabsContent value="overview">
                   <LeadOverview
                     lead={lead}

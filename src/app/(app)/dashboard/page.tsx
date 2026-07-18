@@ -27,6 +27,7 @@ import {
 } from "@/lib/dashboard-role-focus";
 import { DashboardPendingOverview } from "@/components/dashboard/dashboard-pending-overview";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
+import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
 import { DashboardAiBrief } from "@/components/ai/dashboard-ai-brief";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import {
@@ -375,6 +376,9 @@ export default function DashboardPage() {
         { label: "Active sequences", value: String(workflowMetrics.activeSequences) },
         { label: "Sequence steps remaining", value: String(workflowMetrics.remainingSequenceSteps) },
         { label: "Sequences paused on reply", value: String(workflowMetrics.pausedOnReply) },
+        { label: "Total replies", value: String(workflowMetrics.totalReplies) },
+        { label: "Replies in range", value: String(workflowMetrics.repliesInRange) },
+        { label: "Replies pending review", value: String(workflowMetrics.repliesPendingReview) },
         { label: "Emails sent in range", value: String(workflowMetrics.sentInRange) },
         { label: "Emails scheduled", value: String(workflowMetrics.scheduledSteps) },
         { label: "Email failures", value: String(workflowMetrics.failedDeliveries) },
@@ -585,7 +589,7 @@ export default function DashboardPage() {
                 </button>
               </p>
             )}
-            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
+            <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
               <KpiCard
                 label="Open sales leads"
                 value={workflowMetrics.openSalesLeads}
@@ -599,6 +603,13 @@ export default function DashboardPage() {
                 hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsPushed} pushed`}
                 icon={UserRoundSearch}
                 href="/prospects"
+              />
+              <KpiCard
+                label="Total replies"
+                value={workflowMetrics.totalReplies}
+                hint={`${workflowMetrics.repliesInRange} in ${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey].toLowerCase()} · ${workflowMetrics.repliesPendingReview} to review`}
+                icon={MessageSquareReply}
+                href="/leads?stage=replied"
               />
               <KpiCard
                 label="Follow-ups due"
@@ -654,6 +665,8 @@ export default function DashboardPage() {
                 href="/activity"
               />
             </div>
+
+            <DashboardReplyReviews leads={scopedLeads} />
 
             <DashboardNeedsAttention
               leads={scopedLeads}

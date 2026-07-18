@@ -12,6 +12,7 @@ import {
   cancelScheduledEmailsForFollowups,
   openFollowupsWithScheduledEmail,
 } from "@/lib/cancel-followup-scheduled-email-client";
+import { buildReplyDetectedPatch, shouldOpenReplyReview } from "@/lib/leads/reply-review";
 import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-store";
 import { toast } from "sonner";
 
@@ -54,6 +55,7 @@ export function FollowupPlanReplyWatcher() {
     followupPlans,
     pauseFollowupPlanForReply,
     clearFollowupEmailSchedule,
+    patchLeadAsync,
   } = useWorkspace();
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
@@ -123,9 +125,34 @@ export function FollowupPlanReplyWatcher() {
             return;
           }
 
+          const replyAt = new Date().toISOString();
+          try {
+            await patchLeadAsync(
+              leadId,
+              buildReplyDetectedPatch({
+                lead,
+                replyAt,
+                replyMessageId: mid,
+                source: "imap",
+              }),
+            );
+          } catch {
+            /* Reply pause/cancel already applied; review stamp can retry next sync. */
+          }
+
           processedRef.current.add(mid);
           writeProcessed(processedRef.current);
-          if (!plan && cancelled > 0) {
+
+          const openedReview = shouldOpenReplyReview(lead);
+          if (openedReview) {
+            toast.message("Reply received — review on Dashboard", {
+              description:
+                lead.companyName || lead.contactName
+                  ? `${lead.companyName || lead.contactName}: promote or move to Replied`
+                  : "Promote to lead or move to Replied when ready.",
+              duration: 9000,
+            });
+          } else if (!plan && cancelled > 0) {
             toast.message("Lead replied, scheduled followup emails cancelled", {
               description: "Outbound steps will not send. Review the reply in Inbox.",
               duration: 8000,
@@ -152,6 +179,7 @@ export function FollowupPlanReplyWatcher() {
     pauseFollowupPlanForReply,
     clearFollowupEmailSchedule,
     cancelScheduled,
+    patchLeadAsync,
   ]);
 
   return null;

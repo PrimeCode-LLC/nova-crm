@@ -7,6 +7,9 @@ import {
   incrementCampaignStatServer,
 } from "./campaign-server";
 import { recordAudit } from "@/lib/firestore/audit";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { buildReplyDetectedPatch } from "@/lib/leads/reply-review";
+import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 
 export type InstantlyWebhookPayload = {
   timestamp?: string;
@@ -100,16 +103,24 @@ export async function handleInstantlyWebhookEvent(
 
   let leadId: string;
 
+  const replyAt = new Date().toISOString();
+
   if (!existing.empty) {
     const doc = existing.docs[0]!;
     leadId = doc.id;
+    const existingLead = mapLeadDoc(doc.id, doc.data() as Record<string, unknown>);
+    const replyPatch = buildReplyDetectedPatch({
+      lead: existingLead,
+      replyAt,
+      source: "instantly",
+      replyMessageId: payload.unibox_url?.trim() || undefined,
+    });
     const patch: Record<string, unknown> = {
-      lastActivityAt: new Date().toISOString(),
-      temperature: "warm",
+      ...replyPatch,
     };
     if (novaCampaign) patch.campaignId = novaCampaign.id;
     patch.pushToInstantly = "pushed";
-    await doc.ref.update(stampForUpdate(patch));
+    await doc.ref.update(stampForUpdate(stripUndefined(patch)));
   } else {
     leadId = `l-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
     const accountId = `a-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -133,23 +144,30 @@ export async function handleInstantlyWebhookEvent(
       }),
     );
     await db.collection(COLLECTIONS.leads).doc(leadId).set(
-      stampForCreate(organizationId, {
-        accountId,
-        contactId,
-        channel: "cold_email",
-        campaignId: novaCampaign?.id,
-        stage: "replied",
-        temperature: "warm",
-        priority: "high",
-        ownerId: "",
-        contactName,
-        contactEmail: email,
-        companyName,
-        pushToInstantly: "pushed",
-        touches: 1,
-        firstContactAt: new Date().toISOString(),
-        lastActivityAt: new Date().toISOString(),
-      }),
+      stampForCreate(
+        organizationId,
+        stripUndefined({
+          accountId,
+          contactId,
+          channel: "cold_email",
+          campaignId: novaCampaign?.id,
+          stage: "replied",
+          temperature: "warm",
+          priority: "high",
+          ownerId: "",
+          contactName,
+          contactEmail: email,
+          companyName,
+          pushToInstantly: "pushed",
+          touches: 1,
+          firstContactAt: replyAt,
+          lastActivityAt: replyAt,
+          lastReplyAt: replyAt,
+          lastReplySource: "instantly",
+          lastReplyMessageId: payload.unibox_url?.trim() || undefined,
+          replyReviewStatus: "accepted",
+        }),
+      ),
     );
   }
 

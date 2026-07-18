@@ -1,9 +1,12 @@
+"use client";
+
 import * as React from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, MailWarning, MessageSquareReply, Timer, ListTodo } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
+import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 
 type AttentionItem = {
   id: string;
@@ -42,6 +45,22 @@ export function DashboardNeedsAttention({
   };
 
   const items: AttentionItem[] = [];
+
+  for (const lead of leads) {
+    if (!hasPendingReplyReview(lead)) continue;
+    items.push({
+      id: `reply-${lead.id}`,
+      label: `Reply to review · ${lead.companyName || lead.contactName}`,
+      detail:
+        lead.intakeKind === "prospect"
+          ? "Promote to lead or confirm Replied on the dashboard."
+          : "Confirm moving this opportunity to Replied.",
+      href: lead.intakeKind === "prospect" ? `/leads/${lead.id}?from=prospects` : `/leads/${lead.id}`,
+      time: timestamp(lead.lastReplyAt || lead.lastActivityAt, now),
+      severity: "urgent",
+      icon: MessageSquareReply,
+    });
+  }
 
   for (const followup of followups) {
     if (followup.completedAt || followup.pausedAt) continue;
@@ -88,6 +107,8 @@ export function DashboardNeedsAttention({
 
   for (const plan of plans) {
     if (plan.status !== "paused" || !plan.replyMessageId) continue;
+    const planLead = leadById.get(plan.leadId);
+    if (planLead && hasPendingReplyReview(planLead)) continue;
     items.push({
       id: `plan-${plan.id}`,
       label: `Sequence stopped on reply · ${leadLabel(plan.leadId)}`,
@@ -101,6 +122,7 @@ export function DashboardNeedsAttention({
 
   for (const lead of leads) {
     if (lead.intakeKind === "prospect" || !lead.isIdle || ["won", "lost"].includes(lead.stage)) continue;
+    if (hasPendingReplyReview(lead)) continue;
     items.push({
       id: `idle-${lead.id}`,
       label: `Idle lead · ${lead.companyName || lead.contactName}`,

@@ -76,5 +76,20 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       typeof raw.prospectSourceId === "string" ? raw.prospectSourceId : undefined,
     channelTags: parseChannelKeyArray(raw.channelTags),
     sharedOwnerIds: parseStringArray(raw.sharedOwnerIds),
+    lastReplyAt: raw.lastReplyAt ? firestoreValueToIso(raw.lastReplyAt) : undefined,
+    lastReplyMessageId:
+      typeof raw.lastReplyMessageId === "string" ? raw.lastReplyMessageId : undefined,
+    lastReplySource:
+      raw.lastReplySource === "imap" ||
+      raw.lastReplySource === "instantly" ||
+      raw.lastReplySource === "manual"
+        ? raw.lastReplySource
+        : undefined,
+    replyReviewStatus:
+      raw.replyReviewStatus === "pending" ||
+      raw.replyReviewStatus === "dismissed" ||
+      raw.replyReviewStatus === "accepted"
+        ? raw.replyReviewStatus
+        : undefined,
   };
 }

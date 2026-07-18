@@ -497,6 +497,16 @@ export interface Lead {
   isIdle: boolean;
   idleDays?: number;
 
+  /** Latest inbound reply detected (IMAP / Instantly). */
+  lastReplyAt?: ISODate;
+  lastReplyMessageId?: string;
+  lastReplySource?: "imap" | "instantly" | "manual";
+  /**
+   * Soft prompt after a reply: promote prospect → sales lead and/or move stage to `replied`.
+   * Set to `pending` on reply; cleared via accept (`accepted`) or dismiss (`dismissed`).
+   */
+  replyReviewStatus?: "pending" | "dismissed" | "accepted";
+
   // Free-form
   notes?: string;
   nextAction?: string;
