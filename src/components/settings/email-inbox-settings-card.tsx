@@ -31,7 +31,23 @@ import {
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { normalizeCrmEmailKey } from "@/lib/crm-dedup-keys";
 import { toast } from "sonner";
-import { Ban, Eye, EyeOff, Loader2, Mail, PlugZap, ShieldAlert, Plus, Save, Trash2, Users } from "lucide-react";
+import {
+  Ban,
+  CheckCircle2,
+  Eye,
+  EyeOff,
+  Gauge,
+  Loader2,
+  Mail,
+  PenLine,
+  PlugZap,
+  ShieldAlert,
+  Plus,
+  Save,
+  Trash2,
+  Unplug,
+  Users,
+} from "lucide-react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import {
@@ -41,6 +57,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import type { MailboxDelegation } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +73,116 @@ function findDuplicateMailboxByEmail(
     if (m.id === excludeMailboxId) return false;
     return normalizeCrmEmailKey(m.emailAddress) === key;
   });
+}
+
+/** Transport ready: Google OAuth for Workspace, otherwise SMTP host set. */
+function isMailboxTransportConnected(mb: EmailMailboxSettings): boolean {
+  if (mb.connectionType === "google_workspace") {
+    return Boolean(mb.googleAuthConnected);
+  }
+  return Boolean(mb.emailAddress.trim() && normalizeMailHost(mb.smtp.host));
+}
+
+type StatusTone = "ok" | "warn" | "muted";
+
+function MailboxStatusChip({
+  tone,
+  icon: Icon,
+  label,
+  tooltip,
+}: {
+  tone: StatusTone;
+  icon: React.ComponentType<{ className?: string; "aria-hidden"?: boolean }>;
+  label?: string;
+  tooltip: string;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className={cn(
+              "inline-flex h-6 shrink-0 items-center gap-1 rounded-md border px-1.5 text-[10px] font-medium tabular-nums",
+              tone === "ok" && "border-success/25 bg-success/10 text-success",
+              tone === "warn" && "border-warning/25 bg-warning/10 text-warning",
+              tone === "muted" && "border-border bg-muted/40 text-muted-foreground",
+            )}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Icon className="h-3 w-3" aria-hidden />
+            {label ? <span>{label}</span> : null}
+          </span>
+        }
+      />
+      <TooltipContent side="top">{tooltip}</TooltipContent>
+    </Tooltip>
+  );
+}
+
+function MailboxQuickStatus({
+  mailbox,
+  sendUsage,
+}: {
+  mailbox: EmailMailboxSettings;
+  sendUsage?: { used: number; limit: number | null };
+}) {
+  const connected = isMailboxTransportConnected(mailbox);
+  const assignedCount = (mailbox.assignedUserIds ?? []).length;
+  const hasSignature = Boolean(mailbox.signature?.trim());
+  const limit = mailbox.dailySendLimit;
+  const used = sendUsage?.used ?? 0;
+  const limitNear =
+    limit != null && limit > 0 && used / limit >= 0.9;
+
+  const connectedTooltip = connected
+    ? mailbox.connectionType === "google_workspace"
+      ? "Google OAuth connected"
+      : "SMTP host configured"
+    : mailbox.connectionType === "google_workspace"
+      ? "Google not connected — sign in required"
+      : "SMTP not configured yet";
+
+  const limitLabel = limit == null ? "∞" : String(limit);
+  const limitTooltip =
+    limit == null
+      ? "No daily send limit"
+      : limitNear
+        ? `Daily limit nearly reached (${used}/${limit})`
+        : `Daily send limit: ${used > 0 ? `${used}/` : ""}${limit}`;
+
+  return (
+    <div
+      className="flex shrink-0 flex-wrap items-center justify-end gap-1"
+      aria-label="Mailbox setup overview"
+    >
+      <MailboxStatusChip
+        tone={connected ? "ok" : "warn"}
+        icon={connected ? CheckCircle2 : Unplug}
+        tooltip={connectedTooltip}
+      />
+      <MailboxStatusChip
+        tone={assignedCount > 0 ? "ok" : "muted"}
+        icon={Users}
+        label={assignedCount > 0 ? String(assignedCount) : undefined}
+        tooltip={
+          assignedCount > 0
+            ? `Assigned to ${assignedCount} teammate${assignedCount === 1 ? "" : "s"}`
+            : "No teammates assigned"
+        }
+      />
+      <MailboxStatusChip
+        tone={limitNear ? "warn" : limit != null ? "ok" : "muted"}
+        icon={Gauge}
+        label={limitLabel}
+        tooltip={limitTooltip}
+      />
+      <MailboxStatusChip
+        tone={hasSignature ? "ok" : "warn"}
+        icon={PenLine}
+        tooltip={hasSignature ? "Signature set" : "No signature yet"}
+      />
+    </div>
+  );
 }
 
 export function EmailInboxSettingsCard() {
@@ -807,20 +934,32 @@ export function EmailInboxSettingsCard() {
               <AccordionItem key={mb.id} value={mb.id} className="border-b-0 not-last:border-b">
                 <AccordionHeader>
                   <AccordionTrigger className="py-3 hover:no-underline">
-                    <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
-                      <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
-                      {mb.enabled ? (
-                        <Badge variant="secondary" className="shrink-0 text-[10px]">
-                          Enabled
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
-                          Off
-                        </Badge>
-                      )}
-                      {mb.emailAddress?.trim() ? (
-                        <span className="truncate text-xs font-normal text-muted-foreground">{mb.emailAddress.trim()}</span>
-                      ) : null}
+                    <div className="flex min-w-0 flex-1 items-center gap-3">
+                      <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
+                        <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
+                        {mb.enabled ? (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-success/30 bg-success/10 text-[10px] text-success"
+                          >
+                            Enabled
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="shrink-0 text-[10px] text-muted-foreground">
+                            Off
+                          </Badge>
+                        )}
+                        {mb.emailAddress?.trim() &&
+                        mb.emailAddress.trim().toLowerCase() !== (mb.label?.trim() || "").toLowerCase() ? (
+                          <span className="truncate text-xs font-normal text-muted-foreground">
+                            {mb.emailAddress.trim()}
+                          </span>
+                        ) : null}
+                      </div>
+                      <MailboxQuickStatus
+                        mailbox={mb}
+                        sendUsage={sendUsageByMailboxId[mb.id]}
+                      />
                     </div>
                   </AccordionTrigger>
                 </AccordionHeader>
@@ -1032,20 +1171,38 @@ export function EmailInboxSettingsCard() {
                             preferred password on Google&apos;s login screen — then Nova uses OAuth tokens.
                           </p>
                           {mb.googleAuthConnected ? (
-                            <div className="flex flex-wrap items-center gap-2">
-                              <Badge variant="secondary" className="text-[10px]">
-                                Google connected
+                            <div className="flex flex-wrap items-center gap-2.5 rounded-md border border-success/25 bg-success/10 px-3 py-2.5">
+                              <CheckCircle2
+                                className="h-4 w-4 shrink-0 text-success"
+                                aria-hidden
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="text-xs font-medium text-success">Connected</p>
+                                <p className="truncate text-sm text-foreground">
+                                  {mb.emailAddress.trim() || "Mailbox linked"}
+                                </p>
+                              </div>
+                              <Badge
+                                variant="outline"
+                                className="border-success/30 bg-success/15 text-[10px] text-success"
+                              >
+                                Google
                               </Badge>
-                              <span className="text-xs text-muted-foreground truncate">
-                                {mb.emailAddress.trim() || "Mailbox linked"}
-                              </span>
                             </div>
                           ) : (
-                            <p className="text-xs text-warning">Not connected with Google yet.</p>
+                            <div className="rounded-md border border-warning/25 bg-warning/10 px-3 py-2.5">
+                              <p className="text-xs font-medium text-warning">
+                                Not connected with Google yet
+                              </p>
+                              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                                Sign in below to authorize SMTP/IMAP via OAuth.
+                              </p>
+                            </div>
                           )}
                           <Button
                             type="button"
                             size="sm"
+                            variant={mb.googleAuthConnected ? "outline" : "default"}
                             className="gap-1.5"
                             disabled={isDemo}
                             onClick={() => {
