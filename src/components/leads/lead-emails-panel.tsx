@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Forward, Loader2, Mail, RefreshCw, Reply, ReplyAll, Send, UserRound } from "lucide-react";
+import { Forward, Loader2, Mail, PenLine, RefreshCw, Reply, ReplyAll, Send, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmailComposeForm } from "@/components/inbox/email-compose-form";
@@ -11,6 +11,8 @@ import {
   mailReaderContentFromInbound,
   mailReaderContentFromSent,
 } from "@/components/inbox/mail-reader-dialog";
+import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
+import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,8 +23,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { MailInbound, MailSent } from "@/lib/email-account-types";
+import {
+  appendGlobalEmailFooter,
+  appendMailboxSignature,
+} from "@/lib/email/append-mailbox-signature";
 import {
   type ComposeAttachment,
   MAX_COMPOSE_ATTACHMENT_BYTES,
@@ -50,12 +64,17 @@ import {
 import { fmtRelative } from "@/lib/format";
 import type { Lead } from "@/lib/types";
 import {
+  getActiveMailbox,
   isEmailAccountConfigured,
   isImapInboxConfigured,
   useEmailAccountStore,
 } from "@/stores/email-account-store";
 
-type ComposeMode = "reply" | "replyAll" | "forward";
+type ComposeMode = "compose" | "reply" | "replyAll" | "forward";
+
+/** Header-only sync is enough to match lead emails; bodies load when a thread is opened. */
+const LEAD_EMAIL_SYNC_LIMIT = 40;
+const LEAD_EMAIL_SYNC_TIMEOUT_MS = 22_000;
 
 function messageBody(message: LeadEmailMessage): string {
   return message.direction === "inbound"
@@ -157,6 +176,8 @@ export function LeadEmailsPanel({
 }) {
   const workspace = useWorkspace();
   const mailboxes = useEmailAccountStore((state) => state.mailboxes);
+  const activeMailboxId = useEmailAccountStore((state) => state.activeMailboxId);
+  const globalEmailFooter = useEmailAccountStore((state) => state.globalEmailFooter);
   const inboundByMailbox = useEmailAccountStore((state) => state.inboundByMailbox);
   const sent = useEmailAccountStore((state) => state.sent);
   const linkedLeadByMessageId = useEmailAccountStore((state) => state.linkedLeadByMessageId);
@@ -171,6 +192,15 @@ export function LeadEmailsPanel({
   const addScheduled = useEmailAccountStore((state) => state.addScheduled);
   const upsertDraft = useEmailAccountStore((state) => state.upsertDraft);
   const linkMessageToLead = useEmailAccountStore((state) => state.linkMessageToLead);
+
+  const activeMailbox = React.useMemo(
+    () => getActiveMailbox({ mailboxes, activeMailboxId }),
+    [activeMailboxId, mailboxes],
+  );
+  const smtpMailboxes = React.useMemo(
+    () => mailboxes.filter((mailbox) => isEmailAccountConfigured(mailbox) || workspace.isDemo),
+    [mailboxes, workspace.isDemo],
+  );
 
   const messages = React.useMemo(
     () => relevantLeadMessages({ lead, contactEmail, inboundByMailbox, sent, linkedLeadByMessageId }),
@@ -187,6 +217,7 @@ export function LeadEmailsPanel({
   const [loadingBodies, setLoadingBodies] = React.useState(false);
   const bodyLoadIdRef = React.useRef(0);
   const [composeMode, setComposeMode] = React.useState<ComposeMode | null>(null);
+  const [composeMailboxId, setComposeMailboxId] = React.useState("");
   const [to, setTo] = React.useState("");
   const [cc, setCc] = React.useState("");
   const [subject, setSubject] = React.useState("");
@@ -199,14 +230,32 @@ export function LeadEmailsPanel({
   const [scheduleEnabled, setScheduleEnabled] = React.useState(false);
   const [scheduledAt, setScheduledAt] = React.useState(defaultScheduleDatetimeLocal);
   const [draftId, setDraftId] = React.useState<string | undefined>();
+  const [includeSignature, setIncludeSignature] = React.useState(true);
+  const [includeFooter, setIncludeFooter] = React.useState(true);
 
   const selectedMailbox = selected
     ? mailboxes.find((mailbox) => mailbox.id === selected.mailboxId)
     : undefined;
-  const readOnly = Boolean(
+  const newComposeMailbox =
+    mailboxes.find((mailbox) => mailbox.id === composeMailboxId) ??
+    smtpMailboxes.find((mailbox) => mailbox.id === activeMailbox.id) ??
+    smtpMailboxes[0] ??
+    activeMailbox;
+  const composeMailbox = composeMode === "compose" ? newComposeMailbox : selectedMailbox;
+  const conversationReadOnly = Boolean(
     inboxWriteDisabled ||
       !selectedMailbox ||
       lead.doNotContact,
+  );
+  const composeReadOnly = Boolean(
+    inboxWriteDisabled ||
+      !composeMailbox ||
+      lead.doNotContact,
+  );
+  const canComposeNew = Boolean(
+    !inboxWriteDisabled &&
+      !lead.doNotContact &&
+      (workspace.isDemo || smtpMailboxes.length > 0 || isEmailAccountConfigured(activeMailbox)),
   );
 
   const syncConversationLists = React.useCallback(
@@ -252,11 +301,13 @@ export function LeadEmailsPanel({
               method: "POST",
               headers: { "Content-Type": "application/json" },
               credentials: "same-origin",
+              signal: AbortSignal.timeout(LEAD_EMAIL_SYNC_TIMEOUT_MS),
               body: JSON.stringify({
                 mailboxId: mailbox.id,
                 folder,
-                limit: 100,
+                limit: LEAD_EMAIL_SYNC_LIMIT,
                 offset: 0,
+                headsOnly: true,
                 imap: {
                   host: mailbox.imap.host,
                   port: mailbox.imap.port,
@@ -276,7 +327,14 @@ export function LeadEmailsPanel({
             if (folder === "inbox") reconcileInboundHeadFromSync(mailbox.id, rows);
             else reconcileSentHeadFromSync(mailbox.id, rows);
           } catch (error) {
-            if (!firstError) firstError = error instanceof Error ? error.message : "Could not refresh mail";
+            if (!firstError) {
+              firstError =
+                error instanceof Error
+                  ? error.name === "TimeoutError" || error.name === "AbortError"
+                    ? "Mailbox check timed out — try Refresh or open Inbox."
+                    : error.message
+                  : "Could not refresh mail";
+            }
           }
         }
       };
@@ -390,6 +448,7 @@ export function LeadEmailsPanel({
 
   function resetComposer() {
     setComposeMode(null);
+    setComposeMailboxId("");
     setTo("");
     setCc("");
     setSubject("");
@@ -400,15 +459,50 @@ export function LeadEmailsPanel({
     setScheduleEnabled(false);
     setScheduledAt(defaultScheduleDatetimeLocal());
     setDraftId(undefined);
+    setIncludeSignature(true);
+    setIncludeFooter(Boolean(globalEmailFooter.trim()));
   }
 
-  function openComposer(mode: ComposeMode) {
+  function openNewCompose() {
+    if (lead.doNotContact) {
+      toast.error("This lead is marked do not contact.");
+      return;
+    }
+    if (inboxWriteDisabled) {
+      toast.error("Compose is disabled while viewing another member’s mailbox.");
+      return;
+    }
+    const mailbox = smtpMailboxes[0]
+      ? (smtpMailboxes.find((item) => item.id === activeMailbox.id) ?? smtpMailboxes[0])
+      : activeMailbox;
+    if (!workspace.isDemo && !isEmailAccountConfigured(mailbox)) {
+      toast.error("Configure SMTP in Settings → Email first.");
+      return;
+    }
+    setSelectedId(null);
+    setComposeMailboxId(mailbox.id);
+    setTo(contactEmail?.trim() || "");
+    setCc("");
+    setSubject("");
+    setBody("");
+    setInReplyTo(undefined);
+    setReferenceIds([]);
+    setAttachments([]);
+    setScheduleEnabled(false);
+    setScheduledAt(defaultScheduleDatetimeLocal());
+    setDraftId(undefined);
+    setIncludeSignature(true);
+    setIncludeFooter(Boolean(globalEmailFooter.trim()));
+    setComposeMode("compose");
+  }
+
+  function openComposer(mode: Exclude<ComposeMode, "compose">) {
     if (!selected || !selectedMailbox) return;
     if (lead.doNotContact) {
       toast.error("This lead is marked do not contact.");
       return;
     }
-    if (readOnly) {
+    if (conversationReadOnly) {
       toast.error("You cannot send from this mailbox.");
       return;
     }
@@ -468,6 +562,15 @@ export function LeadEmailsPanel({
     setComposeMode(mode);
   }
 
+  function resolveOutboundBody(mailbox: NonNullable<typeof composeMailbox>): string {
+    if (composeMode !== "compose") return body;
+    let outbound = includeSignature
+      ? appendMailboxSignature(body, mailbox.signature)
+      : body.replace(/\s+$/u, "");
+    if (includeFooter) outbound = appendGlobalEmailFooter(outbound, globalEmailFooter);
+    return outbound;
+  }
+
   async function addAttachments(files: FileList) {
     const remaining = MAX_COMPOSE_ATTACHMENTS - attachments.length;
     if (remaining <= 0) {
@@ -516,14 +619,21 @@ export function LeadEmailsPanel({
     };
   }
 
-  function recordSentMessage(input: { mailboxId: string; from: string; to: string; cc?: string; messageId?: string }) {
+  function recordSentMessage(input: {
+    mailboxId: string;
+    from: string;
+    to: string;
+    cc?: string;
+    body: string;
+    messageId?: string;
+  }) {
     const id = addSent({
       mailboxId: input.mailboxId,
       from: input.from,
       to: input.to,
       cc: input.cc,
       subject: subject.trim() || "(no subject)",
-      body,
+      body: input.body,
       attachments: attachments.map((attachment) => ({
         filename: attachment.filename,
         mimeType: attachment.mimeType,
@@ -547,26 +657,28 @@ export function LeadEmailsPanel({
   }
 
   async function sendNow() {
-    if (!selectedMailbox || readOnly) return;
+    if (!composeMailbox || composeReadOnly) return;
     const recipients = normalizedRecipients();
     if (!recipients) return;
-    if (!selectedMailbox.emailAddress.trim()) {
+    if (!composeMailbox.emailAddress.trim()) {
       toast.error("Set the mailbox From address in Settings → Email.");
       return;
     }
-    if (!workspace.isDemo && !isEmailAccountConfigured(selectedMailbox)) {
+    if (!workspace.isDemo && !isEmailAccountConfigured(composeMailbox)) {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
 
+    const outboundBody = resolveOutboundBody(composeMailbox);
     setSending(true);
     try {
       if (workspace.isDemo) {
         recordSentMessage({
-          mailboxId: selectedMailbox.id,
-          from: selectedMailbox.emailAddress || "demo@nova.local",
+          mailboxId: composeMailbox.id,
+          from: composeMailbox.emailAddress || "demo@nova.local",
           to: recipients.to,
           cc: recipients.cc,
+          body: outboundBody,
         });
         toast.success("Message saved to Sent (demo)");
         resetComposer();
@@ -575,7 +687,7 @@ export function LeadEmailsPanel({
 
       const forUid = resolveMailApiForUserUid({
         mailViewAsUid,
-        activeMailboxDataOwnerUid: selectedMailbox.dataOwnerUid,
+        activeMailboxDataOwnerUid: composeMailbox.dataOwnerUid,
         selfUid: workspace.currentUserId ?? "",
       });
       const url = appendMailDataOwnerParam("/api/email/send", forUid, workspace.currentUserId ?? "");
@@ -584,16 +696,16 @@ export function LeadEmailsPanel({
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
-          mailboxId: selectedMailbox.id,
+          mailboxId: composeMailbox.id,
           leadId: lead.id,
-          from: selectedMailbox.emailAddress,
-          displayName: selectedMailbox.displayName,
-          replyTo: selectedMailbox.replyTo,
+          from: composeMailbox.emailAddress,
+          displayName: composeMailbox.displayName,
+          replyTo: composeMailbox.replyTo,
           to: recipients.to,
           cc: recipients.cc,
           subject: subject.trim(),
-          text: body,
-          html: bodyToHtml(body),
+          text: outboundBody,
+          html: bodyToHtml(outboundBody),
           inReplyTo,
           referenceIds,
           attachments: attachments.map((attachment) => ({
@@ -602,19 +714,19 @@ export function LeadEmailsPanel({
             contentBase64: attachment.contentBase64,
           })),
           smtp: {
-            host: selectedMailbox.smtp.host,
-            port: selectedMailbox.smtp.port,
-            secure: selectedMailbox.smtp.secure,
-            user: selectedMailbox.smtp.user,
-            pass: selectedMailbox.smtp.password,
+            host: composeMailbox.smtp.host,
+            port: composeMailbox.smtp.port,
+            secure: composeMailbox.smtp.secure,
+            user: composeMailbox.smtp.user,
+            pass: composeMailbox.smtp.password,
           },
-          imap: isImapInboxConfigured(selectedMailbox)
+          imap: isImapInboxConfigured(composeMailbox)
             ? {
-                host: selectedMailbox.imap.host,
-                port: selectedMailbox.imap.port,
-                secure: selectedMailbox.imap.secure,
-                user: selectedMailbox.imap.user,
-                pass: selectedMailbox.imap.password,
+                host: composeMailbox.imap.host,
+                port: composeMailbox.imap.port,
+                secure: composeMailbox.imap.secure,
+                user: composeMailbox.imap.user,
+                pass: composeMailbox.imap.password,
               }
             : undefined,
         }),
@@ -622,10 +734,11 @@ export function LeadEmailsPanel({
       const data = (await response.json()) as { ok?: boolean; error?: string; messageId?: string };
       if (!response.ok || !data.ok) throw new Error(data.error || "Send failed");
       recordSentMessage({
-        mailboxId: selectedMailbox.id,
-        from: selectedMailbox.emailAddress,
+        mailboxId: composeMailbox.id,
+        from: composeMailbox.emailAddress,
         to: recipients.to,
         cc: recipients.cc,
+        body: outboundBody,
         messageId: data.messageId,
       });
       if (draftId) useEmailAccountStore.getState().deleteDraft(draftId);
@@ -641,14 +754,14 @@ export function LeadEmailsPanel({
   }
 
   async function scheduleSend() {
-    if (!selectedMailbox || readOnly) return;
+    if (!composeMailbox || composeReadOnly) return;
     const recipients = normalizedRecipients();
     if (!recipients) return;
-    if (!selectedMailbox.emailAddress.trim()) {
+    if (!composeMailbox.emailAddress.trim()) {
       toast.error("Set the mailbox From address in Settings → Email.");
       return;
     }
-    if (!workspace.isDemo && !isEmailAccountConfigured(selectedMailbox)) {
+    if (!workspace.isDemo && !isEmailAccountConfigured(composeMailbox)) {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
@@ -657,19 +770,20 @@ export function LeadEmailsPanel({
       toast.error("Schedule time must be at least 1 minute in the future.");
       return;
     }
+    const outboundBody = resolveOutboundBody(composeMailbox);
     setSending(true);
     try {
       const payload = {
-        mailboxId: selectedMailbox.id,
-        from: selectedMailbox.emailAddress,
-        displayName: selectedMailbox.displayName,
-        replyTo: selectedMailbox.replyTo,
+        mailboxId: composeMailbox.id,
+        from: composeMailbox.emailAddress,
+        displayName: composeMailbox.displayName,
+        replyTo: composeMailbox.replyTo,
         to: recipients.to,
         cc: recipients.cc,
         subject: subject.trim(),
-        body,
-        text: body,
-        html: bodyToHtml(body),
+        body: outboundBody,
+        text: outboundBody,
+        html: bodyToHtml(outboundBody),
         scheduledAt: date.toISOString(),
         leadId: lead.id,
         inReplyTo,
@@ -685,7 +799,7 @@ export function LeadEmailsPanel({
       } else {
         const forUid = resolveMailApiForUserUid({
           mailViewAsUid,
-          activeMailboxDataOwnerUid: selectedMailbox.dataOwnerUid,
+          activeMailboxDataOwnerUid: composeMailbox.dataOwnerUid,
           selfUid: workspace.currentUserId ?? "",
         });
         const url = appendMailDataOwnerParam("/api/email/scheduled", forUid, workspace.currentUserId ?? "");
@@ -709,10 +823,10 @@ export function LeadEmailsPanel({
   }
 
   function saveDraft() {
-    if (!selectedMailbox) return;
+    if (!composeMailbox) return;
     const id = upsertDraft({
       id: draftId,
-      mailboxId: selectedMailbox.id,
+      mailboxId: composeMailbox.id,
       to,
       cc: cc.trim() || undefined,
       subject,
@@ -787,6 +901,14 @@ export function LeadEmailsPanel({
               </Button>
               <Button
                 size="sm"
+                disabled={!canComposeNew}
+                onClick={openNewCompose}
+              >
+                <PenLine className="h-3.5 w-3.5" />
+                Compose
+              </Button>
+              <Button
+                size="sm"
                 variant="outline"
                 nativeButton={false}
                 render={<Link href="/inbox">Open inbox</Link>}
@@ -797,20 +919,27 @@ export function LeadEmailsPanel({
         <CardContent className="space-y-2">
           {conversations.length === 0 ? (
             <div className="rounded-lg border border-dashed px-4 py-8 text-center">
+              <Mail className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+              <p className="text-sm font-medium">No recent linked emails</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Messages linked in Inbox or matching {contactEmail || "the lead’s email"} appear here.
+              </p>
               {syncingLists ? (
-                <>
-                  <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-muted-foreground" />
-                  <p className="text-sm font-medium">Loading email conversations…</p>
-                </>
-              ) : (
-                <>
-                  <Mail className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
-                  <p className="text-sm font-medium">No recent linked emails</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Messages linked in Inbox or matching {contactEmail || "the lead’s email"} appear here.
-                  </p>
-                </>
-              )}
+                <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  Checking mailbox for matches…
+                </p>
+              ) : null}
+              <div className="mt-4 flex justify-center">
+                <Button
+                  size="sm"
+                  disabled={!canComposeNew}
+                  onClick={openNewCompose}
+                >
+                  <PenLine className="h-3.5 w-3.5" />
+                  Compose email
+                </Button>
+              </div>
             </div>
           ) : (
             conversations.map((conversation) => {
@@ -860,6 +989,96 @@ export function LeadEmailsPanel({
       </Card>
 
       <Dialog
+        open={composeMode === "compose"}
+        onOpenChange={(open) => {
+          if (!open) resetComposer();
+        }}
+      >
+        <DialogContent
+          className="flex max-h-[min(92vh,880px)] w-[calc(100vw-2rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-2xl"
+          showCloseButton
+        >
+          <DialogHeader className="shrink-0 border-b px-5 py-4">
+            <DialogTitle>Compose</DialogTitle>
+            <DialogDescription>
+              Send through your SMTP account saved in Settings.
+              {contactEmail ? ` Prefilled for ${contactEmail}.` : ""}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="shrink-0 space-y-3 border-b px-5 py-3">
+            {smtpMailboxes.length > 1 ? (
+              <div className="space-y-1.5">
+                <Label className="text-xs">From</Label>
+                <Select
+                  value={composeMailbox?.id}
+                  onValueChange={(value) => {
+                    if (value) setComposeMailboxId(value);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select mailbox">
+                      {composeMailbox
+                        ? composeMailbox.label || composeMailbox.emailAddress || "Mailbox"
+                        : "Select mailbox"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {smtpMailboxes.map((mailbox) => (
+                      <SelectItem key={mailbox.id} value={mailbox.id}>
+                        {mailbox.label || mailbox.emailAddress || mailbox.id}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            <MailboxSignaturePreview
+              signature={composeMailbox?.signature}
+              includeSignature={includeSignature}
+              onIncludeChange={setIncludeSignature}
+              mailboxLabel={composeMailbox?.label || composeMailbox?.emailAddress}
+              id="lead-compose-include-signature"
+            />
+            <GlobalEmailFooterPreview
+              footer={globalEmailFooter}
+              includeFooter={includeFooter}
+              onIncludeChange={setIncludeFooter}
+              id="lead-compose-include-footer"
+            />
+          </div>
+          <EmailComposeForm
+            to={to}
+            onToChange={setTo}
+            cc={cc}
+            onCcChange={setCc}
+            subject={subject}
+            onSubjectChange={setSubject}
+            body={body}
+            onBodyChange={setBody}
+            attachments={attachments}
+            onAddAttachments={(files) => void addAttachments(files)}
+            onRemoveAttachment={(id) => setAttachments((current) => current.filter((item) => item.id !== id))}
+            disabled={composeReadOnly}
+            sending={sending}
+            aiBusy={aiBusy}
+            onImproveWithAi={() => void runAi("improve")}
+            onGenerateAiDraft={() => void runAi("reply")}
+            onSaveDraft={saveDraft}
+            scheduleEnabled={scheduleEnabled}
+            onScheduleEnabledChange={(checked) => {
+              setScheduleEnabled(checked);
+              if (checked && !scheduledAt) setScheduledAt(defaultScheduleDatetimeLocal());
+            }}
+            scheduledAt={scheduledAt}
+            onScheduledAtChange={setScheduledAt}
+            minimumScheduledAt={defaultScheduleDatetimeLocal()}
+            onSend={() => void sendNow()}
+            onScheduleSend={() => void scheduleSend()}
+          />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
         open={Boolean(selected)}
         onOpenChange={(open) => {
           if (!open) {
@@ -880,18 +1099,18 @@ export function LeadEmailsPanel({
                 {selectedMailbox?.label || selectedMailbox?.emailAddress || "Mailbox"}
               </DialogDescription>
               <div className="flex flex-wrap gap-2 pt-1" role="toolbar" aria-label="Conversation actions">
-                <Button size="sm" disabled={readOnly} onClick={() => openComposer("reply")}>
+                <Button size="sm" disabled={conversationReadOnly} onClick={() => openComposer("reply")}>
                   <Reply className="h-3.5 w-3.5" /> Reply
                 </Button>
-                <Button size="sm" variant="secondary" disabled={readOnly} onClick={() => openComposer("replyAll")}>
+                <Button size="sm" variant="secondary" disabled={conversationReadOnly} onClick={() => openComposer("replyAll")}>
                   <ReplyAll className="h-3.5 w-3.5" /> Reply all
                 </Button>
-                <Button size="sm" variant="secondary" disabled={readOnly} onClick={() => openComposer("forward")}>
+                <Button size="sm" variant="secondary" disabled={conversationReadOnly} onClick={() => openComposer("forward")}>
                   <Forward className="h-3.5 w-3.5" /> Forward
                 </Button>
                 {lead.doNotContact ? (
                   <span className="self-center text-xs text-destructive">Lead is marked do not contact.</span>
-                ) : readOnly ? (
+                ) : conversationReadOnly ? (
                   <span className="self-center text-xs text-muted-foreground">This mailbox is read-only.</span>
                 ) : null}
               </div>
@@ -935,7 +1154,7 @@ export function LeadEmailsPanel({
                 })}
               </div>
 
-              {composeMode ? (
+              {composeMode && composeMode !== "compose" ? (
                 <div className="mt-4 rounded-lg border border-primary/25 bg-card px-4 pb-4 shadow-sm">
                   <div className="flex items-center justify-between border-b py-3">
                     <p className="text-sm font-medium capitalize">
@@ -958,7 +1177,7 @@ export function LeadEmailsPanel({
                     attachments={attachments}
                     onAddAttachments={(files) => void addAttachments(files)}
                     onRemoveAttachment={(id) => setAttachments((current) => current.filter((item) => item.id !== id))}
-                    disabled={readOnly}
+                    disabled={composeReadOnly}
                     sending={sending}
                     aiBusy={aiBusy}
                     onImproveWithAi={() => void runAi("improve")}

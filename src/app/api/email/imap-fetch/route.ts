@@ -164,7 +164,11 @@ export async function POST(req: Request) {
       );
       const envByUid = new Map(envelopeRows.map((r) => [r.uid, r]));
 
-      const uidsForBody = slice.slice(0, Math.min(FULL_BODY_SYNC_CAP, slice.length));
+      /** Lead matching / quick list sync only needs headers — skip RFC822 download. */
+      const headsOnly = Boolean(b.headsOnly);
+      const uidsForBody = headsOnly
+        ? ([] as number[])
+        : slice.slice(0, Math.min(FULL_BODY_SYNC_CAP, slice.length));
       const sourceByUid = new Map<number, Buffer>();
       for (let i = 0; i < uidsForBody.length; i += BODY_FETCH_BATCH) {
         const batch = uidsForBody.slice(i, i + BODY_FETCH_BATCH);
