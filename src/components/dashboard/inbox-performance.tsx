@@ -1,0 +1,98 @@
+"use client";
+
+import * as React from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { UserChip } from "@/components/common/user-chip";
+import { buildInboxPerformanceRows } from "@/lib/dashboard-ops-analytics";
+import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
+import { fmtNumber, fmtPercent } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import type { Followup, Lead, User } from "@/lib/types";
+
+export function InboxPerformance({
+  users,
+  leads,
+  followups,
+  range,
+  wall,
+}: {
+  users: User[];
+  leads: Lead[];
+  followups: Followup[];
+  range: DashboardTimeRangeKey;
+  wall?: boolean;
+}) {
+  const rows = React.useMemo(
+    () => buildInboxPerformanceRows({ users, leads, followups, range, limit: wall ? 6 : 10 }),
+    [users, leads, followups, range, wall],
+  );
+
+  return (
+    <Card className="min-w-0">
+      <CardHeader className="pb-2">
+        <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
+          Top performers
+        </CardTitle>
+        <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
+          Emails sent & replies by assigned owner · {DASHBOARD_TIME_RANGE_LABELS[range]}
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="pt-0">
+        {rows.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">No outreach in this range yet.</p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-8">Person</TableHead>
+                <TableHead className="h-8 text-right">Sent</TableHead>
+                <TableHead className="h-8 text-right">Replies</TableHead>
+                <TableHead className="h-8 text-right">Rate</TableHead>
+                {!wall && <TableHead className="h-8 text-right">Queued</TableHead>}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r, i) => (
+                <TableRow key={r.userId}>
+                  <TableCell className="py-2">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={cn(
+                          "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold tabular-nums",
+                          i === 0 && "bg-chart-1/20 text-foreground",
+                          i === 1 && "bg-chart-2/20 text-foreground",
+                          i === 2 && "bg-chart-3/20 text-foreground",
+                          i > 2 && "bg-muted text-muted-foreground",
+                        )}
+                      >
+                        {i + 1}
+                      </span>
+                      <UserChip userId={r.userId} />
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-2 text-right tabular-nums font-medium">
+                    {fmtNumber(r.emailsSent)}
+                  </TableCell>
+                  <TableCell className="py-2 text-right tabular-nums">{fmtNumber(r.replies)}</TableCell>
+                  <TableCell className="py-2 text-right tabular-nums text-muted-foreground">
+                    {fmtPercent(r.replyRate, 0)}
+                  </TableCell>
+                  {!wall && (
+                    <TableCell className="py-2 text-right tabular-nums text-muted-foreground">
+                      {fmtNumber(r.scheduled)}
+                      {r.failed > 0 ? (
+                        <span className="ml-1 text-destructive">· {r.failed} fail</span>
+                      ) : null}
+                    </TableCell>
+                  )}
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}

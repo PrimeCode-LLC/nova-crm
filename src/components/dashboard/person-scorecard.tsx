@@ -1,105 +1,138 @@
 "use client";
 
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import * as React from "react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { fmtNumber, fmtPercent, fmtCurrency } from "@/lib/format";
-import { ROLES } from "@/lib/constants";
-import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
-import { UserChip } from "@/components/common/user-chip";
 import { Badge } from "@/components/ui/badge";
-import type { Deal, Lead } from "@/lib/types";
+import { UserChip } from "@/components/common/user-chip";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { buildOpsScorecardRows } from "@/lib/dashboard-ops-analytics";
+import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
+import { ROLES } from "@/lib/constants";
+import { fmtCurrency, fmtNumber } from "@/lib/format";
+import { cn } from "@/lib/utils";
+import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import type { Deal, Followup, Lead, LeadTask } from "@/lib/types";
 
 export function PersonScorecard({
   leads: leadsOverride,
   deals: dealsOverride,
+  followups: followupsOverride,
+  tasks: tasksOverride,
+  range = "30d",
+  wall,
 }: {
   leads?: Lead[];
   deals?: Deal[];
+  followups?: Followup[];
+  tasks?: LeadTask[];
+  range?: DashboardTimeRangeKey;
+  wall?: boolean;
 } = {}) {
   const ws = useWorkspace();
-  const { users, currentUserId } = ws;
+  const { users, currentUserId, leadTasks, followups: wsFollowups } = ws;
   const leads = leadsOverride ?? ws.leads;
   const deals = dealsOverride ?? ws.deals;
+  const followups = followupsOverride ?? wsFollowups;
+  const tasks = tasksOverride ?? leadTasks;
   const viewer = users.find((u) => u.id === currentUserId);
-  const canSeeTeamScorecards = viewer?.roleId === "director" || viewer?.roleId === "manager";
+  const canSeeTeam =
+    viewer?.roleId === "director" ||
+    viewer?.roleId === "manager" ||
+    viewer?.roleId === "team_lead" ||
+    viewerHasElevatedWorkspaceRole(viewer);
 
-  const rowsAll = users
-    .filter((u) => u.roleId !== "director" && u.status === "active")
-    .map((u) => {
-      const ownedLeads = leads.filter((l) => l.ownerId === u.id);
-      const replied = ownedLeads.filter((l) =>
-        ["replied", "qualified", "discovery", "proposal", "negotiation", "won"].includes(l.stage),
-      ).length;
-      const won = ownedLeads.filter((l) => l.stage === "won").length;
-      const wonDeals = deals.filter((d) => d.ownerId === u.id && d.stage === "won");
-      const pipeline = computeUserOpenPipelineMetrics(u.id, leads, deals).total;
-      const closedValue = wonDeals.reduce((s, d) => s + d.value, 0);
+  const rowsAll = React.useMemo(
+    () =>
+      buildOpsScorecardRows({
+        users,
+        leads,
+        deals,
+        followups,
+        tasks,
+        range,
+      }),
+    [users, leads, deals, followups, tasks, range],
+  );
 
-      return {
-        user: u,
-        leads: ownedLeads.length,
-        replyRate: ownedLeads.length > 0 ? (replied / ownedLeads.length) * 100 : 0,
-        winRate: ownedLeads.length > 0 ? (won / ownedLeads.length) * 100 : 0,
-        pipeline,
-        closedValue,
-      };
-    })
-    .sort((a, b) => b.closedValue - a.closedValue);
-
-  const rows = canSeeTeamScorecards
-    ? rowsAll
-    : rowsAll.filter((r) => r.user.id === currentUserId);
+  const rows = canSeeTeam ? rowsAll : rowsAll.filter((r) => r.userId === currentUserId);
+  const rangeLabel = DASHBOARD_TIME_RANGE_LABELS[range];
 
   return (
-    <Card>
+    <Card className="min-w-0">
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-semibold">
-          {canSeeTeamScorecards ? "Team scorecards" : "Your scorecard"}
+        <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
+          {canSeeTeam ? "Team scorecard" : "Your scorecard"}
         </CardTitle>
-        <CardDescription className="text-xs">
-          {canSeeTeamScorecards
-            ? "Per-person funnel performance · last 30 days"
-            : "Your funnel performance on leads you can access · last 30 days"}
+        <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
+          Prospects, outreach & pipeline · {rangeLabel}
         </CardDescription>
       </CardHeader>
-      <CardContent className="pt-0">
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className="h-8">Person</TableHead>
-              <TableHead className="h-8">Role</TableHead>
-              <TableHead className="h-8 text-right">Leads</TableHead>
-              <TableHead className="h-8 text-right">Reply</TableHead>
-              <TableHead className="h-8 text-right">Win</TableHead>
-              <TableHead className="h-8 text-right">Pipeline</TableHead>
-              <TableHead className="h-8 text-right">Closed</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {rows.map((r) => (
-              <TableRow key={r.user.id}>
-                <TableCell className="py-2">
-                  <UserChip userId={r.user.id} />
-                </TableCell>
-                <TableCell className="py-2">
-                  <Badge variant="outline" className="text-[10px] font-normal">
-                    {ROLES[r.user.roleId].label}
-                  </Badge>
-                </TableCell>
-                <TableCell className="py-2 text-right tabular-nums">{fmtNumber(r.leads)}</TableCell>
-                <TableCell className="py-2 text-right tabular-nums">{fmtPercent(r.replyRate, 1)}</TableCell>
-                <TableCell className="py-2 text-right tabular-nums">{fmtPercent(r.winRate, 1)}</TableCell>
-                <TableCell className="py-2 text-right tabular-nums text-muted-foreground">
-                  {fmtCurrency(r.pipeline)}
-                </TableCell>
-                <TableCell className="py-2 text-right tabular-nums font-semibold text-success">
-                  {fmtCurrency(r.closedValue)}
-                </TableCell>
+      <CardContent className="pt-0 overflow-x-auto">
+        {rows.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">
+            No scored activity in this range yet.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="h-8">Person</TableHead>
+                {!wall && <TableHead className="h-8">Role</TableHead>}
+                <TableHead className="h-8 text-right">Prospects</TableHead>
+                <TableHead className="h-8 text-right">Leads</TableHead>
+                <TableHead className="h-8 text-right">Sent</TableHead>
+                <TableHead className="h-8 text-right">Replies</TableHead>
+                {!wall && <TableHead className="h-8 text-right">Done</TableHead>}
+                <TableHead className="h-8 text-right">Pipeline</TableHead>
+                <TableHead className="h-8 text-right">Closed</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {rows.map((r) => {
+                const user = users.find((u) => u.id === r.userId);
+                return (
+                  <TableRow key={r.userId}>
+                    <TableCell className="py-2">
+                      <UserChip userId={r.userId} />
+                    </TableCell>
+                    {!wall && (
+                      <TableCell className="py-2">
+                        {user ? (
+                          <Badge variant="outline" className="text-[10px] font-normal">
+                            {ROLES[user.roleId]?.label ?? user.roleId}
+                          </Badge>
+                        ) : null}
+                      </TableCell>
+                    )}
+                    <TableCell className="py-2 text-right tabular-nums">
+                      {fmtNumber(r.prospectsAdded)}
+                    </TableCell>
+                    <TableCell className="py-2 text-right tabular-nums">
+                      {fmtNumber(r.salesLeadsAdded)}
+                    </TableCell>
+                    <TableCell className="py-2 text-right tabular-nums font-medium">
+                      {fmtNumber(r.emailsSent)}
+                    </TableCell>
+                    <TableCell className="py-2 text-right tabular-nums">{fmtNumber(r.replies)}</TableCell>
+                    {!wall && (
+                      <TableCell className="py-2 text-right tabular-nums text-muted-foreground">
+                        {fmtNumber(r.followupsCompleted + r.tasksCompleted)}
+                      </TableCell>
+                    )}
+                    <TableCell className="py-2 text-right tabular-nums text-muted-foreground">
+                      {fmtCurrency(r.openPipeline)}
+                    </TableCell>
+                    <TableCell className="py-2 text-right tabular-nums font-semibold text-success">
+                      {fmtCurrency(r.closedValue)}
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        )}
       </CardContent>
     </Card>
   );

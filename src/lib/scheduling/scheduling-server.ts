@@ -486,6 +486,8 @@ export async function listMeetingsServer(input: {
   leadId?: string;
   from?: string;
   to?: string;
+  /** Org-wide list for managers/owners (dashboard ops board). */
+  scope?: "host" | "org";
 }): Promise<Meeting[]> {
   const db = getAdminDb();
   if (!db) return [];
@@ -499,6 +501,24 @@ export async function listMeetingsServer(input: {
     return snap.docs
       .map((d) => docToMeeting(d.id, d.data()))
       .sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+  }
+
+  if (input.scope === "org") {
+    const snap = await db
+      .collection(COLLECTIONS.meetings)
+      .where("organizationId", "==", input.organizationId)
+      .get();
+    let items = snap.docs.map((d) => docToMeeting(d.id, d.data()));
+    if (input.from) {
+      const f = new Date(input.from).getTime();
+      items = items.filter((m) => new Date(m.endAt).getTime() >= f);
+    }
+    if (input.to) {
+      const t = new Date(input.to).getTime();
+      items = items.filter((m) => new Date(m.startAt).getTime() <= t);
+    }
+    items.sort((a, b) => new Date(a.startAt).getTime() - new Date(b.startAt).getTime());
+    return items;
   }
 
   const hostId = input.hostId ?? input.viewerUid;

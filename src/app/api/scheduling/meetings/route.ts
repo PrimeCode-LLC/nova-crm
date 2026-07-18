@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardTenantApi, roleAtLeast } from "@/lib/platform/tenant-api-guard";
 import {
   bookMeetingServer,
   listMeetingsServer,
@@ -34,6 +34,11 @@ export async function GET(req: Request) {
   const leadId = url.searchParams.get("leadId")?.trim() || undefined;
   const from = url.searchParams.get("from")?.trim() || undefined;
   const to = url.searchParams.get("to")?.trim() || undefined;
+  const wantOrg = url.searchParams.get("scope")?.trim() === "org";
+  const canListOrg = roleAtLeast(g.ctx.role, "manager");
+  if (wantOrg && !canListOrg) {
+    return NextResponse.json({ ok: false, error: "Forbidden" }, { status: 403 });
+  }
   const items = await listMeetingsServer({
     organizationId: g.ctx.session.organizationId,
     viewerUid: g.ctx.session.uid,
@@ -41,6 +46,7 @@ export async function GET(req: Request) {
     leadId,
     from,
     to,
+    scope: wantOrg && canListOrg ? "org" : "host",
   });
   return NextResponse.json({ ok: true, items });
 }

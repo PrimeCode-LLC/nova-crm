@@ -13,9 +13,9 @@ export function showTeamFollowupsOnDashboard(role: Role | undefined): boolean {
 export function getDashboardOverviewDescription(role: Role | undefined): string {
   switch (role) {
     case "director":
-      return "Org-wide pipeline, channel health, and where the team is stuck, with your own commitments in view.";
+      return "Command board: live outreach, team scorecards, inbox leaders, and wall-ready ops pulse.";
     case "manager":
-      return "Team coverage, pipeline risk, and follow-through across your reports.";
+      return "Team coverage, outreach volume, follow-through, and where reps need help.";
     case "team_lead":
       return "Squad pipeline, coaching signals, and the next actions your reps owe.";
     case "salesperson":
