@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -20,14 +19,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
-import { useAuth } from "@/components/providers/auth-provider";
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isAuthDisabled } from "@/lib/auth/flags";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import type { OrganizationMember, TimelineEvent, User } from "@/lib/types";
+import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
+import { isProspectRow, prospectPatchForSalesLeadSync } from "@/lib/prospects/prospect-access";
+import type { Lead, OrganizationMember, User } from "@/lib/types";
+
+const OPEN_QUEUE_OWNER_VALUE = "__open_queue__";
 
 type OwnerOption = { id: string; label: string };
 
@@ -67,6 +65,15 @@ function newTimelineId(): string {
   return `te-local-${Date.now()}`;
 }
 
+function ownerPatchForLead(lead: Lead, nextOwnerId: string): Partial<Lead> {
+  const patch: Partial<Lead> = { ownerId: nextOwnerId };
+  // Transfer prospect ownership with sales ownership so access + filters stay aligned.
+  if (isProspectRow(lead) && nextOwnerId) {
+    patch.prospectOwnerId = nextOwnerId;
+  }
+  return patch;
+}
+
 export function ReassignLeadsDialog({
   open,
   onOpenChange,
@@ -84,22 +91,36 @@ export function ReassignLeadsDialog({
     getUserById,
     getOwnerDisplayName,
     users,
-    patchLead,
-    bumpLeadActivity,
-    addTimelineEvent,
+    bulkReassignOwners,
     currentUserId,
   } = useWorkspace();
-  const { user: fbUser } = useAuth();
-  const { data: liveUserDoc } = useUserDoc(
-    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
-  );
   const [newOwnerId, setNewOwnerId] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const [progressDone, setProgressDone] = React.useState(0);
+  const [progressTotal, setProgressTotal] = React.useState(0);
   const [ownerOptions, setOwnerOptions] = React.useState<OwnerOption[]>([]);
   const [ownersLoading, setOwnersLoading] = React.useState(false);
 
+  const targets = React.useMemo(
+    () =>
+      leadIds
+        .map((id) => ({ id, lead: getLeadById(id) }))
+        .filter((x): x is { id: string; lead: Lead } => Boolean(x.lead)),
+    [leadIds, getLeadById],
+  );
+  const mostlyProspects =
+    targets.length > 0 &&
+    targets.filter((t) => isProspectRow(t.lead)).length >= Math.ceil(targets.length / 2);
+  const noun = mostlyProspects ? "prospect" : "lead";
+  const nouns = mostlyProspects ? "prospects" : "leads";
+
   React.useEffect(() => {
-    if (open) setNewOwnerId("");
+    if (open) {
+      setNewOwnerId("");
+      setProgressDone(0);
+      setProgressTotal(0);
+      setSubmitting(false);
+    }
   }, [open, leadIds.join(",")]);
 
   React.useEffect(() => {
@@ -152,89 +173,119 @@ export function ReassignLeadsDialog({
     };
   }, [open, isDemo, users]);
 
+  function displayOwnerName(ownerId: string): string {
+    if (!ownerId.trim()) return "Open queue";
+    return (
+      ownerOptions.find((o) => o.id === ownerId)?.label ??
+      getUserById(ownerId)?.displayName?.trim() ??
+      getOwnerDisplayName(ownerId) ??
+      ownerId
+    );
+  }
+
   async function onSubmit() {
-    const owner = newOwnerId.trim();
-    if (!owner) {
-      toast.error("Choose a teammate to assign the lead to.");
+    if (!newOwnerId) {
+      toast.error(`Choose who should own the selected ${nouns}.`);
       return;
     }
     if (!leadIds.length) return;
 
-    const targets = leadIds.map((id) => ({ id, lead: getLeadById(id) })).filter((x) => x.lead);
-    if (!targets.length) {
-      toast.error("No matching leads to update.");
+    const owner =
+      newOwnerId === OPEN_QUEUE_OWNER_VALUE ? "" : newOwnerId.trim();
+    if (newOwnerId !== OPEN_QUEUE_OWNER_VALUE && !owner) {
+      toast.error(`Choose who should own the selected ${nouns}.`);
       return;
     }
-    const already = targets.filter((t) => t.lead!.ownerId === owner);
+
+    if (!targets.length) {
+      toast.error(`No matching ${nouns} to update.`);
+      return;
+    }
+
+    const already = targets.filter((t) => (t.lead.ownerId?.trim() || "") === owner);
     if (already.length === targets.length) {
-      const who =
-        ownerOptions.find((o) => o.id === owner)?.label ??
-        getUserById(owner)?.displayName?.trim() ??
-        getOwnerDisplayName(owner) ??
-        owner;
+      const who = displayOwnerName(owner);
       toast.message("No change", {
         description:
           targets.length === 1
-            ? `This lead is already assigned to ${who}.`
-            : `These leads are already assigned to ${who}.`,
+            ? `This ${noun} is already assigned to ${who}.`
+            : `These ${nouns} are already assigned to ${who}.`,
       });
       return;
     }
 
-    setSubmitting(true);
-    try {
-      const writeFs =
-        !isDemo && isFirebaseWebConfigured() && liveUserDoc?.organizationId;
+    const toUpdate = targets.filter((t) => (t.lead.ownerId?.trim() || "") !== owner);
+    const items: BulkOwnerReassignItem[] = toUpdate.map(({ id, lead }) => {
+      const current = lead.ownerId?.trim() || "";
+      const leadPatch = ownerPatchForLead(lead, owner);
+      const linkedSalesLeadId = lead.linkedSalesLeadId?.trim();
+      const linkedSalesPatch =
+        isProspectRow(lead) && linkedSalesLeadId
+          ? prospectPatchForSalesLeadSync(leadPatch)
+          : undefined;
 
-      const db = writeFs ? getFirebaseDb() : null;
-      for (const { id, lead } of targets) {
-        if (!lead || lead.ownerId === owner) continue;
-        if (writeFs && db) {
-          await updateDoc(doc(db, COLLECTIONS.leads, id), {
-            ownerId: owner,
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          patchLead(id, { ownerId: owner });
-        }
-        const fromName = !lead.ownerId?.trim()
-          ? "Open queue"
-          : getUserById(lead.ownerId)?.displayName?.trim() ||
-            getOwnerDisplayName(lead.ownerId) ||
-            "Unknown owner";
-        const toName =
-          ownerOptions.find((o) => o.id === owner)?.label ??
-          getUserById(owner)?.displayName?.trim() ??
-          getOwnerDisplayName(owner) ??
-          owner;
-        addTimelineEvent({
+      return {
+        leadId: id,
+        previousOwnerId: current,
+        leadPatch,
+        linkedSalesLeadId:
+          linkedSalesPatch && Object.keys(linkedSalesPatch).length > 0
+            ? linkedSalesLeadId
+            : undefined,
+        linkedSalesPatch:
+          linkedSalesPatch && Object.keys(linkedSalesPatch).length > 0
+            ? linkedSalesPatch
+            : undefined,
+        accountId: lead.accountId,
+        contactId: lead.contactId,
+        timeline: {
           id: newTimelineId(),
           leadId: id,
           type: "assignment_changed",
           actorId: currentUserId,
-          summary: `Reassigned from ${fromName} to ${toName}`,
+          summary: `Reassigned from ${displayOwnerName(current)} to ${displayOwnerName(owner)}`,
           createdAt: new Date().toISOString(),
-        });
-        bumpLeadActivity(id);
-      }
+        },
+      };
+    });
 
-      const n = targets.filter((t) => t.lead && t.lead.ownerId !== owner).length;
-      toast.success(n === 1 ? "Lead reassigned" : `${n} leads reassigned`);
+    setSubmitting(true);
+    setProgressDone(0);
+    setProgressTotal(items.length);
+    try {
+      await bulkReassignOwners(items, owner, (done, total) => {
+        setProgressDone(done);
+        setProgressTotal(total);
+      });
+
+      const updated = items.length;
+      toast.success(
+        owner
+          ? updated === 1
+            ? `${noun[0]!.toUpperCase()}${noun.slice(1)} assigned`
+            : `${updated} ${nouns} assigned`
+          : updated === 1
+            ? `Moved ${noun} to open queue`
+            : `Moved ${updated} ${nouns} to open queue`,
+      );
       onOpenChange(false);
       onSuccess?.();
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      toast.error(`Could not reassign: ${msg}`);
+      toast.error(`Could not assign owner: ${msg}`);
     } finally {
       setSubmitting(false);
     }
   }
 
-  const title = leadIds.length <= 1 ? "Reassign lead" : `Reassign ${leadIds.length} leads`;
+  const title =
+    leadIds.length <= 1
+      ? `Assign ${noun} owner`
+      : `Assign owner (${leadIds.length} ${nouns})`;
 
-  /** Base UI Select can show the raw `value` (uid) when the trigger cannot resolve the item label; always pass an explicit label. */
   const selectedOwnerDisplay = React.useMemo(() => {
     if (!newOwnerId) return null;
+    if (newOwnerId === OPEN_QUEUE_OWNER_VALUE) return "Open queue (unassigned)";
     return (
       ownerOptions.find((o) => o.id === newOwnerId)?.label ??
       getUserById(newOwnerId)?.displayName?.trim() ??
@@ -243,52 +294,98 @@ export function ReassignLeadsDialog({
     );
   }, [newOwnerId, ownerOptions, getUserById, getOwnerDisplayName]);
 
+  const progressPct =
+    progressTotal > 0 ? Math.round((progressDone / progressTotal) * 100) : 0;
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (submitting) return;
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-md" showCloseButton={!submitting}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>
-            Pick who should own {leadIds.length <= 1 ? "this lead" : "these leads"}. The Owner column and
-            owned-by-me views update for the teammate you pick.
+            Choose a teammate (or open queue) for{" "}
+            {leadIds.length <= 1 ? `this ${noun}` : `these ${leadIds.length} ${nouns}`}. The Owner
+            column and owned-by-me filters update right away.
           </DialogDescription>
         </DialogHeader>
-        <div className="space-y-2 py-2">
-          <Label htmlFor="reassign-owner" className="text-xs font-medium">
-            New owner
-          </Label>
-          <Select value={newOwnerId} onValueChange={(v) => setNewOwnerId(v ?? "")}>
-            <SelectTrigger id="reassign-owner" className="h-9" disabled={ownersLoading}>
-              <SelectValue placeholder={ownersLoading ? "Loading team…" : "Select teammate…"}>
-                {newOwnerId ? (selectedOwnerDisplay ?? "Selected teammate") : undefined}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {ownersLoading ? (
-                <div className="px-2 py-2 text-xs text-muted-foreground">Loading team…</div>
-              ) : ownerOptions.length === 0 ? (
-                <div className="px-2 py-2 text-xs text-muted-foreground">No active teammates found.</div>
-              ) : (
-                ownerOptions.map((o) => (
-                  <SelectItem key={o.id} value={o.id}>
-                    {o.label}
-                  </SelectItem>
-                ))
-              )}
-            </SelectContent>
-          </Select>
+        <div className="space-y-3 py-2">
+          <div className="space-y-2">
+            <Label htmlFor="reassign-owner" className="text-xs font-medium">
+              New owner
+            </Label>
+            <Select
+              value={newOwnerId}
+              onValueChange={(v) => setNewOwnerId(v ?? "")}
+              disabled={ownersLoading || submitting}
+            >
+              <SelectTrigger id="reassign-owner" className="h-9" disabled={ownersLoading || submitting}>
+                <SelectValue placeholder={ownersLoading ? "Loading team…" : "Select teammate…"}>
+                  {newOwnerId ? (selectedOwnerDisplay ?? "Selected teammate") : undefined}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {ownersLoading ? (
+                  <div className="px-2 py-2 text-xs text-muted-foreground">Loading team…</div>
+                ) : (
+                  <>
+                    <SelectItem value={OPEN_QUEUE_OWNER_VALUE}>Open queue (unassigned)</SelectItem>
+                    {ownerOptions.length === 0 ? (
+                      <div className="px-2 py-2 text-xs text-muted-foreground">
+                        No active teammates found.
+                      </div>
+                    ) : (
+                      ownerOptions.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SelectItem>
+                      ))
+                    )}
+                  </>
+                )}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {submitting && progressTotal > 0 ? (
+            <div className="space-y-2 rounded-md border bg-muted/30 px-3 py-3">
+              <Progress value={progressPct} className="w-full gap-2">
+                <ProgressLabel className="text-xs">
+                  {progressPct < 100 ? "Assigning in batches…" : "Finishing…"}
+                </ProgressLabel>
+                <ProgressValue className="text-xs">
+                  {() => `${progressDone} / ${progressTotal} · ${progressPct}%`}
+                </ProgressValue>
+              </Progress>
+            </div>
+          ) : null}
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button type="button" variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={submitting}
+            onClick={() => onOpenChange(false)}
+          >
             Cancel
           </Button>
           <Button
             type="button"
             size="sm"
-            disabled={submitting || ownersLoading || !newOwnerId || ownerOptions.length === 0}
+            disabled={submitting || ownersLoading || !newOwnerId}
             onClick={() => void onSubmit()}
           >
-            {submitting ? "Saving…" : "Save"}
+            {submitting
+              ? progressTotal > 0
+                ? `${progressPct}%`
+                : "Assigning…"
+              : "Assign"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -49,6 +49,8 @@ import {
   persistLeadCreateClient,
 } from "@/lib/firestore/persist-lead-graph-client";
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
+import { persistBulkOwnerReassignClient } from "@/lib/firestore/persist-bulk-owner-reassign-client";
+import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
 import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
 import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
 import { persistDealPatchClient } from "@/lib/firestore/persist-deal-patch-client";
@@ -197,6 +199,15 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     patchLead: (leadId: string, patch: Partial<Lead>) => void;
     /** Like `patchLead` but awaits the Firestore write (live mode). Throws on permission or network errors. */
     patchLeadAsync: (leadId: string, patch: Partial<Lead>) => Promise<void>;
+    /**
+     * Bulk owner reassignment via Firestore write batches (live) or a single session update (demo).
+     * Prefer this over looping `patchLeadAsync` for large selections.
+     */
+    bulkReassignOwners: (
+      items: BulkOwnerReassignItem[],
+      nextOwnerId: string,
+      onProgress?: (done: number, total: number) => void,
+    ) => Promise<void>;
     patchAccount: (accountId: string, patch: Partial<Account>) => void;
     patchContact: (contactId: string, patch: Partial<Contact>) => void;
     /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
@@ -1357,6 +1368,109 @@ export function WorkspaceModeProvider({
     [patchLeadAsync],
   );
 
+  const bulkReassignOwners = React.useCallback(
+    async (
+      items: BulkOwnerReassignItem[],
+      nextOwnerId: string,
+      onProgress?: (done: number, total: number) => void,
+    ) => {
+      if (!items.length) return;
+
+      const viewerRole: OrgMemberRole =
+        snapshotRef.current.users.find((u) => u.id === snapshotRef.current.currentUserId)?.orgRole ??
+        userDoc?.orgRole ??
+        "member";
+
+      for (const item of items) {
+        const lead = snapshotRef.current.leads.find((l) => l.id === item.leadId);
+        if (lead && !canEditProspectDerivedLead(lead, viewerRole)) {
+          throw new Error("Only workspace admins can edit one or more of the selected leads.");
+        }
+      }
+
+      const iso = new Date().toISOString();
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+
+      if (writeFs && orgId) {
+        const db = getFirebaseDb();
+        await persistBulkOwnerReassignClient(db, orgId, items, nextOwnerId, onProgress);
+      } else {
+        // Demo / offline: simulate chunked progress for the UI.
+        const total = items.length;
+        const chunk = 25;
+        for (let i = 0; i < total; i += chunk) {
+          onProgress?.(Math.min(i + chunk, total), total);
+          await new Promise((r) => setTimeout(r, 0));
+        }
+      }
+
+      setSessionV2((s) => {
+        const leadPatches = { ...s.leadPatches };
+        const accountPatches = { ...s.accountPatches };
+        const contactPatches = { ...s.contactPatches };
+        const timelineAdded = [...s.timelineAdded];
+        const leadActivity = writeFs ? s.leadActivity : { ...s.leadActivity };
+
+        for (const item of items) {
+          leadPatches[item.leadId] = {
+            ...leadPatches[item.leadId],
+            ...item.leadPatch,
+            updatedAt: iso,
+          };
+          if (item.linkedSalesLeadId && item.linkedSalesPatch) {
+            leadPatches[item.linkedSalesLeadId] = {
+              ...leadPatches[item.linkedSalesLeadId],
+              ...item.linkedSalesPatch,
+              updatedAt: iso,
+            };
+          }
+          if (item.accountId?.trim()) {
+            accountPatches[item.accountId] = {
+              ...accountPatches[item.accountId],
+              ownerId: nextOwnerId,
+              updatedAt: iso,
+            };
+          }
+          if (item.contactId?.trim()) {
+            contactPatches[item.contactId] = {
+              ...contactPatches[item.contactId],
+              ownerId: nextOwnerId,
+              updatedAt: iso,
+            };
+          }
+          timelineAdded.push({
+            id: item.timeline.id,
+            leadId: item.timeline.leadId,
+            type: item.timeline.type,
+            actorId: item.timeline.actorId,
+            summary: item.timeline.summary,
+            createdAt: item.timeline.createdAt,
+          });
+          if (!writeFs) {
+            leadActivity[item.leadId] = {
+              bump: (leadActivity[item.leadId]?.bump ?? 0) + 1,
+              lastAt: item.timeline.createdAt,
+            };
+          }
+        }
+
+        return {
+          ...s,
+          leadPatches,
+          accountPatches,
+          contactPatches,
+          timelineAdded,
+          leadActivity,
+        };
+      });
+
+      onProgress?.(items.length, items.length);
+    },
+    [mode, userDoc?.organizationId, userDoc?.orgRole],
+  );
+
   const patchAccount = React.useCallback(
     (accountId: string, patch: Partial<Account>) => {
       const iso = new Date().toISOString();
@@ -1968,6 +2082,7 @@ export function WorkspaceModeProvider({
       addTimelineEvent,
       patchLead,
       patchLeadAsync,
+      bulkReassignOwners,
       patchAccount,
       patchContact,
       patchDeal,
@@ -2034,6 +2149,7 @@ export function WorkspaceModeProvider({
     addTimelineEvent,
     patchLead,
     patchLeadAsync,
+    bulkReassignOwners,
     patchAccount,
     patchContact,
     patchDeal,

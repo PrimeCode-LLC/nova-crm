@@ -129,6 +129,7 @@ const INBOX_MAIL_LEAD_FILTER_ALL = "all";
 const INBOX_MAIL_LEAD_FILTER_SYNCED = "synced";
 const INBOX_MAIL_LEAD_FILTER_NONE = "none";
 const LEADS_TABLE_PAGE_SIZE = 10;
+const LEADS_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
 function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
   return [
@@ -958,7 +959,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                   openReassignForIds([id]);
                 }}
               >
-                Reassign
+                Assign owner
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => router.push(buildLeadHref(id, "tab=notes"))}>
                 Add note
@@ -990,6 +991,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     data: dataForTable,
     columns,
     getRowId: (row) => row.id,
+    enableRowSelection: true,
     state: { sorting, globalFilter, columnFilters, rowSelection, columnVisibility, pagination },
     onSortingChange: setSorting,
     onGlobalFilterChange: setGlobalFilter,
@@ -1545,7 +1547,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               openReassignForIds(ids);
             }}
           >
-            <UserCog className="h-3.5 w-3.5" /> Reassign
+            <UserCog className="h-3.5 w-3.5" /> Assign owner
           </Button>
           <Button
             variant="outline"
@@ -1692,34 +1694,68 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             );
           })()}
         </span>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            className="h-8 gap-1"
-            disabled={!table.getCanPreviousPage()}
-            onClick={() => table.previousPage()}
-            aria-label="Previous page"
-          >
-            <ChevronLeft className="h-3.5 w-3.5" />
-            Previous
-          </Button>
-          <span className="min-w-[5.5rem] px-1 text-center text-xs font-medium tabular-nums text-foreground">
-            Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            className="h-8 gap-1"
-            disabled={!table.getCanNextPage()}
-            onClick={() => table.nextPage()}
-            aria-label="Next page"
-          >
-            Next
-            <ChevronRight className="h-3.5 w-3.5" />
-          </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            <span className="whitespace-nowrap">Rows per page</span>
+            <Select
+              value={String(table.getState().pagination.pageSize)}
+              onValueChange={(v) => {
+                const next = Number(v);
+                if (!LEADS_TABLE_PAGE_SIZE_OPTIONS.includes(next as (typeof LEADS_TABLE_PAGE_SIZE_OPTIONS)[number])) {
+                  return;
+                }
+                setPagination((prev) => ({
+                  ...prev,
+                  pageSize: next,
+                  pageIndex: 0,
+                }));
+              }}
+            >
+              <SelectTrigger
+                size="sm"
+                className="h-8 w-[4.5rem] tabular-nums"
+                aria-label="Rows per page"
+              >
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent align="end">
+                {LEADS_TABLE_PAGE_SIZE_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              className="h-8 gap-1"
+              disabled={!table.getCanPreviousPage()}
+              onClick={() => table.previousPage()}
+              aria-label="Previous page"
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+              Previous
+            </Button>
+            <span className="min-w-[5.5rem] px-1 text-center text-xs font-medium tabular-nums text-foreground">
+              Page {table.getState().pagination.pageIndex + 1} of {table.getPageCount() || 1}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              className="h-8 gap-1"
+              disabled={!table.getCanNextPage()}
+              onClick={() => table.nextPage()}
+              aria-label="Next page"
+            >
+              Next
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
       </div>
     </div>
