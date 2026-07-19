@@ -34,6 +34,7 @@ import {
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
 import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
+import { ChannelFunnelsSettings } from "@/components/dashboard/channel-funnels-settings";
 import { DashboardSettingsSheet } from "@/components/dashboard/dashboard-settings-sheet";
 import { DashboardAiBrief } from "@/components/ai/dashboard-ai-brief";
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
@@ -300,8 +301,16 @@ export default function DashboardPage() {
     [currentUserId, getUserById],
   );
   const canCustomizeLayout = showOwnerOpsDashboard(viewer);
-  const { prefs, setViewMode, setPreviewRole, setWidget, setAllWidgets, reset } =
-    useDashboardPreferences(currentUserId || "anon");
+  const {
+    prefs,
+    setViewMode,
+    setPreviewRole,
+    setWidget,
+    setAllWidgets,
+    setChannelFunnelVisible,
+    setAllChannelFunnelsVisible,
+    reset,
+  } = useDashboardPreferences(currentUserId || "anon");
 
   const effectiveRole = resolveEffectiveDashboardRole(viewer?.roleId, prefs);
   const frontlineLayout = resolveFrontlineLayout(effectiveRole, prefs);
@@ -328,15 +337,23 @@ export default function DashboardPage() {
 
   const funnelCharts = React.useMemo(
     () =>
-      funnelChannelKeys.map((key) => {
-        const meta = CHANNEL_LIST.find((c) => c.key === key);
-        return {
-          channel: key,
-          title: meta?.label ?? key,
-          counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedSalesLeads, scopedDeals),
-        };
-      }),
-    [funnelChannelKeys, scopedActivityCounters, scopedSalesLeads, scopedDeals],
+      funnelChannelKeys
+        .filter((key) => prefs.channelFunnelsVisible[key] !== false)
+        .map((key) => {
+          const meta = CHANNEL_LIST.find((c) => c.key === key);
+          return {
+            channel: key,
+            title: meta?.label ?? key,
+            counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedSalesLeads, scopedDeals),
+          };
+        }),
+    [
+      funnelChannelKeys,
+      prefs.channelFunnelsVisible,
+      scopedActivityCounters,
+      scopedSalesLeads,
+      scopedDeals,
+    ],
   );
 
   const outreachMetrics = React.useMemo(
@@ -811,19 +828,31 @@ export default function DashboardPage() {
 
             {w.channelFunnels ? (
               <div>
-                <div className="mb-3 flex items-center justify-between">
+                <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
                     <h2 className="text-sm font-semibold">Channel funnels</h2>
                     <p className="text-xs text-muted-foreground">
                       Each channel&apos;s stage-by-stage conversion. Click any stage to drill into leads.
                     </p>
                   </div>
+                  <ChannelFunnelsSettings
+                    visible={prefs.channelFunnelsVisible}
+                    onChange={setChannelFunnelVisible}
+                    onShowAll={() => setAllChannelFunnelsVisible(true)}
+                    onHideAll={() => setAllChannelFunnelsVisible(false)}
+                  />
                 </div>
-                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                  {funnelCharts.map(({ channel, title, counts }) => (
-                    <FunnelChart key={channel} channel={channel} title={title} counts={counts} />
-                  ))}
-                </div>
+                {funnelCharts.length > 0 ? (
+                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {funnelCharts.map(({ channel, title, counts }) => (
+                      <FunnelChart key={channel} channel={channel} title={title} counts={counts} />
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-dashed px-4 py-8 text-center text-xs text-muted-foreground">
+                    No channels visible. Use the settings control to turn funnels back on.
+                  </p>
+                )}
               </div>
             ) : null}
 

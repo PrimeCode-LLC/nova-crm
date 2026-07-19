@@ -1,4 +1,5 @@
-import type { Role } from "@/lib/types";
+import { CHANNEL_LIST } from "@/lib/constants";
+import type { ChannelKey, Role } from "@/lib/types";
 
 /** Layout presets an owner can pick or preview. */
 export type DashboardViewMode = "auto" | "ops" | "classic" | "frontline";
@@ -27,11 +28,16 @@ export type DashboardWidgetKey =
 
 export type DashboardWidgets = Record<DashboardWidgetKey, boolean>;
 
+/** Per-channel visibility inside the Channel funnels section. */
+export type ChannelFunnelsVisibility = Record<ChannelKey, boolean>;
+
 export type DashboardPreferences = {
   viewMode: DashboardViewMode;
   /** When set (owners only), layout follows this CRM role instead of the real viewer. */
   previewRole: Role | null;
   widgets: DashboardWidgets;
+  /** Which channel cards appear in Channel funnels (independent of dashboard channel filter). */
+  channelFunnelsVisible: ChannelFunnelsVisibility;
 };
 
 export const DASHBOARD_VIEW_MODE_OPTIONS: {
@@ -111,11 +117,20 @@ export const DEFAULT_DASHBOARD_WIDGETS: DashboardWidgets = {
   wallLink: true,
 };
 
-export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = {
-  viewMode: "auto",
-  previewRole: null,
-  widgets: { ...DEFAULT_DASHBOARD_WIDGETS },
-};
+export const DEFAULT_CHANNEL_FUNNELS_VISIBLE: ChannelFunnelsVisibility = Object.fromEntries(
+  CHANNEL_LIST.map((c) => [c.key, true]),
+) as ChannelFunnelsVisibility;
+
+export function defaultDashboardPreferences(): DashboardPreferences {
+  return {
+    viewMode: "auto",
+    previewRole: null,
+    widgets: { ...DEFAULT_DASHBOARD_WIDGETS },
+    channelFunnelsVisible: { ...DEFAULT_CHANNEL_FUNNELS_VISIBLE },
+  };
+}
+
+export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = defaultDashboardPreferences();
 
 const STORAGE_PREFIX = "nova.dashboard.prefs.v1";
 
@@ -134,9 +149,19 @@ function isRole(value: unknown): value is Role {
   );
 }
 
+function parseChannelFunnelsVisible(raw: unknown): ChannelFunnelsVisibility {
+  const visible = { ...DEFAULT_CHANNEL_FUNNELS_VISIBLE };
+  if (!raw || typeof raw !== "object") return visible;
+  const o = raw as Partial<Record<ChannelKey, unknown>>;
+  for (const { key } of CHANNEL_LIST) {
+    if (typeof o[key] === "boolean") visible[key] = o[key];
+  }
+  return visible;
+}
+
 export function parseDashboardPreferences(raw: unknown): DashboardPreferences {
   if (!raw || typeof raw !== "object") {
-    return { ...DEFAULT_DASHBOARD_PREFERENCES, widgets: { ...DEFAULT_DASHBOARD_WIDGETS } };
+    return defaultDashboardPreferences();
   }
   const o = raw as Partial<DashboardPreferences>;
   const viewMode =
@@ -156,19 +181,24 @@ export function parseDashboardPreferences(raw: unknown): DashboardPreferences {
       if (typeof v === "boolean") widgets[key] = v;
     }
   }
-  return { viewMode, previewRole, widgets };
+  return {
+    viewMode,
+    previewRole,
+    widgets,
+    channelFunnelsVisible: parseChannelFunnelsVisible(o.channelFunnelsVisible),
+  };
 }
 
 export function loadDashboardPreferences(userId: string): DashboardPreferences {
   if (typeof window === "undefined") {
-    return { ...DEFAULT_DASHBOARD_PREFERENCES, widgets: { ...DEFAULT_DASHBOARD_WIDGETS } };
+    return defaultDashboardPreferences();
   }
   try {
     const raw = localStorage.getItem(dashboardPrefsStorageKey(userId));
-    if (!raw) return { ...DEFAULT_DASHBOARD_PREFERENCES, widgets: { ...DEFAULT_DASHBOARD_WIDGETS } };
+    if (!raw) return defaultDashboardPreferences();
     return parseDashboardPreferences(JSON.parse(raw) as unknown);
   } catch {
-    return { ...DEFAULT_DASHBOARD_PREFERENCES, widgets: { ...DEFAULT_DASHBOARD_WIDGETS } };
+    return defaultDashboardPreferences();
   }
 }
 

@@ -2,22 +2,21 @@
 
 import * as React from "react";
 import {
-  DEFAULT_DASHBOARD_PREFERENCES,
+  DEFAULT_CHANNEL_FUNNELS_VISIBLE,
   DEFAULT_DASHBOARD_WIDGETS,
+  defaultDashboardPreferences,
   loadDashboardPreferences,
   saveDashboardPreferences,
+  type ChannelFunnelsVisibility,
   type DashboardPreferences,
   type DashboardViewMode,
   type DashboardWidgetKey,
   type DashboardWidgets,
 } from "@/lib/dashboard-preferences";
-import type { Role } from "@/lib/types";
+import type { ChannelKey, Role } from "@/lib/types";
 
 export function useDashboardPreferences(userId: string) {
-  const [prefs, setPrefs] = React.useState<DashboardPreferences>(() => ({
-    ...DEFAULT_DASHBOARD_PREFERENCES,
-    widgets: { ...DEFAULT_DASHBOARD_WIDGETS },
-  }));
+  const [prefs, setPrefs] = React.useState<DashboardPreferences>(() => defaultDashboardPreferences());
   const [hydrated, setHydrated] = React.useState(false);
 
   React.useEffect(() => {
@@ -66,8 +65,30 @@ export function useDashboardPreferences(userId: string) {
     [commit, prefs],
   );
 
+  const setChannelFunnelVisible = React.useCallback(
+    (channel: ChannelKey, enabled: boolean) => {
+      const channelFunnelsVisible: ChannelFunnelsVisibility = {
+        ...prefs.channelFunnelsVisible,
+        [channel]: enabled,
+      };
+      commit({ ...prefs, channelFunnelsVisible });
+    },
+    [commit, prefs],
+  );
+
+  const setAllChannelFunnelsVisible = React.useCallback(
+    (enabled: boolean) => {
+      const channelFunnelsVisible = { ...DEFAULT_CHANNEL_FUNNELS_VISIBLE };
+      for (const key of Object.keys(channelFunnelsVisible) as ChannelKey[]) {
+        channelFunnelsVisible[key] = enabled;
+      }
+      commit({ ...prefs, channelFunnelsVisible });
+    },
+    [commit, prefs],
+  );
+
   const reset = React.useCallback(() => {
-    commit({ ...DEFAULT_DASHBOARD_PREFERENCES, widgets: { ...DEFAULT_DASHBOARD_WIDGETS } });
+    commit(defaultDashboardPreferences());
   }, [commit]);
 
   return {
@@ -77,6 +98,8 @@ export function useDashboardPreferences(userId: string) {
     setPreviewRole,
     setWidget,
     setAllWidgets,
+    setChannelFunnelVisible,
+    setAllChannelFunnelsVisible,
     reset,
   };
 }
