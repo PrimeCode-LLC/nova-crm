@@ -87,6 +87,7 @@ export async function persistFollowupCreate(
   if (f.completedAt) data.completedAt = f.completedAt;
   if (f.deliveryStatus) data.deliveryStatus = f.deliveryStatus;
   if (f.sentAt) data.sentAt = f.sentAt;
+  if (f.sentMessageId) data.sentMessageId = f.sentMessageId;
   if (f.failedAt) data.failedAt = f.failedAt;
   if (f.cancelledAt) data.cancelledAt = f.cancelledAt;
   if (f.deliveryError) data.deliveryError = f.deliveryError;

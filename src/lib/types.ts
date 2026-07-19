@@ -670,6 +670,8 @@ export interface Followup {
   /** Durable outbound state retained after the scheduled-email link is cleared. */
   deliveryStatus?: FollowupDeliveryStatus;
   sentAt?: ISODate;
+  /** RFC 5322 Message-ID of the outbound email (no angle brackets), for sequence threading. */
+  sentMessageId?: string;
   failedAt?: ISODate;
   cancelledAt?: ISODate;
   deliveryError?: string;

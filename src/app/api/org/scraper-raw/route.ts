@@ -29,7 +29,19 @@ export async function GET(req: Request) {
     limit: Number.isFinite(limit) ? limit : 200,
   });
 
-  return NextResponse.json({ items });
+  // Slim payload for the pool list — full HTML bodies make 200-row fetches multi‑second.
+  const lean = items.map((item) => {
+    const plain =
+      item.contentSnippet?.trim() ||
+      item.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return {
+      ...item,
+      content: plain.slice(0, 800),
+      contentSnippet: plain.slice(0, 320),
+    };
+  });
+
+  return NextResponse.json({ items: lean });
 }
 
 export async function PATCH(req: Request) {

@@ -48,6 +48,7 @@ import {
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 import { IntakeItemActions } from "@/components/intake/intake-item-actions";
 import { IntakeKeywordFilters } from "@/components/intake/intake-keyword-filters";
+import { IntakeQualityBadge } from "@/components/intake/intake-quality-badge";
 import {
   intakeKeywordFiltersActive,
   mergeTeamAndPersonalKeywords,
@@ -56,11 +57,16 @@ import {
 } from "@/lib/intake/keyword-filter";
 import type { OrganizationIntakeFilterDefaults } from "@/lib/types";
 import { EMPTY_INTAKE_FILTER_DEFAULTS } from "@/lib/intake/intake-filter-defaults";
+import { useIntakeQualityScores } from "@/lib/intake/use-intake-quality-scores";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { userCanDeleteIntakePool } from "@/lib/admin-feature-access";
 import { cn } from "@/lib/utils";
 
 const ALL = "__all__" as const;
+type QualityFilter = "all" | "has_signals" | "ready";
+type SortMode = "newest" | "best_match";
+/** Soft auto-refresh when returning to the tab (ms). */
+const VISIBILITY_REFRESH_MIN_MS = 90_000;
 
 function localYmdFromIso(iso: string): string {
   const d = new Date(iso);
@@ -90,11 +96,14 @@ export default function IntakePoolPage() {
   const canDeleteIntake = userCanDeleteIntakePool(viewer, ws.viewerOrgRole);
   const [items, setItems] = React.useState<ScraperRawItem[]>([]);
   const [loading, setLoading] = React.useState(true);
+  const [refreshing, setRefreshing] = React.useState(false);
   const [platform, setPlatform] = React.useState<string>(ALL);
   const [category, setCategory] = React.useState<string>(ALL);
   const [searchQuery, setSearchQuery] = React.useState("");
   const [dateFrom, setDateFrom] = React.useState("");
   const [dateTo, setDateTo] = React.useState("");
+  const [qualityFilter, setQualityFilter] = React.useState<QualityFilter>("all");
+  const [sortMode, setSortMode] = React.useState<SortMode>("newest");
   const [teamDefaults, setTeamDefaults] = React.useState<OrganizationIntakeFilterDefaults>({
     ...EMPTY_INTAKE_FILTER_DEFAULTS,
   });
@@ -109,6 +118,11 @@ export default function IntakePoolPage() {
   const [deleteConfirm, setDeleteConfirm] = React.useState<null | "all" | "selected">(null);
   const [bulkBusy, setBulkBusy] = React.useState(false);
 
+  const abortRef = React.useRef<AbortController | null>(null);
+  const lastFetchAtRef = React.useRef(0);
+  const itemsLenRef = React.useRef(0);
+  itemsLenRef.current = items.length;
+
   const effectiveKeywords = React.useMemo(
     () =>
       mergeTeamAndPersonalKeywords(teamDefaults, {
@@ -118,9 +132,14 @@ export default function IntakePoolPage() {
     [teamDefaults, personalIncludeKeywords, personalExcludeKeywords],
   );
 
+  const { qualityById, scoring: scoringQuality } = useIntakeQualityScores(
+    items,
+    ws.intentPlaybook,
+  );
+
   const filteredItems = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
-    return items.filter((item) => {
+    const filtered = items.filter((item) => {
       const haystack = rawItemSearchHaystack(item);
       if (q && !haystack.includes(q)) return false;
       if (
@@ -133,9 +152,31 @@ export default function IntakePoolPage() {
         return false;
       }
       if (!passesPublishedDateRange(item.publishedAt, dateFrom, dateTo)) return false;
+      const quality = qualityById.get(item.id);
+      if (qualityFilter === "has_signals" && !(quality && quality.signalCount > 0)) return false;
+      if (qualityFilter === "ready" && !(quality && quality.meetsThreshold)) return false;
       return true;
     });
-  }, [items, searchQuery, effectiveKeywords, dateFrom, dateTo]);
+
+    if (sortMode === "best_match") {
+      return [...filtered].sort((a, b) => {
+        const sa = qualityById.get(a.id)?.score ?? 0;
+        const sb = qualityById.get(b.id)?.score ?? 0;
+        if (sb !== sa) return sb - sa;
+        return new Date(b.publishedAt).getTime() - new Date(a.publishedAt).getTime();
+      });
+    }
+    return filtered;
+  }, [
+    items,
+    searchQuery,
+    effectiveKeywords,
+    dateFrom,
+    dateTo,
+    qualityFilter,
+    sortMode,
+    qualityById,
+  ]);
   const categoryOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
     for (const preset of SCRAPER_CATEGORY_PRESETS) dynamic.add(preset);
@@ -155,7 +196,9 @@ export default function IntakePoolPage() {
     searchQuery.trim().length > 0 ||
     dateFrom.length > 0 ||
     dateTo.length > 0 ||
-    keywordFiltersActive;
+    keywordFiltersActive ||
+    qualityFilter !== "all" ||
+    sortMode !== "newest";
 
   const selectedCount = selectedIds.size;
   const allFilteredSelected =
@@ -178,43 +221,68 @@ export default function IntakePoolPage() {
     })();
   }, [ws.isDemo, ws.organizationId]);
 
-  const load = React.useCallback(async () => {
-    if (ws.isDemo) {
-      setItems([]);
-      setLoading(false);
-      return;
-    }
-    setLoading(true);
-    try {
-      const params = new URLSearchParams({ status: "available", limit: "200" });
-      if (platform !== ALL) params.set("platform", platform);
-      if (category !== ALL) params.set("category", category);
-      const res = await fetch(`/api/org/scraper-raw?${params}`, {
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const data = (await res.json()) as { items?: ScraperRawItem[]; error?: string };
-      if (!res.ok) {
-        toast.error(data.error ?? "Could not load intake pool");
+  const load = React.useCallback(
+    async (opts?: { soft?: boolean }) => {
+      if (ws.isDemo) {
         setItems([]);
+        setLoading(false);
+        setRefreshing(false);
         return;
       }
-      setItems(data.items ?? []);
-    } catch {
-      toast.error("Network error loading intake pool");
-    } finally {
-      setLoading(false);
-    }
-  }, [ws.isDemo, platform, category]);
+
+      const soft = opts?.soft ?? itemsLenRef.current > 0;
+      abortRef.current?.abort();
+      const ac = new AbortController();
+      abortRef.current = ac;
+
+      if (soft) setRefreshing(true);
+      else setLoading(true);
+
+      try {
+        const params = new URLSearchParams({ status: "available", limit: "200" });
+        if (platform !== ALL) params.set("platform", platform);
+        if (category !== ALL) params.set("category", category);
+        const res = await fetch(`/api/org/scraper-raw?${params}`, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: ac.signal,
+        });
+        if (ac.signal.aborted) return;
+        const data = (await res.json()) as { items?: ScraperRawItem[]; error?: string };
+        if (!res.ok) {
+          toast.error(data.error ?? "Could not load intake pool");
+          if (!soft) setItems([]);
+          return;
+        }
+        setItems(data.items ?? []);
+        lastFetchAtRef.current = Date.now();
+      } catch (e) {
+        if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
+        toast.error("Network error loading intake pool");
+      } finally {
+        if (!ac.signal.aborted) {
+          setLoading(false);
+          setRefreshing(false);
+        }
+      }
+    },
+    [ws.isDemo, platform, category],
+  );
 
   React.useEffect(() => {
-    void load();
+    // Soft refresh when platform/category changes so the list doesn't blank for 10s+.
+    void load({ soft: itemsLenRef.current > 0 });
+    return () => {
+      abortRef.current?.abort();
+    };
   }, [load]);
 
   React.useEffect(() => {
     if (ws.isDemo) return;
     const onVisible = () => {
-      if (document.visibilityState === "visible") void load();
+      if (document.visibilityState !== "visible") return;
+      if (Date.now() - lastFetchAtRef.current < VISIBILITY_REFRESH_MIN_MS) return;
+      void load({ soft: true });
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
@@ -396,7 +464,7 @@ export default function IntakePoolPage() {
     }
   }
 
-  const canDelete = canDeleteIntake && !loading && items.length > 0 && !bulkBusy;
+  const canDelete = canDeleteIntake && items.length > 0 && !bulkBusy;
 
   return (
     <>
@@ -436,8 +504,19 @@ export default function IntakePoolPage() {
         description={`Fresh posts from your RSS scrapers. Unclaimed rows expire after ${RAW_ITEM_RETENTION_DAYS} days unless promoted to a prospect.`}
         actions={
           <>
-            <Button variant="outline" size="sm" type="button" onClick={() => void load()} disabled={loading}>
-              <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} /> Refresh
+            <Button
+              variant="outline"
+              size="sm"
+              type="button"
+              onClick={() => void load({ soft: items.length > 0 })}
+              disabled={loading || refreshing}
+            >
+              <RefreshCw
+                className={
+                  loading || refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"
+                }
+              />{" "}
+              {refreshing ? "Updating…" : "Refresh"}
             </Button>
             {!ws.isDemo && canDeleteIntake ? (
               selectMode ? (
@@ -538,8 +617,12 @@ export default function IntakePoolPage() {
               />
               <div className="flex flex-wrap items-end gap-3">
                 <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="Platform" />
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Platform">
+                      {platform === ALL
+                        ? "All platforms"
+                        : getScraperPlatformLabel(platform)}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>All platforms</SelectItem>
@@ -551,8 +634,12 @@ export default function IntakePoolPage() {
                   </SelectContent>
                 </Select>
                 <Select value={category} onValueChange={(v) => v && setCategory(v)}>
-                  <SelectTrigger className="w-[140px]">
-                    <SelectValue placeholder="Category" />
+                  <SelectTrigger className="w-[150px]">
+                    <SelectValue placeholder="Category">
+                      {category === ALL
+                        ? "All categories"
+                        : getScraperCategoryLabel(category)}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value={ALL}>All categories</SelectItem>
@@ -561,6 +648,39 @@ export default function IntakePoolPage() {
                         {getScraperCategoryLabel(c)}
                       </SelectItem>
                     ))}
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={qualityFilter}
+                  onValueChange={(v) => v && setQualityFilter(v as QualityFilter)}
+                >
+                  <SelectTrigger className="w-[160px]">
+                    <SelectValue placeholder="Match quality">
+                      {qualityFilter === "all"
+                        ? "All matches"
+                        : qualityFilter === "has_signals"
+                          ? "Has signals"
+                          : "Ready (≥ threshold)"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All matches</SelectItem>
+                    <SelectItem value="has_signals">Has signals</SelectItem>
+                    <SelectItem value="ready">Ready (≥ threshold)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select
+                  value={sortMode}
+                  onValueChange={(v) => v && setSortMode(v as SortMode)}
+                >
+                  <SelectTrigger className="w-[140px]">
+                    <SelectValue placeholder="Sort">
+                      {sortMode === "newest" ? "Newest" : "Best match"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="newest">Newest</SelectItem>
+                    <SelectItem value="best_match">Best match</SelectItem>
                   </SelectContent>
                 </Select>
                 <div className="space-y-1.5">
@@ -601,17 +721,26 @@ export default function IntakePoolPage() {
                       setDateTo("");
                       setPersonalIncludeKeywords([]);
                       setPersonalExcludeKeywords([]);
+                      setQualityFilter("all");
+                      setSortMode("newest");
                     }}
                   >
                     Clear filters
                   </Button>
                 ) : null}
-                <span className="text-sm text-muted-foreground pb-2 ml-auto">
-                  {loading
+                <span className="text-sm text-muted-foreground pb-2 ml-auto flex items-center gap-2">
+                  {refreshing || scoringQuality ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  ) : null}
+                  {loading && items.length === 0
                     ? "Loading…"
-                    : filtersActive
-                      ? `${filteredItems.length} of ${items.length} shown`
-                      : `${items.length} available`}
+                    : refreshing
+                      ? "Updating…"
+                      : scoringQuality
+                        ? `Scoring matches… · ${filteredItems.length} of ${items.length}`
+                        : filtersActive
+                          ? `${filteredItems.length} of ${items.length} shown`
+                          : `${items.length} available`}
                 </span>
               </div>
             </div>
@@ -652,7 +781,7 @@ export default function IntakePoolPage() {
               </div>
             ) : null}
 
-            {loading ? (
+            {loading && items.length === 0 ? (
               <div className="flex items-center gap-2 text-sm text-muted-foreground py-12 justify-center">
                 <Loader2 className="h-4 w-4 animate-spin" /> Loading posts…
               </div>
@@ -671,19 +800,33 @@ export default function IntakePoolPage() {
                 <CardHeader>
                   <CardTitle>No matches</CardTitle>
                   <CardDescription>
-                    Try different search terms, keyword lists, or dates, or clear filters to see all{" "}
-                    {items.length} posts.
+                    Try different search terms, keyword lists, dates, or match filters, or clear
+                    filters to see all {items.length} posts.
+                    {scoringQuality && (qualityFilter === "has_signals" || qualityFilter === "ready")
+                      ? " Match scores are still calculating — results may appear shortly."
+                      : null}
                   </CardDescription>
                 </CardHeader>
               </Card>
             ) : (
-              <ul className="space-y-3">
+              <ul
+                className={cn(
+                  "space-y-3 transition-opacity",
+                  refreshing && "opacity-70",
+                )}
+              >
                 {filteredItems.map((item) => {
                   const itemBusy = busy?.itemId === item.id ? busy.action : null;
                   const snippet =
                     item.contentSnippet?.trim() ||
                     item.content.replace(/<[^>]+>/g, " ").slice(0, 280);
                   const isSelected = selectedIds.has(item.id);
+                  const quality = qualityById.get(item.id);
+                  const topSignalLabels =
+                    quality?.matchedSignals
+                      .filter((s) => s.category !== "engagement")
+                      .slice(0, 2)
+                      .map((s) => s.label) ?? [];
                   return (
                     <li key={item.id}>
                       <Card
@@ -716,11 +859,31 @@ export default function IntakePoolPage() {
                                   </a>
                                 </CardTitle>
                                 <div className="flex flex-wrap gap-1.5">
+                                  {quality ? (
+                                    <IntakeQualityBadge
+                                      result={quality}
+                                      playbook={ws.intentPlaybook}
+                                    />
+                                  ) : null}
                                   <Badge variant="secondary">{getScraperPlatformLabel(item.platform)}</Badge>
                                   <Badge variant="outline">{getScraperCategoryLabel(item.category)}</Badge>
                                   <Badge variant="outline" className="font-normal text-muted-foreground">
                                     {item.feedName}
                                   </Badge>
+                                  {quality?.primaryOpportunity ? (
+                                    <Badge variant="outline" className="font-normal">
+                                      {quality.primaryOpportunity.label}
+                                    </Badge>
+                                  ) : null}
+                                  {topSignalLabels.map((label) => (
+                                    <Badge
+                                      key={label}
+                                      variant="secondary"
+                                      className="font-normal text-xs"
+                                    >
+                                      {label}
+                                    </Badge>
+                                  ))}
                                 </div>
                               </div>
                             </div>

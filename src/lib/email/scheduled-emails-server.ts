@@ -15,6 +15,11 @@ import {
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
+import {
+  resolveSequenceThreadContext,
+  type SequenceThreadStep,
+} from "@/lib/email/sequence-thread";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
@@ -64,6 +69,10 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     status: (String(data.status ?? "pending") as ScheduledEmailStatus) || "pending",
     createdAt: String(data.createdAt ?? ""),
     sentAt: data.sentAt ? String(data.sentAt) : undefined,
+    messageId:
+      typeof data.messageId === "string" && data.messageId.trim()
+        ? data.messageId.trim()
+        : undefined,
     error: data.error ? String(data.error) : undefined,
     cancelledAt: data.cancelledAt ? String(data.cancelledAt) : undefined,
     cancelReason: data.cancelReason ? String(data.cancelReason) : undefined,
@@ -214,6 +223,7 @@ async function updateFollowupDeliveryState(
   input: {
     deliveryStatus: "sent" | "failed" | "cancelled";
     sentAt?: string;
+    sentMessageId?: string;
     failedAt?: string;
     cancelledAt?: string;
     deliveryError?: string;
@@ -234,6 +244,7 @@ async function updateFollowupDeliveryState(
       updatedAt: new Date().toISOString(),
     };
     if (input.sentAt) patch.sentAt = input.sentAt;
+    if (input.sentMessageId) patch.sentMessageId = input.sentMessageId;
     if (input.failedAt) patch.failedAt = input.failedAt;
     if (input.cancelledAt) patch.cancelledAt = input.cancelledAt;
     if (input.deliveryError) patch.deliveryError = input.deliveryError.slice(0, 500);
@@ -248,6 +259,76 @@ async function updateFollowupDeliveryState(
   } catch {
     return undefined;
   }
+}
+
+function followupDocToThreadStep(id: string, data: Record<string, unknown>): SequenceThreadStep {
+  return {
+    id,
+    dueAt: typeof data.dueAt === "string" ? data.dueAt : undefined,
+    sentAt: typeof data.sentAt === "string" ? data.sentAt : undefined,
+    emailSubject: typeof data.emailSubject === "string" ? data.emailSubject : undefined,
+    title: typeof data.title === "string" ? data.title : undefined,
+    sentMessageId: typeof data.sentMessageId === "string" ? data.sentMessageId : undefined,
+    deliveryStatus: typeof data.deliveryStatus === "string" ? data.deliveryStatus : undefined,
+    scheduledEmailId:
+      typeof data.scheduledEmailId === "string" ? data.scheduledEmailId : undefined,
+    emailScheduledAt:
+      typeof data.emailScheduledAt === "string" ? data.emailScheduledAt : undefined,
+    pausedAt: typeof data.pausedAt === "string" ? data.pausedAt : undefined,
+    completedAt: typeof data.completedAt === "string" ? data.completedAt : undefined,
+  };
+}
+
+/**
+ * Build In-Reply-To / References from earlier sent steps in the same plan.
+ * Returns null when this mail already has explicit reply headers (e.g. schedule-from-thread).
+ */
+async function resolveSequenceThreadingForFollowup(input: {
+  followupId: string;
+  existingInReplyTo?: string;
+}): Promise<
+  | { kind: "use_existing" }
+  | { kind: "root" }
+  | { kind: "wait_for_prior" }
+  | { kind: "reply"; inReplyTo: string; referenceIds: string[]; subject: string }
+  | { kind: "none" }
+> {
+  if (normalizeMessageId(input.existingInReplyTo)) {
+    return { kind: "use_existing" };
+  }
+
+  const db = getAdminDb();
+  if (!db) return { kind: "none" };
+
+  try {
+    const snap = await db.collection(COLLECTIONS.followups).doc(input.followupId).get();
+    if (!snap.exists) return { kind: "none" };
+    const currentData = snap.data() as Record<string, unknown>;
+    const planId = typeof currentData.planId === "string" ? currentData.planId.trim() : "";
+    if (!planId) return { kind: "none" };
+
+    const siblingsSnap = await db
+      .collection(COLLECTIONS.followups)
+      .where("planId", "==", planId)
+      .get();
+    const current = followupDocToThreadStep(snap.id, currentData);
+    const siblings = siblingsSnap.docs.map((doc) =>
+      followupDocToThreadStep(doc.id, doc.data() as Record<string, unknown>),
+    );
+    return resolveSequenceThreadContext(current, siblings);
+  } catch {
+    return { kind: "none" };
+  }
+}
+
+async function releaseScheduledClaim(docRef: DocumentReference): Promise<void> {
+  const now = new Date().toISOString();
+  await docRef.update({
+    status: "pending",
+    updatedAt: now,
+    processingAt: FieldValue.delete(),
+    processingClaimId: FieldValue.delete(),
+  });
 }
 
 async function completePlanWhenAllStepsDone(planId: string, completedAt: string): Promise<void> {
@@ -460,6 +541,28 @@ async function sendScheduledDoc(
     return cancelDueToFollowupStop(docRef, followupIdEarly, finalStopReason);
   }
 
+  let subject = String(data.subject ?? "");
+  let inReplyTo = String(data.inReplyTo ?? "") || undefined;
+  let referenceIds = Array.isArray(data.referenceIds)
+    ? data.referenceIds.map(String).filter(Boolean).slice(-50)
+    : undefined;
+
+  if (followupIdEarly) {
+    const thread = await resolveSequenceThreadingForFollowup({
+      followupId: followupIdEarly,
+      existingInReplyTo: inReplyTo,
+    });
+    if (thread.kind === "wait_for_prior") {
+      await releaseScheduledClaim(docRef);
+      return "skipped";
+    }
+    if (thread.kind === "reply") {
+      inReplyTo = thread.inReplyTo;
+      referenceIds = thread.referenceIds;
+      subject = thread.subject;
+    }
+  }
+
   const result = await sendOutboundMailServer({
     organizationId,
     uid,
@@ -488,23 +591,26 @@ async function sendScheduledDoc(
     replyTo: String(data.replyTo ?? mailbox.replyTo),
     to: String(data.to ?? ""),
     cc: String(data.cc ?? "") || undefined,
-    subject: String(data.subject ?? ""),
+    subject,
     text: String(data.text ?? data.body ?? ""),
     html: String(data.html ?? ""),
-    inReplyTo: String(data.inReplyTo ?? "") || undefined,
-    referenceIds: Array.isArray(data.referenceIds)
-      ? data.referenceIds.map(String).filter(Boolean).slice(-50)
-      : undefined,
+    inReplyTo,
+    referenceIds,
     attachments: parsedAttachments,
   });
 
   const now = new Date().toISOString();
   if (result.ok) {
+    const messageId = normalizeMessageId(result.messageId);
     await docRef.update({
       status: "sent",
       sentAt: now,
       updatedAt: now,
       error: null,
+      ...(messageId ? { messageId } : {}),
+      ...(inReplyTo ? { inReplyTo } : {}),
+      ...(referenceIds?.length ? { referenceIds } : {}),
+      ...(subject ? { subject } : {}),
       processingAt: FieldValue.delete(),
       processingClaimId: FieldValue.delete(),
     });
@@ -514,6 +620,7 @@ async function sendScheduledDoc(
       const planId = await updateFollowupDeliveryState(followupId, {
         deliveryStatus: "sent",
         sentAt: now,
+        ...(messageId ? { sentMessageId: messageId } : {}),
         completedAt: now,
         clearSchedule: true,
       });

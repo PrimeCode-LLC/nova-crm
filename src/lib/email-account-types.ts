@@ -165,6 +165,8 @@ export interface ScheduledEmail {
   status: ScheduledEmailStatus;
   createdAt: string;
   sentAt?: string;
+  /** RFC 5322 Message-ID after successful send (normalized, no angle brackets). */
+  messageId?: string;
   error?: string;
   cancelledAt?: string;
   cancelReason?: string;

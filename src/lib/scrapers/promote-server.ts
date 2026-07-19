@@ -9,6 +9,10 @@ import {
 } from "@/lib/scrapers/raw-item-field-parser";
 import { getScraperRawItemServer, markRawItemPromotedServer } from "@/lib/scrapers/raw-items-server";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
+import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playbook-server";
+import { withInitialQualityScore } from "@/lib/intent/apply-quality-score";
+import { researchFieldsFromIntakeItem } from "@/lib/intent/score-intake-item";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 
 function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
   const base = { ...raw, id } as unknown as Account;
@@ -37,23 +41,9 @@ function newEntityId(prefix: string): string {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-function stripHtml(text: string): string {
-  return text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-}
-
 function channelForPlatform(platform: ScraperRawItem["platform"]): ChannelKey {
   if (platform === "linkedin") return "linkedin_outbound";
   return "website_form";
-}
-
-function buildNotes(item: ScraperRawItem): string {
-  const snippet = item.contentSnippet?.trim() || stripHtml(item.content).slice(0, 500);
-  const lines = [
-    `Source: ${item.feedName} (${item.platform} · ${item.category})`,
-    `Link: ${item.link}`,
-    snippet ? `\n${snippet}` : "",
-  ];
-  return lines.join("\n").trim();
 }
 
 export async function promoteRawItemToProspectServer(input: {
@@ -134,7 +124,7 @@ export async function promoteRawItemToProspectServer(input: {
   const contactId = newEntityId("ct");
   const leadId = newEntityId("l");
   const ownerId = input.ownerId.trim();
-  const notes = buildNotes(item);
+  const research = researchFieldsFromIntakeItem(item);
 
   const account: Account = {
     id: accountId,
@@ -158,7 +148,7 @@ export async function promoteRawItemToProspectServer(input: {
     updatedAt: now,
   };
 
-  const lead: Lead = {
+  const leadBase: Lead = {
     id: leadId,
     accountId,
     contactId,
@@ -176,7 +166,7 @@ export async function promoteRawItemToProspectServer(input: {
     companyName,
     touches: 0,
     isIdle: false,
-    notes,
+    ...research,
     extensions: {
       scraperSource: {
         rawItemId: item.id,
@@ -193,6 +183,9 @@ export async function promoteRawItemToProspectServer(input: {
     updatedAt: now,
   };
 
+  const playbook = await getOrganizationIntentPlaybookServer(input.organizationId);
+  const lead = withInitialQualityScore(leadBase, playbook, []);
+
   const batch = db.batch();
   const aRef = db.collection(COLLECTIONS.accounts).doc(accountId);
   const cRef = db.collection(COLLECTIONS.contacts).doc(contactId);
@@ -200,15 +193,27 @@ export async function promoteRawItemToProspectServer(input: {
 
   batch.set(
     aRef,
-    stampForCreate(input.organizationId, account as unknown as Record<string, unknown>, input.userId),
+    stampForCreate(
+      input.organizationId,
+      stripUndefined(account as unknown as Record<string, unknown>),
+      input.userId,
+    ),
   );
   batch.set(
     cRef,
-    stampForCreate(input.organizationId, contact as unknown as Record<string, unknown>, input.userId),
+    stampForCreate(
+      input.organizationId,
+      stripUndefined(contact as unknown as Record<string, unknown>),
+      input.userId,
+    ),
   );
   batch.set(
     lRef,
-    stampForCreate(input.organizationId, lead as unknown as Record<string, unknown>, input.userId),
+    stampForCreate(
+      input.organizationId,
+      stripUndefined(lead as unknown as Record<string, unknown>),
+      input.userId,
+    ),
   );
   await batch.commit();
 
