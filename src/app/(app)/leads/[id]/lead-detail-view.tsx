@@ -42,9 +42,9 @@ import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
 import { STAGE_TONE_CLASS, StageBadge } from "@/components/common/stage-badge";
 import { ChannelTagsRow } from "@/components/common/channel-tags-row";
-import { channelLabelFromValue, buildChannelOptions } from "@/lib/channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
 import { buildChannelTagTooltipMap } from "@/lib/prospects/channel-tag-display";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import { UserChip } from "@/components/common/user-chip";
 import { LeadTimeline } from "@/components/leads/lead-timeline";
 import { LeadOverview } from "@/components/leads/lead-overview";
@@ -170,8 +170,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         ? "Back to prospects"
         : "Back to leads";
   const lead = ws.getLeadById(leadId);
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(() => buildChannelOptions(customChannels), [customChannels]);
+  const channelOptions = useChannelOptions({ includeDisabled: true });
   const channelTagTooltips = React.useMemo(() => {
     if (!lead) return undefined;
     return buildChannelTagTooltipMap(

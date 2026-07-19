@@ -34,8 +34,7 @@ import {
 import { ChannelChip } from "@/components/common/channel-chip";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { buildChannelOptions } from "@/lib/channel-options";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { selectTriggerLabelById, selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import type { ChannelKey, Profile } from "@/lib/types";
@@ -65,11 +64,7 @@ export default function AdminProfilesPage() {
     updateProfile,
     addProfile,
   } = useWorkspace();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(
-    () => buildChannelOptions(customChannels),
-    [customChannels],
-  );
+  const channelOptions = useChannelOptions();
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");

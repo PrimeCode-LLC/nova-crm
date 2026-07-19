@@ -63,8 +63,8 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import { doc, getDoc } from "firebase/firestore";
 import { findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
-import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import type { NewProspectPrefill } from "@/components/layout/quick-add-launcher";
 import { cn } from "@/lib/utils";
 import {
@@ -234,8 +234,7 @@ export function NewProspectDialog({
     addTimelineEvent,
     isDemo,
   } = useWorkspace();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(() => buildChannelOptions(customChannels), [customChannels]);
+  const channelOptions = useChannelOptions();
   const { user: fbUser } = useAuth();
   const { data: liveUserDoc } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,

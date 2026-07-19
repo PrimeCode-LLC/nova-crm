@@ -18,8 +18,7 @@ import {
 } from "@/components/ui/select";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
-import { buildChannelOptions } from "@/lib/channel-options";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import {
   buildWorkspaceOwnerPickerOptions,
   ownerPickerTriggerLabel,
@@ -31,8 +30,7 @@ import {
   prospectOwnerIdOf,
   unpushedAssignmentsForViewer,
 } from "@/lib/prospects/prospect-access";
-import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
-import { CHANNEL_LIST } from "@/lib/constants";
+import { channelLabelFromValue } from "@/lib/channel-options";
 
 function newAssignmentId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -60,8 +58,8 @@ function assignmentsToDrafts(assignments: ProspectChannelAssignment[] | undefine
 export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
   const router = useRouter();
   const ws = useWorkspace();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(() => buildChannelOptions(customChannels), [customChannels]);
+  const channelOptions = useChannelOptions();
+  const allChannelOptions = useChannelOptions({ includeDisabled: true });
 
   const viewerId = ws.currentUserId ?? "";
   const viewer = React.useMemo((): User | undefined => {
@@ -257,12 +255,23 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
                     <SelectTrigger size="sm">
                       <SelectValue placeholder="Select channel">
                         {row.channel
-                          ? selectTriggerLabelByKey(row.channel, CHANNEL_LIST)
+                          ? channelLabelFromValue(row.channel, allChannelOptions) || row.channel
                           : "Select channel"}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
-                      {channelOptions.map((c) => (
+                      {(row.channel && !channelOptions.some((c) => c.key === row.channel)
+                        ? [
+                            {
+                              key: row.channel,
+                              label:
+                                channelLabelFromValue(row.channel, allChannelOptions) ||
+                                row.channel,
+                            },
+                            ...channelOptions,
+                          ]
+                        : channelOptions
+                      ).map((c) => (
                         <SelectItem
                           key={c.key}
                           value={c.key}

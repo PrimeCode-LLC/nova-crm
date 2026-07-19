@@ -21,8 +21,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { CHANNEL_LIST } from "@/lib/constants";
-import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import { useChannelOptions } from "@/hooks/use-channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
 
 function newId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -44,6 +44,8 @@ export function LogTouchpointDialog({
   currentUserId: string;
   onCreate: (t: Touchpoint) => void;
 }) {
+  const channelOptions = useChannelOptions();
+  const allChannelOptions = useChannelOptions({ includeDisabled: true });
   const [channel, setChannel] = React.useState<ChannelKey>("cold_email");
   const [state, setState] = React.useState("");
   const [summary, setSummary] = React.useState("");
@@ -96,10 +98,21 @@ export function LogTouchpointDialog({
               <Label>Channel</Label>
               <Select value={channel} onValueChange={(v) => v && setChannel(v as ChannelKey)}>
                 <SelectTrigger>
-                  <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
+                  <SelectValue>
+                    {channelLabelFromValue(channel, allChannelOptions) || channel}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  {CHANNEL_LIST.map((c) => (
+                  {(channel && !channelOptions.some((c) => c.key === channel)
+                    ? [
+                        {
+                          key: channel,
+                          label: channelLabelFromValue(channel, allChannelOptions) || channel,
+                        },
+                        ...channelOptions,
+                      ]
+                    : channelOptions
+                  ).map((c) => (
                     <SelectItem key={c.key} value={c.key}>
                       {c.label}
                     </SelectItem>

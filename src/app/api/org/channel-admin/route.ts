@@ -28,11 +28,13 @@ const customChannelSchema = z.object({
   description: z.string().max(2000),
   stages: z.array(stageSchema).max(40),
   auto: z.boolean(),
+  enabled: z.boolean().optional().default(true),
 });
 
 const putSchema = z
   .object({
     autoMap: z.record(z.string(), z.boolean()),
+    enabledMap: z.record(z.string(), z.boolean()).optional(),
     descriptionOverrides: z.record(z.string(), z.string()).optional(),
     customChannels: z.array(customChannelSchema).max(50),
   })
@@ -45,6 +47,12 @@ function sanitizeChannelAdminInput(
   for (const [k, v] of Object.entries(parsed.autoMap)) {
     if (ALLOWED_KEYS.has(k as ChannelKey)) autoMap[k as ChannelKey] = v;
   }
+  const enabledMap: Partial<Record<ChannelKey, boolean>> = {};
+  if (parsed.enabledMap) {
+    for (const [k, v] of Object.entries(parsed.enabledMap)) {
+      if (ALLOWED_KEYS.has(k as ChannelKey)) enabledMap[k as ChannelKey] = v;
+    }
+  }
   const descriptionOverrides: Partial<Record<ChannelKey, string>> = {};
   if (parsed.descriptionOverrides) {
     for (const [k, v] of Object.entries(parsed.descriptionOverrides)) {
@@ -55,8 +63,12 @@ function sanitizeChannelAdminInput(
   }
   return mergeChannelAdminConfig({
     autoMap,
+    enabledMap,
     descriptionOverrides,
-    customChannels: parsed.customChannels,
+    customChannels: parsed.customChannels.map((c) => ({
+      ...c,
+      enabled: c.enabled !== false,
+    })),
   });
 }
 
@@ -101,6 +113,7 @@ function mergeMemberChannelAdminPut(
     ok: true,
     merged: {
       autoMap: base.autoMap,
+      enabledMap: base.enabledMap,
       descriptionOverrides: base.descriptionOverrides,
       customChannels: mergedCustom,
     },

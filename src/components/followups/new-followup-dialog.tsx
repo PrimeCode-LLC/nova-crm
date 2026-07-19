@@ -4,9 +4,11 @@ import * as React from "react";
 import { Loader2, Sparkles, Users } from "lucide-react";
 import { toast } from "sonner";
 import type { Followup, FollowupChannel, Lead, LeadPriority } from "@/lib/types";
-import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
+import { PRIORITY_TONE } from "@/lib/constants";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { leadPickerTriggerLabel } from "@/lib/base-ui-select-label";
+import { useChannelOptions } from "@/hooks/use-channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
 import {
   buildWorkspaceOwnerPickerOptions,
   filterLeadsByOwnerScope,
@@ -112,6 +114,7 @@ export function NewFollowupDialog({
   fixedLeadId?: string;
 }) {
   const { users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
+  const channelOptions = useChannelOptions();
   const isEdit = Boolean(editFollowup);
   const [leadId, setLeadId] = React.useState("");
   const [title, setTitle] = React.useState("");
@@ -484,13 +487,13 @@ export function NewFollowupDialog({
                     <SelectTrigger>
                       <SelectValue placeholder="Any channel">
                         {channel
-                          ? CHANNEL_LIST.find((c) => c.key === channel)?.label ?? channel
+                          ? channelLabelFromValue(channel, channelOptions) || channel
                           : "Any channel"}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__none__">Any channel</SelectItem>
-                      {CHANNEL_LIST.map((c) => (
+                      {channelOptions.map((c) => (
                         <SelectItem key={c.key} value={c.key}>
                           {c.label}
                         </SelectItem>

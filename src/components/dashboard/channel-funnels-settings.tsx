@@ -16,6 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { CHANNEL_LIST } from "@/lib/constants";
 import type { ChannelFunnelsVisibility } from "@/lib/dashboard-preferences";
 import type { ChannelKey } from "@/lib/types";
+import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 
 export function ChannelFunnelsSettings({
   visible,
@@ -28,7 +29,9 @@ export function ChannelFunnelsSettings({
   onShowAll: () => void;
   onHideAll: () => void;
 }) {
-  const hiddenCount = CHANNEL_LIST.filter((c) => !visible[c.key]).length;
+  const enabledKeys = useEnabledBuiltinChannelKeys();
+  const channels = CHANNEL_LIST.filter((c) => enabledKeys.includes(c.key));
+  const hiddenCount = channels.filter((c) => !visible[c.key]).length;
 
   return (
     <Popover>
@@ -71,7 +74,7 @@ export function ChannelFunnelsSettings({
         </div>
 
         <ul className="space-y-2.5">
-          {CHANNEL_LIST.map((channel) => (
+          {channels.map((channel) => (
             <li key={channel.key} className="flex items-center justify-between gap-3">
               <Label
                 htmlFor={`funnel-ch-${channel.key}`}

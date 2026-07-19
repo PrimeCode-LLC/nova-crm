@@ -38,7 +38,9 @@ import type {
   TimelineEvent,
   Touchpoint,
 } from "@/lib/types";
-import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
+import { PRIORITY_TONE } from "@/lib/constants";
+import { useChannelOptions } from "@/hooks/use-channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { cn } from "@/lib/utils";
@@ -81,9 +83,9 @@ function newFollowupId(): string {
     : `f-local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function channelLabel(ch: FollowupChannel): string {
+function channelLabel(ch: FollowupChannel, options: { key: string; label: string }[]): string {
   if (ch === "other") return "Lead channel";
-  return CHANNEL_LIST.find((c) => c.key === ch)?.label ?? ch;
+  return channelLabelFromValue(ch, options) || ch;
 }
 
 function showsEmailSubject(ch: FollowupChannel): boolean {
@@ -119,6 +121,7 @@ export function SuggestFollowupsDialog({
   followupPlans?: FollowupPlan[];
   initialSequenceMode?: FollowupSequenceMode;
 }) {
+  const channelOptions = useChannelOptions();
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
   const [sequenceMode, setSequenceMode] =
     React.useState<FollowupSequenceMode>(initialSequenceMode);
@@ -455,16 +458,16 @@ export function SuggestFollowupsDialog({
                             }}
                           >
                             <SelectTrigger className="h-8 text-xs">
-                              <SelectValue>{channelLabel(it.channel)}</SelectValue>
+                              <SelectValue>{channelLabel(it.channel, channelOptions)}</SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              {CHANNEL_LIST.map((c) => (
+                              {channelOptions.map((c) => (
                                 <SelectItem key={c.key} value={c.key}>
                                   {c.label}
                                 </SelectItem>
                               ))}
                               <SelectItem value="other">
-                                Same as lead ({channelLabel(leadChannel)})
+                                Same as lead ({channelLabel(leadChannel, channelOptions)})
                               </SelectItem>
                             </SelectContent>
                           </Select>

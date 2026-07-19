@@ -38,7 +38,6 @@ import {
   TEMPERATURE_TONE,
   COMPANY_SIZES,
   REVENUE_RANGES,
-  CHANNEL_LIST,
   CHANNELS_REQUIRING_OUTREACH_PROFILE,
 } from "@/lib/constants";
 import type {
@@ -57,7 +56,6 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
@@ -69,7 +67,8 @@ import {
   selectTriggerLabelByIdName,
   selectTriggerLabelByKey,
 } from "@/lib/base-ui-select-label";
-import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
 
 export type QuickAddPill = "lead" | "contact" | "account" | "task" | "profile";
@@ -157,11 +156,7 @@ type TaskForm = z.infer<typeof taskSchema>;
 // ── Profile quick form (outreach persona) ──
 function ProfileQuickFormBody({ onClose }: { onClose: () => void }) {
   const { users, currentUserId, getOwnerDisplayName, addProfile } = useWorkspace();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(
-    () => buildChannelOptions(customChannels),
-    [customChannels],
-  );
+  const channelOptions = useChannelOptions();
   const [name, setName] = React.useState("");
   const [channel, setChannel] = React.useState<ChannelKey | "">("");
   const [ownerId, setOwnerId] = React.useState("");
@@ -318,11 +313,7 @@ function LeadFormBody({
   const isProspectingIntakeRole =
     forceIntakeProspect || viewerRoleId === "prospecting" || viewerRoleId === "data_scraper";
   const router = useRouter();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(
-    () => buildChannelOptions(customChannels),
-    [customChannels],
-  );
+  const channelOptions = useChannelOptions();
   const { user: fbUser } = useAuth();
   const { data: liveUserDoc } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,

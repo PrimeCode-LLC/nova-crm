@@ -98,7 +98,7 @@ import {
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
 import { LeadCampaignBadge } from "@/components/leads/lead-campaign-badge";
 import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { buildInboxSyncedLeadIds } from "@/lib/email/lead-inbox-sync";
 import {
@@ -135,25 +135,13 @@ const INBOX_MAIL_LEAD_FILTER_NONE = "none";
 const LEADS_TABLE_PAGE_SIZE = 10;
 const LEADS_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
-function buildLeadsChannelOptions(customChannels: { id: string; name: string }[]) {
-  return [
-    ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
-    ...customChannels
-      .map((c) => ({ key: `custom_${c.id}`, label: c.name.trim() }))
-      .filter((c) => c.label.length > 0),
-  ];
-}
-
 function LeadChannelCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
   const { patchLead, bumpLeadActivity, leads, getOwnerDisplayName } = useWorkspace();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const channelOptions = React.useMemo(
-    () => buildLeadsChannelOptions(customChannels),
-    [customChannels],
-  );
+  const channelOptions = useChannelOptions();
+  const labelOptions = useChannelOptions({ includeDisabled: true });
   const getChannelLabel = React.useCallback(
-    (channel: ChannelKey) => channelLabelFromValue(channel, channelOptions) || channel,
-    [channelOptions],
+    (channel: ChannelKey) => channelLabelFromValue(channel, labelOptions) || channel,
+    [labelOptions],
   );
   const tagTooltips = React.useMemo(
     () => buildChannelTagTooltipMap(lead, leads, getOwnerDisplayName, getChannelLabel),
@@ -388,14 +376,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     updateLeadStage,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const leadsChannelFilterOptions = useChannelOptions({ includeDisabled: true });
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const emailSent = useEmailAccountStore((s) => s.sent);
-  const leadsChannelFilterOptions = React.useMemo(
-    () => buildLeadsChannelOptions(customChannels),
-    [customChannels],
-  );
   const initialChannels = React.useMemo(
     () => (urlChannelKey ? urlChannelKey.split("|").filter(Boolean) : []),
     [urlChannelKey],

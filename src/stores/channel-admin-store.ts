@@ -4,7 +4,10 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { ChannelKey, OrganizationChannelAdminConfig } from "@/lib/types";
 import type { OrganizationCustomChannelRow } from "@/lib/types";
-import { DEFAULT_CHANNEL_AUTO } from "@/lib/channel-admin-defaults";
+import {
+  DEFAULT_CHANNEL_AUTO,
+  DEFAULT_CHANNEL_ENABLED,
+} from "@/lib/channel-admin-defaults";
 
 /** @deprecated name — use OrganizationCustomChannelRow */
 export type CustomChannelRow = OrganizationCustomChannelRow;
@@ -13,6 +16,7 @@ export type ChannelAdminPersisted = OrganizationChannelAdminConfig;
 
 export interface ChannelAdminState extends OrganizationChannelAdminConfig {
   setAuto: (key: ChannelKey, value: boolean) => void;
+  setEnabled: (key: ChannelKey, value: boolean) => void;
   setDescriptionOverride: (key: ChannelKey, value: string | undefined) => void;
   addCustomChannel: (input: Omit<OrganizationCustomChannelRow, "id">) => void;
   updateCustomChannel: (
@@ -24,6 +28,7 @@ export interface ChannelAdminState extends OrganizationChannelAdminConfig {
 
 const emptyPersisted: OrganizationChannelAdminConfig = {
   autoMap: { ...DEFAULT_CHANNEL_AUTO },
+  enabledMap: { ...DEFAULT_CHANNEL_ENABLED },
   descriptionOverrides: {},
   customChannels: [],
 };
@@ -43,10 +48,14 @@ export function parseStagesInput(raw: string): { key: string; label: string }[] 
 }
 
 export function getChannelAdminPersistedSnapshot(
-  s: Pick<ChannelAdminState, "autoMap" | "descriptionOverrides" | "customChannels">,
+  s: Pick<
+    ChannelAdminState,
+    "autoMap" | "enabledMap" | "descriptionOverrides" | "customChannels"
+  >,
 ): OrganizationChannelAdminConfig {
   return {
     autoMap: s.autoMap,
+    enabledMap: s.enabledMap,
     descriptionOverrides: s.descriptionOverrides,
     customChannels: s.customChannels,
   };
@@ -58,6 +67,8 @@ export const useChannelAdminStore = create<ChannelAdminState>()(
       ...emptyPersisted,
       setAuto: (key, value) =>
         set({ autoMap: { ...get().autoMap, [key]: value } }),
+      setEnabled: (key, value) =>
+        set({ enabledMap: { ...get().enabledMap, [key]: value } }),
       setDescriptionOverride: (key, value) =>
         set({
           descriptionOverrides: (() => {
@@ -73,6 +84,7 @@ export const useChannelAdminStore = create<ChannelAdminState>()(
             ...get().customChannels,
             {
               ...input,
+              enabled: input.enabled !== false,
               id: globalThis.crypto?.randomUUID?.() ?? `c_${Date.now()}`,
             },
           ],
@@ -97,11 +109,17 @@ export const useChannelAdminStore = create<ChannelAdminState>()(
         return {
           ...(current as ChannelAdminState),
           autoMap: { ...DEFAULT_CHANNEL_AUTO, ...(p.autoMap ?? {}) },
+          enabledMap: { ...DEFAULT_CHANNEL_ENABLED, ...(p.enabledMap ?? {}) },
           descriptionOverrides:
             p.descriptionOverrides && typeof p.descriptionOverrides === "object"
               ? (p.descriptionOverrides as Partial<Record<ChannelKey, string>>)
               : {},
-          customChannels: Array.isArray(p.customChannels) ? p.customChannels : [],
+          customChannels: Array.isArray(p.customChannels)
+            ? p.customChannels.map((c) => ({
+                ...c,
+                enabled: c.enabled !== false,
+              }))
+            : [],
         };
       },
     },

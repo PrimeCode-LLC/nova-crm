@@ -102,6 +102,8 @@ export default function AdminChannelsPage() {
 
   const autoMap = useChannelAdminStore((s) => s.autoMap);
   const setAuto = useChannelAdminStore((s) => s.setAuto);
+  const enabledMap = useChannelAdminStore((s) => s.enabledMap);
+  const setEnabled = useChannelAdminStore((s) => s.setEnabled);
   const descriptionOverrides = useChannelAdminStore((s) => s.descriptionOverrides);
   const setDescriptionOverride = useChannelAdminStore((s) => s.setDescriptionOverride);
   const customChannels = useChannelAdminStore((s) => s.customChannels);
@@ -117,12 +119,14 @@ export default function AdminChannelsPage() {
   const [newDescription, setNewDescription] = React.useState("");
   const [newStages, setNewStages] = React.useState("Lead\nContacted\nMeeting\nClosed");
   const [newAuto, setNewAuto] = React.useState(false);
+  const [newEnabled, setNewEnabled] = React.useState(true);
 
   const resetAddForm = React.useCallback(() => {
     setNewName("");
     setNewDescription("");
     setNewStages("Lead\nContacted\nMeeting\nClosed");
     setNewAuto(false);
+    setNewEnabled(true);
   }, []);
 
   const handleAddCustom = React.useCallback(async () => {
@@ -141,18 +145,19 @@ export default function AdminChannelsPage() {
       description: newDescription.trim(),
       stages,
       auto: newAuto,
+      enabled: newEnabled,
     });
     const saved = await syncChannelsToWorkspace();
     if (saved) toast.success(`Custom channel “${name}” added.`);
     setAddOpen(false);
     resetAddForm();
-  }, [addCustomChannel, newDescription, newName, newStages, newAuto, resetAddForm]);
+  }, [addCustomChannel, newDescription, newName, newStages, newAuto, newEnabled, resetAddForm]);
 
   return (
     <>
       <PageHeader
         title="Channels"
-        description="Configure outreach channels, funnel stages, and automation rules."
+        description="Enable or disable channels, configure funnel stages, and automation rules."
         actions={
           <Button variant="outline" size="sm" onClick={() => openAddCustomDialog(setAddOpen)}>
             <Plus className="h-3.5 w-3.5" /> Add custom channel
@@ -165,15 +170,26 @@ export default function AdminChannelsPage() {
             const funnelStages = CHANNEL_FUNNELS[ch.key];
             const description =
               descriptionOverrides[ch.key] ?? CHANNEL_DESCRIPTIONS[ch.key];
+            const isEnabled = enabledMap[ch.key] !== false;
             return (
               <div
                 key={ch.key}
-                className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 hover:bg-muted/20 transition-colors"
+                className={cn(
+                  "flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 hover:bg-muted/20 transition-colors",
+                  !isEnabled && "opacity-60",
+                )}
               >
                 <div className="flex items-center gap-3 flex-1 min-w-0">
                   <ChannelChip channel={ch.key} />
                   <div className="min-w-0">
-                    <div className="text-sm font-medium">{ch.label}</div>
+                    <div className="flex items-center gap-2">
+                      <div className="text-sm font-medium">{ch.label}</div>
+                      {!isEnabled ? (
+                        <Badge variant="secondary" className="text-[10px] font-normal">
+                          Disabled
+                        </Badge>
+                      ) : null}
+                    </div>
                     <div className="text-xs text-muted-foreground mt-0.5">{description}</div>
                   </div>
                 </div>
@@ -202,7 +218,21 @@ export default function AdminChannelsPage() {
                       </React.Fragment>
                     ))}
                   </div>
-                  <div className="flex items-center gap-2 justify-between sm:justify-start">
+                  <div className="flex items-center gap-2 justify-between sm:justify-start flex-wrap">
+                    <span className="text-xs text-muted-foreground">Enabled</span>
+                    <Switch
+                      checked={isEnabled}
+                      disabled={!isWorkspaceAdmin}
+                      title={
+                        !isWorkspaceAdmin
+                          ? "Only workspace admins can change built-in channels."
+                          : "Hide this channel from pickers, dashboard widgets, and new assignments."
+                      }
+                      onCheckedChange={(v) => {
+                        setEnabled(ch.key, !!v);
+                        toast.success(`${ch.label}: ${v ? "enabled" : "disabled"}`);
+                      }}
+                    />
                     <span className="text-xs text-muted-foreground">Auto</span>
                     <Switch
                       checked={autoMap[ch.key]}
@@ -234,6 +264,12 @@ export default function AdminChannelsPage() {
               key={c.id}
               channel={c}
               onConfigure={() => setConfigure({ kind: "custom", id: c.id })}
+              onToggleEnabled={(v) => {
+                updateCustomChannel(c.id, { enabled: v });
+                void syncChannelsToWorkspace().then((ok) => {
+                  if (ok) toast.success(`${c.name}: ${v ? "enabled" : "disabled"}`);
+                });
+              }}
               onToggleAuto={(v) => {
                 updateCustomChannel(c.id, { auto: v });
                 void syncChannelsToWorkspace().then((ok) => {
@@ -310,6 +346,15 @@ export default function AdminChannelsPage() {
               <p className="text-[11px] text-muted-foreground">Separate with new lines or commas.</p>
             </div>
             <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+              <div>
+                <div className="text-sm font-medium">Enabled</div>
+                <div className="text-[11px] text-muted-foreground">
+                  Show in pickers, dashboard, and new assignments
+                </div>
+              </div>
+              <Switch checked={newEnabled} onCheckedChange={setNewEnabled} />
+            </div>
+            <div className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
               <span className="text-sm">Automation</span>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-muted-foreground">Auto</span>
@@ -338,6 +383,8 @@ export default function AdminChannelsPage() {
         setDescriptionOverride={setDescriptionOverride}
         autoMap={autoMap}
         setAuto={setAuto}
+        enabledMap={enabledMap}
+        setEnabled={setEnabled}
         customChannels={customChannels}
         updateCustomChannel={updateCustomChannel}
         removeCustomChannel={removeCustomChannel}
@@ -381,18 +428,26 @@ export default function AdminChannelsPage() {
 function CustomChannelListRow({
   channel,
   onConfigure,
+  onToggleEnabled,
   onToggleAuto,
   onDelete,
   canDelete,
 }: {
   channel: CustomChannelRow;
   onConfigure: () => void;
+  onToggleEnabled: (v: boolean) => void;
   onToggleAuto: (v: boolean) => void;
   onDelete: () => void;
   canDelete: boolean;
 }) {
+  const isEnabled = channel.enabled !== false;
   return (
-    <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 hover:bg-muted/20 transition-colors">
+    <div
+      className={cn(
+        "flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 px-4 py-3 hover:bg-muted/20 transition-colors",
+        !isEnabled && "opacity-60",
+      )}
+    >
       <div className="flex items-center gap-3 flex-1 min-w-0">
         <Badge
           variant="outline"
@@ -405,7 +460,14 @@ function CustomChannelListRow({
           <span className="max-w-[4rem] truncate">{channel.name}</span>
         </Badge>
         <div className="min-w-0">
-          <div className="text-sm font-medium">{channel.name}</div>
+          <div className="flex items-center gap-2">
+            <div className="text-sm font-medium">{channel.name}</div>
+            {!isEnabled ? (
+              <Badge variant="secondary" className="text-[10px] font-normal">
+                Disabled
+              </Badge>
+            ) : null}
+          </div>
           <div className="text-xs text-muted-foreground mt-0.5">
             {channel.description || "Custom outreach channel."}
           </div>
@@ -436,7 +498,9 @@ function CustomChannelListRow({
             </React.Fragment>
           ))}
         </div>
-        <div className="flex items-center gap-2 justify-between sm:justify-start">
+        <div className="flex items-center gap-2 justify-between sm:justify-start flex-wrap">
+          <span className="text-xs text-muted-foreground">Enabled</span>
+          <Switch checked={isEnabled} onCheckedChange={onToggleEnabled} />
           <span className="text-xs text-muted-foreground">Auto</span>
           <Switch checked={channel.auto} onCheckedChange={onToggleAuto} />
           <Button variant="outline" size="sm" className="h-7 ml-auto sm:ml-0" onClick={onConfigure}>
@@ -467,6 +531,8 @@ function ChannelConfigureSheet({
   setDescriptionOverride,
   autoMap,
   setAuto,
+  enabledMap,
+  setEnabled,
   customChannels,
   updateCustomChannel,
   removeCustomChannel,
@@ -479,6 +545,8 @@ function ChannelConfigureSheet({
   setDescriptionOverride: (key: ChannelKey, value: string | undefined) => void;
   autoMap: Record<ChannelKey, boolean>;
   setAuto: (key: ChannelKey, value: boolean) => void;
+  enabledMap: Record<ChannelKey, boolean>;
+  setEnabled: (key: ChannelKey, value: boolean) => void;
   customChannels: CustomChannelRow[];
   updateCustomChannel: (id: string, patch: Partial<Omit<CustomChannelRow, "id">>) => void;
   removeCustomChannel: (id: string) => void;
@@ -506,9 +574,11 @@ function ChannelConfigureSheet({
             defaultDescription={descriptionDefaults[target.key]}
             initialDescription={descriptionOverrides[target.key] ?? descriptionDefaults[target.key]}
             initialAuto={autoMap[target.key]}
+            initialEnabled={enabledMap[target.key] !== false}
             onClose={() => onOpenChange(false)}
             setDescriptionOverride={setDescriptionOverride}
             setAuto={setAuto}
+            setEnabled={setEnabled}
           />
         )}
         {target?.kind === "custom" && customRow && (
@@ -532,26 +602,32 @@ function ConfigureBuiltinChannelForm({
   defaultDescription,
   initialDescription,
   initialAuto,
+  initialEnabled,
   onClose,
   setDescriptionOverride,
   setAuto,
+  setEnabled,
 }: {
   channelKey: ChannelKey;
   channelLabel: string;
   defaultDescription: string;
   initialDescription: string;
   initialAuto: boolean;
+  initialEnabled: boolean;
   onClose: () => void;
   setDescriptionOverride: (key: ChannelKey, value: string | undefined) => void;
   setAuto: (key: ChannelKey, value: boolean) => void;
+  setEnabled: (key: ChannelKey, value: boolean) => void;
 }) {
   const [draftDesc, setDraftDesc] = React.useState(initialDescription);
   const [draftAuto, setDraftAuto] = React.useState(initialAuto);
+  const [draftEnabled, setDraftEnabled] = React.useState(initialEnabled);
 
   const handleSave = () => {
     const trimmed = draftDesc.trim();
     if (trimmed === defaultDescription.trim()) setDescriptionOverride(channelKey, undefined);
     else setDescriptionOverride(channelKey, trimmed);
+    setEnabled(channelKey, draftEnabled);
     setAuto(channelKey, draftAuto);
     toast.success("Channel settings saved.");
     onClose();
@@ -562,7 +638,7 @@ function ConfigureBuiltinChannelForm({
       <SheetHeader>
         <SheetTitle>Configure: {channelLabel}</SheetTitle>
         <SheetDescription>
-          Adjust how this channel is described in the list and whether automation runs.
+          Adjust availability, description, and whether automation runs.
         </SheetDescription>
       </SheetHeader>
 
@@ -588,6 +664,15 @@ function ConfigureBuiltinChannelForm({
             onChange={(e) => setDraftDesc(e.target.value)}
             className="min-h-[100px]"
           />
+        </div>
+        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+          <div>
+            <div className="text-sm font-medium">Enabled</div>
+            <div className="text-xs text-muted-foreground">
+              Show in pickers, dashboard widgets, and new assignments
+            </div>
+          </div>
+          <Switch checked={draftEnabled} onCheckedChange={setDraftEnabled} />
         </div>
         <div className="flex items-center justify-between rounded-md border px-3 py-2">
           <div>
@@ -627,6 +712,7 @@ function ConfigureCustomChannelForm({
   const [draftDesc, setDraftDesc] = React.useState(channel.description);
   const [draftStages, setDraftStages] = React.useState(channel.stages.map((s) => s.label).join("\n"));
   const [draftAuto, setDraftAuto] = React.useState(channel.auto);
+  const [draftEnabled, setDraftEnabled] = React.useState(channel.enabled !== false);
 
   const handleSave = async () => {
     const stages = parseStagesInput(draftStages);
@@ -644,6 +730,7 @@ function ConfigureCustomChannelForm({
       description: draftDesc.trim(),
       stages,
       auto: draftAuto,
+      enabled: draftEnabled,
     });
     const ok = await syncChannelsToWorkspace();
     if (ok) toast.success("Custom channel updated.");
@@ -688,6 +775,13 @@ function ConfigureCustomChannelForm({
             onChange={(e) => setDraftStages(e.target.value)}
             className="min-h-[100px] font-mono text-xs"
           />
+        </div>
+        <div className="flex items-center justify-between rounded-md border px-3 py-2">
+          <div>
+            <div className="text-sm">Enabled</div>
+            <div className="text-xs text-muted-foreground">Show in pickers and widgets</div>
+          </div>
+          <Switch checked={draftEnabled} onCheckedChange={setDraftEnabled} />
         </div>
         <div className="flex items-center justify-between rounded-md border px-3 py-2">
           <span className="text-sm">Auto</span>

@@ -60,6 +60,15 @@ function parseOrgChannelAdmin(raw: unknown): OrganizationChannelAdminConfig | un
     }
   }
 
+  const enabledPartial: Partial<Record<ChannelKey, boolean>> = {};
+  if (o.enabledMap && typeof o.enabledMap === "object") {
+    for (const [k, v] of Object.entries(o.enabledMap as Record<string, unknown>)) {
+      if (CHANNEL_KEY_SET.has(k as ChannelKey) && typeof v === "boolean") {
+        enabledPartial[k as ChannelKey] = v;
+      }
+    }
+  }
+
   const descPartial: Partial<Record<ChannelKey, string>> = {};
   if (o.descriptionOverrides && typeof o.descriptionOverrides === "object") {
     for (const [k, v] of Object.entries(
@@ -81,6 +90,7 @@ function parseOrgChannelAdmin(raw: unknown): OrganizationChannelAdminConfig | un
       if (!id || !name.trim()) continue;
       const description = typeof r.description === "string" ? r.description : "";
       const auto = typeof r.auto === "boolean" ? r.auto : false;
+      const enabled = typeof r.enabled === "boolean" ? r.enabled : true;
       const stages: { key: string; label: string }[] = [];
       if (Array.isArray(r.stages)) {
         for (const s of r.stages) {
@@ -91,12 +101,13 @@ function parseOrgChannelAdmin(raw: unknown): OrganizationChannelAdminConfig | un
           if (sk && label) stages.push({ key: sk, label });
         }
       }
-      custom.push({ id, name, description, stages, auto });
+      custom.push({ id, name, description, stages, auto, enabled });
     }
   }
 
   return mergeChannelAdminConfig({
     autoMap: autoPartial,
+    enabledMap: enabledPartial,
     descriptionOverrides: descPartial,
     customChannels: custom,
   });
@@ -369,6 +380,7 @@ export async function updateOrganizationChannelAdminServer(
   await ref.update({
     channelAdmin: {
       autoMap: config.autoMap,
+      enabledMap: config.enabledMap,
       descriptionOverrides: config.descriptionOverrides,
       customChannels: config.customChannels,
     },

@@ -45,6 +45,7 @@ export function ChannelAdminSync() {
   const lastSentCustomJson = React.useRef<string>("");
   const hydratedBuiltins = React.useRef<{
     autoMap: Record<ChannelKey, boolean>;
+    enabledMap: Record<ChannelKey, boolean>;
     descriptionOverrides: Partial<Record<ChannelKey, string>>;
   } | null>(null);
   const channelAdminLsHydrated = useZustandPersistHydrated(channelAdminStoreWithPersist);
@@ -86,11 +87,13 @@ export function ChannelAdminSync() {
 
         useChannelAdminStore.setState({
           autoMap: merged.autoMap,
+          enabledMap: merged.enabledMap,
           descriptionOverrides: merged.descriptionOverrides,
           customChannels,
         });
         hydratedBuiltins.current = {
           autoMap: merged.autoMap,
+          enabledMap: merged.enabledMap,
           descriptionOverrides: merged.descriptionOverrides,
         };
         const snap = getChannelAdminPersistedSnapshot(useChannelAdminStore.getState());
@@ -156,6 +159,7 @@ export function ChannelAdminSync() {
 
       const body = JSON.stringify({
         autoMap: hydratedBuiltins.current.autoMap,
+        enabledMap: hydratedBuiltins.current.enabledMap,
         descriptionOverrides: hydratedBuiltins.current.descriptionOverrides,
         customChannels: snapshot.customChannels,
       });

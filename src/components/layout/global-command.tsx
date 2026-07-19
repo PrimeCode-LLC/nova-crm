@@ -19,8 +19,8 @@ import {
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
-import { useChannelAdminStore } from "@/stores/channel-admin-store";
-import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import { Plus, Sparkles, Target, Building2, User, IdCard, ScanSearch } from "lucide-react";
 
 export function GlobalCommandMenu({
@@ -32,11 +32,7 @@ export function GlobalCommandMenu({
 }) {
   const router = useRouter();
   const { leads, accounts, contacts, users, profiles } = useWorkspace();
-  const customChannels = useChannelAdminStore((s) => s.customChannels);
-  const profileChannelOptions = React.useMemo(
-    () => buildChannelOptions(customChannels),
-    [customChannels],
-  );
+  const profileChannelOptions = useChannelOptions();
   const navAccess = useNavAccessContext();
   const navSections = React.useMemo(
     () => getVisibleNavSections(navAccess),

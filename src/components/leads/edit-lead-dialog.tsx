@@ -36,7 +36,6 @@ import {
 } from "@/components/ui/select";
 import {
   PIPELINE_STAGES,
-  CHANNEL_LIST,
   CHANNELS_REQUIRING_OUTREACH_PROFILE,
   outreachProfileFieldLabel,
   TEMPERATURE_TONE,
@@ -45,6 +44,8 @@ import {
   INTAKE_KIND_META,
 } from "@/lib/constants";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import { useChannelOptions } from "@/hooks/use-channel-options";
+import { channelLabelFromValue } from "@/lib/channel-options";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
@@ -103,6 +104,8 @@ export function EditLeadDialog({
   onSave: (patch: Partial<Lead>) => void;
   section?: LeadEditSection;
 }) {
+  const channelOptions = useChannelOptions();
+  const allChannelOptions = useChannelOptions({ includeDisabled: true });
   const [channel, setChannel] = React.useState<ChannelKey>("cold_email");
   const [stage, setStage] = React.useState<PipelineStage>("new");
   const [temperature, setTemperature] = React.useState<LeadTemperature>("cold");
@@ -470,10 +473,21 @@ export function EditLeadDialog({
                   }}
                 >
                   <SelectTrigger>
-                    <SelectValue>{selectTriggerLabelByKey(channel, CHANNEL_LIST) ?? undefined}</SelectValue>
+                    <SelectValue>
+                      {channelLabelFromValue(channel, allChannelOptions) || channel}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    {CHANNEL_LIST.map((c) => (
+                    {(channel && !channelOptions.some((c) => c.key === channel)
+                      ? [
+                          {
+                            key: channel,
+                            label: channelLabelFromValue(channel, allChannelOptions) || channel,
+                          },
+                          ...channelOptions,
+                        ]
+                      : channelOptions
+                    ).map((c) => (
                       <SelectItem key={c.key} value={c.key}>
                         {c.label}
                       </SelectItem>

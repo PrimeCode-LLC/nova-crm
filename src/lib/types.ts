@@ -145,10 +145,14 @@ export type OrganizationCustomChannelRow = {
   description: string;
   stages: { key: string; label: string }[];
   auto: boolean;
+  /** When false, channel is hidden from pickers/widgets (existing data still shows). */
+  enabled: boolean;
 };
 
 export type OrganizationChannelAdminConfig = {
   autoMap: Record<ChannelKey, boolean>;
+  /** Soft-disable: false hides channel from pickers/widgets org-wide. */
+  enabledMap: Record<ChannelKey, boolean>;
   descriptionOverrides: Partial<Record<ChannelKey, string>>;
   customChannels: OrganizationCustomChannelRow[];
 };

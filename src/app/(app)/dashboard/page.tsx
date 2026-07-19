@@ -20,6 +20,7 @@ import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, ROLES } from "@/lib/constants";
+import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 import {
   getDashboardOverviewDescription,
   getDashboardRoleFocusLine,
@@ -137,6 +138,7 @@ export default function DashboardPage() {
     timelineByLead,
     viewerOrgRole,
   } = useWorkspace();
+  const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
   const emailResponseCtx = useLeadEmailResponseContext();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
@@ -330,10 +332,14 @@ export default function DashboardPage() {
   }, [pipelineMetrics.leadEstimateContributors, pipelineMetrics.openDealCount]);
 
   const funnelChannelKeys = React.useMemo(() => {
-    if (channelScope.length === 0) return CHANNEL_LIST.map((c) => c.key);
+    const enabledSet = new Set(enabledBuiltinChannels);
+    const base =
+      channelScope.length === 0
+        ? enabledBuiltinChannels
+        : channelScope.filter((k) => enabledSet.has(k));
     const order = new Map(CHANNEL_LIST.map((c, i) => [c.key, i]));
-    return [...channelScope].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
-  }, [channelScope]);
+    return [...base].sort((a, b) => (order.get(a) ?? 0) - (order.get(b) ?? 0));
+  }, [channelScope, enabledBuiltinChannels]);
 
   const funnelCharts = React.useMemo(
     () =>
@@ -541,7 +547,7 @@ export default function DashboardPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-2 max-h-[50vh] overflow-y-auto pr-1">
-            {CHANNEL_LIST.map((c) => (
+            {CHANNEL_LIST.filter((c) => enabledBuiltinChannels.includes(c.key)).map((c) => (
               <div key={c.key} className="flex items-center gap-3">
                 <Checkbox
                   id={`dash-ch-${c.key}`}

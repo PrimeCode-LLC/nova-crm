@@ -54,7 +54,7 @@ import {
 import type { AuditOperation } from "@/lib/firestore/audit";
 import type { OrgMemberRole } from "@/lib/types";
 import { roleAtLeast } from "@/lib/platform/org-role";
-import { CHANNEL_LIST } from "@/lib/constants";
+import { useChannelOptions } from "@/hooks/use-channel-options";
 import { Input } from "@/components/ui/input";
 import type { AuditAnalyticsResult } from "@/lib/audit-analytics";
 import { ActivityLogsDashboard } from "./activity-logs-dashboard";
@@ -214,6 +214,7 @@ export function ActivityLogsClient({
   members: MemberOption[];
 }) {
   const canView = roleAtLeast(orgRole, "admin");
+  const channelOptions = useChannelOptions({ includeDisabled: true });
   const searchParams = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
@@ -543,7 +544,7 @@ export function ActivityLogsClient({
               </SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All channels</SelectItem>
-                {CHANNEL_LIST.map((c) => (
+                {channelOptions.map((c) => (
                   <SelectItem key={c.key} value={c.key}>
                     {c.label}
                   </SelectItem>

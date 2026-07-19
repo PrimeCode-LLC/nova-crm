@@ -1,27 +1,31 @@
 "use client";
 
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { CHANNELS, CHANNEL_LIST } from "@/lib/constants";
+import { CHANNELS } from "@/lib/constants";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { ChannelChip } from "@/components/common/channel-chip";
+import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 import type { Lead } from "@/lib/types";
 
 export function ChannelMix({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
   const ws = useWorkspace();
   const leads = leadsOverride ?? ws.leads;
+  const enabledKeys = useEnabledBuiltinChannelKeys();
   const total = leads.length;
-  const rows = CHANNEL_LIST.map((c) => {
-    const count = leads.filter((l) => l.channel === c.key).length;
-    const won = leads.filter((l) => l.channel === c.key && l.stage === "won").length;
-    return {
-      key: c.key,
-      count,
-      won,
-      pct: total > 0 ? (count / total) * 100 : 0,
-      winRate: count > 0 ? (won / count) * 100 : 0,
-    };
-  }).sort((a, b) => b.count - a.count);
+  const rows = enabledKeys
+    .map((key) => {
+      const count = leads.filter((l) => l.channel === key).length;
+      const won = leads.filter((l) => l.channel === key && l.stage === "won").length;
+      return {
+        key,
+        count,
+        won,
+        pct: total > 0 ? (count / total) * 100 : 0,
+        winRate: count > 0 ? (won / count) * 100 : 0,
+      };
+    })
+    .sort((a, b) => b.count - a.count);
 
   return (
     <Card>

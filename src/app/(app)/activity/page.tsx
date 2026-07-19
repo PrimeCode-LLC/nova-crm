@@ -27,6 +27,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { CHANNEL_FUNNELS, CHANNEL_LIST } from "@/lib/constants";
 import { useChannelAdminStore } from "@/stores/channel-admin-store";
+import { buildChannelOptions } from "@/lib/channel-options";
 import type { ActivityRecord, OrganizationCustomChannelRow, User } from "@/lib/types";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import { fmtDate, fmtNumber, fmtRelative } from "@/lib/format";
@@ -85,13 +86,11 @@ function passesActivityDateRange(iso: string, fromYmd: string, toYmd: string): b
   return true;
 }
 
-function buildRollupChannelOptions(customChannels: { id: string; name: string }[]) {
-  return [
-    ...CHANNEL_LIST.map((c) => ({ key: c.key, label: c.label })),
-    ...customChannels
-      .map((c) => ({ key: `custom_${c.id}`, label: c.name.trim() }))
-      .filter((c) => c.label.length > 0),
-  ];
+function buildRollupChannelOptions(
+  customChannels: { id: string; name: string; enabled?: boolean }[],
+  enabledMap?: Partial<Record<ChannelKey, boolean>>,
+) {
+  return buildChannelOptions({ customChannels, enabledMap });
 }
 
 function rollupFunnelStages(
@@ -588,9 +587,10 @@ function DailyRollupForm({
 }) {
   const { profiles, getProfileById } = useWorkspace();
   const customChannels = useChannelAdminStore((s) => s.customChannels);
+  const enabledMap = useChannelAdminStore((s) => s.enabledMap);
   const channelOptions = React.useMemo(
-    () => buildRollupChannelOptions(customChannels),
-    [customChannels],
+    () => buildRollupChannelOptions(customChannels, enabledMap),
+    [customChannels, enabledMap],
   );
   const [channel, setChannel] = React.useState<string>("cold_email");
   const channelSelectLabel = React.useMemo(() => {
