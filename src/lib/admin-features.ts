@@ -18,7 +18,9 @@ export type AdminFeatureKey =
   | "email_outreach"
   | "create_campaigns"
   | "delete_intake_pool"
-  | "intent_playbook";
+  | "intent_playbook"
+  | "buyer_personas"
+  | "prospecting_strategies";
 
 export type AdminFeatureMeta = {
   label: string;
@@ -96,6 +98,22 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     minWorkspaceRole: "manager",
     minOrgRole: "admin",
     href: "/admin/intent-playbook",
+  },
+  buyer_personas: {
+    label: "Buyer personas",
+    description: "ICP buyer personas for prospecting strategies",
+    cluster: "programs",
+    minWorkspaceRole: "manager",
+    minOrgRole: "manager",
+    href: "/admin/buyer-personas",
+  },
+  prospecting_strategies: {
+    label: "Strategies",
+    description: "Prospecting strategies, assignments, and daily targets",
+    cluster: "programs",
+    minWorkspaceRole: "manager",
+    minOrgRole: "manager",
+    href: "/admin/strategies",
   },
   organization: {
     label: "Organization",

@@ -3,7 +3,7 @@
 import * as React from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown } from "lucide-react";
 import type {
   Account,
   Contact,
@@ -67,6 +67,10 @@ import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import { buildChannelOptions, channelLabelFromValue } from "@/lib/channel-options";
 import type { NewProspectPrefill } from "@/components/layout/quick-add-launcher";
 import { cn } from "@/lib/utils";
+import {
+  useProspectingStrategyData,
+} from "@/lib/hooks/use-prospecting-strategy-data";
+import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
 
 const UNSET = "__unset__" as const;
 
@@ -269,6 +273,41 @@ export function NewProspectDialog({
   const [doNotContact, setDoNotContact] = React.useState(F.doNotContact);
   const [nextAction, setNextAction] = React.useState(F.nextAction);
   const [showAdvancedCompany, setShowAdvancedCompany] = React.useState(false);
+  const [strategyId, setStrategyId] = React.useState(initialPrefill?.strategyId ?? "");
+  const [personaId, setPersonaId] = React.useState(initialPrefill?.personaId ?? "");
+  const [strategyAssignmentIdPrefill] = React.useState(
+    initialPrefill?.strategyAssignmentId ?? "",
+  );
+  const [strategyVersionPrefill] = React.useState(initialPrefill?.strategyVersion);
+
+  const prospecting = useProspectingStrategyData();
+  const myActiveAssignments = React.useMemo(
+    () => activeAssignmentsForUser(prospecting.assignments, currentUserId),
+    [prospecting.assignments, currentUserId],
+  );
+  const selectableStrategies = React.useMemo(() => {
+    const ids = new Set(myActiveAssignments.map((a) => a.strategyId));
+    const fromAssign = prospecting.strategies.filter(
+      (s) => ids.has(s.id) && s.status === "published",
+    );
+    if (fromAssign.length) return fromAssign;
+    return prospecting.strategies.filter((s) => s.status === "published" || s.status === "draft");
+  }, [myActiveAssignments, prospecting.strategies]);
+  const selectedStrategy = selectableStrategies.find((s) => s.id === strategyId);
+  const strategyPersonas = React.useMemo(() => {
+    if (!selectedStrategy) return [];
+    const assignment = myActiveAssignments.find((a) => a.strategyId === selectedStrategy.id);
+    const pids = assignment?.personaIdsOverride?.length
+      ? assignment.personaIdsOverride
+      : selectedStrategy.personaIds;
+    return prospecting.personas.filter((p) => pids.includes(p.id) && p.active);
+  }, [selectedStrategy, myActiveAssignments, prospecting.personas]);
+
+  React.useEffect(() => {
+    if (!open) return;
+    if (initialPrefill?.strategyId) setStrategyId(initialPrefill.strategyId);
+    if (initialPrefill?.personaId) setPersonaId(initialPrefill.personaId);
+  }, [open, initialPrefill?.strategyId, initialPrefill?.personaId]);
 
   const [bizName, setBizName] = React.useState(F.bizName);
   const [industry, setIndustry] = React.useState(F.industry);
@@ -508,6 +547,15 @@ export function NewProspectDialog({
       isIdle: false,
       notes: leadNotes.trim() || undefined,
       nextAction: nextAction.trim() || undefined,
+      strategyId: strategyId || undefined,
+      personaId: personaId || undefined,
+      strategyVersion: strategyId
+        ? strategyVersionPrefill ?? selectedStrategy?.version
+        : undefined,
+      strategyAssignmentId: strategyId
+        ? strategyAssignmentIdPrefill ||
+          myActiveAssignments.find((a) => a.strategyId === strategyId)?.id
+        : undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -577,6 +625,80 @@ export function NewProspectDialog({
           </DialogHeader>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6">
+            {selectableStrategies.length > 0 ? (
+              <section className="space-y-3">
+                <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                  Strategy attribution
+                </p>
+                <div className="grid sm:grid-cols-2 gap-3">
+                  <div className="grid gap-1.5">
+                    <Label>Prospecting strategy</Label>
+                    <Select
+                      value={strategyId || "__none__"}
+                      onValueChange={(v) => {
+                        const next = v === "__none__" ? "" : v ?? "";
+                        setStrategyId(next);
+                        setPersonaId("");
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue>
+                          {selectedStrategy?.name ?? "None"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {selectableStrategies.map((s) => (
+                          <SelectItem key={s.id} value={s.id}>
+                            {s.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="grid gap-1.5">
+                    <Label>Buyer persona</Label>
+                    <Select
+                      value={personaId || "__none__"}
+                      onValueChange={(v) => setPersonaId(v === "__none__" ? "" : v ?? "")}
+                      disabled={!strategyId}
+                    >
+                      <SelectTrigger>
+                        <SelectValue>
+                          {strategyPersonas.find((p) => p.id === personaId)?.name ?? "None"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__none__">None</SelectItem>
+                        {strategyPersonas.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                {selectedStrategy ? (
+                  <div className="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5">
+                    <p className="text-xs font-medium">Quality checklist</p>
+                    {selectedStrategy.qualityChecklist
+                      .filter((c) => c.requirement !== "not_needed")
+                      .slice(0, 8)
+                      .map((c) => (
+                        <div key={c.id} className="flex items-start gap-2 text-xs text-muted-foreground">
+                          <CheckCircle2 className="size-3.5 mt-0.5 shrink-0" />
+                          <span>
+                            <span className="text-foreground">{c.label}</span>
+                            {c.requirement === "required" ? " · required" : " · optional"}
+                          </span>
+                        </div>
+                      ))}
+                  </div>
+                ) : null}
+              </section>
+            ) : null}
+
             <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Intake defaults

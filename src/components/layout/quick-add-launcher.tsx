@@ -9,6 +9,11 @@ export type NewProspectPrefill = {
   leadNotes?: string;
   channel?: ChannelKey;
   painPoints?: string;
+  /** Prospecting strategy attribution (Phase 1). */
+  strategyId?: string;
+  strategyAssignmentId?: string;
+  strategyVersion?: number;
+  personaId?: string;
 };
 
 export type OpenQuickAddOpts = {

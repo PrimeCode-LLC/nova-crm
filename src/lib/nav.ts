@@ -29,6 +29,8 @@ import {
   Sparkles,
   ScrollText,
   Crosshair,
+  BookOpen,
+  UserCircle2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -78,6 +80,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
       { href: "/leads", label: "Leads", icon: Target },
       { href: "/prospects", label: "Prospects", icon: ScanSearch },
+      { href: "/my-strategy", label: "My Strategy", icon: BookOpen },
       { href: "/intake", label: "Intake pool", icon: Rss },
       { href: "/fit-check", label: "Fit Check", icon: Sparkles },
       { href: "/pipeline", label: "Pipeline", icon: Kanban },
@@ -186,6 +189,22 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Crosshair,
         minWorkspaceRole: "manager",
         adminFeature: "intent_playbook",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/strategies",
+        label: "Strategies",
+        icon: Target,
+        minWorkspaceRole: "manager",
+        adminFeature: "prospecting_strategies",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/buyer-personas",
+        label: "Buyer personas",
+        icon: UserCircle2,
+        minWorkspaceRole: "manager",
+        adminFeature: "buyer_personas",
         adminCluster: "programs",
       },
       {

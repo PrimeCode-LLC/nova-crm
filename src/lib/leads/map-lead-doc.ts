@@ -91,5 +91,11 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       raw.replyReviewStatus === "accepted"
         ? raw.replyReviewStatus
         : undefined,
+    strategyId: typeof raw.strategyId === "string" ? raw.strategyId : undefined,
+    personaId: typeof raw.personaId === "string" ? raw.personaId : undefined,
+    strategyVersion:
+      typeof raw.strategyVersion === "number" ? raw.strategyVersion : undefined,
+    strategyAssignmentId:
+      typeof raw.strategyAssignmentId === "string" ? raw.strategyAssignmentId : undefined,
   };
 }

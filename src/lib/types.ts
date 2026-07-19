@@ -520,6 +520,15 @@ export interface Lead {
   /** When true, auto-temperature from Quality Score will not overwrite `temperature`. */
   temperatureLocked?: boolean;
 
+  /** Prospecting strategy that guided research (attribution). */
+  strategyId?: string;
+  /** Buyer persona targeted when the prospect was created. */
+  personaId?: string;
+  /** Strategy version at attribution time. */
+  strategyVersion?: number;
+  /** Strategy assignment that produced this prospect. */
+  strategyAssignmentId?: string;
+
   // Activity metrics
   firstContactAt?: ISODate;
   lastActivityAt?: ISODate;

@@ -21,6 +21,12 @@ export const COLLECTIONS = {
   scriptLibrary: "scriptLibrary",
   /** Workspace-defined labels for leads, deals, accounts, contacts. */
   labels: "labels",
+  /** ICP buyer personas for prospecting strategies (not outreach Profiles). */
+  buyerPersonas: "buyerPersonas",
+  /** Prospecting strategy / playbook guidance documents. */
+  prospectingStrategies: "prospectingStrategies",
+  /** User assignments to prospecting strategies. */
+  strategyAssignments: "strategyAssignments",
   /** Scheduling links (Calendly-style event types). */
   schedulingLinks: "schedulingLinks",
   /** Booked sales meetings tied to leads and hosts. */
@@ -99,6 +105,9 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.campaigns,
   COLLECTIONS.scriptLibrary,
   COLLECTIONS.labels,
+  COLLECTIONS.buyerPersonas,
+  COLLECTIONS.prospectingStrategies,
+  COLLECTIONS.strategyAssignments,
   COLLECTIONS.schedulingLinks,
   COLLECTIONS.meetings,
   COLLECTIONS.availabilitySchedules,

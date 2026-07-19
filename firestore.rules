@@ -347,6 +347,21 @@ service cloud.firestore {
       allow write: if tenantWritable();
     }
 
+    match /buyerPersonas/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /prospectingStrategies/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /strategyAssignments/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
     match /departments/{id} {
       allow read: if tenantReadable();
       allow write: if tenantWritable() && isOrgAtLeast('admin');
