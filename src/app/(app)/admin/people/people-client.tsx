@@ -578,13 +578,14 @@ function PeoplePageClientInner({
   async function handleSaveProfile() {
     if (!editMember || !canManageCrm) return;
     const email = editEmail.trim();
-    if (!editDisplayName.trim() || !email) {
+    const displayName = editDisplayName.trim();
+    if (!displayName || !email) {
       toast.error("Name and email are required");
       return;
     }
     setProfileSaving(true);
     const patch: Partial<Omit<User, "id">> = {
-      displayName: editDisplayName.trim(),
+      displayName,
       email,
       title: editTitle.trim() || undefined,
       roleId: editCrmRole,
@@ -594,21 +595,35 @@ function PeoplePageClientInner({
       featureGrants: editFeatureGrants.length ? editFeatureGrants : undefined,
     };
 
-    if (canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured()) {
+    const writeLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
+    if (writeLive) {
+      const body: Record<string, unknown> = {
+        userId: editMember.uid,
+        displayName,
+        email,
+        title: editTitle.trim() || null,
+        status: editCrmStatus,
+        departmentId: editDept === NONE ? null : editDept,
+        managerId: editManager === NONE ? null : editManager,
+      };
+      if (editMember.uid !== currentUserId) {
+        body.roleId = editCrmRole;
+      }
+      if (canEditFeatureGrants) {
+        body.featureGrants = editFeatureGrants;
+      }
+
       const res = await fetch("/api/org/workspace-users", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          userId: editMember.uid,
-          featureGrants: editFeatureGrants,
-        }),
+        body: JSON.stringify(body),
       });
       const data = (await res.json()) as { error?: unknown };
       if (!res.ok) {
         const msg =
           typeof data.error === "string"
             ? data.error
-            : JSON.stringify(data.error ?? "Failed to save feature access");
+            : JSON.stringify(data.error ?? "Failed to save profile");
         toast.error(msg);
         setProfileSaving(false);
         return;
@@ -617,7 +632,7 @@ function PeoplePageClientInner({
 
     patchUser(editMember.uid, patch);
     setProfileSaving(false);
-    toast.success("Profile saved");
+    toast.success(writeLive ? "Profile saved" : "Profile saved (this tab)");
   }
 
   const activeMembers = members.filter((m) => m.status !== "pending");

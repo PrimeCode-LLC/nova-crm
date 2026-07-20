@@ -123,6 +123,10 @@ export async function PATCH(req: Request) {
     managerId: bodyManagerId,
     departmentId: bodyDeptId,
     roleId: bodyRoleId,
+    status: bodyStatus,
+    displayName: bodyDisplayName,
+    email: bodyEmail,
+    title: bodyTitle,
     featureGrants: bodyFeatureGrants,
   } = parsed.data;
 
@@ -191,6 +195,22 @@ export async function PATCH(req: Request) {
   if (bodyRoleId !== undefined) {
     payload.roleId = bodyRoleId;
   }
+  if (bodyStatus !== undefined) {
+    payload.status = bodyStatus;
+  }
+  if (bodyDisplayName !== undefined) {
+    payload.displayName = bodyDisplayName;
+  }
+  if (bodyEmail !== undefined) {
+    payload.email = bodyEmail.toLowerCase();
+  }
+  if (bodyTitle !== undefined) {
+    if (bodyTitle === null || bodyTitle === "") {
+      payload.title = FieldValue.delete();
+    } else {
+      payload.title = bodyTitle;
+    }
+  }
   if (bodyFeatureGrants !== undefined) {
     const normalized = normalizeFeatureGrants(bodyFeatureGrants) ?? [];
     if (normalized.length === 0) {
@@ -223,15 +243,35 @@ export async function PATCH(req: Request) {
     await batch.commit();
   }
 
+  const profileOnly =
+    bodyStatus !== undefined ||
+    bodyDisplayName !== undefined ||
+    bodyEmail !== undefined ||
+    bodyTitle !== undefined;
+  const hierarchyTouched =
+    bodyManagerId !== undefined ||
+    bodyDeptId !== undefined ||
+    bodyRoleId !== undefined;
+  const auditEvent =
+    bodyFeatureGrants !== undefined && !hierarchyTouched && !profileOnly
+      ? "user.feature_grants_updated"
+      : profileOnly && !hierarchyTouched && bodyFeatureGrants === undefined
+        ? "user.profile_updated"
+        : "user.hierarchy_updated";
+
   await recordAudit({
     organizationId: orgId,
     actorUid: g.ctx.session.uid,
-    event: bodyFeatureGrants !== undefined ? "user.feature_grants_updated" : "user.hierarchy_updated",
+    event: auditEvent,
     meta: {
       targetUid: targetId,
       managerId: bodyManagerId === undefined ? undefined : bodyManagerId,
       departmentId: bodyDeptId === undefined ? undefined : bodyDeptId,
       roleId: bodyRoleId,
+      status: bodyStatus,
+      displayName: bodyDisplayName,
+      email: bodyEmail,
+      title: bodyTitle === undefined ? undefined : bodyTitle,
       featureGrants: bodyFeatureGrants,
     },
   });
