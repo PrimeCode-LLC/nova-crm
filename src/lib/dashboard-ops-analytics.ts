@@ -383,6 +383,7 @@ const ORG_FEED_TYPES = new Set<OrgActivityEventType>([
   "strategy_assignment_removed",
   "strategy_pack_imported",
   "intake_promoted",
+  "scraper_run",
   "import_completed",
   "wall_exit_denied",
   "wall_exit_attempt",

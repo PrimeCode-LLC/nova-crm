@@ -36,6 +36,9 @@ import {
 
 import type { AdminFeatureKey } from "@/lib/admin-features";
 import { userHasAdminFeature, workspaceRoleMeetsMin } from "@/lib/admin-feature-access";
+import { MODULE_BY_HREF } from "@/lib/permissions/catalog";
+import { canAccessHref } from "@/lib/permissions/can";
+import type { EffectivePermissionSnapshot } from "@/lib/permissions/role-types";
 import type { OrgMemberRole, Role } from "@/lib/types";
 
 export interface NavItem {
@@ -246,26 +249,36 @@ export type NavAccessContext = {
   orgRole?: OrgMemberRole;
   isSuperAdmin: boolean;
   featureGrants?: import("@/lib/types").User["featureGrants"];
-  /** When true, do not hide elevated links while the user profile is still loading. */
+  /**
+   * Effective modules/actions from `computedPermissions/{uid}` (Roles catalog).
+   * When set, admin features and module hrefs honor the catalog instead of legacy role gates only.
+   */
+  roleSnapshot?: EffectivePermissionSnapshot | null;
+  /** When true, do not hide elevated links while the user profile / permissions are still loading. */
   roleLoading?: boolean;
 };
 
 export function canAccessNavItem(item: NavItem, ctx: NavAccessContext): boolean {
-  if (ctx.roleLoading && ctx.roleId === undefined && !ctx.featureGrants?.length) {
-    return true;
-  }
+  // Keep nav stable until profile + computed permissions settle (avoids flash show/hide).
+  if (ctx.roleLoading) return true;
+
+  const subject = {
+    roleId: ctx.roleId ?? "salesperson",
+    isSuperAdmin: ctx.isSuperAdmin,
+    featureGrants: ctx.featureGrants,
+    orgRole: ctx.orgRole,
+    roleSnapshot: ctx.roleSnapshot,
+  };
   const featureKeys =
     item.adminFeatures?.length ? item.adminFeatures : item.adminFeature ? [item.adminFeature] : [];
   if (featureKeys.length > 0) {
-    const user = {
-      roleId: ctx.roleId ?? "salesperson",
-      isSuperAdmin: ctx.isSuperAdmin,
-      featureGrants: ctx.featureGrants,
-      orgRole: ctx.orgRole,
-    };
-    return featureKeys.some((key) => userHasAdminFeature(user, key, ctx.orgRole));
+    return featureKeys.some((key) => userHasAdminFeature(subject, key, ctx.orgRole));
   }
   if (ctx.isSuperAdmin) return true;
+  // Honor Roles catalog module toggles (e.g. Intake pool) once computed permissions are loaded.
+  if (ctx.roleSnapshot && MODULE_BY_HREF[item.href]) {
+    return canAccessHref(subject, item.href);
+  }
   if (!item.minWorkspaceRole) return true;
   return workspaceRoleMeetsMin(ctx.roleId, item.minWorkspaceRole);
 }

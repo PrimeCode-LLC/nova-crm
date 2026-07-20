@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
+import {
+  guardAdminFeature,
+  guardPermissionAction,
+} from "@/lib/platform/guard-admin-feature";
 import {
   deleteScraperFeedServer,
   getScraperFeedServer,
   updateScraperFeedServer,
 } from "@/lib/scrapers/feeds-server";
 import { runScraperFeedByIdServer } from "@/lib/scrapers/run-feeds-server";
+import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
 import { recordAudit } from "@/lib/firestore/audit";
 
 const patchSchema = z
@@ -33,8 +37,6 @@ export async function GET(_req: Request, ctx: RouteCtx) {
 }
 
 export async function PATCH(req: Request, ctx: RouteCtx) {
-  const g = await guardAdminFeature("scrapers");
-  if (!g.ok) return g.response;
   const { feedId } = await ctx.params;
 
   let json: unknown;
@@ -49,12 +51,33 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     json !== null &&
     (json as { action?: string }).action === "run"
   ) {
+    const g = await guardPermissionAction("scrapers.run", {
+      orAdminFeature: "scrapers",
+    });
+    if (!g.ok) return g.response;
+
     const result = await runScraperFeedByIdServer(g.ctx.session.organizationId, feedId);
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    void recordAudit({
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      event: "scraper.run",
+      meta: { feedId, newCount: result.newCount },
+    });
+    void recordScraperRunOrgActivity({
+      organizationId: g.ctx.session.organizationId,
+      actorId: g.ctx.session.uid,
+      newTotal: result.newCount,
+      feedCount: 1,
+      feedName: result.feedName,
+    });
     return NextResponse.json({ result });
   }
+
+  const g = await guardAdminFeature("scrapers");
+  if (!g.ok) return g.response;
 
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {

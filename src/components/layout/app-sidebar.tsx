@@ -35,6 +35,7 @@ import { useInboxMailUnreadTotal } from "@/hooks/use-inbox-mail-unread-total";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import { formatUnreadBadgeCount } from "@/lib/email/inbox-unread-count";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { useComputedPermissions } from "@/lib/hooks/use-computed-permissions";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import type { Role } from "@/lib/types";
 
@@ -149,9 +150,10 @@ export function AppSidebar({
   const { theme, setTheme } = useTheme();
   const { user: fbUser, signOut } = useAuth();
   const { isDemo, demoPersonaId, setDemoPersona, users } = useWorkspace();
-  const { data: userDoc, loading: userDocLoading } = useUserDoc(
-    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
-  );
+  const useMockPersona = isDemo || isAuthDisabled() || !fbUser;
+  const liveUid = useMockPersona || !fbUser ? undefined : fbUser.uid;
+  const { data: userDoc, loading: userDocLoading } = useUserDoc(liveUid);
+  const { data: roleSnapshot, loading: permsLoading } = useComputedPermissions(liveUid);
   const mockUser =
     users.find((u) => u.id === demoPersonaId) ?? users[0] ?? {
       id: demoPersonaId,
@@ -159,7 +161,6 @@ export function AppSidebar({
       email: "demo@example.com",
       roleId: "salesperson" as const,
     };
-  const useMockPersona = isDemo || isAuthDisabled() || !fbUser;
   const displayName = useMockPersona
     ? mockUser.displayName
     : fbUser.displayName || fbUser.email?.split("@")[0] || "User";
@@ -184,13 +185,17 @@ export function AppSidebar({
         .slice(0, 2)
         .toUpperCase();
 
+  const profileReady = useMockPersona || userDoc != null || !userDocLoading;
+  const permsReady = useMockPersona || !profileReady || !permsLoading;
+
   const navAccess = React.useMemo<NavAccessContext>(
     () => ({
       roleId: useMockPersona ? mockUser.roleId : userDoc?.roleId,
       orgRole: useMockPersona ? mockUser.orgRole : userDoc?.orgRole,
       isSuperAdmin: !useMockPersona && Boolean(userDoc?.isSuperAdmin),
       featureGrants: useMockPersona ? mockUser.featureGrants : userDoc?.featureGrants,
-      roleLoading: !useMockPersona && userDocLoading && userDoc == null,
+      roleSnapshot: useMockPersona ? null : roleSnapshot,
+      roleLoading: !useMockPersona && (!profileReady || !permsReady),
     }),
     [
       useMockPersona,
@@ -201,8 +206,9 @@ export function AppSidebar({
       userDoc?.orgRole,
       userDoc?.isSuperAdmin,
       userDoc?.featureGrants,
-      userDocLoading,
-      userDoc,
+      roleSnapshot,
+      profileReady,
+      permsReady,
     ],
   );
   const sections = React.useMemo(
@@ -212,6 +218,7 @@ export function AppSidebar({
       navAccess.orgRole,
       navAccess.isSuperAdmin,
       navAccess.featureGrants,
+      navAccess.roleSnapshot,
       navAccess.roleLoading,
     ],
   );

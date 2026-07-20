@@ -1,13 +1,17 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
+import {
+  guardAdminFeature,
+  guardPermissionAction,
+} from "@/lib/platform/guard-admin-feature";
 import {
   createScraperFeedServer,
   listScraperFeedsServer,
   seedDefaultScraperFeedsServer,
 } from "@/lib/scrapers/feeds-server";
 import { runScraperFeedsServer } from "@/lib/scrapers/run-feeds-server";
+import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
 import { recordAudit } from "@/lib/firestore/audit";
 
 const createSchema = z.object({
@@ -27,9 +31,6 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const g = await guardAdminFeature("scrapers");
-  if (!g.ok) return g.response;
-
   let json: unknown;
   try {
     json = await req.json();
@@ -41,6 +42,34 @@ export async function POST(req: Request) {
     typeof json === "object" && json !== null && "action" in json
       ? String((json as { action: unknown }).action)
       : "create";
+
+  if (action === "run_all") {
+    const g = await guardPermissionAction("scrapers.run", {
+      orAdminFeature: "scrapers",
+    });
+    if (!g.ok) return g.response;
+
+    const orgId = g.ctx.session.organizationId;
+    const uid = g.ctx.session.uid;
+    const { results } = await runScraperFeedsServer({ organizationId: orgId, force: true });
+    const newTotal = results.reduce((n, r) => n + r.newCount, 0);
+    void recordAudit({
+      organizationId: orgId,
+      actorUid: uid,
+      event: "scraper.run",
+      meta: { feedCount: results.length, newTotal },
+    });
+    void recordScraperRunOrgActivity({
+      organizationId: orgId,
+      actorId: uid,
+      newTotal,
+      feedCount: results.length,
+    });
+    return NextResponse.json({ results, newTotal });
+  }
+
+  const g = await guardAdminFeature("scrapers");
+  if (!g.ok) return g.response;
 
   const orgId = g.ctx.session.organizationId;
   const uid = g.ctx.session.uid;
@@ -54,18 +83,6 @@ export async function POST(req: Request) {
       meta: { created: result.created, skipped: result.skipped },
     });
     return NextResponse.json(result);
-  }
-
-  if (action === "run_all") {
-    const { results } = await runScraperFeedsServer({ organizationId: orgId, force: true });
-    const newTotal = results.reduce((n, r) => n + r.newCount, 0);
-    void recordAudit({
-      organizationId: orgId,
-      actorUid: uid,
-      event: "scraper.run",
-      meta: { feedCount: results.length, newTotal },
-    });
-    return NextResponse.json({ results, newTotal });
   }
 
   const parsed = createSchema.safeParse(json);

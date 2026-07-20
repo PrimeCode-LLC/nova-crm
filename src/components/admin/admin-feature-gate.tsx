@@ -23,6 +23,7 @@ export function AdminFeatureGate({
       isSuperAdmin: ctx.isSuperAdmin,
       featureGrants: ctx.featureGrants,
       orgRole: ctx.orgRole,
+      roleSnapshot: ctx.roleSnapshot,
     },
     feature,
     ctx.orgRole,

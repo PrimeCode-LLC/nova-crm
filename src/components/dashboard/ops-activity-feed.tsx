@@ -18,6 +18,7 @@ import {
   UserPlus,
   Users,
   Workflow,
+  Rss,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UserChip } from "@/components/common/user-chip";
@@ -53,6 +54,7 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   strategy_assignment_removed: Crosshair,
   strategy_pack_imported: Package,
   intake_promoted: UploadCloud,
+  scraper_run: Rss,
   import_completed: UploadCloud,
   wall_exit_denied: ShieldAlert,
   wall_exit_attempt: ShieldAlert,
@@ -143,7 +145,7 @@ export function OpsActivityFeed({
           Live activity
         </CardTitle>
         <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
-          Prospects, outreach, follow-ups, strategy, and imports
+          Prospects, outreach, follow-ups, scrapers, strategy, and imports
         </CardDescription>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">

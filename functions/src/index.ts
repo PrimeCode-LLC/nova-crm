@@ -28,8 +28,9 @@ export const health = onRequest((req, res) => {
 });
 
 /**
- * Recomputes `computedPermissions/{userId}` when a user profile changes.
- * Override documents are expected in collection `permissionOverrides` with field `userId`.
+ * Legacy resource-scope merge for older clients.
+ * Skips overwrite when the Roles catalog already wrote `modules`/`actions`
+ * (see `writeComputedPermissions` in the Next app).
  */
 export const recomputePermissionsOnUserWrite = onDocumentWritten(
   "users/{userId}",
@@ -37,6 +38,12 @@ export const recomputePermissionsOnUserWrite = onDocumentWritten(
     const userId = event.params.userId;
     const after = event.data?.after?.data() as { roleId?: Role } | undefined;
     if (!after?.roleId) return;
+
+    const existing = await db.collection("computedPermissions").doc(userId).get();
+    if (existing.exists && existing.data()?.modules) {
+      // Roles catalog owns this document — do not clobber with legacy shape.
+      return;
+    }
 
     const snap = await db
       .collection("permissionOverrides")

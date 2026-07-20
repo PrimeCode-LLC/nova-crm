@@ -40,12 +40,30 @@ describe("permission evaluate", () => {
     ).toBe(false);
   });
 
-  it("canAdminFeature maps create_campaigns action", () => {
+  it("canAdminFeature honors role catalog scrapers module via roleSnapshot", () => {
+    const snap = {
+      roleId: "custom_rep",
+      modules: {
+        ...SYSTEM_ROLE_PRESETS.salesperson.modules,
+        scrapers: {
+          view: true,
+          create: false,
+          edit: false,
+          delete: false,
+          scope: "all" as const,
+        },
+      },
+      actions: { "scrapers.run": true },
+      source: "role_doc" as const,
+    };
     expect(
-      canAdminFeature({ roleId: "manager", isSuperAdmin: false }, "create_campaigns"),
+      canAdminFeature(
+        { roleId: "salesperson", isSuperAdmin: false, roleSnapshot: snap },
+        "scrapers",
+      ),
     ).toBe(true);
     expect(
-      canAdminFeature({ roleId: "salesperson", isSuperAdmin: false }, "create_campaigns"),
+      canAdminFeature({ roleId: "salesperson", isSuperAdmin: false }, "scrapers"),
     ).toBe(false);
   });
 });

@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import { Calendar, CheckSquare, Loader2, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Calendar, CheckSquare, Loader2, Play, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
@@ -59,7 +59,9 @@ import type { OrganizationIntakeFilterDefaults } from "@/lib/types";
 import { EMPTY_INTAKE_FILTER_DEFAULTS } from "@/lib/intake/intake-filter-defaults";
 import { useIntakeQualityScores } from "@/lib/intake/use-intake-quality-scores";
 import { roleAtLeast } from "@/lib/platform/org-role";
-import { userCanDeleteIntakePool } from "@/lib/admin-feature-access";
+import { userCanDeleteIntakePool, userHasAdminFeature } from "@/lib/admin-feature-access";
+import { canAction } from "@/lib/permissions/can";
+import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { cn } from "@/lib/utils";
 
 const ALL = "__all__" as const;
@@ -92,11 +94,28 @@ function passesPublishedDateRange(iso: string, fromYmd: string, toYmd: string): 
 export default function IntakePoolPage() {
   const ws = useWorkspace();
   const router = useRouter();
+  const navAccess = useNavAccessContext();
   const viewer = ws.getUserById(ws.currentUserId);
-  const canDeleteIntake = userCanDeleteIntakePool(viewer, ws.viewerOrgRole);
+  const permissionSubject = {
+    roleId: viewer?.roleId ?? navAccess.roleId ?? "salesperson",
+    isSuperAdmin: Boolean(viewer?.isSuperAdmin || navAccess.isSuperAdmin),
+    featureGrants: viewer?.featureGrants ?? navAccess.featureGrants,
+    orgRole: viewer?.orgRole ?? navAccess.orgRole,
+    roleSnapshot: navAccess.roleSnapshot,
+  };
+  const canDeleteIntake = userCanDeleteIntakePool(permissionSubject, navAccess.orgRole);
+  const canRunScrapers =
+    canAction(permissionSubject, "scrapers.run") ||
+    userHasAdminFeature(permissionSubject, "scrapers", navAccess.orgRole);
+  const canManageFeeds = userHasAdminFeature(
+    permissionSubject,
+    "scrapers",
+    navAccess.orgRole,
+  );
   const [items, setItems] = React.useState<ScraperRawItem[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
+  const [runningScrapers, setRunningScrapers] = React.useState(false);
   const [platform, setPlatform] = React.useState<string>(ALL);
   const [category, setCategory] = React.useState<string>(ALL);
   const [searchQuery, setSearchQuery] = React.useState("");
@@ -315,6 +334,31 @@ export default function IntakePoolPage() {
     setSelectedIds(new Set());
   }
 
+  async function runAllScrapers() {
+    if (ws.isDemo || !canRunScrapers) return;
+    setRunningScrapers(true);
+    try {
+      const res = await fetch("/api/org/scraper-feeds", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "run_all" }),
+      });
+      const data = (await res.json()) as { newTotal?: number; error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not run scrapers");
+        return;
+      }
+      const n = data.newTotal ?? 0;
+      toast.success(`${n} new post${n === 1 ? "" : "s"} fetched`);
+      await load({ soft: true });
+    } catch {
+      toast.error("Network error running scrapers");
+    } finally {
+      setRunningScrapers(false);
+    }
+  }
+
   function toggleSelected(itemId: string, checked: boolean) {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -504,12 +548,28 @@ export default function IntakePoolPage() {
         description={`Fresh posts from your RSS scrapers. Unclaimed rows expire after ${RAW_ITEM_RETENTION_DAYS} days unless promoted to a prospect.`}
         actions={
           <>
+            {!ws.isDemo && canRunScrapers ? (
+              <Button
+                variant="default"
+                size="sm"
+                type="button"
+                onClick={() => void runAllScrapers()}
+                disabled={loading || refreshing || runningScrapers}
+              >
+                {runningScrapers ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Play className="h-3.5 w-3.5" />
+                )}{" "}
+                {runningScrapers ? "Fetching…" : "Fetch new posts"}
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               size="sm"
               type="button"
               onClick={() => void load({ soft: items.length > 0 })}
-              disabled={loading || refreshing}
+              disabled={loading || refreshing || runningScrapers}
             >
               <RefreshCw
                 className={
@@ -573,12 +633,14 @@ export default function IntakePoolPage() {
               nativeButton={false}
               render={<Link href="/prospects">All prospects</Link>}
             />
-            <Button
-              variant="outline"
-              size="sm"
-              nativeButton={false}
-              render={<Link href="/admin/scrapers">Manage feeds</Link>}
-            />
+            {canManageFeeds ? (
+              <Button
+                variant="outline"
+                size="sm"
+                nativeButton={false}
+                render={<Link href="/admin/scrapers">Manage feeds</Link>}
+              />
+            ) : null}
           </>
         }
       />
