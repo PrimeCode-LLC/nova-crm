@@ -46,7 +46,7 @@ export function KpiCard({
   const card = (
     <Card
       className={cn(
-        "relative overflow-hidden transition-colors",
+        "relative h-full overflow-hidden transition-colors",
         interactive && "cursor-pointer hover:bg-muted/40",
         selected && "ring-2 ring-primary/60 border-primary/40",
         className,
@@ -65,7 +65,7 @@ export function KpiCard({
           : undefined
       }
     >
-      <CardContent className={cn(dense ? "p-2.5" : "p-4")}>
+      <CardContent className={cn("flex h-full flex-col", dense ? "p-2.5" : "p-4")}>
         <div className="flex items-center justify-between">
           <span
             className={cn(
@@ -103,11 +103,16 @@ export function KpiCard({
             </span>
           )}
         </div>
-        {hint ? (
-          <p className={cn("text-muted-foreground", dense ? "mt-0.5 text-[11px]" : "mt-1 text-xs")}>
-            {hint}
-          </p>
-        ) : null}
+        {/* Always reserve hint line height so KPI rows stay aligned when a card has no hint. */}
+        <p
+          className={cn(
+            "text-muted-foreground",
+            dense ? "mt-0.5 min-h-4 text-[11px]" : "mt-1 min-h-4 text-xs",
+            !hint && "invisible",
+          )}
+        >
+          {hint || "\u00A0"}
+        </p>
       </CardContent>
     </Card>
   );
@@ -116,7 +121,7 @@ export function KpiCard({
     return (
       <Link
         href={href}
-        className="block rounded-xl text-inherit no-underline outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+        className="block h-full rounded-xl text-inherit no-underline outline-none transition-opacity focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
       >
         {card}
       </Link>

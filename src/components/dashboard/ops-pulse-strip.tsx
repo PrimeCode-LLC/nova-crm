@@ -66,7 +66,7 @@ export function OpsPulseStrip({
     {
       label: "Meetings today",
       value: meetingsToday,
-      hint: pipelineLabel,
+      hint: pipelineLabel || "scheduled",
       icon: Calendar,
       href: "/scheduling",
     },

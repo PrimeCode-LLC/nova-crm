@@ -38,11 +38,16 @@ export function fmtRelative(iso?: ISODate) {
   }
 }
 
-export function initials(name: string) {
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .slice(0, 2)
-    .toUpperCase();
+export function initials(name?: string | null) {
+  if (!name?.trim()) return "?";
+  return (
+    name
+      .trim()
+      .split(/\s+/)
+      .map((n) => n[0])
+      .filter(Boolean)
+      .join("")
+      .slice(0, 2)
+      .toUpperCase() || "?"
+  );
 }

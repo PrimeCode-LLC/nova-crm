@@ -25,6 +25,15 @@ import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import type { Contact } from "@/lib/types";
 import { Plus, Search, Upload, Mail, Phone, CheckCircle2, XCircle, Copy } from "lucide-react";
 
+function contactDisplayName(c: Contact) {
+  return (
+    c.fullName?.trim() ||
+    [c.firstName, c.lastName].filter(Boolean).join(" ").trim() ||
+    c.email?.trim() ||
+    "Unknown"
+  );
+}
+
 function contactMatchesQuery(
   c: Contact,
   q: string,
@@ -35,7 +44,7 @@ function contactMatchesQuery(
   const account = accounts.find((a) => a.id === c.accountId);
   const owner = users.find((u) => u.id === c.ownerId);
   const hay = [
-    c.fullName,
+    contactDisplayName(c),
     c.email,
     c.title,
     c.phone,
@@ -139,6 +148,7 @@ export default function ContactsPage() {
                 )}
                 {filtered.map((c) => {
                   const account = accounts.find((a) => a.id === c.accountId);
+                  const name = contactDisplayName(c);
                   return (
                     <TableRow
                       key={c.id}
@@ -153,10 +163,10 @@ export default function ContactsPage() {
                         <Link href={`/contacts/${c.id}`} className="flex items-center gap-2 hover:text-primary">
                           <Avatar className="h-7 w-7">
                             <AvatarFallback className="bg-primary/15 text-primary text-[10px] font-semibold">
-                              {initials(c.fullName)}
+                              {initials(name)}
                             </AvatarFallback>
                           </Avatar>
-                          <span className="text-sm font-medium">{c.fullName}</span>
+                          <span className="text-sm font-medium">{name}</span>
                         </Link>
                       </TableCell>
                       <TableCell className="py-2 text-sm text-muted-foreground">{c.title}</TableCell>

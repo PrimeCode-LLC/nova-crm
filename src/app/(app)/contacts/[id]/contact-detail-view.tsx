@@ -41,6 +41,11 @@ export function ContactDetailView({ contactId }: { contactId: string }) {
 
   const account = ws.getAccountById(contact.accountId);
   const leads = ws.leads.filter((l) => l.contactId === contact.id);
+  const displayName =
+    contact.fullName?.trim() ||
+    [contact.firstName, contact.lastName].filter(Boolean).join(" ").trim() ||
+    contact.email?.trim() ||
+    "Unknown";
 
   return (
     <>
@@ -59,11 +64,11 @@ export function ContactDetailView({ contactId }: { contactId: string }) {
             />
             <Avatar className="h-9 w-9">
               <AvatarFallback className="bg-primary/15 text-primary font-semibold text-sm">
-                {initials(contact.fullName)}
+                {initials(displayName)}
               </AvatarFallback>
             </Avatar>
             <div>
-              <div>{contact.fullName}</div>
+              <div>{displayName}</div>
               <div className="text-xs text-muted-foreground font-normal mt-0.5">
                 {contact.title} · {account?.name}
               </div>
