@@ -116,7 +116,12 @@ export function StrategyScoreboard({
           </p>
         ) : null}
       </CardHeader>
-      <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
+      <CardContent
+        className={cn(
+          "pt-0",
+          wall && "flex min-h-0 flex-1 flex-col overflow-hidden",
+        )}
+      >
         {loading ? (
           <p className="py-6 text-center text-xs text-muted-foreground">Loading strategies…</p>
         ) : board.rows.length === 0 ? (
@@ -137,24 +142,88 @@ export function StrategyScoreboard({
           <p className="py-6 text-center text-xs text-muted-foreground">
             All published strategies are hidden. Use the settings control to turn some back on.
           </p>
+        ) : wall ? (
+          <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+            {visibleRows.slice(0, 4).map((r, i) => (
+              <li
+                key={r.strategyId}
+                className="shrink-0 rounded-lg border border-border/50 bg-muted/10 px-3 py-2"
+              >
+                <div className="flex items-center gap-2">
+                  <span className="w-4 shrink-0 text-right text-xs font-semibold tabular-nums text-muted-foreground">
+                    {i + 1}
+                  </span>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span className="truncate text-sm font-semibold">{r.name}</span>
+                      {r.activeAssignees > 0 ? (
+                        <Badge variant="outline" className="h-4 px-1 text-[9px] font-normal">
+                          {r.activeAssignees} active
+                        </Badge>
+                      ) : (
+                        <Badge variant="secondary" className="h-4 px-1 text-[9px] font-normal">
+                          Unassigned
+                        </Badge>
+                      )}
+                      {r.thinSample ? (
+                        <Badge
+                          variant="outline"
+                          className="h-4 px-1 text-[9px] font-normal text-muted-foreground"
+                        >
+                          &lt;{STRATEGY_SCOREBOARD_THIN_SAMPLE_MIN}
+                        </Badge>
+                      ) : null}
+                    </div>
+                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary transition-all"
+                        style={{
+                          width: `${Math.max(
+                            2,
+                            Math.min(
+                              100,
+                              visibleRows[0]?.score
+                                ? Math.round((r.score / Math.max(1, visibleRows[0].score)) * 100)
+                                : 0,
+                            ),
+                          )}%`,
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <WallMetricTiles
+                  className={cn("mt-1.5", r.thinSample && "opacity-70")}
+                  columns={8}
+                  compact
+                  items={[
+                    { label: "Prospects", value: fmtNumber(r.prospects) },
+                    {
+                      label: "Quality",
+                      value: r.avgQuality == null ? "—" : String(Math.round(r.avgQuality)),
+                    },
+                    { label: "Qualified", value: fmtPercent(r.qualifiedRate) },
+                    { label: "Leads", value: fmtNumber(r.salesLeads) },
+                    { label: "Replies", value: fmtNumber(r.replies) },
+                    { label: "Reply %", value: fmtPercent(r.replyRate) },
+                    { label: "Pipeline", value: fmtCurrency(r.openPipeline) },
+                    { label: "Won", value: fmtCurrency(r.closedValue) },
+                  ]}
+                />
+              </li>
+            ))}
+          </ul>
         ) : (
-          <ul className={cn("divide-y", wall && "divide-border/50")}>
+          <ul className="divide-y">
             {visibleRows.map((r, i) => (
-              <li key={r.strategyId} className={cn(wall ? "py-3.5" : "py-2.5")}>
+              <li key={r.strategyId} className="py-2.5">
                 <div className="flex items-start gap-3">
-                  <span
-                    className={cn(
-                      "mt-0.5 shrink-0 text-right font-medium tabular-nums text-muted-foreground",
-                      wall ? "w-5 text-sm" : "w-4 text-xs",
-                    )}
-                  >
+                  <span className="mt-0.5 w-4 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">
                     {i + 1}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className={cn("truncate font-medium", wall ? "text-base" : "text-sm")}>
-                        {r.name}
-                      </span>
+                      <span className="truncate text-sm font-medium">{r.name}</span>
                       {r.activeAssignees > 0 ? (
                         <Badge variant="outline" className="text-[10px] font-normal">
                           {r.activeAssignees} active
@@ -171,12 +240,7 @@ export function StrategyScoreboard({
                       ) : null}
                     </div>
 
-                    <div
-                      className={cn(
-                        "mt-1.5 overflow-hidden rounded-full bg-muted",
-                        wall ? "h-2" : "h-1.5",
-                      )}
-                    >
+                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
                       <div
                         className="h-full rounded-full bg-primary transition-all"
                         style={{
@@ -193,52 +257,27 @@ export function StrategyScoreboard({
                       />
                     </div>
 
-                    {wall ? (
-                      <WallMetricTiles
-                        className={cn("mt-2.5", r.thinSample && "opacity-70")}
-                        columns={4}
-                        items={[
-                          { label: "Prospects", value: fmtNumber(r.prospects) },
-                          {
-                            label: "Avg quality",
-                            value: r.avgQuality == null ? "—" : String(Math.round(r.avgQuality)),
-                          },
-                          { label: "Qualified", value: fmtPercent(r.qualifiedRate) },
-                          { label: "Leads", value: fmtNumber(r.salesLeads) },
-                          { label: "Replies", value: fmtNumber(r.replies) },
-                          { label: "Reply rate", value: fmtPercent(r.replyRate) },
-                          { label: "Pipeline", value: fmtCurrency(r.openPipeline) },
-                          { label: "Won", value: fmtCurrency(r.closedValue) },
-                        ]}
+                    <div
+                      className={cn(
+                        "mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs",
+                        r.thinSample && "opacity-70",
+                      )}
+                    >
+                      <Metric label="Prospects" value={fmtNumber(r.prospects)} />
+                      <Metric
+                        label="Avg quality"
+                        value={r.avgQuality == null ? "—" : String(Math.round(r.avgQuality))}
                       />
-                    ) : (
-                      <div
-                        className={cn(
-                          "mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs",
-                          r.thinSample && "opacity-70",
-                        )}
-                      >
-                        <Metric label="Prospects" value={fmtNumber(r.prospects)} />
-                        <Metric
-                          label="Avg quality"
-                          value={r.avgQuality == null ? "—" : String(Math.round(r.avgQuality))}
-                        />
-                        <Metric label="Qualified" value={fmtPercent(r.qualifiedRate)} />
-                        <Metric label="Leads" value={fmtNumber(r.salesLeads)} tone="success" />
-                        <Metric label="Replies" value={fmtNumber(r.replies)} />
-                        <Metric label="Reply rate" value={fmtPercent(r.replyRate)} tone="muted" />
-                        <Metric label="Pipeline" value={fmtCurrency(r.openPipeline)} tone="muted" />
-                        <Metric label="Won" value={fmtCurrency(r.closedValue)} tone="success" />
-                      </div>
-                    )}
+                      <Metric label="Qualified" value={fmtPercent(r.qualifiedRate)} />
+                      <Metric label="Leads" value={fmtNumber(r.salesLeads)} tone="success" />
+                      <Metric label="Replies" value={fmtNumber(r.replies)} />
+                      <Metric label="Reply rate" value={fmtPercent(r.replyRate)} tone="muted" />
+                      <Metric label="Pipeline" value={fmtCurrency(r.openPipeline)} tone="muted" />
+                      <Metric label="Won" value={fmtCurrency(r.closedValue)} tone="success" />
+                    </div>
 
                     {r.prospects === 0 && r.activeAssignees > 0 ? (
-                      <div
-                        className={cn(
-                          "mt-1.5 flex items-center gap-1.5 text-amber-500",
-                          wall ? "text-xs" : "text-[11px]",
-                        )}
-                      >
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-500">
                         <TriangleAlert className="h-3 w-3 shrink-0" />
                         <span>Assigned but no attributed prospects in this range</span>
                       </div>

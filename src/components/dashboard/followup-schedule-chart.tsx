@@ -43,10 +43,18 @@ export function FollowupScheduleChart({
           done
         </CardDescription>
       </CardHeader>
-      <CardContent className={cn("pt-0", fill && "min-h-0 flex-1")}>
+      <CardContent
+        className={cn(
+          "pt-0",
+          fill && "flex min-h-0 flex-1 flex-col overflow-hidden pb-1",
+        )}
+      >
         <div
           ref={wrapRef}
-          className={cn("w-full min-w-0", fill ? "h-full min-h-[120px]" : compact ? "h-36" : "h-52")}
+          className={cn(
+            "w-full min-w-0",
+            fill ? "min-h-0 flex-1" : compact ? "h-36" : "h-52",
+          )}
         >
           {chartSize.w > 0 && chartSize.h > 0 ? (
             <BarChart
@@ -61,7 +69,7 @@ export function FollowupScheduleChart({
                 tick={{ fontSize: 9, fill: "var(--muted-foreground)" }}
                 tickLine={false}
                 axisLine={false}
-                interval={compact ? 4 : 2}
+                interval={compact || fill ? 4 : 2}
               />
               <YAxis
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
@@ -84,15 +92,17 @@ export function FollowupScheduleChart({
             </BarChart>
           ) : null}
         </div>
-        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-muted-foreground">
+        <div className="mt-2 flex shrink-0 flex-wrap gap-x-4 gap-y-1 pb-0.5 text-[11px] leading-none text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm" style={{ background: "var(--chart-3)" }} /> Done
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-3)" }} />{" "}
+            Done
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm" style={{ background: "var(--chart-1)" }} /> Scheduled
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-1)" }} />{" "}
+            Scheduled
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 rounded-sm bg-destructive" /> Overdue
+            <span className="h-2 w-2 shrink-0 rounded-sm bg-destructive" /> Overdue
           </span>
         </div>
       </CardContent>

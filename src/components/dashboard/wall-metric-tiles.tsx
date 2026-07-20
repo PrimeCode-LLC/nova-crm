@@ -108,40 +108,51 @@ export function WallMetricTiles({
   items,
   className,
   columns,
+  compact,
 }: {
   items: WallMetricItem[];
   className?: string;
   /** Prefer an explicit column count when you know the metric set size. */
   columns?: 3 | 4 | 6 | 8;
+  /** Tighter padding/type for dense boards (e.g. 2×2 strategy grid). */
+  compact?: boolean;
 }) {
+  // Use fixed column counts (not `sm:`) — wall panels are often narrower than the
+  // viewport breakpoint, which was collapsing 4-col grids into 2-per-row.
   const colClass =
     columns === 3
       ? "grid-cols-3"
       : columns === 4
-        ? "grid-cols-2 sm:grid-cols-4"
+        ? "grid-cols-4"
         : columns === 8
-          ? "grid-cols-4 lg:grid-cols-8"
-          : items.length <= 3
-            ? "grid-cols-3"
-            : items.length <= 4
-              ? "grid-cols-2 sm:grid-cols-4"
-              : "grid-cols-3 sm:grid-cols-6";
+          ? "grid-cols-8"
+          : columns === 6
+            ? "grid-cols-6"
+            : items.length <= 3
+              ? "grid-cols-3"
+              : items.length <= 4
+                ? "grid-cols-4"
+                : items.length <= 6
+                  ? "grid-cols-6"
+                  : "grid-cols-4";
 
   return (
-    <div className={cn("grid gap-2", colClass, className)}>
+    <div className={cn("grid", compact ? "gap-1" : "gap-2", colClass, className)}>
       {items.map((m) => {
         const accent = accentFor(m);
         return (
           <div
             key={m.label}
             className={cn(
-              "rounded-lg border px-2.5 py-2 text-center shadow-sm backdrop-blur-[2px]",
+              "border text-center shadow-sm backdrop-blur-[2px]",
+              compact ? "rounded-md px-1.5 py-1" : "rounded-lg px-2.5 py-2",
               accent.shell,
             )}
           >
             <p
               className={cn(
-                "truncate text-[10px] font-semibold uppercase tracking-[0.1em]",
+                "truncate font-semibold uppercase tracking-[0.08em]",
+                compact ? "text-[8px]" : "text-[10px]",
                 accent.label,
               )}
             >
@@ -149,7 +160,8 @@ export function WallMetricTiles({
             </p>
             <p
               className={cn(
-                "mt-1 truncate text-base font-bold tabular-nums tracking-tight",
+                "truncate font-bold tabular-nums tracking-tight",
+                compact ? "mt-0.5 text-xs" : "mt-1 text-base",
                 accent.value,
               )}
             >
