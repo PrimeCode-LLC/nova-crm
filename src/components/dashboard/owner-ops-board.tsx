@@ -12,6 +12,7 @@ import { InboxPerformance } from "@/components/dashboard/inbox-performance";
 import { MailboxUtilizationPanel } from "@/components/dashboard/mailbox-utilization-panel";
 import { ActionBoardPanel } from "@/components/dashboard/action-board-panel";
 import { PersonScorecard } from "@/components/dashboard/person-scorecard";
+import { TeamCommand } from "@/components/dashboard/team-command";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
 import { useDashboardMeetings } from "@/hooks/use-dashboard-meetings";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
@@ -109,11 +110,15 @@ export function OwnerOpsBoard({
   );
 
   const showCharts = widgets.emailVolume || widgets.followupSchedule;
+  // Team command supersedes the standalone scorecard + top performers here.
+  const showScorecard = widgets.scorecard && !widgets.teamCommand;
+  const showInboxPerformance = widgets.inboxPerformance && !widgets.teamCommand;
   const showLeft =
     showCharts ||
-    widgets.scorecard ||
+    widgets.teamCommand ||
+    showScorecard ||
     widgets.needsAttention ||
-    widgets.inboxPerformance ||
+    showInboxPerformance ||
     widgets.mailboxUtilization;
   const showRight = widgets.activityFeed || widgets.actionBoard;
 
@@ -164,7 +169,17 @@ export function OwnerOpsBoard({
                   ) : null}
                 </div>
               ) : null}
-              {widgets.scorecard ? (
+              {widgets.teamCommand ? (
+                <TeamCommand
+                  leads={leads}
+                  deals={deals}
+                  followups={followups}
+                  tasks={tasks}
+                  range={range}
+                  wall={wall}
+                />
+              ) : null}
+              {showScorecard ? (
                 <PersonScorecard
                   leads={leads}
                   deals={deals}
@@ -183,7 +198,7 @@ export function OwnerOpsBoard({
                   currentUserId={currentUserId}
                 />
               ) : null}
-              {widgets.inboxPerformance ? (
+              {showInboxPerformance ? (
                 <InboxPerformance
                   users={users}
                   leads={leads}

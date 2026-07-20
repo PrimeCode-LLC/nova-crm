@@ -8,6 +8,7 @@ export type DashboardWidgetKey =
   | "pulse"
   | "emailVolume"
   | "followupSchedule"
+  | "teamCommand"
   | "scorecard"
   | "needsAttention"
   | "inboxPerformance"
@@ -75,6 +76,7 @@ export const DASHBOARD_WIDGET_META: {
   { key: "pulse", label: "Ops pulse strip", group: "ops" },
   { key: "emailVolume", label: "Email volume chart", group: "ops" },
   { key: "followupSchedule", label: "Follow-up schedule chart", group: "ops" },
+  { key: "teamCommand", label: "Team command", group: "ops" },
   { key: "scorecard", label: "Team scorecard", group: "ops" },
   { key: "needsAttention", label: "Needs attention", group: "shared" },
   { key: "inboxPerformance", label: "Top performers", group: "ops" },
@@ -98,6 +100,7 @@ export const DEFAULT_DASHBOARD_WIDGETS: DashboardWidgets = {
   pulse: true,
   emailVolume: true,
   followupSchedule: true,
+  teamCommand: true,
   scorecard: true,
   needsAttention: true,
   inboxPerformance: true,
