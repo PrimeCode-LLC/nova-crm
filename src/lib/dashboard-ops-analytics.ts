@@ -1,6 +1,7 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
+import { roleAtLeast } from "@/lib/platform/org-role";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import type {
   ActivityRecord,
@@ -11,6 +12,7 @@ import type {
   Meeting,
   OrgActivityEvent,
   OrgActivityEventType,
+  OrgMemberRole,
   TimelineEvent,
   TimelineEventType,
   User,
@@ -98,11 +100,26 @@ function hourLabel(h: number): string {
 }
 
 /** Owner / manager ops board vs frontline personal dashboard. */
-export function showOwnerOpsDashboard(viewer: User | undefined): boolean {
-  if (!viewer) return false;
-  if (viewerHasElevatedWorkspaceRole(viewer)) return true;
-  if (viewer.orgRole === "manager") return true;
-  return viewer.roleId === "director" || viewer.roleId === "manager" || viewer.roleId === "team_lead";
+export function showOwnerOpsDashboard(
+  viewer: User | undefined,
+  /** Live org membership role — used when the CRM user doc is incomplete. */
+  orgRole?: OrgMemberRole | null,
+): boolean {
+  if (viewer) {
+    if (viewerHasElevatedWorkspaceRole(viewer)) return true;
+    if (viewer.orgRole === "manager") return true;
+    if (
+      viewer.roleId === "director" ||
+      viewer.roleId === "manager" ||
+      viewer.roleId === "team_lead"
+    ) {
+      return true;
+    }
+  }
+  // Live tenants: org owner/admin/manager should always reach wall + ops board
+  // even if the CRM `users` row is missing or lacks roleId.
+  if (orgRole && roleAtLeast(orgRole, "manager")) return true;
+  return false;
 }
 
 export function buildEmailVolumeSeries(input: {

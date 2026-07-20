@@ -18,9 +18,7 @@ import {
 } from "@/components/dashboard/wall-pin-lock";
 import { cn } from "@/lib/utils";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
-import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
-import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useSidebar } from "@/components/ui/sidebar";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
@@ -82,7 +80,7 @@ export default function DashboardWallPage() {
   } = useWorkspace();
 
   const viewer = currentUserId ? getUserById(currentUserId) : undefined;
-  const allowed = showOwnerOpsDashboard(viewer);
+  const allowed = showOwnerOpsDashboard(viewer, viewerOrgRole);
   const { prefs: wallPrefs } = useWallPreferences(
     resolveWallPrefsUserId(currentUserId, demoPersonaId),
   );
@@ -377,17 +375,6 @@ export default function DashboardWallPage() {
         <Link href="/dashboard" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
           Back to dashboard
         </Link>
-      </div>
-    );
-  }
-
-  if (!isDemo && leads.length === 0) {
-    return (
-      <div className="fixed inset-0 z-[200] overflow-auto bg-background p-8">
-        <WorkspaceEmptyHint
-          title="No data for the wall board yet"
-          description="Add prospects, leads, and outreach activity so the board has something to show."
-        />
       </div>
     );
   }

@@ -2,9 +2,11 @@
 
 import * as React from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { KpiCard } from "@/components/common/kpi-card";
 import { FunnelChart } from "@/components/dashboard/funnel-chart";
 import { PipelineDistribution } from "@/components/dashboard/pipeline-distribution";
@@ -81,6 +83,7 @@ import {
   MessageSquareReply,
   CircleCheck,
   Eye,
+  Monitor,
 } from "lucide-react";
 import { computeDashboardWorkflowMetrics, isSalesLead } from "@/lib/dashboard-workflow";
 import {
@@ -303,7 +306,7 @@ export default function DashboardPage() {
     () => (currentUserId ? getUserById(currentUserId) : undefined),
     [currentUserId, getUserById],
   );
-  const canCustomizeLayout = showOwnerOpsDashboard(viewer);
+  const canCustomizeLayout = showOwnerOpsDashboard(viewer, viewerOrgRole);
   const {
     prefs,
     setViewMode,
@@ -439,6 +442,15 @@ export default function DashboardPage() {
         description={getDashboardOverviewDescription(effectiveRole ?? viewer?.roleId)}
         actions={
           <>
+            {canCustomizeLayout ? (
+              <Link
+                href="/dashboard/wall"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+              >
+                <Monitor className="h-3.5 w-3.5" />
+                Wall mode
+              </Link>
+            ) : null}
             {canCustomizeLayout ? (
               <DashboardSettingsSheet
                 prefs={prefs}
@@ -672,7 +684,6 @@ export default function DashboardPage() {
                 currentUserId={currentUserId}
                 orgMeetingsScope={orgMeetingsScope}
                 widgets={w}
-                showWallLink
                 isDemo={isDemo}
               />
             ) : w.classicKpis ? (
