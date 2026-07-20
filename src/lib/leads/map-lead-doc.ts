@@ -5,6 +5,12 @@ import type {
   ProspectChannelAssignment,
   ProspectVisibility,
 } from "@/lib/types";
+import type {
+  IntentEvidence,
+  PersonalizationNote,
+  ProspectQualifyStatus,
+  ProspectRejectionReason,
+} from "@/lib/prospecting-strategy/qualify";
 
 function parseProspectChannelAssignments(
   raw: unknown,
@@ -45,12 +51,53 @@ function parseStringArray(raw: unknown): string[] | undefined {
   return out.length ? out : undefined;
 }
 
+function parseIntentEvidence(raw: unknown): IntentEvidence[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const out: IntentEvidence[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id : "";
+    const strength = row.strength === "strong" || row.strength === "medium" ? row.strength : null;
+    if (!id || !strength) continue;
+    out.push({
+      id,
+      label: String(row.label ?? ""),
+      category: String(row.category ?? ""),
+      strength,
+      sourceUrl: String(row.sourceUrl ?? ""),
+      observedAt: String(row.observedAt ?? ""),
+      explanation: String(row.explanation ?? ""),
+      signalId: typeof row.signalId === "string" ? row.signalId : undefined,
+    });
+  }
+  return out.length ? out : undefined;
+}
+
+function parsePersonalization(raw: unknown): PersonalizationNote | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const row = raw as Record<string, unknown>;
+  return {
+    trigger: String(row.trigger ?? ""),
+    likelyImpact: String(row.likelyImpact ?? ""),
+    relevantService: String(row.relevantService ?? ""),
+    suggestedAngle: String(row.suggestedAngle ?? ""),
+  };
+}
+
 /** Normalize a Firestore lead document into a typed `Lead`. */
 export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
   const base = { ...raw, id } as unknown as Lead;
   const prospectVisibility =
     raw.prospectVisibility === "open" || raw.prospectVisibility === "assigned"
       ? (raw.prospectVisibility as ProspectVisibility)
+      : undefined;
+
+  const qualifyStatus =
+    raw.prospectQualifyStatus === "incomplete" ||
+    raw.prospectQualifyStatus === "completed" ||
+    raw.prospectQualifyStatus === "rejected"
+      ? (raw.prospectQualifyStatus as ProspectQualifyStatus)
       : undefined;
 
   return {
@@ -97,5 +144,15 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       typeof raw.strategyVersion === "number" ? raw.strategyVersion : undefined,
     strategyAssignmentId:
       typeof raw.strategyAssignmentId === "string" ? raw.strategyAssignmentId : undefined,
+    intentEvidence: parseIntentEvidence(raw.intentEvidence),
+    personalizationNote: parsePersonalization(raw.personalizationNote),
+    prospectQualifyStatus: qualifyStatus,
+    rejectionReason:
+      typeof raw.rejectionReason === "string"
+        ? (raw.rejectionReason as ProspectRejectionReason)
+        : undefined,
+    rejectionNote: typeof raw.rejectionNote === "string" ? raw.rejectionNote : undefined,
+    deeplyPersonalized: raw.deeplyPersonalized === true ? true : undefined,
+    emailVerified: raw.emailVerified === true ? true : undefined,
   };
 }

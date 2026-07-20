@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -35,22 +35,65 @@ import type {
   ProspectingStrategyStatus,
   QualityChecklistItem,
   StrategyAssignment,
+  StrategyDailyTargets,
 } from "@/lib/prospecting-strategy/types";
+import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
 import {
   activeAssignmentsForUser,
-  allocationIsValid,
   allocationTotal,
 } from "@/lib/prospecting-strategy/allocation";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { selectTriggerLabelById, capitalizeSelectToken } from "@/lib/base-ui-select-label";
-import { COMPANY_SIZES, COMPANY_SIZE_LABELS } from "@/lib/constants";
-import type { CompanySize } from "@/lib/types";
+import { COMPANY_SIZES, COMPANY_SIZE_LABELS, REVENUE_RANGES } from "@/lib/constants";
+import type { CompanySize, RevenueRange } from "@/lib/types";
+
+const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
+
+const DAILY_TARGET_FIELDS: { key: keyof StrategyDailyTargets; label: string }[] = [
+  { key: "completed", label: "Completed / day" },
+  { key: "uniqueCompanies", label: "Unique companies" },
+  { key: "maxContactsPerCompany", label: "Max contacts / company" },
+  { key: "verifiedEmails", label: "Verified emails" },
+  { key: "withEvidence", label: "With evidence URL" },
+  { key: "withRecentSignal", label: "With recent signal" },
+  { key: "warm", label: "Warm" },
+  { key: "hot", label: "Hot" },
+  { key: "deeplyPersonalized", label: "Deeply personalized" },
+];
 
 function parseLines(raw: string): string[] {
   return raw
     .split(/[\n,]+/)
     .map((s) => s.trim())
     .filter(Boolean);
+}
+
+/** Trims free-form editor state so we never persist empty queries, groups, or allocations. */
+function normalizeStrategy(s: ProspectingStrategy): ProspectingStrategy {
+  const searchTemplates = (s.searchTemplates ?? [])
+    .map((t) => ({
+      ...t,
+      label: t.label.trim() || "Untitled group",
+      queries: t.queries.map((q) => q.trim()).filter(Boolean),
+    }))
+    .filter((t) => t.queries.length > 0);
+
+  const industryAllocations = (s.industryAllocations ?? [])
+    .map((a) => ({ label: a.label.trim(), target: Number.isFinite(a.target) ? a.target : 0 }))
+    .filter((a) => a.label.length > 0);
+
+  const qualityChecklist = s.qualityChecklist.map((c, i) => ({
+    ...c,
+    label: c.label.trim() || "Requirement",
+    sortOrder: i,
+  }));
+
+  return {
+    ...s,
+    searchTemplates: searchTemplates.length ? searchTemplates : undefined,
+    industryAllocations: industryAllocations.length ? industryAllocations : undefined,
+    qualityChecklist,
+  };
 }
 
 export default function StrategyDetailPage() {
@@ -114,7 +157,8 @@ export default function StrategyDetailPage() {
   const save = async (patch?: Partial<ProspectingStrategy>) => {
     setSaving(true);
     try {
-      const next = { ...draft, ...patch, updatedBy: ws.currentUserId, updatedAt: new Date().toISOString() };
+      const merged = { ...draft, ...patch, updatedBy: ws.currentUserId, updatedAt: new Date().toISOString() };
+      const next = normalizeStrategy(merged);
       await data.updateStrategy(id, next);
       setDraft(next);
       toast.success("Strategy saved");
@@ -190,6 +234,171 @@ export default function StrategyDetailPage() {
     });
   };
 
+  const addChecklistItem = () => {
+    setDraft((d) => {
+      if (!d) return d;
+      const order = d.qualityChecklist.length;
+      return {
+        ...d,
+        qualityChecklist: [
+          ...d.qualityChecklist,
+          {
+            id: newProspectingEntityId("qc"),
+            fieldKey: `custom_${order}`,
+            label: "New requirement",
+            requirement: "optional",
+            sortOrder: order,
+          },
+        ],
+      };
+    });
+  };
+
+  const removeChecklistItem = (itemId: string) => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            qualityChecklist: d.qualityChecklist
+              .filter((c) => c.id !== itemId)
+              .map((c, i) => ({ ...c, sortOrder: i })),
+          }
+        : d,
+    );
+  };
+
+  const moveChecklistItem = (itemId: string, dir: -1 | 1) => {
+    setDraft((d) => {
+      if (!d) return d;
+      const arr = [...d.qualityChecklist];
+      const idx = arr.findIndex((c) => c.id === itemId);
+      const swap = idx + dir;
+      if (idx < 0 || swap < 0 || swap >= arr.length) return d;
+      [arr[idx], arr[swap]] = [arr[swap]!, arr[idx]!];
+      return { ...d, qualityChecklist: arr.map((c, i) => ({ ...c, sortOrder: i })) };
+    });
+  };
+
+  // Search templates
+  const addSearchGroup = () => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            searchTemplates: [
+              ...(d.searchTemplates ?? []),
+              { id: newProspectingEntityId("st"), label: "New group", queries: [""] },
+            ],
+          }
+        : d,
+    );
+  };
+
+  const updateSearchGroupLabel = (groupId: string, label: string) => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            searchTemplates: (d.searchTemplates ?? []).map((t) =>
+              t.id === groupId ? { ...t, label } : t,
+            ),
+          }
+        : d,
+    );
+  };
+
+  const removeSearchGroup = (groupId: string) => {
+    setDraft((d) =>
+      d
+        ? { ...d, searchTemplates: (d.searchTemplates ?? []).filter((t) => t.id !== groupId) }
+        : d,
+    );
+  };
+
+  const updateQuery = (groupId: string, index: number, value: string) => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            searchTemplates: (d.searchTemplates ?? []).map((t) =>
+              t.id === groupId
+                ? { ...t, queries: t.queries.map((q, i) => (i === index ? value : q)) }
+                : t,
+            ),
+          }
+        : d,
+    );
+  };
+
+  const addQuery = (groupId: string) => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            searchTemplates: (d.searchTemplates ?? []).map((t) =>
+              t.id === groupId ? { ...t, queries: [...t.queries, ""] } : t,
+            ),
+          }
+        : d,
+    );
+  };
+
+  const removeQuery = (groupId: string, index: number) => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            searchTemplates: (d.searchTemplates ?? []).map((t) =>
+              t.id === groupId
+                ? { ...t, queries: t.queries.filter((_, i) => i !== index) }
+                : t,
+            ),
+          }
+        : d,
+    );
+  };
+
+  // Daily targets + industry mix
+  const currentTargets = resolveDailyTargets(draft);
+
+  const updateDailyTarget = (key: keyof StrategyDailyTargets, value: number) => {
+    setDraft((d) =>
+      d ? { ...d, dailyTargets: { ...resolveDailyTargets(d), [key]: value } } : d,
+    );
+  };
+
+  const addAllocation = () => {
+    setDraft((d) =>
+      d
+        ? { ...d, industryAllocations: [...(d.industryAllocations ?? []), { label: "", target: 0 }] }
+        : d,
+    );
+  };
+
+  const updateAllocation = (
+    index: number,
+    patch: Partial<{ label: string; target: number }>,
+  ) => {
+    setDraft((d) =>
+      d
+        ? {
+            ...d,
+            industryAllocations: (d.industryAllocations ?? []).map((a, i) =>
+              i === index ? { ...a, ...patch } : a,
+            ),
+          }
+        : d,
+    );
+  };
+
+  const removeAllocation = (index: number) => {
+    setDraft((d) =>
+      d
+        ? { ...d, industryAllocations: (d.industryAllocations ?? []).filter((_, i) => i !== index) }
+        : d,
+    );
+  };
+
   return (
     <>
       <PageHeader
@@ -237,6 +446,8 @@ export default function StrategyDetailPage() {
             <TabsTrigger value="company">Company profile</TabsTrigger>
             <TabsTrigger value="personas">Personas</TabsTrigger>
             <TabsTrigger value="signals">Signals</TabsTrigger>
+            <TabsTrigger value="search">Search & queries</TabsTrigger>
+            <TabsTrigger value="targets">Targets & mix</TabsTrigger>
             <TabsTrigger value="checklist">Checklist & SOP</TabsTrigger>
             <TabsTrigger value="assignments">Assignments</TabsTrigger>
           </TabsList>
@@ -272,6 +483,17 @@ export default function StrategyDetailPage() {
                     onChange={(e) =>
                       setDraft((d) => (d ? { ...d, objective: e.target.value } : d))
                     }
+                  />
+                </div>
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label>Mission blurb (pinned on My Strategy)</Label>
+                  <Textarea
+                    rows={5}
+                    value={draft.missionBlurb ?? ""}
+                    onChange={(e) =>
+                      setDraft((d) => (d ? { ...d, missionBlurb: e.target.value } : d))
+                    }
+                    placeholder="Four questions, what not to submit, how to start with signals…"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -469,6 +691,76 @@ export default function StrategyDetailPage() {
                   </Select>
                 </div>
                 <div className="space-y-1.5">
+                  <Label>Min revenue</Label>
+                  <Select
+                    value={draft.firmographics.revenueMin ?? "__none__"}
+                    onValueChange={(v) =>
+                      setDraft((d) =>
+                        d
+                          ? {
+                              ...d,
+                              firmographics: {
+                                ...d.firmographics,
+                                revenueMin: v === "__none__" ? undefined : (v as RevenueRange),
+                              },
+                            }
+                          : d,
+                      )
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue>
+                        {draft.firmographics.revenueMin
+                          ? REVENUE_RANGES[draft.firmographics.revenueMin]
+                          : "Any"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Any</SelectItem>
+                      {REVENUE_KEYS.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {REVENUE_RANGES[r]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label>Max revenue</Label>
+                  <Select
+                    value={draft.firmographics.revenueMax ?? "__none__"}
+                    onValueChange={(v) =>
+                      setDraft((d) =>
+                        d
+                          ? {
+                              ...d,
+                              firmographics: {
+                                ...d.firmographics,
+                                revenueMax: v === "__none__" ? undefined : (v as RevenueRange),
+                              },
+                            }
+                          : d,
+                      )
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue>
+                        {draft.firmographics.revenueMax
+                          ? REVENUE_RANGES[draft.firmographics.revenueMax]
+                          : "Any"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__none__">Any</SelectItem>
+                      {REVENUE_KEYS.map((r) => (
+                        <SelectItem key={r} value={r}>
+                          {REVENUE_RANGES[r]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
                   <Label>Required keywords</Label>
                   <Textarea
                     rows={2}
@@ -656,6 +948,33 @@ export default function StrategyDetailPage() {
                                 }
                               />
                             </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs">Strength</Label>
+                              <Select
+                                value={linked.strength ?? "__none__"}
+                                onValueChange={(v) =>
+                                  updateLinkedSignal(sig.id, {
+                                    strength:
+                                      v === "__none__"
+                                        ? undefined
+                                        : (v as "strong" | "medium"),
+                                  })
+                                }
+                              >
+                                <SelectTrigger className="h-9">
+                                  <SelectValue>
+                                    {linked.strength
+                                      ? capitalizeSelectToken(linked.strength)
+                                      : "Not set"}
+                                  </SelectValue>
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="__none__">Not set</SelectItem>
+                                  <SelectItem value="strong">Strong</SelectItem>
+                                  <SelectItem value="medium">Medium</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                             <div className="flex items-end gap-2 pb-1">
                               <Switch
                                 checked={linked.required}
@@ -675,12 +994,169 @@ export default function StrategyDetailPage() {
                                 }
                               />
                             </div>
+                            <div className="sm:col-span-3 space-y-1">
+                              <Label className="text-xs">Message angle (shown to researcher)</Label>
+                              <Textarea
+                                rows={2}
+                                value={linked.messageAngle ?? ""}
+                                onChange={(e) =>
+                                  updateLinkedSignal(sig.id, { messageAngle: e.target.value })
+                                }
+                                placeholder="How Stellix Soft helps when this signal is present…"
+                              />
+                            </div>
                           </div>
                         ) : null}
                       </div>
                     );
                   })
                 )}
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="search" className="mt-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Search templates</CardTitle>
+                <CardDescription>
+                  Query groups researchers copy or launch from My Strategy. Start with signals, not
+                  directories.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {(draft.searchTemplates ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No query groups yet.</p>
+                ) : (
+                  (draft.searchTemplates ?? []).map((group) => (
+                    <div key={group.id} className="rounded-md border p-3 space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          value={group.label}
+                          placeholder="Group name (e.g. Facility expansion)"
+                          onChange={(e) => updateSearchGroupLabel(group.id, e.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="text-destructive shrink-0"
+                          onClick={() => removeSearchGroup(group.id)}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                      <div className="space-y-1.5">
+                        {group.queries.map((q, i) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <Input
+                              className="font-mono text-xs"
+                              value={q}
+                              placeholder='"new distribution center" logistics 2026'
+                              onChange={(e) => updateQuery(group.id, i, e.target.value)}
+                            />
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="text-destructive shrink-0"
+                              onClick={() => removeQuery(group.id, i)}
+                            >
+                              <Trash2 className="size-3.5" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7"
+                          onClick={() => addQuery(group.id)}
+                        >
+                          <Plus className="size-3.5" />
+                          Add query
+                        </Button>
+                      </div>
+                    </div>
+                  ))
+                )}
+                <Button type="button" size="sm" variant="outline" onClick={addSearchGroup}>
+                  <Plus className="size-4" />
+                  Add query group
+                </Button>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="targets" className="mt-4 space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Daily targets</CardTitle>
+                <CardDescription>
+                  Per-metric goals shown in “Today’s targets detail” on My Strategy. Leave the
+                  defaults if you only track the single daily total.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-3">
+                {DAILY_TARGET_FIELDS.map((field) => (
+                  <div key={field.key} className="space-y-1.5">
+                    <Label>{field.label}</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      value={currentTargets[field.key]}
+                      onChange={(e) =>
+                        updateDailyTarget(field.key, Number(e.target.value) || 0)
+                      }
+                    />
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Recommended industry mix</CardTitle>
+                <CardDescription>
+                  Suggested split of the daily target across industries (shown as chips).
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {(draft.industryAllocations ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">No industry mix set.</p>
+                ) : (
+                  (draft.industryAllocations ?? []).map((a, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Input
+                        value={a.label}
+                        placeholder="Industry group"
+                        onChange={(e) => updateAllocation(i, { label: e.target.value })}
+                      />
+                      <Input
+                        type="number"
+                        min={0}
+                        className="w-24"
+                        value={a.target}
+                        onChange={(e) =>
+                          updateAllocation(i, { target: Number(e.target.value) || 0 })
+                        }
+                      />
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="ghost"
+                        className="text-destructive shrink-0"
+                        onClick={() => removeAllocation(i)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
+                  ))
+                )}
+                <Button type="button" size="sm" variant="outline" onClick={addAllocation}>
+                  <Plus className="size-4" />
+                  Add industry
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>
@@ -695,15 +1171,42 @@ export default function StrategyDetailPage() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {draft.qualityChecklist.map((item) => (
+                {draft.qualityChecklist.map((item, index) => (
                   <div
                     key={item.id}
-                    className="grid gap-2 sm:grid-cols-[1fr_140px] items-center rounded-md border px-3 py-2"
+                    className="grid gap-2 sm:grid-cols-[auto_1fr_140px] items-start rounded-md border px-3 py-2"
                   >
-                    <div>
-                      <p className="text-sm font-medium">{item.label}</p>
+                    <div className="flex sm:flex-col items-center gap-0.5 pt-1">
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="size-6"
+                        disabled={index === 0}
+                        onClick={() => moveChecklistItem(item.id, -1)}
+                      >
+                        <ArrowUp className="size-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="size-6"
+                        disabled={index === draft.qualityChecklist.length - 1}
+                        onClick={() => moveChecklistItem(item.id, 1)}
+                      >
+                        <ArrowDown className="size-3.5" />
+                      </Button>
+                    </div>
+                    <div className="space-y-1">
                       <Input
-                        className="mt-1 h-8 text-xs"
+                        className="h-8 text-sm font-medium"
+                        value={item.label}
+                        placeholder="Requirement label"
+                        onChange={(e) => updateChecklistItem(item.id, { label: e.target.value })}
+                      />
+                      <Input
+                        className="h-8 text-xs"
                         placeholder="Instructions for researcher"
                         value={item.instructions ?? ""}
                         onChange={(e) =>
@@ -711,29 +1214,44 @@ export default function StrategyDetailPage() {
                         }
                       />
                     </div>
-                    <Select
-                      value={item.requirement}
-                      onValueChange={(v) =>
-                        updateChecklistItem(item.id, {
-                          requirement: v as QualityChecklistItem["requirement"],
-                        })
-                      }
-                    >
-                      <SelectTrigger className="h-8">
-                        <SelectValue>
-                          {item.requirement === "not_needed"
-                            ? "Not needed"
-                            : capitalizeSelectToken(item.requirement)}
-                        </SelectValue>
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="required">Required</SelectItem>
-                        <SelectItem value="optional">Optional</SelectItem>
-                        <SelectItem value="not_needed">Not needed</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <div className="flex items-center gap-1">
+                      <Select
+                        value={item.requirement}
+                        onValueChange={(v) =>
+                          updateChecklistItem(item.id, {
+                            requirement: v as QualityChecklistItem["requirement"],
+                          })
+                        }
+                      >
+                        <SelectTrigger className="h-8">
+                          <SelectValue>
+                            {item.requirement === "not_needed"
+                              ? "Not needed"
+                              : capitalizeSelectToken(item.requirement)}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="required">Required</SelectItem>
+                          <SelectItem value="optional">Optional</SelectItem>
+                          <SelectItem value="not_needed">Not needed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="size-8 text-destructive shrink-0"
+                        onClick={() => removeChecklistItem(item.id)}
+                      >
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </div>
                   </div>
                 ))}
+                <Button type="button" size="sm" variant="outline" onClick={addChecklistItem}>
+                  <Plus className="size-4" />
+                  Add requirement
+                </Button>
               </CardContent>
             </Card>
 
@@ -821,9 +1339,52 @@ function AssignmentsPanel({
   currentUserId: string;
 }) {
   const [userId, setUserId] = React.useState("");
-  const [allocationPct, setAllocationPct] = React.useState("100");
+  const [allocationPct, setAllocationPct] = React.useState("50");
   const [targetOverride, setTargetOverride] = React.useState("");
   const [assignmentType, setAssignmentType] = React.useState<"primary" | "secondary">("primary");
+  const [editingAllocId, setEditingAllocId] = React.useState<string | null>(null);
+  const [editingAllocValue, setEditingAllocValue] = React.useState("");
+
+  const existingOnThisStrategy = React.useMemo(
+    () => assignments.find((a) => a.userId === userId && a.status !== "ended"),
+    [assignments, userId],
+  );
+
+  /** This user's active assignments on other strategies (excluding this strategy's row). */
+  const otherActive = React.useMemo(() => {
+    if (!userId) return [];
+    return activeAssignmentsForUser(data.assignments, userId).filter(
+      (a) => a.strategyId !== strategyId && a.id !== existingOnThisStrategy?.id,
+    );
+  }, [data.assignments, userId, strategyId, existingOnThisStrategy?.id]);
+
+  const othersTotal = allocationTotal(otherActive);
+  const thisPct = Number(allocationPct);
+  const projectedTotal =
+    othersTotal + (Number.isFinite(thisPct) && thisPct > 0 ? thisPct : 0);
+  const remainingCap = Math.max(0, 100 - othersTotal);
+
+  const selectUser = (next: string) => {
+    setUserId(next);
+    const existing = assignments.find((a) => a.userId === next && a.status !== "ended");
+    if (existing) {
+      setAllocationPct(String(existing.allocationPct));
+      setAssignmentType(existing.assignmentType);
+      setTargetOverride(
+        existing.targetOverride != null ? String(existing.targetOverride) : "",
+      );
+      return;
+    }
+    const others = activeAssignmentsForUser(data.assignments, next).filter(
+      (a) => a.strategyId !== strategyId,
+    );
+    const used = allocationTotal(others);
+    // First strategy defaults to 50% so you can add more; otherwise suggest remaining capacity.
+    const suggest = used === 0 ? 50 : Math.max(1, Math.min(100, 100 - used));
+    setAllocationPct(String(suggest));
+    setTargetOverride("");
+    setAssignmentType(used === 0 ? "primary" : "secondary");
+  };
 
   const add = async () => {
     if (!userId) {
@@ -831,48 +1392,53 @@ function AssignmentsPanel({
       return;
     }
     const pct = Number(allocationPct);
-    if (!Number.isFinite(pct) || pct <= 0) {
-      toast.error("Allocation must be > 0");
-      return;
-    }
-    const existingActive = activeAssignmentsForUser(data.assignments, userId);
-    const others = existingActive.filter((a) => a.strategyId !== strategyId);
-    const projected = [
-      ...others,
-      {
-        ...({} as StrategyAssignment),
-        allocationPct: pct,
-        status: "active" as const,
-        userId,
-      },
-    ];
-    if (!allocationIsValid(projected)) {
-      toast.error("Allocation would exceed 100%", {
-        description: `Other active assignments total ${allocationTotal(others)}%. Adjust before adding.`,
-      });
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+      toast.error("Allocation must be between 1 and 100");
       return;
     }
 
     const now = new Date().toISOString();
-    const assignment: StrategyAssignment = {
-      id: newProspectingEntityId("sa"),
-      organizationId: data.organizationId,
-      strategyId,
-      userId,
-      assignmentType,
-      priority: assignmentType === "primary" ? 100 : 50,
-      allocationPct: pct,
-      targetOverride: targetOverride.trim() ? Number(targetOverride) : undefined,
-      status: "active",
-      assignedBy: currentUserId,
-      createdAt: now,
-      updatedAt: now,
-    };
     try {
-      await data.addAssignment(assignment);
-      toast.success("Assignment added");
+      if (existingOnThisStrategy) {
+        await data.updateAssignment(existingOnThisStrategy.id, {
+          assignmentType,
+          priority: assignmentType === "primary" ? 100 : 50,
+          allocationPct: pct,
+          targetOverride: targetOverride.trim() ? Number(targetOverride) : undefined,
+          status: "active",
+          updatedAt: now,
+        });
+      } else {
+        const assignment: StrategyAssignment = {
+          id: newProspectingEntityId("sa"),
+          organizationId: data.organizationId,
+          strategyId,
+          userId,
+          assignmentType,
+          priority: assignmentType === "primary" ? 100 : 50,
+          allocationPct: pct,
+          targetOverride: targetOverride.trim() ? Number(targetOverride) : undefined,
+          status: "active",
+          assignedBy: currentUserId,
+          createdAt: now,
+          updatedAt: now,
+        };
+        await data.addAssignment(assignment);
+      }
+
+      const totalAfter = othersTotal + pct;
+      if (Math.abs(totalAfter - 100) <= 0.5) {
+        toast.success(existingOnThisStrategy ? "Assignment updated" : "Assignment added");
+      } else {
+        toast.success(
+          existingOnThisStrategy ? "Assignment updated" : "Assignment added",
+          {
+            description: `This person’s allocations now total ${totalAfter}%. Adjust other strategies until they equal 100%.`,
+          },
+        );
+      }
       setUserId("");
-      setAllocationPct("100");
+      setAllocationPct("50");
       setTargetOverride("");
     } catch (e) {
       toast.error("Could not assign", {
@@ -881,23 +1447,96 @@ function AssignmentsPanel({
     }
   };
 
+  const removeAssignment = async (id: string) => {
+    try {
+      await data.deleteAssignment(id);
+      toast.success("Assignment removed");
+    } catch (e) {
+      toast.error("Could not remove assignment", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
+  const pauseOrActivate = async (a: StrategyAssignment, status: "active" | "paused") => {
+    try {
+      await data.updateAssignment(a.id, { status });
+      toast.success(status === "paused" ? "Assignment paused" : "Assignment activated");
+    } catch (e) {
+      toast.error("Could not update assignment", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
+  const saveInlineAlloc = async (a: StrategyAssignment) => {
+    const pct = Number(editingAllocValue);
+    if (!Number.isFinite(pct) || pct <= 0 || pct > 100) {
+      toast.error("Allocation must be between 1 and 100");
+      return;
+    }
+    try {
+      await data.updateAssignment(a.id, { allocationPct: pct });
+      setEditingAllocId(null);
+      const userActive = activeAssignmentsForUser(data.assignments, a.userId).map((row) =>
+        row.id === a.id ? { ...row, allocationPct: pct } : row,
+      );
+      const total = allocationTotal(userActive);
+      toast.success("Allocation updated", {
+        description:
+          Math.abs(total - 100) <= 0.5
+            ? `${userOptions.find((u) => u.id === a.userId)?.label ?? "User"} totals 100%.`
+            : `Person now totals ${total}% across strategies — aim for 100%.`,
+      });
+    } catch (e) {
+      toast.error("Could not update allocation", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
+  /** Per-user totals for people on this strategy (for the balance strip). */
+  const balanceByUser = React.useMemo(() => {
+    const ids = [...new Set(assignments.map((a) => a.userId))];
+    return ids.map((uid) => {
+      const active = activeAssignmentsForUser(data.assignments, uid);
+      const total = allocationTotal(active);
+      return {
+        userId: uid,
+        label: userOptions.find((u) => u.id === uid)?.label ?? uid,
+        total,
+        ok: Math.abs(total - 100) <= 0.5,
+        count: active.length,
+      };
+    });
+  }, [assignments, data.assignments, userOptions]);
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-base">Assignments</CardTitle>
         <CardDescription>
-          Default daily target for this strategy: {strategy.dailyTargetDefault}. Active allocations
-          per person must total 100%.
+          Default daily target: {strategy.dailyTargetDefault}.{" "}
+          <strong>Allocation %</strong> is how much of this person’s day goes to each strategy
+          (add all strategies first, then tweak until each person totals 100%).{" "}
+          <strong>Target override</strong> changes how many prospects/day for this strategy only.
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
+          <p className="font-medium text-foreground">How to split someone across strategies</p>
+          <ol className="list-decimal pl-4 space-y-0.5">
+            <li>On strategy A, assign them at e.g. 50%.</li>
+            <li>On strategy B, assign them at 30%.</li>
+            <li>On strategy C, assign them at 20%.</li>
+            <li>Edit any % in the list until their total is 100% (see balance below).</li>
+          </ol>
+        </div>
+
         <div className="grid gap-2 sm:grid-cols-4 items-end rounded-md border p-3">
           <div className="space-y-1.5">
             <Label>User</Label>
-            <Select
-              value={userId || undefined}
-              onValueChange={(v) => setUserId(v ?? "")}
-            >
+            <Select value={userId || undefined} onValueChange={(v) => selectUser(v ?? "")}>
               <SelectTrigger>
                 <SelectValue>
                   {userId ? selectTriggerLabelById(userId, userOptions) : "Select user"}
@@ -946,13 +1585,59 @@ function AssignmentsPanel({
               onChange={(e) => setTargetOverride(e.target.value)}
             />
           </div>
+
+          {userId ? (
+            <div className="sm:col-span-4 text-xs">
+              <span className="text-muted-foreground">
+                Other strategies: {othersTotal}% · Remaining capacity: {remainingCap}% · After save:{" "}
+              </span>
+              <span
+                className={
+                  Math.abs(projectedTotal - 100) <= 0.5
+                    ? "text-emerald-600 dark:text-emerald-400 font-medium"
+                    : "text-amber-600 dark:text-amber-400 font-medium"
+                }
+              >
+                {projectedTotal}% total
+                {Math.abs(projectedTotal - 100) <= 0.5
+                  ? " ✓"
+                  : projectedTotal < 100
+                    ? ` (${100 - projectedTotal}% still free for other strategies)`
+                    : ` (over by ${projectedTotal - 100}% — edit other strategies down)`}
+              </span>
+            </div>
+          ) : null}
+
           <div className="sm:col-span-4">
             <Button type="button" size="sm" onClick={() => void add()}>
               <Plus className="size-4" />
-              Assign
+              {existingOnThisStrategy ? "Update assignment" : "Assign"}
             </Button>
           </div>
         </div>
+
+        {balanceByUser.length > 0 ? (
+          <div className="rounded-md border px-3 py-2 space-y-1.5">
+            <p className="text-xs font-medium">Allocation balance (all strategies)</p>
+            <ul className="space-y-1">
+              {balanceByUser.map((row) => (
+                <li key={row.userId} className="flex items-center justify-between text-xs gap-2">
+                  <span className="truncate">{row.label}</span>
+                  <span
+                    className={
+                      row.ok
+                        ? "text-emerald-600 dark:text-emerald-400 shrink-0"
+                        : "text-amber-600 dark:text-amber-400 shrink-0"
+                    }
+                  >
+                    {row.total}% across {row.count} strateg{row.count === 1 ? "y" : "ies"}
+                    {row.ok ? " ✓" : " — adjust to 100%"}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
 
         {assignments.length === 0 ? (
           <p className="text-sm text-muted-foreground text-center py-6">No assignments yet.</p>
@@ -961,29 +1646,76 @@ function AssignmentsPanel({
             {assignments.map((a) => {
               const userLabel =
                 userOptions.find((u) => u.id === a.userId)?.label ?? a.userId;
+              const isEditing = editingAllocId === a.id;
               return (
                 <li
                   key={a.id}
                   className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between px-3 py-2.5 text-sm"
                 >
-                  <div className="min-w-0">
+                  <div className="min-w-0 space-y-1">
                     <p className="font-medium">{userLabel}</p>
                     <p className="text-xs text-muted-foreground">
-                      {a.assignmentType} · {a.allocationPct}% ·{" "}
+                      {a.assignmentType} ·{" "}
                       {a.targetOverride != null
-                        ? `target ${a.targetOverride} (override)`
-                        : `target ${strategy.dailyTargetDefault} (strategy)`}{" "}
+                        ? `target ${a.targetOverride}/day (override)`
+                        : `target ${strategy.dailyTargetDefault}/day`}{" "}
                       · {a.status}
                     </p>
+                    <div className="flex items-center gap-2">
+                      <Label className="text-xs text-muted-foreground shrink-0">Alloc %</Label>
+                      {isEditing ? (
+                        <>
+                          <Input
+                            className="h-7 w-20"
+                            type="number"
+                            min={1}
+                            max={100}
+                            value={editingAllocValue}
+                            onChange={(e) => setEditingAllocValue(e.target.value)}
+                          />
+                          <Button
+                            type="button"
+                            size="sm"
+                            className="h-7"
+                            onClick={() => void saveInlineAlloc(a)}
+                          >
+                            Save
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7"
+                            onClick={() => setEditingAllocId(null)}
+                          >
+                            Cancel
+                          </Button>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-xs font-medium">{a.allocationPct}%</span>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-7"
+                            onClick={() => {
+                              setEditingAllocId(a.id);
+                              setEditingAllocValue(String(a.allocationPct));
+                            }}
+                          >
+                            Edit %
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </div>
                   <div className="flex items-center gap-1">
                     {a.status === "active" ? (
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() =>
-                          void data.updateAssignment(a.id, { status: "paused" })
-                        }
+                        onClick={() => void pauseOrActivate(a, "paused")}
                       >
                         Pause
                       </Button>
@@ -991,9 +1723,7 @@ function AssignmentsPanel({
                       <Button
                         size="sm"
                         variant="ghost"
-                        onClick={() =>
-                          void data.updateAssignment(a.id, { status: "active" })
-                        }
+                        onClick={() => void pauseOrActivate(a, "active")}
                       >
                         Activate
                       </Button>
@@ -1002,7 +1732,7 @@ function AssignmentsPanel({
                       size="sm"
                       variant="ghost"
                       className="text-destructive"
-                      onClick={() => void data.deleteAssignment(a.id)}
+                      onClick={() => void removeAssignment(a.id)}
                     >
                       Remove
                     </Button>
@@ -1016,3 +1746,4 @@ function AssignmentsPanel({
     </Card>
   );
 }
+

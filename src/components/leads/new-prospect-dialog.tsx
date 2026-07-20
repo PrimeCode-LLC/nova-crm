@@ -71,6 +71,14 @@ import {
   useProspectingStrategyData,
 } from "@/lib/hooks/use-prospecting-strategy-data";
 import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
+import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
+import { evaluateQualifyGate, formatPersonalizationNote } from "@/lib/prospecting-strategy/qualify";
+import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
+import {
+  emptyQualifyFormState,
+  ProspectQualifyPanel,
+  type ProspectQualifyFormState,
+} from "@/components/prospecting/prospect-qualify-panel";
 
 const UNSET = "__unset__" as const;
 
@@ -228,11 +236,13 @@ export function NewProspectDialog({
     getOwnerDisplayName,
     profiles,
     contacts,
+    leads,
     addAccount,
     addContact,
     addLead,
     addTimelineEvent,
     isDemo,
+    intentPlaybook,
   } = useWorkspace();
   const channelOptions = useChannelOptions();
   const { user: fbUser } = useAuth();
@@ -307,6 +317,15 @@ export function NewProspectDialog({
     if (initialPrefill?.strategyId) setStrategyId(initialPrefill.strategyId);
     if (initialPrefill?.personaId) setPersonaId(initialPrefill.personaId);
   }, [open, initialPrefill?.strategyId, initialPrefill?.personaId]);
+
+  const [qualifyForm, setQualifyForm] = React.useState<ProspectQualifyFormState>(emptyQualifyFormState);
+
+  React.useEffect(() => {
+    if (open) setQualifyForm(emptyQualifyFormState());
+  }, [open]);
+
+  const maxContacts =
+    resolveDailyTargets(selectedStrategy).maxContactsPerCompany ?? 2;
 
   const [bizName, setBizName] = React.useState(F.bizName);
   const [industry, setIndustry] = React.useState(F.industry);
@@ -439,6 +458,46 @@ export function NewProspectDialog({
       return;
     }
 
+    const domain = domainFromWebsiteOrEmail(website, email);
+    const existingCompanyContacts = countCompanyContactsForUser(
+      leads,
+      oid,
+      domain,
+      bn,
+    );
+    const emailIsVerified = emailVerify === "verified";
+
+    if (qualifyForm.qualifyStatus === "completed") {
+      const gate = evaluateQualifyGate({
+        companyName: bn,
+        companyWebsite: website.trim(),
+        contactName: fullName,
+        contactTitle: title.trim(),
+        contactLinkedIn: linkedin.trim(),
+        emailVerified: emailIsVerified,
+        intentEvidence: qualifyForm.evidence,
+        personalizationNote: qualifyForm.personalization,
+        primaryOpportunityLabel: qualifyForm.primaryOpportunityLabel,
+        outreachThreshold: intentPlaybook.outreachThreshold,
+        existingContactsForCompany: existingCompanyContacts,
+        maxContactsPerCompany: maxContacts,
+      });
+      if (!gate.ok) {
+        toast.error("Cannot mark as completed", {
+          description: gate.issues
+            .filter((i) => i.blocking)
+            .map((i) => i.message)
+            .slice(0, 3)
+            .join(" · "),
+        });
+        return;
+      }
+    }
+    if (qualifyForm.qualifyStatus === "rejected" && !qualifyForm.rejectionReason) {
+      toast.error("Select a rejection reason.");
+      return;
+    }
+
     const yf = yearFounded.trim();
     let yearFoundedNum: number | undefined;
     if (yf) {
@@ -456,7 +515,6 @@ export function NewProspectDialog({
 
     const locParts = [city.trim(), state.trim(), country.trim()].filter(Boolean);
     const locationStr = locParts.length ? locParts.join(", ") : undefined;
-    const domain = domainFromWebsiteOrEmail(website, email);
 
     const now = new Date().toISOString();
     const accountId = newEntityId("a");
@@ -539,7 +597,6 @@ export function NewProspectDialog({
       companyIndustry: industry.trim() || undefined,
       companySize: size === UNSET ? undefined : size,
       revenueRange: rev === UNSET ? undefined : rev,
-      triggerEvent: triggerEvent.trim() || undefined,
       painPoints: painPoints.trim() || undefined,
       doNotContact,
       touches: 0,
@@ -555,6 +612,28 @@ export function NewProspectDialog({
         ? strategyAssignmentIdPrefill ||
           myActiveAssignments.find((a) => a.strategyId === strategyId)?.id
         : undefined,
+      intentEvidence:
+        qualifyForm.evidence.filter((e) => e.label.trim() || e.sourceUrl.trim()).length > 0
+          ? qualifyForm.evidence
+          : undefined,
+      personalizationNote: qualifyForm.personalization,
+      prospectQualifyStatus: qualifyForm.qualifyStatus,
+      rejectionReason:
+        qualifyForm.qualifyStatus === "rejected" && qualifyForm.rejectionReason
+          ? qualifyForm.rejectionReason
+          : undefined,
+      rejectionNote:
+        qualifyForm.qualifyStatus === "rejected"
+          ? qualifyForm.rejectionNote.trim() || undefined
+          : undefined,
+      deeplyPersonalized: qualifyForm.deeplyPersonalized || undefined,
+      emailVerified: emailIsVerified || undefined,
+      primaryOpportunityLabel: qualifyForm.primaryOpportunityLabel.trim() || undefined,
+      psLine: formatPersonalizationNote(qualifyForm.personalization).trim() || undefined,
+      triggerEvent:
+        triggerEvent.trim() ||
+        qualifyForm.evidence.find((e) => e.label.trim())?.label ||
+        undefined,
       createdAt: now,
       updatedAt: now,
     };
@@ -1179,6 +1258,25 @@ export function NewProspectDialog({
                 </div>
               </div>
             </section>
+
+            <ProspectQualifyPanel
+              state={qualifyForm}
+              onChange={setQualifyForm}
+              companyName={bizName}
+              companyWebsite={website}
+              contactName={`${firstName} ${lastName}`.trim()}
+              contactTitle={title}
+              contactLinkedIn={linkedin}
+              emailVerified={emailVerify === "verified"}
+              outreachThreshold={intentPlaybook.outreachThreshold}
+              existingContactsForCompany={countCompanyContactsForUser(
+                leads,
+                currentUserId,
+                domainFromWebsiteOrEmail(website, email),
+                bizName,
+              )}
+              maxContactsPerCompany={maxContacts}
+            />
           </div>
 
           <DialogFooter className="px-6 py-4 border-t shrink-0 bg-muted/20">

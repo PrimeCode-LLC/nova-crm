@@ -106,9 +106,57 @@ function asLinkedSignals(raw: unknown): LinkedPlaybookSignal[] {
       recencyDays: typeof row.recencyDays === "number" ? row.recencyDays : undefined,
       required: Boolean(row.required),
       instructions: optStr(row.instructions),
+      strength: row.strength === "strong" || row.strength === "medium" ? row.strength : undefined,
+      messageAngle: optStr(row.messageAngle),
     });
   }
   return out;
+}
+
+function asSearchTemplates(raw: unknown): ProspectingStrategy["searchTemplates"] {
+  if (!Array.isArray(raw)) return undefined;
+  const out: NonNullable<ProspectingStrategy["searchTemplates"]> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id : "";
+    const label = typeof row.label === "string" ? row.label : "";
+    const queries = strArr(row.queries);
+    if (!id || !label) continue;
+    out.push({ id, label, queries });
+  }
+  return out.length ? out : undefined;
+}
+
+function asDailyTargets(raw: unknown): ProspectingStrategy["dailyTargets"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const r = raw as Record<string, unknown>;
+  const num = (k: string) => (typeof r[k] === "number" && Number.isFinite(r[k]) ? (r[k] as number) : undefined);
+  return {
+    completed: num("completed") ?? 150,
+    uniqueCompanies: num("uniqueCompanies") ?? 90,
+    maxContactsPerCompany: num("maxContactsPerCompany") ?? 2,
+    verifiedEmails: num("verifiedEmails") ?? 135,
+    withEvidence: num("withEvidence") ?? 150,
+    withRecentSignal: num("withRecentSignal") ?? 150,
+    warm: num("warm") ?? 40,
+    hot: num("hot") ?? 15,
+    deeplyPersonalized: num("deeplyPersonalized") ?? 15,
+  };
+}
+
+function asIndustryAllocations(raw: unknown): ProspectingStrategy["industryAllocations"] {
+  if (!Array.isArray(raw)) return undefined;
+  const out: NonNullable<ProspectingStrategy["industryAllocations"]> = [];
+  for (const item of raw) {
+    if (!item || typeof item !== "object") continue;
+    const row = item as Record<string, unknown>;
+    const label = typeof row.label === "string" ? row.label.trim() : "";
+    const target = typeof row.target === "number" ? row.target : 0;
+    if (!label) continue;
+    out.push({ label, target });
+  }
+  return out.length ? out : undefined;
 }
 
 function asChecklist(raw: unknown): QualityChecklistItem[] {
@@ -150,6 +198,7 @@ export function mapProspectingStrategy(id: string, raw: Record<string, unknown>)
     name: String(raw.name ?? ""),
     description: optStr(raw.description),
     objective: optStr(raw.objective),
+    missionBlurb: optStr(raw.missionBlurb),
     ownerId: String(raw.ownerId ?? ""),
     status: safeStatus,
     priority: typeof raw.priority === "number" ? raw.priority : 0,
@@ -159,6 +208,9 @@ export function mapProspectingStrategy(id: string, raw: Record<string, unknown>)
     qualityChecklist: asChecklist(raw.qualityChecklist),
     sopMarkdown: optStr(raw.sopMarkdown),
     researchNotes: optStr(raw.researchNotes),
+    searchTemplates: asSearchTemplates(raw.searchTemplates),
+    dailyTargets: asDailyTargets(raw.dailyTargets),
+    industryAllocations: asIndustryAllocations(raw.industryAllocations),
     dailyTargetDefault:
       typeof raw.dailyTargetDefault === "number" && Number.isFinite(raw.dailyTargetDefault)
         ? raw.dailyTargetDefault

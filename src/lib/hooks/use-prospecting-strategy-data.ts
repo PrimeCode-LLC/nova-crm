@@ -37,6 +37,10 @@ import {
   persistStrategyAssignmentUpdate,
 } from "@/lib/firestore/persist-prospecting-strategy-client";
 import { buildSeedPersonas, buildSeedStrategy } from "@/lib/prospecting-strategy/seed";
+import {
+  buildPerson1Personas,
+  buildPerson1Strategy,
+} from "@/lib/prospecting-strategy/person1-seed";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 
 export type ProspectingStrategyData = {
@@ -55,6 +59,7 @@ export type ProspectingStrategyData = {
   updateAssignment: (id: string, patch: Partial<StrategyAssignment>) => Promise<void>;
   deleteAssignment: (id: string) => Promise<void>;
   seedMasterPack: () => Promise<void>;
+  seedPerson1Pack: () => Promise<void>;
 };
 
 function newId(prefix: string): string {
@@ -356,6 +361,32 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     );
   }, [ws.isDemo, ws.currentUserId, organizationId, canLive, demoDelta?.assignments]);
 
+  const seedPerson1Pack = React.useCallback(async () => {
+    const ownerId = ws.currentUserId;
+    const org = organizationId || DEMO_WORKSPACE_ORG_ID;
+    const personasSeed = buildPerson1Personas(org, ownerId);
+    const strategySeed = buildPerson1Strategy(org, ownerId);
+    if (ws.isDemo) {
+      setDemoDelta((d) => {
+        const existingPersonas = d?.personas ?? [];
+        const byId = new Map(existingPersonas.map((p) => [p.id, p]));
+        for (const p of personasSeed) byId.set(p.id, p);
+        const strategies = [
+          ...(d?.strategies ?? []).filter((s) => s.id !== strategySeed.id),
+          strategySeed,
+        ];
+        return {
+          personas: [...byId.values()],
+          strategies,
+          assignments: d?.assignments ?? [],
+        };
+      });
+      return;
+    }
+    if (!canLive) throw new Error("No organization context");
+    await persistProspectingSeedBatch(getFirebaseDb(), organizationId, personasSeed, strategySeed);
+  }, [ws.isDemo, ws.currentUserId, organizationId, canLive]);
+
   return {
     loading,
     personas: livePersonas,
@@ -372,5 +403,6 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     updateAssignment,
     deleteAssignment,
     seedMasterPack,
+    seedPerson1Pack,
   };
 }

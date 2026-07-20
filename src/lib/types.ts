@@ -533,6 +533,22 @@ export interface Lead {
   /** Strategy assignment that produced this prospect. */
   strategyAssignmentId?: string;
 
+  /**
+   * Structured intent evidence (Phase 1.5).
+   * Prefer this over free-text research fields for qualification.
+   */
+  intentEvidence?: import("@/lib/prospecting-strategy/qualify").IntentEvidence[];
+  /** Structured personalization (Trigger / Impact / Service / Angle). */
+  personalizationNote?: import("@/lib/prospecting-strategy/qualify").PersonalizationNote;
+  /** Whether the prospect counts toward daily completed target. */
+  prospectQualifyStatus?: import("@/lib/prospecting-strategy/qualify").ProspectQualifyStatus;
+  rejectionReason?: import("@/lib/prospecting-strategy/qualify").ProspectRejectionReason;
+  rejectionNote?: string;
+  /** Counted toward deeply-personalized daily target. */
+  deeplyPersonalized?: boolean;
+  /** Denormalized from contact at create — used for daily verified-email targets. */
+  emailVerified?: boolean;
+
   // Activity metrics
   firstContactAt?: ISODate;
   lastActivityAt?: ISODate;

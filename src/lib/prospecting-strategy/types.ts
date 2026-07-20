@@ -1,4 +1,10 @@
 import type { CompanySize, ISODate, RevenueRange } from "@/lib/types";
+import type {
+  StrategyDailyTargets,
+  StrategyIndustryAllocation,
+  StrategySearchTemplate,
+} from "@/lib/prospecting-strategy/qualify";
+import { DEFAULT_DAILY_TARGETS } from "@/lib/prospecting-strategy/qualify";
 
 /** Buyer / ICP persona — not an outreach Profile. */
 export type BuyerPersonaTitleKind = "approved" | "similar" | "excluded";
@@ -68,6 +74,9 @@ export type LinkedPlaybookSignal = {
   recencyDays?: number;
   required: boolean;
   instructions?: string;
+  /** strong | medium for strategy-layer qualification guidance. */
+  strength?: "strong" | "medium";
+  messageAngle?: string;
 };
 
 export type StrategyFirmographics = {
@@ -92,6 +101,8 @@ export type ProspectingStrategy = {
   name: string;
   description?: string;
   objective?: string;
+  /** Pinned mission shown at top of My Strategy. */
+  missionBlurb?: string;
   ownerId: string;
   status: ProspectingStrategyStatus;
   priority: number;
@@ -104,6 +115,12 @@ export type ProspectingStrategy = {
   /** Rich-text / markdown SOP. */
   sopMarkdown?: string;
   researchNotes?: string;
+  /** Search query templates for the researcher workbench. */
+  searchTemplates?: StrategySearchTemplate[];
+  /** Multi-metric daily targets (Phase 1.5). */
+  dailyTargets?: StrategyDailyTargets;
+  /** Recommended industry mix for the day. */
+  industryAllocations?: StrategyIndustryAllocation[];
   dailyTargetDefault: number;
   /** Integer version bumped on publish. */
   version: number;
@@ -140,8 +157,6 @@ export type StrategyAssignment = {
   updatedAt: ISODate;
 };
 
-export type EmptyFirmographics = StrategyFirmographics;
-
 export function emptyFirmographics(): StrategyFirmographics {
   return {
     targetIndustries: [],
@@ -153,3 +168,25 @@ export function emptyFirmographics(): StrategyFirmographics {
     excludedKeywords: [],
   };
 }
+
+export function resolveDailyTargets(
+  strategy: Pick<ProspectingStrategy, "dailyTargets" | "dailyTargetDefault"> | undefined,
+): StrategyDailyTargets {
+  const base = { ...DEFAULT_DAILY_TARGETS };
+  if (!strategy) return base;
+  if (strategy.dailyTargets) {
+    return { ...base, ...strategy.dailyTargets };
+  }
+  if (Number.isFinite(strategy.dailyTargetDefault)) {
+    base.completed = strategy.dailyTargetDefault;
+    base.withEvidence = strategy.dailyTargetDefault;
+    base.withRecentSignal = strategy.dailyTargetDefault;
+  }
+  return base;
+}
+
+export type {
+  StrategyDailyTargets,
+  StrategyIndustryAllocation,
+  StrategySearchTemplate,
+};

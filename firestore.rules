@@ -349,17 +349,23 @@ service cloud.firestore {
 
     match /buyerPersonas/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
     }
 
     match /prospectingStrategies/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
     }
 
     match /strategyAssignments/{id} {
       allow read: if tenantReadable();
-      allow write: if tenantWritable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
     }
 
     match /departments/{id} {

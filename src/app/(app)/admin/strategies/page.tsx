@@ -109,6 +109,20 @@ export default function AdminStrategiesPage() {
     }
   };
 
+  const seedPerson1 = async () => {
+    setSeeding(true);
+    try {
+      await data.seedPerson1Pack();
+      toast.success("Seeded Person 1 supply-chain strategy + personas");
+    } catch (e) {
+      toast.error("Seed failed", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setSeeding(false);
+    }
+  };
+
   const managerRows = React.useMemo(() => {
     const userIds = [...new Set(data.assignments.map((a) => a.userId))];
     return userIds.map((userId) => {
@@ -153,6 +167,16 @@ export default function AdminStrategiesPage() {
             >
               {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sprout className="size-4" />}
               Seed master pack
+            </Button>
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              disabled={seeding}
+              onClick={() => void seedPerson1()}
+            >
+              {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sprout className="size-4" />}
+              Seed Person 1 pack
             </Button>
             <Button size="sm" type="button" disabled={creating} onClick={() => void createBlank()}>
               {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
@@ -263,7 +287,7 @@ export default function AdminStrategiesPage() {
                           <th className="px-3 py-2 font-medium">Strategies</th>
                           <th className="px-3 py-2 font-medium">Alloc %</th>
                           <th className="px-3 py-2 font-medium">Target</th>
-                          <th className="px-3 py-2 font-medium">Researched</th>
+                          <th className="px-3 py-2 font-medium">Completed</th>
                           <th className="px-3 py-2 font-medium">Qualified</th>
                           <th className="px-3 py-2 font-medium">Rate</th>
                         </tr>
@@ -273,7 +297,7 @@ export default function AdminStrategiesPage() {
                           const rate =
                             row.progress.researched > 0
                               ? Math.round(
-                                  (row.progress.qualified / row.progress.researched) * 100,
+                                  (row.progress.completed / row.progress.researched) * 100,
                                 )
                               : 0;
                           return (
@@ -296,7 +320,7 @@ export default function AdminStrategiesPage() {
                                 </span>
                               </td>
                               <td className="px-3 py-2">{row.dailyTarget}</td>
-                              <td className="px-3 py-2">{row.progress.researched}</td>
+                              <td className="px-3 py-2">{row.progress.completed}</td>
                               <td className="px-3 py-2">{row.progress.qualified}</td>
                               <td className="px-3 py-2">{rate}%</td>
                             </tr>

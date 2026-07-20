@@ -67,7 +67,9 @@ export function PageBody({
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-6">
       <div
         className={cn(
-          "flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-y-contain scrollbar-thin",
+          // [&>*]:shrink-0 keeps section height natural so this pane scrolls
+          // instead of children compressing and clipping with no scrollbar.
+          "flex min-h-0 flex-1 flex-col gap-6 overflow-y-auto overscroll-y-contain scrollbar-thin [&>*]:shrink-0",
           className,
         )}
       >
