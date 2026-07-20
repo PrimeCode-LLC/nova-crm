@@ -41,6 +41,13 @@ import {
   buildPerson1Personas,
   buildPerson1Strategy,
 } from "@/lib/prospecting-strategy/person1-seed";
+import { buildSampleB2bSaasPack } from "@/lib/prospecting-strategy/sample-pack";
+import {
+  materializeStrategyPack,
+  parseStrategyPack,
+  strategyToPack,
+  type StrategyPack,
+} from "@/lib/prospecting-strategy/pack";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 
 export type ProspectingStrategyData = {
@@ -58,7 +65,23 @@ export type ProspectingStrategyData = {
   addAssignment: (assignment: StrategyAssignment) => Promise<void>;
   updateAssignment: (id: string, patch: Partial<StrategyAssignment>) => Promise<void>;
   deleteAssignment: (id: string) => Promise<void>;
+  /** Install the neutral product sample pack (safe for any SaaS org). */
+  installSamplePack: () => Promise<{ strategyId: string; warnings: string[] }>;
+  /** Import a StrategyPack JSON into this org with fresh ids. */
+  importStrategyPack: (
+    pack: StrategyPack,
+  ) => Promise<{ strategyId: string; warnings: string[] }>;
+  /** Build a portable pack from a live strategy (for download). */
+  exportStrategyPack: (strategyId: string) => StrategyPack | null;
+  /**
+   * @deprecated Internal/dev only — exports Stellix master into Firestore with fixed ids.
+   * Prefer private JSON packs + importStrategyPack.
+   */
   seedMasterPack: () => Promise<void>;
+  /**
+   * @deprecated Internal/dev only — exports Person 1 logistics pack with fixed ids.
+   * Prefer private JSON packs + importStrategyPack.
+   */
   seedPerson1Pack: () => Promise<void>;
 };
 
@@ -340,6 +363,70 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     [ws.isDemo, canLive],
   );
 
+  const importStrategyPack = React.useCallback(
+    async (pack: StrategyPack) => {
+      const org = organizationId || DEMO_WORKSPACE_ORG_ID;
+      const materialized = materializeStrategyPack(pack, {
+        organizationId: org,
+        userId: ws.currentUserId,
+        newId,
+        preserveIds: false,
+      });
+
+      if (ws.isDemo) {
+        setDemoDelta((d) => {
+          const byId = new Map((d?.personas ?? []).map((p) => [p.id, p]));
+          for (const p of materialized.personas) byId.set(p.id, p);
+          return {
+            personas: [...byId.values()],
+            strategies: [
+              ...(d?.strategies ?? []).filter((s) => s.id !== materialized.strategy.id),
+              materialized.strategy,
+            ],
+            assignments: d?.assignments ?? [],
+          };
+        });
+        return {
+          strategyId: materialized.strategy.id,
+          warnings: materialized.warnings,
+        };
+      }
+      if (!canLive) throw new Error("No organization context");
+      await persistProspectingSeedBatch(
+        getFirebaseDb(),
+        organizationId,
+        materialized.personas,
+        materialized.strategy,
+      );
+      return {
+        strategyId: materialized.strategy.id,
+        warnings: materialized.warnings,
+      };
+    },
+    [ws.isDemo, ws.currentUserId, organizationId, canLive],
+  );
+
+  const installSamplePack = React.useCallback(async () => {
+    const parsed = parseStrategyPack(buildSampleB2bSaasPack());
+    if (!parsed.ok) throw new Error(parsed.error);
+    return importStrategyPack(parsed.pack);
+  }, [importStrategyPack]);
+
+  const exportStrategyPackFn = React.useCallback(
+    (strategyId: string): StrategyPack | null => {
+      const strategy = liveStrategies.find((s) => s.id === strategyId);
+      if (!strategy) return null;
+      return strategyToPack({
+        packId: strategy.id,
+        name: strategy.name,
+        description: strategy.description,
+        strategy,
+        personas: livePersonas,
+      });
+    },
+    [liveStrategies, livePersonas],
+  );
+
   const seedMasterPack = React.useCallback(async () => {
     const ownerId = ws.currentUserId;
     const personasSeed = buildSeedPersonas(organizationId || DEMO_WORKSPACE_ORG_ID, ownerId);
@@ -402,6 +489,9 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     addAssignment,
     updateAssignment,
     deleteAssignment,
+    installSamplePack,
+    importStrategyPack,
+    exportStrategyPack: exportStrategyPackFn,
     seedMasterPack,
     seedPerson1Pack,
   };

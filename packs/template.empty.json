@@ -1,0 +1,104 @@
+{
+  "packVersion": 1,
+  "packId": "template-empty",
+  "name": "Empty strategy pack template",
+  "description": "Canonical pack shape. Fill personas + strategy, then Import on Strategies. Remove fields you do not need; keep packVersion = 1.",
+  "personas": [
+    {
+      "id": "persona-local-1",
+      "name": "Example Buyer Persona",
+      "description": "Replace with a real buyer description.",
+      "department": "Operations",
+      "seniority": "VP / Director",
+      "titles": [
+        {
+          "title": "VP Operations",
+          "kind": "approved"
+        },
+        {
+          "title": "Recruiter",
+          "kind": "excluded"
+        }
+      ],
+      "industries": [],
+      "countries": [],
+      "responsibilities": [],
+      "businessGoals": [],
+      "painPoints": [],
+      "buyingTriggers": [],
+      "objections": [],
+      "relevantServices": [],
+      "relevantSignalIds": [],
+      "recommendedAngle": "Replace with the outreach angle for this persona.",
+      "priority": 100,
+      "active": true
+    }
+  ],
+  "strategy": {
+    "id": "strategy-local-1",
+    "name": "Untitled strategy",
+    "description": "Short description shown on My Strategy.",
+    "objective": "What this strategy is trying to achieve.",
+    "missionBlurb": "Why we prospect, how we qualify, and the four questions every prospect must answer.",
+    "status": "draft",
+    "priority": 50,
+    "personaRefs": [
+      "persona-local-1"
+    ],
+    "firmographics": {
+      "targetIndustries": [
+        "Example Industry"
+      ],
+      "excludedIndustries": [],
+      "targetCountries": [
+        "United States"
+      ],
+      "excludedCountries": [],
+      "targetRegions": [],
+      "requiredKeywords": [],
+      "excludedKeywords": [],
+      "companyExamples": "Good-fit company examples…",
+      "disqualifiedExamples": "Disqualified examples…"
+    },
+    "linkedSignals": [],
+    "qualityChecklist": [
+      {
+        "id": "qc-1",
+        "fieldKey": "companyName",
+        "label": "Company name + website",
+        "requirement": "required",
+        "sortOrder": 0
+      }
+    ],
+    "sopMarkdown": "## Daily process\n1. …\n",
+    "researchNotes": "Where to look and how to validate.",
+    "searchTemplates": [
+      {
+        "id": "st-1",
+        "label": "Example queries",
+        "queries": [
+          "\"example signal\" company 2026"
+        ]
+      }
+    ],
+    "dailyTargets": {
+      "completed": 150,
+      "uniqueCompanies": 90,
+      "maxContactsPerCompany": 2,
+      "verifiedEmails": 135,
+      "withEvidence": 150,
+      "withRecentSignal": 150,
+      "warm": 40,
+      "hot": 15,
+      "deeplyPersonalized": 15
+    },
+    "industryAllocations": [
+      {
+        "label": "Example Industry",
+        "target": 50
+      }
+    ],
+    "dailyTargetDefault": 150,
+    "version": 1
+  }
+}

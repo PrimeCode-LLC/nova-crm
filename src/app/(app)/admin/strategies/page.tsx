@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Loader2, Plus, Sprout } from "lucide-react";
+import { Download, Loader2, Plus, Sprout, Upload } from "lucide-react";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -20,6 +20,12 @@ import {
 import { emptyFirmographics } from "@/lib/prospecting-strategy/types";
 import type { ProspectingStrategy } from "@/lib/prospecting-strategy/types";
 import { DEFAULT_CHECKLIST } from "@/lib/prospecting-strategy/seed";
+import {
+  downloadJson,
+  emptyStrategyPackTemplate,
+  parseStrategyPack,
+  slugifyPackId,
+} from "@/lib/prospecting-strategy/pack";
 import {
   activeAssignmentsForUser,
   allocatedDailyTarget,
@@ -40,7 +46,9 @@ export default function AdminStrategiesPage() {
   const ws = useWorkspace();
   const data = useProspectingStrategyData();
   const [seeding, setSeeding] = React.useState(false);
+  const [importing, setImporting] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   const sorted = React.useMemo(
     () =>
@@ -95,13 +103,18 @@ export default function AdminStrategiesPage() {
     }
   };
 
-  const seed = async () => {
+  const installSample = async () => {
     setSeeding(true);
     try {
-      await data.seedMasterPack();
-      toast.success("Seeded master strategy + personas");
+      const result = await data.installSamplePack();
+      toast.success("Installed sample B2B SaaS pack", {
+        description: result.warnings.length
+          ? result.warnings.join(" · ")
+          : "Neutral demo strategy + personas (new ids).",
+      });
+      router.push(`/admin/strategies/${result.strategyId}`);
     } catch (e) {
-      toast.error("Seed failed", {
+      toast.error("Install failed", {
         description: e instanceof Error ? e.message : String(e),
       });
     } finally {
@@ -109,17 +122,48 @@ export default function AdminStrategiesPage() {
     }
   };
 
-  const seedPerson1 = async () => {
-    setSeeding(true);
+  const downloadTemplate = () => {
+    downloadJson("strategy-pack.template.json", emptyStrategyPackTemplate());
+    toast.success("Downloaded empty pack template");
+  };
+
+  const exportOne = (strategyId: string) => {
+    const pack = data.exportStrategyPack(strategyId);
+    if (!pack) {
+      toast.error("Strategy not found");
+      return;
+    }
+    downloadJson(`${slugifyPackId(pack.name)}.strategy-pack.json`, pack);
+    toast.success(`Exported ${pack.name}`);
+  };
+
+  const onImportFile = async (file: File | undefined) => {
+    if (!file) return;
+    setImporting(true);
     try {
-      await data.seedPerson1Pack();
-      toast.success("Seeded Person 1 supply-chain strategy + personas");
+      const text = await file.text();
+      let raw: unknown;
+      try {
+        raw = JSON.parse(text);
+      } catch {
+        throw new Error("Invalid JSON file");
+      }
+      const parsed = parseStrategyPack(raw);
+      if (!parsed.ok) throw new Error(parsed.error);
+      const result = await data.importStrategyPack(parsed.pack);
+      toast.success(`Imported “${parsed.pack.name}”`, {
+        description: result.warnings.length
+          ? result.warnings.join(" · ")
+          : "Created with new ids for this org.",
+      });
+      router.push(`/admin/strategies/${result.strategyId}`);
     } catch (e) {
-      toast.error("Seed failed", {
+      toast.error("Import failed", {
         description: e instanceof Error ? e.message : String(e),
       });
     } finally {
-      setSeeding(false);
+      setImporting(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -157,26 +201,37 @@ export default function AdminStrategiesPage() {
         title="Prospecting strategies"
         description="Guidance, personas, signal focus, checklists, and assignments — scoring stays in Intent Playbook."
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="application/json,.json"
+              className="hidden"
+              onChange={(e) => void onImportFile(e.target.files?.[0])}
+            />
             <Button
               size="sm"
               type="button"
               variant="outline"
-              disabled={seeding}
-              onClick={() => void seed()}
+              disabled={importing}
+              onClick={() => fileInputRef.current?.click()}
             >
-              {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sprout className="size-4" />}
-              Seed master pack
+              {importing ? <Loader2 className="size-4 animate-spin" /> : <Upload className="size-4" />}
+              Import pack
+            </Button>
+            <Button size="sm" type="button" variant="outline" onClick={downloadTemplate}>
+              <Download className="size-4" />
+              Pack template
             </Button>
             <Button
               size="sm"
               type="button"
               variant="outline"
               disabled={seeding}
-              onClick={() => void seedPerson1()}
+              onClick={() => void installSample()}
             >
               {seeding ? <Loader2 className="size-4 animate-spin" /> : <Sprout className="size-4" />}
-              Seed Person 1 pack
+              Install sample pack
             </Button>
             <Button size="sm" type="button" disabled={creating} onClick={() => void createBlank()}>
               {creating ? <Loader2 className="size-4 animate-spin" /> : <Plus className="size-4" />}
@@ -203,13 +258,15 @@ export default function AdminStrategiesPage() {
               <CardHeader>
                 <CardTitle className="text-base">All strategies</CardTitle>
                 <CardDescription>
-                  Publish a strategy, then assign people with allocation percentages that total 100%.
+                  Publish a strategy, then assign people with allocation percentages that total
+                  100%. Use <strong>Import pack</strong> for private JSON packs (e.g. your Stellix
+                  strategies). <strong>Install sample pack</strong> adds a neutral demo only.
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 {sorted.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-8 text-center">
-                    No strategies yet. Create one or seed the Stellix Soft master pack.
+                    No strategies yet. Import a pack, install the sample, or create a blank one.
                   </p>
                 ) : (
                   <ul className="divide-y rounded-md border">
@@ -250,12 +307,23 @@ export default function AdminStrategiesPage() {
                               ) : null}
                             </div>
                           </div>
-                          <Link
-                            href={`/admin/strategies/${s.id}`}
-                            className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
-                          >
-                            Open
-                          </Link>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <Button
+                              size="sm"
+                              type="button"
+                              variant="ghost"
+                              onClick={() => exportOne(s.id)}
+                            >
+                              <Download className="size-4" />
+                              Export
+                            </Button>
+                            <Link
+                              href={`/admin/strategies/${s.id}`}
+                              className={cn(buttonVariants({ size: "sm", variant: "outline" }))}
+                            >
+                              Open
+                            </Link>
+                          </div>
                         </li>
                       );
                     })}

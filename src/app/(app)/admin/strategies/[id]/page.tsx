@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { ArrowDown, ArrowLeft, ArrowUp, Loader2, Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, Download, Loader2, Plus, Trash2 } from "lucide-react";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -46,6 +46,7 @@ import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { selectTriggerLabelById, capitalizeSelectToken } from "@/lib/base-ui-select-label";
 import { COMPANY_SIZES, COMPANY_SIZE_LABELS, REVENUE_RANGES } from "@/lib/constants";
 import type { CompanySize, RevenueRange } from "@/lib/types";
+import { downloadJson, slugifyPackId } from "@/lib/prospecting-strategy/pack";
 
 const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
 
@@ -413,6 +414,23 @@ export default function StrategyDetailPage() {
               <ArrowLeft className="size-4" />
               Back
             </Link>
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const pack = data.exportStrategyPack(id);
+                if (!pack) {
+                  toast.error("Nothing to export");
+                  return;
+                }
+                downloadJson(`${slugifyPackId(pack.name)}.strategy-pack.json`, pack);
+                toast.success("Pack exported");
+              }}
+            >
+              <Download className="size-4" />
+              Export pack
+            </Button>
             <Select
               value={draft.status}
               onValueChange={(v) =>

@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "export:strategy-packs": "npx --yes tsx scripts/export-strategy-packs.ts",
     "dev:import-local": "npm --prefix functions run build && firebase emulators:exec --config firebase.emulator-test.json --only firestore,functions \"node scripts/start-local-import-dev.mjs\"",
     "firebase:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
     "firebase:deploy:indexes": "npx firebase-tools deploy --only firestore:indexes",
