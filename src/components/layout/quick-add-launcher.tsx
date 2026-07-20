@@ -72,16 +72,11 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
           initialLeadStage={opts.initialLeadStage}
         />
       ) : null}
-      {newProspectOpen ? (
-        <NewProspectDialog
-          open={newProspectOpen}
-          onOpenChange={(o) => {
-            setNewProspectOpen(o);
-            if (!o) setProspectPrefill(undefined);
-          }}
-          initialPrefill={prospectPrefill}
-        />
-      ) : null}
+      <NewProspectDialog
+        open={newProspectOpen}
+        onOpenChange={setNewProspectOpen}
+        initialPrefill={prospectPrefill}
+      />
     </QuickAddLauncherContext.Provider>
   );
 }

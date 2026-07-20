@@ -35,6 +35,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -72,13 +82,23 @@ import {
 } from "@/lib/hooks/use-prospecting-strategy-data";
 import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
 import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
-import { evaluateQualifyGate, formatPersonalizationNote } from "@/lib/prospecting-strategy/qualify";
+import { evaluateQualifyGate, formatPersonalizationNote, type QualifyIssue } from "@/lib/prospecting-strategy/qualify";
 import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
 import {
   emptyQualifyFormState,
   ProspectQualifyPanel,
   type ProspectQualifyFormState,
 } from "@/components/prospecting/prospect-qualify-panel";
+import {
+  clearNewProspectDraft,
+  emptyNewProspectFormDraft,
+  isNewProspectFormDraftEmpty,
+  loadNewProspectDraft,
+  mergePrefillIntoDraft,
+  saveNewProspectDraft,
+  serializeNewProspectDraft,
+  type NewProspectFormDraft,
+} from "@/lib/new-prospect-form-draft";
 
 const UNSET = "__unset__" as const;
 
@@ -284,10 +304,14 @@ export function NewProspectDialog({
   const [showAdvancedCompany, setShowAdvancedCompany] = React.useState(false);
   const [strategyId, setStrategyId] = React.useState(initialPrefill?.strategyId ?? "");
   const [personaId, setPersonaId] = React.useState(initialPrefill?.personaId ?? "");
-  const [strategyAssignmentIdPrefill] = React.useState(
+  const [strategyAssignmentId, setStrategyAssignmentId] = React.useState(
     initialPrefill?.strategyAssignmentId ?? "",
   );
-  const [strategyVersionPrefill] = React.useState(initialPrefill?.strategyVersion);
+  const [strategyVersion, setStrategyVersion] = React.useState<number | undefined>(
+    initialPrefill?.strategyVersion,
+  );
+
+  const [qualifyForm, setQualifyForm] = React.useState<ProspectQualifyFormState>(emptyQualifyFormState);
 
   const prospecting = useProspectingStrategyData();
   const myActiveAssignments = React.useMemo(
@@ -311,18 +335,6 @@ export function NewProspectDialog({
       : selectedStrategy.personaIds;
     return prospecting.personas.filter((p) => pids.includes(p.id) && p.active);
   }, [selectedStrategy, myActiveAssignments, prospecting.personas]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    if (initialPrefill?.strategyId) setStrategyId(initialPrefill.strategyId);
-    if (initialPrefill?.personaId) setPersonaId(initialPrefill.personaId);
-  }, [open, initialPrefill?.strategyId, initialPrefill?.personaId]);
-
-  const [qualifyForm, setQualifyForm] = React.useState<ProspectQualifyFormState>(emptyQualifyFormState);
-
-  React.useEffect(() => {
-    if (open) setQualifyForm(emptyQualifyFormState());
-  }, [open]);
 
   const maxContacts =
     resolveDailyTargets(selectedStrategy).maxContactsPerCompany ?? 2;
@@ -360,6 +372,263 @@ export function NewProspectDialog({
   const [linkedin, setLinkedin] = React.useState(F.linkedin);
 
   const [submitting, setSubmitting] = React.useState(false);
+  const [discardOpen, setDiscardOpen] = React.useState(false);
+  const [qualifyBlockerOpen, setQualifyBlockerOpen] = React.useState(false);
+  const [qualifyBlockerIssues, setQualifyBlockerIssues] = React.useState<QualifyIssue[]>([]);
+  const [baselineSerialized, setBaselineSerialized] = React.useState(() =>
+    serializeNewProspectDraft(emptyNewProspectFormDraft()),
+  );
+  const wasOpenRef = React.useRef(false);
+  const restoredToastShownRef = React.useRef(false);
+  const pendingBaselineSyncRef = React.useRef(false);
+
+  const buildDraft = React.useCallback((): NewProspectFormDraft => {
+    return {
+      v: 1,
+      channel,
+      profileId,
+      stage,
+      temperature,
+      priority,
+      leadNotes,
+      triggerEvent,
+      painPoints,
+      doNotContact,
+      nextAction,
+      showAdvancedCompany,
+      strategyId,
+      personaId,
+      strategyAssignmentId,
+      strategyVersion,
+      bizName,
+      industry,
+      bizDesc,
+      city,
+      state,
+      country,
+      yearFounded,
+      bizStatus,
+      size,
+      rev,
+      website,
+      companyLinkedin,
+      webStatus,
+      techStackStr,
+      activity,
+      lastSiteAt,
+      lastSiteNote,
+      careersUrl,
+      firstName,
+      lastName,
+      title,
+      seniority,
+      contactLocation,
+      email,
+      personalEmail,
+      emailVerify,
+      phone,
+      contactSource,
+      bestChannel,
+      linkedin,
+      qualifyForm,
+    };
+  }, [
+    activity,
+    bestChannel,
+    bizDesc,
+    bizName,
+    bizStatus,
+    careersUrl,
+    channel,
+    city,
+    companyLinkedin,
+    contactLocation,
+    contactSource,
+    country,
+    doNotContact,
+    email,
+    emailVerify,
+    firstName,
+    industry,
+    lastName,
+    lastSiteAt,
+    lastSiteNote,
+    leadNotes,
+    linkedin,
+    nextAction,
+    painPoints,
+    personaId,
+    personalEmail,
+    phone,
+    priority,
+    profileId,
+    qualifyForm,
+    rev,
+    seniority,
+    showAdvancedCompany,
+    size,
+    stage,
+    state,
+    strategyAssignmentId,
+    strategyId,
+    strategyVersion,
+    techStackStr,
+    temperature,
+    title,
+    triggerEvent,
+    webStatus,
+    website,
+    yearFounded,
+  ]);
+
+  const applyDraft = React.useCallback((draft: NewProspectFormDraft) => {
+    setChannel(draft.channel);
+    setProfileId(draft.profileId);
+    setStage(draft.stage);
+    setTemperature(draft.temperature);
+    setPriority(draft.priority);
+    setLeadNotes(draft.leadNotes);
+    setTriggerEvent(draft.triggerEvent);
+    setPainPoints(draft.painPoints);
+    setDoNotContact(draft.doNotContact);
+    setNextAction(draft.nextAction);
+    setShowAdvancedCompany(draft.showAdvancedCompany);
+    setStrategyId(draft.strategyId);
+    setPersonaId(draft.personaId);
+    setStrategyAssignmentId(draft.strategyAssignmentId);
+    setStrategyVersion(draft.strategyVersion);
+    setBizName(draft.bizName);
+    setIndustry(draft.industry);
+    setBizDesc(draft.bizDesc);
+    setCity(draft.city);
+    setState(draft.state);
+    setCountry(draft.country);
+    setYearFounded(draft.yearFounded);
+    setBizStatus(draft.bizStatus);
+    setSize(draft.size);
+    setRev(draft.rev);
+    setWebsite(draft.website);
+    setCompanyLinkedin(draft.companyLinkedin);
+    setWebStatus(draft.webStatus);
+    setTechStackStr(draft.techStackStr);
+    setActivity(draft.activity);
+    setLastSiteAt(draft.lastSiteAt);
+    setLastSiteNote(draft.lastSiteNote);
+    setCareersUrl(draft.careersUrl);
+    setFirstName(draft.firstName);
+    setLastName(draft.lastName);
+    setTitle(draft.title);
+    setSeniority(draft.seniority);
+    setContactLocation(draft.contactLocation);
+    setEmail(draft.email);
+    setPersonalEmail(draft.personalEmail);
+    setEmailVerify(draft.emailVerify);
+    setPhone(draft.phone);
+    setContactSource(draft.contactSource);
+    setBestChannel(draft.bestChannel);
+    setLinkedin(draft.linkedin);
+    setQualifyForm(draft.qualifyForm);
+  }, []);
+
+  const resetForm = React.useCallback(() => {
+    applyDraft(emptyNewProspectFormDraft());
+  }, [applyDraft]);
+
+  const syncBaseline = React.useCallback(() => {
+    setBaselineSerialized(serializeNewProspectDraft(buildDraft()));
+  }, [buildDraft]);
+
+  const isDirty = React.useMemo(() => {
+    return serializeNewProspectDraft(buildDraft()) !== baselineSerialized;
+  }, [baselineSerialized, buildDraft]);
+
+  const finalizeClose = React.useCallback(
+    (options?: { discard?: boolean }) => {
+      if (options?.discard) {
+        resetForm();
+        clearNewProspectDraft(effectiveUid);
+        syncBaseline();
+      } else if (!isDirty) {
+        clearNewProspectDraft(effectiveUid);
+      }
+      setDiscardOpen(false);
+      onOpenChange(false);
+    },
+    [effectiveUid, isDirty, onOpenChange, resetForm, syncBaseline],
+  );
+
+  const requestClose = React.useCallback(() => {
+    if (isDirty) {
+      setDiscardOpen(true);
+      return;
+    }
+    finalizeClose();
+  }, [finalizeClose, isDirty]);
+
+  const handleDialogOpenChange = React.useCallback(
+    (nextOpen: boolean, eventDetails?: { cancel?: () => void }) => {
+      if (nextOpen) {
+        onOpenChange(true);
+        return;
+      }
+      if (isDirty) {
+        eventDetails?.cancel?.();
+        setDiscardOpen(true);
+        return;
+      }
+      finalizeClose();
+    },
+    [finalizeClose, isDirty, onOpenChange],
+  );
+
+  React.useEffect(() => {
+    if (!open) {
+      wasOpenRef.current = false;
+      restoredToastShownRef.current = false;
+      return;
+    }
+
+    const justOpened = !wasOpenRef.current;
+    wasOpenRef.current = true;
+    if (!justOpened) return;
+
+    const stored = loadNewProspectDraft(effectiveUid);
+    const inMemoryEmpty = isNewProspectFormDraftEmpty(buildDraft());
+
+    if (stored && !isNewProspectFormDraftEmpty(stored) && inMemoryEmpty) {
+      applyDraft(stored);
+      if (!restoredToastShownRef.current) {
+        restoredToastShownRef.current = true;
+        toast.message("Restored your unsaved prospect draft.");
+      }
+    } else if (inMemoryEmpty) {
+      applyDraft(mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill));
+    } else {
+      applyDraft(mergePrefillIntoDraft(buildDraft(), initialPrefill));
+    }
+    pendingBaselineSyncRef.current = true;
+  }, [
+    open,
+    effectiveUid,
+    applyDraft,
+    buildDraft,
+    initialPrefill,
+    resetForm,
+  ]);
+
+  React.useEffect(() => {
+    if (!pendingBaselineSyncRef.current) return;
+    pendingBaselineSyncRef.current = false;
+    syncBaseline();
+  });
+
+  React.useEffect(() => {
+    if (!open || !isDirty) return;
+    const handle = window.setTimeout(() => {
+      saveNewProspectDraft(effectiveUid, buildDraft());
+    }, 400);
+    return () => window.clearTimeout(handle);
+  }, [open, isDirty, effectiveUid, buildDraft]);
 
   const channelNeedsProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel);
   const profileOptionsForChannel = React.useMemo(
@@ -390,8 +659,7 @@ export function NewProspectDialog({
     triggerEvent,
   ]);
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function createProspect(skipQualifyGate: boolean) {
     const oid = effectiveUid?.trim() ?? "";
     if (!oid) {
       toast.error("Sign in to create a prospect.");
@@ -427,7 +695,7 @@ export function NewProspectDialog({
             label: "View",
             onClick: () => {
               router.push(`/contacts/${existing.id}`);
-              onOpenChange(false);
+              requestClose();
             },
           },
         });
@@ -467,6 +735,7 @@ export function NewProspectDialog({
     );
     const emailIsVerified = emailVerify === "verified";
 
+    let prospectQualifyStatus = qualifyForm.qualifyStatus;
     if (qualifyForm.qualifyStatus === "completed") {
       const gate = evaluateQualifyGate({
         companyName: bn,
@@ -483,14 +752,12 @@ export function NewProspectDialog({
         maxContactsPerCompany: maxContacts,
       });
       if (!gate.ok) {
-        toast.error("Cannot mark as completed", {
-          description: gate.issues
-            .filter((i) => i.blocking)
-            .map((i) => i.message)
-            .slice(0, 3)
-            .join(" · "),
-        });
-        return;
+        if (!skipQualifyGate) {
+          setQualifyBlockerIssues(gate.issues.filter((i) => i.blocking));
+          setQualifyBlockerOpen(true);
+          return;
+        }
+        prospectQualifyStatus = "incomplete";
       }
     }
     if (qualifyForm.qualifyStatus === "rejected" && !qualifyForm.rejectionReason) {
@@ -606,10 +873,10 @@ export function NewProspectDialog({
       strategyId: strategyId || undefined,
       personaId: personaId || undefined,
       strategyVersion: strategyId
-        ? strategyVersionPrefill ?? selectedStrategy?.version
+        ? strategyVersion ?? selectedStrategy?.version
         : undefined,
       strategyAssignmentId: strategyId
-        ? strategyAssignmentIdPrefill ||
+        ? strategyAssignmentId ||
           myActiveAssignments.find((a) => a.strategyId === strategyId)?.id
         : undefined,
       intentEvidence:
@@ -617,7 +884,7 @@ export function NewProspectDialog({
           ? qualifyForm.evidence
           : undefined,
       personalizationNote: qualifyForm.personalization,
-      prospectQualifyStatus: qualifyForm.qualifyStatus,
+      prospectQualifyStatus,
       rejectionReason:
         qualifyForm.qualifyStatus === "rejected" && qualifyForm.rejectionReason
           ? qualifyForm.rejectionReason
@@ -675,7 +942,14 @@ export function NewProspectDialog({
         summary: `Prospect created by ${creatorLabel} for ${channelLabelFromValue(channel, channelOptions) || channel}. Add channel assignments when ready.`,
         createdAt: now,
       });
-      toast.success("Prospect created — add channels when ready.");
+      toast.success(
+        prospectQualifyStatus === "incomplete" && qualifyForm.qualifyStatus === "completed"
+          ? "Prospect created as incomplete — finish qualification on the record when ready."
+          : "Prospect created — add channels when ready.",
+      );
+      resetForm();
+      clearNewProspectDraft(effectiveUid);
+      pendingBaselineSyncRef.current = true;
       onOpenChange(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -685,8 +959,14 @@ export function NewProspectDialog({
     }
   }
 
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await createProspect(false);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    <Dialog open={open} onOpenChange={handleDialogOpenChange}>
       <DialogContent
         className="flex flex-col min-h-0 sm:max-w-3xl w-[calc(100vw-1.5rem)] max-h-[min(92vh,880px)] overflow-hidden gap-0 p-0"
         showCloseButton
@@ -1280,7 +1560,7 @@ export function NewProspectDialog({
           </div>
 
           <DialogFooter className="px-6 py-4 border-t shrink-0 bg-muted/20">
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
+            <Button type="button" variant="outline" onClick={requestClose} disabled={submitting}>
               Cancel
             </Button>
             <Button type="submit" disabled={submitting}>
@@ -1290,5 +1570,55 @@ export function NewProspectDialog({
         </form>
       </DialogContent>
     </Dialog>
+
+    <AlertDialog open={qualifyBlockerOpen} onOpenChange={setQualifyBlockerOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Qualification not complete</AlertDialogTitle>
+          <AlertDialogDescription>
+            This prospect does not meet your completed qualification rules yet. You can go back
+            and add evidence, or create it anyway as an incomplete draft.
+          </AlertDialogDescription>
+          {qualifyBlockerIssues.length ? (
+            <ul className="list-disc space-y-1 pl-4 text-sm text-destructive">
+              {qualifyBlockerIssues.map((issue) => (
+                <li key={issue.code}>{issue.message}</li>
+              ))}
+            </ul>
+          ) : null}
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={submitting}>Keep editing</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={submitting}
+            onClick={() => {
+              setQualifyBlockerOpen(false);
+              void createProspect(true);
+            }}
+          >
+            Create prospect anyway
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+
+    <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Discard unsaved prospect?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Your entries are saved locally while you work, but closing now without creating will discard
+            this draft unless you keep editing.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep editing</AlertDialogCancel>
+          <AlertDialogAction onClick={() => finalizeClose({ discard: true })}>
+            Discard
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   );
 }

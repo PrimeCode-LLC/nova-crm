@@ -125,7 +125,7 @@ export function ProspectQualifyPanel({
       </div>
 
       {gate.issues.length > 0 ? (
-        <ul className="space-y-1 text-xs">
+        <ul className="mb-3 space-y-1 text-xs">
           {gate.issues.map((issue) => (
             <li
               key={issue.code}
