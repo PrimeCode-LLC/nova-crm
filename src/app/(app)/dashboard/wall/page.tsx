@@ -2,9 +2,20 @@
 
 import * as React from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Maximize2, Minimize2, Monitor, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { OwnerOpsBoard } from "@/components/dashboard/owner-ops-board";
+import {
+  WallPinLockOverlay,
+  WallPinSetupFields,
+  clearStoredWallPinHash,
+  hashWallPin,
+  isValidWallPin,
+  readStoredWallPinHash,
+  writeStoredWallPinHash,
+  WALL_PIN_GUARD_ACTOR,
+} from "@/components/dashboard/wall-pin-lock";
 import { cn } from "@/lib/utils";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
@@ -14,10 +25,40 @@ import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
 import { roleAtLeast } from "@/lib/platform/org-role";
+import { getFirebaseDb } from "@/lib/firebase/client";
+import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { persistUserNotificationCreate } from "@/lib/notifications/persist-user-notification-client";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
-import type { OrgMemberRole } from "@/lib/types";
+import type { OrgActivityEvent, OrgMemberRole } from "@/lib/types";
+
+function newOrgActivityId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `oa-${crypto.randomUUID()}`;
+  }
+  return `oa-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+async function lockEscapeKey() {
+  try {
+    const kb = (navigator as Navigator & { keyboard?: { lock?: (keys?: string[]) => Promise<void> } })
+      .keyboard;
+    if (kb?.lock) await kb.lock(["Escape"]);
+  } catch {
+    /* unsupported or permission denied */
+  }
+}
+
+function unlockEscapeKey() {
+  try {
+    const kb = (navigator as Navigator & { keyboard?: { unlock?: () => void } }).keyboard;
+    kb?.unlock?.();
+  } catch {
+    /* ignore */
+  }
+}
 
 export default function DashboardWallPage() {
+  const router = useRouter();
   const {
     leads,
     deals,
@@ -33,6 +74,8 @@ export default function DashboardWallPage() {
     workspaceLoading,
     isDemo,
     viewerOrgRole,
+    organizationId,
+    addOrgActivityEvent,
   } = useWorkspace();
 
   const viewer = currentUserId ? getUserById(currentUserId) : undefined;
@@ -42,6 +85,17 @@ export default function DashboardWallPage() {
   const [clock, setClock] = React.useState(() => new Date());
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [fsError, setFsError] = React.useState<string | null>(null);
+
+  const [pin, setPin] = React.useState("");
+  const [pinConfirm, setPinConfirm] = React.useState("");
+  const [pinSetupError, setPinSetupError] = React.useState<string | null>(null);
+  const [armedHash, setArmedHash] = React.useState<string | null>(() => readStoredWallPinHash());
+  const [lockOpen, setLockOpen] = React.useState(() => Boolean(readStoredWallPinHash()));
+  const armedRef = React.useRef(Boolean(readStoredWallPinHash()));
+
+  React.useEffect(() => {
+    armedRef.current = Boolean(armedHash);
+  }, [armedHash]);
 
   React.useEffect(() => {
     setOpen(false);
@@ -53,6 +107,7 @@ export default function DashboardWallPage() {
     document.body.style.overflow = "hidden";
     return () => {
       document.body.style.overflow = prevOverflow;
+      unlockEscapeKey();
       if (document.fullscreenElement) {
         void document.exitFullscreen().catch(() => undefined);
       }
@@ -62,8 +117,16 @@ export default function DashboardWallPage() {
   React.useEffect(() => {
     const id = window.setInterval(() => setClock(new Date()), 30_000);
     const onFs = () => {
-      setIsFullscreen(Boolean(document.fullscreenElement));
-      if (document.fullscreenElement) setFsError(null);
+      const fs = Boolean(document.fullscreenElement);
+      setIsFullscreen(fs);
+      if (fs) {
+        setFsError(null);
+        void lockEscapeKey();
+        if (armedRef.current) setLockOpen(false);
+      } else {
+        unlockEscapeKey();
+        if (armedRef.current) setLockOpen(true);
+      }
     };
     document.addEventListener("fullscreenchange", onFs);
     return () => {
@@ -71,6 +134,31 @@ export default function DashboardWallPage() {
       document.removeEventListener("fullscreenchange", onFs);
     };
   }, []);
+
+  /** Warn on tab close/reload while armed. */
+  React.useEffect(() => {
+    if (!armedHash) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [armedHash]);
+
+  /** Trap browser Back while armed — re-open lock instead of leaving. */
+  React.useEffect(() => {
+    if (!armedHash) return;
+    const marker = { wallPin: true };
+    window.history.pushState(marker, "", window.location.href);
+    const onPop = () => {
+      if (!armedRef.current) return;
+      window.history.pushState(marker, "", window.location.href);
+      setLockOpen(true);
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [armedHash]);
 
   const range: DashboardTimeRangeKey = "7d";
   const metrics = React.useMemo(
@@ -96,21 +184,104 @@ export default function DashboardWallPage() {
       if (!document.fullscreenElement) {
         await el.requestFullscreen();
       }
+      await lockEscapeKey();
     } catch {
       setFsError("Browser blocked fullscreen. Click again, or press F11 / Ctrl+Cmd+F.");
     }
+  }
+
+  async function armAndEnterFullscreen() {
+    setPinSetupError(null);
+    if (!isValidWallPin(pin)) {
+      setPinSetupError("PIN must be 4–6 digits.");
+      return;
+    }
+    if (pin !== pinConfirm) {
+      setPinSetupError("PINs do not match.");
+      return;
+    }
+    const hash = await hashWallPin(pin);
+    writeStoredWallPinHash(hash);
+    setArmedHash(hash);
+    armedRef.current = true;
+    setPin("");
+    setPinConfirm("");
+    await enterFullscreen();
+    // If the browser blocked fullscreen, stay on the board with Exit still PIN-gated.
+    if (!document.fullscreenElement) {
+      setLockOpen(false);
+    }
+  }
+
+  function requestExit() {
+    if (armedHash) {
+      setLockOpen(true);
+      return;
+    }
+    router.push("/dashboard");
   }
 
   async function toggleFullscreen() {
     try {
       if (!document.fullscreenElement) {
         await enterFullscreen();
+      } else if (armedHash) {
+        setLockOpen(true);
       } else {
         await document.exitFullscreen();
       }
     } catch {
       setFsError("Could not toggle fullscreen. Try F11 (Windows) or Ctrl+Cmd+F (Mac).");
     }
+  }
+
+  function emitWallActivity(type: "wall_exit_denied" | "wall_exited", summary: string) {
+    if (!currentUserId) return;
+    const event: OrgActivityEvent = {
+      id: newOrgActivityId(),
+      type,
+      actorId: currentUserId,
+      summary,
+      createdAt: new Date().toISOString(),
+      href: "/dashboard/wall",
+      entityType: "wall",
+      entityId: "display",
+    };
+    addOrgActivityEvent(event);
+  }
+
+  async function onDeniedAttempt() {
+    emitWallActivity("wall_exit_denied", "Wrong PIN entered on the wall display");
+    if (isDemo || !currentUserId || !organizationId || !isFirebaseWebConfigured()) return;
+    try {
+      const db = getFirebaseDb();
+      await persistUserNotificationCreate(db, {
+        organizationId,
+        recipientId: currentUserId,
+        actorId: WALL_PIN_GUARD_ACTOR,
+        kind: "security",
+        message: "Someone entered a wrong PIN trying to exit wall mode.",
+        target: "Wall display",
+        targetHref: "/dashboard/wall",
+      });
+    } catch {
+      /* best-effort */
+    }
+  }
+
+  async function onUnlockSuccess() {
+    emitWallActivity("wall_exited", "Wall display unlocked and exited");
+    clearStoredWallPinHash();
+    setArmedHash(null);
+    armedRef.current = false;
+    setLockOpen(false);
+    unlockEscapeKey();
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+    } catch {
+      /* ignore */
+    }
+    router.push("/dashboard");
   }
 
   if (workspaceLoading) {
@@ -143,6 +314,8 @@ export default function DashboardWallPage() {
     );
   }
 
+  const showSetupGate = !isFullscreen && !armedHash && !lockOpen;
+
   return (
     <div
       ref={rootRef}
@@ -151,18 +324,30 @@ export default function DashboardWallPage() {
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-br from-background via-background to-muted/40" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-chart-1/5 via-transparent to-transparent" />
 
-      {!isFullscreen ? (
+      {showSetupGate ? (
         <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/80 p-6 backdrop-blur-sm">
           <div className="max-w-md rounded-xl border bg-card p-6 text-center shadow-lg">
             <Monitor className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
             <h2 className="text-lg font-semibold tracking-tight">Enter TV / wall display</h2>
             <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-              Hides the CRM sidebar and top bar. Fullscreen also hides browser tabs and the address
-              bar — required for a clean office screen.
+              Hides the CRM sidebar and top bar. Set an exit PIN so the board stays protected if you
+              step away.
             </p>
-            <Button type="button" className="mt-5 w-full gap-2" onClick={() => void enterFullscreen()}>
+            <WallPinSetupFields
+              className="mt-4"
+              pin={pin}
+              confirm={pinConfirm}
+              onPinChange={setPin}
+              onConfirmChange={setPinConfirm}
+              error={pinSetupError}
+            />
+            <Button
+              type="button"
+              className="mt-5 w-full gap-2"
+              onClick={() => void armAndEnterFullscreen()}
+            >
               <Maximize2 className="h-4 w-4" />
-              Enter fullscreen
+              Arm PIN & enter fullscreen
             </Button>
             {fsError ? <p className="mt-3 text-xs text-destructive">{fsError}</p> : null}
             <p className="mt-3 text-[11px] text-muted-foreground">
@@ -177,6 +362,16 @@ export default function DashboardWallPage() {
             </Link>
           </div>
         </div>
+      ) : null}
+
+      {armedHash ? (
+        <WallPinLockOverlay
+          open={lockOpen}
+          pinHash={armedHash}
+          onUnlock={() => void onUnlockSuccess()}
+          onDenied={() => void onDeniedAttempt()}
+          onReenterFullscreen={() => void enterFullscreen()}
+        />
       ) : null}
 
       <header className="relative z-10 flex shrink-0 items-center justify-between gap-4 border-b border-border/60 bg-background/80 px-5 py-3 backdrop-blur-md">
@@ -205,13 +400,16 @@ export default function DashboardWallPage() {
           >
             {isFullscreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
           </Button>
-          <Link
-            href="/dashboard"
-            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="gap-1.5"
+            onClick={requestExit}
           >
             <X className="h-3.5 w-3.5" />
             Exit
-          </Link>
+          </Button>
         </div>
       </header>
 

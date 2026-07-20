@@ -971,7 +971,9 @@ export type OrgActivityEventType =
   | "strategy_assignment_removed"
   | "strategy_pack_imported"
   | "intake_promoted"
-  | "import_completed";
+  | "import_completed"
+  | "wall_exit_denied"
+  | "wall_exited";
 
 export interface OrgActivityEvent {
   id: string;

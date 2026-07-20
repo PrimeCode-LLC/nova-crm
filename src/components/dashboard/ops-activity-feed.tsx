@@ -11,6 +11,8 @@ import {
   NotebookPen,
   Package,
   Send,
+  ShieldAlert,
+  ShieldCheck,
   Sparkles,
   UploadCloud,
   UserPlus,
@@ -52,6 +54,8 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   strategy_pack_imported: Package,
   intake_promoted: UploadCloud,
   import_completed: UploadCloud,
+  wall_exit_denied: ShieldAlert,
+  wall_exited: ShieldCheck,
 };
 
 function feedHref(item: OpsFeedItem): string | undefined {

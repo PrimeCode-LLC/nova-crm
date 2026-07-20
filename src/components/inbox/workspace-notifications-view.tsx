@@ -25,6 +25,7 @@ import {
   Globe,
   Search,
   CheckCheck,
+  ShieldAlert,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { User } from "@/lib/types";
@@ -36,6 +37,7 @@ const KIND_ICONS: Record<NotificationKind, React.ElementType> = {
   idle: AlertTriangle,
   stage: TrendingUp,
   form: Globe,
+  security: ShieldAlert,
 };
 
 const KIND_COLORS: Record<NotificationKind, string> = {
@@ -45,6 +47,7 @@ const KIND_COLORS: Record<NotificationKind, string> = {
   idle: "bg-destructive/10 text-destructive",
   stage: "bg-success/10 text-success",
   form: "bg-violet-500/10 text-violet-400",
+  security: "bg-destructive/10 text-destructive",
 };
 
 function normalizeListSearch(raw: string): string {
@@ -78,7 +81,7 @@ export function WorkspaceNotificationsView() {
         if (tab === "unread") return !n.read;
         if (tab === "mentions") return n.kind === "mention";
         if (tab === "assignments") return n.kind === "assignment";
-        if (tab === "alerts") return n.kind === "idle" || n.kind === "followup";
+        if (tab === "alerts") return n.kind === "idle" || n.kind === "followup" || n.kind === "security";
         return true;
       })
       .filter((n) => notificationMatchesSearch(n, q, users));

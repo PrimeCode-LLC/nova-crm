@@ -7,7 +7,8 @@ export type NotificationKind =
   | "followup"
   | "idle"
   | "stage"
-  | "form";
+  | "form"
+  | "security";
 
 export interface DemoNotification {
   id: string;

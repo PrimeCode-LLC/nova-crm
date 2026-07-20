@@ -384,6 +384,8 @@ const ORG_FEED_TYPES = new Set<OrgActivityEventType>([
   "strategy_pack_imported",
   "intake_promoted",
   "import_completed",
+  "wall_exit_denied",
+  "wall_exited",
 ]);
 
 export function buildOpsActivityFeed(input: {
