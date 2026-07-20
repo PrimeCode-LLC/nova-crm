@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
+import { MarkdownContent } from "@/components/common/markdown-content";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -769,9 +770,9 @@ function StrategyWorkbench({
               label="Research notes"
               actions={<CopyButton label="research notes" value={strategy.researchNotes} />}
             >
-              <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+              <MarkdownContent className="text-muted-foreground">
                 {strategy.researchNotes}
-              </p>
+              </MarkdownContent>
             </FieldBlock>
           ) : null}
         </CollapsibleSection>
@@ -972,9 +973,7 @@ function StrategyWorkbench({
             onToggle={() => toggle("sop")}
             actions={<CopyButton label="SOP" value={strategy.sopMarkdown} />}
           >
-            <pre className="whitespace-pre-wrap text-sm font-sans leading-relaxed">
-              {strategy.sopMarkdown}
-            </pre>
+            <MarkdownContent>{strategy.sopMarkdown}</MarkdownContent>
           </CollapsibleSection>
         ) : null}
 

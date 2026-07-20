@@ -7,6 +7,7 @@ Portable JSON packs for prospecting strategies + linked buyer personas.
 | `template.empty.json` | Canonical empty template — match this shape for every new pack |
 | `sample-b2b-saas.json` | Neutral product sample (also installed via **Install sample pack**) |
 | `private/*.json` | Tenant-specific ICPs (gitignored) — generate then **Import pack** |
+| `private/seeds/` | Private seed sources for those packs (gitignored) |
 
 ## Regenerate
 

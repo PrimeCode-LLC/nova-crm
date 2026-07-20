@@ -327,6 +327,7 @@ export default function AdminBuyerPersonasPage() {
               <Input
                 value={draft.name}
                 onChange={(e) => setDraft((d) => ({ ...d, name: e.target.value }))}
+                placeholder="e.g. Supply Chain Executive"
               />
             </div>
             <div className="sm:col-span-2 space-y-1.5">
@@ -335,6 +336,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.description}
                 onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
+                placeholder="Who this buyer is and what they own — e.g. Operational buyer owning inventory flow and supply-chain tech."
               />
             </div>
             <div className="space-y-1.5">
@@ -342,6 +344,7 @@ export default function AdminBuyerPersonasPage() {
               <Input
                 value={draft.department}
                 onChange={(e) => setDraft((d) => ({ ...d, department: e.target.value }))}
+                placeholder="e.g. Supply Chain, Engineering, IT"
               />
             </div>
             <div className="space-y-1.5">
@@ -349,6 +352,7 @@ export default function AdminBuyerPersonasPage() {
               <Input
                 value={draft.seniority}
                 onChange={(e) => setDraft((d) => ({ ...d, seniority: e.target.value }))}
+                placeholder="e.g. C-level / VP / Director"
               />
             </div>
             <div className="space-y-1.5">
@@ -357,62 +361,85 @@ export default function AdminBuyerPersonasPage() {
                 rows={3}
                 value={draft.approvedTitles}
                 onChange={(e) => setDraft((d) => ({ ...d, approvedTitles: e.target.value }))}
+                placeholder={"VP Supply Chain\nDirector of Supply Chain\nChief Supply Chain Officer"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Similar titles</Label>
+              <p className="text-xs text-muted-foreground">
+                Acceptable alternatives — one per line.
+              </p>
               <Textarea
                 rows={3}
                 value={draft.similarTitles}
                 onChange={(e) => setDraft((d) => ({ ...d, similarTitles: e.target.value }))}
+                placeholder={"Head of Logistics\nWarehouse Operations Manager"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Excluded titles</Label>
+              <p className="text-xs text-muted-foreground">
+                Do not outreach these — one per line.
+              </p>
               <Textarea
                 rows={2}
                 value={draft.excludedTitles}
                 onChange={(e) => setDraft((d) => ({ ...d, excludedTitles: e.target.value }))}
+                placeholder={"Recruiter\nSales Director\nSoftware Engineer"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Industries</Label>
+              <p className="text-xs text-muted-foreground">One per line.</p>
               <Textarea
                 rows={2}
                 value={draft.industries}
                 onChange={(e) => setDraft((d) => ({ ...d, industries: e.target.value }))}
+                placeholder={"Logistics\nWarehousing\nManufacturing"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Pain points</Label>
+              <p className="text-xs text-muted-foreground">One per line.</p>
               <Textarea
                 rows={3}
                 value={draft.painPoints}
                 onChange={(e) => setDraft((d) => ({ ...d, painPoints: e.target.value }))}
+                placeholder={"Inventory inaccuracies\nLack of visibility\nFragmented systems"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Buying triggers</Label>
+              <p className="text-xs text-muted-foreground">
+                Events that open a conversation — one per line.
+              </p>
               <Textarea
                 rows={3}
                 value={draft.buyingTriggers}
                 onChange={(e) => setDraft((d) => ({ ...d, buyingTriggers: e.target.value }))}
+                placeholder={"RFID rollout\nNew distribution center\nWMS replacement"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Relevant services</Label>
+              <p className="text-xs text-muted-foreground">
+                Stellix Soft offerings this persona buys — one per line.
+              </p>
               <Textarea
                 rows={2}
                 value={draft.relevantServices}
                 onChange={(e) => setDraft((d) => ({ ...d, relevantServices: e.target.value }))}
+                placeholder={"RFID and asset tracking\nERP and WMS integrations\nReal-time dashboards"}
               />
             </div>
             <div className="space-y-1.5">
               <Label>Countries</Label>
+              <p className="text-xs text-muted-foreground">One per line.</p>
               <Textarea
                 rows={2}
                 value={draft.countries}
                 onChange={(e) => setDraft((d) => ({ ...d, countries: e.target.value }))}
+                placeholder={"United States\nCanada"}
               />
             </div>
             <div className="sm:col-span-2 space-y-1.5">
@@ -421,6 +448,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.recommendedAngle}
                 onChange={(e) => setDraft((d) => ({ ...d, recommendedAngle: e.target.value }))}
+                placeholder="e.g. Lead with the software and dashboards around their supply-chain visibility initiative."
               />
             </div>
             <div className="sm:col-span-2 space-y-1.5">
@@ -429,6 +457,21 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.valueProposition}
                 onChange={(e) => setDraft((d) => ({ ...d, valueProposition: e.target.value }))}
+                placeholder="e.g. Give supply-chain leaders real-time inventory visibility through RFID/IoT, dashboards, and ERP/WMS integrations."
+              />
+            </div>
+            <div className="sm:col-span-2 space-y-1.5">
+              <Label>Personalization notes</Label>
+              <p className="text-xs text-muted-foreground">
+                Guidance researchers follow when writing the note (trigger → impact → service → angle).
+              </p>
+              <Textarea
+                rows={3}
+                value={draft.personalizationNotes}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, personalizationNotes: e.target.value }))
+                }
+                placeholder={`Trigger: what recently happened?\nLikely impact: what need does it create?\nRelevant service: which capability addresses it?\nAngle: what should the message lead with?`}
               />
             </div>
             <div className="space-y-1.5">
@@ -437,6 +480,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.goodExamples}
                 onChange={(e) => setDraft((d) => ({ ...d, goodExamples: e.target.value }))}
+                placeholder="e.g. A 3PL announcing a new DC + hiring a WMS admin — Hot when VP Supply Chain is attached."
               />
             </div>
             <div className="space-y-1.5">
@@ -445,6 +489,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.badExamples}
                 onChange={(e) => setDraft((d) => ({ ...d, badExamples: e.target.value }))}
+                placeholder="e.g. SAP present with no project, pain, or hiring — technology alone is not intent."
               />
             </div>
             <div className="space-y-1.5">
@@ -453,6 +498,7 @@ export default function AdminBuyerPersonasPage() {
                 type="number"
                 value={draft.priority}
                 onChange={(e) => setDraft((d) => ({ ...d, priority: e.target.value }))}
+                placeholder="Higher = preferred (e.g. 100)"
               />
             </div>
             <div className="flex items-center gap-2 pt-6">

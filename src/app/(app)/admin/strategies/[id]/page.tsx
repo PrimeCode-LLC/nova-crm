@@ -17,6 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { MarkdownField } from "@/components/common/markdown-field";
 import {
   Select,
   SelectContent,
@@ -50,16 +51,20 @@ import { downloadJson, slugifyPackId } from "@/lib/prospecting-strategy/pack";
 
 const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
 
-const DAILY_TARGET_FIELDS: { key: keyof StrategyDailyTargets; label: string }[] = [
-  { key: "completed", label: "Completed / day" },
-  { key: "uniqueCompanies", label: "Unique companies" },
-  { key: "maxContactsPerCompany", label: "Max contacts / company" },
-  { key: "verifiedEmails", label: "Verified emails" },
-  { key: "withEvidence", label: "With evidence URL" },
-  { key: "withRecentSignal", label: "With recent signal" },
-  { key: "warm", label: "Warm" },
-  { key: "hot", label: "Hot" },
-  { key: "deeplyPersonalized", label: "Deeply personalized" },
+const DAILY_TARGET_FIELDS: {
+  key: keyof StrategyDailyTargets;
+  label: string;
+  placeholder: string;
+}[] = [
+  { key: "completed", label: "Completed / day", placeholder: "e.g. 150" },
+  { key: "uniqueCompanies", label: "Unique companies", placeholder: "e.g. 90" },
+  { key: "maxContactsPerCompany", label: "Max contacts / company", placeholder: "e.g. 2" },
+  { key: "verifiedEmails", label: "Verified emails", placeholder: "e.g. 135" },
+  { key: "withEvidence", label: "With evidence URL", placeholder: "e.g. 150" },
+  { key: "withRecentSignal", label: "With recent signal", placeholder: "e.g. 150" },
+  { key: "warm", label: "Warm", placeholder: "e.g. 40" },
+  { key: "hot", label: "Hot", placeholder: "e.g. 15" },
+  { key: "deeplyPersonalized", label: "Deeply personalized", placeholder: "e.g. 15" },
 ];
 
 function parseLines(raw: string): string[] {
@@ -481,6 +486,7 @@ export default function StrategyDetailPage() {
                   <Input
                     value={draft.name}
                     onChange={(e) => setDraft((d) => (d ? { ...d, name: e.target.value } : d))}
+                    placeholder="e.g. Supply Chain & Logistics Prospecting"
                   />
                 </div>
                 <div className="sm:col-span-2 space-y-1.5">
@@ -491,6 +497,7 @@ export default function StrategyDetailPage() {
                     onChange={(e) =>
                       setDraft((d) => (d ? { ...d, description: e.target.value } : d))
                     }
+                    placeholder="One or two sentences shown in the strategy list — who this assignment is for and what they hunt."
                   />
                 </div>
                 <div className="sm:col-span-2 space-y-1.5">
@@ -501,17 +508,30 @@ export default function StrategyDetailPage() {
                     onChange={(e) =>
                       setDraft((d) => (d ? { ...d, objective: e.target.value } : d))
                     }
+                    placeholder="e.g. Identify mid-market manufacturers with recent RFID / WMS / warehouse-expansion intent…"
                   />
                 </div>
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label>Mission blurb (pinned on My Strategy)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    What researchers see first — include what to find, what not to submit, and the
+                    qualifying questions every prospect must answer.
+                  </p>
                   <Textarea
                     rows={5}
                     value={draft.missionBlurb ?? ""}
                     onChange={(e) =>
                       setDraft((d) => (d ? { ...d, missionBlurb: e.target.value } : d))
                     }
-                    placeholder="Four questions, what not to submit, how to start with signals…"
+                    placeholder={`Your responsibility is to find companies that…
+
+Start with a recent signal, validate the company, identify the right buyer, verify the email, and attach evidence.
+
+A qualified prospect must answer:
+1. Why this company?
+2. Why this decision-maker?
+3. Why now?
+4. Which service is relevant?`}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -527,6 +547,7 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder="e.g. 150"
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -539,6 +560,7 @@ export default function StrategyDetailPage() {
                         d ? { ...d, priority: Number(e.target.value) || 0 } : d,
                       )
                     }
+                    placeholder="Higher = listed first (e.g. 100)"
                   />
                 </div>
                 <div className="sm:col-span-2 flex items-center gap-2 text-xs text-muted-foreground">
@@ -558,6 +580,7 @@ export default function StrategyDetailPage() {
               <CardContent className="grid gap-3 sm:grid-cols-2">
                 <div className="space-y-1.5">
                   <Label>Target industries</Label>
+                  <p className="text-xs text-muted-foreground">One industry per line.</p>
                   <Textarea
                     rows={3}
                     value={draft.firmographics.targetIndustries.join("\n")}
@@ -574,10 +597,12 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder={"Logistics\nWarehousing\nManufacturing\nHealthcare technology"}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Excluded industries</Label>
+                  <p className="text-xs text-muted-foreground">One industry per line.</p>
                   <Textarea
                     rows={3}
                     value={draft.firmographics.excludedIndustries.join("\n")}
@@ -594,10 +619,12 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder={"Marketing agencies\nRecruitment agencies\nSolo consultants"}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Target countries</Label>
+                  <p className="text-xs text-muted-foreground">One country per line. Primary geography first.</p>
                   <Textarea
                     rows={2}
                     value={draft.firmographics.targetCountries.join("\n")}
@@ -614,10 +641,14 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder={"United States\nCanada\nUnited Kingdom"}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Regions / states</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Priority regions — not hard restrictions. One per line.
+                  </p>
                   <Textarea
                     rows={2}
                     value={draft.firmographics.targetRegions.join("\n")}
@@ -634,6 +665,7 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder={"Texas\nCalifornia\nIllinois\nNew York"}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -780,6 +812,9 @@ export default function StrategyDetailPage() {
                 </div>
                 <div className="space-y-1.5">
                   <Label>Required keywords</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Must appear in research (optional). One per line.
+                  </p>
                   <Textarea
                     rows={2}
                     value={draft.firmographics.requiredKeywords.join("\n")}
@@ -796,10 +831,14 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder={"warehouse\ninventory tracking"}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Excluded keywords</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Disqualify if these dominate. One per line.
+                  </p>
                   <Textarea
                     rows={2}
                     value={draft.firmographics.excludedKeywords.join("\n")}
@@ -816,10 +855,14 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder={"website design only\nstaffing agency"}
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Good company examples</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Concrete “this is a great fit” examples for researchers.
+                  </p>
                   <Textarea
                     rows={2}
                     value={draft.firmographics.companyExamples ?? ""}
@@ -836,10 +879,14 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder="e.g. A 600-employee 3PL announcing a new DC while hiring a WMS administrator."
                   />
                 </div>
                 <div className="space-y-1.5">
                   <Label>Disqualified examples</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Concrete “do not submit” examples and why.
+                  </p>
                   <Textarea
                     rows={2}
                     value={draft.firmographics.disqualifiedExamples ?? ""}
@@ -856,6 +903,7 @@ export default function StrategyDetailPage() {
                           : d,
                       )
                     }
+                    placeholder="e.g. A 12-person trucking company with no tech team or recent project — too small, no intent."
                   />
                 </div>
               </CardContent>
@@ -950,6 +998,7 @@ export default function StrategyDetailPage() {
                                     priority: Number(e.target.value) || 0,
                                   })
                                 }
+                                placeholder="e.g. 100"
                               />
                             </div>
                             <div className="space-y-1">
@@ -964,6 +1013,7 @@ export default function StrategyDetailPage() {
                                       : undefined,
                                   })
                                 }
+                                placeholder="e.g. 90"
                               />
                             </div>
                             <div className="space-y-1">
@@ -1010,6 +1060,7 @@ export default function StrategyDetailPage() {
                                 onChange={(e) =>
                                   updateLinkedSignal(sig.id, { instructions: e.target.value })
                                 }
+                                placeholder="e.g. Active RFID rollout. Prefer last 90 days; max 180 for ongoing. Confirm with a second source."
                               />
                             </div>
                             <div className="sm:col-span-3 space-y-1">
@@ -1020,7 +1071,7 @@ export default function StrategyDetailPage() {
                                 onChange={(e) =>
                                   updateLinkedSignal(sig.id, { messageAngle: e.target.value })
                                 }
-                                placeholder="How Stellix Soft helps when this signal is present…"
+                                placeholder="e.g. Lead with the software and integration layer around the RFID hardware — not hardware sales."
                               />
                             </div>
                           </div>
@@ -1044,14 +1095,17 @@ export default function StrategyDetailPage() {
               </CardHeader>
               <CardContent className="space-y-4">
                 {(draft.searchTemplates ?? []).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No query groups yet.</p>
+                  <p className="text-sm text-muted-foreground">
+                    No query groups yet. Add groups like “Facility expansion”, “RFID”, or “Hiring”
+                    with Google / LinkedIn search strings researchers can copy.
+                  </p>
                 ) : (
                   (draft.searchTemplates ?? []).map((group) => (
                     <div key={group.id} className="rounded-md border p-3 space-y-2">
                       <div className="flex items-center gap-2">
                         <Input
                           value={group.label}
-                          placeholder="Group name (e.g. Facility expansion)"
+                          placeholder="Group name (e.g. Facility expansion, RFID, Hiring)"
                           onChange={(e) => updateSearchGroupLabel(group.id, e.target.value)}
                         />
                         <Button
@@ -1070,7 +1124,11 @@ export default function StrategyDetailPage() {
                             <Input
                               className="font-mono text-xs"
                               value={q}
-                              placeholder='"new distribution center" logistics 2026'
+                              placeholder={
+                                i === 0
+                                  ? '"new distribution center" logistics 2026'
+                                  : 'site:linkedin.com/jobs "RFID engineer"'
+                              }
                               onChange={(e) => updateQuery(group.id, i, e.target.value)}
                             />
                             <Button
@@ -1123,6 +1181,7 @@ export default function StrategyDetailPage() {
                       type="number"
                       min={0}
                       value={currentTargets[field.key]}
+                      placeholder={field.placeholder}
                       onChange={(e) =>
                         updateDailyTarget(field.key, Number(e.target.value) || 0)
                       }
@@ -1141,13 +1200,16 @@ export default function StrategyDetailPage() {
               </CardHeader>
               <CardContent className="space-y-2">
                 {(draft.industryAllocations ?? []).length === 0 ? (
-                  <p className="text-sm text-muted-foreground">No industry mix set.</p>
+                  <p className="text-sm text-muted-foreground">
+                    No industry mix set. Example: Logistics 45 · Warehousing 35 · Manufacturing 40
+                    (should add up near the daily completed target).
+                  </p>
                 ) : (
                   (draft.industryAllocations ?? []).map((a, i) => (
                     <div key={i} className="flex items-center gap-2">
                       <Input
                         value={a.label}
-                        placeholder="Industry group"
+                        placeholder="e.g. Logistics, transportation and 3PL"
                         onChange={(e) => updateAllocation(i, { label: e.target.value })}
                       />
                       <Input
@@ -1155,6 +1217,7 @@ export default function StrategyDetailPage() {
                         min={0}
                         className="w-24"
                         value={a.target}
+                        placeholder="45"
                         onChange={(e) =>
                           updateAllocation(i, { target: Number(e.target.value) || 0 })
                         }
@@ -1220,12 +1283,12 @@ export default function StrategyDetailPage() {
                       <Input
                         className="h-8 text-sm font-medium"
                         value={item.label}
-                        placeholder="Requirement label"
+                        placeholder="e.g. Verified business email"
                         onChange={(e) => updateChecklistItem(item.id, { label: e.target.value })}
                       />
                       <Input
                         className="h-8 text-xs"
-                        placeholder="Instructions for researcher"
+                        placeholder="e.g. Must be a work email verified by the researcher's tool"
                         value={item.instructions ?? ""}
                         onChange={(e) =>
                           updateChecklistItem(item.id, { instructions: e.target.value })
@@ -1276,25 +1339,48 @@ export default function StrategyDetailPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">SOP / daily process</CardTitle>
+                <CardDescription>
+                  Written in markdown — use Preview to see bold, headings, and lists.
+                </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
-                <Textarea
+                <MarkdownField
                   rows={12}
-                  className="font-mono text-xs"
+                  mono
                   value={draft.sopMarkdown ?? ""}
-                  onChange={(e) =>
-                    setDraft((d) => (d ? { ...d, sopMarkdown: e.target.value } : d))
+                  onChange={(sopMarkdown) =>
+                    setDraft((d) => (d ? { ...d, sopMarkdown } : d))
                   }
-                  placeholder="Markdown: daily process, qualification, common mistakes…"
+                  placeholder={`## Daily process
+1. **Signal discovery (90m)** — Start with signals, not directories.
+2. **Company qualification (60m)** — Industry, size, geo, service fit.
+3. **Decision-maker ID (90m)** — One ops buyer; one technical when justified.
+4. **Enrichment & scoring (90m)** — LinkedIn, verified email, evidence, score.
+5. **Personalization & QA (60m)** — Structured notes; deeply personalize top 15.
+
+## Qualification
+One strong signal OR two medium signals from different categories.
+
+## Hot rule
+Score ≥ 70 + strong signal + relevant decision-maker.`}
                 />
                 <div className="space-y-1.5">
                   <Label>Research notes</Label>
-                  <Textarea
-                    rows={3}
+                  <p className="text-xs text-muted-foreground">
+                    Where to look and how to validate (company sites, LinkedIn, news, tenders…).
+                  </p>
+                  <MarkdownField
+                    rows={5}
                     value={draft.researchNotes ?? ""}
-                    onChange={(e) =>
-                      setDraft((d) => (d ? { ...d, researchNotes: e.target.value } : d))
+                    onChange={(researchNotes) =>
+                      setDraft((d) => (d ? { ...d, researchNotes } : d))
                     }
+                    placeholder={`Spend ~80% of effort on the United States.
+
+**Priority 1:** Company newsroom, careers, press releases.
+**Priority 2:** LinkedIn posts, jobs, leadership changes.
+**Priority 3:** Google News, PR wires, tenders.
+Confirm tech-detection findings with a second source.`}
                   />
                 </div>
               </CardContent>
@@ -1592,13 +1678,14 @@ function AssignmentsPanel({
               max={100}
               value={allocationPct}
               onChange={(e) => setAllocationPct(e.target.value)}
+              placeholder="e.g. 50 (share of their day)"
             />
           </div>
           <div className="space-y-1.5">
             <Label>Target override</Label>
             <Input
               type="number"
-              placeholder={String(strategy.dailyTargetDefault)}
+              placeholder={`Leave blank for default (${strategy.dailyTargetDefault})`}
               value={targetOverride}
               onChange={(e) => setTargetOverride(e.target.value)}
             />

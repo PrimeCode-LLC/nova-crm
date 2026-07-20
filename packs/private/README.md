@@ -1,7 +1,12 @@
 # Private strategy packs
 #
-# These JSON files are tenant-specific (e.g. Stellix Soft ICPs).
-# They are gitignored — generate them with:
+# Tenant-specific ICPs (e.g. Stellix Soft). Not product defaults.
+#
+# Layout (all gitignored except this README):
+#   *.json              — portable packs for Admin → Import pack
+#   seeds/person*-seed.ts — TypeScript sources that generate those JSON files
+#
+# Generate / refresh packs:
 #
 #   npx --yes tsx scripts/export-strategy-packs.ts
 #
