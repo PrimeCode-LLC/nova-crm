@@ -385,6 +385,7 @@ const ORG_FEED_TYPES = new Set<OrgActivityEventType>([
   "intake_promoted",
   "import_completed",
   "wall_exit_denied",
+  "wall_exit_attempt",
   "wall_exited",
 ]);
 

@@ -92,10 +92,16 @@ export default function DashboardWallPage() {
   const [armedHash, setArmedHash] = React.useState<string | null>(() => readStoredWallPinHash());
   const [lockOpen, setLockOpen] = React.useState(() => Boolean(readStoredWallPinHash()));
   const armedRef = React.useRef(Boolean(readStoredWallPinHash()));
+  const lockOpenRef = React.useRef(Boolean(readStoredWallPinHash()));
+  const lastAttemptLogAtRef = React.useRef(0);
 
   React.useEffect(() => {
     armedRef.current = Boolean(armedHash);
   }, [armedHash]);
+
+  React.useEffect(() => {
+    lockOpenRef.current = lockOpen;
+  }, [lockOpen]);
 
   React.useEffect(() => {
     setOpen(false);
@@ -114,6 +120,70 @@ export default function DashboardWallPage() {
     };
   }, []);
 
+  function emitWallActivity(
+    type: "wall_exit_denied" | "wall_exit_attempt" | "wall_exited",
+    summary: string,
+  ) {
+    if (!currentUserId) return;
+    const event: OrgActivityEvent = {
+      id: newOrgActivityId(),
+      type,
+      actorId: currentUserId,
+      summary,
+      createdAt: new Date().toISOString(),
+      href: "/dashboard/wall",
+      entityType: "wall",
+      entityId: "display",
+    };
+    addOrgActivityEvent(event);
+  }
+
+  function recordExitAttempt(reason: string, notify = true) {
+    const now = Date.now();
+    // Avoid flooding Live activity if Esc / fullscreen / Exit fire together.
+    if (now - lastAttemptLogAtRef.current < 1500) return;
+    lastAttemptLogAtRef.current = now;
+
+    const summaries: Record<string, string> = {
+      escape: "Escape pressed on the wall display (exit attempt)",
+      fullscreen_lost: "Fullscreen left on the wall display (exit attempt)",
+      exit_button: "Exit clicked on the wall display (exit attempt)",
+      minimize: "Minimize clicked on the wall display (exit attempt)",
+      back: "Browser Back used on the wall display (exit attempt)",
+    };
+    emitWallActivity("wall_exit_attempt", summaries[reason] ?? `Exit attempt on the wall display (${reason})`);
+
+    if (!notify || isDemo || !currentUserId || !organizationId || !isFirebaseWebConfigured()) return;
+    void (async () => {
+      try {
+        const db = getFirebaseDb();
+        await persistUserNotificationCreate(db, {
+          organizationId,
+          recipientId: currentUserId,
+          actorId: WALL_PIN_GUARD_ACTOR,
+          kind: "security",
+          message: "Someone tried to leave wall mode without entering the PIN.",
+          target: "Wall display",
+          targetHref: "/dashboard/wall",
+        });
+      } catch {
+        /* best-effort */
+      }
+    })();
+  }
+
+  function openLockWithAttempt(reason: string) {
+    if (!armedRef.current) return;
+    const alreadyOpen = lockOpenRef.current;
+    setLockOpen(true);
+    if (!alreadyOpen) {
+      recordExitAttempt(reason);
+    } else if (reason === "escape") {
+      // Still record repeated Esc presses while the lock is showing.
+      recordExitAttempt("escape");
+    }
+  }
+
   React.useEffect(() => {
     const id = window.setInterval(() => setClock(new Date()), 30_000);
     const onFs = () => {
@@ -125,7 +195,7 @@ export default function DashboardWallPage() {
         if (armedRef.current) setLockOpen(false);
       } else {
         unlockEscapeKey();
-        if (armedRef.current) setLockOpen(true);
+        if (armedRef.current) openLockWithAttempt("fullscreen_lost");
       }
     };
     document.addEventListener("fullscreenchange", onFs);
@@ -133,7 +203,23 @@ export default function DashboardWallPage() {
       window.clearInterval(id);
       document.removeEventListener("fullscreenchange", onFs);
     };
+    // openLockWithAttempt closes over stable refs; re-bind only on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  /** Log Esc even when Keyboard Lock keeps fullscreen open. */
+  React.useEffect(() => {
+    if (!armedHash) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (!armedRef.current) return;
+      e.preventDefault();
+      openLockWithAttempt("escape");
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => document.removeEventListener("keydown", onKey, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [armedHash]);
 
   /** Warn on tab close/reload while armed. */
   React.useEffect(() => {
@@ -154,10 +240,11 @@ export default function DashboardWallPage() {
     const onPop = () => {
       if (!armedRef.current) return;
       window.history.pushState(marker, "", window.location.href);
-      setLockOpen(true);
+      openLockWithAttempt("back");
     };
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armedHash]);
 
   const range: DashboardTimeRangeKey = "7d";
@@ -215,7 +302,7 @@ export default function DashboardWallPage() {
 
   function requestExit() {
     if (armedHash) {
-      setLockOpen(true);
+      openLockWithAttempt("exit_button");
       return;
     }
     router.push("/dashboard");
@@ -226,28 +313,13 @@ export default function DashboardWallPage() {
       if (!document.fullscreenElement) {
         await enterFullscreen();
       } else if (armedHash) {
-        setLockOpen(true);
+        openLockWithAttempt("minimize");
       } else {
         await document.exitFullscreen();
       }
     } catch {
       setFsError("Could not toggle fullscreen. Try F11 (Windows) or Ctrl+Cmd+F (Mac).");
     }
-  }
-
-  function emitWallActivity(type: "wall_exit_denied" | "wall_exited", summary: string) {
-    if (!currentUserId) return;
-    const event: OrgActivityEvent = {
-      id: newOrgActivityId(),
-      type,
-      actorId: currentUserId,
-      summary,
-      createdAt: new Date().toISOString(),
-      href: "/dashboard/wall",
-      entityType: "wall",
-      entityId: "display",
-    };
-    addOrgActivityEvent(event);
   }
 
   async function onDeniedAttempt() {

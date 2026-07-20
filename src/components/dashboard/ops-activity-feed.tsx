@@ -55,6 +55,7 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   intake_promoted: UploadCloud,
   import_completed: UploadCloud,
   wall_exit_denied: ShieldAlert,
+  wall_exit_attempt: ShieldAlert,
   wall_exited: ShieldCheck,
 };
 
