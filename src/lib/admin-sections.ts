@@ -36,6 +36,11 @@ export const ADMIN_SUBSECTIONS: Record<string, AdminSubSection[]> = {
     { tab: "integrations", label: "Integrations", keywords: ["webhook", "connect"] },
     { tab: "ai", label: "AI assistant", keywords: ["tone", "assistant"] },
     { tab: "appearance", label: "Appearance", keywords: ["theme", "dark", "light"] },
+    {
+      tab: "wall",
+      label: "Wall display",
+      keywords: ["tv", "kiosk", "timer", "carousel", "command board"],
+    },
     { tab: "billing", label: "Billing", keywords: ["plan", "subscription", "invoice"] },
   ],
 };

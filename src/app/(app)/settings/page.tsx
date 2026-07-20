@@ -47,6 +47,7 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
+import { WallDisplaySettingsCard } from "@/components/settings/wall-display-settings-card";
 import { InstantlyIntegrationCard } from "@/components/integrations/instantly-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
 import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
@@ -481,6 +482,9 @@ function SettingsPage() {
             </TabsTrigger>
             <TabsTrigger value="appearance" className="gap-1.5">
               <Palette className="h-3.5 w-3.5" /> Appearance
+            </TabsTrigger>
+            <TabsTrigger value="wall" className="gap-1.5">
+              <Monitor className="h-3.5 w-3.5" /> Wall
             </TabsTrigger>
             <TabsTrigger value="billing" className="gap-1.5">
               <CreditCard className="h-3.5 w-3.5" /> Billing
@@ -1005,6 +1009,11 @@ function SettingsPage() {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Wall display */}
+          <TabsContent value="wall">
+            <WallDisplaySettingsCard userId={currentUserId || demoPersonaId || "anon"} />
           </TabsContent>
 
           {/* Billing */}

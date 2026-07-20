@@ -23,6 +23,7 @@ import { useDashboardMeetings } from "@/hooks/use-dashboard-meetings";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import type { DashboardWidgets } from "@/lib/dashboard-preferences";
+import { defaultWallPreferences, type WallPreferences } from "@/lib/wall-preferences";
 import type {
   ActivityRecord,
   Deal,
@@ -110,6 +111,7 @@ export function OwnerOpsBoard({
   wall,
   showWallLink,
   isDemo,
+  wallPrefs,
 }: {
   metrics: DashboardWorkflowMetrics;
   leads: Lead[];
@@ -131,7 +133,10 @@ export function OwnerOpsBoard({
   wall?: boolean;
   showWallLink?: boolean;
   isDemo?: boolean;
+  /** Wall display timing / scene prefs (Settings → Wall). */
+  wallPrefs?: WallPreferences;
 }) {
+  const wallSettings = wallPrefs ?? defaultWallPreferences();
   const { meetings } = useDashboardMeetings(true, orgMeetingsScope);
   const meetingsToday = React.useMemo(() => {
     const start = new Date();
@@ -207,7 +212,7 @@ export function OwnerOpsBoard({
       ) : null,
     ].filter(Boolean);
 
-    if (nowWidgets.length > 0) {
+    if (nowWidgets.length > 0 && wallSettings.scenes.priorities) {
       scenes.push({
         id: "now",
         label: "Priorities",
@@ -260,7 +265,7 @@ export function OwnerOpsBoard({
     ) : null;
 
     const teamWidgets = [teamCard, capacityStack].filter(Boolean);
-    if (teamWidgets.length > 0) {
+    if (teamWidgets.length > 0 && wallSettings.scenes.team) {
       scenes.push({
         id: "team",
         label: "Team",
@@ -272,7 +277,7 @@ export function OwnerOpsBoard({
     }
 
     // Scene 3 — Pipeline: strategy health beside outreach/follow-up trends.
-    if (widgets.strategyScoreboard || showCharts) {
+    if (wallSettings.scenes.pipeline && (widgets.strategyScoreboard || showCharts)) {
       const chartsColumn = showCharts ? (
         <div
           className={cn(
@@ -318,6 +323,9 @@ export function OwnerOpsBoard({
     return scenes;
   }, [
     wall,
+    wallSettings.scenes.priorities,
+    wallSettings.scenes.team,
+    wallSettings.scenes.pipeline,
     widgets,
     showInboxPerformance,
     showScorecard,
@@ -343,7 +351,7 @@ export function OwnerOpsBoard({
   if (wall) {
     return (
       <div className="flex h-full min-h-0 flex-col gap-3">
-        {widgets.pulse ? (
+        {widgets.pulse && wallSettings.showPulseStrip ? (
           <div className="shrink-0">
             <OpsPulseStrip
               metrics={metrics}
@@ -354,10 +362,17 @@ export function OwnerOpsBoard({
           </div>
         ) : null}
         {wallScenes.length > 0 ? (
-          <WallSceneCarousel scenes={wallScenes} />
+          <WallSceneCarousel
+            scenes={wallScenes}
+            dwellMs={wallSettings.dwellSeconds * 1000}
+            resumeIdleMs={wallSettings.resumeIdleSeconds * 1000}
+            showProgressBar={wallSettings.showProgressBar}
+            progressBarPosition={wallSettings.progressBarPosition}
+          />
         ) : (
           <p className="text-sm text-muted-foreground">
-            No wall widgets enabled. Turn widgets on in dashboard settings.
+            No wall scenes enabled. Turn scenes on in Settings → Wall, or enable widgets in dashboard
+            settings.
           </p>
         )}
       </div>

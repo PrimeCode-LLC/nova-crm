@@ -2,6 +2,7 @@
 
 import * as React from "react";
 import { cn } from "@/lib/utils";
+import type { WallProgressBarPosition } from "@/lib/wall-preferences";
 
 export type WallScene = {
   id: string;
@@ -12,16 +13,44 @@ export type WallScene = {
   content: React.ReactNode;
 };
 
-const DWELL_MS = 15_000;
-const RESUME_IDLE_MS = 8_000;
+const DEFAULT_DWELL_MS = 15_000;
+const DEFAULT_RESUME_IDLE_MS = 8_000;
 const TICK_MS = 50;
+
+function ProgressBar({
+  progress,
+  paused,
+}: {
+  progress: number;
+  paused: boolean;
+}) {
+  return (
+    <div className="relative h-1 overflow-hidden rounded-full bg-muted/70">
+      <div
+        className={cn(
+          "h-full rounded-full bg-gradient-to-r from-primary/80 to-primary transition-[width] ease-linear",
+          paused ? "opacity-50 duration-300" : "duration-75",
+        )}
+        style={{ width: `${progress * 100}%` }}
+      />
+    </div>
+  );
+}
 
 export function WallSceneCarousel({
   scenes,
   className,
+  dwellMs = DEFAULT_DWELL_MS,
+  resumeIdleMs = DEFAULT_RESUME_IDLE_MS,
+  showProgressBar = true,
+  progressBarPosition = "top",
 }: {
   scenes: WallScene[];
   className?: string;
+  dwellMs?: number;
+  resumeIdleMs?: number;
+  showProgressBar?: boolean;
+  progressBarPosition?: WallProgressBarPosition;
 }) {
   const count = scenes.length;
   const [index, setIndex] = React.useState(0);
@@ -30,10 +59,26 @@ export function WallSceneCarousel({
   const pauseUntilRef = React.useRef(0);
   const elapsedRef = React.useRef(0);
   const indexRef = React.useRef(0);
+  const dwellMsRef = React.useRef(dwellMs);
+  const resumeIdleMsRef = React.useRef(resumeIdleMs);
+
+  React.useEffect(() => {
+    dwellMsRef.current = Math.max(3_000, dwellMs);
+  }, [dwellMs]);
+
+  React.useEffect(() => {
+    resumeIdleMsRef.current = Math.max(1_000, resumeIdleMs);
+  }, [resumeIdleMs]);
 
   React.useEffect(() => {
     indexRef.current = index;
   }, [index]);
+
+  // Reset progress when dwell length changes so the bar stays honest.
+  React.useEffect(() => {
+    elapsedRef.current = 0;
+    setProgress(0);
+  }, [dwellMs]);
 
   // If a scene is removed, clamp the active index.
   React.useEffect(() => {
@@ -57,7 +102,7 @@ export function WallSceneCarousel({
   );
 
   const pauseBriefly = React.useCallback(() => {
-    pauseUntilRef.current = Date.now() + RESUME_IDLE_MS;
+    pauseUntilRef.current = Date.now() + resumeIdleMsRef.current;
     setPaused((was) => (was ? was : true));
   }, []);
 
@@ -71,10 +116,10 @@ export function WallSceneCarousel({
       if (shouldPause) return;
 
       elapsedRef.current += TICK_MS;
-      const ratio = Math.min(1, elapsedRef.current / DWELL_MS);
+      const ratio = Math.min(1, elapsedRef.current / dwellMsRef.current);
       setProgress(ratio);
 
-      if (elapsedRef.current >= DWELL_MS) {
+      if (elapsedRef.current >= dwellMsRef.current) {
         const next = (indexRef.current + 1) % count;
         setIndex(next);
         elapsedRef.current = 0;
@@ -105,25 +150,21 @@ export function WallSceneCarousel({
   if (count === 0) return null;
 
   const scene = scenes[Math.min(index, count - 1)] ?? scenes[0];
+  const bar = showProgressBar ? <ProgressBar progress={progress} paused={paused} /> : null;
 
   return (
     <div
       className={cn("flex min-h-0 flex-1 flex-col", className)}
       onPointerMove={pauseBriefly}
     >
-      <div className="shrink-0">
-        <div className="relative h-1 overflow-hidden rounded-full bg-muted/70">
-          <div
-            className={cn(
-              "h-full rounded-full bg-gradient-to-r from-primary/80 to-primary transition-[width] ease-linear",
-              paused ? "opacity-50 duration-300" : "duration-75",
-            )}
-            style={{ width: `${progress * 100}%` }}
-          />
-        </div>
-      </div>
+      {progressBarPosition === "top" && bar ? <div className="shrink-0">{bar}</div> : null}
 
-      <div className="relative mt-3 min-h-0 flex-1 overflow-hidden">
+      <div
+        className={cn(
+          "relative min-h-0 flex-1 overflow-hidden",
+          progressBarPosition === "top" && bar && "mt-3",
+        )}
+      >
         {scenes.map((s, i) => {
           const active = i === index;
           return (
@@ -141,7 +182,8 @@ export function WallSceneCarousel({
         })}
       </div>
 
-      <div className="mt-3 shrink-0">
+      <div className="mt-3 shrink-0 space-y-2">
+        {progressBarPosition === "bottom" && bar ? bar : null}
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">

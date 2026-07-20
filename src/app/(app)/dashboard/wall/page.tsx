@@ -24,6 +24,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
+import { useWallPreferences } from "@/hooks/use-wall-preferences";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
@@ -80,6 +81,7 @@ export default function DashboardWallPage() {
 
   const viewer = currentUserId ? getUserById(currentUserId) : undefined;
   const allowed = showOwnerOpsDashboard(viewer);
+  const { prefs: wallPrefs } = useWallPreferences(currentUserId || "anon");
   const { setOpen, setOpenMobile } = useSidebar();
   const rootRef = React.useRef<HTMLDivElement>(null);
   const [clock, setClock] = React.useState(() => new Date());
@@ -503,6 +505,7 @@ export default function DashboardWallPage() {
           widgets={DEFAULT_DASHBOARD_WIDGETS}
           wall
           isDemo={isDemo}
+          wallPrefs={wallPrefs}
         />
       </div>
     </div>
