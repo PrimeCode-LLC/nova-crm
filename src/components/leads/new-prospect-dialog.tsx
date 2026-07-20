@@ -708,8 +708,8 @@ export function NewProspectDialog({
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                   Strategy attribution
                 </p>
-                <div className="grid sm:grid-cols-2 gap-3">
-                  <div className="grid gap-1.5">
+                <div className="grid sm:grid-cols-2 gap-3 [&>*]:min-w-0">
+                  <div className="grid min-w-0 gap-1.5">
                     <Label>Prospecting strategy</Label>
                     <Select
                       value={strategyId || "__none__"}
@@ -734,7 +734,7 @@ export function NewProspectDialog({
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="grid gap-1.5">
+                  <div className="grid min-w-0 gap-1.5">
                     <Label>Buyer persona</Label>
                     <Select
                       value={personaId || "__none__"}
@@ -781,8 +781,8 @@ export function NewProspectDialog({
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Intake defaults
               </p>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
+              <div className="grid sm:grid-cols-2 gap-3 [&>*]:min-w-0">
+                <div className="grid min-w-0 gap-1.5">
                   <Label>Intended channel</Label>
                   <Select
                     value={channel}
@@ -905,8 +905,8 @@ export function NewProspectDialog({
                   Capture why this prospect matters before assigning outreach.
                 </p>
               </div>
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="grid gap-1.5 sm:col-span-2">
+              <div className="grid gap-3 sm:grid-cols-2 [&>*]:min-w-0">
+                <div className="grid min-w-0 gap-1.5 sm:col-span-2">
                   <Label>Trigger event</Label>
                   <Input
                     value={triggerEvent}
@@ -976,8 +976,8 @@ export function NewProspectDialog({
                   />
                 </Button>
               </div>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div className="grid gap-1.5 sm:col-span-2">
+              <div className="grid sm:grid-cols-2 gap-3 [&>*]:min-w-0">
+                <div className="grid min-w-0 gap-1.5 sm:col-span-2">
                   <Label>Business Name</Label>
                   <Input
                     value={bizName}
@@ -1160,8 +1160,8 @@ export function NewProspectDialog({
 
             <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Contact</p>
-              <div className="grid sm:grid-cols-2 gap-3">
-                <div className="grid gap-1.5">
+              <div className="grid sm:grid-cols-2 gap-3 [&>*]:min-w-0">
+                <div className="grid min-w-0 gap-1.5">
                   <Label>First name</Label>
                   <Input value={firstName} onChange={(e) => setFirstName(e.target.value)} required />
                 </div>
