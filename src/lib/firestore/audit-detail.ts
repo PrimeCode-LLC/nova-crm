@@ -174,6 +174,15 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     fieldName: "featureGrants",
     message: (m) => `Feature access updated for ${String(m.targetUid ?? "user")}`,
   },
+  "user.profile_updated": {
+    operation: "update",
+    tableName: "users",
+    fieldName: "status",
+    message: (m) => {
+      const status = typeof m.status === "string" ? ` → ${m.status}` : "";
+      return `CRM profile updated for ${String(m.targetUid ?? "user")}${status}`;
+    },
+  },
   "ai.settings_updated": {
     operation: "update",
     tableName: "aiSettings",

@@ -25,12 +25,18 @@ const ROLE_IDS = [
   "prospecting",
 ] as const;
 
+const CRM_STATUSES = ["active", "inactive", "pip"] as const;
+
 const patchSchema = z
   .object({
     userId: z.string().min(1),
     managerId: z.union([z.string().min(1), z.null()]).optional(),
     departmentId: z.union([z.string().min(1), z.null()]).optional(),
     roleId: z.enum(ROLE_IDS).optional(),
+    status: z.enum(CRM_STATUSES).optional(),
+    displayName: z.string().trim().min(1).max(200).optional(),
+    email: z.string().trim().email().max(320).optional(),
+    title: z.union([z.string().trim().max(200), z.null()]).optional(),
     featureGrants: z
       .array(z.string())
       .optional()
@@ -46,6 +52,10 @@ const patchSchema = z
       d.managerId !== undefined ||
       d.departmentId !== undefined ||
       d.roleId !== undefined ||
+      d.status !== undefined ||
+      d.displayName !== undefined ||
+      d.email !== undefined ||
+      d.title !== undefined ||
       d.featureGrants !== undefined,
     { message: "At least one field is required" },
   );
