@@ -20,6 +20,7 @@ import {
 import type { WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import { dmChannelId, generalChannelId as buildGeneralChannelId, useTeamChatDemoStore } from "@/stores/team-chat-demo-store";
+import { createUserNotifications } from "@/lib/notifications/create-user-notification";
 
 const DEMO_CHAT_ORG = DEMO_WORKSPACE_ORG_ID;
 
@@ -256,19 +257,40 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
       if (isDemo) {
         demoAppendMessage(DEMO_CHAT_ORG, { ...msg, organizationId: DEMO_CHAT_ORG });
-        return;
+      } else {
+        if (!organizationId || !isFirebaseWebConfigured()) return;
+        try {
+          const db = getFirebaseDb();
+          const toSave = { ...msg, organizationId };
+          await persistWorkspaceChatMessageCreate(db, organizationId, toSave);
+          setPendingMessagesByChannel((prev) => ({
+            ...prev,
+            [toSave.channelId]: [...(prev[toSave.channelId] ?? []), toSave],
+          }));
+        } catch (e) {
+          throw e instanceof Error ? e : new Error(String(e));
+        }
       }
-      if (!organizationId || !isFirebaseWebConfigured()) return;
-      try {
-        const db = getFirebaseDb();
-        const toSave = { ...msg, organizationId };
-        await persistWorkspaceChatMessageCreate(db, organizationId, toSave);
-        setPendingMessagesByChannel((prev) => ({
-          ...prev,
-          [toSave.channelId]: [...(prev[toSave.channelId] ?? []), toSave],
-        }));
-      } catch (e) {
-        throw e instanceof Error ? e : new Error(String(e));
+
+      const mentions = Array.from(new Set(mentionUserIds)).filter((uid) => uid && uid !== currentUserId);
+      if (mentions.length) {
+        const channelName =
+          channels.find((c) => c.id === selectedChannelId)?.name?.trim() || "team chat";
+        const preview = trimmed.length > 80 ? `${trimmed.slice(0, 77)}…` : trimmed;
+        void createUserNotifications(
+          { organizationId, isDemo },
+          mentions.map((uid) => ({
+            organizationId: organizationId || DEMO_CHAT_ORG,
+            recipientId: uid,
+            actorId: currentUserId,
+            kind: "mention" as const,
+            message: `Mentioned you in ${channelName}: ${preview}`,
+            target: channelName,
+            targetHref: "/team-chat",
+            entityType: "chat" as const,
+            entityId: id,
+          })),
+        );
       }
     },
     [
@@ -278,6 +300,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       isDemo,
       organizationId,
       demoAppendMessage,
+      channels,
     ],
   );
 

@@ -35,6 +35,13 @@ const PlatformNotificationsAlertSync = dynamic(
     })),
   { ssr: false },
 );
+const FollowupDueNotificationSync = dynamic(
+  () =>
+    import("@/components/providers/followup-due-notification-sync").then((m) => ({
+      default: m.FollowupDueNotificationSync,
+    })),
+  { ssr: false },
+);
 const ChannelAdminSync = dynamic(
   () => import("@/components/providers/channel-admin-sync").then((m) => ({ default: m.ChannelAdminSync })),
   { ssr: false },
@@ -87,6 +94,7 @@ export function DeferredAppSync() {
           <InboxBackgroundSync />
           <ScheduledEmailSendSync />
           <PlatformNotificationsAlertSync />
+          <FollowupDueNotificationSync />
           <ActivityAuditTracker />
           {needsFollowupReplyWatcher(pathname) ? <FollowupPlanReplyWatcher /> : null}
           {needsLeadResponseTimeSync(pathname) ? <LeadResponseTimeSync /> : null}

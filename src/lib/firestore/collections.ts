@@ -55,6 +55,8 @@ export const COLLECTIONS = {
   workspaceChatMessages: "workspaceChatMessages",
   /** Per-user last-read timestamps per channel (`channels.{channelId}` → ISO string). */
   workspaceChatReads: "workspaceChatReads",
+  /** Durable in-app notifications targeted at a recipient (ownership, strategy, mentions, …). */
+  userNotifications: "userNotifications",
   /** SaaS tenants — read/write only through server (Admin SDK). */
   organizations: "organizations",
   /** Product-level operators — read/write only through server (Admin SDK). */
@@ -121,4 +123,5 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.workspaceChatChannels,
   COLLECTIONS.workspaceChatMessages,
   COLLECTIONS.workspaceChatReads,
+  COLLECTIONS.userNotifications,
 ] as const;

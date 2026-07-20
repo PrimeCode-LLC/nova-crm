@@ -1,4 +1,5 @@
 import type { Lead, User } from "@/lib/types";
+import type { NotificationPrefKey } from "@/lib/notifications/user-notification-types";
 
 export type NotificationKind =
   | "mention"
@@ -17,6 +18,10 @@ export interface DemoNotification {
   target: string;
   targetHref: string;
   timestamp: string;
+  /** Firestore-backed row — read/dismiss persist across devices. */
+  durable?: boolean;
+  /** Recipient Settings key that can hide this row. */
+  prefKey?: NotificationPrefKey;
 }
 
 const DEMO_NOW = new Date();

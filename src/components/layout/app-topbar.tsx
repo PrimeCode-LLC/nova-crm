@@ -29,7 +29,6 @@ import {
 } from "@/components/ui/breadcrumb";
 import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
-import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { cn } from "@/lib/utils";
@@ -60,9 +59,8 @@ export function AppTopbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [cmdOpen, setCmdOpen] = React.useState(false);
-  const { notifications: mergedNotifications } = useWorkspaceInboxNotifications();
+  const { notifications: mergedNotifications, markRead } = useWorkspaceInboxNotifications();
   const { teamChatUnreadTotal } = useTeamChatUnread();
-  const markRead = useInboxNotificationOverrides((s) => s.markRead);
 
   const bellUnread =
     mergedNotifications.filter((n) => !n.read).length + teamChatUnreadTotal;

@@ -45,6 +45,52 @@ import {
   type StrategyPack,
 } from "@/lib/prospecting-strategy/pack";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
+import { createUserNotification, actorLabel } from "@/lib/notifications/create-user-notification";
+
+async function notifyStrategyAssignment(
+  ws: { isDemo: boolean; currentUserId: string; users: { id: string; displayName?: string; email?: string }[]; organizationId?: string },
+  organizationId: string,
+  assignment: StrategyAssignment,
+  strategies: ProspectingStrategy[],
+  action: "assigned" | "updated" | "paused" | "activated" | "removed",
+) {
+  const strategy = strategies.find((s) => s.id === assignment.strategyId);
+  const name = strategy?.name?.trim() || "a prospecting strategy";
+  const actor = actorLabel(ws.users, ws.currentUserId);
+  const pct = assignment.allocationPct;
+  let message: string;
+  switch (action) {
+    case "assigned":
+      message = `${actor} assigned you strategy “${name}” (${pct}%)`;
+      break;
+    case "updated":
+      message = `${actor} updated your assignment on “${name}” (${pct}%)`;
+      break;
+    case "paused":
+      message = `${actor} paused your assignment on “${name}”`;
+      break;
+    case "activated":
+      message = `${actor} reactivated your assignment on “${name}”`;
+      break;
+    case "removed":
+      message = `${actor} removed your assignment on “${name}”`;
+      break;
+  }
+  await createUserNotification(
+    { organizationId: ws.organizationId || organizationId, isDemo: ws.isDemo },
+    {
+      organizationId: ws.organizationId || organizationId,
+      recipientId: assignment.userId,
+      actorId: ws.currentUserId,
+      kind: "assignment",
+      message,
+      target: name,
+      targetHref: "/my-strategy",
+      entityType: "strategy",
+      entityId: assignment.strategyId,
+    },
+  );
+}
 
 export type ProspectingStrategyData = {
   loading: boolean;
@@ -311,16 +357,25 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
               }
             : d,
         );
+        await notifyStrategyAssignment(
+          ws,
+          organizationId || DEMO_WORKSPACE_ORG_ID,
+          assignment,
+          liveStrategies,
+          "assigned",
+        );
         return;
       }
       if (!canLive) throw new Error("No organization context");
       await persistStrategyAssignmentCreate(getFirebaseDb(), organizationId, assignment);
+      await notifyStrategyAssignment(ws, organizationId, assignment, liveStrategies, "assigned");
     },
-    [ws.isDemo, canLive, organizationId],
+    [ws, canLive, organizationId, liveStrategies],
   );
 
   const updateAssignment = React.useCallback(
     async (id: string, patch: Partial<StrategyAssignment>) => {
+      const existing = liveAssignments.find((a) => a.id === id);
       if (ws.isDemo) {
         setDemoDelta((d) =>
           d
@@ -332,26 +387,65 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
               }
             : d,
         );
+        if (existing) {
+          const merged = { ...existing, ...patch };
+          const action =
+            patch.status === "paused"
+              ? "paused"
+              : patch.status === "active" && existing.status === "paused"
+                ? "activated"
+                : "updated";
+          await notifyStrategyAssignment(
+            ws,
+            organizationId || DEMO_WORKSPACE_ORG_ID,
+            merged,
+            liveStrategies,
+            action,
+          );
+        }
         return;
       }
       if (!canLive) throw new Error("No organization context");
       await persistStrategyAssignmentUpdate(getFirebaseDb(), id, patch);
+      if (existing) {
+        const merged = { ...existing, ...patch };
+        const action =
+          patch.status === "paused"
+            ? "paused"
+            : patch.status === "active" && existing.status === "paused"
+              ? "activated"
+              : "updated";
+        await notifyStrategyAssignment(ws, organizationId, merged, liveStrategies, action);
+      }
     },
-    [ws.isDemo, canLive],
+    [ws, canLive, organizationId, liveAssignments, liveStrategies],
   );
 
   const deleteAssignment = React.useCallback(
     async (id: string) => {
+      const existing = liveAssignments.find((a) => a.id === id);
       if (ws.isDemo) {
         setDemoDelta((d) =>
           d ? { ...d, assignments: d.assignments.filter((a) => a.id !== id) } : d,
         );
+        if (existing) {
+          await notifyStrategyAssignment(
+            ws,
+            organizationId || DEMO_WORKSPACE_ORG_ID,
+            existing,
+            liveStrategies,
+            "removed",
+          );
+        }
         return;
       }
       if (!canLive) throw new Error("No organization context");
       await persistStrategyAssignmentDelete(getFirebaseDb(), id);
+      if (existing) {
+        await notifyStrategyAssignment(ws, organizationId, existing, liveStrategies, "removed");
+      }
     },
-    [ws.isDemo, canLive],
+    [ws, canLive, organizationId, liveAssignments, liveStrategies],
   );
 
   const importStrategyPack = React.useCallback(

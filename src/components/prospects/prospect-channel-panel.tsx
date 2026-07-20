@@ -31,6 +31,8 @@ import {
   unpushedAssignmentsForViewer,
 } from "@/lib/prospects/prospect-access";
 import { channelLabelFromValue } from "@/lib/channel-options";
+import { createUserNotifications, actorLabel } from "@/lib/notifications/create-user-notification";
+import type { CreateUserNotificationInput } from "@/lib/notifications/user-notification-types";
 
 function newAssignmentId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -162,6 +164,55 @@ export function ProspectChannelPanel({ prospect }: { prospect: Lead }) {
         summary: `Updated channel assignments (${assignments.length})`,
         createdAt: now,
       });
+
+      const prevAssignees = new Map(
+        (prospect.prospectChannelAssignments ?? []).map((a) => [a.id, a.assigneeId]),
+      );
+      const actor = actorLabel(ws.users, viewerId);
+      const company = prospect.companyName?.trim() || prospect.contactName?.trim() || "Prospect";
+      const notifs: CreateUserNotificationInput[] = [];
+      const seenRecipients = new Set<string>();
+
+      for (const a of assignments) {
+        const prevAssignee = prevAssignees.get(a.id);
+        if (prevAssignee === a.assigneeId) continue;
+        if (seenRecipients.has(a.assigneeId)) continue;
+        seenRecipients.add(a.assigneeId);
+        const channelLabel = channelLabelFromValue(a.channel, allChannelOptions) || a.channel;
+        notifs.push({
+          organizationId: ws.organizationId || "demo",
+          recipientId: a.assigneeId,
+          actorId: viewerId,
+          kind: "assignment",
+          message: `${actor} assigned you ${channelLabel} on prospect ${company}`,
+          target: company,
+          targetHref: `/leads/${prospect.id}`,
+          entityType: "channel",
+          entityId: prospect.id,
+          prefKey: "leadAssigned",
+        });
+        if (prevAssignee && prevAssignee !== a.assigneeId && !seenRecipients.has(prevAssignee)) {
+          seenRecipients.add(prevAssignee);
+          notifs.push({
+            organizationId: ws.organizationId || "demo",
+            recipientId: prevAssignee,
+            actorId: viewerId,
+            kind: "assignment",
+            message: `${actor} reassigned ${channelLabel} on prospect ${company} away from you`,
+            target: company,
+            targetHref: `/leads/${prospect.id}`,
+            entityType: "channel",
+            entityId: prospect.id,
+            prefKey: "leadAssigned",
+          });
+        }
+      }
+
+      void createUserNotifications(
+        { organizationId: ws.organizationId, isDemo: ws.isDemo },
+        notifs,
+      );
+
       toast.success("Channel assignments saved");
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);

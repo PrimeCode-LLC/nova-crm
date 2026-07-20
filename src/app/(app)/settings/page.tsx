@@ -298,6 +298,7 @@ function SettingsPage() {
     try {
       if (typeof window !== "undefined") {
         localStorage.setItem(LS_USER_NOTIFICATION_SETTINGS, JSON.stringify(next));
+        window.dispatchEvent(new Event("nova-notification-prefs-changed"));
       }
     } catch {
       /* ignore */
@@ -671,25 +672,60 @@ function SettingsPage() {
                 {(
                   [
                     {
-                      key: "soundAlerts",
+                      key: "soundAlerts" as const,
                       label: "In-app alert sounds",
                       desc: "Play a short chime for new mail, team chat messages, and CRM notifications.",
+                      comingSoon: false,
                     },
-                    { key: "emailNotifs", label: "Email notifications", desc: "Receive activity summaries via email." },
-                    { key: "slackNotifs", label: "Slack notifications", desc: "Get pinged in your Slack workspace." },
-                    { key: "leadAssigned", label: "Lead assigned", desc: "When a lead is assigned or reassigned to you." },
-                    { key: "dailyDigest", label: "Daily digest", desc: "Morning summary of your open pipeline." },
-                    { key: "weeklyScorecard", label: "Weekly scorecard", desc: "Performance summary every Monday." },
-                  ] as const
-                ).map(({ key, label, desc }) => (
+                    {
+                      key: "leadAssigned" as const,
+                      label: "Lead assigned",
+                      desc: "When a lead or prospect is assigned or reassigned to you.",
+                      comingSoon: false,
+                    },
+                    {
+                      key: "emailNotifs" as const,
+                      label: "Email notifications",
+                      desc: "Receive activity summaries via email.",
+                      comingSoon: true,
+                    },
+                    {
+                      key: "slackNotifs" as const,
+                      label: "Slack notifications",
+                      desc: "Get pinged in your Slack workspace.",
+                      comingSoon: true,
+                    },
+                    {
+                      key: "dailyDigest" as const,
+                      label: "Daily digest",
+                      desc: "Morning summary of your open pipeline.",
+                      comingSoon: true,
+                    },
+                    {
+                      key: "weeklyScorecard" as const,
+                      label: "Weekly scorecard",
+                      desc: "Performance summary every Monday.",
+                      comingSoon: true,
+                    },
+                  ]
+                ).map(({ key, label, desc, comingSoon }) => (
                   <div key={key} className="flex items-center justify-between py-3 gap-3">
                     <div>
-                      <div className="text-sm font-medium">{label}</div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium">{label}</span>
+                        {comingSoon ? (
+                          <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                            Coming soon
+                          </Badge>
+                        ) : null}
+                      </div>
                       <div className="text-xs text-muted-foreground">{desc}</div>
                     </div>
                     <Switch
                       checked={notifications[key]}
+                      disabled={comingSoon}
                       onCheckedChange={(v) => {
+                        if (comingSoon) return;
                         setNotifications((prev) => {
                           const next = { ...prev, [key]: !!v };
                           persistNotifications(next);

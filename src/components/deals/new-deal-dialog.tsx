@@ -28,6 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { createUserNotification, actorLabel } from "@/lib/notifications/create-user-notification";
 
 function defaultProbability(stage: PipelineStage): number {
   if (stage === "won") return 100;
@@ -127,6 +129,7 @@ export function NewDealDialog({
   onCreate: (deal: Deal) => void;
 }) {
   const router = useRouter();
+  const ws = useWorkspace();
   const ownerOptions = React.useMemo(
     () => buildOwnerOptions(users, currentUserId, getOwnerDisplayName),
     [users, currentUserId, getOwnerDisplayName],
@@ -214,6 +217,24 @@ export function NewDealDialog({
       updatedAt: now,
     };
     onCreate(deal);
+    if (deal.ownerId && deal.ownerId !== currentUserId) {
+      const actor = actorLabel(users, currentUserId);
+      void createUserNotification(
+        { organizationId: ws.organizationId, isDemo: ws.isDemo },
+        {
+          organizationId: ws.organizationId || "demo",
+          recipientId: deal.ownerId,
+          actorId: currentUserId,
+          kind: "assignment",
+          message: `${actor} assigned you deal: ${deal.name}`,
+          target: deal.name,
+          targetHref: `/deals/${deal.id}`,
+          entityType: "deal",
+          entityId: deal.id,
+          prefKey: "leadAssigned",
+        },
+      );
+    }
     toast.success("Deal created");
     onOpenChange(false);
     router.push(`/deals/${deal.id}`);

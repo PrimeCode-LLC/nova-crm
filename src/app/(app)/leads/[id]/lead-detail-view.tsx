@@ -25,6 +25,10 @@ import {
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import {
+  createUserNotifications,
+} from "@/lib/notifications/create-user-notification";
+import { buildOwnershipHandoffNotifications } from "@/lib/notifications/ownership-handoff";
+import {
   CHANNELS_REQUIRING_OUTREACH_PROFILE,
   outreachProfileFieldLabel,
   PIPELINE_STAGES,
@@ -397,6 +401,10 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
     const fromName = ownerDisplayName(currentOwnerId);
     const toName = ownerDisplayName(cleanNextOwnerId);
+    const actorName =
+      ws.getOwnerDisplayName(ws.currentUserId)?.trim() ||
+      ws.users.find((u) => u.id === ws.currentUserId)?.displayName?.trim() ||
+      "Teammate";
 
     ws.patchLead(resolvedLead.id, { ownerId: cleanNextOwnerId });
     ws.patchAccount(resolvedLead.accountId, { ownerId: cleanNextOwnerId });
@@ -412,6 +420,21 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       createdAt: new Date().toISOString(),
     });
     ws.bumpLeadActivity(resolvedLead.id);
+
+    void createUserNotifications(
+      { organizationId: ws.organizationId, isDemo: ws.isDemo },
+      buildOwnershipHandoffNotifications({
+        organizationId: ws.organizationId || "demo",
+        actorId: ws.currentUserId,
+        actorName,
+        previousOwnerId: currentOwnerId,
+        nextOwnerId: cleanNextOwnerId,
+        leadId: resolvedLead.id,
+        lead: resolvedLead,
+        claim: options?.claim,
+      }),
+    );
+
     toast.success(cleanNextOwnerId ? "Owner updated" : "Moved to open queue");
   }
 

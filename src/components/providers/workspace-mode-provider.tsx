@@ -51,6 +51,8 @@ import {
 import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
 import { persistBulkOwnerReassignClient } from "@/lib/firestore/persist-bulk-owner-reassign-client";
 import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
+import { createUserNotifications, actorLabel } from "@/lib/notifications/create-user-notification";
+import { buildOwnershipHandoffNotifications } from "@/lib/notifications/ownership-handoff";
 import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
 import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
 import { persistDealPatchClient } from "@/lib/firestore/persist-deal-patch-client";
@@ -1523,6 +1525,26 @@ export function WorkspaceModeProvider({
           leadActivity,
         };
       });
+
+      const actorId = snapshotRef.current.currentUserId;
+      const actorName = actorLabel(snapshotRef.current.users, actorId);
+      const notifyOrgId = userDoc?.organizationId || "demo";
+      const notifs = items.flatMap((item) => {
+        const lead = snapshotRef.current.leads.find((l) => l.id === item.leadId);
+        return buildOwnershipHandoffNotifications({
+          organizationId: notifyOrgId,
+          actorId,
+          actorName,
+          previousOwnerId: item.previousOwnerId,
+          nextOwnerId: nextOwnerId,
+          leadId: item.leadId,
+          lead: lead ?? {},
+        });
+      });
+      void createUserNotifications(
+        { organizationId: userDoc?.organizationId, isDemo: mode === "demo" },
+        notifs,
+      );
 
       onProgress?.(items.length, items.length);
     },

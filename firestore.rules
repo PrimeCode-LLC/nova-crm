@@ -478,6 +478,39 @@ service cloud.firestore {
         && resource.data.authorId == request.auth.uid;
     }
 
+    /**
+     * Durable CRM notifications for a single recipient.
+     * Any org member may create (targeted handoffs); only the recipient may read/update/dismiss.
+     */
+    match /userNotifications/{id} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.recipientId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.recipientId is string
+        && request.resource.data.recipientId.size() > 0
+        && request.resource.data.kind is string
+        && request.resource.data.actorId is string
+        && request.resource.data.message is string
+        && request.resource.data.target is string
+        && request.resource.data.targetHref is string
+        && request.resource.data.createdAt is string;
+
+      allow update: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.recipientId == resource.data.recipientId
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['readAt', 'dismissedAt']);
+
+      allow delete: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.recipientId == request.auth.uid;
+    }
+
     /** Per-user read cursors for team chat (client merge-updates `channels` map). */
     match /workspaceChatReads/{readDocId} {
       allow read: if signedIn()

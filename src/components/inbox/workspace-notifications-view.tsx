@@ -63,11 +63,8 @@ type TabFilter = "all" | "unread" | "mentions" | "assignments" | "alerts";
 
 export function WorkspaceNotificationsView() {
   const { users, isDemo } = useWorkspace();
-  const { notifications } = useWorkspaceInboxNotifications();
-  const markReadStore = useInboxNotificationOverrides((s) => s.markRead);
-  const markUnreadStore = useInboxNotificationOverrides((s) => s.markUnread);
-  const dismissStore = useInboxNotificationOverrides((s) => s.dismiss);
-  const markAllReadStore = useInboxNotificationOverrides((s) => s.markAllRead);
+  const { notifications, markRead, markUnread, dismiss, markAllRead: markAllReadHook } =
+    useWorkspaceInboxNotifications();
   const forcedUnreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
 
   const [selected, setSelected] = React.useState<DemoNotification | null>(null);
@@ -93,9 +90,9 @@ export function WorkspaceNotificationsView() {
   const selectNotification = React.useCallback(
     (n: DemoNotification) => {
       setSelected(n);
-      if (!n.read) markReadStore(n.id);
+      if (!n.read) markRead(n.id);
     },
-    [markReadStore],
+    [markRead],
   );
 
   React.useEffect(() => {
@@ -111,25 +108,31 @@ export function WorkspaceNotificationsView() {
 
   React.useEffect(() => {
     if (!selected || selected.read || forcedUnreadIds.includes(selected.id)) return;
-    markReadStore(selected.id);
-  }, [selected, forcedUnreadIds, markReadStore]);
+    markRead(selected.id);
+  }, [selected, forcedUnreadIds, markRead]);
 
   function markAllRead() {
-    markAllReadStore(notifications.map((n) => n.id));
+    markAllReadHook(notifications.map((n) => n.id));
     toast.success("All notifications marked as read");
   }
 
   function markReadSelected() {
     if (!selected) return;
-    markReadStore(selected.id);
+    markRead(selected.id);
     toast.success("Marked as read");
   }
 
   function dismissSelected() {
     if (!selected) return;
-    dismissStore(selected.id);
+    dismiss(selected.id);
     setSelected(null);
     toast.success("Dismissed");
+  }
+
+  function markUnreadSelected() {
+    if (!selected) return;
+    markUnread(selected.id);
+    toast.success("Marked as unread");
   }
 
   return (
@@ -276,11 +279,11 @@ export function WorkspaceNotificationsView() {
                 <Button size="sm" variant="outline" disabled={selected.read} onClick={markReadSelected}>
                   Mark read
                 </Button>
-                {!selected.read && (
-                  <Button size="sm" variant="ghost" onClick={() => markUnreadStore(selected.id)}>
+                {selected.read ? (
+                  <Button size="sm" variant="ghost" onClick={markUnreadSelected}>
                     Mark unread
                   </Button>
-                )}
+                ) : null}
                 <Button size="sm" variant="ghost" onClick={dismissSelected}>
                   Dismiss
                 </Button>
