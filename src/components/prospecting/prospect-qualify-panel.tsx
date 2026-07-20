@@ -21,6 +21,7 @@ import {
   emptyPersonalization,
   evaluateQualifyGate,
   formatPersonalizationNote,
+  summarizeEvidenceMatch,
   type IntentEvidence,
   type PersonalizationNote,
   type ProspectQualifyStatus,
@@ -106,11 +107,21 @@ export function ProspectQualifyPanel({
     maxContactsPerCompany,
   });
 
+  const evidenceSummary = summarizeEvidenceMatch(state.evidence);
+
   const updateEvidence = (id: string, patch: Partial<IntentEvidence>) => {
     onChange({
       ...state,
       evidence: state.evidence.map((e) => (e.id === id ? { ...e, ...patch } : e)),
     });
+  };
+
+  const signalStatusLabel = (id: string) => {
+    const status = evidenceSummary.statusById[id];
+    if (status === "matched") return "Matched";
+    if (status === "stale") return "Too old";
+    if (status === "future") return "Future date";
+    return "Incomplete";
   };
 
   return (
@@ -119,9 +130,14 @@ export function ProspectQualifyPanel({
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
           Evidence & qualification
         </p>
-        <Badge variant={gate.ok ? "default" : "secondary"}>
-          {gate.ok ? "Ready to complete" : `${gate.issues.filter((i) => i.blocking).length} blockers`}
-        </Badge>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <Badge variant={evidenceSummary.passes ? "default" : "outline"}>
+            {evidenceSummary.matchLabel}
+          </Badge>
+          <Badge variant={gate.ok ? "default" : "secondary"}>
+            {gate.ok ? "Ready to complete" : `${gate.issues.filter((i) => i.blocking).length} blockers`}
+          </Badge>
+        </div>
       </div>
 
       {gate.issues.length > 0 ? (
@@ -141,7 +157,7 @@ export function ProspectQualifyPanel({
       )}
 
       <div className="space-y-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <Label className="text-sm">Intent evidence</Label>
           <Button
             type="button"
@@ -158,7 +174,15 @@ export function ProspectQualifyPanel({
         {state.evidence.map((ev, idx) => (
           <div key={ev.id} className="rounded-md border bg-muted/20 p-3 space-y-2">
             <div className="flex items-center justify-between gap-2">
-              <span className="text-xs font-medium">Signal {idx + 1}</span>
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="text-xs font-medium">Signal {idx + 1}</span>
+                <Badge
+                  variant={evidenceSummary.statusById[ev.id] === "matched" ? "default" : "outline"}
+                  className="text-[10px]"
+                >
+                  {signalStatusLabel(ev.id)}
+                </Badge>
+              </div>
               {state.evidence.length > 1 ? (
                 <Button
                   type="button"
@@ -176,8 +200,8 @@ export function ProspectQualifyPanel({
                 </Button>
               ) : null}
             </div>
-            <div className="grid sm:grid-cols-2 gap-2">
-              <div className="grid gap-1">
+            <div className="grid sm:grid-cols-2 gap-2 [&>*]:min-w-0">
+              <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Label</Label>
                 <Input
                   value={ev.label}
@@ -185,7 +209,7 @@ export function ProspectQualifyPanel({
                   onChange={(e) => updateEvidence(ev.id, { label: e.target.value })}
                 />
               </div>
-              <div className="grid gap-1">
+              <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Category</Label>
                 <Select
                   value={ev.category || undefined}
@@ -203,7 +227,7 @@ export function ProspectQualifyPanel({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1">
+              <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Strength</Label>
                 <Select
                   value={ev.strength}
@@ -222,7 +246,7 @@ export function ProspectQualifyPanel({
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-1">
+              <div className="grid min-w-0 gap-1">
                 <Label className="text-xs">Observed date</Label>
                 <Input
                   type="date"
@@ -230,7 +254,7 @@ export function ProspectQualifyPanel({
                   onChange={(e) => updateEvidence(ev.id, { observedAt: e.target.value })}
                 />
               </div>
-              <div className="sm:col-span-2 grid gap-1">
+              <div className="sm:col-span-2 grid min-w-0 gap-1">
                 <Label className="text-xs">Evidence URL</Label>
                 <Input
                   value={ev.sourceUrl}
@@ -238,7 +262,7 @@ export function ProspectQualifyPanel({
                   onChange={(e) => updateEvidence(ev.id, { sourceUrl: e.target.value })}
                 />
               </div>
-              <div className="sm:col-span-2 grid gap-1">
+              <div className="sm:col-span-2 grid min-w-0 gap-1">
                 <Label className="text-xs">Explanation (your words)</Label>
                 <Textarea
                   rows={2}
@@ -264,50 +288,62 @@ export function ProspectQualifyPanel({
       <div className="space-y-2">
         <Label className="text-sm">Personalization note</Label>
         <div className="grid gap-2">
-          <Textarea
-            rows={2}
-            placeholder="Trigger: what recently happened?"
-            value={state.personalization.trigger}
-            onChange={(e) =>
-              onChange({
-                ...state,
-                personalization: { ...state.personalization, trigger: e.target.value },
-              })
-            }
-          />
-          <Textarea
-            rows={2}
-            placeholder="Likely impact: what need does this create?"
-            value={state.personalization.likelyImpact}
-            onChange={(e) =>
-              onChange({
-                ...state,
-                personalization: { ...state.personalization, likelyImpact: e.target.value },
-              })
-            }
-          />
-          <Textarea
-            rows={2}
-            placeholder="Relevant Stellix Soft service"
-            value={state.personalization.relevantService}
-            onChange={(e) =>
-              onChange({
-                ...state,
-                personalization: { ...state.personalization, relevantService: e.target.value },
-              })
-            }
-          />
-          <Textarea
-            rows={2}
-            placeholder="Suggested outreach angle"
-            value={state.personalization.suggestedAngle}
-            onChange={(e) =>
-              onChange({
-                ...state,
-                personalization: { ...state.personalization, suggestedAngle: e.target.value },
-              })
-            }
-          />
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Trigger</Label>
+            <Textarea
+              rows={2}
+              placeholder="What recently happened?"
+              value={state.personalization.trigger}
+              onChange={(e) =>
+                onChange({
+                  ...state,
+                  personalization: { ...state.personalization, trigger: e.target.value },
+                })
+              }
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Likely impact</Label>
+            <Textarea
+              rows={2}
+              placeholder="What need does this create?"
+              value={state.personalization.likelyImpact}
+              onChange={(e) =>
+                onChange({
+                  ...state,
+                  personalization: { ...state.personalization, likelyImpact: e.target.value },
+                })
+              }
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Relevant Stellix Soft service</Label>
+            <Textarea
+              rows={2}
+              placeholder="e.g. Enterprise Application Development"
+              value={state.personalization.relevantService}
+              onChange={(e) =>
+                onChange({
+                  ...state,
+                  personalization: { ...state.personalization, relevantService: e.target.value },
+                })
+              }
+            />
+          </div>
+          <div className="grid gap-1">
+            <Label className="text-xs text-muted-foreground">Suggested outreach angle</Label>
+            <Textarea
+              rows={2}
+              placeholder="How should outreach lead?"
+              value={state.personalization.suggestedAngle}
+              onChange={(e) =>
+                onChange({
+                  ...state,
+                  personalization: { ...state.personalization, suggestedAngle: e.target.value },
+                })
+              }
+            />
+          </div>
         </div>
         <label className="flex items-center gap-2 text-sm">
           <Checkbox

@@ -93,10 +93,23 @@ export function personalizationIsComplete(note: PersonalizationNote | undefined)
   );
 }
 
+/** Calendar-day age. Same calendar day = 0; future dates are negative. */
 export function evidenceAgeDays(observedAt: string, now = new Date()): number | null {
-  const t = Date.parse(observedAt.length === 10 ? `${observedAt}T12:00:00` : observedAt);
-  if (Number.isNaN(t)) return null;
-  return Math.floor((now.getTime() - t) / (24 * 60 * 60 * 1000));
+  const raw = observedAt.trim();
+  if (!raw) return null;
+  // Prefer YYYY-MM-DD (what <input type="date"> stores). Avoid local-noon math that
+  // treats "today" as age -1 before noon.
+  const day = raw.length >= 10 ? raw.slice(0, 10) : raw;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(day);
+  const localDayMs = (d: Date) =>
+    Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  if (!m) {
+    const t = Date.parse(raw);
+    if (Number.isNaN(t)) return null;
+    return Math.floor((localDayMs(now) - localDayMs(new Date(t))) / (24 * 60 * 60 * 1000));
+  }
+  const observedDay = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  return Math.floor((localDayMs(now) - observedDay) / (24 * 60 * 60 * 1000));
 }
 
 export function evidenceIsComplete(e: IntentEvidence): boolean {
@@ -116,17 +129,94 @@ export function evidencePassesStrengthRule(
   maxAgeDays = 180,
   now = new Date(),
 ): boolean {
-  const fresh = evidence.filter((e) => {
-    if (!evidenceIsComplete(e)) return false;
+  return summarizeEvidenceMatch(evidence, maxAgeDays, now).passes;
+}
+
+export type EvidenceSignalStatus = "matched" | "incomplete" | "stale" | "future";
+
+export type EvidenceMatchSummary = {
+  passes: boolean;
+  /** Complete signals within the age window that count toward the rule. */
+  matched: IntentEvidence[];
+  strongCount: number;
+  mediumCategoryCount: number;
+  /** Human-readable match line, e.g. "1 strong matched". */
+  matchLabel: string;
+  statusById: Record<string, EvidenceSignalStatus>;
+};
+
+/** Classify each signal and summarize how many count toward the qualify rule. */
+export function summarizeEvidenceMatch(
+  evidence: IntentEvidence[],
+  maxAgeDays = 180,
+  now = new Date(),
+): EvidenceMatchSummary {
+  const statusById: Record<string, EvidenceSignalStatus> = {};
+  const matched: IntentEvidence[] = [];
+
+  for (const e of evidence) {
+    if (!evidenceIsComplete(e)) {
+      statusById[e.id] = "incomplete";
+      continue;
+    }
     const age = evidenceAgeDays(e.observedAt, now);
-    if (age == null || age < 0) return false;
-    return age <= maxAgeDays;
-  });
-  if (fresh.some((e) => e.strength === "strong")) return true;
-  const mediumCats = new Set(
-    fresh.filter((e) => e.strength === "medium").map((e) => e.category.trim().toLowerCase()),
-  );
-  return mediumCats.size >= 2;
+    if (age == null || age < 0) {
+      statusById[e.id] = "future";
+      continue;
+    }
+    if (age > maxAgeDays) {
+      statusById[e.id] = "stale";
+      continue;
+    }
+    statusById[e.id] = "matched";
+    matched.push(e);
+  }
+
+  const strongCount = matched.filter((e) => e.strength === "strong").length;
+  const mediumCategoryCount = new Set(
+    matched.filter((e) => e.strength === "medium").map((e) => e.category.trim().toLowerCase()),
+  ).size;
+  const passes = strongCount >= 1 || mediumCategoryCount >= 2;
+
+  let matchLabel = "0 signals matched";
+  if (strongCount >= 1) {
+    matchLabel =
+      strongCount === 1 ? "1 strong matched" : `${strongCount} strong matched`;
+  } else if (mediumCategoryCount >= 2) {
+    matchLabel = `${mediumCategoryCount} medium categories matched`;
+  } else if (matched.length > 0) {
+    matchLabel = `${matched.length} signal${matched.length === 1 ? "" : "s"} (need 1 strong or 2 medium categories)`;
+  }
+
+  return {
+    passes,
+    matched,
+    strongCount,
+    mediumCategoryCount,
+    matchLabel,
+    statusById,
+  };
+}
+
+/**
+ * Collapse accidental double-paste company names like "AveniAveni" → "Aveni".
+ * Only when the string is an exact concatenation of the same half (case-insensitive).
+ */
+export function collapseAccidentalDoubleName(name: string): string {
+  const t = name.trim().replace(/\s+/g, " ");
+  if (t.length < 4) return t;
+  const mid = Math.floor(t.length / 2);
+  if (t.length % 2 === 0) {
+    const a = t.slice(0, mid);
+    const b = t.slice(mid);
+    if (a.toLowerCase() === b.toLowerCase()) return a;
+  }
+  // Also handle "Aveni Aveni"
+  const parts = t.split(" ");
+  if (parts.length === 2 && parts[0]!.toLowerCase() === parts[1]!.toLowerCase()) {
+    return parts[0]!;
+  }
+  return t;
 }
 
 export type QualifyGateInput = {
@@ -207,10 +297,13 @@ export function evaluateQualifyGate(input: QualifyGateInput): {
     });
   }
   if (!evidencePassesStrengthRule(input.intentEvidence ?? [])) {
+    const summary = summarizeEvidenceMatch(input.intentEvidence ?? []);
     issues.push({
       code: "intent_evidence",
       message:
-        "Need one strong signal or two medium signals from different categories (with URL, date, and explanation)",
+        summary.matched.length > 0
+          ? `${summary.matchLabel}. Need one strong signal or two medium signals from different categories (with URL, date, and explanation)`
+          : "Need one strong signal or two medium signals from different categories (with URL, date, and explanation)",
       blocking: true,
     });
   }

@@ -82,7 +82,7 @@ import {
 } from "@/lib/hooks/use-prospecting-strategy-data";
 import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
 import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
-import { evaluateQualifyGate, formatPersonalizationNote, type QualifyIssue } from "@/lib/prospecting-strategy/qualify";
+import { evaluateQualifyGate, formatPersonalizationNote, collapseAccidentalDoubleName, type QualifyIssue } from "@/lib/prospecting-strategy/qualify";
 import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
 import {
   emptyQualifyFormState,
@@ -665,7 +665,10 @@ export function NewProspectDialog({
       toast.error("Sign in to create a prospect.");
       return;
     }
-    const bn = bizName.trim();
+    const bn = collapseAccidentalDoubleName(bizName);
+    if (bn !== bizName.trim()) {
+      setBizName(bn);
+    }
     if (!bn) {
       toast.error("Business name is required.");
       return;
@@ -1262,6 +1265,7 @@ export function NewProspectDialog({
                   <Input
                     value={bizName}
                     onChange={(e) => setBizName(e.target.value)}
+                    onBlur={() => setBizName((v) => collapseAccidentalDoubleName(v))}
                     required
                     placeholder="Stellixsoft, Acme Inc."
                   />

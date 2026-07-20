@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  collapseAccidentalDoubleName,
+  evidenceAgeDays,
   evidencePassesStrengthRule,
   evaluateQualifyGate,
   personalizationIsComplete,
+  summarizeEvidenceMatch,
   type IntentEvidence,
 } from "@/lib/prospecting-strategy/qualify";
 
@@ -50,6 +53,38 @@ describe("qualify gate", () => {
         evidence({ id: "2", strength: "medium", category: "Automation" }),
       ]),
     ).toBe(true);
+  });
+
+  it("counts same-day observed dates as age 0 (not future)", () => {
+    const morning = new Date("2026-07-20T08:00:00");
+    expect(evidenceAgeDays("2026-07-20", morning)).toBe(0);
+    expect(
+      evidencePassesStrengthRule(
+        [evidence({ id: "1", strength: "strong", category: "Hiring", observedAt: "2026-07-20" })],
+        180,
+        morning,
+      ),
+    ).toBe(true);
+  });
+
+  it("summarizes matched strong signals", () => {
+    const summary = summarizeEvidenceMatch([
+      evidence({ id: "1", strength: "strong", category: "Hiring" }),
+      evidence({ id: "2", strength: "medium", category: "Other" }),
+      evidence({ id: "3", strength: "medium", category: "Hiring", label: "" }),
+    ]);
+    expect(summary.passes).toBe(true);
+    expect(summary.strongCount).toBe(1);
+    expect(summary.matched).toHaveLength(2);
+    expect(summary.matchLabel).toBe("1 strong matched");
+    expect(summary.statusById["1"]).toBe("matched");
+    expect(summary.statusById["3"]).toBe("incomplete");
+  });
+
+  it("collapses accidental doubled company names", () => {
+    expect(collapseAccidentalDoubleName("AveniAveni")).toBe("Aveni");
+    expect(collapseAccidentalDoubleName("Aveni Aveni")).toBe("Aveni");
+    expect(collapseAccidentalDoubleName("Aveni AI")).toBe("Aveni AI");
   });
 
   it("blocks incomplete personalization", () => {
