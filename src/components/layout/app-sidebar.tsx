@@ -15,13 +15,12 @@ import {
   Monitor,
   Palette,
   ShieldCheck,
-  ChevronDown,
+  SlidersHorizontal,
 } from "lucide-react";
 import { useOpenQuickAdd } from "./quick-add-launcher";
 import { useTheme } from "next-themes";
 
 import {
-  clusterConfigurationItems,
   getVisibleNavSections,
   type NavAccessContext,
   type NavItem,
@@ -51,13 +50,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
-  useSidebar,
 } from "@/components/ui/sidebar";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,101 +115,6 @@ function NavMenuLinks({
         );
       })}
     </>
-  );
-}
-
-function ConfigurationNavGroups({
-  items,
-  pathname,
-  flat,
-  teamChatUnreadTotal,
-  inboxMailUnreadTotal,
-  notificationsUnreadTotal,
-}: {
-  items: NavItem[];
-  pathname: string;
-  flat: boolean;
-  teamChatUnreadTotal: number;
-  inboxMailUnreadTotal: number;
-  notificationsUnreadTotal: number;
-}) {
-  if (flat) {
-    return (
-      <SidebarMenu>
-        <NavMenuLinks
-          items={items}
-          pathname={pathname}
-          teamChatUnreadTotal={teamChatUnreadTotal}
-          inboxMailUnreadTotal={inboxMailUnreadTotal}
-          notificationsUnreadTotal={notificationsUnreadTotal}
-        />
-      </SidebarMenu>
-    );
-  }
-  const clusters = clusterConfigurationItems(items);
-  const [clusterOpen, setClusterOpen] = React.useState<Record<string, boolean>>({});
-
-  React.useEffect(() => {
-    setClusterOpen((prev) => {
-      let changed = false;
-      const next = { ...prev };
-      for (const cluster of clusters) {
-        const pathOpen = cluster.items.some(
-          (item) => pathname === item.href || pathname.startsWith(item.href + "/"),
-        );
-        if (pathOpen && !prev[cluster.clusterId]) {
-          next[cluster.clusterId] = true;
-          changed = true;
-        }
-      }
-      return changed ? next : prev;
-    });
-  }, [pathname, clusters]);
-
-  return (
-    <div className="flex flex-col gap-0.5">
-      {clusters.map((cluster) => {
-        const pathOpen = cluster.items.some(
-          (item) =>
-            pathname === item.href || pathname.startsWith(item.href + "/"),
-        );
-        const open = clusterOpen[cluster.clusterId] ?? pathOpen;
-        return (
-          <Collapsible
-            key={cluster.clusterId}
-            open={open}
-            onOpenChange={(nextOpen) =>
-              setClusterOpen((prev) => ({ ...prev, [cluster.clusterId]: nextOpen }))
-            }
-            className="group/cluster"
-          >
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <CollapsibleTrigger
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs font-medium text-muted-foreground outline-none ring-sidebar-ring transition-colors hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 group-data-open/cluster:bg-sidebar-accent/40",
-                  )}
-                >
-                  <span className="min-w-0 flex-1 truncate">{cluster.label}</span>
-                  <ChevronDown className="size-3.5 shrink-0 opacity-70 transition-transform group-data-open/cluster:rotate-180" />
-                </CollapsibleTrigger>
-              </SidebarMenuItem>
-            </SidebarMenu>
-            <CollapsibleContent>
-              <SidebarMenu className="mt-0.5">
-                <NavMenuLinks
-                  items={cluster.items}
-                  pathname={pathname}
-                  teamChatUnreadTotal={teamChatUnreadTotal}
-                  inboxMailUnreadTotal={inboxMailUnreadTotal}
-                  notificationsUnreadTotal={notificationsUnreadTotal}
-                />
-              </SidebarMenu>
-            </CollapsibleContent>
-          </Collapsible>
-        );
-      })}
-    </div>
   );
 }
 
@@ -320,8 +218,6 @@ export function AppSidebar({
   const { teamChatUnreadTotal } = useTeamChatUnread();
   const inboxMailUnreadTotal = useInboxMailUnreadTotal();
   const { unreadCount: notificationsUnreadTotal } = useWorkspaceInboxNotifications();
-  const { state: sidebarState } = useSidebar();
-  const sidebarIsCollapsed = sidebarState === "collapsed";
 
   if (pathname === "/dashboard/wall" || pathname.startsWith("/dashboard/wall/")) {
     return null;
@@ -340,33 +236,45 @@ export function AppSidebar({
       </SidebarHeader>
 
       <SidebarContent>
-        {sections.map((section) => (
-          <SidebarGroup key={section.label}>
-            <SidebarGroupLabel>{section.label}</SidebarGroupLabel>
-            <SidebarGroupContent>
-              {section.label === "Configuration" ? (
-                <ConfigurationNavGroups
-                  items={section.items}
-                  pathname={pathname}
-                  flat={sidebarIsCollapsed}
-                  teamChatUnreadTotal={teamChatUnreadTotal}
-                  inboxMailUnreadTotal={inboxMailUnreadTotal}
-                  notificationsUnreadTotal={notificationsUnreadTotal}
-                />
-              ) : (
-                <SidebarMenu>
-                  <NavMenuLinks
-                    items={section.items}
-                    pathname={pathname}
-                    teamChatUnreadTotal={teamChatUnreadTotal}
-                    inboxMailUnreadTotal={inboxMailUnreadTotal}
-                    notificationsUnreadTotal={notificationsUnreadTotal}
-                  />
-                </SidebarMenu>
-              )}
-            </SidebarGroupContent>
-          </SidebarGroup>
-        ))}
+        {sections.map((section) => {
+          const isConfig = section.label === "Configuration";
+          return (
+            <SidebarGroup key={section.label}>
+              {!isConfig && <SidebarGroupLabel>{section.label}</SidebarGroupLabel>}
+              <SidebarGroupContent>
+                {isConfig ? (
+                  <SidebarMenu>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton
+                        isActive={pathname === "/admin" || pathname.startsWith("/admin/")}
+                        tooltip="Configuration"
+                        render={
+                          <Link
+                            href="/admin"
+                            className="flex min-w-0 flex-1 items-center gap-2"
+                          >
+                            <SlidersHorizontal className="shrink-0" />
+                            <span className="min-w-0 flex-1 truncate">Configuration</span>
+                          </Link>
+                        }
+                      />
+                    </SidebarMenuItem>
+                  </SidebarMenu>
+                ) : (
+                  <SidebarMenu>
+                    <NavMenuLinks
+                      items={section.items}
+                      pathname={pathname}
+                      teamChatUnreadTotal={teamChatUnreadTotal}
+                      inboxMailUnreadTotal={inboxMailUnreadTotal}
+                      notificationsUnreadTotal={notificationsUnreadTotal}
+                    />
+                  </SidebarMenu>
+                )}
+              </SidebarGroupContent>
+            </SidebarGroup>
+          );
+        })}
         {showPlatformLink && (
           <SidebarGroup>
             <SidebarGroupLabel>Product</SidebarGroupLabel>

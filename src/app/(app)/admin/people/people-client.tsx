@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { adminSubSectionTabs } from "@/lib/admin-sections";
 import {
   UserPlus,
   Mail,
@@ -208,6 +209,12 @@ function PeoplePageClientInner({
   const [lastDeliveryNote, setLastDeliveryNote] = React.useState<string | null>(
     null,
   );
+
+  const [activeTab, setActiveTab] = React.useState("members");
+  React.useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t && adminSubSectionTabs("/admin/people").includes(t)) setActiveTab(t);
+  }, [searchParams]);
 
   const [editMember, setEditMember] = React.useState<OrganizationMember | null>(null);
   const [editTab, setEditTab] = React.useState<"access" | "profile" | "admin">("access");
@@ -746,7 +753,7 @@ function PeoplePageClientInner({
           </Card>
         )}
 
-        <Tabs defaultValue="members" className="space-y-4">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
           <TabsList>
             <TabsTrigger value="members">
               People ({activeMembers.length})

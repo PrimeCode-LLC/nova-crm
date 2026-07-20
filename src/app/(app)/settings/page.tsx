@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
+import { adminSubSectionTabs } from "@/lib/admin-sections";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,7 +185,7 @@ function SettingsPage() {
 
   React.useEffect(() => {
     const t = searchParams.get("tab");
-    if (t === "email") setActiveTab("email");
+    if (t && adminSubSectionTabs("/settings").includes(t)) setActiveTab(t);
   }, [searchParams]);
 
   const { isDemo, users, currentUserId, demoPersonaId, patchUser } = useWorkspace();

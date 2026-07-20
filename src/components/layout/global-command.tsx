@@ -15,7 +15,9 @@ import {
   canAccessNavItem,
   findNavItemByHref,
   getVisibleNavSections,
+  type NavItem,
 } from "@/lib/nav";
+import { ADMIN_SUBSECTIONS, adminSubSectionHref } from "@/lib/admin-sections";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
@@ -38,6 +40,33 @@ export function GlobalCommandMenu({
     () => getVisibleNavSections(navAccess),
     [navAccess.roleId, navAccess.isSuperAdmin, navAccess.roleLoading],
   );
+  const subSectionEntries = React.useMemo(() => {
+    const entries: {
+      href: string;
+      areaLabel: string;
+      icon: NavItem["icon"];
+      tab: string;
+      label: string;
+      keywords: string[];
+    }[] = [];
+    for (const [href, subs] of Object.entries(ADMIN_SUBSECTIONS)) {
+      const navItem = findNavItemByHref(href);
+      if (!navItem || !canAccessNavItem(navItem, navAccess)) continue;
+      for (const s of subs) {
+        entries.push({
+          href,
+          areaLabel: navItem.label,
+          icon: navItem.icon,
+          tab: s.tab,
+          label: s.label,
+          keywords: s.keywords ?? [],
+        });
+      }
+    }
+    return entries;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [navAccess.roleId, navAccess.orgRole, navAccess.isSuperAdmin, navAccess.roleLoading, navAccess.featureGrants]);
+
   const adminPeopleNav = findNavItemByHref("/admin/people");
   const adminProfilesNav = findNavItemByHref("/admin/profiles");
   const showTeamJumpList =
@@ -117,6 +146,30 @@ export function GlobalCommandMenu({
             })}
           </CommandGroup>
         ))}
+
+        {subSectionEntries.length > 0 && (
+          <>
+            <CommandSeparator />
+            <CommandGroup heading="Settings sections">
+              {subSectionEntries.map((entry) => {
+                const Icon = entry.icon;
+                return (
+                  <CommandItem
+                    key={`${entry.href}-${entry.tab}`}
+                    value={`${entry.areaLabel} ${entry.label} ${entry.keywords.join(" ")}`}
+                    onSelect={() => go(adminSubSectionHref(entry.href, entry.tab))}
+                  >
+                    <Icon className="mr-2 h-4 w-4" />
+                    <span>{entry.label}</span>
+                    <span className="ml-auto text-xs text-muted-foreground">
+                      {entry.areaLabel}
+                    </span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </>
+        )}
 
         <CommandSeparator />
 

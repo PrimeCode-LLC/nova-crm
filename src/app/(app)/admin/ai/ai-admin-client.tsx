@@ -1,6 +1,8 @@
 "use client";
 
 import * as React from "react";
+import { useSearchParams } from "next/navigation";
+import { adminSubSectionTabs } from "@/lib/admin-sections";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -51,6 +53,12 @@ const FEATURES: { key: AiFeatureKey; label: string }[] = [
 ];
 
 export function AiAdminClient() {
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = React.useState("setup");
+  React.useEffect(() => {
+    const t = searchParams.get("tab");
+    if (t && adminSubSectionTabs("/admin/ai").includes(t)) setActiveTab(t);
+  }, [searchParams]);
   const [loading, setLoading] = React.useState(true);
   const [settings, setSettings] = React.useState<OrganizationAiSettings | null>(null);
   const [keyFlags, setKeyFlags] = React.useState({ openai: false, anthropic: false, google: false });
@@ -242,7 +250,7 @@ export function AiAdminClient() {
             <Loader2 className="h-4 w-4 animate-spin" /> Loading…
           </p>
         ) : (
-          <Tabs defaultValue="setup" className="space-y-4">
+          <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
             <TabsList>
               <TabsTrigger value="setup">Setup</TabsTrigger>
               <TabsTrigger value="prompts">Prompts</TabsTrigger>

@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import { AdminHubClient } from "./admin-hub-client";
 
 export default function AdminIndexPage() {
-  redirect("/admin/people");
+  return <AdminHubClient />;
 }
