@@ -59,6 +59,20 @@ export default function DealsPage() {
         leadId: deal.leadId,
         channel: lead?.channel,
       });
+      if (deal.leadId) {
+        ws.addTimelineEvent({
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? `te-${crypto.randomUUID()}`
+              : `te-${Date.now()}`,
+          leadId: deal.leadId,
+          type: "deal_created",
+          actorId: deal.ownerId || ws.currentUserId,
+          summary: `Created deal: ${deal.name}`,
+          createdAt: deal.createdAt || new Date().toISOString(),
+          payload: { dealId: deal.id },
+        });
+      }
     },
     [addLocalDeal, ws],
   );

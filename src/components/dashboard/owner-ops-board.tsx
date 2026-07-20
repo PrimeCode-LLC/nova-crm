@@ -18,11 +18,13 @@ import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import type { DashboardWidgets } from "@/lib/dashboard-preferences";
 import type {
+  ActivityRecord,
   Deal,
   Followup,
   FollowupPlan,
   Lead,
   LeadTask,
+  OrgActivityEvent,
   TimelineEvent,
   User,
 } from "@/lib/types";
@@ -58,6 +60,8 @@ export function OwnerOpsBoard({
   tasks,
   users,
   timelineByLead,
+  orgActivityEvents,
+  activityRecords,
   range,
   currentUserId,
   orgMeetingsScope,
@@ -74,6 +78,8 @@ export function OwnerOpsBoard({
   tasks: LeadTask[];
   users: User[];
   timelineByLead: Record<string, TimelineEvent[]>;
+  orgActivityEvents?: OrgActivityEvent[];
+  activityRecords?: ActivityRecord[];
   range: DashboardTimeRangeKey;
   currentUserId: string;
   orgMeetingsScope: boolean;
@@ -206,6 +212,8 @@ export function OwnerOpsBoard({
               {widgets.activityFeed ? (
                 <OpsActivityFeed
                   timelineByLead={timelineByLead}
+                  orgActivityEvents={orgActivityEvents}
+                  activityRecords={activityRecords}
                   wall={wall}
                   className={cn(
                     "min-h-[320px]",

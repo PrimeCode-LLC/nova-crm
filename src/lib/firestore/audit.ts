@@ -68,7 +68,12 @@ export type AuditEvent =
   | "scraper.raw_promote"
   | "intake_filter_defaults.updated"
   | "intent_playbook.updated"
-  | "intent_playbook.template_applied";
+  | "intent_playbook.template_applied"
+  | "strategy.created"
+  | "strategy.updated"
+  | "strategy.deleted"
+  | "strategy.assigned"
+  | "strategy.pack_imported";
 
 export type AuditLogRecord = {
   id: string;

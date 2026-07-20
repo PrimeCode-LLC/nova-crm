@@ -198,6 +198,10 @@ export function applyLiveHierarchyScope(
     (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
   );
 
+  const orgActivityEvents = snapshot.orgActivityEvents.filter((e) =>
+    activityActorIds.has(e.actorId),
+  );
+
   return {
     ...snapshot,
     users,
@@ -214,5 +218,6 @@ export function applyLiveHierarchyScope(
     permissionOverrides,
     activityCounters,
     activityRecords,
+    orgActivityEvents,
   };
 }

@@ -5,10 +5,14 @@ import Link from "next/link";
 import {
   CalendarPlus,
   CheckCircle2,
+  Crosshair,
   Mail,
   MessageSquareReply,
   NotebookPen,
+  Package,
   Send,
+  Sparkles,
+  UploadCloud,
   UserPlus,
   Users,
   Workflow,
@@ -18,14 +22,15 @@ import { UserChip } from "@/components/common/user-chip";
 import { buildOpsActivityFeed, type OpsFeedItem } from "@/lib/dashboard-ops-analytics";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { TimelineEvent, TimelineEventType } from "@/lib/types";
+import type { ActivityRecord, OrgActivityEvent, TimelineEvent } from "@/lib/types";
 
-const ICONS: Partial<Record<TimelineEventType | string, React.ComponentType<{ className?: string }>>> = {
+const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>> = {
   lead_created: UserPlus,
   email_sent: Send,
   email_replied: MessageSquareReply,
   followup_created: Mail,
   followup_completed: CheckCircle2,
+  followup_plan_paused: Mail,
   meeting_scheduled: CalendarPlus,
   meeting_completed: CalendarPlus,
   prospect_channel_pushed: Workflow,
@@ -34,10 +39,30 @@ const ICONS: Partial<Record<TimelineEventType | string, React.ComponentType<{ cl
   note_added: NotebookPen,
   assignment_changed: Users,
   deal_created: CheckCircle2,
+  stage_changed: Workflow,
+  ai_analysis: Sparkles,
+  strategy_created: Crosshair,
+  strategy_updated: Crosshair,
+  strategy_deleted: Crosshair,
+  strategy_assigned: Crosshair,
+  strategy_assignment_updated: Crosshair,
+  strategy_assignment_paused: Crosshair,
+  strategy_assignment_activated: Crosshair,
+  strategy_assignment_removed: Crosshair,
+  strategy_pack_imported: Package,
+  intake_promoted: UploadCloud,
+  import_completed: UploadCloud,
 };
+
+function feedHref(item: OpsFeedItem): string | undefined {
+  if (item.href) return item.href;
+  if (item.leadId) return `/leads/${item.leadId}`;
+  return undefined;
+}
 
 function FeedRow({ item, wall }: { item: OpsFeedItem; wall?: boolean }) {
   const Icon = ICONS[item.type] ?? Mail;
+  const href = feedHref(item);
   const inner = (
     <div
       className={cn(
@@ -66,9 +91,9 @@ function FeedRow({ item, wall }: { item: OpsFeedItem; wall?: boolean }) {
     </div>
   );
 
-  if (item.leadId && !wall) {
+  if (href && !wall) {
     return (
-      <Link href={`/leads/${item.leadId}`} className="block">
+      <Link href={href} className="block">
         {inner}
       </Link>
     );
@@ -78,16 +103,26 @@ function FeedRow({ item, wall }: { item: OpsFeedItem; wall?: boolean }) {
 
 export function OpsActivityFeed({
   timelineByLead,
+  orgActivityEvents,
+  activityRecords,
   wall,
   className,
 }: {
   timelineByLead: Record<string, TimelineEvent[]>;
+  orgActivityEvents?: readonly OrgActivityEvent[];
+  activityRecords?: readonly ActivityRecord[];
   wall?: boolean;
   className?: string;
 }) {
   const items = React.useMemo(
-    () => buildOpsActivityFeed({ timelineByLead, limit: wall ? 24 : 18 }),
-    [timelineByLead, wall],
+    () =>
+      buildOpsActivityFeed({
+        timelineByLead,
+        orgActivityEvents,
+        activityRecords,
+        limit: wall ? 24 : 18,
+      }),
+    [timelineByLead, orgActivityEvents, activityRecords, wall],
   );
 
   return (
@@ -103,7 +138,7 @@ export function OpsActivityFeed({
           Live activity
         </CardTitle>
         <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
-          Who added prospects, sent email, scheduled follow-ups
+          Prospects, outreach, follow-ups, strategy, and imports
         </CardDescription>
       </CardHeader>
       <CardContent className="min-h-0 flex-1 overflow-y-auto pt-0">

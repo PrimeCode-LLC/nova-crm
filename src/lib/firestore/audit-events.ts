@@ -50,6 +50,11 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "intake_filter_defaults.updated": "Team intake filters updated",
   "intent_playbook.updated": "Intent playbook updated",
   "intent_playbook.template_applied": "Intent playbook template applied",
+  "strategy.created": "Strategy created",
+  "strategy.updated": "Strategy updated",
+  "strategy.deleted": "Strategy deleted",
+  "strategy.assigned": "Strategy assignment changed",
+  "strategy.pack_imported": "Strategy pack imported",
 };
 
 export type AuditEventCategory =
@@ -109,6 +114,11 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "intake_filter_defaults.updated": "settings",
   "intent_playbook.updated": "settings",
   "intent_playbook.template_applied": "settings",
+  "strategy.created": "crm",
+  "strategy.updated": "crm",
+  "strategy.deleted": "crm",
+  "strategy.assigned": "crm",
+  "strategy.pack_imported": "crm",
 };
 
 export function labelForAuditEvent(event: string): string {

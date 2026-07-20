@@ -3,11 +3,14 @@ import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import type {
+  ActivityRecord,
   Deal,
   Followup,
   Lead,
   LeadTask,
   Meeting,
+  OrgActivityEvent,
+  OrgActivityEventType,
   TimelineEvent,
   TimelineEventType,
   User,
@@ -53,11 +56,12 @@ export type InboxPerfRow = {
 
 export type OpsFeedItem = {
   id: string;
-  type: TimelineEventType | "task_open" | "followup_due";
+  type: TimelineEventType | OrgActivityEventType | "task_open" | "followup_due" | "import_completed";
   actorId?: string;
   summary: string;
   createdAt: string;
   leadId?: string;
+  href?: string;
 };
 
 export type ActionBoardBuckets = {
@@ -355,6 +359,7 @@ const FEED_TYPES = new Set<TimelineEventType>([
   "email_replied",
   "followup_created",
   "followup_completed",
+  "followup_plan_paused",
   "meeting_scheduled",
   "meeting_completed",
   "prospect_channel_pushed",
@@ -363,10 +368,28 @@ const FEED_TYPES = new Set<TimelineEventType>([
   "note_added",
   "assignment_changed",
   "deal_created",
+  "stage_changed",
+  "ai_analysis",
+]);
+
+const ORG_FEED_TYPES = new Set<OrgActivityEventType>([
+  "strategy_created",
+  "strategy_updated",
+  "strategy_deleted",
+  "strategy_assigned",
+  "strategy_assignment_updated",
+  "strategy_assignment_paused",
+  "strategy_assignment_activated",
+  "strategy_assignment_removed",
+  "strategy_pack_imported",
+  "intake_promoted",
+  "import_completed",
 ]);
 
 export function buildOpsActivityFeed(input: {
   timelineByLead: Record<string, TimelineEvent[]>;
+  orgActivityEvents?: readonly OrgActivityEvent[];
+  activityRecords?: readonly ActivityRecord[];
   limit?: number;
 }): OpsFeedItem[] {
   const limit = input.limit ?? 40;
@@ -383,6 +406,30 @@ export function buildOpsActivityFeed(input: {
         leadId,
       });
     }
+  }
+  for (const e of input.orgActivityEvents ?? []) {
+    if (!ORG_FEED_TYPES.has(e.type)) continue;
+    flat.push({
+      id: e.id,
+      type: e.type,
+      actorId: e.actorId,
+      summary: e.summary,
+      createdAt: e.createdAt,
+      href: e.href,
+      leadId: typeof e.payload?.leadId === "string" ? e.payload.leadId : undefined,
+    });
+  }
+  for (const r of input.activityRecords ?? []) {
+    if (r.type !== "import_completed") continue;
+    flat.push({
+      id: r.id,
+      type: "import_completed",
+      actorId: r.userId,
+      summary: r.summary?.trim() || "Prospect import completed",
+      createdAt: r.occurredAt,
+      href: "/admin/import",
+      leadId: r.leadId,
+    });
   }
   flat.sort((a, b) => (validTime(b.createdAt) ?? 0) - (validTime(a.createdAt) ?? 0));
   return flat.slice(0, limit);

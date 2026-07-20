@@ -46,9 +46,56 @@ import {
 } from "@/lib/prospecting-strategy/pack";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import { createUserNotification, actorLabel } from "@/lib/notifications/create-user-notification";
+import { recordStrategyAuditClient } from "@/lib/firestore/audit-change-client";
+import type { OrgActivityEvent, OrgActivityEventType } from "@/lib/types";
+
+function newOrgActivityId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return `oa-${crypto.randomUUID()}`;
+  }
+  return `oa-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+function emitStrategyOrgActivity(
+  ws: {
+    currentUserId: string;
+    users: { id: string; displayName?: string; email?: string }[];
+    addOrgActivityEvent: (e: OrgActivityEvent) => void;
+  },
+  input: {
+    type: OrgActivityEventType;
+    summary: string;
+    strategyId: string;
+    strategyName?: string;
+    assigneeId?: string;
+    href?: string;
+  },
+) {
+  ws.addOrgActivityEvent({
+    id: newOrgActivityId(),
+    type: input.type,
+    actorId: ws.currentUserId,
+    summary: input.summary,
+    createdAt: new Date().toISOString(),
+    href: input.href ?? "/admin/strategies",
+    entityType: "strategy",
+    entityId: input.strategyId,
+    payload: {
+      strategyId: input.strategyId,
+      strategyName: input.strategyName,
+      assigneeId: input.assigneeId,
+    },
+  });
+}
 
 async function notifyStrategyAssignment(
-  ws: { isDemo: boolean; currentUserId: string; users: { id: string; displayName?: string; email?: string }[]; organizationId?: string },
+  ws: {
+    isDemo: boolean;
+    currentUserId: string;
+    users: { id: string; displayName?: string; email?: string }[];
+    organizationId?: string;
+    addOrgActivityEvent: (e: OrgActivityEvent) => void;
+  },
   organizationId: string,
   assignment: StrategyAssignment,
   strategies: ProspectingStrategy[],
@@ -59,23 +106,50 @@ async function notifyStrategyAssignment(
   const actor = actorLabel(ws.users, ws.currentUserId);
   const pct = assignment.allocationPct;
   let message: string;
+  let orgType: OrgActivityEventType;
+  let feedSummary: string;
   switch (action) {
     case "assigned":
       message = `${actor} assigned you strategy “${name}” (${pct}%)`;
+      feedSummary = `${actor} assigned strategy “${name}” (${pct}%)`;
+      orgType = "strategy_assigned";
       break;
     case "updated":
       message = `${actor} updated your assignment on “${name}” (${pct}%)`;
+      feedSummary = `${actor} updated strategy assignment on “${name}” (${pct}%)`;
+      orgType = "strategy_assignment_updated";
       break;
     case "paused":
       message = `${actor} paused your assignment on “${name}”`;
+      feedSummary = `${actor} paused strategy assignment on “${name}”`;
+      orgType = "strategy_assignment_paused";
       break;
     case "activated":
       message = `${actor} reactivated your assignment on “${name}”`;
+      feedSummary = `${actor} reactivated strategy assignment on “${name}”`;
+      orgType = "strategy_assignment_activated";
       break;
     case "removed":
       message = `${actor} removed your assignment on “${name}”`;
+      feedSummary = `${actor} removed strategy assignment on “${name}”`;
+      orgType = "strategy_assignment_removed";
       break;
   }
+  emitStrategyOrgActivity(ws, {
+    type: orgType,
+    summary: feedSummary,
+    strategyId: assignment.strategyId,
+    strategyName: name,
+    assigneeId: assignment.userId,
+    href: "/admin/strategies",
+  });
+  recordStrategyAuditClient({
+    event: "strategy.assigned",
+    strategyId: assignment.strategyId,
+    strategyName: name,
+    action,
+    assigneeId: assignment.userId,
+  });
   await createUserNotification(
     { organizationId: ws.organizationId || organizationId, isDemo: ws.isDemo },
     {
@@ -294,16 +368,30 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
               }
             : d,
         );
-        return;
+      } else {
+        if (!canLive) throw new Error("No organization context");
+        await persistProspectingStrategyCreate(getFirebaseDb(), organizationId, strategy);
       }
-      if (!canLive) throw new Error("No organization context");
-      await persistProspectingStrategyCreate(getFirebaseDb(), organizationId, strategy);
+      const actor = actorLabel(ws.users, ws.currentUserId);
+      const name = strategy.name?.trim() || "Untitled strategy";
+      emitStrategyOrgActivity(ws, {
+        type: "strategy_created",
+        summary: `${actor} created strategy “${name}”`,
+        strategyId: strategy.id,
+        strategyName: name,
+      });
+      recordStrategyAuditClient({
+        event: "strategy.created",
+        strategyId: strategy.id,
+        strategyName: name,
+      });
     },
-    [ws.isDemo, canLive, organizationId],
+    [ws, canLive, organizationId],
   );
 
   const updateStrategy = React.useCallback(
     async (id: string, patch: Partial<ProspectingStrategy>) => {
+      const existing = liveStrategies.find((s) => s.id === id);
       if (ws.isDemo) {
         setDemoDelta((d) =>
           d
@@ -315,16 +403,30 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
               }
             : d,
         );
-        return;
+      } else {
+        if (!canLive) throw new Error("No organization context");
+        await persistProspectingStrategyUpdate(getFirebaseDb(), id, patch);
       }
-      if (!canLive) throw new Error("No organization context");
-      await persistProspectingStrategyUpdate(getFirebaseDb(), id, patch);
+      const actor = actorLabel(ws.users, ws.currentUserId);
+      const name = (patch.name ?? existing?.name)?.trim() || "Untitled strategy";
+      emitStrategyOrgActivity(ws, {
+        type: "strategy_updated",
+        summary: `${actor} updated strategy “${name}”`,
+        strategyId: id,
+        strategyName: name,
+      });
+      recordStrategyAuditClient({
+        event: "strategy.updated",
+        strategyId: id,
+        strategyName: name,
+      });
     },
-    [ws.isDemo, canLive],
+    [ws, canLive, liveStrategies],
   );
 
   const deleteStrategy = React.useCallback(
     async (id: string) => {
+      const existing = liveStrategies.find((s) => s.id === id);
       if (ws.isDemo) {
         setDemoDelta((d) =>
           d
@@ -335,12 +437,25 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
               }
             : d,
         );
-        return;
+      } else {
+        if (!canLive) throw new Error("No organization context");
+        await persistProspectingStrategyDelete(getFirebaseDb(), id);
       }
-      if (!canLive) throw new Error("No organization context");
-      await persistProspectingStrategyDelete(getFirebaseDb(), id);
+      const actor = actorLabel(ws.users, ws.currentUserId);
+      const name = existing?.name?.trim() || "a strategy";
+      emitStrategyOrgActivity(ws, {
+        type: "strategy_deleted",
+        summary: `${actor} deleted strategy “${name}”`,
+        strategyId: id,
+        strategyName: name,
+      });
+      recordStrategyAuditClient({
+        event: "strategy.deleted",
+        strategyId: id,
+        strategyName: name,
+      });
     },
-    [ws.isDemo, canLive],
+    [ws, canLive, liveStrategies],
   );
 
   const addAssignment = React.useCallback(
@@ -471,24 +586,34 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
             assignments: d?.assignments ?? [],
           };
         });
-        return {
-          strategyId: materialized.strategy.id,
-          warnings: materialized.warnings,
-        };
+      } else {
+        if (!canLive) throw new Error("No organization context");
+        await persistProspectingSeedBatch(
+          getFirebaseDb(),
+          organizationId,
+          materialized.personas,
+          materialized.strategy,
+        );
       }
-      if (!canLive) throw new Error("No organization context");
-      await persistProspectingSeedBatch(
-        getFirebaseDb(),
-        organizationId,
-        materialized.personas,
-        materialized.strategy,
-      );
+      const actor = actorLabel(ws.users, ws.currentUserId);
+      const name = materialized.strategy.name?.trim() || pack.name || "strategy pack";
+      emitStrategyOrgActivity(ws, {
+        type: "strategy_pack_imported",
+        summary: `${actor} imported strategy pack “${name}”`,
+        strategyId: materialized.strategy.id,
+        strategyName: name,
+      });
+      recordStrategyAuditClient({
+        event: "strategy.pack_imported",
+        strategyId: materialized.strategy.id,
+        strategyName: name,
+      });
       return {
         strategyId: materialized.strategy.id,
         warnings: materialized.warnings,
       };
     },
-    [ws.isDemo, ws.currentUserId, organizationId, canLive],
+    [ws, organizationId, canLive],
   );
 
   const installSamplePack = React.useCallback(async () => {

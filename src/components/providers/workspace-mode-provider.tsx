@@ -22,6 +22,7 @@ import type {
   User,
   CrmLabel,
   Deal,
+  OrgActivityEvent,
   OrgMemberRole,
 } from "@/lib/types";
 import {
@@ -84,6 +85,7 @@ import {
   persistTimelineEventCreate,
   persistTouchpointCreate,
 } from "@/lib/firestore/persist-workspace-entities-client";
+import { persistOrgActivityEventCreate } from "@/lib/firestore/persist-org-activity-client";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { isAuthDisabled } from "@/lib/auth/flags";
@@ -209,6 +211,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     deleteLeadNote: (noteId: string) => void;
     addLeadTouchpoint: (t: Touchpoint) => void;
     addTimelineEvent: (e: TimelineEvent) => void;
+    addOrgActivityEvent: (e: OrgActivityEvent) => void;
     patchLead: (leadId: string, patch: Partial<Lead>) => void;
     /** Like `patchLead` but awaits the Firestore write (live mode). Throws on permission or network errors. */
     patchLeadAsync: (leadId: string, patch: Partial<Lead>) => Promise<void>;
@@ -754,6 +757,18 @@ export function WorkspaceModeProvider({
   const addFollowup = React.useCallback(
     (f: Followup) => {
       const iso = new Date().toISOString();
+      const timeline: TimelineEvent | null =
+        f.leadId
+          ? {
+              id: newLocalId("te-local"),
+              leadId: f.leadId,
+              type: "followup_created",
+              actorId: f.ownerId,
+              summary: `Scheduled follow-up: ${f.title}`,
+              createdAt: iso,
+              payload: { followupId: f.id },
+            }
+          : null;
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
@@ -763,6 +778,14 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistFollowupCreate(db, orgId, f);
             if (f.leadId) await persistLeadActivityBump(db, f.leadId);
+            if (timeline) {
+              await persistTimelineEventCreate(
+                db,
+                orgId,
+                timeline,
+                leadOwnerIdForFirestore(f.leadId!),
+              );
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save follow-up", { description: msg });
@@ -773,6 +796,7 @@ export function WorkspaceModeProvider({
         const next: WorkspaceSessionV2 = {
           ...s,
           followups: { ...s.followups, extras: [...s.followups.extras, f] },
+          timelineAdded: timeline ? [...s.timelineAdded, timeline] : s.timelineAdded,
         };
         if (!f.leadId) return next;
         if (writeFs) return next;
@@ -788,11 +812,23 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const createFollowupPlanWithFollowups = React.useCallback(
     (plan: FollowupPlan, items: Followup[]) => {
+      const iso = new Date().toISOString();
+      const timelines: TimelineEvent[] = items
+        .filter((f): f is Followup & { leadId: string } => Boolean(f.leadId))
+        .map((f) => ({
+          id: newLocalId("te-local"),
+          leadId: f.leadId,
+          type: "followup_created" as const,
+          actorId: f.ownerId || plan.ownerId,
+          summary: `Scheduled follow-up: ${f.title}`,
+          createdAt: iso,
+          payload: { followupId: f.id, planId: plan.id },
+        }));
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
@@ -805,6 +841,14 @@ export function WorkspaceModeProvider({
               await persistFollowupCreate(db, orgId, f);
             }
             if (plan.leadId) await persistLeadActivityBump(db, plan.leadId);
+            for (const te of timelines) {
+              await persistTimelineEventCreate(
+                db,
+                orgId,
+                te,
+                leadOwnerIdForFirestore(te.leadId),
+              );
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save follow-up plan", { description: msg });
@@ -821,9 +865,10 @@ export function WorkspaceModeProvider({
           ...s.followups,
           extras: [...s.followups.extras, ...items],
         },
+        timelineAdded: timelines.length ? [...s.timelineAdded, ...timelines] : s.timelineAdded,
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const pauseFollowupPlanForReply = React.useCallback(
@@ -945,13 +990,37 @@ export function WorkspaceModeProvider({
 
   const setFollowupCompleted = React.useCallback(
     (id: string, completed: boolean) => {
+      const snap = snapshotRef.current;
+      const followup = snap.followups.find((f) => f.id === id);
+      const iso = new Date().toISOString();
+      const timeline: TimelineEvent | null =
+        completed && followup?.leadId
+          ? {
+              id: newLocalId("te-local"),
+              leadId: followup.leadId,
+              type: "followup_completed",
+              actorId: snap.currentUserId || followup.ownerId,
+              summary: `Completed follow-up: ${followup.title}`,
+              createdAt: iso,
+              payload: { followupId: id },
+            }
+          : null;
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
-      if (writeFs) {
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
         void (async () => {
           try {
             const db = getFirebaseDb();
             await persistFollowupSetCompleted(db, id, completed);
+            if (timeline && followup?.leadId) {
+              await persistTimelineEventCreate(
+                db,
+                orgId,
+                timeline,
+                leadOwnerIdForFirestore(followup.leadId),
+              );
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not update follow-up", { description: msg });
@@ -960,12 +1029,16 @@ export function WorkspaceModeProvider({
       }
       setSessionV2((s) => {
         const completion = { ...s.followups.completion };
-        if (completed) completion[id] = new Date().toISOString();
+        if (completed) completion[id] = iso;
         else completion[id] = null;
-        return { ...s, followups: { ...s.followups, completion } };
+        return {
+          ...s,
+          followups: { ...s.followups, completion },
+          timelineAdded: timeline ? [...s.timelineAdded, timeline] : s.timelineAdded,
+        };
       });
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const setFollowupEmailSchedule = React.useCallback(
@@ -1143,6 +1216,18 @@ export function WorkspaceModeProvider({
 
   const addLeadTask = React.useCallback(
     (t: LeadTask) => {
+      const timeline: TimelineEvent | null =
+        t.leadId
+          ? {
+              id: newLocalId("te-local"),
+              leadId: t.leadId,
+              type: "lead_task_created",
+              actorId: t.createdById,
+              summary: `Created task: ${t.title}`,
+              createdAt: t.createdAt || new Date().toISOString(),
+              payload: { taskId: t.id, assigneeId: t.assigneeId },
+            }
+          : null;
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
@@ -1151,6 +1236,14 @@ export function WorkspaceModeProvider({
           try {
             const db = getFirebaseDb();
             await persistLeadTaskCreate(db, orgId, t);
+            if (timeline && t.leadId) {
+              await persistTimelineEventCreate(
+                db,
+                orgId,
+                timeline,
+                leadOwnerIdForFirestore(t.leadId),
+              );
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not save task", { description: msg });
@@ -1160,9 +1253,10 @@ export function WorkspaceModeProvider({
       setSessionV2((s) => ({
         ...s,
         leadTasks: { ...s.leadTasks, extras: [...s.leadTasks.extras, t] },
+        timelineAdded: timeline ? [...s.timelineAdded, timeline] : s.timelineAdded,
       }));
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const addLeadNote = React.useCallback(
@@ -1360,6 +1454,30 @@ export function WorkspaceModeProvider({
       }));
     },
     [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+  );
+
+  const addOrgActivityEvent = React.useCallback(
+    (e: OrgActivityEvent) => {
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      if (writeFs && orgId) {
+        void (async () => {
+          try {
+            const db = getFirebaseDb();
+            await persistOrgActivityEventCreate(db, orgId, e);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            toast.error("Could not save activity", { description: msg });
+          }
+        })();
+      }
+      setSessionV2((s) => ({
+        ...s,
+        orgActivityAdded: [...s.orgActivityAdded, e],
+      }));
+    },
+    [mode, userDoc?.organizationId],
   );
 
   const applyLeadPatchToSession = React.useCallback(
@@ -1918,6 +2036,7 @@ export function WorkspaceModeProvider({
       timelineByLead: groupTimelineEventsByLead(liveFs.timelineEvents),
       activityCounters: liveFs.activityCounters,
       activityRecords: liveFs.activityRecords,
+      orgActivityEvents: liveFs.orgActivityEvents,
       profiles: liveFs.profiles,
       campaigns: liveFs.campaigns,
       crmLabels: liveFs.crmLabels,
@@ -1953,6 +2072,7 @@ export function WorkspaceModeProvider({
     liveFs.timelineEvents,
     liveFs.activityCounters,
     liveFs.activityRecords,
+    liveFs.orgActivityEvents,
     liveFs.profiles,
     liveFs.campaigns,
     liveFs.crmLabels,
@@ -2057,6 +2177,21 @@ export function WorkspaceModeProvider({
 
   const setLeadTaskCompleted = React.useCallback(
     (id: string, completed: boolean) => {
+      const snap = snapshotRef.current;
+      const task = snap.leadTasks.find((t) => t.id === id);
+      const iso = new Date().toISOString();
+      const timeline: TimelineEvent | null =
+        completed && task?.leadId
+          ? {
+              id: newLocalId("te-local"),
+              leadId: task.leadId,
+              type: "lead_task_completed",
+              actorId: snap.currentUserId || task.assigneeId,
+              summary: `Completed task: ${task.title}`,
+              createdAt: iso,
+              payload: { taskId: id },
+            }
+          : null;
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
@@ -2065,13 +2200,20 @@ export function WorkspaceModeProvider({
           try {
             const db = getFirebaseDb();
             await persistLeadTaskSetCompleted(db, id, completed);
+            if (timeline && task?.leadId) {
+              await persistTimelineEventCreate(
+                db,
+                orgId,
+                timeline,
+                leadOwnerIdForFirestore(task.leadId),
+              );
+            }
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
             toast.error("Could not update task", { description: msg });
           }
         })();
       }
-      const iso = new Date().toISOString();
       setSessionV2((s) => {
         const completion = { ...s.leadTasks.completion };
         if (completed) completion[id] = iso;
@@ -2079,10 +2221,11 @@ export function WorkspaceModeProvider({
         return {
           ...s,
           leadTasks: { ...s.leadTasks, completion },
+          timelineAdded: timeline ? [...s.timelineAdded, timeline] : s.timelineAdded,
         };
       });
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
   );
 
   const value = React.useMemo<WorkspaceContextValue>(() => {
@@ -2162,6 +2305,7 @@ export function WorkspaceModeProvider({
       deleteLeadNote,
       addLeadTouchpoint,
       addTimelineEvent,
+      addOrgActivityEvent,
       patchLead,
       patchLeadAsync,
       bulkReassignOwners,
@@ -2231,6 +2375,7 @@ export function WorkspaceModeProvider({
     deleteLeadNote,
     addLeadTouchpoint,
     addTimelineEvent,
+    addOrgActivityEvent,
     patchLead,
     patchLeadAsync,
     bulkReassignOwners,

@@ -217,6 +217,41 @@ export async function promoteRawItemToProspectServer(input: {
   );
   await batch.commit();
 
+  const teId = newEntityId("te");
+  await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+    stampForCreate(
+      input.organizationId,
+      {
+        leadId,
+        leadOwnerId: ownerId || input.userId,
+        type: "lead_created",
+        actorId: input.userId,
+        summary: `Promoted from intake: ${companyName}`,
+        payload: { source: "intake", rawItemId: item.id },
+        createdAt: now,
+      },
+      input.userId,
+    ),
+  );
+
+  const oaId = newEntityId("oa");
+  await db.collection(COLLECTIONS.orgActivityEvents).doc(oaId).set(
+    stampForCreate(
+      input.organizationId,
+      {
+        type: "intake_promoted",
+        actorId: input.userId,
+        summary: `Promoted intake item to prospect “${companyName}”`,
+        createdAt: now,
+        href: `/leads/${leadId}`,
+        entityType: "lead",
+        entityId: leadId,
+        payload: { leadId, rawItemId: item.id },
+      },
+      input.userId,
+    ),
+  );
+
   const marked = await markRawItemPromotedServer({
     organizationId: input.organizationId,
     itemId: input.itemId,

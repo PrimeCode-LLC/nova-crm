@@ -9,6 +9,8 @@ export const COLLECTIONS = {
   leadTasks: "leadTasks",
   touchpoints: "touchpoints",
   timelineEvents: "timelineEvents",
+  /** Org-level Live activity rows (strategy, import, intake promote, …). */
+  orgActivityEvents: "orgActivityEvents",
   accounts: "accounts",
   contacts: "contacts",
   deals: "deals",
@@ -96,6 +98,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.leadTasks,
   COLLECTIONS.touchpoints,
   COLLECTIONS.timelineEvents,
+  COLLECTIONS.orgActivityEvents,
   COLLECTIONS.accounts,
   COLLECTIONS.contacts,
   COLLECTIONS.deals,

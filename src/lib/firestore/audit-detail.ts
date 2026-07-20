@@ -335,6 +335,32 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     fieldName: "intentPlaybook",
     message: (m) => `Intent playbook template applied (${String(m.templateId ?? "")})`,
   },
+  "strategy.created": {
+    operation: "create",
+    tableName: "prospectingStrategies",
+    message: (m) => `Strategy created (${String(m.strategyName ?? m.strategyId ?? "")})`,
+  },
+  "strategy.updated": {
+    operation: "update",
+    tableName: "prospectingStrategies",
+    message: (m) => `Strategy updated (${String(m.strategyName ?? m.strategyId ?? "")})`,
+  },
+  "strategy.deleted": {
+    operation: "delete",
+    tableName: "prospectingStrategies",
+    message: (m) => `Strategy deleted (${String(m.strategyName ?? m.strategyId ?? "")})`,
+  },
+  "strategy.assigned": {
+    operation: "update",
+    tableName: "strategyAssignments",
+    message: (m) =>
+      `Strategy assignment ${String(m.action ?? "updated")} (${String(m.strategyName ?? m.strategyId ?? "")})`,
+  },
+  "strategy.pack_imported": {
+    operation: "create",
+    tableName: "prospectingStrategies",
+    message: (m) => `Strategy pack imported (${String(m.strategyName ?? m.strategyId ?? "")})`,
+  },
 };
 
 export function buildAuditMessage(

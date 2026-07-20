@@ -317,6 +317,12 @@ service cloud.firestore {
       allow write: if tenantWritable();
     }
 
+    match /orgActivityEvents/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update, delete: if false;
+    }
+
     match /accounts/{id} {
       allow read: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
       allow write: if tenantWritable();

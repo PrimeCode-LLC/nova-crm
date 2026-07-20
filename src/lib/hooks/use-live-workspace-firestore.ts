@@ -29,6 +29,7 @@ import type {
   Lead,
   LeadTask,
   Note,
+  OrgActivityEvent,
   Role,
   Touchpoint,
   TimelineEvent,
@@ -56,6 +57,7 @@ export type LiveWorkspaceFirestoreState = {
   timelineEvents: TimelineEvent[];
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
+  orgActivityEvents: OrgActivityEvent[];
   profiles: Profile[];
   campaigns: Campaign[];
   crmLabels: CrmLabel[];
@@ -93,6 +95,7 @@ const empty: LiveWorkspaceFirestoreState = {
   timelineEvents: [],
   activityCounters: [],
   activityRecords: [],
+  orgActivityEvents: [],
   profiles: [],
   campaigns: [],
   crmLabels: [],
@@ -403,6 +406,24 @@ function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRec
   };
 }
 
+function asOrgActivityEvent(id: string, raw: Record<string, unknown>): OrgActivityEvent {
+  return {
+    id,
+    organizationId: typeof raw.organizationId === "string" ? raw.organizationId : undefined,
+    type: raw.type as OrgActivityEvent["type"],
+    actorId: String(raw.actorId ?? ""),
+    summary: String(raw.summary ?? ""),
+    createdAt: firestoreValueToIso(raw.createdAt),
+    href: typeof raw.href === "string" ? raw.href : undefined,
+    entityType: typeof raw.entityType === "string" ? raw.entityType : undefined,
+    entityId: typeof raw.entityId === "string" ? raw.entityId : undefined,
+    payload:
+      raw.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload)
+        ? (raw.payload as Record<string, unknown>)
+        : undefined,
+  };
+}
+
 /**
  * Real-time tenant CRM documents for live workspace mode.
  *
@@ -463,6 +484,7 @@ export function useLiveWorkspaceFirestore(
         timelineEvents: [],
         activityCounters: [],
         activityRecords: [],
+        orgActivityEvents: [],
         profiles: [],
         campaigns: [],
         crmLabels: [],
@@ -491,6 +513,7 @@ export function useLiveWorkspaceFirestore(
         timelineEvents: [],
         activityCounters: [],
         activityRecords: [],
+        orgActivityEvents: [],
         profiles: [],
         campaigns: [],
         crmLabels: [],
@@ -925,6 +948,23 @@ export function useLiveWorkspaceFirestore(
           applySnapshot("activityRecords", "activityRecords", activityRecords);
         },
         (err) => applyListenerError("activityRecords", err),
+      ),
+    );
+
+    const qOrgActivity = query(
+      collection(db, COLLECTIONS.orgActivityEvents),
+      where("organizationId", "==", organizationId),
+    );
+    unsubs.push(
+      onSnapshot(
+        qOrgActivity,
+        (snap) => {
+          const orgActivityEvents = snap.docs.map((d) =>
+            asOrgActivityEvent(d.id, d.data() as Record<string, unknown>),
+          );
+          applySnapshot("orgActivityEvents", "orgActivityEvents", orgActivityEvents);
+        },
+        (err) => applyListenerError("orgActivityEvents", err),
       ),
     );
 

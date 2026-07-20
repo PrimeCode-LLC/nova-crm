@@ -102,3 +102,24 @@ export function recordActivityCounterLoggedClient(input: {
     profileId: input.profileId,
   });
 }
+
+export function recordStrategyAuditClient(input: {
+  event:
+    | "strategy.created"
+    | "strategy.updated"
+    | "strategy.deleted"
+    | "strategy.assigned"
+    | "strategy.pack_imported";
+  strategyId: string;
+  strategyName?: string;
+  action?: string;
+  assigneeId?: string;
+}): void {
+  postAuditEvent({
+    event: input.event,
+    strategyId: input.strategyId,
+    strategyName: input.strategyName,
+    action: input.action,
+    assigneeId: input.assigneeId,
+  });
+}

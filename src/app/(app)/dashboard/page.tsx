@@ -136,6 +136,7 @@ export default function DashboardPage() {
     followups,
     followupPlans,
     timelineByLead,
+    orgActivityEvents,
     viewerOrgRole,
   } = useWorkspace();
   const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
@@ -662,6 +663,8 @@ export default function DashboardPage() {
                 tasks={workflowTasks}
                 users={users}
                 timelineByLead={timelineByLead}
+                orgActivityEvents={orgActivityEvents}
+                activityRecords={activityRecords}
                 range={timeRange as DashboardTimeRangeKey}
                 currentUserId={currentUserId}
                 orgMeetingsScope={orgMeetingsScope}

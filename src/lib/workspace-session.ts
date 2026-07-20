@@ -9,6 +9,7 @@ import type {
   Account,
   Contact,
   Deal,
+  OrgActivityEvent,
 } from "@/lib/types";
 import type { WorkspaceSnapshot } from "@/lib/workspace-dataset";
 import { mockLeads } from "./mock-data";
@@ -56,6 +57,7 @@ export type WorkspaceSessionV2 = {
   notes: NotesSessionDelta;
   touchpointsAdded: Touchpoint[];
   timelineAdded: TimelineEvent[];
+  orgActivityAdded: OrgActivityEvent[];
   leadPatches: Record<string, Partial<Lead>>;
   accountPatches: Record<string, Partial<Account>>;
   contactPatches: Record<string, Partial<Contact>>;
@@ -75,6 +77,7 @@ export function emptyWorkspaceSession(): WorkspaceSessionV2 {
     notes: { added: [], removedIds: [], updates: {} },
     touchpointsAdded: [],
     timelineAdded: [],
+    orgActivityAdded: [],
     leadPatches: {},
     accountPatches: {},
     contactPatches: {},
@@ -209,6 +212,7 @@ function normalizeSession(parsed: Partial<WorkspaceSessionV2>): WorkspaceSession
     },
     touchpointsAdded: Array.isArray(parsed.touchpointsAdded) ? parsed.touchpointsAdded : [],
     timelineAdded: Array.isArray(parsed.timelineAdded) ? parsed.timelineAdded : [],
+    orgActivityAdded: Array.isArray(parsed.orgActivityAdded) ? parsed.orgActivityAdded : [],
     leadPatches: parsed.leadPatches && typeof parsed.leadPatches === "object" ? parsed.leadPatches : {},
     accountPatches:
       parsed.accountPatches && typeof parsed.accountPatches === "object" ? parsed.accountPatches : {},
@@ -271,6 +275,7 @@ export function mergeSessionIntoSnapshot(
   | "notes"
   | "touchpoints"
   | "timelineByLead"
+  | "orgActivityEvents"
   | "leads"
   | "accounts"
   | "contacts"
@@ -397,6 +402,12 @@ export function mergeSessionIntoSnapshot(
       return p ? { ...d, ...p } : d;
     });
 
+  const baseOrgIds = new Set(base.orgActivityEvents.map((e) => e.id));
+  const orgActivityEvents = [
+    ...base.orgActivityEvents,
+    ...session.orgActivityAdded.filter((e) => !baseOrgIds.has(e.id)),
+  ].sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
   return {
     followups,
     followupPlans,
@@ -404,6 +415,7 @@ export function mergeSessionIntoSnapshot(
     notes,
     touchpoints,
     timelineByLead,
+    orgActivityEvents,
     leads,
     accounts,
     contacts,

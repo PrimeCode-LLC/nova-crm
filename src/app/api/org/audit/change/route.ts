@@ -64,12 +64,27 @@ const counterLoggedBody = z.object({
   profileId: z.string().max(120).optional(),
 });
 
+const strategyBody = z.object({
+  event: z.enum([
+    "strategy.created",
+    "strategy.updated",
+    "strategy.deleted",
+    "strategy.assigned",
+    "strategy.pack_imported",
+  ]),
+  strategyId: z.string().min(1).max(120),
+  strategyName: z.string().max(200).optional(),
+  action: z.string().max(80).optional(),
+  assigneeId: z.string().max(120).optional(),
+});
+
 const bodySchema = z.discriminatedUnion("event", [
   leadStageBody,
   leadCreatedBody,
   dealCreatedBody,
   dealStageBody,
   counterLoggedBody,
+  strategyBody,
 ]);
 
 function stageLabel(stage: PipelineStage): string {
@@ -226,6 +241,47 @@ export async function POST(req: Request) {
         message: `Logged ${total} activity count${total === 1 ? "" : "s"} for ${channel}`,
         updatedValue: JSON.stringify(counters),
         meta: { channel, date, counters, profileId },
+      }),
+    );
+    return NextResponse.json({ ok: true });
+  }
+
+  if (
+    data.event === "strategy.created" ||
+    data.event === "strategy.updated" ||
+    data.event === "strategy.deleted" ||
+    data.event === "strategy.assigned" ||
+    data.event === "strategy.pack_imported"
+  ) {
+    const { event, strategyId, strategyName, action, assigneeId } = data;
+    const name = strategyName ?? strategyId;
+    const message =
+      event === "strategy.created"
+        ? `Strategy created (${name})`
+        : event === "strategy.updated"
+          ? `Strategy updated (${name})`
+          : event === "strategy.deleted"
+            ? `Strategy deleted (${name})`
+            : event === "strategy.pack_imported"
+              ? `Strategy pack imported (${name})`
+              : `Strategy assignment ${action ?? "updated"} (${name})`;
+
+    await recordAudit(
+      withAuditActor(g.ctx.session, {
+        organizationId: orgId,
+        actorUid,
+        event,
+        operation:
+          event === "strategy.deleted"
+            ? "delete"
+            : event === "strategy.created" || event === "strategy.pack_imported"
+              ? "create"
+              : "update",
+        tableName:
+          event === "strategy.assigned" ? "strategyAssignments" : "prospectingStrategies",
+        message,
+        updatedValue: name,
+        meta: { strategyId, strategyName, action, assigneeId },
       }),
     );
     return NextResponse.json({ ok: true });

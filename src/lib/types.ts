@@ -952,6 +952,34 @@ export interface TimelineEvent {
   createdAt: ISODate;
 }
 
+/** Org-scoped ops events that are not tied to a single lead timeline. */
+export type OrgActivityEventType =
+  | "strategy_created"
+  | "strategy_updated"
+  | "strategy_deleted"
+  | "strategy_assigned"
+  | "strategy_assignment_updated"
+  | "strategy_assignment_paused"
+  | "strategy_assignment_activated"
+  | "strategy_assignment_removed"
+  | "strategy_pack_imported"
+  | "intake_promoted"
+  | "import_completed";
+
+export interface OrgActivityEvent {
+  id: string;
+  organizationId?: string;
+  type: OrgActivityEventType;
+  actorId: string;
+  summary: string;
+  createdAt: ISODate;
+  /** Deep-link for the Live activity feed row. */
+  href?: string;
+  entityType?: string;
+  entityId?: string;
+  payload?: Record<string, unknown>;
+}
+
 /** Org-wide Slack-style chat (Firestore `workspaceChatChannels`). */
 export type WorkspaceChatChannelKind = "public" | "dm";
 

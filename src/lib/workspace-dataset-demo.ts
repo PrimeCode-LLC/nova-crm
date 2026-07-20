@@ -46,6 +46,7 @@ export const DEMO_SNAPSHOT: WorkspaceSnapshot = {
   notes: mockNotes,
   activityCounters: mockActivityCounters,
   activityRecords: mockActivityRecords,
+  orgActivityEvents: [],
   crmLabels: mockCrmLabels,
   currentUserId: CURRENT_USER_ID,
 };
@@ -148,6 +149,11 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
           (r) => activityActorIds.has(r.userId) && (!r.leadId || visibleLeadIds.has(r.leadId)),
         );
 
+  const orgActivityEvents =
+    activityActorIds === null
+      ? snapshot.orgActivityEvents
+      : snapshot.orgActivityEvents.filter((e) => activityActorIds.has(e.actorId));
+
   return {
     ...snapshot,
     users,
@@ -165,6 +171,7 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
     permissionOverrides,
     activityCounters,
     activityRecords,
+    orgActivityEvents,
   };
 }
 

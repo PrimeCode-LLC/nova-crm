@@ -17,6 +17,7 @@ import type {
   ActivityRecord,
   PermissionOverride,
   CrmLabel,
+  OrgActivityEvent,
 } from "./types";
 
 export type WorkspaceSnapshot = {
@@ -37,6 +38,7 @@ export type WorkspaceSnapshot = {
   notes: Note[];
   activityCounters: ActivityCounterRow[];
   activityRecords: ActivityRecord[];
+  orgActivityEvents: OrgActivityEvent[];
   crmLabels: CrmLabel[];
   currentUserId: string;
 };
@@ -61,6 +63,7 @@ export const LIVE_SNAPSHOT: WorkspaceSnapshot = {
   notes: [],
   activityCounters: [],
   activityRecords: [],
+  orgActivityEvents: [],
   crmLabels: [],
   currentUserId: "",
 };

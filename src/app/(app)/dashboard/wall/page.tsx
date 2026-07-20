@@ -26,6 +26,8 @@ export default function DashboardWallPage() {
     leadTasks,
     users,
     timelineByLead,
+    orgActivityEvents,
+    activityRecords,
     currentUserId,
     getUserById,
     workspaceLoading,
@@ -223,6 +225,8 @@ export default function DashboardWallPage() {
           tasks={leadTasks}
           users={users}
           timelineByLead={timelineByLead}
+          orgActivityEvents={orgActivityEvents}
+          activityRecords={activityRecords}
           range={range}
           currentUserId={currentUserId}
           orgMeetingsScope={orgMeetingsScope}
