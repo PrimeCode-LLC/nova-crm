@@ -58,6 +58,7 @@ import {
   LS_USER_NOTIFICATION_SETTINGS,
   type UserNotificationSettings,
 } from "@/lib/notifications/alert-preferences";
+import { resolveWallPrefsUserId } from "@/lib/wall-preferences";
 
 const LS_PROFILE = "nova-crm-settings-profile-v1";
 const LS_ACCOUNT = "nova-crm-settings-account-v1";
@@ -1013,7 +1014,9 @@ function SettingsPage() {
 
           {/* Wall display */}
           <TabsContent value="wall">
-            <WallDisplaySettingsCard userId={currentUserId || demoPersonaId || "anon"} />
+            <WallDisplaySettingsCard
+              userId={resolveWallPrefsUserId(currentUserId, demoPersonaId)}
+            />
           </TabsContent>
 
           {/* Billing */}

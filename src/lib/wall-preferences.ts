@@ -85,6 +85,27 @@ export function wallPrefsStorageKey(userId: string): string {
   return `${STORAGE_PREFIX}:${userId || "anon"}`;
 }
 
+/** Shared key for Settings + Wall so both read/write the same prefs. */
+export function resolveWallPrefsUserId(
+  currentUserId?: string | null,
+  demoPersonaId?: string | null,
+): string {
+  return (currentUserId || demoPersonaId || "anon").trim() || "anon";
+}
+
+export const WALL_PREFS_CHANGED_EVENT = "nova-wall-prefs-changed";
+
+export function notifyWallPreferencesChanged(userId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(
+      new CustomEvent(WALL_PREFS_CHANGED_EVENT, { detail: { userId: wallPrefsStorageKey(userId) } }),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
 function clampDwell(n: number): number {
   const allowed = WALL_DWELL_OPTIONS.map((o) => o.value);
   if (allowed.includes(n as (typeof WALL_DWELL_OPTIONS)[number]["value"])) return n;
@@ -151,6 +172,7 @@ export function saveWallPreferences(userId: string, prefs: WallPreferences): voi
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(wallPrefsStorageKey(userId), JSON.stringify(prefs));
+    notifyWallPreferencesChanged(userId);
   } catch {
     /* ignore quota */
   }

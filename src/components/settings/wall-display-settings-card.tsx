@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { toast } from "sonner";
 import { useWallPreferences } from "@/hooks/use-wall-preferences";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import { cn } from "@/lib/utils";
@@ -59,7 +60,9 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
               value={String(prefs.dwellSeconds)}
               onValueChange={(v) => {
                 if (!v) return;
-                setDwellSeconds(Number(v));
+                const seconds = Number(v);
+                setDwellSeconds(seconds);
+                toast.success(`Scene timer set to ${seconds}s`);
               }}
             >
               <SelectTrigger className="h-9 w-full">
@@ -89,7 +92,9 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
               value={String(prefs.resumeIdleSeconds)}
               onValueChange={(v) => {
                 if (!v) return;
-                setResumeIdleSeconds(Number(v));
+                const seconds = Number(v);
+                setResumeIdleSeconds(seconds);
+                toast.success(`Resume idle set to ${seconds}s`);
               }}
             >
               <SelectTrigger className="h-9 w-full">
@@ -132,7 +137,10 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
             </div>
             <Switch
               checked={prefs.showProgressBar}
-              onCheckedChange={setShowProgressBar}
+              onCheckedChange={(on) => {
+                setShowProgressBar(on);
+                toast.success(on ? "Countdown bar on" : "Countdown bar off");
+              }}
               aria-label="Show countdown bar"
             />
           </div>
@@ -142,7 +150,10 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
               <Select
                 value={prefs.progressBarPosition}
                 onValueChange={(v) => {
-                  if (v === "top" || v === "bottom") setProgressBarPosition(v);
+                  if (v === "top" || v === "bottom") {
+                    setProgressBarPosition(v);
+                    toast.success(`Countdown bar at ${v}`);
+                  }
                 }}
               >
                 <SelectTrigger className="h-9 w-full">
@@ -174,7 +185,10 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
             </div>
             <Switch
               checked={prefs.showPulseStrip}
-              onCheckedChange={setShowPulseStrip}
+              onCheckedChange={(on) => {
+                setShowPulseStrip(on);
+                toast.success(on ? "Pulse strip on" : "Pulse strip off");
+              }}
               aria-label="Show pulse KPI strip"
             />
           </div>
@@ -199,7 +213,10 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
                 </div>
                 <Switch
                   checked={prefs.scenes[s.key]}
-                  onCheckedChange={(on) => setScene(s.key, on)}
+                  onCheckedChange={(on) => {
+                    setScene(s.key, on);
+                    toast.success(on ? `${s.label} scene on` : `${s.label} scene off`);
+                  }}
                   disabled={prefs.scenes[s.key] && enabledSceneCount <= 1}
                   aria-label={`Show ${s.label} scene`}
                 />
@@ -218,7 +235,15 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
             <Monitor className="h-3.5 w-3.5" />
             Open wall mode
           </Link>
-          <Button type="button" variant="outline" size="sm" onClick={reset}>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              reset();
+              toast.success("Wall settings reset to defaults");
+            }}
+          >
             Reset defaults
           </Button>
         </div>
