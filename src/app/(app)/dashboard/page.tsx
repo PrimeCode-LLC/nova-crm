@@ -666,6 +666,9 @@ export default function DashboardPage() {
                 orgActivityEvents={orgActivityEvents}
                 activityRecords={activityRecords}
                 range={timeRange as DashboardTimeRangeKey}
+                teamCommandLeads={ownerScopedLeads}
+                teamCommandDeals={ownerScopedDeals}
+                teamCommandFollowups={followups}
                 currentUserId={currentUserId}
                 orgMeetingsScope={orgMeetingsScope}
                 widgets={w}

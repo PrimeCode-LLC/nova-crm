@@ -12,8 +12,13 @@ import {
   type TeamCommandLens,
   type TeamCommandRow,
 } from "@/lib/dashboard-team-command";
-import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
-import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
+import {
+  DASHBOARD_TIME_RANGE_LABELS,
+  TEAM_COMMAND_TIME_RANGES,
+  TEAM_COMMAND_TIME_RANGE_SHORT_LABELS,
+  type DashboardTimeRangeKey,
+  type TeamCommandTimeRangeKey,
+} from "@/lib/dashboard-date-range";
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
@@ -93,6 +98,13 @@ function DeltaBadge({ delta }: { delta: number }) {
   );
 }
 
+function toTeamCommandRange(range: DashboardTimeRangeKey): TeamCommandTimeRangeKey {
+  if ((TEAM_COMMAND_TIME_RANGES as readonly string[]).includes(range)) {
+    return range as TeamCommandTimeRangeKey;
+  }
+  return "30d";
+}
+
 export function TeamCommand({
   leads: leadsOverride,
   deals: dealsOverride,
@@ -110,11 +122,20 @@ export function TeamCommand({
 } = {}) {
   const ws = useWorkspace();
   const { users, currentUserId, leadTasks, followups: wsFollowups, intentPlaybook } = ws;
+  // Prefer overrides (channel/owner-scoped, not date-capped) when the parent
+  // supplies them; fall back to full workspace for standalone / wall usage.
   const leads = leadsOverride ?? ws.leads;
   const deals = dealsOverride ?? ws.deals;
   const followups = followupsOverride ?? wsFollowups;
   const tasks = tasksOverride ?? leadTasks;
   const [lens, setLens] = React.useState<TeamCommandLens>("overall");
+  const [localRange, setLocalRange] = React.useState<TeamCommandTimeRangeKey>(() =>
+    toTeamCommandRange(range),
+  );
+
+  React.useEffect(() => {
+    setLocalRange(toTeamCommandRange(range));
+  }, [range]);
 
   const viewer = users.find((u) => u.id === currentUserId);
   const canSeeTeam =
@@ -131,10 +152,10 @@ export function TeamCommand({
         deals,
         followups,
         tasks,
-        range,
+        range: localRange,
         outreachThreshold: intentPlaybook.outreachThreshold,
       }),
-    [users, leads, deals, followups, tasks, range, intentPlaybook.outreachThreshold],
+    [users, leads, deals, followups, tasks, localRange, intentPlaybook.outreachThreshold],
   );
 
   const scoped = canSeeTeam ? rowsAll : rowsAll.filter((r) => r.userId === currentUserId);
@@ -143,7 +164,7 @@ export function TeamCommand({
     [scoped, lens],
   );
 
-  const rangeLabel = DASHBOARD_TIME_RANGE_LABELS[range];
+  const rangeLabel = DASHBOARD_TIME_RANGE_LABELS[localRange];
   const podium = rows.slice(0, 3);
 
   return (
@@ -158,15 +179,29 @@ export function TeamCommand({
               {LENS_META[lens].blurb} · {rangeLabel}
             </CardDescription>
           </div>
-          <Tabs value={lens} onValueChange={(v) => setLens(v as TeamCommandLens)}>
-            <TabsList>
-              {TEAM_COMMAND_LENSES.map((key) => (
-                <TabsTrigger key={key} value={key}>
-                  {LENS_META[key].label}
-                </TabsTrigger>
-              ))}
-            </TabsList>
-          </Tabs>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            <Tabs
+              value={localRange}
+              onValueChange={(v) => setLocalRange(v as TeamCommandTimeRangeKey)}
+            >
+              <TabsList>
+                {TEAM_COMMAND_TIME_RANGES.map((key) => (
+                  <TabsTrigger key={key} value={key}>
+                    {TEAM_COMMAND_TIME_RANGE_SHORT_LABELS[key]}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+            <Tabs value={lens} onValueChange={(v) => setLens(v as TeamCommandLens)}>
+              <TabsList>
+                {TEAM_COMMAND_LENSES.map((key) => (
+                  <TabsTrigger key={key} value={key}>
+                    {LENS_META[key].label}
+                  </TabsTrigger>
+                ))}
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
       </CardHeader>
       <CardContent className="pt-0">

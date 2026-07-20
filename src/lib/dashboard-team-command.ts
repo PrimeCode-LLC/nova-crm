@@ -101,8 +101,14 @@ function computeWindowMetrics(
     const qualityWeighted = scored.reduce((s, l) => s + (l.qualityScore ?? 0) / 100, 0);
     const strategyAttributed = myProspects.filter((l) => Boolean(l.strategyId)).length;
 
+    // Open sales leads only — lost/won are terminal and already surface under Won
+    // (or shouldn't inflate "Leads" when the Leads page hides them as closed).
     const salesLeadsAdded = leads.filter(
-      (l) => isSalesLead(l) && l.ownerId === u.id && inWindow(l.createdAt, start, end),
+      (l) =>
+        isSalesLead(l) &&
+        l.ownerId === u.id &&
+        !["won", "lost"].includes(l.stage) &&
+        inWindow(l.createdAt, start, end),
     ).length;
 
     const emailsSent = followups.filter(
@@ -223,22 +229,25 @@ export function buildTeamCommandRows(input: {
   const now = input.now ?? new Date();
   const end = now.getTime();
   const start = getDashboardRangeStart(input.range, now).getTime();
-  const windowMs = Math.max(1, end - start);
-  const prevStart = start - windowMs;
+  const allTime = input.range === "all";
 
   const cur = computeWindowMetrics(input, start, end);
-  const prev = computeWindowMetrics(input, prevStart, start);
-
   const curScores = normalizeLens(cur.map(lensRawScores)).scores;
-  const prevScores = normalizeLens(prev.map(lensRawScores)).scores;
-  const prevByUser = new Map(prev.map((m, i) => [m.userId, prevScores[i]]));
+
+  let prevByUser = new Map<string, Record<TeamCommandLens, number>>();
+  if (!allTime) {
+    const windowMs = Math.max(1, end - start);
+    const prev = computeWindowMetrics(input, start - windowMs, start);
+    const prevScores = normalizeLens(prev.map(lensRawScores)).scores;
+    prevByUser = new Map(prev.map((m, i) => [m.userId, prevScores[i]]));
+  }
 
   const rows: TeamCommandRow[] = cur.map((m, i) => {
     const scores = curScores[i];
     const prevScore = prevByUser.get(m.userId);
     const deltas = {} as Record<TeamCommandLens, number>;
     for (const lens of TEAM_COMMAND_LENSES) {
-      deltas[lens] = scores[lens] - (prevScore?.[lens] ?? 0);
+      deltas[lens] = allTime ? 0 : scores[lens] - (prevScore?.[lens] ?? 0);
     }
     return {
       userId: m.userId,

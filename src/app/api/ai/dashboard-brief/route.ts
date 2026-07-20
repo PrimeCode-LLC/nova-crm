@@ -55,7 +55,7 @@ const briefSchema = z.object({
 const bodySchema = z.object({
   channelScope: z.array(z.string()).default([]),
   ownerScope: z.string().default("all-owners"),
-  timeRange: z.enum(["1d", "7d", "30d", "90d", "qtd", "ytd"]).default("30d"),
+  timeRange: z.enum(["1d", "7d", "30d", "90d", "qtd", "ytd", "all"]).default("30d"),
   regenerate: z.boolean().optional(),
   demoBundle: z
     .object({

@@ -65,6 +65,10 @@ export function OwnerOpsBoard({
   orgActivityEvents,
   activityRecords,
   range,
+  /** Channel/owner-scoped but not date-capped — Team Command applies its own window. */
+  teamCommandLeads,
+  teamCommandDeals,
+  teamCommandFollowups,
   currentUserId,
   orgMeetingsScope,
   widgets,
@@ -83,6 +87,9 @@ export function OwnerOpsBoard({
   orgActivityEvents?: OrgActivityEvent[];
   activityRecords?: ActivityRecord[];
   range: DashboardTimeRangeKey;
+  teamCommandLeads?: Lead[];
+  teamCommandDeals?: Deal[];
+  teamCommandFollowups?: Followup[];
   currentUserId: string;
   orgMeetingsScope: boolean;
   widgets: DashboardWidgets;
@@ -173,9 +180,9 @@ export function OwnerOpsBoard({
               ) : null}
               {widgets.teamCommand ? (
                 <TeamCommand
-                  leads={leads}
-                  deals={deals}
-                  followups={followups}
+                  leads={teamCommandLeads ?? leads}
+                  deals={teamCommandDeals ?? deals}
+                  followups={teamCommandFollowups ?? followups}
                   tasks={tasks}
                   range={range}
                   wall={wall}

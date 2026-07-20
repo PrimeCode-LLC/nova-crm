@@ -244,6 +244,7 @@ export function buildOpsScorecardRows(input: {
         (l) =>
           isSalesLead(l) &&
           l.ownerId === u.id &&
+          !["won", "lost"].includes(l.stage) &&
           (validTime(l.createdAt) ?? 0) >= start,
       ).length;
       const emailsSent = input.followups.filter(
