@@ -22,6 +22,7 @@ import {
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { WallMetricTiles } from "@/components/dashboard/wall-metric-tiles";
 import type { Deal, Followup, Lead, LeadTask } from "@/lib/types";
 
 const LENS_META: Record<TeamCommandLens, { label: string; blurb: string }> = {
@@ -239,21 +240,33 @@ export function TeamCommand({
               </div>
             ) : null}
 
-            <ul className="divide-y">
+            <ul className={cn("divide-y", wall && "divide-border/50")}>
               {rows.map((r, i) => {
                 const metrics = lensMetrics(lens, r);
                 const score = r.scores[lens];
                 return (
-                  <li key={r.userId} className="py-2.5">
+                  <li key={r.userId} className={cn(wall ? "py-3.5" : "py-2.5")}>
                     <div className="flex items-center gap-3">
-                      <span className="w-4 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">
+                      <span
+                        className={cn(
+                          "shrink-0 text-right font-medium tabular-nums text-muted-foreground",
+                          wall ? "w-5 text-sm" : "w-4 text-xs",
+                        )}
+                      >
                         {i + 1}
                       </span>
                       <div className="min-w-0 flex-1">
                         <UserChip userId={r.userId} />
                       </div>
                       <div className="flex items-center gap-2">
-                        <span className="text-sm font-semibold tabular-nums">{score}</span>
+                        <span
+                          className={cn(
+                            "font-semibold tabular-nums",
+                            wall ? "text-lg" : "text-sm",
+                          )}
+                        >
+                          {score}
+                        </span>
                         {!wall ? (
                           <span className="text-[11px]">
                             <DeltaBadge delta={r.deltas[lens]} />
@@ -262,8 +275,13 @@ export function TeamCommand({
                       </div>
                     </div>
 
-                    <div className="mt-1.5 flex items-center gap-3 pl-7">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                    <div className={cn("mt-1.5 flex items-center gap-3", wall ? "pl-8" : "pl-7")}>
+                      <div
+                        className={cn(
+                          "flex-1 overflow-hidden rounded-full bg-muted",
+                          wall ? "h-2" : "h-1.5",
+                        )}
+                      >
                         <div
                           className="h-full rounded-full bg-primary transition-all"
                           style={{ width: `${Math.max(2, Math.min(100, score))}%` }}
@@ -271,25 +289,38 @@ export function TeamCommand({
                       </div>
                     </div>
 
-                    <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 pl-7 text-xs">
-                      {metrics.map((m) => (
-                        <span key={m.label} className="inline-flex items-baseline gap-1">
-                          <span className="text-muted-foreground">{m.label}</span>
-                          <span
-                            className={cn(
-                              "font-medium tabular-nums",
-                              m.tone === "muted" && "text-muted-foreground",
-                              m.tone === "success" && "text-success",
-                            )}
-                          >
-                            {m.value}
+                    {wall ? (
+                      <WallMetricTiles
+                        className="mt-2.5 pl-8"
+                        items={metrics}
+                        columns={metrics.length <= 4 ? 4 : 6}
+                      />
+                    ) : (
+                      <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 pl-7 text-xs">
+                        {metrics.map((m) => (
+                          <span key={m.label} className="inline-flex items-baseline gap-1">
+                            <span className="text-muted-foreground">{m.label}</span>
+                            <span
+                              className={cn(
+                                "font-medium tabular-nums",
+                                m.tone === "muted" && "text-muted-foreground",
+                                m.tone === "success" && "text-success",
+                              )}
+                            >
+                              {m.value}
+                            </span>
                           </span>
-                        </span>
-                      ))}
-                    </div>
+                        ))}
+                      </div>
+                    )}
 
                     {r.bottleneck ? (
-                      <div className="mt-1.5 flex items-center gap-1.5 pl-7 text-[11px] text-amber-500">
+                      <div
+                        className={cn(
+                          "mt-1.5 flex items-center gap-1.5 text-amber-500",
+                          wall ? "pl-8 text-xs" : "pl-7 text-[11px]",
+                        )}
+                      >
                         <TriangleAlert className="h-3 w-3 shrink-0" />
                         <span>{r.bottleneck}</span>
                       </div>

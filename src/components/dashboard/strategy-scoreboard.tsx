@@ -18,6 +18,7 @@ import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { WallMetricTiles } from "@/components/dashboard/wall-metric-tiles";
 import type { Deal, Followup, Lead } from "@/lib/types";
 
 export function StrategyScoreboard({
@@ -137,16 +138,23 @@ export function StrategyScoreboard({
             All published strategies are hidden. Use the settings control to turn some back on.
           </p>
         ) : (
-          <ul className="divide-y">
+          <ul className={cn("divide-y", wall && "divide-border/50")}>
             {visibleRows.map((r, i) => (
-              <li key={r.strategyId} className="py-2.5">
+              <li key={r.strategyId} className={cn(wall ? "py-3.5" : "py-2.5")}>
                 <div className="flex items-start gap-3">
-                  <span className="mt-0.5 w-4 shrink-0 text-right text-xs font-medium tabular-nums text-muted-foreground">
+                  <span
+                    className={cn(
+                      "mt-0.5 shrink-0 text-right font-medium tabular-nums text-muted-foreground",
+                      wall ? "w-5 text-sm" : "w-4 text-xs",
+                    )}
+                  >
                     {i + 1}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="truncate text-sm font-medium">{r.name}</span>
+                      <span className={cn("truncate font-medium", wall ? "text-base" : "text-sm")}>
+                        {r.name}
+                      </span>
                       {r.activeAssignees > 0 ? (
                         <Badge variant="outline" className="text-[10px] font-normal">
                           {r.activeAssignees} active
@@ -163,7 +171,12 @@ export function StrategyScoreboard({
                       ) : null}
                     </div>
 
-                    <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={cn(
+                        "mt-1.5 overflow-hidden rounded-full bg-muted",
+                        wall ? "h-2" : "h-1.5",
+                      )}
+                    >
                       <div
                         className="h-full rounded-full bg-primary transition-all"
                         style={{
@@ -180,27 +193,52 @@ export function StrategyScoreboard({
                       />
                     </div>
 
-                    <div
-                      className={cn(
-                        "mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs",
-                        r.thinSample && "opacity-70",
-                      )}
-                    >
-                      <Metric label="Prospects" value={fmtNumber(r.prospects)} />
-                      <Metric
-                        label="Avg quality"
-                        value={r.avgQuality == null ? "—" : String(Math.round(r.avgQuality))}
+                    {wall ? (
+                      <WallMetricTiles
+                        className={cn("mt-2.5", r.thinSample && "opacity-70")}
+                        columns={4}
+                        items={[
+                          { label: "Prospects", value: fmtNumber(r.prospects) },
+                          {
+                            label: "Avg quality",
+                            value: r.avgQuality == null ? "—" : String(Math.round(r.avgQuality)),
+                          },
+                          { label: "Qualified", value: fmtPercent(r.qualifiedRate) },
+                          { label: "Leads", value: fmtNumber(r.salesLeads) },
+                          { label: "Replies", value: fmtNumber(r.replies) },
+                          { label: "Reply rate", value: fmtPercent(r.replyRate) },
+                          { label: "Pipeline", value: fmtCurrency(r.openPipeline) },
+                          { label: "Won", value: fmtCurrency(r.closedValue) },
+                        ]}
                       />
-                      <Metric label="Qualified" value={fmtPercent(r.qualifiedRate)} />
-                      <Metric label="Leads" value={fmtNumber(r.salesLeads)} tone="success" />
-                      <Metric label="Replies" value={fmtNumber(r.replies)} />
-                      <Metric label="Reply rate" value={fmtPercent(r.replyRate)} tone="muted" />
-                      <Metric label="Pipeline" value={fmtCurrency(r.openPipeline)} tone="muted" />
-                      <Metric label="Won" value={fmtCurrency(r.closedValue)} tone="success" />
-                    </div>
+                    ) : (
+                      <div
+                        className={cn(
+                          "mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 text-xs",
+                          r.thinSample && "opacity-70",
+                        )}
+                      >
+                        <Metric label="Prospects" value={fmtNumber(r.prospects)} />
+                        <Metric
+                          label="Avg quality"
+                          value={r.avgQuality == null ? "—" : String(Math.round(r.avgQuality))}
+                        />
+                        <Metric label="Qualified" value={fmtPercent(r.qualifiedRate)} />
+                        <Metric label="Leads" value={fmtNumber(r.salesLeads)} tone="success" />
+                        <Metric label="Replies" value={fmtNumber(r.replies)} />
+                        <Metric label="Reply rate" value={fmtPercent(r.replyRate)} tone="muted" />
+                        <Metric label="Pipeline" value={fmtCurrency(r.openPipeline)} tone="muted" />
+                        <Metric label="Won" value={fmtCurrency(r.closedValue)} tone="success" />
+                      </div>
+                    )}
 
                     {r.prospects === 0 && r.activeAssignees > 0 ? (
-                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-amber-500">
+                      <div
+                        className={cn(
+                          "mt-1.5 flex items-center gap-1.5 text-amber-500",
+                          wall ? "text-xs" : "text-[11px]",
+                        )}
+                      >
                         <TriangleAlert className="h-3 w-3 shrink-0" />
                         <span>Assigned but no attributed prospects in this range</span>
                       </div>
