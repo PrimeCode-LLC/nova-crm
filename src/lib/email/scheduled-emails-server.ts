@@ -12,6 +12,7 @@ import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import { listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-server";
 import {
   assertMailboxDailySendQuotaServer,
+  getMailboxLastSentAtServer,
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
@@ -20,6 +21,15 @@ import {
   type SequenceThreadStep,
 } from "@/lib/email/sequence-thread";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
+import {
+  SCHEDULED_SEND_MAX_ATTEMPTS,
+  classifyScheduledSendError,
+  nextRetryAtIso,
+  nextUtcMidnightIso,
+  normalizeSendGapSeconds,
+} from "@/lib/email/scheduled-send-failure";
+import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
+import { stampForCreate } from "@/lib/firestore/tenant-write";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
@@ -89,6 +99,17 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     referenceIds: Array.isArray(data.referenceIds)
       ? data.referenceIds.map(String).filter(Boolean).slice(-50)
       : undefined,
+    attempts: Number.isFinite(Number(data.attempts)) ? Math.max(0, Number(data.attempts)) : undefined,
+    nextRetryAt:
+      typeof data.nextRetryAt === "string" && data.nextRetryAt.trim()
+        ? data.nextRetryAt.trim()
+        : undefined,
+    failureKind:
+      data.failureKind === "transient" ||
+      data.failureKind === "permanent" ||
+      data.failureKind === "quota"
+        ? data.failureKind
+        : undefined,
   };
 }
 
@@ -221,7 +242,7 @@ export async function cancelScheduledEmailServer(input: {
 async function updateFollowupDeliveryState(
   followupId: string,
   input: {
-    deliveryStatus: "sent" | "failed" | "cancelled";
+    deliveryStatus: "sent" | "failed" | "cancelled" | "needs_retry" | "scheduled";
     sentAt?: string;
     sentMessageId?: string;
     failedAt?: string;
@@ -230,6 +251,9 @@ async function updateFollowupDeliveryState(
     cancelReason?: string;
     completedAt?: string;
     clearSchedule?: boolean;
+    keepSchedule?: boolean;
+    deliveryAttempts?: number;
+    nextRetryAt?: string | null;
   },
 ): Promise<string | undefined> {
   const db = getAdminDb();
@@ -250,14 +274,116 @@ async function updateFollowupDeliveryState(
     if (input.deliveryError) patch.deliveryError = input.deliveryError.slice(0, 500);
     if (input.cancelReason) patch.cancelReason = input.cancelReason.slice(0, 500);
     if (input.completedAt) patch.completedAt = input.completedAt;
+    if (input.deliveryAttempts != null) patch.deliveryAttempts = input.deliveryAttempts;
+    if (input.nextRetryAt === null) patch.nextRetryAt = FieldValue.delete();
+    else if (input.nextRetryAt) patch.nextRetryAt = input.nextRetryAt;
     if (input.clearSchedule) {
       patch.scheduledEmailId = FieldValue.delete();
       patch.emailScheduledAt = FieldValue.delete();
+    }
+    if (input.keepSchedule && input.nextRetryAt) {
+      patch.emailScheduledAt = input.nextRetryAt;
     }
     await ref.update(patch);
     return typeof current.planId === "string" ? current.planId.trim() || undefined : undefined;
   } catch {
     return undefined;
+  }
+}
+
+async function notifyFollowupOwnerOfDeliveryFailure(input: {
+  organizationId: string;
+  followupId: string;
+  leadId?: string;
+  error: string;
+  kind: "failed" | "needs_retry";
+}): Promise<void> {
+  const db = getAdminDb();
+  if (!db) return;
+  try {
+    const snap = await db.collection(COLLECTIONS.followups).doc(input.followupId).get();
+    if (!snap.exists) return;
+    const data = snap.data() as Record<string, unknown>;
+    const ownerId = typeof data.ownerId === "string" ? data.ownerId.trim() : "";
+    if (!ownerId) return;
+    const title = typeof data.title === "string" ? data.title.trim() : "Sequence email";
+    const leadId =
+      input.leadId?.trim() ||
+      (typeof data.leadId === "string" ? data.leadId.trim() : "");
+    const href = leadId ? `/leads/${leadId}` : "/followups";
+    const prefix =
+      input.kind === "needs_retry" ? "Email send will retry" : "Email send failed";
+    await createUserNotificationServer({
+      organizationId: input.organizationId,
+      recipientId: ownerId,
+      actorId: "system",
+      kind: "followup",
+      message: `${prefix}: ${title} — ${input.error.slice(0, 180)}`,
+      target: title,
+      targetHref: href,
+      entityType: "followup",
+      entityId: input.followupId,
+      id: `un-email-${input.kind}-${input.followupId}-${Math.floor(Date.now() / 3_600_000)}`,
+    });
+  } catch {
+    /* Notifications are best-effort. */
+  }
+}
+
+async function recordScheduledEmailSentTimeline(input: {
+  organizationId: string;
+  uid: string;
+  leadId: string;
+  subject: string;
+  messageId?: string;
+  followupId?: string;
+  mailboxId: string;
+}): Promise<void> {
+  const db = getAdminDb();
+  if (!db || !input.leadId.trim()) return;
+  try {
+    const teId = `te-${crypto.randomUUID()}`;
+    const now = new Date().toISOString();
+    let leadOwnerId = input.uid;
+    try {
+      const leadSnap = await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
+      if (leadSnap.exists) {
+        const owner = (leadSnap.data() as Record<string, unknown>).ownerId;
+        if (typeof owner === "string" && owner.trim()) leadOwnerId = owner.trim();
+      }
+    } catch {
+      /* keep uid */
+    }
+    await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+      stampForCreate(
+        input.organizationId,
+        {
+          leadId: input.leadId,
+          leadOwnerId,
+          type: "email_sent",
+          actorId: input.uid,
+          summary: `Email sent: ${input.subject.trim() || "(no subject)"}`,
+          payload: {
+            source: "scheduled",
+            mailboxId: input.mailboxId,
+            ...(input.messageId ? { messageId: input.messageId } : {}),
+            ...(input.followupId ? { followupId: input.followupId } : {}),
+          },
+          createdAt: now,
+        },
+        input.uid,
+      ),
+    );
+    await db
+      .collection(COLLECTIONS.leads)
+      .doc(input.leadId)
+      .update({
+        lastActivityAt: now,
+        updatedAt: now,
+      })
+      .catch(() => undefined);
+  } catch {
+    /* Timeline is best-effort; CRM delivery state remains authoritative. */
   }
 }
 
@@ -433,6 +559,9 @@ async function claimScheduledDoc(
 async function sendScheduledDoc(
   docRef: DocumentReference,
   data: Record<string, unknown>,
+  runContext?: {
+    lastSentAtByMailbox: Map<string, number>;
+  },
 ): Promise<"sent" | "failed" | "skipped"> {
   const organizationId = String(data.organizationId ?? "");
   const uid = String(data.uid ?? "");
@@ -456,11 +585,30 @@ async function sendScheduledDoc(
       await docRef.update({
         status: cancelled ? "cancelled" : "failed",
         error: contactPolicy.error,
+        failureKind: cancelled ? "permanent" : "permanent",
         ...(cancelled ? { cancelledAt: now, cancelReason: contactPolicy.error } : {}),
         updatedAt: now,
         processingAt: FieldValue.delete(),
         processingClaimId: FieldValue.delete(),
       });
+      if (followupIdEarly) {
+        await updateFollowupDeliveryState(followupIdEarly, {
+          deliveryStatus: cancelled ? "cancelled" : "failed",
+          ...(cancelled
+            ? { cancelledAt: now, cancelReason: contactPolicy.error, clearSchedule: true }
+            : { failedAt: now, deliveryError: contactPolicy.error }),
+          nextRetryAt: null,
+        });
+        if (!cancelled) {
+          await notifyFollowupOwnerOfDeliveryFailure({
+            organizationId,
+            followupId: followupIdEarly,
+            leadId,
+            error: contactPolicy.error,
+            kind: "failed",
+          });
+        }
+      }
       return cancelled ? "skipped" : "failed";
     }
   }
@@ -472,6 +620,7 @@ async function sendScheduledDoc(
     await docRef.update({
       status: "failed",
       error: "Mailbox no longer exists.",
+      failureKind: "permanent",
       updatedAt: now,
       processingAt: FieldValue.delete(),
       processingClaimId: FieldValue.delete(),
@@ -481,10 +630,53 @@ async function sendScheduledDoc(
         deliveryStatus: "failed",
         failedAt: now,
         deliveryError: "Mailbox no longer exists.",
-        clearSchedule: true,
+        nextRetryAt: null,
+      });
+      await notifyFollowupOwnerOfDeliveryFailure({
+        organizationId,
+        followupId: followupIdEarly,
+        leadId,
+        error: "Mailbox no longer exists.",
+        kind: "failed",
       });
     }
     return "failed";
+  }
+
+  const gapSeconds = normalizeSendGapSeconds(mailbox.sendGapSeconds);
+  if (gapSeconds > 0) {
+    const mailboxKey = `${organizationId}/${uid}/${mailboxId}`;
+    let lastMs = runContext?.lastSentAtByMailbox.get(mailboxKey);
+    if (lastMs == null) {
+      const persisted = await getMailboxLastSentAtServer({ organizationId, uid, mailboxId });
+      lastMs = persisted ? new Date(persisted).getTime() : undefined;
+    }
+    if (lastMs != null && Number.isFinite(lastMs)) {
+      const earliest = lastMs + gapSeconds * 1000;
+      const waitMs = earliest - Date.now();
+      if (waitMs > 0) {
+        if (waitMs <= 25_000) {
+          await new Promise((r) => setTimeout(r, waitMs));
+        } else {
+          const retryAt = new Date(earliest).toISOString();
+          await docRef.update({
+            status: "pending",
+            scheduledAt: retryAt,
+            updatedAt: new Date().toISOString(),
+            processingAt: FieldValue.delete(),
+            processingClaimId: FieldValue.delete(),
+          });
+          if (followupIdEarly) {
+            await updateFollowupDeliveryState(followupIdEarly, {
+              deliveryStatus: "scheduled",
+              keepSchedule: true,
+              nextRetryAt: retryAt,
+            });
+          }
+          return "skipped";
+        }
+      }
+    }
   }
 
   const quota = await assertMailboxDailySendQuotaServer({
@@ -495,22 +687,26 @@ async function sendScheduledDoc(
   });
   if (!quota.ok) {
     const now = new Date().toISOString();
+    const deferAt = nextUtcMidnightIso(new Date(now));
     await docRef.update({
-      status: "failed",
+      status: "pending",
+      scheduledAt: deferAt,
       error: quota.error,
+      failureKind: "quota",
       updatedAt: now,
       processingAt: FieldValue.delete(),
       processingClaimId: FieldValue.delete(),
     });
     if (followupIdEarly) {
       await updateFollowupDeliveryState(followupIdEarly, {
-        deliveryStatus: "failed",
+        deliveryStatus: "needs_retry",
         failedAt: now,
         deliveryError: quota.error,
-        clearSchedule: true,
+        keepSchedule: true,
+        nextRetryAt: deferAt,
       });
     }
-    return "failed";
+    return "skipped";
   }
 
   const parsedAttachments = parseOutboundAttachments(data.attachments);
@@ -519,6 +715,7 @@ async function sendScheduledDoc(
     await docRef.update({
       status: "failed",
       error: parsedAttachments.error,
+      failureKind: "permanent",
       updatedAt: now,
       processingAt: FieldValue.delete(),
       processingClaimId: FieldValue.delete(),
@@ -528,7 +725,14 @@ async function sendScheduledDoc(
         deliveryStatus: "failed",
         failedAt: now,
         deliveryError: parsedAttachments.error,
-        clearSchedule: true,
+        nextRetryAt: null,
+      });
+      await notifyFollowupOwnerOfDeliveryFailure({
+        organizationId,
+        followupId: followupIdEarly,
+        leadId,
+        error: parsedAttachments.error,
+        kind: "failed",
       });
     }
     return "failed";
@@ -607,6 +811,8 @@ async function sendScheduledDoc(
       sentAt: now,
       updatedAt: now,
       error: null,
+      failureKind: FieldValue.delete(),
+      nextRetryAt: FieldValue.delete(),
       ...(messageId ? { messageId } : {}),
       ...(inReplyTo ? { inReplyTo } : {}),
       ...(referenceIds?.length ? { referenceIds } : {}),
@@ -623,30 +829,93 @@ async function sendScheduledDoc(
         ...(messageId ? { sentMessageId: messageId } : {}),
         completedAt: now,
         clearSchedule: true,
+        nextRetryAt: null,
       });
       if (planId) await completePlanWhenAllStepsDone(planId, now);
+    }
+    if (leadId) {
+      await recordScheduledEmailSentTimeline({
+        organizationId,
+        uid,
+        leadId,
+        subject,
+        messageId,
+        followupId: followupId || undefined,
+        mailboxId,
+      });
     }
     try {
       await incrementMailboxSendCountServer({ organizationId, uid, mailboxId });
     } catch {
       /* Delivery is authoritative; quota accounting can recover independently. */
     }
+    if (runContext) {
+      runContext.lastSentAtByMailbox.set(`${organizationId}/${uid}/${mailboxId}`, Date.now());
+    }
     return "sent";
+  }
+
+  const attempts = Math.max(0, Number(data.attempts ?? 0)) + 1;
+  const kind = classifyScheduledSendError(result.error);
+  const errorText = result.error.slice(0, 500);
+
+  if (kind === "transient" && attempts < SCHEDULED_SEND_MAX_ATTEMPTS) {
+    const retryAt = nextRetryAtIso(attempts);
+    await docRef.update({
+      status: "pending",
+      scheduledAt: retryAt,
+      attempts,
+      nextRetryAt: retryAt,
+      error: errorText,
+      failureKind: "transient",
+      updatedAt: now,
+      processingAt: FieldValue.delete(),
+      processingClaimId: FieldValue.delete(),
+    });
+    if (followupIdEarly) {
+      await updateFollowupDeliveryState(followupIdEarly, {
+        deliveryStatus: "needs_retry",
+        failedAt: now,
+        deliveryError: errorText,
+        deliveryAttempts: attempts,
+        keepSchedule: true,
+        nextRetryAt: retryAt,
+      });
+      await notifyFollowupOwnerOfDeliveryFailure({
+        organizationId,
+        followupId: followupIdEarly,
+        leadId,
+        error: `${errorText} (retry ${attempts}/${SCHEDULED_SEND_MAX_ATTEMPTS})`,
+        kind: "needs_retry",
+      });
+    }
+    return "skipped";
   }
 
   await docRef.update({
     status: "failed",
-    error: result.error.slice(0, 500),
+    error: errorText,
+    attempts,
+    failureKind: kind === "quota" ? "quota" : "permanent",
     updatedAt: now,
     processingAt: FieldValue.delete(),
     processingClaimId: FieldValue.delete(),
+    nextRetryAt: FieldValue.delete(),
   });
   if (followupIdEarly) {
     await updateFollowupDeliveryState(followupIdEarly, {
       deliveryStatus: "failed",
       failedAt: now,
-      deliveryError: result.error,
-      clearSchedule: true,
+      deliveryError: errorText,
+      deliveryAttempts: attempts,
+      nextRetryAt: null,
+    });
+    await notifyFollowupOwnerOfDeliveryFailure({
+      organizationId,
+      followupId: followupIdEarly,
+      leadId,
+      error: errorText,
+      kind: "failed",
     });
   }
   return "failed";
@@ -658,6 +927,7 @@ async function processScheduledSnap(
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  const runContext = { lastSentAtByMailbox: new Map<string, number>() };
 
   for (const doc of docs) {
     const claimed = await claimScheduledDoc(doc.ref);
@@ -666,7 +936,7 @@ async function processScheduledSnap(
       continue;
     }
     try {
-      const outcome = await sendScheduledDoc(doc.ref, claimed);
+      const outcome = await sendScheduledDoc(doc.ref, claimed, runContext);
       if (outcome === "sent") sent += 1;
       else if (outcome === "failed") failed += 1;
       else skipped += 1;
@@ -681,7 +951,7 @@ async function processScheduledSnap(
 
 /**
  * Dev/local helper: process due emails for one mailbox owner.
- * Production cron continues to use processDueScheduledEmailsServer (collection group).
+ * Production cron uses processDueScheduledEmailsServer (collection group) with the same claim path.
  */
 export async function processDueScheduledEmailsForMemberServer(input: {
   organizationId: string;
@@ -727,17 +997,68 @@ export async function processDueScheduledEmailsServer(): Promise<{
     .limit(50)
     .get();
 
-  let sent = 0;
-  let failed = 0;
-  let skipped = 0;
+  return processScheduledSnap(
+    snap.docs.map((doc) => ({
+      ref: doc.ref,
+      data: () => doc.data() as Record<string, unknown>,
+    })),
+  );
+}
 
-  for (const doc of snap.docs) {
-    const data = doc.data() as Record<string, unknown>;
-    const outcome = await sendScheduledDoc(doc.ref, data);
-    if (outcome === "sent") sent += 1;
-    else if (outcome === "failed") failed += 1;
-    else skipped += 1;
+/** Manual retry: re-queue a failed (or exhausted) scheduled email for immediate send. */
+export async function retryScheduledEmailServer(input: {
+  organizationId: string;
+  uid: string;
+  id: string;
+}): Promise<{ ok: true; scheduledAt: string } | { error: string }> {
+  const ref = scheduledRef(input.organizationId, input.uid, input.id);
+  if (!ref) return { error: "Database not configured" };
+
+  const snap = await ref.get();
+  if (!snap.exists) return { error: "Scheduled email not found." };
+  const data = snap.data() as Record<string, unknown>;
+  const status = String(data.status ?? "");
+  if (status !== "failed" && status !== "pending") {
+    return { error: "Only failed or pending scheduled emails can be retried." };
   }
 
-  return { processed: snap.size, sent, failed, skipped };
+  const scheduledAt = new Date(Date.now() + 60_000).toISOString();
+  const now = new Date().toISOString();
+  await ref.update({
+    status: "pending",
+    scheduledAt,
+    error: null,
+    failureKind: FieldValue.delete(),
+    nextRetryAt: scheduledAt,
+    updatedAt: now,
+    processingAt: FieldValue.delete(),
+    processingClaimId: FieldValue.delete(),
+  });
+
+  const followupId = typeof data.followupId === "string" ? data.followupId.trim() : "";
+  if (followupId) {
+    await updateFollowupDeliveryState(followupId, {
+      deliveryStatus: "scheduled",
+      keepSchedule: true,
+      nextRetryAt: scheduledAt,
+    });
+    // Re-link schedule fields if they were cleared on permanent fail.
+    const db = getAdminDb();
+    if (db) {
+      await db
+        .collection(COLLECTIONS.followups)
+        .doc(followupId)
+        .update({
+          scheduledEmailId: input.id,
+          emailScheduledAt: scheduledAt,
+          deliveryStatus: "scheduled",
+          deliveryError: FieldValue.delete(),
+          failedAt: FieldValue.delete(),
+          updatedAt: now,
+        })
+        .catch(() => undefined);
+    }
+  }
+
+  return { ok: true, scheduledAt };
 }

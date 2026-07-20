@@ -43,6 +43,7 @@ function isAwaitingOutboundSend(step: SequenceThreadStep): boolean {
   if (step.pausedAt) return false;
   if (step.deliveryStatus === "sent") return false;
   if (step.deliveryStatus === "cancelled" || step.deliveryStatus === "failed") return false;
+  if (step.deliveryStatus === "needs_retry") return true;
   if (step.completedAt && step.deliveryStatus !== "scheduled") return false;
   return Boolean(
     step.scheduledEmailId ||

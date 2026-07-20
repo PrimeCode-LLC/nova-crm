@@ -416,6 +416,9 @@ export default function DashboardPage() {
         { label: "Emails sent in range", value: String(workflowMetrics.sentInRange) },
         { label: "Emails scheduled", value: String(workflowMetrics.scheduledSteps) },
         { label: "Email failures", value: String(workflowMetrics.failedDeliveries) },
+        ...(workflowMetrics.retryingDeliveries > 0
+          ? [{ label: "Email retrying", value: String(workflowMetrics.retryingDeliveries) }]
+          : []),
         { label: "My open tasks", value: String(workflowMetrics.myOpenTasks) },
         { label: "Pipeline value (USD)", value: String(Math.round(pipelineValue)) },
         { label: "Closed revenue (USD)", value: String(Math.round(closedValue)) },
@@ -734,7 +737,11 @@ export default function DashboardPage() {
                   <KpiCard
                     label="Email delivery"
                     value={workflowMetrics.sentInRange}
-                    hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.failedDeliveries} failed`}
+                    hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.failedDeliveries} failed${
+                      workflowMetrics.retryingDeliveries > 0
+                        ? ` · ${workflowMetrics.retryingDeliveries} retrying`
+                        : ""
+                    }`}
                     icon={Send}
                     href="/inbox?folder=scheduled"
                   />

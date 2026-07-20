@@ -355,7 +355,10 @@ export function buildInboxPerformanceRows(input: {
           (f.deliveryStatus === "scheduled" || Boolean(f.scheduledEmailId)),
       ).length;
       const failed = input.followups.filter(
-        (f) => f.ownerId === u.id && f.deliveryStatus === "failed" && !f.completedAt,
+        (f) =>
+          f.ownerId === u.id &&
+          (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry") &&
+          !f.completedAt,
       ).length;
       return {
         userId: u.id,

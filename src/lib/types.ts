@@ -654,7 +654,13 @@ export type FollowupPlanStatus = "active" | "paused" | "superseded" | "completed
  * - `continue` — intro already sent; draft remaining touches only
  */
 export type FollowupSequenceMode = "full" | "continue";
-export type FollowupDeliveryStatus = "scheduled" | "sent" | "failed" | "cancelled";
+export type FollowupDeliveryStatus =
+  | "scheduled"
+  | "sent"
+  | "failed"
+  | "cancelled"
+  /** Transient send failure; cron will auto-retry until attempts are exhausted. */
+  | "needs_retry";
 
 /** AI-generated cadence for a lead; open follow-ups reference `planId`. */
 export interface FollowupPlan {
@@ -712,6 +718,10 @@ export interface Followup {
   cancelledAt?: ISODate;
   deliveryError?: string;
   cancelReason?: string;
+  /** Auto-retry attempts so far (scheduled send path). */
+  deliveryAttempts?: number;
+  /** When the next auto-retry is due (ISO). */
+  nextRetryAt?: ISODate;
 }
 
 /** Assigned work between teammates (review, email, etc.). Optional lead context + visibility. */

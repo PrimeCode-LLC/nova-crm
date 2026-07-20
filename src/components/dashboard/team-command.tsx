@@ -33,7 +33,7 @@ const LENS_META: Record<TeamCommandLens, { label: string; blurb: string }> = {
   closing: { label: "Closing", blurb: "Pipeline built & revenue won" },
 };
 
-type Metric = { label: string; value: string; tone?: "default" | "muted" | "success" };
+type Metric = { label: string; value: string; tone?: "default" | "muted" | "success" | "warn" };
 
 function lensMetrics(lens: TeamCommandLens, row: TeamCommandRow): Metric[] {
   switch (lens) {
@@ -52,11 +52,17 @@ function lensMetrics(lens: TeamCommandLens, row: TeamCommandRow): Metric[] {
         { label: "Sent", value: fmtNumber(row.emailsSent) },
         { label: "Replies", value: fmtNumber(row.replies), tone: "success" },
         { label: "Reply rate", value: fmtPercent(row.replyRate), tone: "muted" },
+        ...(row.failed > 0
+          ? [{ label: "Failed", value: fmtNumber(row.failed) }]
+          : []),
       ];
     case "followups":
       return [
         { label: "Completed", value: fmtNumber(row.followupsCompleted) },
         { label: "Scheduled", value: fmtNumber(row.scheduled), tone: "muted" },
+        ...(row.failed > 0
+          ? [{ label: "Failed", value: fmtNumber(row.failed) }]
+          : []),
       ];
     case "closing":
       return [

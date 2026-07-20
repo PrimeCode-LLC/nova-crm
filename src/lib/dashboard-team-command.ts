@@ -27,6 +27,8 @@ export type TeamCommandRow = {
   emailsSent: number;
   replies: number;
   replyRate: number;
+  /** Open failed / needs_retry deliveries (not window-scoped — current state). */
+  failed: number;
   // Follow-ups
   followupsCompleted: number;
   scheduled: number;
@@ -55,6 +57,7 @@ type RawMetrics = {
   replies: number;
   followupsCompleted: number;
   scheduled: number;
+  failed: number;
   openPipeline: number;
   closedValue: number;
   wonCount: number;
@@ -129,6 +132,12 @@ function computeWindowMetrics(
         !f.pausedAt &&
         (f.deliveryStatus === "scheduled" || Boolean(f.scheduledEmailId)),
     ).length;
+    const failed = followups.filter(
+      (f) =>
+        f.ownerId === u.id &&
+        !f.completedAt &&
+        (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry"),
+    ).length;
 
     const openPipeline = computeUserOpenPipelineMetrics(u.id, leads as Lead[], deals as Deal[]).total;
     const wonDeals = deals.filter(
@@ -152,6 +161,7 @@ function computeWindowMetrics(
       replies,
       followupsCompleted,
       scheduled,
+      failed,
       openPipeline,
       closedValue,
       wonCount: wonDeals.length,
@@ -260,6 +270,7 @@ export function buildTeamCommandRows(input: {
       emailsSent: m.emailsSent,
       replies: m.replies,
       replyRate: m.emailsSent > 0 ? (m.replies / m.emailsSent) * 100 : 0,
+      failed: m.failed,
       followupsCompleted: m.followupsCompleted,
       scheduled: m.scheduled,
       openPipeline: m.openPipeline,
@@ -277,7 +288,8 @@ export function buildTeamCommandRows(input: {
         r.salesLeadsAdded +
         r.emailsSent +
         r.replies +
-        r.followupsCompleted >
+        r.followupsCompleted +
+        r.failed >
         0 ||
       r.openPipeline > 0 ||
       r.closedValue > 0,

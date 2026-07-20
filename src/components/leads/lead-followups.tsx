@@ -22,8 +22,10 @@ import {
   Clock,
   Copy,
   Check,
+  MailWarning,
   Pencil,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
 } from "lucide-react";
@@ -54,6 +56,7 @@ import type { FollowupPlan } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canMutateFollowup } from "@/lib/can-mutate-followup";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
+import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import {
   getActiveMailbox,
   useEmailAccountStore,
@@ -163,7 +166,9 @@ function FollowupRow({
   canMutate,
   onSchedule,
   onCancelSchedule,
+  onRetrySend,
   cancellingSchedule,
+  retryingSend,
   stepIndex,
   leadChannel,
 }: {
@@ -175,24 +180,33 @@ function FollowupRow({
   canMutate: boolean;
   onSchedule: () => void;
   onCancelSchedule: () => void;
+  onRetrySend: () => void;
   cancellingSchedule: boolean;
+  retryingSend: boolean;
   stepIndex?: number;
   leadChannel: Lead["channel"];
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const chLabel = channelBadgeLabel(f.channel);
   const isScheduled = Boolean(f.scheduledEmailId && f.emailScheduledAt);
+  const isFailed = f.deliveryStatus === "failed";
+  const isRetrying = f.deliveryStatus === "needs_retry";
   const channelSupportsEmail = canAutoScheduleFollowupEmail(
     { ...f, scheduledEmailId: undefined, completedAt: undefined, pausedAt: undefined },
     leadChannel,
   );
   const canScheduleNow = canAutoScheduleFollowupEmail(f, leadChannel);
+  const canRetry =
+    canMutate &&
+    Boolean(f.scheduledEmailId) &&
+    (isFailed || isRetrying);
 
   return (
     <li
       className={cn(
         "rounded-md border px-3 py-2 bg-card",
-        overdue && "border-destructive/30 bg-destructive/5",
+        overdue && !isFailed && !isRetrying && "border-destructive/30 bg-destructive/5",
+        (isFailed || isRetrying) && "border-destructive/40 bg-destructive/5",
       )}
     >
       <div className="flex items-center gap-3">
@@ -229,7 +243,23 @@ function FollowupRow({
                 Paused
               </Badge>
             )}
-            {isScheduled && (
+            {isFailed ? (
+              <Badge variant="outline" className="text-[10px] gap-1 border-destructive/50 text-destructive">
+                <MailWarning className="h-2.5 w-2.5" />
+                Send failed
+              </Badge>
+            ) : null}
+            {isRetrying ? (
+              <Badge variant="outline" className="text-[10px] gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400">
+                <RefreshCw className="h-2.5 w-2.5" />
+                Retrying
+                {f.deliveryAttempts ? ` (${f.deliveryAttempts})` : ""}
+                {f.nextRetryAt
+                  ? ` · ${format(new Date(f.nextRetryAt), "MMM d, h:mm a")}`
+                  : ""}
+              </Badge>
+            ) : null}
+            {isScheduled && !isFailed && !isRetrying && (
               <Badge variant="outline" className="text-[10px] gap-1 border-sky-500/40 text-sky-700 dark:text-sky-400">
                 <CalendarClock className="h-2.5 w-2.5" />
                 Scheduled
@@ -238,7 +268,7 @@ function FollowupRow({
                   : ""}
               </Badge>
             )}
-            {!isScheduled && !f.pausedAt && channelSupportsEmail && f.messageBody ? (
+            {!isScheduled && !f.pausedAt && !isFailed && !isRetrying && channelSupportsEmail && f.messageBody ? (
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Email-ready
               </Badge>
@@ -264,6 +294,9 @@ function FollowupRow({
               Subject: {f.emailSubject}
             </p>
           )}
+          {(isFailed || isRetrying) && f.deliveryError ? (
+            <p className="text-xs text-destructive/90 truncate mt-0.5">{f.deliveryError}</p>
+          ) : null}
           {f.description && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">{f.description}</p>
           )}
@@ -331,7 +364,20 @@ function FollowupRow({
           {channelSupportsEmail ? <OutboundTrailersPreview /> : null}
           <div className="flex flex-wrap items-center gap-2">
             <CopyBodyButton text={f.messageBody} />
-            {isScheduled ? (
+            {canRetry ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                disabled={retryingSend}
+                onClick={onRetrySend}
+              >
+                <RefreshCw className="h-3 w-3" />
+                {retryingSend ? "Retrying…" : "Retry send"}
+              </Button>
+            ) : null}
+            {isScheduled && !isFailed ? (
               <Button
                 type="button"
                 variant="outline"
@@ -342,7 +388,7 @@ function FollowupRow({
               >
                 {cancellingSchedule ? "Cancelling…" : "Cancel schedule"}
               </Button>
-            ) : canScheduleNow ? (
+            ) : canScheduleNow && !isFailed && !isRetrying ? (
               <Button
                 type="button"
                 variant="outline"
@@ -356,6 +402,21 @@ function FollowupRow({
           </div>
         </div>
       )}
+      {(isFailed || isRetrying) && !expanded && canRetry ? (
+        <div className="mt-2 ml-9">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            disabled={retryingSend}
+            onClick={onRetrySend}
+          >
+            <RefreshCw className="h-3 w-3" />
+            {retryingSend ? "Retrying…" : "Retry send"}
+          </Button>
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -378,6 +439,7 @@ export function LeadFollowups({
   const [scheduleTarget, setScheduleTarget] = React.useState<Followup | null>(null);
   const [scheduleAllOpen, setScheduleAllOpen] = React.useState(false);
   const [cancellingId, setCancellingId] = React.useState<string | null>(null);
+  const [retryingId, setRetryingId] = React.useState<string | null>(null);
   /** Live optimistic schedule chip until Firestore listener catches up (or clears after send). */
   const [optimisticSchedule, setOptimisticSchedule] = React.useState<
     Record<string, { scheduledEmailId: string; emailScheduledAt: string } | null>
@@ -590,6 +652,49 @@ export function LeadFollowups({
     }
   }
 
+  async function handleRetrySend(f: Followup) {
+    if (!f.scheduledEmailId) {
+      toast.error("No scheduled email linked to retry.");
+      return;
+    }
+    setRetryingId(f.id);
+    try {
+      const result = await retryScheduledEmailClient({
+        scheduledEmailId: f.scheduledEmailId,
+        isDemo,
+        retryDemo: (id) => {
+          const row = scheduledEmails.find((s) => s.id === id);
+          if (!row) return;
+          useEmailAccountStore.getState().setScheduled(
+            scheduledEmails.map((s) =>
+              s.id === id
+                ? {
+                    ...s,
+                    status: "pending" as const,
+                    scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+                    error: undefined,
+                  }
+                : s,
+            ),
+          );
+        },
+      });
+      if ("error" in result) {
+        toast.error(result.error);
+        return;
+      }
+      if (result.scheduledAt) {
+        applyScheduleOptimistic(f.id, {
+          scheduledEmailId: f.scheduledEmailId,
+          emailScheduledAt: result.scheduledAt,
+        });
+      }
+      toast.success("Retry queued — will send shortly");
+    } finally {
+      setRetryingId(null);
+    }
+  }
+
   function renderOpenRow(f: Followup, stepIndex?: number) {
     const due = new Date(f.dueAt);
     const overdue = due.getTime() < Date.now();
@@ -607,7 +712,9 @@ export function LeadFollowups({
         canMutate={mutate}
         onSchedule={() => setScheduleTarget(f)}
         onCancelSchedule={() => void handleCancelSchedule(f)}
+        onRetrySend={() => void handleRetrySend(f)}
         cancellingSchedule={cancellingId === f.id}
+        retryingSend={retryingId === f.id}
       />
     );
   }

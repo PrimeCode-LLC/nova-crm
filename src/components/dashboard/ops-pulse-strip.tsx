@@ -31,7 +31,9 @@ export function OpsPulseStrip({
     {
       label: "Emails sent",
       value: metrics.sentInRange,
-      hint: `${metrics.scheduledSteps} queued · ${metrics.failedDeliveries} failed`,
+      hint: `${metrics.scheduledSteps} queued · ${metrics.failedDeliveries} failed${
+        metrics.retryingDeliveries > 0 ? ` · ${metrics.retryingDeliveries} retrying` : ""
+      }`,
       icon: Send,
       href: "/inbox?folder=scheduled",
     },

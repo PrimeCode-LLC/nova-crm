@@ -1280,6 +1280,33 @@ export function EmailInboxSettingsCard() {
                             : null}
                         </p>
                       </div>
+                      <div className="space-y-1.5 sm:col-span-1">
+                        <Label className="text-xs">Send gap (seconds)</Label>
+                        <Input
+                          className="h-9"
+                          type="number"
+                          min={0}
+                          max={120}
+                          placeholder="15"
+                          value={mb.sendGapSeconds ?? ""}
+                          onChange={(e) => {
+                            const raw = e.target.value.trim();
+                            if (!raw) {
+                              updateMailbox(mb.id, { sendGapSeconds: null });
+                              return;
+                            }
+                            const n = Math.floor(Number(raw));
+                            updateMailbox(mb.id, {
+                              sendGapSeconds:
+                                Number.isFinite(n) && n >= 0 ? Math.min(120, n) : null,
+                            });
+                          }}
+                        />
+                        <p className="text-[11px] text-muted-foreground">
+                          Minimum delay between sends from this mailbox (0–120). Empty = 15s
+                          default. Spaces sequence bursts for deliverability.
+                        </p>
+                      </div>
                     </div>
 
                     <Separator />

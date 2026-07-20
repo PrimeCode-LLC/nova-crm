@@ -36,6 +36,7 @@ import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
 import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
 import { useQualityOutreachGate } from "@/components/leads/use-quality-outreach-gate";
 import type { MailInbound, MailSent } from "@/lib/email-account-types";
+import type { Followup, Lead } from "@/lib/types";
 import {
   appendGlobalEmailFooter,
   appendMailboxSignature,
@@ -65,7 +66,6 @@ import {
   withMailboxSignature,
 } from "@/lib/email/reply-compose";
 import { fmtRelative } from "@/lib/format";
-import type { Lead } from "@/lib/types";
 import {
   getActiveMailbox,
   isEmailAccountConfigured,
@@ -147,6 +147,8 @@ function relevantLeadMessages(input: {
   inboundByMailbox: Record<string, MailInbound[]>;
   sent: MailSent[];
   linkedLeadByMessageId: Record<string, string>;
+  /** CRM sequence sends that may not yet appear in IMAP Sent. */
+  crmSentFollowups?: readonly Followup[];
 }): LeadEmailMessage[] {
   const email = input.contactEmail?.trim().toLowerCase() ?? "";
   const rows: LeadEmailMessage[] = [];
@@ -159,13 +161,35 @@ function relevantLeadMessages(input: {
       if (manual || automatic) rows.push({ key, mailboxId, direction: "inbound", message });
     }
   }
+  const seenMessageIds = new Set<string>();
   for (const message of input.sent) {
     const manual = input.linkedLeadByMessageId[message.id] === input.lead.id;
     const automatic =
       Boolean(email) && extractEmailAddresses(message.from, message.to, message.cc).has(email);
     if (manual || automatic) {
       rows.push({ key: message.id, mailboxId: message.mailboxId, direction: "sent", message });
+      if (message.messageId) seenMessageIds.add(message.messageId.toLowerCase());
     }
+  }
+  for (const followup of input.crmSentFollowups ?? []) {
+    if (followup.leadId !== input.lead.id) continue;
+    if (followup.deliveryStatus !== "sent" || !followup.sentAt) continue;
+    const mid = followup.sentMessageId?.trim().toLowerCase();
+    if (mid && seenMessageIds.has(mid)) continue;
+    const id = `crm-sent-${followup.id}`;
+    const synthetic: MailSent = {
+      id,
+      mailboxId: "crm",
+      from: "",
+      to: email || "",
+      subject: followup.emailSubject?.trim() || followup.title,
+      body: followup.messageBody?.trim() || "",
+      sentAt: followup.sentAt,
+      messageId: followup.sentMessageId,
+      preview: (followup.messageBody?.trim() || followup.title).slice(0, 240),
+    };
+    rows.push({ key: id, mailboxId: "crm", direction: "sent", message: synthetic });
+    if (mid) seenMessageIds.add(mid);
   }
   return rows;
 }
@@ -178,6 +202,13 @@ export function LeadEmailsPanel({
   contactEmail?: string;
 }) {
   const workspace = useWorkspace();
+  const crmSentFollowups = React.useMemo(
+    () =>
+      workspace.followups.filter(
+        (f) => f.leadId === lead.id && f.deliveryStatus === "sent" && Boolean(f.sentAt),
+      ),
+    [workspace.followups, lead.id],
+  );
   const mailboxes = useEmailAccountStore((state) => state.mailboxes);
   const activeMailboxId = useEmailAccountStore((state) => state.activeMailboxId);
   const globalEmailFooter = useEmailAccountStore((state) => state.globalEmailFooter);
@@ -206,8 +237,16 @@ export function LeadEmailsPanel({
   );
 
   const messages = React.useMemo(
-    () => relevantLeadMessages({ lead, contactEmail, inboundByMailbox, sent, linkedLeadByMessageId }),
-    [contactEmail, inboundByMailbox, lead, linkedLeadByMessageId, sent],
+    () =>
+      relevantLeadMessages({
+        lead,
+        contactEmail,
+        inboundByMailbox,
+        sent,
+        linkedLeadByMessageId,
+        crmSentFollowups,
+      }),
+    [contactEmail, crmSentFollowups, inboundByMailbox, lead, linkedLeadByMessageId, sent],
   );
   const conversations = React.useMemo(() => groupLeadEmailConversations(messages), [messages]);
   const [selectedId, setSelectedId] = React.useState<string | null>(null);

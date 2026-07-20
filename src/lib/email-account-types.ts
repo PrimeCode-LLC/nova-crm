@@ -40,6 +40,11 @@ export interface EmailAccountSettings {
   connectionType: MailboxConnectionType;
   /** Max successful sends per UTC calendar day; `null` = unlimited. */
   dailySendLimit: number | null;
+  /**
+   * Minimum seconds between successful sends from this mailbox (cron spacing).
+   * `0` = no gap; omit / null uses the product default (15s).
+   */
+  sendGapSeconds?: number | null;
   /** Workspace member UIDs who may view/send this mailbox (credentials stay with owner). */
   assignedUserIds: string[];
   /** True when Google OAuth (XOAUTH2) tokens are stored for this mailbox. */
@@ -81,6 +86,7 @@ export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
   readReceipts: false,
   connectionType: "custom",
   dailySendLimit: null,
+  sendGapSeconds: null,
   assignedUserIds: [],
 });
 
@@ -141,6 +147,8 @@ export interface MailSent {
 
 export type ScheduledEmailStatus = "pending" | "processing" | "sent" | "failed" | "cancelled";
 
+export type ScheduledEmailFailureKind = "transient" | "permanent" | "quota";
+
 export interface ScheduledEmailAttachment {
   filename: string;
   mimeType: string;
@@ -176,6 +184,11 @@ export interface ScheduledEmail {
   /** RFC 5322 threading context for a scheduled reply. */
   inReplyTo?: string;
   referenceIds?: string[];
+  /** Send attempts so far (includes the latest failure). */
+  attempts?: number;
+  /** ISO when the next auto-retry should run (status stays pending). */
+  nextRetryAt?: string;
+  failureKind?: ScheduledEmailFailureKind;
 }
 
 /** Message loaded from the mailbox via IMAP (server round-trip). */
@@ -222,6 +235,8 @@ export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettin
     assignedUserIds: restPartial.assignedUserIds ?? base.assignedUserIds,
     dailySendLimit:
       restPartial.dailySendLimit === undefined ? base.dailySendLimit : restPartial.dailySendLimit,
+    sendGapSeconds:
+      restPartial.sendGapSeconds === undefined ? base.sendGapSeconds : restPartial.sendGapSeconds,
     ...(dataOwnerUid ? { dataOwnerUid } : {}),
   };
 }

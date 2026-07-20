@@ -81,6 +81,18 @@ export function DashboardNeedsAttention({
       });
       continue;
     }
+    if (followup.deliveryStatus === "needs_retry") {
+      items.push({
+        id: `retry-${followup.id}`,
+        label: `Email retrying · ${leadLabel(followup.leadId)}`,
+        detail: followup.deliveryError || followup.title,
+        href: followup.leadId ? `/leads/${followup.leadId}` : "/followups",
+        time: timestamp(followup.nextRetryAt || followup.failedAt, now),
+        severity: "warning",
+        icon: MailWarning,
+      });
+      continue;
+    }
     const due = timestamp(followup.dueAt, Number.POSITIVE_INFINITY);
     if (due < now) {
       items.push({

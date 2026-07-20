@@ -281,7 +281,8 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
       raw.deliveryStatus === "scheduled" ||
       raw.deliveryStatus === "sent" ||
       raw.deliveryStatus === "failed" ||
-      raw.deliveryStatus === "cancelled"
+      raw.deliveryStatus === "cancelled" ||
+      raw.deliveryStatus === "needs_retry"
         ? raw.deliveryStatus
         : undefined,
     sentAt: raw.sentAt ? firestoreValueToIso(raw.sentAt) : undefined,
@@ -293,6 +294,11 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     cancelledAt: raw.cancelledAt ? firestoreValueToIso(raw.cancelledAt) : undefined,
     deliveryError: typeof raw.deliveryError === "string" ? raw.deliveryError : undefined,
     cancelReason: typeof raw.cancelReason === "string" ? raw.cancelReason : undefined,
+    deliveryAttempts:
+      Number.isFinite(Number(raw.deliveryAttempts)) && Number(raw.deliveryAttempts) > 0
+        ? Math.floor(Number(raw.deliveryAttempts))
+        : undefined,
+    nextRetryAt: raw.nextRetryAt ? firestoreValueToIso(raw.nextRetryAt) : undefined,
   };
 }
 

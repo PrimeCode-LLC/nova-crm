@@ -79,6 +79,13 @@ function parseDailySendLimit(raw: unknown): number | null {
   return Math.floor(n);
 }
 
+function parseSendGapSeconds(raw: unknown): number | null {
+  if (raw == null || raw === "") return null;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.min(120, Math.floor(n));
+}
+
 function parseAssignedUserIds(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return [...new Set(raw.map((x) => String(x).trim()).filter(Boolean))];
@@ -103,6 +110,8 @@ function profileToFirestore(mb: EmailMailboxSettings): Record<string, unknown> {
     readReceipts: mb.readReceipts,
     connectionType: serializeConnectionType(mb.connectionType),
     dailySendLimit: mb.dailySendLimit == null ? null : Math.floor(mb.dailySendLimit),
+    sendGapSeconds:
+      mb.sendGapSeconds == null ? null : parseSendGapSeconds(mb.sendGapSeconds),
     assignedUserIds: parseAssignedUserIds(mb.assignedUserIds),
     updatedAt: new Date().toISOString(),
   };
@@ -150,6 +159,7 @@ function firestoreToMailbox(
     readReceipts: Boolean(data.readReceipts),
     connectionType: parseConnectionType(data.connectionType),
     dailySendLimit: parseDailySendLimit(data.dailySendLimit),
+    sendGapSeconds: parseSendGapSeconds(data.sendGapSeconds),
     assignedUserIds: parseAssignedUserIds(data.assignedUserIds),
     googleAuthConnected: Boolean(secrets?.googleOAuth?.accountEmail),
   };

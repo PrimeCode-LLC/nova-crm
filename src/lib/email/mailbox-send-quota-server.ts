@@ -267,6 +267,21 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
   return { ok: true, dayKey, used, limit, remaining: Math.max(0, limit - used) };
 }
 
+export async function getMailboxLastSentAtServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+}): Promise<string | undefined> {
+  if (!input.mailboxId.trim()) return undefined;
+  const dayKey = utcSendDayKey();
+  const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
+  if (!ref) return undefined;
+  const snap = await ref.get();
+  if (!snap.exists) return undefined;
+  const last = (snap.data() as Record<string, unknown>).lastSentAt;
+  return typeof last === "string" && last.trim() ? last.trim() : undefined;
+}
+
 export async function incrementMailboxSendCountServer(input: {
   organizationId: string;
   uid: string;
@@ -276,11 +291,13 @@ export async function incrementMailboxSendCountServer(input: {
   const dayKey = utcSendDayKey();
   const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
   if (!ref) return;
+  const now = new Date().toISOString();
   await ref.set(
     {
       count: FieldValue.increment(1),
       dayKey,
-      updatedAt: new Date().toISOString(),
+      lastSentAt: now,
+      updatedAt: now,
     },
     { merge: true },
   );

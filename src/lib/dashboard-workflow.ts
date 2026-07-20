@@ -27,6 +27,8 @@ export type DashboardWorkflowMetrics = {
   readyUnscheduledSteps: number;
   sentInRange: number;
   failedDeliveries: number;
+  /** Transient failures awaiting auto-retry. */
+  retryingDeliveries: number;
   activeSequences: number;
   remainingSequenceSteps: number;
   pausedOnReply: number;
@@ -111,6 +113,9 @@ export function computeDashboardWorkflowMetrics(input: {
     }).length,
     failedDeliveries: input.followups.filter(
       (followup) => followup.deliveryStatus === "failed" && !followup.completedAt,
+    ).length,
+    retryingDeliveries: input.followups.filter(
+      (followup) => followup.deliveryStatus === "needs_retry" && !followup.completedAt,
     ).length,
     activeSequences: activePlanIds.size,
     remainingSequenceSteps: actionableFollowups.filter(
