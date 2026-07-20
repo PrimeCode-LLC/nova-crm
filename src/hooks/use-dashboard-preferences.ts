@@ -87,6 +87,30 @@ export function useDashboardPreferences(userId: string) {
     [commit, prefs],
   );
 
+  const setStrategyScoreboardVisible = React.useCallback(
+    (strategyId: string, enabled: boolean) => {
+      commit({
+        ...prefs,
+        strategyScoreboardVisible: {
+          ...prefs.strategyScoreboardVisible,
+          [strategyId]: enabled,
+        },
+      });
+    },
+    [commit, prefs],
+  );
+
+  const setAllStrategyScoreboardVisible = React.useCallback(
+    (strategyIds: string[], enabled: boolean) => {
+      const strategyScoreboardVisible = { ...prefs.strategyScoreboardVisible };
+      for (const id of strategyIds) {
+        strategyScoreboardVisible[id] = enabled;
+      }
+      commit({ ...prefs, strategyScoreboardVisible });
+    },
+    [commit, prefs],
+  );
+
   const reset = React.useCallback(() => {
     commit(defaultDashboardPreferences());
   }, [commit]);
@@ -100,6 +124,8 @@ export function useDashboardPreferences(userId: string) {
     setAllWidgets,
     setChannelFunnelVisible,
     setAllChannelFunnelsVisible,
+    setStrategyScoreboardVisible,
+    setAllStrategyScoreboardVisible,
     reset,
   };
 }

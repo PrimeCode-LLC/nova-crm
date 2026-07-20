@@ -5,6 +5,7 @@ import {
 } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import {
   categoryForAuditEvent,
   type AuditEventCategory,
@@ -151,20 +152,20 @@ export async function recordAudit(input: RecordAuditInput): Promise<void> {
     const db = getAdminDb();
     if (!db) return;
     const detail = normalizeDetailFields(input);
-    const payload: Record<string, unknown> = {
+    const payload = stripUndefined({
       organizationId: input.organizationId,
       actorUid: input.actorUid,
       event: input.event,
       meta: input.meta ?? {},
       createdAt: FieldValue.serverTimestamp(),
-    };
-    if (detail.operation) payload.operation = detail.operation;
-    if (detail.tableName) payload.tableName = detail.tableName;
-    if (detail.fieldName) payload.fieldName = detail.fieldName;
-    if (detail.message) payload.message = detail.message;
-    if (detail.prevValue != null) payload.prevValue = detail.prevValue;
-    if (detail.updatedValue != null) payload.updatedValue = detail.updatedValue;
-    if (detail.actorEmail) payload.actorEmail = detail.actorEmail;
+      operation: detail.operation,
+      tableName: detail.tableName,
+      fieldName: detail.fieldName,
+      message: detail.message,
+      prevValue: detail.prevValue,
+      updatedValue: detail.updatedValue,
+      actorEmail: detail.actorEmail,
+    }) as Record<string, unknown>;
 
     await db
       .collection(COLLECTIONS.organizations)

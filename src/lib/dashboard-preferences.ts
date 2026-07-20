@@ -9,6 +9,7 @@ export type DashboardWidgetKey =
   | "emailVolume"
   | "followupSchedule"
   | "teamCommand"
+  | "strategyScoreboard"
   | "scorecard"
   | "needsAttention"
   | "inboxPerformance"
@@ -32,6 +33,12 @@ export type DashboardWidgets = Record<DashboardWidgetKey, boolean>;
 /** Per-channel visibility inside the Channel funnels section. */
 export type ChannelFunnelsVisibility = Record<ChannelKey, boolean>;
 
+/**
+ * Per-strategy visibility on the Strategy scoreboard.
+ * Missing ids default to visible (true). Only published strategies are candidates.
+ */
+export type StrategyScoreboardVisibility = Record<string, boolean>;
+
 export type DashboardPreferences = {
   viewMode: DashboardViewMode;
   /** When set (owners only), layout follows this CRM role instead of the real viewer. */
@@ -39,6 +46,8 @@ export type DashboardPreferences = {
   widgets: DashboardWidgets;
   /** Which channel cards appear in Channel funnels (independent of dashboard channel filter). */
   channelFunnelsVisible: ChannelFunnelsVisibility;
+  /** Which published strategies appear on the Strategy scoreboard. */
+  strategyScoreboardVisible: StrategyScoreboardVisibility;
 };
 
 export const DASHBOARD_VIEW_MODE_OPTIONS: {
@@ -77,6 +86,7 @@ export const DASHBOARD_WIDGET_META: {
   { key: "emailVolume", label: "Email volume chart", group: "ops" },
   { key: "followupSchedule", label: "Follow-up schedule chart", group: "ops" },
   { key: "teamCommand", label: "Team command", group: "ops" },
+  { key: "strategyScoreboard", label: "Strategy scoreboard", group: "ops" },
   { key: "scorecard", label: "Team scorecard", group: "ops" },
   { key: "needsAttention", label: "Needs attention", group: "shared" },
   { key: "inboxPerformance", label: "Top performers", group: "ops" },
@@ -101,6 +111,7 @@ export const DEFAULT_DASHBOARD_WIDGETS: DashboardWidgets = {
   emailVolume: true,
   followupSchedule: true,
   teamCommand: true,
+  strategyScoreboard: true,
   scorecard: true,
   needsAttention: true,
   inboxPerformance: true,
@@ -130,7 +141,16 @@ export function defaultDashboardPreferences(): DashboardPreferences {
     previewRole: null,
     widgets: { ...DEFAULT_DASHBOARD_WIDGETS },
     channelFunnelsVisible: { ...DEFAULT_CHANNEL_FUNNELS_VISIBLE },
+    strategyScoreboardVisible: {},
   };
+}
+
+/** Missing key → visible. Explicit false hides the strategy. */
+export function isStrategyScoreboardVisible(
+  visible: StrategyScoreboardVisibility,
+  strategyId: string,
+): boolean {
+  return visible[strategyId] !== false;
 }
 
 export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = defaultDashboardPreferences();
@@ -184,11 +204,19 @@ export function parseDashboardPreferences(raw: unknown): DashboardPreferences {
       if (typeof v === "boolean") widgets[key] = v;
     }
   }
+  const strategyScoreboardVisible: StrategyScoreboardVisibility = {};
+  if (o.strategyScoreboardVisible && typeof o.strategyScoreboardVisible === "object") {
+    for (const [id, v] of Object.entries(o.strategyScoreboardVisible)) {
+      if (typeof v === "boolean") strategyScoreboardVisible[id] = v;
+    }
+  }
+
   return {
     viewMode,
     previewRole,
     widgets,
     channelFunnelsVisible: parseChannelFunnelsVisible(o.channelFunnelsVisible),
+    strategyScoreboardVisible,
   };
 }
 

@@ -13,6 +13,7 @@ import { MailboxUtilizationPanel } from "@/components/dashboard/mailbox-utilizat
 import { ActionBoardPanel } from "@/components/dashboard/action-board-panel";
 import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { TeamCommand } from "@/components/dashboard/team-command";
+import { StrategyScoreboard } from "@/components/dashboard/strategy-scoreboard";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
 import { useDashboardMeetings } from "@/hooks/use-dashboard-meetings";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
@@ -116,6 +117,7 @@ export function OwnerOpsBoard({
   const showLeft =
     showCharts ||
     widgets.teamCommand ||
+    widgets.strategyScoreboard ||
     showScorecard ||
     widgets.needsAttention ||
     showInboxPerformance ||
@@ -175,6 +177,15 @@ export function OwnerOpsBoard({
                   deals={deals}
                   followups={followups}
                   tasks={tasks}
+                  range={range}
+                  wall={wall}
+                />
+              ) : null}
+              {widgets.strategyScoreboard ? (
+                <StrategyScoreboard
+                  leads={leads}
+                  deals={deals}
+                  followups={followups}
                   range={range}
                   wall={wall}
                 />

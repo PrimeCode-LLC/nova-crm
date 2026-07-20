@@ -1,15 +1,8 @@
 import { doc, setDoc } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import type { OrgActivityEvent } from "@/lib/types";
-
-function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(obj)) {
-    if (v !== undefined) out[k] = v;
-  }
-  return out;
-}
 
 export async function persistOrgActivityEventCreate(
   db: Firestore,
@@ -29,6 +22,6 @@ export async function persistOrgActivityEventCreate(
       entityType: event.entityType ?? null,
       entityId: event.entityId ?? null,
       payload: event.payload ?? null,
-    }),
+    }) as Record<string, unknown>,
   );
 }

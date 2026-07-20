@@ -281,7 +281,12 @@ export async function POST(req: Request) {
           event === "strategy.assigned" ? "strategyAssignments" : "prospectingStrategies",
         message,
         updatedValue: name,
-        meta: { strategyId, strategyName, action, assigneeId },
+        meta: {
+          strategyId,
+          ...(strategyName !== undefined ? { strategyName } : {}),
+          ...(action !== undefined ? { action } : {}),
+          ...(assigneeId !== undefined ? { assigneeId } : {}),
+        },
       }),
     );
     return NextResponse.json({ ok: true });

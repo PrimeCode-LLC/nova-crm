@@ -82,8 +82,8 @@ function emitStrategyOrgActivity(
     entityId: input.strategyId,
     payload: {
       strategyId: input.strategyId,
-      strategyName: input.strategyName,
-      assigneeId: input.assigneeId,
+      ...(input.strategyName !== undefined ? { strategyName: input.strategyName } : {}),
+      ...(input.assigneeId !== undefined ? { assigneeId: input.assigneeId } : {}),
     },
   });
 }
