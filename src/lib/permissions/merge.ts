@@ -6,7 +6,7 @@ export type ScopeKey = PermissionOverride["scope"];
 
 /** Default scope by role before department / overrides (v1 heuristic). */
 const ROLE_DEFAULT_SCOPE: Record<
-  Role,
+  string,
   Partial<Record<ResourceKey, ScopeKey>>
 > = {
   director: {

@@ -285,8 +285,8 @@ export default function AdminPermissionsPage() {
   return (
     <>
       <PageHeader
-        title="Permission Overrides"
-        description="CRM record access overrides and per-user admin feature grants, without changing roles."
+        title="Person overrides"
+        description="Per-user CRM record access exceptions and admin feature grants, without changing their role matrix."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New override

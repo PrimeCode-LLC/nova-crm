@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ROLES } from "@/lib/constants";
+import { ROLES, roleLabel } from "@/lib/constants";
 import {
   DASHBOARD_VIEW_MODE_OPTIONS,
   DASHBOARD_WIDGET_META,
@@ -144,7 +144,7 @@ export function DashboardSettingsSheet({
               <SelectTrigger size="sm" className="w-full">
                 <SelectValue>
                   {prefs.previewRole
-                    ? ROLES[prefs.previewRole]?.label ?? prefs.previewRole
+                    ? roleLabel(prefs.previewRole)
                     : "Off — use my role"}
                 </SelectValue>
               </SelectTrigger>
@@ -152,7 +152,7 @@ export function DashboardSettingsSheet({
                 <SelectItem value="none">Off — use my role</SelectItem>
                 {PREVIEW_ROLES.map((role) => (
                   <SelectItem key={role} value={role}>
-                    {ROLES[role].label}
+                    {roleLabel(role)}
                   </SelectItem>
                 ))}
               </SelectContent>

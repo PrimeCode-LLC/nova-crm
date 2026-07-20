@@ -42,7 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ROLES } from "@/lib/constants";
+import { ROLES, roleLabel } from "@/lib/constants";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import {
   buildHierarchyForest,
@@ -248,7 +248,7 @@ function HierarchyNodeRow({
                 </div>
               </div>
               <Badge variant="outline" className="hidden shrink-0 text-[10px] font-normal sm:inline-flex">
-                {ROLES[u.roleId]?.label ?? u.roleId}
+                {roleLabel(u.roleId)}
               </Badge>
               {hasKids ? (
                 <span className="shrink-0 text-[10px] text-muted-foreground tabular-nums">
@@ -401,7 +401,7 @@ function HorizontalOrgBlock({
               {deptLabel(node.user, departments) ?? node.user.title ?? "-"}
             </div>
             <Badge variant="outline" className="mt-1 w-fit text-[10px]">
-              {ROLES[node.user.roleId]?.label ?? node.user.roleId}
+              {roleLabel(node.user.roleId)}
             </Badge>
           </button>
           {hasKids ? (
@@ -768,7 +768,7 @@ export function UserHierarchyPanel({
                 </div>
                 <div className="mt-2 flex flex-wrap gap-1">
                   <Badge variant="outline" className="text-[10px]">
-                    {ROLES[selected.roleId]?.label ?? selected.roleId}
+                    {roleLabel(selected.roleId)}
                   </Badge>
                   {brokenIds.has(selected.id) ? (
                     <Badge variant="outline" className="border-warning/40 bg-warning/10 text-[10px] text-warning">
@@ -846,7 +846,7 @@ export function UserHierarchyPanel({
                     disabled={!canEdit || selected.id === currentUserId}
                   >
                     <SelectTrigger className="h-9">
-                      <SelectValue>{ROLES[editRole]?.label ?? undefined}</SelectValue>
+                      <SelectValue>{roleLabel(editRole)}</SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       {Object.entries(ROLES).map(([k, v]) => (

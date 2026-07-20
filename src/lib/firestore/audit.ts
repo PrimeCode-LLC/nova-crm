@@ -75,7 +75,11 @@ export type AuditEvent =
   | "strategy.updated"
   | "strategy.deleted"
   | "strategy.assigned"
-  | "strategy.pack_imported";
+  | "strategy.pack_imported"
+  | "role.created"
+  | "role.updated"
+  | "role.deleted"
+  | "role.reset";
 
 export type AuditLogRecord = {
   id: string;

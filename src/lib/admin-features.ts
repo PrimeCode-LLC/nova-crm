@@ -7,6 +7,7 @@ export type AdminFeatureKey =
   | "import"
   | "scrapers"
   | "permissions"
+  | "roles"
   | "activity_logs"
   | "organization"
   | "team"
@@ -64,11 +65,19 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     href: "/admin/scrapers",
   },
   permissions: {
-    label: "Permissions",
-    description: "CRM record access overrides",
+    label: "Person overrides",
+    description: "Per-user CRM access exceptions on top of roles",
     cluster: "access",
     minWorkspaceRole: "director",
     href: "/admin/permissions",
+  },
+  roles: {
+    label: "Roles",
+    description: "CRM role catalog, modules, and sensitive actions",
+    cluster: "access",
+    minWorkspaceRole: "director",
+    minOrgRole: "admin",
+    href: "/admin/roles",
   },
   activity_logs: {
     label: "Activity logs",

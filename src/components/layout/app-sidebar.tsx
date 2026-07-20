@@ -26,7 +26,7 @@ import {
   type NavItem,
 } from "@/lib/nav";
 import { DEMO_ROLE_PRESETS } from "@/lib/demo-persona";
-import { ROLES, APP_NAME } from "@/lib/constants";
+import { ROLES, APP_NAME, roleLabel } from "@/lib/constants";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -127,7 +127,7 @@ function workspaceRoleSubtitle(
   if (loading && !hasDoc) return "…";
   let base: string;
   if (roleId && roleId in ROLES) {
-    base = ROLES[roleId as Role].label;
+    base = roleLabel(roleId);
   } else if (hasDoc) {
     base = typeof roleId === "string" ? roleId : "Member";
   } else {
@@ -164,8 +164,8 @@ export function AppSidebar({
     ? mockUser.displayName
     : fbUser.displayName || fbUser.email?.split("@")[0] || "User";
   const email = useMockPersona ? mockUser.email : (fbUser.email ?? "");
-  const roleLabel = useMockPersona
-    ? ROLES[mockUser.roleId].label
+  const displayRoleLabel = useMockPersona
+    ? roleLabel(mockUser.roleId)
     : workspaceRoleSubtitle(userDoc?.roleId, userDoc?.isSuperAdmin, {
         loading: userDocLoading,
         hasDoc: userDoc != null,
@@ -316,7 +316,7 @@ export function AppSidebar({
                     <div className="grid flex-1 text-left text-sm leading-tight">
                       <span className="truncate font-medium">{displayName}</span>
                       <span className="truncate text-xs text-muted-foreground">
-                        {roleLabel}
+                        {displayRoleLabel}
                       </span>
                     </div>
                     <ChevronsUpDown className="ml-auto h-4 w-4 opacity-60" />

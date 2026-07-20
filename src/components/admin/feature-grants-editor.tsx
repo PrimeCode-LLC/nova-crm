@@ -37,8 +37,9 @@ export function FeatureGrantsEditor({
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Grant specific admin tools without changing this person&apos;s CRM role. Role-based access
-        still applies, grants only add capabilities they would not have otherwise.
+        Optional extras on top of this person&apos;s CRM role. Prefer editing the role matrix under{" "}
+        <span className="font-medium text-foreground">Configuration → Roles</span>; grants only add
+        capabilities the role would not otherwise include.
       </p>
       {groups.map((group) => (
         <div key={group.cluster} className="space-y-2">

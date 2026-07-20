@@ -9,7 +9,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildOpsScorecardRows } from "@/lib/dashboard-ops-analytics";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
-import { ROLES } from "@/lib/constants";
+import { ROLES, roleLabel } from "@/lib/constants";
 import { fmtCurrency, fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
@@ -101,7 +101,7 @@ export function PersonScorecard({
                       <TableCell className="py-2">
                         {user ? (
                           <Badge variant="outline" className="text-[10px] font-normal">
-                            {ROLES[user.roleId]?.label ?? user.roleId}
+                            {roleLabel(user.roleId)}
                           </Badge>
                         ) : null}
                       </TableCell>

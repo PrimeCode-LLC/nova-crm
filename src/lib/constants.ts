@@ -1,7 +1,7 @@
 import type {
   ChannelKey,
   PipelineStage,
-  Role,
+  SystemRoleId,
   RevenueRange,
   CompanySize,
   LeadTemperature,
@@ -76,7 +76,7 @@ export const KANBAN_STAGES: PipelineStage[] = [
   "won",
 ];
 
-export const ROLES: Record<Role, { label: string; description: string }> = {
+export const ROLES: Record<SystemRoleId, { label: string; description: string }> = {
   director: { label: "Director", description: "Sees and edits everything" },
   manager: { label: "Manager", description: "Sees department; writes own + team" },
   team_lead: { label: "Team Lead", description: "Sees team; writes own + team" },
@@ -90,6 +90,13 @@ export const ROLES: Record<Role, { label: string; description: string }> = {
     description: "Adds top-of-funnel prospects; sees rows they sourced or own until handoff",
   },
 };
+
+/** Label for a CRM role id (system preset or custom id string). */
+export function roleLabel(roleId: string | undefined | null): string {
+  if (!roleId) return ROLES.salesperson.label;
+  if (roleId in ROLES) return ROLES[roleId as SystemRoleId].label;
+  return roleId;
+}
 
 export const INTAKE_KIND_META: Record<
   LeadIntakeKind,

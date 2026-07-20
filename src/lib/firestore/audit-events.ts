@@ -56,6 +56,10 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "strategy.deleted": "Strategy deleted",
   "strategy.assigned": "Strategy assignment changed",
   "strategy.pack_imported": "Strategy pack imported",
+  "role.created": "CRM role created",
+  "role.updated": "CRM role updated",
+  "role.deleted": "CRM role deleted",
+  "role.reset": "CRM role reset to default",
 };
 
 export type AuditEventCategory =
@@ -121,6 +125,10 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "strategy.deleted": "crm",
   "strategy.assigned": "crm",
   "strategy.pack_imported": "crm",
+  "role.created": "settings",
+  "role.updated": "settings",
+  "role.deleted": "settings",
+  "role.reset": "settings",
 };
 
 export function labelForAuditEvent(event: string): string {

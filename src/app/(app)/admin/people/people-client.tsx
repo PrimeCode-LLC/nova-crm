@@ -35,6 +35,7 @@ import { canManageOrgUsers } from "@/lib/can-manage-org-users";
 import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
 import type { AdminFeatureKey } from "@/lib/admin-features";
 import { userHasAdminFeature } from "@/lib/admin-feature-access";
+import type { RoleListItem } from "@/lib/permissions/role-types";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
@@ -231,6 +232,7 @@ function PeoplePageClientInner({
   const [editCrmStatus, setEditCrmStatus] = React.useState<User["status"]>("active");
   const [editFeatureGrants, setEditFeatureGrants] = React.useState<AdminFeatureKey[]>([]);
   const [profileSaving, setProfileSaving] = React.useState(false);
+  const [orgRoles, setOrgRoles] = React.useState<RoleListItem[]>([]);
 
   const dismissedUrlPerson = React.useRef<string | null>(null);
 
@@ -244,6 +246,47 @@ function PeoplePageClientInner({
     mode,
     isDemo,
   } = useWorkspace();
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/org/roles");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (!cancelled && Array.isArray(data.roles)) {
+          setOrgRoles(
+            (data.roles as RoleListItem[]).filter((r) => r.isActive !== false),
+          );
+        }
+      } catch {
+        // Fall back to built-in ROLES labels when catalog is unavailable.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const crmRoleOptions = React.useMemo(() => {
+    if (orgRoles.length > 0) {
+      return orgRoles.map((r) => ({
+        value: r.id as Role,
+        label: r.name,
+      }));
+    }
+    return Object.entries(ROLES)
+      .filter(([k]) => k !== "data_scraper")
+      .map(([k, v]) => ({ value: k as Role, label: v.label }));
+  }, [orgRoles]);
+
+  function crmRoleLabel(roleId: string | undefined): string {
+    if (!roleId) return "—";
+    const fromOrg = orgRoles.find((r) => r.id === roleId);
+    if (fromOrg) return fromOrg.name;
+    if (roleId in ROLES) return ROLES[roleId as keyof typeof ROLES].label;
+    return roleId;
+  }
 
   const viewer = getUserById(currentUserId);
   const canManageCrm = canManageOrgUsers(viewer);
@@ -805,9 +848,9 @@ function PeoplePageClientInner({
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All CRM roles</SelectItem>
-                      {Object.entries(ROLES).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>
-                          {v.label}
+                      {crmRoleOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -908,7 +951,7 @@ function PeoplePageClientInner({
                           <TableCell className="text-sm text-muted-foreground">
                             {crm ? (
                               <Badge variant="outline" className="text-[10px] font-medium">
-                                {ROLES[crm.roleId]?.label ?? crm.roleId}
+                                {crmRoleLabel(crm.roleId)}
                               </Badge>
                             ) : (
                               <span className="text-xs">-</span>
@@ -1599,12 +1642,12 @@ function PeoplePageClientInner({
                             disabled={!canManageCrm}
                           >
                             <SelectTrigger className="h-9">
-                              <SelectValue>{ROLES[editCrmRole]?.label ?? undefined}</SelectValue>
+                              <SelectValue>{crmRoleLabel(editCrmRole)}</SelectValue>
                             </SelectTrigger>
                             <SelectContent>
-                              {Object.entries(ROLES).map(([k, v]) => (
-                                <SelectItem key={k} value={k}>
-                                  {v.label}
+                              {crmRoleOptions.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
                                 </SelectItem>
                               ))}
                             </SelectContent>

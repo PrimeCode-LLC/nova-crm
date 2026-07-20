@@ -109,6 +109,7 @@ import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
+import { canAction } from "@/lib/permissions/can";
 import {
   canEditProspectDerivedLead,
   isProspectRow,
@@ -2240,16 +2241,22 @@ export function WorkspaceModeProvider({
     };
     const viewerRole: OrgMemberRole =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
-    const canDeleteLeads = viewerRole === "owner" || viewerRole === "admin";
-    const canEditLead = (lead: Lead) => canEditProspectDerivedLead(lead, viewerRole);
     const viewer =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId) ??
       (userDoc && fbUser?.uid ? ({ ...userDoc, id: fbUser.uid } as User) : undefined);
+    const canDeleteLeads =
+      viewerRole === "owner" ||
+      viewerRole === "admin" ||
+      canAction(viewer, "leads.archive");
+    const canEditLead = (lead: Lead) => canEditProspectDerivedLead(lead, viewerRole);
     const reportIds = viewer
       ? collectDescendantUserIds(viewer.id, snapshotWithIdle.users)
       : new Set<string>();
     const canViewMemberMailboxes =
-      roleAtLeast(viewerRole, "admin") || reportIds.size > 0 || delegatedMailboxHostIds.length > 0;
+      roleAtLeast(viewerRole, "admin") ||
+      canAction(viewer, "mailbox.view_others") ||
+      reportIds.size > 0 ||
+      delegatedMailboxHostIds.length > 0;
     const hierarchyMailboxIds = canViewMemberMailboxes
       ? roleAtLeast(viewerRole, "admin")
         ? snapshotWithIdle.users

@@ -19,7 +19,7 @@ import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
-import { CHANNEL_LIST, ROLES } from "@/lib/constants";
+import { CHANNEL_LIST, ROLES, roleLabel } from "@/lib/constants";
 import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 import {
   getDashboardOverviewDescription,
@@ -598,7 +598,7 @@ export default function DashboardPage() {
                 <Eye className="h-3.5 w-3.5 text-primary" />
                 <span className="font-medium text-foreground">
                   {prefs.previewRole
-                    ? `Previewing as ${ROLES[prefs.previewRole].label}`
+                    ? `Previewing as ${roleLabel(prefs.previewRole)}`
                     : `View: ${prefs.viewMode === "ops" ? "Owner command board" : prefs.viewMode === "classic" ? "Pipeline classic" : "Employee board"}`}
                 </span>
                 <span className="text-muted-foreground">Layout only — data access is unchanged.</span>
@@ -617,7 +617,7 @@ export default function DashboardPage() {
             {viewer && (
               <div className="rounded-lg border border-border/80 bg-muted/15 px-4 py-3">
                 <p className="text-xs font-semibold text-foreground">
-                  {ROLES[effectiveRole ?? viewer.roleId]?.label ?? "Member"} view
+                  {roleLabel(effectiveRole ?? viewer.roleId)} view
                 </p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
                   {getDashboardRoleFocusLine(effectiveRole ?? viewer.roleId)}

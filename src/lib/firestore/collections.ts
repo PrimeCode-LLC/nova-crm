@@ -84,6 +84,8 @@ export const ORG_SUBCOLLECTIONS = {
   opportunityScans: "opportunityScans",
   /** Encrypted third-party integration credentials (Instantly, etc.). */
   integrationSecrets: "integrationSecrets",
+  /** Org-scoped CRM Role Catalog (`WorkspaceRoleDoc`). */
+  roles: "roles",
 } as const;
 
 /**

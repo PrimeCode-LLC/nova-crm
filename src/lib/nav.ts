@@ -132,10 +132,18 @@ export const NAV_SECTIONS: NavSection[] = [
       },
       {
         href: "/admin/permissions",
-        label: "Permissions",
+        label: "Person overrides",
         icon: Shield,
         minWorkspaceRole: "director",
         adminFeature: "permissions",
+        adminCluster: "access",
+      },
+      {
+        href: "/admin/roles",
+        label: "Roles",
+        icon: UserCog,
+        minWorkspaceRole: "director",
+        adminFeature: "roles",
         adminCluster: "access",
       },
       {
@@ -148,7 +156,7 @@ export const NAV_SECTIONS: NavSection[] = [
       {
         href: "/admin/departments",
         label: "Departments",
-        icon: UserCog,
+        icon: Users,
         minWorkspaceRole: "manager",
         adminFeature: "departments",
         adminCluster: "company",

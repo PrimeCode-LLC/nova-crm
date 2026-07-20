@@ -14,16 +14,12 @@ import {
 } from "@/lib/user-hierarchy-tree";
 import { normalizeFeatureGrants } from "@/lib/admin-feature-access";
 import { GRANTABLE_ADMIN_FEATURES } from "@/lib/admin-features";
+import {
+  getOrgRole,
+  resolveRoleForUser,
+  writeComputedPermissions,
+} from "@/lib/permissions/roles-server";
 import type { Role, User } from "@/lib/types";
-
-const ROLE_IDS = [
-  "director",
-  "manager",
-  "team_lead",
-  "salesperson",
-  "data_scraper",
-  "prospecting",
-] as const;
 
 const CRM_STATUSES = ["active", "inactive", "pip"] as const;
 
@@ -32,7 +28,8 @@ const patchSchema = z
     userId: z.string().min(1),
     managerId: z.union([z.string().min(1), z.null()]).optional(),
     departmentId: z.union([z.string().min(1), z.null()]).optional(),
-    roleId: z.enum(ROLE_IDS).optional(),
+    /** System preset id or custom org role document id. */
+    roleId: z.string().min(1).max(80).optional(),
     status: z.enum(CRM_STATUSES).optional(),
     displayName: z.string().trim().min(1).max(200).optional(),
     email: z.string().trim().email().max(320).optional(),
@@ -163,7 +160,20 @@ export async function PATCH(req: Request) {
   }
   let nextRole = targetUser.roleId;
   if (bodyRoleId !== undefined) {
-    nextRole = bodyRoleId;
+    const resolvedId = bodyRoleId === "data_scraper" ? "prospecting" : bodyRoleId;
+    await resolveRoleForUser({
+      organizationId: orgId,
+      roleId: resolvedId,
+      actorUid: g.ctx.session.uid,
+    });
+    const roleDoc = await getOrgRole(orgId, resolvedId);
+    if (!roleDoc || !roleDoc.isActive) {
+      return NextResponse.json(
+        { error: "Unknown or inactive CRM role. Create or activate it under Configuration → Roles." },
+        { status: 400 },
+      );
+    }
+    nextRole = roleDoc.id;
   }
 
   const orgIds = new Set(orgUsers.map((u) => u.id));
@@ -193,7 +203,7 @@ export async function PATCH(req: Request) {
     else payload.departmentId = bodyDeptId;
   }
   if (bodyRoleId !== undefined) {
-    payload.roleId = bodyRoleId;
+    payload.roleId = nextRole;
   }
   if (bodyStatus !== undefined) {
     payload.status = bodyStatus;
@@ -221,6 +231,23 @@ export async function PATCH(req: Request) {
   }
 
   await db.collection(COLLECTIONS.users).doc(targetId).update(payload);
+
+  if (bodyRoleId !== undefined) {
+    try {
+      const roleDoc = await resolveRoleForUser({
+        organizationId: orgId,
+        roleId: nextRole,
+        actorUid: g.ctx.session.uid,
+      });
+      await writeComputedPermissions({
+        uid: targetId,
+        organizationId: orgId,
+        role: roleDoc,
+      });
+    } catch (e) {
+      console.error("[workspace-users] computedPermissions", e);
+    }
+  }
 
   if (bodyManagerId !== undefined) {
     const nextUsers = orgUsers.map((u) =>

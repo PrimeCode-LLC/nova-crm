@@ -370,6 +370,26 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     tableName: "prospectingStrategies",
     message: (m) => `Strategy pack imported (${String(m.strategyName ?? m.strategyId ?? "")})`,
   },
+  "role.created": {
+    operation: "create",
+    tableName: "roles",
+    message: (m) => `CRM role created (${String(m.roleName ?? m.roleId ?? "")})`,
+  },
+  "role.updated": {
+    operation: "update",
+    tableName: "roles",
+    message: (m) => `CRM role updated (${String(m.roleName ?? m.roleId ?? "")})`,
+  },
+  "role.deleted": {
+    operation: "delete",
+    tableName: "roles",
+    message: (m) => `CRM role deleted (${String(m.roleName ?? m.roleId ?? "")})`,
+  },
+  "role.reset": {
+    operation: "update",
+    tableName: "roles",
+    message: (m) => `CRM role reset to default (${String(m.roleName ?? m.roleId ?? "")})`,
+  },
 };
 
 export function buildAuditMessage(

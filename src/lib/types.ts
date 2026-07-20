@@ -6,7 +6,8 @@ import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 
 export type ISODate = string;
 
-export type Role =
+/** Built-in CRM role ids seeded into the org Role Catalog. */
+export type SystemRoleId =
   | "director"
   | "manager"
   | "team_lead"
@@ -14,6 +15,12 @@ export type Role =
   /** @deprecated Prefer `prospecting`; kept for existing Firestore `roleId` values. */
   | "data_scraper"
   | "prospecting";
+
+/**
+ * CRM workspace role document id.
+ * System presets use {@link SystemRoleId}; custom roles use org-generated ids.
+ */
+export type Role = SystemRoleId | (string & {});
 
 export type ChannelKey =
   | "cold_email"
