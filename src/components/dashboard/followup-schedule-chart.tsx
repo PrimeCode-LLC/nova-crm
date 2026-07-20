@@ -11,12 +11,15 @@ import type { Followup } from "@/lib/types";
 export function FollowupScheduleChart({
   followups,
   compact,
+  fill,
 }: {
   followups: Followup[];
   compact?: boolean;
+  /** Grow to fill the parent's height instead of a fixed chart height. */
+  fill?: boolean;
 }) {
   const data = React.useMemo(() => buildFollowupScheduleByDay({ followups }), [followups]);
-  const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 160 : 200 });
+  const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });
   const monthLabel = new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" });
   const totals = React.useMemo(
     () =>
@@ -32,16 +35,19 @@ export function FollowupScheduleChart({
   );
 
   return (
-    <Card className="min-w-0">
-      <CardHeader className="pb-2">
+    <Card className={cn("min-w-0", fill && "flex h-full min-h-0 flex-col")}>
+      <CardHeader className={cn("pb-2", fill && "shrink-0")}>
         <CardTitle className="text-sm font-semibold">Follow-ups this month</CardTitle>
         <CardDescription className="text-xs">
           {monthLabel} · {totals.scheduled} upcoming · {totals.overdue} overdue · {totals.completed}{" "}
           done
         </CardDescription>
       </CardHeader>
-      <CardContent className="pt-0">
-        <div ref={wrapRef} className={cn("w-full min-w-0", compact ? "h-40" : "h-52")}>
+      <CardContent className={cn("pt-0", fill && "min-h-0 flex-1")}>
+        <div
+          ref={wrapRef}
+          className={cn("w-full min-w-0", fill ? "h-full min-h-[120px]" : compact ? "h-36" : "h-52")}
+        >
           {chartSize.w > 0 && chartSize.h > 0 ? (
             <BarChart
               width={chartSize.w}

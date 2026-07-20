@@ -24,10 +24,13 @@ export function EmailVolumeChart({
   followups,
   leads,
   compact,
+  fill,
 }: {
   followups: Followup[];
   leads: Lead[];
   compact?: boolean;
+  /** Grow to fill the parent's height instead of a fixed chart height. */
+  fill?: boolean;
 }) {
   const [period, setPeriod] = React.useState<EmailVolumePeriod>("week");
   const data = React.useMemo(
@@ -35,11 +38,11 @@ export function EmailVolumeChart({
     [followups, leads, period],
   );
   const totals = React.useMemo(() => emailVolumeTotals(data), [data]);
-  const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 160 : 200 });
+  const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });
 
   return (
-    <Card className="min-w-0">
-      <CardHeader className="pb-2">
+    <Card className={cn("min-w-0", fill && "flex h-full min-h-0 flex-col")}>
+      <CardHeader className={cn("pb-2", fill && "shrink-0")}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div>
             <CardTitle className="text-sm font-semibold">Email volume</CardTitle>
@@ -47,24 +50,29 @@ export function EmailVolumeChart({
               Sent vs replies · {fmtNumber(totals.sent)} sent · {fmtNumber(totals.replies)} replies
             </CardDescription>
           </div>
-          <div className="flex gap-1">
-            {PERIODS.map((p) => (
-              <Button
-                key={p.key}
-                type="button"
-                size="sm"
-                variant={period === p.key ? "secondary" : "ghost"}
-                className={cn("h-7 px-2 text-[11px]", period === p.key && "font-semibold")}
-                onClick={() => setPeriod(p.key)}
-              >
-                {p.label}
-              </Button>
-            ))}
-          </div>
+          {!compact ? (
+            <div className="flex gap-1">
+              {PERIODS.map((p) => (
+                <Button
+                  key={p.key}
+                  type="button"
+                  size="sm"
+                  variant={period === p.key ? "secondary" : "ghost"}
+                  className={cn("h-7 px-2 text-[11px]", period === p.key && "font-semibold")}
+                  onClick={() => setPeriod(p.key)}
+                >
+                  {p.label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
-        <div ref={wrapRef} className={cn("w-full min-w-0", compact ? "h-40" : "h-52")}>
+      <CardContent className={cn("pt-0", fill && "min-h-0 flex-1")}>
+        <div
+          ref={wrapRef}
+          className={cn("w-full min-w-0", fill ? "h-full min-h-[120px]" : compact ? "h-36" : "h-52")}
+        >
           {chartSize.w > 0 && chartSize.h > 0 ? (
             <AreaChart
               width={chartSize.w}

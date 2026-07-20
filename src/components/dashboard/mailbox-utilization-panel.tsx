@@ -112,10 +112,12 @@ export function MailboxUtilizationPanel({
   isDemo,
   currentUserId,
   wall,
+  className,
 }: {
   isDemo: boolean;
   currentUserId: string;
   wall?: boolean;
+  className?: string;
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const { rows, summary, loading, error } = useMailboxUtilization({
@@ -124,13 +126,13 @@ export function MailboxUtilizationPanel({
     currentUserId,
   });
 
-  const needs = React.useMemo(() => pickNeedsAttentionRows(rows, wall ? 4 : 3), [rows, wall]);
-  const best = React.useMemo(() => pickWellUtilizedRows(rows, wall ? 4 : 3), [rows, wall]);
+  const needs = React.useMemo(() => pickNeedsAttentionRows(rows, wall ? 6 : 3), [rows, wall]);
+  const best = React.useMemo(() => pickWellUtilizedRows(rows, wall ? 6 : 3), [rows, wall]);
 
   return (
     <>
-      <Card className="min-w-0">
-        <CardHeader className="pb-2">
+      <Card className={cn("min-w-0", wall && "flex h-full min-h-0 flex-col", className)}>
+        <CardHeader className={cn("pb-2", wall && "shrink-0")}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 space-y-1">
               <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
@@ -175,7 +177,7 @@ export function MailboxUtilizationPanel({
             </div>
           ) : null}
         </CardHeader>
-        <CardContent className="pt-0">
+        <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
           {loading ? (
             <div className="flex items-center gap-2 py-8 text-xs text-muted-foreground">
               <Inbox className="h-3.5 w-3.5 animate-pulse" />

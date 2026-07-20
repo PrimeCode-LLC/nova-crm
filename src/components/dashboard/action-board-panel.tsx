@@ -46,11 +46,13 @@ export function ActionBoardPanel({
   followups,
   meetings,
   wall,
+  className,
 }: {
   tasks: LeadTask[];
   followups: Followup[];
   meetings: Meeting[];
   wall?: boolean;
+  className?: string;
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const board = React.useMemo(
@@ -60,8 +62,8 @@ export function ActionBoardPanel({
 
   return (
     <>
-      <Card className="min-w-0">
-        <CardHeader className="pb-2">
+      <Card className={cn("min-w-0", wall && "flex h-full min-h-0 flex-col", className)}>
+        <CardHeader className={cn("pb-2", wall && "shrink-0")}>
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 space-y-1">
               <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
@@ -86,7 +88,12 @@ export function ActionBoardPanel({
             ) : null}
           </div>
         </CardHeader>
-        <CardContent className="grid gap-5 pt-0 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+        <CardContent
+          className={cn(
+            "grid gap-5 pt-0 sm:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2",
+            wall && "min-h-0 flex-1 grid-cols-1 gap-4 overflow-y-auto sm:grid-cols-1 xl:grid-cols-1 2xl:grid-cols-1",
+          )}
+        >
           <Section title="Urgent tasks" icon={AlertTriangle} empty="No overdue tasks" wall={wall}>
             {board.urgentTasks.map((t) => (
               <li key={t.id}>

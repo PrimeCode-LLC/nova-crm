@@ -26,12 +26,14 @@ export function StrategyScoreboard({
   followups: followupsOverride,
   range = "30d",
   wall,
+  className,
 }: {
   leads?: Lead[];
   deals?: Deal[];
   followups?: Followup[];
   range?: DashboardTimeRangeKey;
   wall?: boolean;
+  className?: string;
 } = {}) {
   const ws = useWorkspace();
   const { currentUserId, intentPlaybook } = ws;
@@ -81,8 +83,8 @@ export function StrategyScoreboard({
   const allIds = settingsOptions.map((s) => s.id);
 
   return (
-    <Card className="min-w-0">
-      <CardHeader className="gap-2 pb-3">
+    <Card className={cn("min-w-0", wall && "flex h-full min-h-0 flex-col", className)}>
+      <CardHeader className={cn("gap-2 pb-3", wall && "shrink-0")}>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <div className="min-w-0">
             <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
@@ -113,7 +115,7 @@ export function StrategyScoreboard({
           </p>
         ) : null}
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
         {loading ? (
           <p className="py-6 text-center text-xs text-muted-foreground">Loading strategies…</p>
         ) : board.rows.length === 0 ? (

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, MailWarning, MessageSquareReply, Timer, ListTodo } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 
@@ -30,12 +31,16 @@ export function DashboardNeedsAttention({
   plans,
   tasks,
   currentUserId,
+  wall,
+  className,
 }: {
   leads: readonly Lead[];
   followups: readonly Followup[];
   plans: readonly FollowupPlan[];
   tasks: readonly LeadTask[];
   currentUserId: string;
+  wall?: boolean;
+  className?: string;
 }) {
   const [now] = React.useState(() => Date.now());
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
@@ -135,13 +140,14 @@ export function DashboardNeedsAttention({
   }
 
   const severityRank = { urgent: 0, warning: 1, info: 2 };
+  const limit = wall ? 6 : 8;
   const visible = items
     .sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || a.time - b.time)
-    .slice(0, 8);
+    .slice(0, limit);
 
   return (
-    <Card className="shrink-0">
-      <CardHeader className="pb-3">
+    <Card className={cn("min-h-0 shrink-0", wall && "flex h-full flex-col", className)}>
+      <CardHeader className={cn("pb-3", wall && "shrink-0")}>
         <div className="flex items-start justify-between gap-3">
           <div>
             <CardTitle className="text-base">Needs attention</CardTitle>
@@ -152,7 +158,7 @@ export function DashboardNeedsAttention({
           {items.length > 0 && <Badge variant="secondary">{items.length}</Badge>}
         </div>
       </CardHeader>
-      <CardContent className="pt-0">
+      <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
         {visible.length === 0 ? (
           <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
             Nothing needs attention right now.
@@ -161,28 +167,46 @@ export function DashboardNeedsAttention({
           <ul className="divide-y rounded-md border">
             {visible.map((item) => {
               const Icon = item.icon;
+              const rowClass = cn(
+                "flex items-center gap-3 px-3 py-2.5",
+                !wall && "transition-colors hover:bg-muted/40",
+              );
+              const body = (
+                <>
+                  <Icon
+                    className={
+                      item.severity === "urgent"
+                        ? "h-4 w-4 shrink-0 text-destructive"
+                        : item.severity === "warning"
+                          ? "h-4 w-4 shrink-0 text-amber-600"
+                          : "h-4 w-4 shrink-0 text-muted-foreground"
+                    }
+                    aria-hidden
+                  />
+                  <span className="min-w-0 flex-1">
+                    <span className={cn("block truncate font-medium", wall ? "text-sm" : "text-xs")}>
+                      {item.label}
+                    </span>
+                    <span
+                      className="block truncate text-xs text-muted-foreground"
+                    >
+                      {item.detail}
+                    </span>
+                  </span>
+                  {!wall ? (
+                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  ) : null}
+                </>
+              );
               return (
                 <li key={item.id}>
-                  <Link
-                    href={item.href}
-                    className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
-                  >
-                    <Icon
-                      className={
-                        item.severity === "urgent"
-                          ? "h-4 w-4 shrink-0 text-destructive"
-                          : item.severity === "warning"
-                            ? "h-4 w-4 shrink-0 text-amber-600"
-                            : "h-4 w-4 shrink-0 text-muted-foreground"
-                      }
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-xs font-medium">{item.label}</span>
-                      <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
-                    </span>
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  </Link>
+                  {wall ? (
+                    <div className={rowClass}>{body}</div>
+                  ) : (
+                    <Link href={item.href} className={rowClass}>
+                      {body}
+                    </Link>
+                  )}
                 </li>
               );
             })}

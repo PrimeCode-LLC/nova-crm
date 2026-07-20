@@ -485,7 +485,7 @@ export default function DashboardWallPage() {
         </div>
       </header>
 
-      <div className="relative z-10 min-h-0 flex-1 overflow-auto p-4 md:p-5">
+      <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden p-4 md:p-5">
         <OwnerOpsBoard
           metrics={metrics}
           leads={leads}

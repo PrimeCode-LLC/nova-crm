@@ -14,6 +14,7 @@ export function KpiCard({
   href,
   onClick,
   selected,
+  dense,
 }: {
   label: string;
   value: React.ReactNode;
@@ -26,6 +27,8 @@ export function KpiCard({
   href?: string;
   onClick?: () => void;
   selected?: boolean;
+  /** Tighter padding/type for wall / dense strips. */
+  dense?: boolean;
 }) {
   let trend: "up" | "down" | "flat" = "flat";
   if (delta != null) {
@@ -62,17 +65,28 @@ export function KpiCard({
           : undefined
       }
     >
-      <CardContent className="p-4">
+      <CardContent className={cn(dense ? "p-2.5" : "p-4")}>
         <div className="flex items-center justify-between">
-          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <span
+            className={cn(
+              "font-medium uppercase tracking-wide text-muted-foreground",
+              dense ? "text-[10px]" : "text-xs",
+            )}
+          >
             {label}
           </span>
-          {Icon && (
-            <Icon className="h-4 w-4 text-muted-foreground/70" />
-          )}
+          {Icon ? (
+            <Icon
+              className={cn("text-muted-foreground/70", dense ? "h-3.5 w-3.5" : "h-4 w-4")}
+            />
+          ) : null}
         </div>
-        <div className="mt-2 flex items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums">{value}</span>
+        <div className={cn("flex items-baseline gap-2", dense ? "mt-1" : "mt-2")}>
+          <span
+            className={cn("font-semibold tabular-nums", dense ? "text-xl" : "text-2xl")}
+          >
+            {value}
+          </span>
           {delta != null && (
             <span
               className={cn(
@@ -89,9 +103,11 @@ export function KpiCard({
             </span>
           )}
         </div>
-        {hint && (
-          <p className="mt-1 text-xs text-muted-foreground">{hint}</p>
-        )}
+        {hint ? (
+          <p className={cn("text-muted-foreground", dense ? "mt-0.5 text-[11px]" : "mt-1 text-xs")}>
+            {hint}
+          </p>
+        ) : null}
       </CardContent>
     </Card>
   );
