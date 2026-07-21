@@ -114,7 +114,7 @@ export function WallMetricTiles({
   className?: string;
   /** Prefer an explicit column count when you know the metric set size. */
   columns?: 3 | 4 | 6 | 8;
-  /** Tighter padding/type for dense boards (e.g. 2×2 strategy grid). */
+  /** Tighter padding/type for dense boards (e.g. non-wall strategy grids). */
   compact?: boolean;
 }) {
   // Use fixed column counts (not `sm:`) — wall panels are often narrower than the
@@ -137,7 +137,7 @@ export function WallMetricTiles({
                   : "grid-cols-4";
 
   return (
-    <div className={cn("grid", compact ? "gap-1" : "gap-2", colClass, className)}>
+    <div className={cn("grid", compact ? "gap-1" : "gap-1.5", colClass, className)}>
       {items.map((m) => {
         const accent = accentFor(m);
         return (
@@ -145,14 +145,17 @@ export function WallMetricTiles({
             key={m.label}
             className={cn(
               "border text-center shadow-sm backdrop-blur-[2px]",
-              compact ? "rounded-md px-1.5 py-1" : "rounded-lg px-2.5 py-2",
+              // One wall density for Team + Strategy so both scenes match.
+              compact ? "rounded-md px-1.5 py-1" : "rounded-lg px-2 py-1.5",
               accent.shell,
             )}
           >
             <p
               className={cn(
-                "truncate font-semibold uppercase tracking-[0.08em]",
-                compact ? "text-[8px]" : "text-[10px]",
+                "truncate uppercase tracking-wide",
+                compact
+                  ? "text-[8px] font-semibold tracking-[0.08em]"
+                  : "text-[10px] font-medium",
                 accent.label,
               )}
             >
@@ -160,8 +163,8 @@ export function WallMetricTiles({
             </p>
             <p
               className={cn(
-                "truncate font-bold tabular-nums tracking-tight",
-                compact ? "mt-0.5 text-xs" : "mt-1 text-base",
+                "truncate tabular-nums tracking-tight",
+                compact ? "mt-0.5 text-xs font-bold" : "mt-0.5 text-sm font-semibold",
                 accent.value,
               )}
             >

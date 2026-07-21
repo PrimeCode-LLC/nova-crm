@@ -143,19 +143,16 @@ export function StrategyScoreboard({
             All published strategies are hidden. Use the settings control to turn some back on.
           </p>
         ) : wall ? (
-          <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
+          <ul className="flex min-h-0 flex-1 flex-col divide-y divide-border/50 overflow-y-auto">
             {visibleRows.slice(0, 4).map((r, i) => (
-              <li
-                key={r.strategyId}
-                className="shrink-0 rounded-lg border border-border/50 bg-muted/10 px-3 py-2"
-              >
-                <div className="flex items-center gap-2">
-                  <span className="w-4 shrink-0 text-right text-xs font-semibold tabular-nums text-muted-foreground">
+              <li key={r.strategyId} className="shrink-0 py-3.5">
+                <div className="flex items-center gap-3">
+                  <span className="w-5 shrink-0 text-right text-sm font-medium tabular-nums text-muted-foreground">
                     {i + 1}
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate text-sm font-semibold">{r.name}</span>
+                      <span className="truncate text-sm">{r.name}</span>
                       {r.activeAssignees > 0 ? (
                         <Badge variant="outline" className="h-4 px-1 text-[9px] font-normal">
                           {r.activeAssignees} active
@@ -174,7 +171,7 @@ export function StrategyScoreboard({
                         </Badge>
                       ) : null}
                     </div>
-                    <div className="mt-1 h-1.5 overflow-hidden rounded-full bg-muted">
+                    <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
                       <div
                         className="h-full rounded-full bg-primary transition-all"
                         style={{
@@ -193,9 +190,8 @@ export function StrategyScoreboard({
                   </div>
                 </div>
                 <WallMetricTiles
-                  className={cn("mt-1.5", r.thinSample && "opacity-70")}
+                  className={cn("mt-2.5 pl-8", r.thinSample && "opacity-70")}
                   columns={8}
-                  compact
                   items={[
                     { label: "Prospects", value: fmtNumber(r.prospects) },
                     {
