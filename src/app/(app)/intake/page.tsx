@@ -130,6 +130,7 @@ export default function IntakePoolPage() {
   const [dateTo, setDateTo] = React.useState("");
   const [qualityFilter, setQualityFilter] = React.useState<QualityFilter>("all");
   const [minimumScore, setMinimumScore] = React.useState("");
+  const [maximumScore, setMaximumScore] = React.useState("");
   const [strategyFilter, setStrategyFilter] = React.useState<string>(ALL);
   const [sortMode, setSortMode] = React.useState<SortMode>("newest");
   const [teamDefaults, setTeamDefaults] = React.useState<OrganizationIntakeFilterDefaults>({
@@ -208,6 +209,9 @@ export default function IntakePoolPage() {
     const parsedMinimumScore = Number(minimumScore);
     const hasMinimumScore =
       minimumScore.trim() !== "" && Number.isFinite(parsedMinimumScore);
+    const parsedMaximumScore = Number(maximumScore);
+    const hasMaximumScore =
+      maximumScore.trim() !== "" && Number.isFinite(parsedMaximumScore);
     const filtered = items.filter((item) => {
       const haystack = rawItemSearchHaystack(item);
       if (q && !haystack.includes(q)) return false;
@@ -237,6 +241,7 @@ export default function IntakePoolPage() {
       if (qualityFilter === "has_signals" && !(quality && quality.signalCount > 0)) return false;
       if (qualityFilter === "ready" && !(quality && quality.meetsThreshold)) return false;
       if (hasMinimumScore && score < Math.max(0, Math.min(100, parsedMinimumScore))) return false;
+      if (hasMaximumScore && score > Math.max(0, Math.min(100, parsedMaximumScore))) return false;
       if (
         strategyFilter === ANY_MY_STRATEGY &&
         qualifyingStrategyMatches.length === 0
@@ -277,6 +282,7 @@ export default function IntakePoolPage() {
     dateTo,
     qualityFilter,
     minimumScore,
+    maximumScore,
     strategyFilter,
     sortMode,
     qualityById,
@@ -305,6 +311,7 @@ export default function IntakePoolPage() {
     keywordFiltersActive ||
     qualityFilter !== "all" ||
     minimumScore.trim().length > 0 ||
+    maximumScore.trim().length > 0 ||
     strategyFilter !== ALL ||
     sortMode !== "newest";
 
@@ -820,6 +827,20 @@ export default function IntakePoolPage() {
                     aria-label="Minimum match score"
                   />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Maximum score</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    inputMode="numeric"
+                    value={maximumScore}
+                    onChange={(event) => setMaximumScore(event.target.value)}
+                    placeholder="0–100"
+                    className="h-9 w-[110px]"
+                    aria-label="Maximum match score"
+                  />
+                </div>
                 <Select
                   value={strategyFilter}
                   onValueChange={(value) => value && setStrategyFilter(value)}
@@ -902,6 +923,7 @@ export default function IntakePoolPage() {
                       setPersonalExcludeKeywords([]);
                       setQualityFilter("all");
                       setMinimumScore("");
+                      setMaximumScore("");
                       setStrategyFilter(ALL);
                       setSortMode("newest");
                     }}
