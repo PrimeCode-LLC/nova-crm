@@ -1,6 +1,7 @@
 import { writeBatch, doc, setDoc } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Account, Contact, Lead } from "@/lib/types";
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
@@ -11,46 +12,59 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<strin
   return out;
 }
 
+async function withOwnerManagerIds(
+  db: Firestore,
+  ownerId: string | undefined,
+  base: Record<string, unknown>,
+  override?: string[],
+): Promise<Record<string, unknown>> {
+  const ids = override ?? (await resolveOwnerManagerIdsClient(db, ownerId));
+  return { ...base, ownerManagerIds: ids };
+}
+
 export async function persistAccountCreateClient(
   db: Firestore,
   organizationId: string,
   account: Account,
+  opts?: { ownerManagerIds?: string[] },
 ): Promise<void> {
-  await setDoc(
-    doc(db, COLLECTIONS.accounts, account.id),
-    stripUndefined({
-      ...account,
-      organizationId,
-    }) as Record<string, unknown>,
+  const data = await withOwnerManagerIds(
+    db,
+    account.ownerId,
+    stripUndefined({ ...account, organizationId }),
+    opts?.ownerManagerIds,
   );
+  await setDoc(doc(db, COLLECTIONS.accounts, account.id), data);
 }
 
 export async function persistContactCreateClient(
   db: Firestore,
   organizationId: string,
   contact: Contact,
+  opts?: { ownerManagerIds?: string[] },
 ): Promise<void> {
-  await setDoc(
-    doc(db, COLLECTIONS.contacts, contact.id),
-    stripUndefined({
-      ...contact,
-      organizationId,
-    }) as Record<string, unknown>,
+  const data = await withOwnerManagerIds(
+    db,
+    contact.ownerId,
+    stripUndefined({ ...contact, organizationId }),
+    opts?.ownerManagerIds,
   );
+  await setDoc(doc(db, COLLECTIONS.contacts, contact.id), data);
 }
 
 export async function persistLeadCreateClient(
   db: Firestore,
   organizationId: string,
   lead: Lead,
+  opts?: { ownerManagerIds?: string[] },
 ): Promise<void> {
-  await setDoc(
-    doc(db, COLLECTIONS.leads, lead.id),
-    stripUndefined({
-      ...lead,
-      organizationId,
-    }) as Record<string, unknown>,
+  const data = await withOwnerManagerIds(
+    db,
+    lead.ownerId,
+    stripUndefined({ ...lead, organizationId }),
+    opts?.ownerManagerIds,
   );
+  await setDoc(doc(db, COLLECTIONS.leads, lead.id), data);
 }
 
 /**
@@ -63,7 +77,11 @@ export async function persistLeadGraphClient(
   account: Account,
   contact: Contact,
   lead: Lead,
+  opts?: { ownerManagerIds?: string[] },
 ): Promise<void> {
+  const ownerManagerIds =
+    opts?.ownerManagerIds ??
+    (await resolveOwnerManagerIdsClient(db, lead.ownerId || account.ownerId));
   const batch = writeBatch(db);
   const aRef = doc(db, COLLECTIONS.accounts, account.id);
   const cRef = doc(db, COLLECTIONS.contacts, contact.id);
@@ -74,6 +92,7 @@ export async function persistLeadGraphClient(
     stripUndefined({
       ...account,
       organizationId,
+      ownerManagerIds,
     }) as Record<string, unknown>,
   );
   batch.set(
@@ -81,6 +100,7 @@ export async function persistLeadGraphClient(
     stripUndefined({
       ...contact,
       organizationId,
+      ownerManagerIds,
     }) as Record<string, unknown>,
   );
   batch.set(
@@ -88,6 +108,7 @@ export async function persistLeadGraphClient(
     stripUndefined({
       ...lead,
       organizationId,
+      ownerManagerIds,
     }) as Record<string, unknown>,
   );
 

@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
-import { buildOrgManagerAncestorIdsMap } from "@/lib/user-hierarchy-tree";
+import { restampOwnerManagerIdsForOrgUsers } from "@/lib/firestore/restamp-owner-manager-ids-server";
 
 /**
- * Recomputes `managerAncestorIds` for every user in the tenant from current `managerId` links.
- * Use after bulk imports or if managers cannot see reports in live mode.
+ * Backfill denormalized ownerManagerIds / leadOwnerManagerIds / userManagerIds
+ * from current org hierarchy (for manager live list queries).
  */
 export async function POST() {
   const g = await guardTenantApi({ minRole: "admin" });
@@ -30,33 +28,15 @@ export async function POST() {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  const ancestorMap = buildOrgManagerAncestorIdsMap(orgUsers);
-  const batch = db.batch();
-  for (const u of orgUsers) {
-    const ancestors = ancestorMap.get(u.id) ?? [];
-    batch.update(db.collection(COLLECTIONS.users).doc(u.id), {
-      managerAncestorIds: ancestors,
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  }
-  await batch.commit();
-
-  const { restampOwnerManagerIdsForOrgUsers } = await import(
-    "@/lib/firestore/restamp-owner-manager-ids-server"
-  );
   const restamp = await restampOwnerManagerIdsForOrgUsers({
     db,
     organizationId: orgId,
     users: orgUsers.map((u) => ({
       id: u.id,
       managerId: u.managerId,
-      managerAncestorIds: ancestorMap.get(u.id) ?? [],
+      managerAncestorIds: u.managerAncestorIds,
     })),
   });
 
-  return NextResponse.json({
-    ok: true,
-    updated: orgUsers.length,
-    crmDocsUpdated: restamp.updated,
-  });
+  return NextResponse.json({ ok: true, crmDocsUpdated: restamp.updated });
 }

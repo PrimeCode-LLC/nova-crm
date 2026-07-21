@@ -1,6 +1,7 @@
 import crypto from "crypto";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
 import {
   findNovaCampaignByInstantlyId,
@@ -129,11 +130,13 @@ export async function handleInstantlyWebhookEvent(
     const localPart = email.split("@")[0] ?? "Contact";
     const contactName =
       localPart.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) || "Contact";
+    const ownerManagerIds: string[] = [];
 
     await db.collection(COLLECTIONS.accounts).doc(accountId).set(
       stampForCreate(organizationId, {
         name: companyName,
         domain: email.includes("@") ? email.split("@")[1] : undefined,
+        ownerManagerIds,
       }),
     );
     await db.collection(COLLECTIONS.contacts).doc(contactId).set(
@@ -141,6 +144,7 @@ export async function handleInstantlyWebhookEvent(
         accountId,
         name: contactName,
         email,
+        ownerManagerIds,
       }),
     );
     await db.collection(COLLECTIONS.leads).doc(leadId).set(
@@ -155,6 +159,7 @@ export async function handleInstantlyWebhookEvent(
           temperature: "warm",
           priority: "high",
           ownerId: "",
+          ownerManagerIds,
           contactName,
           contactEmail: email,
           companyName,
@@ -173,11 +178,13 @@ export async function handleInstantlyWebhookEvent(
 
   const leadSnap = await db.collection(COLLECTIONS.leads).doc(leadId).get();
   const leadOwnerId = String(leadSnap.data()?.ownerId ?? "");
+  const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
 
   await db.collection(COLLECTIONS.timelineEvents).add(
     stampForCreate(organizationId, {
       leadId,
       leadOwnerId,
+      leadOwnerManagerIds,
       type: "email_replied",
       actorId: null,
       summary:

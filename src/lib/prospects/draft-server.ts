@@ -11,6 +11,7 @@ import { z } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import {
   PROSPECT_DRAFT_FIELD_KEYS,
@@ -1218,19 +1219,29 @@ export async function completeProspectDraft(input: {
         },
       },
     });
+    const ownerManagerIds = await resolveOwnerManagerIdsAdmin(db, input.userId);
     const account = withoutUndefined(stampForCreate(
       input.organizationId,
-      entities.account as unknown as Record<string, unknown>,
+      {
+        ...(entities.account as unknown as Record<string, unknown>),
+        ownerManagerIds,
+      },
       input.userId,
     ));
     const contact = withoutUndefined(stampForCreate(
       input.organizationId,
-      entities.contact as unknown as Record<string, unknown>,
+      {
+        ...(entities.contact as unknown as Record<string, unknown>),
+        ownerManagerIds,
+      },
       input.userId,
     ));
     const lead = withoutUndefined(stampForCreate(
       input.organizationId,
-      entities.lead as unknown as Record<string, unknown>,
+      {
+        ...(entities.lead as unknown as Record<string, unknown>),
+        ownerManagerIds,
+      },
       input.userId,
     ));
     const draftRef = db.collection(COLLECTIONS.prospectDrafts).doc(draft.id);
@@ -1348,6 +1359,7 @@ export async function completeProspectDraft(input: {
         organizationId: input.organizationId,
         leadId,
         leadOwnerId: input.userId,
+        leadOwnerManagerIds: ownerManagerIds,
         type: "lead_created",
         actorId: input.userId,
         summary: `Prospect created from working draft for ${form.channel.replaceAll("_", " ")}.`,

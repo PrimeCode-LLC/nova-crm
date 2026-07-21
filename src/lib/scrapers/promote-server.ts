@@ -13,6 +13,7 @@ import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playboo
 import { withInitialQualityScore } from "@/lib/intent/apply-quality-score";
 import { researchFieldsFromIntakeItem } from "@/lib/intent/score-intake-item";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 
 function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
   const base = { ...raw, id } as unknown as Account;
@@ -185,6 +186,7 @@ export async function promoteRawItemToProspectServer(input: {
 
   const playbook = await getOrganizationIntentPlaybookServer(input.organizationId);
   const lead = withInitialQualityScore(leadBase, playbook, []);
+  const ownerManagerIds = await resolveOwnerManagerIdsAdmin(db, ownerId || input.userId);
 
   const batch = db.batch();
   const aRef = db.collection(COLLECTIONS.accounts).doc(accountId);
@@ -195,7 +197,10 @@ export async function promoteRawItemToProspectServer(input: {
     aRef,
     stampForCreate(
       input.organizationId,
-      stripUndefined(account as unknown as Record<string, unknown>),
+      stripUndefined({
+        ...(account as unknown as Record<string, unknown>),
+        ownerManagerIds,
+      }),
       input.userId,
     ),
   );
@@ -203,7 +208,10 @@ export async function promoteRawItemToProspectServer(input: {
     cRef,
     stampForCreate(
       input.organizationId,
-      stripUndefined(contact as unknown as Record<string, unknown>),
+      stripUndefined({
+        ...(contact as unknown as Record<string, unknown>),
+        ownerManagerIds,
+      }),
       input.userId,
     ),
   );
@@ -211,7 +219,10 @@ export async function promoteRawItemToProspectServer(input: {
     lRef,
     stampForCreate(
       input.organizationId,
-      stripUndefined(lead as unknown as Record<string, unknown>),
+      stripUndefined({
+        ...(lead as unknown as Record<string, unknown>),
+        ownerManagerIds,
+      }),
       input.userId,
     ),
   );
@@ -224,6 +235,7 @@ export async function promoteRawItemToProspectServer(input: {
       {
         leadId,
         leadOwnerId: ownerId || input.userId,
+        leadOwnerManagerIds: ownerManagerIds,
         type: "lead_created",
         actorId: input.userId,
         summary: `Promoted from intake: ${companyName}`,

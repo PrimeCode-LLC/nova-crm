@@ -365,6 +365,8 @@ export interface Account {
   leadCount: number;
   openDealValue: number;
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   /** Assigned workspace labels (`labels` collection ids). */
   labelIds?: string[];
   createdAt: ISODate;
@@ -390,6 +392,8 @@ export interface Contact {
   contactSource?: string;
   bestContactChannel?: BestContactChannel;
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   labelIds?: string[];
   createdAt: ISODate;
   updatedAt: ISODate;
@@ -400,6 +404,8 @@ export interface Profile {
   name: string;
   channel: ChannelKey;
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   active: boolean;
   notes?: string;
   /** Short stack label for Fit Check (e.g. "MERN", ".NET"). */
@@ -457,6 +463,8 @@ export interface Lead {
   priority: LeadPriority;
   /** Sales owner; empty string = open queue (visible to whole org until someone claims). */
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   /** Firebase uid of the user who created this lead (audit / performance reviews). */
   createdById?: string;
   /** User who sourced / entered the row (prospecting team). */
@@ -617,6 +625,8 @@ export interface Deal {
   probability: number;
   expectedCloseDate: ISODate;
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   products?: string[];
   notes?: string;
   labelIds?: string[];
@@ -673,6 +683,8 @@ export interface FollowupPlan {
   id: string;
   leadId: string;
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   status: FollowupPlanStatus;
   planSummary: string;
   createdAt: ISODate;
@@ -709,6 +721,8 @@ export interface Followup {
   dueAt: ISODate;
   completedAt?: ISODate;
   ownerId: string;
+  /** Denormalized managers of `ownerId` for Firestore list queries (hierarchy). */
+  ownerManagerIds?: string[];
   priority: LeadPriority;
   auto: boolean;
   /** Queued outbound email id (`scheduledEmails` doc) while pending send. */
@@ -970,6 +984,8 @@ export interface TimelineEvent {
   leadId: string;
   /** Denormalized lead owner used for visibility and legacy activity attribution. */
   leadOwnerId?: string;
+  /** Denormalized managers of `leadOwnerId` for Firestore list queries (hierarchy). */
+  leadOwnerManagerIds?: string[];
   type: TimelineEventType;
   actorId?: string;
   summary: string;

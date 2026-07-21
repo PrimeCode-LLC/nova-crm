@@ -91,6 +91,8 @@ export async function syncInstantlyCampaignLeadsToNova(
 
   const updates: { ref: DocumentReference; data: Record<string, unknown> }[] = [];
   const creates: PendingCreate[] = [];
+  // Open-queue Instantly imports have blank ownerId → empty manager stamp.
+  const ownerManagerIds: string[] = [];
 
   for (const { fields } of parsed) {
     const existingId = existingByEmail.get(fields.email);
@@ -125,6 +127,7 @@ export async function syncInstantlyCampaignLeadsToNova(
           {
             name: fields.companyName,
             domain: fields.companyDomain ?? null,
+            ownerManagerIds,
           },
           uid,
         ),
@@ -135,6 +138,7 @@ export async function syncInstantlyCampaignLeadsToNova(
             name: fields.contactName,
             email: fields.email,
             title: fields.contactTitle ?? null,
+            ownerManagerIds,
           },
           uid,
         ),
@@ -149,6 +153,7 @@ export async function syncInstantlyCampaignLeadsToNova(
             temperature: "cold",
             priority: "medium",
             ownerId: "",
+            ownerManagerIds,
             contactName: fields.contactName,
             contactTitle: fields.contactTitle ?? null,
             contactEmail: fields.email,

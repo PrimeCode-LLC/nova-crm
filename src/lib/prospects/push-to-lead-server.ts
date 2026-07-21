@@ -1,5 +1,6 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
+import { ownerManagerIdsFromUser } from "@/lib/crm-owner-managers";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
@@ -153,6 +154,29 @@ export async function pushProspectChannelToLeadServer(input: {
       let salesLeadId = prospect.linkedSalesLeadId?.trim() ?? "";
       let created = false;
       let salesLead: Lead;
+      const ownerId = prospectOwnerIdOf(prospect);
+
+      // All reads before writes (Firestore transaction rule).
+      let salesRef = salesLeadId
+        ? db.collection(COLLECTIONS.leads).doc(salesLeadId)
+        : null;
+      let salesSnap = salesRef ? await tx.get(salesRef) : null;
+      const ownerUserSnap = ownerId
+        ? await tx.get(db.collection(COLLECTIONS.users).doc(ownerId))
+        : null;
+      const ownerManagerIds = ownerUserSnap?.exists
+        ? ownerManagerIdsFromUser((() => {
+            const data = ownerUserSnap.data() as Record<string, unknown>;
+            return {
+              managerId: typeof data.managerId === "string" ? data.managerId : undefined,
+              managerAncestorIds: Array.isArray(data.managerAncestorIds)
+                ? data.managerAncestorIds.filter(
+                    (id): id is string => typeof id === "string",
+                  )
+                : undefined,
+            };
+          })())
+        : [];
 
       if (!salesLeadId) {
         salesLeadId = newEntityId("l");
@@ -165,19 +189,20 @@ export async function pushProspectChannelToLeadServer(input: {
           now,
         );
 
-        const salesRef = db.collection(COLLECTIONS.leads).doc(salesLeadId);
+        salesRef = db.collection(COLLECTIONS.leads).doc(salesLeadId);
         tx.set(
           salesRef,
           stampForCreate(
             input.organizationId,
-            stripUndefined(salesLead as unknown as Record<string, unknown>),
+            stripUndefined({
+              ...(salesLead as unknown as Record<string, unknown>),
+              ownerManagerIds,
+            }),
             input.userId,
           ),
         );
       } else {
-        const salesRef = db.collection(COLLECTIONS.leads).doc(salesLeadId);
-        const salesSnap = await tx.get(salesRef);
-        if (!salesSnap.exists) {
+        if (!salesSnap?.exists) {
           return { error: "Linked sales lead missing" } as const;
         }
         const salesRaw = salesSnap.data() as Record<string, unknown>;
@@ -198,7 +223,7 @@ export async function pushProspectChannelToLeadServer(input: {
         };
 
         tx.update(
-          salesRef,
+          salesRef!,
           stampForUpdate(
             {
               channelTags,
@@ -223,12 +248,12 @@ export async function pushProspectChannelToLeadServer(input: {
 
       const teProspectId = newTimelineEventId();
       const teSalesId = newTimelineEventId();
-      const ownerId = prospectOwnerIdOf(prospect);
 
       tx.set(db.collection(COLLECTIONS.timelineEvents).doc(teProspectId), {
         organizationId: input.organizationId,
         leadId: prospect.id,
         leadOwnerId: ownerId,
+        leadOwnerManagerIds: ownerManagerIds,
         type: "prospect_channel_pushed",
         actorId: input.userId,
         summary: `Channel pushed to shared lead (${assignment.channel})`,
@@ -244,6 +269,7 @@ export async function pushProspectChannelToLeadServer(input: {
         organizationId: input.organizationId,
         leadId: salesLeadId,
         leadOwnerId: ownerId,
+        leadOwnerManagerIds: ownerManagerIds,
         type: "prospect_channel_pushed",
         actorId: input.userId,
         summary: `Added from prospect via ${assignment.channel}`,

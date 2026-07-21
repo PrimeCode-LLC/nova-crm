@@ -23,7 +23,7 @@ describe("/api/prospect-drafts", () => {
     vi.clearAllMocks();
     vi.mocked(listProspectDraftPage).mockResolvedValue({
       drafts: [],
-      nextCursor: null,
+      nextCursor: undefined,
     });
   });
 

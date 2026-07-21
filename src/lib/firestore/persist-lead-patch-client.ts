@@ -1,6 +1,7 @@
 import { deleteField, doc, updateDoc, serverTimestamp } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Lead } from "@/lib/types";
 
 const OMIT_FROM_PATCH = new Set(["id", "createdAt", "updatedAt"]);
@@ -8,11 +9,13 @@ const OMIT_FROM_PATCH = new Set(["id", "createdAt", "updatedAt"]);
 /**
  * Applies a partial lead update to the Firestore lead document.
  * `undefined` in the patch removes that optional field from the document.
+ * When `ownerId` changes, refreshes denormalized `ownerManagerIds` for manager list queries.
  */
 export async function persistLeadPatchClient(
   db: Firestore,
   leadId: string,
   patch: Partial<Lead>,
+  opts?: { ownerManagerIds?: string[] },
 ): Promise<void> {
   const payload: Record<string, unknown> = {
     updatedAt: serverTimestamp(),
@@ -24,6 +27,10 @@ export async function persistLeadPatchClient(
     } else {
       payload[key] = val;
     }
+  }
+  if (patch.ownerId !== undefined) {
+    payload.ownerManagerIds =
+      opts?.ownerManagerIds ?? (await resolveOwnerManagerIdsClient(db, patch.ownerId));
   }
   await updateDoc(doc(db, COLLECTIONS.leads, leadId), payload);
 }

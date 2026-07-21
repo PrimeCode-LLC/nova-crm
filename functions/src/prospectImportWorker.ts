@@ -21,6 +21,7 @@ const COLLECTIONS = {
   accounts: "accounts",
   contacts: "contacts",
   leads: "leads",
+  users: "users",
   importJobs: "importJobs",
   importJobChunks: "importJobChunks",
   importIdentityKeys: "importIdentityKeys",
@@ -140,6 +141,45 @@ function wasImportDefaulted(
   key: "ownerEmail" | "createdByEmail" | "sourcedByEmail" | "prospectOwnerEmail",
 ): boolean {
   return row[`__defaulted_${key}`] === true;
+}
+
+/** Denormalized manager chain for list-safe manager visibility (matches app helper). */
+async function resolveOwnerManagerIdsCached(
+  firestore: Firestore,
+  ownerId: string,
+  cache: Map<string, string[]>,
+): Promise<string[]> {
+  const oid = ownerId.trim();
+  if (!oid) return [];
+  const hit = cache.get(oid);
+  if (hit) return hit;
+  const snap = await firestore.collection(COLLECTIONS.users).doc(oid).get();
+  let ids: string[] = [];
+  if (snap.exists) {
+    const data = snap.data() as Record<string, unknown>;
+    const fromStored = Array.isArray(data.managerAncestorIds)
+      ? data.managerAncestorIds.filter(
+          (id): id is string => typeof id === "string" && id.trim().length > 0,
+        )
+      : [];
+    if (fromStored.length > 0) {
+      ids = [...new Set(fromStored)];
+    } else {
+      const mid = typeof data.managerId === "string" ? data.managerId.trim() : "";
+      ids = mid ? [mid] : [];
+    }
+  }
+  cache.set(oid, ids);
+  return ids;
+}
+
+/** Stamp ownerManagerIds when this write includes ownerId (skip when owner was omitted). */
+function applyOwnerManagerIds(
+  data: Record<string, unknown>,
+  ownerManagerIds: string[],
+): void {
+  if (!("ownerId" in data)) return;
+  data.ownerManagerIds = asString(data.ownerId) ? ownerManagerIds : [];
 }
 
 function accountValues(row: Record<string, unknown>, ownerId: string): Record<string, unknown> {
@@ -310,10 +350,18 @@ async function processRow(
   orgId: string,
   policy: Policy,
   row: Row,
+  managerCache: Map<string, string[]>,
 ): Promise<RowResult> {
   if (row.issues.some((issue) => issue.severity === "error")) return "skipped";
   if (policy === "add_new" && (row.existingContactId || row.existingProspectIds.length)) return "skipped";
   if (policy !== "add_new" && row.existingProspectIds.length > 1) return "failed";
+
+  const ownerIdForManagers = asString(row.normalized.ownerEmail) ?? "";
+  const ownerManagerIds = await resolveOwnerManagerIdsCached(
+    firestore,
+    ownerIdForManagers,
+    managerCache,
+  );
 
   const receiptId = hash(`${orgId}:receipt:${jobId}:${row.rowNumber}`);
   const receiptRef = firestore.collection(COLLECTIONS.importIdentityKeys).doc(receiptId);
@@ -499,6 +547,9 @@ async function processRow(
         delete leadData.prospectOwnerId;
       }
     }
+    applyOwnerManagerIds(accountData, ownerManagerIds);
+    applyOwnerManagerIds(contactData, ownerManagerIds);
+    applyOwnerManagerIds(leadData, ownerManagerIds);
 
     if (!accountSnap.exists) {
       transaction.create(accountRef, {
@@ -801,12 +852,20 @@ export const processProspectImportChunk = onDocumentUpdated(
       const job = jobSnapshot.data() as Job | undefined;
       if (!job?.policy) throw new Error("Import job has no confirmed policy.");
       const results: Record<RowResult, number> = { created: 0, updated: 0, skipped: 0, failed: 0 };
+      const managerCache = new Map<string, string[]>();
       if (job.status !== "cancel_requested") {
         for (const row of after.rows) {
           const latestJob = await jobRef.get();
           if (latestJob.data()?.status === "cancel_requested") break;
           try {
-            const result = await processRow(db, after.jobId, after.organizationId, job.policy, row);
+            const result = await processRow(
+              db,
+              after.jobId,
+              after.organizationId,
+              job.policy,
+              row,
+              managerCache,
+            );
             results[result]++;
           } catch (error) {
             console.error("Prospect import row failed", {

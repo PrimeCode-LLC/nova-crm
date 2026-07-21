@@ -7,6 +7,7 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Lead, TimelineEvent } from "@/lib/types";
 
 /** Stay under Firestore's 500-op batch limit with headroom. */
@@ -55,6 +56,9 @@ export async function persistBulkOwnerReassignClient(
 ): Promise<void> {
   if (!items.length) return;
 
+  const ownerManagerIds = await resolveOwnerManagerIdsClient(db, nextOwnerId);
+  const leadOwnerManagerIds = ownerManagerIds;
+
   let batch = writeBatch(db);
   const opCount = { n: 0 };
   const accountsSeen = new Set<string>();
@@ -84,16 +88,18 @@ export async function persistBulkOwnerReassignClient(
       await commitCurrent();
     }
 
+    const leadPatch = { ...item.leadPatch, ownerManagerIds };
     batch.update(
       doc(db, COLLECTIONS.leads, item.leadId),
-      leadPayloadFromPatch(item.leadPatch, true),
+      leadPayloadFromPatch(leadPatch, true),
     );
     opCount.n += 1;
 
     if (item.linkedSalesLeadId && item.linkedSalesPatch && Object.keys(item.linkedSalesPatch).length) {
+      const linkedPatch = { ...item.linkedSalesPatch, ownerManagerIds };
       batch.update(
         doc(db, COLLECTIONS.leads, item.linkedSalesLeadId),
-        leadPayloadFromPatch(item.linkedSalesPatch, false),
+        leadPayloadFromPatch(linkedPatch, false),
       );
       opCount.n += 1;
     }
@@ -103,6 +109,7 @@ export async function persistBulkOwnerReassignClient(
       accountsSeen.add(accountId);
       batch.update(doc(db, COLLECTIONS.accounts, accountId), {
         ownerId: nextOwnerId,
+        ownerManagerIds,
         updatedAt: serverTimestamp(),
       });
       opCount.n += 1;
@@ -113,6 +120,7 @@ export async function persistBulkOwnerReassignClient(
       contactsSeen.add(contactId);
       batch.update(doc(db, COLLECTIONS.contacts, contactId), {
         ownerId: nextOwnerId,
+        ownerManagerIds,
         updatedAt: serverTimestamp(),
       });
       opCount.n += 1;
@@ -122,6 +130,7 @@ export async function persistBulkOwnerReassignClient(
       organizationId,
       leadId: item.timeline.leadId,
       leadOwnerId: nextOwnerId,
+      leadOwnerManagerIds,
       type: item.timeline.type,
       actorId: item.timeline.actorId ?? null,
       summary: item.timeline.summary,

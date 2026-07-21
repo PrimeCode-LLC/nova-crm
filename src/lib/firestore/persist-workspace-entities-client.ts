@@ -9,6 +9,7 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type {
   ActivityCounterRow,
   Campaign,
@@ -26,7 +27,7 @@ export async function persistNoteCreate(
   db: Firestore,
   organizationId: string,
   note: Note,
-  opts?: { leadOwnerId?: string },
+  opts?: { leadOwnerId?: string; leadOwnerManagerIds?: string[] },
 ): Promise<void> {
   /** Omit optional string fields instead of writing `null` — Firestore `null` was deserialized so `asNote` dropped `leadId` and notes disappeared from the lead tab. */
   const data: Record<string, unknown> = {
@@ -41,7 +42,10 @@ export async function persistNoteCreate(
   if (note.accountId) data.accountId = note.accountId;
   if (note.dealId) data.dealId = note.dealId;
   if (note.leadId) {
-    data.leadOwnerId = opts?.leadOwnerId ?? "";
+    const leadOwnerId = opts?.leadOwnerId ?? "";
+    data.leadOwnerId = leadOwnerId;
+    data.leadOwnerManagerIds =
+      opts?.leadOwnerManagerIds ?? (await resolveOwnerManagerIdsClient(db, leadOwnerId));
   }
   await setDoc(doc(db, COLLECTIONS.notes, note.id), data);
 }
@@ -65,12 +69,14 @@ export async function persistFollowupCreate(
   db: Firestore,
   organizationId: string,
   f: Followup,
+  opts?: { ownerManagerIds?: string[] },
 ): Promise<void> {
   const data: Record<string, unknown> = {
     organizationId,
     title: f.title,
     dueAt: f.dueAt,
     ownerId: f.ownerId,
+    ownerManagerIds: opts?.ownerManagerIds ?? (await resolveOwnerManagerIdsClient(db, f.ownerId)),
     priority: f.priority,
     auto: f.auto,
   };
@@ -115,6 +121,7 @@ export async function persistFollowupPlanCreate(
     organizationId,
     leadId: plan.leadId,
     ownerId: plan.ownerId,
+    ownerManagerIds: await resolveOwnerManagerIdsClient(db, plan.ownerId),
     status: plan.status,
     planSummary: plan.planSummary,
     createdAt: plan.createdAt,
@@ -221,7 +228,10 @@ export async function persistFollowupPatch(
   }
   if (patch.dueAt !== undefined) data.dueAt = patch.dueAt;
   if (patch.priority !== undefined) data.priority = patch.priority;
-  if (patch.ownerId !== undefined) data.ownerId = patch.ownerId;
+  if (patch.ownerId !== undefined) {
+    data.ownerId = patch.ownerId;
+    data.ownerManagerIds = await resolveOwnerManagerIdsClient(db, patch.ownerId);
+  }
   await updateDoc(doc(db, COLLECTIONS.followups, followupId), data);
 }
 
@@ -268,11 +278,15 @@ export async function persistTouchpointCreate(
   organizationId: string,
   t: Touchpoint,
   leadOwnerId: string,
+  opts?: { leadOwnerManagerIds?: string[] },
 ): Promise<void> {
+  const leadOwnerManagerIds =
+    opts?.leadOwnerManagerIds ?? (await resolveOwnerManagerIdsClient(db, leadOwnerId));
   await setDoc(doc(db, COLLECTIONS.touchpoints, t.id), {
     organizationId,
     leadId: t.leadId,
     leadOwnerId,
+    leadOwnerManagerIds,
     channel: t.channel,
     state: t.state,
     stepNumber: t.stepNumber ?? null,
@@ -288,11 +302,15 @@ export async function persistTimelineEventCreate(
   organizationId: string,
   e: TimelineEvent,
   leadOwnerId: string,
+  opts?: { leadOwnerManagerIds?: string[] },
 ): Promise<void> {
+  const leadOwnerManagerIds =
+    opts?.leadOwnerManagerIds ?? (await resolveOwnerManagerIdsClient(db, leadOwnerId));
   await setDoc(doc(db, COLLECTIONS.timelineEvents, e.id), {
     organizationId,
     leadId: e.leadId,
     leadOwnerId,
+    leadOwnerManagerIds,
     type: e.type,
     actorId: e.actorId ?? null,
     summary: e.summary,
@@ -318,6 +336,7 @@ export async function persistActivityCounterCreate(
   const data: Record<string, unknown> = {
     organizationId,
     userId: row.userId,
+    userManagerIds: await resolveOwnerManagerIdsClient(db, row.userId),
     channel: row.channel,
     date: row.date,
     counters: row.counters,
@@ -346,6 +365,7 @@ export async function persistProfileCreate(
     name: p.name,
     channel: p.channel,
     ownerId: p.ownerId,
+    ownerManagerIds: await resolveOwnerManagerIdsClient(db, p.ownerId),
     active: p.active ?? true,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
@@ -366,7 +386,10 @@ export async function persistProfileUpdate(
   const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (patch.name !== undefined) payload.name = patch.name;
   if (patch.channel !== undefined) payload.channel = patch.channel;
-  if (patch.ownerId !== undefined) payload.ownerId = patch.ownerId;
+  if (patch.ownerId !== undefined) {
+    payload.ownerId = patch.ownerId;
+    payload.ownerManagerIds = await resolveOwnerManagerIdsClient(db, patch.ownerId);
+  }
   if (patch.active !== undefined) payload.active = patch.active;
   if (patch.notes !== undefined) {
     payload.notes = patch.notes && patch.notes.trim() ? patch.notes : deleteField();

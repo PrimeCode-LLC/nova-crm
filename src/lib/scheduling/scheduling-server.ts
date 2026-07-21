@@ -1,6 +1,7 @@
 import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
@@ -612,10 +613,13 @@ async function createTimelineForMeeting(
     meeting.bookedById && meeting.bookedById !== meeting.hostId
       ? `Meeting scheduled on ${meeting.hostName ?? "host"}'s calendar`
       : `Meeting scheduled: ${meeting.title}`;
+  const leadOwnerId = meeting.leadOwnerId ?? meeting.hostId;
+  const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
   await db.collection(COLLECTIONS.timelineEvents).add({
     organizationId: meeting.organizationId,
     leadId: meeting.leadId,
-    leadOwnerId: meeting.leadOwnerId ?? meeting.hostId,
+    leadOwnerId,
+    leadOwnerManagerIds,
     type: "meeting_scheduled",
     actorId: actorId ?? meeting.bookedById ?? meeting.hostId,
     summary,
@@ -815,10 +819,13 @@ export async function updateMeetingStatusServer(input: {
 
   if (meeting.leadId && (input.status === "completed" || input.status === "cancelled")) {
     const type = input.status === "completed" ? "meeting_completed" : "meeting_cancelled";
+    const leadOwnerId = meeting.leadOwnerId ?? meeting.hostId;
+    const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
     await db.collection(COLLECTIONS.timelineEvents).add({
       organizationId: input.organizationId,
       leadId: meeting.leadId,
-      leadOwnerId: meeting.leadOwnerId ?? meeting.hostId,
+      leadOwnerId,
+      leadOwnerManagerIds,
       type,
       actorId: input.actorUid,
       summary:

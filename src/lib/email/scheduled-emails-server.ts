@@ -29,6 +29,7 @@ import {
   normalizeSendGapSeconds,
 } from "@/lib/email/scheduled-send-failure";
 import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/firestore/tenant-write";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
@@ -367,12 +368,14 @@ async function recordScheduledEmailSentTimeline(input: {
     // Credit the person who queued the outreach. Legacy queued rows do not have
     // scheduledByUserId, so fall back to the lead owner rather than the mailbox admin.
     const actorId = input.scheduledByUserId?.trim() || leadOwnerId || input.mailboxOwnerUid;
+    const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
     await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
       stampForCreate(
         input.organizationId,
         {
           leadId: input.leadId,
           leadOwnerId,
+          leadOwnerManagerIds,
           type: "email_sent",
           actorId,
           summary: `Email sent: ${input.subject.trim() || "(no subject)"}`,

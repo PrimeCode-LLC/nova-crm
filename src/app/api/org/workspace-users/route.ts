@@ -268,6 +268,27 @@ export async function PATCH(req: Request) {
       });
     }
     await batch.commit();
+
+    try {
+      const { restampOwnerManagerIdsForOrgUsers } = await import(
+        "@/lib/firestore/restamp-owner-manager-ids-server"
+      );
+      await restampOwnerManagerIdsForOrgUsers({
+        db,
+        organizationId: orgId,
+        users: nextUsers.map((u) => ({
+          id: u.id,
+          managerId: u.id === targetId
+            ? bodyManagerId === null
+              ? undefined
+              : (bodyManagerId ?? undefined)
+            : u.managerId,
+          managerAncestorIds: ancestorMap.get(u.id) ?? [],
+        })),
+      });
+    } catch (e) {
+      console.error("[workspace-users] restamp ownerManagerIds", e);
+    }
   }
 
   const profileOnly =
