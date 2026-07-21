@@ -65,6 +65,21 @@ export async function guardTenantApi(opts?: {
   }
 
   const liveTenant = await resolveLiveTenantForSession(session);
+  if (liveTenant.accessDeniedReason) {
+    const message =
+      liveTenant.accessDeniedReason === "inactive_user"
+        ? "Your Nova user is inactive."
+        : liveTenant.accessDeniedReason === "suspended_organization"
+          ? "This Nova organization is suspended."
+          : "Your workspace membership is not active.";
+    return {
+      ok: false,
+      response: NextResponse.json(
+        { error: message, code: liveTenant.accessDeniedReason },
+        { status: 403 },
+      ),
+    };
+  }
   if (liveTenant.membershipPending) {
     return {
       ok: false,

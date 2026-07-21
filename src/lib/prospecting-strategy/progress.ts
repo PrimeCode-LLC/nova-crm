@@ -74,6 +74,8 @@ export function countStrategyDayProgress(opts: {
   leads: Lead[];
   userId: string;
   strategyId?: string;
+  strategyAssignmentId?: string;
+  strategyAssignmentIds?: readonly string[];
   outreachThreshold?: number;
   now?: Date;
 }): StrategyDayProgress {
@@ -92,10 +94,22 @@ export function countStrategyDayProgress(opts: {
   let deeplyPersonalized = 0;
   let incomplete = 0;
   const companies = new Set<string>();
+  const assignmentIds = opts.strategyAssignmentIds?.length
+    ? new Set(opts.strategyAssignmentIds)
+    : undefined;
 
   for (const lead of opts.leads) {
     if (lead.intakeKind !== "prospect") continue;
     if (opts.strategyId && lead.strategyId !== opts.strategyId) continue;
+    if (
+      opts.strategyAssignmentId &&
+      lead.strategyAssignmentId !== opts.strategyAssignmentId
+    ) {
+      continue;
+    }
+    if (assignmentIds && (!lead.strategyAssignmentId || !assignmentIds.has(lead.strategyAssignmentId))) {
+      continue;
+    }
     const actor = lead.scraperId || lead.createdById || lead.prospectOwnerId || lead.ownerId;
     if (actor !== opts.userId) continue;
     if (!isSameLocalDay(lead.createdAt, dayStart)) continue;
@@ -164,8 +178,15 @@ export function countUserDayProgress(
   userId: string,
   outreachThreshold?: number,
   now?: Date,
+  strategyAssignmentIds?: readonly string[],
 ): StrategyDayProgress {
-  return countStrategyDayProgress({ leads, userId, outreachThreshold, now });
+  return countStrategyDayProgress({
+    leads,
+    userId,
+    outreachThreshold,
+    now,
+    strategyAssignmentIds,
+  });
 }
 
 export function progressAgainstTargets(

@@ -133,6 +133,8 @@ export type QualityMatchedSignal = {
   /** Why it matched (keyword, label, industry, engagement). */
   reason: string;
   qualificationRole?: IntentSignalQualificationRole;
+  /** Source evidence used by browser/intake scanners when block metadata is available. */
+  evidence?: import("@nova/scoring/text-match").MatchEvidence;
 };
 
 export type PrimaryOpportunity = {

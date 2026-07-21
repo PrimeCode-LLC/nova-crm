@@ -370,6 +370,21 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     tableName: "prospectingStrategies",
     message: (m) => `Strategy pack imported (${String(m.strategyName ?? m.strategyId ?? "")})`,
   },
+  "extension.auth_login": {
+    operation: "action",
+    tableName: "extensionSessions",
+    message: () => "Intent Radar signed in",
+  },
+  "extension.auth_logout": {
+    operation: "action",
+    tableName: "extensionSessions",
+    message: () => "Intent Radar signed out",
+  },
+  "extension.finding_saved": {
+    operation: "create",
+    tableName: "extensionFindings",
+    message: (m) => `Intent Radar finding saved (${String(m.action ?? "scan")})`,
+  },
   "role.created": {
     operation: "create",
     tableName: "roles",

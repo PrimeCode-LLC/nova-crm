@@ -46,6 +46,7 @@ const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "dashboard_brief", label: "Dashboard overview" },
   { key: "lead_analyze", label: "Lead analysis" },
   { key: "intent_suggest", label: "Intent signal suggest" },
+  { key: "prospect_draft_extract", label: "Prospect draft extraction" },
   { key: "followup_suggest", label: "Follow-up suggestions" },
   { key: "email_reply", label: "Email reply" },
   { key: "opportunity_fit", label: "Opportunity fit check" },

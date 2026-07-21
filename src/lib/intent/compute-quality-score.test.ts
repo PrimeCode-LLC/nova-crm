@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { computeQualityScore } from "@/lib/intent/compute-quality-score";
 import { modernizationServicesPlaybook } from "@/lib/intent/playbook-templates";
 import { stellixSoftPlaybook } from "@/lib/intent/stellix-soft-playbook";

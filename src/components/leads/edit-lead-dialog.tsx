@@ -89,7 +89,14 @@ function clampBant(n: number): number {
 
 const PUSH_KEYS = Object.keys(PUSH_STATUS_TONE) as PushStatus[];
 
-export type LeadEditSection = "all" | "research" | "qualification" | "routing" | "nextAction";
+export type LeadEditSection =
+  | "all"
+  | "labels"
+  | "intake"
+  | "research"
+  | "qualification"
+  | "routing"
+  | "nextAction";
 
 export function EditLeadDialog({
   open,
@@ -136,6 +143,7 @@ export function EditLeadDialog({
 
   const [profileId, setProfileId] = React.useState("");
   const [intakeKind, setIntakeKind] = React.useState<LeadIntakeKind>("sales_lead");
+  const [ownerId, setOwnerId] = React.useState<string | UnsetToken>(UNSET);
   const [scraperId, setScraperId] = React.useState<string | UnsetToken>(UNSET);
   const [labelIds, setLabelIds] = React.useState<string[]>([]);
   const { profiles, users, currentUserId, getOwnerDisplayName, canEditLead } = useWorkspace();
@@ -147,7 +155,7 @@ export function EditLeadDialog({
     return [...ids];
   }, [lead]);
 
-  const scraperOptions = React.useMemo(
+  const ownerOptions = React.useMemo(
     () => buildWorkspaceOwnerPickerOptions(users, currentUserId, getOwnerDisplayName, ownerPickerIds),
     [users, currentUserId, getOwnerDisplayName, ownerPickerIds],
   );
@@ -204,6 +212,7 @@ export function EditLeadDialog({
       }
 
       setIntakeKind(lead.intakeKind ?? "sales_lead");
+      setOwnerId(lead.ownerId?.trim() || UNSET);
       const existingScraper = lead.scraperId?.trim();
       const me = currentUserId?.trim();
       setScraperId(existingScraper || (me ? me : UNSET));
@@ -252,9 +261,13 @@ export function EditLeadDialog({
 
     const patch: Partial<Lead> = {};
 
-    if (section === "all") {
+    if (section === "all" || section === "intake") {
       patch.intakeKind = intakeKind === "sales_lead" ? undefined : "prospect";
+      patch.ownerId = ownerId === UNSET ? "" : ownerId;
       patch.scraperId = scraperId === UNSET ? undefined : scraperId;
+    }
+
+    if (section === "all" || section === "labels") {
       patch.labelIds = labelIds.length ? labelIds : undefined;
     }
 
@@ -300,15 +313,19 @@ export function EditLeadDialog({
   if (!lead) return null;
   const readOnly = !canEditLead(lead);
   const dialogTitle =
-    section === "research"
-      ? "Edit research & personalization"
-      : section === "qualification"
-        ? "Edit qualification"
-        : section === "routing"
-          ? "Edit campaign routing"
-          : section === "nextAction"
-            ? "Edit next action"
-            : "Edit lead";
+    section === "labels"
+      ? "Edit labels"
+      : section === "intake"
+        ? "Edit intake & ownership"
+        : section === "research"
+          ? "Edit research & personalization"
+          : section === "qualification"
+            ? "Edit qualification"
+            : section === "routing"
+              ? "Edit campaign routing"
+              : section === "nextAction"
+                ? "Edit next action"
+                : "Edit lead";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -322,9 +339,9 @@ export function EditLeadDialog({
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2 max-h-[min(78vh,640px)] overflow-y-auto pr-1">
-            {section === "all" && <section className="space-y-3">
+            {(section === "all" || section === "intake") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                Intake & attribution
+                Intake & ownership
               </p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-2">
@@ -348,6 +365,29 @@ export function EditLeadDialog({
                   </p>
                 </div>
                 <div className="grid gap-2">
+                  <Label>Owner</Label>
+                  <Select
+                    value={ownerId}
+                    onValueChange={(v) => v && setOwnerId(v as string | UnsetToken)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Open queue">
+                        {ownerId === UNSET
+                          ? "Open queue (unassigned)"
+                          : ownerOptions.find((o) => o.id === ownerId)?.label}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNSET}>Open queue (unassigned)</SelectItem>
+                      {ownerOptions.map((o) => (
+                        <SelectItem key={o.id} value={o.id}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="grid gap-2">
                   <Label>Lead by (sourced by)</Label>
                   <Select
                     value={scraperId}
@@ -357,12 +397,12 @@ export function EditLeadDialog({
                       <SelectValue placeholder="Not set">
                         {scraperId === UNSET
                           ? undefined
-                          : scraperOptions.find((o) => o.id === scraperId)?.label}
+                          : ownerOptions.find((o) => o.id === scraperId)?.label}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value={UNSET}>Not set</SelectItem>
-                      {scraperOptions.map((o) => (
+                      {ownerOptions.map((o) => (
                         <SelectItem key={o.id} value={o.id}>
                           {o.label}
                         </SelectItem>
@@ -375,7 +415,7 @@ export function EditLeadDialog({
 
             {section === "all" && <Separator />}
 
-            {section === "all" && <section className="space-y-3">
+            {(section === "all" || section === "labels") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Labels</p>
               <EntityLabelPicker emphasizeAddAction labelIds={labelIds} onChange={setLabelIds} />
             </section>}

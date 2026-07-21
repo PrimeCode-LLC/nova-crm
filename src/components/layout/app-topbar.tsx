@@ -31,6 +31,7 @@ import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { cn } from "@/lib/utils";
 
 const GlobalCommandMenu = dynamic(
@@ -59,6 +60,7 @@ export function AppTopbar() {
   const pathname = usePathname();
   const router = useRouter();
   const [cmdOpen, setCmdOpen] = React.useState(false);
+  const { getLeadById } = useWorkspace();
   const { notifications: mergedNotifications, markRead } = useWorkspaceInboxNotifications();
   const { teamChatUnreadTotal } = useTeamChatUnread();
 
@@ -73,6 +75,10 @@ export function AppTopbar() {
   }, [mergedNotifications]);
 
   const segments = pathname.split("/").filter(Boolean);
+  const leadDetailId =
+    segments.length === 2 && segments[0] === "leads" ? segments[1] : undefined;
+  const detailLead = leadDetailId ? getLeadById(leadDetailId) : undefined;
+  const detailIsProspect = detailLead?.intakeKind === "prospect";
   const isWallMode = pathname === "/dashboard/wall" || pathname.startsWith("/dashboard/wall/");
 
   React.useEffect(() => {
@@ -101,15 +107,24 @@ export function AppTopbar() {
               </BreadcrumbItem>
             ) : (
               segments.map((seg, i) => {
-                const href = "/" + segments.slice(0, i + 1).join("/");
+                const pathHref = "/" + segments.slice(0, i + 1).join("/");
                 const isLast = i === segments.length - 1;
+                const isLeadCollectionCrumb = Boolean(leadDetailId) && i === 0;
+                const href =
+                  isLeadCollectionCrumb && detailIsProspect ? "/prospects" : pathHref;
+                const label =
+                  isLast && leadDetailId
+                    ? detailLead?.contactName || "Lead details"
+                    : isLeadCollectionCrumb && detailIsProspect
+                      ? "Prospects"
+                      : toLabel(seg);
                 return (
-                  <React.Fragment key={href}>
+                  <React.Fragment key={pathHref}>
                     <BreadcrumbItem>
                       {isLast ? (
-                        <BreadcrumbPage>{toLabel(seg)}</BreadcrumbPage>
+                        <BreadcrumbPage>{label}</BreadcrumbPage>
                       ) : (
-                        <BreadcrumbLink render={<Link href={href}>{toLabel(seg)}</Link>} />
+                        <BreadcrumbLink render={<Link href={href}>{label}</Link>} />
                       )}
                     </BreadcrumbItem>
                     {!isLast && <BreadcrumbSeparator />}

@@ -23,6 +23,7 @@ functions/node_modules/
 
 # production
 /build
+/extension/dist/
 
 # misc
 .DS_Store

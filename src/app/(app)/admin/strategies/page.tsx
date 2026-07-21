@@ -181,6 +181,7 @@ export default function AdminStrategiesPage() {
       const progress = countStrategyDayProgress({
         leads: ws.leads,
         userId,
+        strategyAssignmentIds: active.map((assignment) => assignment.id),
         outreachThreshold: ws.intentPlaybook.outreachThreshold,
       });
       const alloc = allocationTotal(active);
@@ -355,6 +356,7 @@ export default function AdminStrategiesPage() {
                           <th className="px-3 py-2 font-medium">Strategies</th>
                           <th className="px-3 py-2 font-medium">Alloc %</th>
                           <th className="px-3 py-2 font-medium">Target</th>
+                          <th className="px-3 py-2 font-medium">Researched</th>
                           <th className="px-3 py-2 font-medium">Completed</th>
                           <th className="px-3 py-2 font-medium">Qualified</th>
                           <th className="px-3 py-2 font-medium">Rate</th>
@@ -388,7 +390,10 @@ export default function AdminStrategiesPage() {
                                 </span>
                               </td>
                               <td className="px-3 py-2">{row.dailyTarget}</td>
-                              <td className="px-3 py-2">{row.progress.completed}</td>
+                              <td className="px-3 py-2">{row.progress.researched}</td>
+                              <td className="px-3 py-2">
+                                {row.progress.completed}/{row.dailyTarget}
+                              </td>
                               <td className="px-3 py-2">{row.progress.qualified}</td>
                               <td className="px-3 py-2">{rate}%</td>
                             </tr>

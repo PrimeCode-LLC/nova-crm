@@ -21,6 +21,7 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
+import { ProspectDraftBanner } from "@/components/prospects/prospect-draft-banner";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -135,6 +136,7 @@ function ProspectsPageInner() {
         }
       />
       <PageBody contained>
+        <ProspectDraftBanner />
         {workspaceLoading ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && prospectCount === 0 ? (

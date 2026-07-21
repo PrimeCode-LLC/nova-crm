@@ -147,7 +147,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const tabFromUrl = React.useMemo(() => tabFromSearchParams(searchParams), [searchParams]);
   const activeTab = tabFromUrl;
   const [editingSection, setEditingSection] = React.useState<LeadEditSection | null>(null);
-  const [prospectFieldsOpen, setProspectFieldsOpen] = React.useState(false);
+  const [prospectFieldsSection, setProspectFieldsSection] = React.useState<
+    "all" | "company" | "contact" | null
+  >(null);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
@@ -167,15 +169,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   );
 
   const backFrom = searchParams.get("from");
+  const lead = ws.getLeadById(leadId);
   const backHref =
-    backFrom === "pipeline" ? "/pipeline" : backFrom === "prospects" ? "/prospects" : "/leads";
+    backFrom === "pipeline"
+      ? "/pipeline"
+      : backFrom === "prospects" || lead?.intakeKind === "prospect"
+        ? "/prospects"
+        : "/leads";
   const backLabel =
     backHref === "/pipeline"
       ? "Back to pipeline"
       : backHref === "/prospects"
         ? "Back to prospects"
         : "Back to leads";
-  const lead = ws.getLeadById(leadId);
   const channelOptions = useChannelOptions({ includeDisabled: true });
   const channelTagTooltips = React.useMemo(() => {
     if (!lead) return undefined;
@@ -429,6 +435,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     }
     const rest: Partial<Lead> = { ...patch };
     delete rest.stage;
+    if ("ownerId" in rest) {
+      const nextOwnerId = rest.ownerId ?? "";
+      if (nextOwnerId !== latest.ownerId) {
+        assignLeadOwner(nextOwnerId);
+      }
+      delete rest.ownerId;
+    }
     if (Object.keys(rest).length > 0) {
       ws.patchLead(latest.id, rest);
       ws.bumpLeadActivity(latest.id);
@@ -855,6 +868,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     outreachProfileSummary={outreachProfileSummary}
                     outreachProfileFieldLabel={needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : undefined}
                     onEditSection={setEditingSection}
+                    onEditRecord={setProspectFieldsSection}
                   />
                 </TabsContent>
                 <TabsContent value="timeline">
@@ -1010,7 +1024,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       variant="ghost"
                       size="sm"
                       className="h-7 px-2 text-xs"
-                      onClick={() => setProspectFieldsOpen(true)}
+                      onClick={() => setProspectFieldsSection("all")}
                     >
                       <Pencil className="h-3 w-3" /> Edit
                     </Button>
@@ -1247,13 +1261,20 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       />
       {account && contact && (
         <ProspectIntakeDialog
-          open={prospectFieldsOpen}
-          onOpenChange={setProspectFieldsOpen}
+          open={prospectFieldsSection !== null}
+          onOpenChange={(open) => {
+            if (!open) setProspectFieldsSection(null);
+          }}
           account={account}
           contact={contact}
+          section={prospectFieldsSection ?? "all"}
           onSave={({ accountPatch, contactPatch, leadPatch }) => {
-            ws.patchAccount(account.id, accountPatch);
-            ws.patchContact(contact.id, contactPatch);
+            if (Object.keys(accountPatch).length > 0) {
+              ws.patchAccount(account.id, accountPatch);
+            }
+            if (Object.keys(contactPatch).length > 0) {
+              ws.patchContact(contact.id, contactPatch);
+            }
             if (Object.keys(leadPatch).length > 0) {
               ws.patchLead(lead.id, leadPatch);
             }

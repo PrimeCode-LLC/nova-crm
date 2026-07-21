@@ -19,7 +19,9 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@nova/scoring": ["./packages/nova-scoring/src/index.ts"],
+      "@nova/scoring/*": ["./packages/nova-scoring/src/*"]
     }
   },
   "include": [
@@ -30,5 +32,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "functions", "scripts", "packs/private"]
+  "exclude": ["node_modules", "functions", "scripts", "packs/private", "extension"]
 }

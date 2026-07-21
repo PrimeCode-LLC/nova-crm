@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it } from "vitest";
 import { corpusConcepts, keywordMatchesCorpus } from "@/lib/intent/text-match";
 
 function matches(corpus: string, keyword: string): boolean {

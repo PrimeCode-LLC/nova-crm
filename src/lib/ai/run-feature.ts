@@ -1,4 +1,4 @@
-import { generateObject, generateText, type LanguageModelUsage } from "ai";
+import { generateText, Output, type LanguageModelUsage } from "ai";
 import type { z } from "zod";
 import type { AiFeatureKey } from "@/lib/ai/types";
 import {
@@ -87,11 +87,11 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
       model,
     });
 
-    const result = await generateObject({
+    const result = await generateText({
       model: languageModel,
       system: prompt.systemPrompt,
       prompt: userPrompt,
-      schema: input.schema,
+      output: Output.object({ schema: input.schema }),
       maxRetries: 0,
     });
 
@@ -109,7 +109,7 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
       leadId: input.leadId,
     });
 
-    return result.object as z.infer<T>;
+    return result.output as z.infer<T>;
   } catch (e) {
     await logUsage({
       organizationId: input.organizationId,

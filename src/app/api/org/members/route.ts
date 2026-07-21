@@ -130,12 +130,38 @@ export async function PATCH(req: Request) {
     const member = await getMemberServer(orgId, uid);
     const effectiveStatus = member?.status ?? "active";
     if (effectiveStatus === "disabled") {
+      const db = getAdminDb();
+      await db
+        ?.collection(COLLECTIONS.users)
+        .doc(uid)
+        .set(
+          {
+            organizationId: FieldValue.delete(),
+            orgRole: FieldValue.delete(),
+            membershipPendingOrgId: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
       await setAppClaims(g.ctx.adminAuth, uid, {
         organizationId: undefined,
         orgRole: undefined,
       });
       await g.ctx.adminAuth.revokeRefreshTokens(uid);
     } else if (effectiveStatus === "active") {
+      const db = getAdminDb();
+      await db
+        ?.collection(COLLECTIONS.users)
+        .doc(uid)
+        .set(
+          {
+            organizationId: orgId,
+            orgRole: member?.role ?? "member",
+            membershipPendingOrgId: FieldValue.delete(),
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
       await setAppClaims(g.ctx.adminAuth, uid, {
         organizationId: orgId,
         orgRole: member?.role,

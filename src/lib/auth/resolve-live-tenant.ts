@@ -4,11 +4,18 @@ import {
   findMembershipForUserServer,
   getMemberServer,
 } from "@/lib/platform/members-server";
+import { getOrganizationServer } from "@/lib/platform/organizations-server";
+import { getAdminDb } from "@/lib/firebase/admin";
+import { COLLECTIONS } from "@/lib/firestore/collections";
 
 export type ResolvedTenantContext = {
   organizationId?: string;
   orgRole?: OrgMemberRole;
   membershipPending: boolean;
+  accessDeniedReason?:
+    | "inactive_user"
+    | "inactive_membership"
+    | "suspended_organization";
 };
 
 /**
@@ -19,33 +26,53 @@ export type ResolvedTenantContext = {
 export async function resolveLiveTenantForSession(
   session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
 ): Promise<ResolvedTenantContext> {
-  let organizationId = session.organizationId;
-  let orgRole = session.orgRole;
+  const db = getAdminDb();
+  const userSnap = await db?.collection(COLLECTIONS.users).doc(session.uid).get();
+  const userStatus = userSnap?.data()?.status;
+  if (userStatus === "inactive") {
+    return {
+      membershipPending: false,
+      accessDeniedReason: "inactive_user",
+    };
+  }
 
-  if (!organizationId || !orgRole) {
-    const m = await findMembershipForUserServer(session.uid);
-    if (m?.status === "pending") {
+  let organizationId = session.organizationId;
+  let membership = organizationId
+    ? await getMemberServer(organizationId, session.uid)
+    : null;
+
+  if (!membership) {
+    membership = await findMembershipForUserServer(session.uid);
+    if (membership?.status === "pending") {
       return {
-        organizationId: m.organizationId,
+        organizationId: membership.organizationId,
         orgRole: undefined,
         membershipPending: true,
       };
     }
-    if (m) {
-      organizationId = m.organizationId;
-      orgRole = m.role;
-    }
-    return { organizationId, orgRole, membershipPending: false };
   }
 
-  const live = await getMemberServer(organizationId, session.uid);
-  if (live?.status === "pending") {
-    return { organizationId, orgRole: undefined, membershipPending: true };
+  if (!membership || membership.status !== "active") {
+    return {
+      membershipPending: false,
+      accessDeniedReason: "inactive_membership",
+    };
   }
-  if (live?.status === "active" && live.role) {
-    orgRole = live.role;
+
+  organizationId = membership.organizationId;
+  const organization = await getOrganizationServer(organizationId);
+  if (!organization || organization.status === "suspended") {
+    return {
+      membershipPending: false,
+      accessDeniedReason: "suspended_organization",
+    };
   }
-  return { organizationId, orgRole, membershipPending: false };
+
+  return {
+    organizationId,
+    orgRole: membership.role,
+    membershipPending: false,
+  };
 }
 
 /** Merges live membership into a session object for API responses and RSC props. */

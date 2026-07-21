@@ -22,6 +22,7 @@ import {
 } from "@/lib/platform/invites-server";
 import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
 import { isFirestoreFailedPrecondition } from "@/lib/firestore/errors";
+import { COLLECTIONS } from "@/lib/firestore/collections";
 
 type SessionRequestBody = {
   idToken?: string;
@@ -96,6 +97,14 @@ export async function POST(req: Request) {
   const uid = decoded.uid;
   const email = (decoded.email ?? "").toLowerCase();
   const displayName = decoded.name ?? email.split("@")[0] ?? "User";
+  const existingUserSnap = await db.collection(COLLECTIONS.users).doc(uid).get();
+  if (existingUserSnap.data()?.status === "inactive") {
+    await adminAuth.revokeRefreshTokens(uid);
+    return NextResponse.json(
+      { error: "Your Nova user is inactive. Contact an administrator." },
+      { status: 403 },
+    );
+  }
 
   // ────────────── 1. Decide which org this session belongs to ──────────────
   // Order of precedence:
@@ -221,8 +230,7 @@ export async function POST(req: Request) {
   if (!organizationId && !membershipPending) {
     // Fast path: `users/{uid}.organizationId` + direct `members/{uid}` read — no
     // collection-group index (covers normal sign-in after at least one session).
-    const userSnap = await db.collection("users").doc(uid).get();
-    const uData = userSnap.exists ? userSnap.data() : undefined;
+    const uData = existingUserSnap.exists ? existingUserSnap.data() : undefined;
     const mirroredOrgId =
       typeof uData?.organizationId === "string" && uData.organizationId.trim()
         ? uData.organizationId.trim()
@@ -314,11 +322,9 @@ export async function POST(req: Request) {
 
   // ────────────── 2. Mirror identity onto users/{uid} ──────────────
   const userRef = db.collection("users").doc(uid);
-  const snap = await userRef.get();
   const userPayload: Record<string, unknown> = {
     email,
     displayName,
-    status: "active",
     updatedAt: FieldValue.serverTimestamp(),
   };
   if (company) userPayload.company = company;
@@ -341,7 +347,8 @@ export async function POST(req: Request) {
     if (organizationId) userPayload.organizationId = organizationId;
     if (orgRole) userPayload.orgRole = orgRole;
   }
-  if (!snap.exists) {
+  if (!existingUserSnap.exists) {
+    userPayload.status = "active";
     userPayload.createdAt = FieldValue.serverTimestamp();
     // Map org owner to 'director' for the legacy CRM role system; everyone
     // else lands as salesperson by default and can be re-roled in /admin/users.

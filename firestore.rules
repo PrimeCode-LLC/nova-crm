@@ -17,29 +17,50 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
 
-    /**
-     * Tenant id for the requesting user. Prefer the `/users/{uid}` document
-     * (source of truth, matches client queries from `useUserDoc`). Fall back
-     * to the JWT claim only when the doc field is absent — a stale token org
-     * must not override the live membership on the user doc.
-     */
-    function callerOrgId() {
+    function candidateOrgId() {
       return signedIn()
-        ? (userDoc().organizationId != null
-            ? userDoc().organizationId
-            : request.auth.token.organizationId)
+        ? userDoc().get(
+            'organizationId',
+            request.auth.token.get('organizationId', null)
+          )
         : null;
     }
 
-    /**
-     * Prefer `orgRole` on the `/users/{uid}` document (server-maintained, matches the app)
-     * and fall back to the JWT claim only when the field is absent (e.g. before first sync).
-     * If we preferred the token whenever it was non-null, a stale token could block deletes
-     * after an owner/admin promotion until the next ID-token refresh.
-     */
-    function callerOrgRole() {
+    function callerMembership() {
+      return get(
+        /databases/$(database)/documents/organizations/$(candidateOrgId())/members/$(request.auth.uid)
+      ).data;
+    }
+
+    function callerOrganization() {
+      return get(
+        /databases/$(database)/documents/organizations/$(candidateOrgId())
+      ).data;
+    }
+
+    /** Tenant access is live: stale user fields or claims cannot bypass disable/suspension. */
+    function hasActiveTenantAccess() {
+      let orgId = candidateOrgId();
       return signedIn()
-        ? userDoc().get('orgRole', request.auth.token.orgRole)
+        && orgId is string
+        && orgId.size() > 0
+        && userDoc().get('status', 'active') in ['active', 'pip']
+        && exists(
+          /databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)
+        )
+        && callerMembership().get('status', '') == 'active'
+        && callerMembership().get('organizationId', '') == orgId
+        && exists(/databases/$(database)/documents/organizations/$(orgId))
+        && callerOrganization().get('status', 'trial') in ['trial', 'active'];
+    }
+
+    function callerOrgId() {
+      return hasActiveTenantAccess() ? candidateOrgId() : null;
+    }
+
+    function callerOrgRole() {
+      return hasActiveTenantAccess()
+        ? callerMembership().get('role', null)
         : null;
     }
 
@@ -112,11 +133,11 @@ service cloud.firestore {
     // change the tenant id.
 
     function tenantReadable() {
-      return signedIn() && inCallerOrg(resource.data);
+      return hasActiveTenantAccess() && inCallerOrg(resource.data);
     }
 
     function tenantWritable() {
-      return signedIn()
+      return hasActiveTenantAccess()
         && (resource == null
               ? isCreatingInOwnOrg()
               : (inCallerOrg(resource.data) && tenantUnchanged()));
@@ -575,6 +596,34 @@ service cloud.firestore {
     }
 
     match /platformAdmins/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionAuthCodes/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionSessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionAuthRateLimits/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionFindings/{id} {
+      allow read, write: if false;
+    }
+
+    match /prospectDrafts/{id} {
+      allow read, write: if false;
+    }
+
+    match /prospectDraftSources/{id} {
+      allow read, write: if false;
+    }
+
+    match /prospectDraftLocks/{id} {
       allow read, write: if false;
     }
   }

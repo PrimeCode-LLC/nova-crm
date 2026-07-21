@@ -63,6 +63,20 @@ export const COLLECTIONS = {
   organizations: "organizations",
   /** Product-level operators — read/write only through server (Admin SDK). */
   platformAdmins: "platformAdmins",
+  /** Single-use PKCE authorization codes for the Nova browser extension. */
+  extensionAuthCodes: "extensionAuthCodes",
+  /** Hashed, revocable 24-hour browser-extension sessions. */
+  extensionSessions: "extensionSessions",
+  /** Fixed-window counters for extension authentication endpoints. */
+  extensionAuthRateLimits: "extensionAuthRateLimits",
+  /** Browser-extension discoveries and their Nova save attribution. */
+  extensionFindings: "extensionFindings",
+  /** One server-managed working prospect draft per Nova user. */
+  prospectDrafts: "prospectDrafts",
+  /** Full captured sources kept outside draft summaries to avoid document-size growth. */
+  prospectDraftSources: "prospectDraftSources",
+  /** Transaction locks that enforce one active working draft per user. */
+  prospectDraftLocks: "prospectDraftLocks",
 } as const;
 
 /** Subcollections under `organizations/{orgId}/*` (server-managed). */

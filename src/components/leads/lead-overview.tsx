@@ -1,14 +1,21 @@
 "use client";
 
+import * as React from "react";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import type { Account, Campaign, Contact, Deal, Lead, Profile } from "@/lib/types";
-import { PUSH_STATUS_TONE, TEMPERATURE_TONE, PRIORITY_TONE } from "@/lib/constants";
+import {
+  CHANNELS,
+  INTAKE_KIND_META,
+  PRIORITY_TONE,
+  PUSH_STATUS_TONE,
+  TEMPERATURE_TONE,
+} from "@/lib/constants";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, Pencil } from "lucide-react";
+import { AlertTriangle, ChevronDown, Pencil } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
 import type { LeadEditSection } from "@/components/leads/edit-lead-dialog";
 import { LeadSourceButton } from "@/components/leads/lead-source-button";
@@ -28,6 +35,12 @@ import type {
   ProspectingStrategy,
   StrategyAssignment,
 } from "@/lib/prospecting-strategy/types";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { MarkdownContent } from "@/components/common/markdown-content";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -52,6 +65,12 @@ function Values({ values }: { values?: readonly string[] }) {
   );
 }
 
+function humanizeValue(value?: string): string {
+  if (!value?.trim()) return "-";
+  const text = value.replace(/[_-]+/g, " ").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function ExternalValue({ href, children }: { href?: string; children?: React.ReactNode }) {
   return href ? (
     <a href={href} target="_blank" rel="noreferrer" className="break-all text-primary/80 hover:text-primary">
@@ -60,6 +79,16 @@ function ExternalValue({ href, children }: { href?: string; children?: React.Rea
   ) : (
     "-"
   );
+}
+
+function EditCardAction({ onClick }: { onClick?: () => void }) {
+  return onClick ? (
+    <CardAction>
+      <Button type="button" variant="ghost" size="sm" onClick={onClick}>
+        <Pencil className="h-3.5 w-3.5" /> Edit
+      </Button>
+    </CardAction>
+  ) : null;
 }
 
 export function LeadOverview({
@@ -75,6 +104,7 @@ export function LeadOverview({
   outreachProfileSummary,
   outreachProfileFieldLabel,
   onEditSection,
+  onEditRecord,
 }: {
   lead: Lead;
   account?: Account;
@@ -89,13 +119,21 @@ export function LeadOverview({
   outreachProfileSummary?: string;
   outreachProfileFieldLabel?: string;
   onEditSection?: (section: Exclude<LeadEditSection, "all">) => void;
+  onEditRecord?: (section: "contact" | "company") => void;
 }) {
   const ws = useWorkspace();
+  const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const canEdit = ws.canEditLead(lead);
   const emailResponseCtx = useLeadEmailResponseContext();
   const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
   const scraperSource = getLeadScraperSource(lead);
+  const sourceProspect = lead.prospectSourceId
+    ? ws.getLeadById(lead.prospectSourceId)
+    : undefined;
+  const linkedSalesLead = lead.linkedSalesLeadId
+    ? ws.getLeadById(lead.linkedSalesLeadId)
+    : undefined;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <LeadIntentQualityCard
@@ -108,6 +146,9 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Labels</CardTitle>
+          <EditCardAction
+            onClick={canEdit && onEditSection ? () => onEditSection("labels") : undefined}
+          />
         </CardHeader>
         <CardContent className="pt-0">
           <EntityLabelPicker
@@ -122,6 +163,9 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Contact record</CardTitle>
+          <EditCardAction
+            onClick={canEdit && contact && onEditRecord ? () => onEditRecord("contact") : undefined}
+          />
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
@@ -151,6 +195,9 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Company record</CardTitle>
+          <EditCardAction
+            onClick={canEdit && account && onEditRecord ? () => onEditRecord("company") : undefined}
+          />
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
@@ -223,6 +270,9 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Intake & ownership</CardTitle>
+          <EditCardAction
+            onClick={canEdit && onEditSection ? () => onEditSection("intake") : undefined}
+          />
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
@@ -326,17 +376,72 @@ export function LeadOverview({
         </CardContent>
       </Card>
 
-      <Card className="lg:col-span-2">
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm">Prospect intelligence & attribution</CardTitle>
-        </CardHeader>
-        <CardContent className="pt-0 space-y-5">
-          <dl className="divide-y">
-            <Field label="Qualification status">{lead.prospectQualifyStatus || "-"}</Field>
+      <Collapsible
+        open={intelligenceOpen}
+        onOpenChange={setIntelligenceOpen}
+        className="lg:col-span-2"
+      >
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Prospect intelligence & attribution</CardTitle>
+            <CardAction>
+              <CollapsibleTrigger
+                render={
+                  <Button type="button" variant="ghost" size="sm">
+                    {intelligenceOpen ? "Collapse" : "View details"}
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 transition-transform",
+                        intelligenceOpen && "rotate-180",
+                      )}
+                    />
+                  </Button>
+                }
+              />
+            </CardAction>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex flex-wrap gap-2">
+              <Badge
+                variant="outline"
+                className={cn(
+                  "font-normal",
+                  lead.prospectQualifyStatus === "completed" &&
+                    "border-success/20 bg-success/10 text-success",
+                  lead.prospectQualifyStatus === "incomplete" &&
+                    "border-warning/20 bg-warning/10 text-warning",
+                  lead.prospectQualifyStatus === "rejected" &&
+                    "border-destructive/20 bg-destructive/10 text-destructive",
+                )}
+              >
+                {humanizeValue(lead.prospectQualifyStatus)}
+              </Badge>
+              {lead.qualityScore != null ? (
+                <Badge variant="secondary" className="font-normal tabular-nums">
+                  Quality {lead.qualityScore}/100
+                </Badge>
+              ) : null}
+              {lead.primaryOpportunityLabel || lead.primaryOpportunityId ? (
+                <Badge variant="outline" className="max-w-full truncate font-normal">
+                  {lead.primaryOpportunityLabel || lead.primaryOpportunityId}
+                </Badge>
+              ) : null}
+              <Badge variant="secondary" className="font-normal tabular-nums">
+                {lead.intentEvidence?.length ?? 0} evidence item
+                {(lead.intentEvidence?.length ?? 0) === 1 ? "" : "s"}
+              </Badge>
+            </div>
+
+            <CollapsibleContent className="mt-5 space-y-5">
+              <dl className="divide-y">
+            <Field label="Qualification status">
+              {humanizeValue(lead.prospectQualifyStatus)}
+            </Field>
             <Field label="Stored quality score">
-              {lead.qualityScore != null
-                ? `${lead.qualityScore}/100 · ${lead.qualitySignalCount ?? 0} signal(s)`
-                : "-"}
+              {lead.qualityScore != null ? `${lead.qualityScore}/100` : "-"}
+            </Field>
+            <Field label="Matched intent signals">
+              {lead.qualitySignalCount != null ? lead.qualitySignalCount : "-"}
             </Field>
             <Field label="Primary opportunity">
               {lead.primaryOpportunityLabel || lead.primaryOpportunityId || "-"}
@@ -345,9 +450,9 @@ export function LeadOverview({
             <Field label="Rejection">
               {[lead.rejectionReason, lead.rejectionNote].filter(Boolean).join(" · ") || "-"}
             </Field>
-          </dl>
+              </dl>
 
-          <section className="space-y-2">
+              <section className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Structured personalization
             </p>
@@ -357,9 +462,9 @@ export function LeadOverview({
               <Field label="Relevant service">{lead.personalizationNote?.relevantService || "-"}</Field>
               <Field label="Suggested angle">{lead.personalizationNote?.suggestedAngle || "-"}</Field>
             </dl>
-          </section>
+              </section>
 
-          <section className="space-y-2">
+              <section className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Verified intent evidence
             </p>
@@ -384,9 +489,6 @@ export function LeadOverview({
                       {evidence.sourceUrl ? (
                         <ExternalValue href={evidence.sourceUrl}>View source</ExternalValue>
                       ) : null}
-                      {evidence.signalId ? (
-                        <span className="text-muted-foreground">Signal: {evidence.signalId}</span>
-                      ) : null}
                     </div>
                   </div>
                 ))}
@@ -394,14 +496,16 @@ export function LeadOverview({
             ) : (
               <p className="text-sm text-muted-foreground">No structured evidence recorded.</p>
             )}
-          </section>
+              </section>
 
-          <section className="space-y-2">
+              <section className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Strategy and buyer persona
             </p>
             <dl className="divide-y rounded-md border px-3">
-              <Field label="Strategy">{strategy?.name || lead.strategyId || "-"}</Field>
+              <Field label="Strategy">
+                {strategy?.name || (lead.strategyId ? "Strategy unavailable" : "-")}
+              </Field>
               <Field label="Strategy objective">{strategy?.objective || strategy?.description || "-"}</Field>
               <Field label="Strategy status/version">
                 {strategy
@@ -410,18 +514,36 @@ export function LeadOverview({
                     ? `Version ${lead.strategyVersion}`
                     : "-"}
               </Field>
-              <Field label="Strategy mission">{strategy?.missionBlurb || "-"}</Field>
-              <Field label="Strategy research">{strategy?.researchNotes || "-"}</Field>
-              <Field label="Strategy SOP">
-                {strategy?.sopMarkdown ? (
-                  <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap font-sans text-sm">
-                    {strategy.sopMarkdown}
-                  </pre>
+              <Field label="Strategy mission">
+                {strategy?.missionBlurb ? (
+                  <MarkdownContent className="text-muted-foreground">
+                    {strategy.missionBlurb}
+                  </MarkdownContent>
                 ) : (
                   "-"
                 )}
               </Field>
-              <Field label="Buyer persona">{persona?.name || lead.personaId || "-"}</Field>
+              <Field label="Strategy research">
+                {strategy?.researchNotes ? (
+                  <MarkdownContent className="text-muted-foreground">
+                    {strategy.researchNotes}
+                  </MarkdownContent>
+                ) : (
+                  "-"
+                )}
+              </Field>
+              <Field label="Strategy SOP">
+                {strategy?.sopMarkdown ? (
+                  <div className="max-h-96 overflow-y-auto pr-2">
+                    <MarkdownContent>{strategy.sopMarkdown}</MarkdownContent>
+                  </div>
+                ) : (
+                  "-"
+                )}
+              </Field>
+              <Field label="Buyer persona">
+                {persona?.name || (lead.personaId ? "Buyer persona unavailable" : "-")}
+              </Field>
               <Field label="Persona description">{persona?.description || "-"}</Field>
               <Field label="Department/seniority">
                 {[persona?.department, persona?.seniority].filter(Boolean).join(" · ") || "-"}
@@ -438,38 +560,50 @@ export function LeadOverview({
               <Field label="Assignment">
                 {strategyAssignment
                   ? `${strategyAssignment.assignmentType} · ${strategyAssignment.allocationPct}% · ${strategyAssignment.status}`
-                  : lead.strategyAssignmentId || "-"}
+                  : lead.strategyAssignmentId
+                    ? "Assignment unavailable"
+                    : "-"}
               </Field>
               <Field label="Assignment guidance">{strategyAssignment?.notes || "-"}</Field>
             </dl>
-          </section>
+              </section>
 
-          <section className="space-y-2">
+              <section className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Outreach attribution
             </p>
             <dl className="divide-y rounded-md border px-3">
-              <Field label="Campaign">{campaign?.name || lead.campaignId || "-"}</Field>
-              <Field label="Outreach profile">{profile?.name || lead.profileId || "-"}</Field>
+              <Field label="Campaign">
+                {campaign?.name || (lead.campaignId ? "Campaign unavailable" : "-")}
+              </Field>
+              <Field label="Outreach profile">
+                {profile?.name || (lead.profileId ? "Profile unavailable" : "-")}
+              </Field>
               <Field label="Profile guidance">{profile?.notes || "-"}</Field>
               <Field label="Profile stack">{profile?.stackLabel || "-"}</Field>
-              <Field label="Case study/script">{lead.caseStudyId || "-"}</Field>
-              <Field label="Matched signal IDs"><Values values={lead.qualityMatchedSignalIds} /></Field>
+              <Field label="Case study/script">{lead.caseStudyId ? "Assigned" : "-"}</Field>
+              <Field label="Matched signals">
+                {lead.qualityMatchedSignalIds?.length
+                  ? `${lead.qualityMatchedSignalIds.length} matched`
+                  : "-"}
+              </Field>
             </dl>
-          </section>
+              </section>
 
-          {lead.extensions && Object.keys(lead.extensions).length > 0 ? (
-            <section className="space-y-2">
+              {lead.extensions && Object.keys(lead.extensions).length > 0 ? (
+                <section className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Channel-specific data
               </p>
               <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 text-xs whitespace-pre-wrap">
                 {JSON.stringify(lead.extensions, null, 2)}
               </pre>
-            </section>
-          ) : null}
-        </CardContent>
-      </Card>
+                </section>
+              ) : null}
+            </CollapsibleContent>
+          </CardContent>
+        </Card>
+      </Collapsible>
 
       {/* Qualification */}
       <Card>
@@ -593,19 +727,48 @@ export function LeadOverview({
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
-            <Field label="Record type">{lead.intakeKind || "sales_lead"}</Field>
-            <Field label="Lead ID">{lead.id}</Field>
-            <Field label="Account ID">{lead.accountId}</Field>
-            <Field label="Contact ID">{lead.contactId}</Field>
-            <Field label="Prospect source">{lead.prospectSourceId || "-"}</Field>
-            <Field label="Linked sales lead">{lead.linkedSalesLeadId || "-"}</Field>
-            <Field label="Channel tags"><Values values={lead.channelTags} /></Field>
-            <Field label="Prospect visibility">{lead.prospectVisibility || "-"}</Field>
-            <Field label="Prospect owner">{lead.prospectOwnerId || "-"}</Field>
-            <Field label="Created">{lead.createdAt}</Field>
-            <Field label="Updated">{lead.updatedAt}</Field>
-            <Field label="Quality scored">{lead.qualityScoredAt || "-"}</Field>
-            <Field label="Reply review">{lead.replyReviewStatus || "-"}</Field>
+            <Field label="Record type">
+              {INTAKE_KIND_META[lead.intakeKind ?? "sales_lead"].label}
+            </Field>
+            <Field label="Company">{account?.name || lead.companyName || "-"}</Field>
+            <Field label="Contact">{contact?.fullName || lead.contactName || "-"}</Field>
+            <Field label="Prospect source">
+              {sourceProspect
+                ? `${sourceProspect.contactName} · ${sourceProspect.companyName}`
+                : lead.prospectSourceId
+                  ? "Source record unavailable"
+                  : "-"}
+            </Field>
+            <Field label="Linked sales lead">
+              {linkedSalesLead
+                ? `${linkedSalesLead.contactName} · ${linkedSalesLead.companyName}`
+                : lead.linkedSalesLeadId
+                  ? "Linked lead unavailable"
+                  : "-"}
+            </Field>
+            <Field label="Channels">
+              <Values
+                values={lead.channelTags?.map(
+                  (channel) => CHANNELS[channel]?.label ?? humanizeValue(channel),
+                )}
+              />
+            </Field>
+            <Field label="Prospect visibility">
+              {humanizeValue(lead.prospectVisibility)}
+            </Field>
+            <Field label="Prospect owner">
+              {lead.prospectOwnerId ? (
+                <UserChip userId={lead.prospectOwnerId} size="sm" />
+              ) : (
+                "-"
+              )}
+            </Field>
+            <Field label="Created">{fmtDate(lead.createdAt, "MMM d, yyyy 'at' h:mm a")}</Field>
+            <Field label="Updated">{fmtDate(lead.updatedAt, "MMM d, yyyy 'at' h:mm a")}</Field>
+            <Field label="Quality scored">
+              {fmtDate(lead.qualityScoredAt, "MMM d, yyyy 'at' h:mm a")}
+            </Field>
+            <Field label="Reply review">{humanizeValue(lead.replyReviewStatus)}</Field>
           </dl>
         </CardContent>
       </Card>

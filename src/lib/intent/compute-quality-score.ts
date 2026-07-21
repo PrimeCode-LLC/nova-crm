@@ -8,7 +8,12 @@ import type {
   QualityMatchedSignal,
   QualityScoreResult,
 } from "@/lib/intent/types";
-import { corpusConcepts, firstMatchingKeyword } from "@/lib/intent/text-match";
+import {
+  corpusConcepts,
+  findKeywordEvidence,
+  firstMatchingKeyword,
+  type TextBlock,
+} from "@nova/scoring/text-match";
 
 const DEFAULT_SCAN_FIELDS: IntentScanFieldKey[] = [
   "triggerEvent",
@@ -203,6 +208,7 @@ export function computeQualityScore(
   playbook: IntentPlaybook,
   options?: {
     labelNames?: string[];
+    evidenceBlocks?: readonly TextBlock[];
   },
 ): QualityScoreResult {
   const labelNamesLower = (options?.labelNames ?? []).map((n) => n.toLowerCase());
@@ -247,6 +253,13 @@ export function computeQualityScore(
         points: Math.max(0, signal.points),
         reason,
         qualificationRole: roleOf(signal),
+        evidence:
+          reason.startsWith("Matched") && options?.evidenceBlocks?.length
+            ? findKeywordEvidence(
+                options.evidenceBlocks,
+                reason.slice("Matched “".length, -1),
+              )
+            : undefined,
       });
     }
   }

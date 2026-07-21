@@ -1,0 +1,134 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const {
+  getMemberServer,
+  findMembershipForUserServer,
+  getOrganizationServer,
+  userGet,
+} = vi.hoisted(() => ({
+  getMemberServer: vi.fn(),
+  findMembershipForUserServer: vi.fn(),
+  getOrganizationServer: vi.fn(),
+  userGet: vi.fn(),
+}));
+
+vi.mock("@/lib/platform/members-server", () => ({
+  getMemberServer,
+  findMembershipForUserServer,
+}));
+
+vi.mock("@/lib/platform/organizations-server", () => ({
+  getOrganizationServer,
+}));
+
+vi.mock("@/lib/firebase/admin", () => ({
+  getAdminDb: () => ({
+    collection: () => ({
+      doc: () => ({ get: userGet }),
+    }),
+  }),
+}));
+
+vi.mock("@/lib/firestore/collections", () => ({
+  COLLECTIONS: { users: "users" },
+}));
+
+import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
+
+describe("resolveLiveTenantForSession", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userGet.mockResolvedValue({ data: () => ({ status: "active" }) });
+    getOrganizationServer.mockResolvedValue({ id: "org-1", status: "active" });
+  });
+
+  it("uses the live active membership role", async () => {
+    getMemberServer.mockResolvedValue({
+      uid: "u-1",
+      organizationId: "org-1",
+      role: "member",
+      status: "active",
+    });
+    await expect(
+      resolveLiveTenantForSession({
+        uid: "u-1",
+        organizationId: "org-1",
+        orgRole: "owner",
+      }),
+    ).resolves.toMatchObject({
+      organizationId: "org-1",
+      orgRole: "member",
+      membershipPending: false,
+    });
+  });
+
+  it("fails closed when a stale claimed membership was disabled", async () => {
+    getMemberServer.mockResolvedValue({
+      uid: "u-1",
+      organizationId: "org-1",
+      role: "member",
+      status: "disabled",
+    });
+    await expect(
+      resolveLiveTenantForSession({
+        uid: "u-1",
+        organizationId: "org-1",
+        orgRole: "member",
+      }),
+    ).resolves.toEqual({
+      membershipPending: false,
+      accessDeniedReason: "inactive_membership",
+    });
+  });
+
+  it("blocks inactive Nova users", async () => {
+    userGet.mockResolvedValue({ data: () => ({ status: "inactive" }) });
+    await expect(
+      resolveLiveTenantForSession({
+        uid: "u-1",
+        organizationId: "org-1",
+        orgRole: "member",
+      }),
+    ).resolves.toEqual({
+      membershipPending: false,
+      accessDeniedReason: "inactive_user",
+    });
+  });
+
+  it("blocks suspended organizations", async () => {
+    getMemberServer.mockResolvedValue({
+      uid: "u-1",
+      organizationId: "org-1",
+      role: "member",
+      status: "active",
+    });
+    getOrganizationServer.mockResolvedValue({ id: "org-1", status: "suspended" });
+    await expect(
+      resolveLiveTenantForSession({
+        uid: "u-1",
+        organizationId: "org-1",
+        orgRole: "member",
+      }),
+    ).resolves.toEqual({
+      membershipPending: false,
+      accessDeniedReason: "suspended_organization",
+    });
+  });
+
+  it("preserves the pending approval state", async () => {
+    getMemberServer.mockResolvedValue(null);
+    findMembershipForUserServer.mockResolvedValue({
+      uid: "u-1",
+      organizationId: "org-1",
+      role: "member",
+      status: "pending",
+    });
+    await expect(
+      resolveLiveTenantForSession({ uid: "u-1" }),
+    ).resolves.toEqual({
+      organizationId: "org-1",
+      orgRole: undefined,
+      membershipPending: true,
+    });
+  });
+});

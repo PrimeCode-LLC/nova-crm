@@ -104,12 +104,14 @@ export function ProspectIntakeDialog({
   onOpenChange,
   account,
   contact,
+  section = "all",
   onSave,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   account: Account | undefined;
   contact: Contact | undefined;
+  section?: "all" | "company" | "contact";
   onSave: (args: {
     accountPatch: Partial<Account>;
     contactPatch: Partial<Contact>;
@@ -246,10 +248,22 @@ export function ProspectIntakeDialog({
       linkedin: linkedin.trim() || undefined,
     };
 
-    const leadPatch = leadSnapshotPatchFromAccountContact(accountPatch, contactPatch);
+    const selectedAccountPatch = section === "contact" ? {} : accountPatch;
+    const selectedContactPatch = section === "company" ? {} : contactPatch;
+    const leadPatch = leadSnapshotPatchFromAccountContact(selectedAccountPatch, selectedContactPatch);
 
-    onSave({ accountPatch, contactPatch, leadPatch });
-    toast.success("Prospect fields saved");
+    onSave({
+      accountPatch: selectedAccountPatch,
+      contactPatch: selectedContactPatch,
+      leadPatch,
+    });
+    toast.success(
+      section === "company"
+        ? "Company record updated"
+        : section === "contact"
+          ? "Contact record updated"
+          : "Prospect fields saved",
+    );
     onOpenChange(false);
   }
 
@@ -258,15 +272,24 @@ export function ProspectIntakeDialog({
       <DialogContent className="sm:max-w-3xl max-h-[min(90vh,800px)] overflow-y-auto" showCloseButton>
         <form onSubmit={handleSubmit}>
           <DialogHeader>
-            <DialogTitle>Prospect & company data</DialogTitle>
+            <DialogTitle>
+              {section === "company"
+                ? "Edit company record"
+                : section === "contact"
+                  ? "Edit contact record"
+                  : "Prospect & company data"}
+            </DialogTitle>
             <DialogDescription>
-              Research fields for intake and routing (integrations, campaigns, outbound). Lead-by and assignment stay
-              on the lead header.
+              {section === "company"
+                ? "Update the company details shown on this lead."
+                : section === "contact"
+                  ? "Update the contact details shown on this lead."
+                  : "Research fields for intake and routing (integrations, campaigns, outbound). Lead-by and assignment stay on the lead header."}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid gap-6 py-3">
-            <section className="space-y-3">
+            {(section === "all" || section === "company") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Business</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5 sm:col-span-2">
@@ -438,9 +461,9 @@ export function ProspectIntakeDialog({
                   <Input value={careersUrl} onChange={(e) => setCareersUrl(e.target.value)} placeholder="https://…" />
                 </div>
               </div>
-            </section>
+            </section>}
 
-            <section className="space-y-3">
+            {(section === "all" || section === "contact") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Contact</p>
               <div className="grid sm:grid-cols-2 gap-3">
                 <div className="grid gap-1.5">
@@ -526,7 +549,7 @@ export function ProspectIntakeDialog({
                   <Input value={linkedin} onChange={(e) => setLinkedin(e.target.value)} placeholder="https://linkedin.com/in/…" />
                 </div>
               </div>
-            </section>
+            </section>}
           </div>
 
           <DialogFooter>

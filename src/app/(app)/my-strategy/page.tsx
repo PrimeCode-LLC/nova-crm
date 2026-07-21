@@ -11,7 +11,6 @@ import {
   ChevronsDownUp,
   ChevronsUpDown,
   Copy,
-  ExternalLink,
   Loader2,
   Play,
   Search,
@@ -231,17 +230,20 @@ function useSectionState(strategyId: string) {
   const [openMap, setOpenMap] = React.useState<Record<string, boolean>>(SECTION_DEFAULTS);
 
   React.useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Record<string, boolean>;
-        setOpenMap({ ...SECTION_DEFAULTS, ...parsed });
-      } else {
+    const timer = window.setTimeout(() => {
+      try {
+        const raw = window.localStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw) as Record<string, boolean>;
+          setOpenMap({ ...SECTION_DEFAULTS, ...parsed });
+        } else {
+          setOpenMap(SECTION_DEFAULTS);
+        }
+      } catch {
         setOpenMap(SECTION_DEFAULTS);
       }
-    } catch {
-      setOpenMap(SECTION_DEFAULTS);
-    }
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [storageKey]);
 
   const persist = React.useCallback(
@@ -295,16 +297,6 @@ export default function MyStrategyPage() {
 
   const [activeAssignmentId, setActiveAssignmentId] = React.useState<string | null>(null);
 
-  React.useEffect(() => {
-    if (!myAssignments.length) {
-      setActiveAssignmentId(null);
-      return;
-    }
-    if (!activeAssignmentId || !myAssignments.some((a) => a.id === activeAssignmentId)) {
-      setActiveAssignmentId(myAssignments[0]!.id);
-    }
-  }, [myAssignments, activeAssignmentId]);
-
   const activeAssignment =
     myAssignments.find((a) => a.id === activeAssignmentId) ?? myAssignments[0];
   const activeStrategy = activeAssignment
@@ -317,8 +309,10 @@ export default function MyStrategyPage() {
         ws.leads,
         ws.currentUserId,
         ws.intentPlaybook.outreachThreshold,
+        undefined,
+        myAssignments.map((assignment) => assignment.id),
       ),
-    [ws.leads, ws.currentUserId, ws.intentPlaybook.outreachThreshold],
+    [ws.leads, ws.currentUserId, ws.intentPlaybook.outreachThreshold, myAssignments],
   );
 
   const todayTotal = React.useMemo(() => {
@@ -329,7 +323,6 @@ export default function MyStrategyPage() {
   }, [myAssignments, data.strategies]);
 
   const targets = targetsForStrategy(activeStrategy);
-  const targetRows = progressAgainstTargets(dayProgress, targets);
   const remaining = Math.max(0, (todayTotal || targets.completed) - dayProgress.completed);
   const pctComplete =
     (todayTotal || targets.completed) > 0
@@ -462,7 +455,6 @@ export default function MyStrategyPage() {
                 userId={ws.currentUserId}
                 outreachThreshold={ws.intentPlaybook.outreachThreshold}
                 playbookSignals={ws.intentPlaybook.signals}
-                targetRows={targetRows}
                 onStart={() => startProspecting(activeAssignment, activeStrategy)}
                 multiStrategy={myAssignments.length > 1}
               />
@@ -482,7 +474,6 @@ function StrategyWorkbench({
   userId,
   outreachThreshold,
   playbookSignals,
-  targetRows,
   onStart,
   multiStrategy,
 }: {
@@ -493,7 +484,6 @@ function StrategyWorkbench({
   userId: string;
   outreachThreshold: number;
   playbookSignals: { id: string; label: string; points: number; category: string }[];
-  targetRows: ReturnType<typeof progressAgainstTargets>;
   onStart: () => void;
   multiStrategy: boolean;
 }) {
@@ -505,8 +495,10 @@ function StrategyWorkbench({
     leads,
     userId,
     strategyId: strategy.id,
+    strategyAssignmentId: assignment.id,
     outreachThreshold,
   });
+  const targetRows = progressAgainstTargets(progress, targetsForStrategy(strategy));
 
   const personaIds = assignment.personaIdsOverride?.length
     ? assignment.personaIdsOverride
@@ -586,8 +578,9 @@ function StrategyWorkbench({
           </Button>
         </div>
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-sm">
-          <Metric label="This strategy · done" value={`${progress.completed}/${allocated}`} />
+        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-sm">
+          <Metric label="Researched" value={`${progress.researched}/${allocated}`} />
+          <Metric label="Completed" value={`${progress.completed}/${allocated}`} />
           <Metric label="Unique cos" value={String(progress.uniqueCompanies)} />
           <Metric label="Warm / Hot" value={`${progress.warm} / ${progress.hot}`} />
           <Metric label="Rejected" value={String(progress.rejected)} />
