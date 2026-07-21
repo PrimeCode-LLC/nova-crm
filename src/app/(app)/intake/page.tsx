@@ -4,8 +4,9 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import { Calendar, CheckSquare, Loader2, Play, RefreshCw, Search, Trash2 } from "lucide-react";
+import { Calendar, Loader2, Play, RefreshCw, Search, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { rankAssignedStrategies, type AssignedStrategyMatch } from "@nova/scoring";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,9 @@ import {
 import type { OrganizationIntakeFilterDefaults } from "@/lib/types";
 import { EMPTY_INTAKE_FILTER_DEFAULTS } from "@/lib/intake/intake-filter-defaults";
 import { useIntakeQualityScores } from "@/lib/intake/use-intake-quality-scores";
+import { intakeItemPlainText } from "@/lib/intent/score-intake-item";
+import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
+import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { userCanDeleteIntakePool, userHasAdminFeature } from "@/lib/admin-feature-access";
 import { canAction } from "@/lib/permissions/can";
@@ -65,7 +69,9 @@ import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { cn } from "@/lib/utils";
 
 const ALL = "__all__" as const;
-type QualityFilter = "all" | "has_signals" | "ready";
+const ANY_MY_STRATEGY = "__any_my_strategy__" as const;
+const NO_STRATEGY_MATCH = "__no_strategy_match__" as const;
+type QualityFilter = "all" | "no_signals" | "not_matching" | "has_signals" | "ready";
 type SortMode = "newest" | "best_match";
 /** Soft auto-refresh when returning to the tab (ms). */
 const VISIBILITY_REFRESH_MIN_MS = 90_000;
@@ -93,6 +99,7 @@ function passesPublishedDateRange(iso: string, fromYmd: string, toYmd: string): 
 
 export default function IntakePoolPage() {
   const ws = useWorkspace();
+  const prospecting = useProspectingStrategyData();
   const router = useRouter();
   const navAccess = useNavAccessContext();
   const viewer = ws.getUserById(ws.currentUserId);
@@ -122,6 +129,8 @@ export default function IntakePoolPage() {
   const [dateFrom, setDateFrom] = React.useState("");
   const [dateTo, setDateTo] = React.useState("");
   const [qualityFilter, setQualityFilter] = React.useState<QualityFilter>("all");
+  const [minimumScore, setMinimumScore] = React.useState("");
+  const [strategyFilter, setStrategyFilter] = React.useState<string>(ALL);
   const [sortMode, setSortMode] = React.useState<SortMode>("newest");
   const [teamDefaults, setTeamDefaults] = React.useState<OrganizationIntakeFilterDefaults>({
     ...EMPTY_INTAKE_FILTER_DEFAULTS,
@@ -132,7 +141,6 @@ export default function IntakePoolPage() {
     itemId: string;
     action: "assign" | "queue" | "dismiss";
   } | null>(null);
-  const [selectMode, setSelectMode] = React.useState(false);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = React.useState<null | "all" | "selected">(null);
   const [bulkBusy, setBulkBusy] = React.useState(false);
@@ -140,7 +148,9 @@ export default function IntakePoolPage() {
   const abortRef = React.useRef<AbortController | null>(null);
   const lastFetchAtRef = React.useRef(0);
   const itemsLenRef = React.useRef(0);
-  itemsLenRef.current = items.length;
+  React.useEffect(() => {
+    itemsLenRef.current = items.length;
+  }, [items.length]);
 
   const effectiveKeywords = React.useMemo(
     () =>
@@ -155,9 +165,49 @@ export default function IntakePoolPage() {
     items,
     ws.intentPlaybook,
   );
+  const myActiveAssignments = React.useMemo(
+    () => activeAssignmentsForUser(prospecting.assignments, ws.currentUserId),
+    [prospecting.assignments, ws.currentUserId],
+  );
+  const assignedStrategies = React.useMemo(() => {
+    const assignedIds = new Set(myActiveAssignments.map((assignment) => assignment.strategyId));
+    return prospecting.strategies
+      .filter((strategy) => assignedIds.has(strategy.id) && strategy.status === "published")
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }, [myActiveAssignments, prospecting.strategies]);
+  const strategyMatchesById = React.useMemo(() => {
+    const matches = new Map<string, AssignedStrategyMatch[]>();
+    if (myActiveAssignments.length === 0) return matches;
+
+    for (const item of items) {
+      const quality = qualityById.get(item.id);
+      if (!quality) continue;
+      const { title, body } = intakeItemPlainText(item);
+      matches.set(
+        item.id,
+        rankAssignedStrategies({
+          page: { title, text: body },
+          quality,
+          assignments: myActiveAssignments,
+          strategies: assignedStrategies,
+          personas: prospecting.personas,
+        }),
+      );
+    }
+    return matches;
+  }, [
+    assignedStrategies,
+    items,
+    myActiveAssignments,
+    prospecting.personas,
+    qualityById,
+  ]);
 
   const filteredItems = React.useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const parsedMinimumScore = Number(minimumScore);
+    const hasMinimumScore =
+      minimumScore.trim() !== "" && Number.isFinite(parsedMinimumScore);
     const filtered = items.filter((item) => {
       const haystack = rawItemSearchHaystack(item);
       if (q && !haystack.includes(q)) return false;
@@ -172,8 +222,41 @@ export default function IntakePoolPage() {
       }
       if (!passesPublishedDateRange(item.publishedAt, dateFrom, dateTo)) return false;
       const quality = qualityById.get(item.id);
+      const score = quality?.score ?? 0;
+      const strategyMatches = strategyMatchesById.get(item.id) ?? [];
+      const qualifyingStrategyMatches = strategyMatches.filter(
+        (match) =>
+          !match.disqualified &&
+          match.missingRequiredSignalIds.length === 0 &&
+          match.score >= ws.intentPlaybook.outreachThreshold,
+      );
+      if (qualityFilter === "no_signals" && (quality?.signalCount ?? 0) !== 0) return false;
+      if (qualityFilter === "not_matching" && score >= ws.intentPlaybook.outreachThreshold) {
+        return false;
+      }
       if (qualityFilter === "has_signals" && !(quality && quality.signalCount > 0)) return false;
       if (qualityFilter === "ready" && !(quality && quality.meetsThreshold)) return false;
+      if (hasMinimumScore && score < Math.max(0, Math.min(100, parsedMinimumScore))) return false;
+      if (
+        strategyFilter === ANY_MY_STRATEGY &&
+        qualifyingStrategyMatches.length === 0
+      ) {
+        return false;
+      }
+      if (
+        strategyFilter === NO_STRATEGY_MATCH &&
+        qualifyingStrategyMatches.length > 0
+      ) {
+        return false;
+      }
+      if (
+        strategyFilter !== ALL &&
+        strategyFilter !== ANY_MY_STRATEGY &&
+        strategyFilter !== NO_STRATEGY_MATCH &&
+        !qualifyingStrategyMatches.some((match) => match.strategyId === strategyFilter)
+      ) {
+        return false;
+      }
       return true;
     });
 
@@ -193,8 +276,12 @@ export default function IntakePoolPage() {
     dateFrom,
     dateTo,
     qualityFilter,
+    minimumScore,
+    strategyFilter,
     sortMode,
     qualityById,
+    strategyMatchesById,
+    ws.intentPlaybook.outreachThreshold,
   ]);
   const categoryOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
@@ -217,11 +304,15 @@ export default function IntakePoolPage() {
     dateTo.length > 0 ||
     keywordFiltersActive ||
     qualityFilter !== "all" ||
+    minimumScore.trim().length > 0 ||
+    strategyFilter !== ALL ||
     sortMode !== "newest";
 
   const selectedCount = selectedIds.size;
   const allFilteredSelected =
     filteredItems.length > 0 && filteredItems.every((item) => selectedIds.has(item.id));
+  const someFilteredSelected =
+    !allFilteredSelected && filteredItems.some((item) => selectedIds.has(item.id));
 
   React.useEffect(() => {
     if (ws.isDemo) return;
@@ -273,7 +364,14 @@ export default function IntakePoolPage() {
           if (!soft) setItems([]);
           return;
         }
-        setItems(data.items ?? []);
+        const nextItems = data.items ?? [];
+        setItems(nextItems);
+        setSelectedIds((previous) => {
+          if (previous.size === 0) return previous;
+          const availableIds = new Set(nextItems.map((item) => item.id));
+          const next = new Set(Array.from(previous).filter((id) => availableIds.has(id)));
+          return next.size === previous.size ? previous : next;
+        });
         lastFetchAtRef.current = Date.now();
       } catch (e) {
         if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
@@ -306,33 +404,6 @@ export default function IntakePoolPage() {
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);
   }, [load, ws.isDemo]);
-
-  React.useEffect(() => {
-    if (!canDeleteIntake && selectMode) {
-      setSelectMode(false);
-      setSelectedIds(new Set());
-      setDeleteConfirm(null);
-    }
-  }, [canDeleteIntake, selectMode]);
-
-  React.useEffect(() => {
-    setSelectedIds((prev) => {
-      if (prev.size === 0) return prev;
-      const available = new Set(items.map((i) => i.id));
-      let changed = false;
-      const next = new Set<string>();
-      for (const id of prev) {
-        if (available.has(id)) next.add(id);
-        else changed = true;
-      }
-      return changed ? next : prev;
-    });
-  }, [items]);
-
-  function exitSelectMode() {
-    setSelectMode(false);
-    setSelectedIds(new Set());
-  }
 
   async function runAllScrapers() {
     if (ws.isDemo || !canRunScrapers) return;
@@ -412,6 +483,12 @@ export default function IntakePoolPage() {
         });
       }
       setItems((prev) => prev.filter((i) => i.id !== itemId));
+      setSelectedIds((previous) => {
+        if (!previous.has(itemId)) return previous;
+        const next = new Set(previous);
+        next.delete(itemId);
+        return next;
+      });
       const viewHref = data.leadId ? `/leads/${data.leadId}?from=prospects` : null;
       if (assignToMe) {
         toast.success("Prospect created, you are the owner", {
@@ -460,6 +537,12 @@ export default function IntakePoolPage() {
         return;
       }
       setItems((prev) => prev.filter((i) => i.id !== itemId));
+      setSelectedIds((previous) => {
+        if (!previous.has(itemId)) return previous;
+        const next = new Set(previous);
+        next.delete(itemId);
+        return next;
+      });
       toast.success("Dismissed");
     } catch {
       toast.error("Network error");
@@ -500,7 +583,7 @@ export default function IntakePoolPage() {
       const count = data.count ?? removed.size;
       toast.success(count === 1 ? "Deleted 1 post" : `Deleted ${count} posts`);
       setDeleteConfirm(null);
-      exitSelectMode();
+      setSelectedIds(new Set());
     } catch {
       toast.error("Network error");
     } finally {
@@ -579,47 +662,33 @@ export default function IntakePoolPage() {
               {refreshing ? "Updating…" : "Refresh"}
             </Button>
             {!ws.isDemo && canDeleteIntake ? (
-              selectMode ? (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  type="button"
-                  onClick={exitSelectMode}
-                  disabled={bulkBusy}
-                >
-                  Cancel select
-                </Button>
-              ) : (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    render={
-                      <Button variant="outline" size="sm" type="button" disabled={!canDelete}>
-                        <Trash2 className="h-3.5 w-3.5" /> Delete
-                      </Button>
-                    }
-                  />
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem
-                      variant="destructive"
-                      disabled={!canDelete}
-                      onSelect={() => setDeleteConfirm("all")}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                      Delete all
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      disabled={!canDelete}
-                      onSelect={() => {
-                        setSelectMode(true);
-                        setSelectedIds(new Set());
-                      }}
-                    >
-                      <CheckSquare className="h-3.5 w-3.5" />
-                      Select for delete
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" size="sm" type="button" disabled={!canDelete}>
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={selectedCount === 0 || bulkBusy}
+                    onSelect={() => setDeleteConfirm("selected")}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete selected
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    variant="destructive"
+                    disabled={!canDelete}
+                    onSelect={() => setDeleteConfirm("all")}
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Delete all
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : null}
             <Button
               variant="outline"
@@ -720,6 +789,10 @@ export default function IntakePoolPage() {
                     <SelectValue placeholder="Match quality">
                       {qualityFilter === "all"
                         ? "All matches"
+                        : qualityFilter === "no_signals"
+                          ? "No signals"
+                          : qualityFilter === "not_matching"
+                            ? "Not matching"
                         : qualityFilter === "has_signals"
                           ? "Has signals"
                           : "Ready (≥ threshold)"}
@@ -727,8 +800,52 @@ export default function IntakePoolPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All matches</SelectItem>
+                    <SelectItem value="no_signals">No signals</SelectItem>
+                    <SelectItem value="not_matching">Not matching</SelectItem>
                     <SelectItem value="has_signals">Has signals</SelectItem>
                     <SelectItem value="ready">Ready (≥ threshold)</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-muted-foreground">Minimum score</Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    max={100}
+                    inputMode="numeric"
+                    value={minimumScore}
+                    onChange={(event) => setMinimumScore(event.target.value)}
+                    placeholder="0–100"
+                    className="h-9 w-[110px]"
+                    aria-label="Minimum match score"
+                  />
+                </div>
+                <Select
+                  value={strategyFilter}
+                  onValueChange={(value) => value && setStrategyFilter(value)}
+                  disabled={prospecting.loading}
+                >
+                  <SelectTrigger className="w-[210px]">
+                    <SelectValue placeholder="Strategy match">
+                      {strategyFilter === ALL
+                        ? "All strategies"
+                        : strategyFilter === ANY_MY_STRATEGY
+                          ? "Matches my strategies"
+                          : strategyFilter === NO_STRATEGY_MATCH
+                            ? "No strategy match"
+                            : assignedStrategies.find((strategy) => strategy.id === strategyFilter)
+                                ?.name ?? "Assigned strategy"}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All strategies</SelectItem>
+                    <SelectItem value={ANY_MY_STRATEGY}>Matches my strategies</SelectItem>
+                    <SelectItem value={NO_STRATEGY_MATCH}>No strategy match</SelectItem>
+                    {assignedStrategies.map((strategy) => (
+                      <SelectItem key={strategy.id} value={strategy.id}>
+                        {strategy.name}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <Select
@@ -784,6 +901,8 @@ export default function IntakePoolPage() {
                       setPersonalIncludeKeywords([]);
                       setPersonalExcludeKeywords([]);
                       setQualityFilter("all");
+                      setMinimumScore("");
+                      setStrategyFilter(ALL);
                       setSortMode("newest");
                     }}
                   >
@@ -807,17 +926,18 @@ export default function IntakePoolPage() {
               </div>
             </div>
 
-            {selectMode && filteredItems.length > 0 ? (
+            {canDeleteIntake && filteredItems.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
                 <Checkbox
                   checked={allFilteredSelected}
+                  indeterminate={someFilteredSelected}
                   onCheckedChange={() => toggleSelectAllFiltered()}
                   aria-label="Select all visible posts"
                 />
                 <span className="font-medium">
                   {selectedCount > 0
                     ? `${selectedCount} selected`
-                    : "Select posts to delete"}
+                    : "Select posts"}
                 </span>
                 <div className="ml-auto flex flex-wrap items-center gap-2">
                   <Button
@@ -884,6 +1004,12 @@ export default function IntakePoolPage() {
                     item.content.replace(/<[^>]+>/g, " ").slice(0, 280);
                   const isSelected = selectedIds.has(item.id);
                   const quality = qualityById.get(item.id);
+                  const matchingStrategies = (strategyMatchesById.get(item.id) ?? []).filter(
+                    (match) =>
+                      !match.disqualified &&
+                      match.missingRequiredSignalIds.length === 0 &&
+                      match.score >= ws.intentPlaybook.outreachThreshold,
+                  );
                   const topSignalLabels =
                     quality?.matchedSignals
                       .filter((s) => s.category !== "engagement")
@@ -893,13 +1019,13 @@ export default function IntakePoolPage() {
                     <li key={item.id}>
                       <Card
                         className={cn(
-                          selectMode && isSelected && "ring-1 ring-primary/40",
+                          isSelected && "ring-1 ring-primary/40",
                         )}
                       >
                         <CardHeader className="pb-2">
                           <div className="flex flex-wrap items-start justify-between gap-2">
                             <div className="flex min-w-0 flex-1 items-start gap-3">
-                              {selectMode ? (
+                              {canDeleteIntake ? (
                                 <Checkbox
                                   className="mt-1"
                                   checked={isSelected}
@@ -937,6 +1063,15 @@ export default function IntakePoolPage() {
                                       {quality.primaryOpportunity.label}
                                     </Badge>
                                   ) : null}
+                                  {matchingStrategies.slice(0, 2).map((match) => (
+                                    <Badge
+                                      key={match.strategyId}
+                                      variant="outline"
+                                      className="font-normal text-xs"
+                                    >
+                                      {match.strategyName} · {match.score}
+                                    </Badge>
+                                  ))}
                                   {topSignalLabels.map((label) => (
                                     <Badge
                                       key={label}
@@ -956,16 +1091,14 @@ export default function IntakePoolPage() {
                         </CardHeader>
                         <CardContent className="space-y-3">
                           <p className="text-sm text-muted-foreground line-clamp-3">{snippet}</p>
-                          {!selectMode ? (
-                            <IntakeItemActions
-                              item={item}
-                              busyAction={itemBusy}
-                              canDismiss={canDeleteIntake}
-                              onAssignToMe={() => promote(item.id, true)}
-                              onOpenQueue={() => promote(item.id, false)}
-                              onDismissConfirmed={() => dismiss(item.id)}
-                            />
-                          ) : null}
+                          <IntakeItemActions
+                            item={item}
+                            busyAction={itemBusy}
+                            canDismiss={canDeleteIntake}
+                            onAssignToMe={() => promote(item.id, true)}
+                            onOpenQueue={() => promote(item.id, false)}
+                            onDismissConfirmed={() => dismiss(item.id)}
+                          />
                         </CardContent>
                       </Card>
                     </li>
