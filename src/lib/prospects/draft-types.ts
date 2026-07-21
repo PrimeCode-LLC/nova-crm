@@ -76,6 +76,8 @@ export type ProspectDraft = {
   origin: ProspectDraftOrigin;
   /** Stable launcher identifier, such as `prospects_page` or `fit_check`. */
   sourceContext?: string;
+  /** Optional source entity id, such as the Fit Check scan that started the draft. */
+  sourceReference?: string;
   /** Route the launcher expected to return to after saving. */
   destination?: string;
   fields: Partial<Record<ProspectDraftFieldKey, ProspectDraftField>>;

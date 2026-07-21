@@ -99,10 +99,19 @@ async function saveValues(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ values, form, revision }),
   });
-  const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
+  const body = (await response.json()) as {
+    draft?: ProspectDraft;
+    error?: string;
+    code?: string;
+  };
+  if (response.status === 409 || body.code === "revision_conflict") {
+    throw new DraftConflictError(body.error ?? "This draft changed elsewhere.");
+  }
   if (!response.ok || !body.draft) throw new Error(body.error ?? "Could not save draft.");
   return body.draft;
 }
+
+class DraftConflictError extends Error {}
 
 function DraftAnnotation({
   draft,
@@ -152,6 +161,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
   const channelOptions = useChannelOptions();
   const prospecting = useProspectingStrategyData();
   const [form, setForm] = React.useState(() => prospectFormFromDraft(draft));
+  const [currentDraft, setCurrentDraft] = React.useState(draft);
   const [research, setResearch] = React.useState({
     companyDomain: draft.fields.companyDomain?.value ?? "",
     businessFocus: draft.fields.businessFocus?.value ?? "",
@@ -180,7 +190,9 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
   const savePromiseRef = React.useRef<Promise<ProspectDraft> | null>(null);
   const [revision, setRevision] = React.useState(draft.revision);
   const [lastSavedAt, setLastSavedAt] = React.useState(draft.lastSavedAt);
-  const [saveState, setSaveState] = React.useState<"saved" | "unsaved" | "saving" | "error">(
+  const [saveState, setSaveState] = React.useState<
+    "saved" | "unsaved" | "saving" | "error" | "conflict"
+  >(
     "saved",
   );
 
@@ -214,6 +226,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
     ).then((updated) => {
       latestRevisionRef.current = updated.revision;
       latestDraftRef.current = updated;
+      setCurrentDraft(updated);
       setRevision(updated.revision);
       setLastSavedAt(updated.lastSavedAt);
       const remaining = reviewedKeysAfterDraftSave(
@@ -252,7 +265,9 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
   React.useEffect(() => {
     if (reviewedKeys.size === 0 || busy) return;
     const timer = window.setTimeout(() => {
-      void persist(false).catch(() => setSaveState("error"));
+      void persist(false).catch((error) =>
+        setSaveState(error instanceof DraftConflictError ? "conflict" : "error"),
+      );
     }, 1_200);
     return () => window.clearTimeout(timer);
   }, [busy, persist, reviewedKeys.size]);
@@ -262,8 +277,42 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
     try {
       await persist();
     } catch (error) {
-      setSaveState("error");
+      setSaveState(error instanceof DraftConflictError ? "conflict" : "error");
       toast.error(error instanceof Error ? error.message : "Could not save draft.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function reloadLatest() {
+    setBusy("save");
+    try {
+      const updated = await loadDraft(draft.id);
+      const updatedForm = prospectFormFromDraft(updated);
+      latestRevisionRef.current = updated.revision;
+      latestDraftRef.current = updated;
+      formRef.current = updatedForm;
+      reviewedKeysRef.current = new Set();
+      setCurrentDraft(updated);
+      setForm(updatedForm);
+      setResearch({
+        companyDomain: updated.fields.companyDomain?.value ?? "",
+        businessFocus: updated.fields.businessFocus?.value ?? "",
+        hiringSignals: updated.fields.hiringSignals?.value ?? "",
+        recentNews: updated.fields.recentNews?.value ?? "",
+      });
+      setValues(
+        Object.fromEntries(
+          PROSPECT_DRAFT_FIELD_KEYS.map((key) => [key, updated.fields[key]?.value ?? ""]),
+        ),
+      );
+      setReviewedKeys(new Set());
+      setRevision(updated.revision);
+      setLastSavedAt(updated.lastSavedAt);
+      setSaveState("saved");
+      toast.success("Latest draft loaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not reload draft.");
     } finally {
       setBusy(null);
     }
@@ -307,7 +356,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
         : "Draft completed and prospect created",
     );
     void queryClient.invalidateQueries({ queryKey: ["prospect-drafts"] });
-    router.push(`/leads/${body.leadId}`);
+    router.push(`/leads/${body.leadId}?from=prospects`);
   }
 
   async function handleDiscard() {
@@ -347,14 +396,18 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
         <CardContent className="space-y-3 pt-5">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
-              <p className="font-semibold">Working draft · {draft.completionPercent}% complete</p>
+              <p className="font-semibold">
+                Working draft · {currentDraft.completionPercent}% complete
+              </p>
               <p className="text-sm text-muted-foreground">
                 AI suggestions remain proposed until you review and save them.
               </p>
               <p
                 className={cn(
                   "mt-1 text-xs",
-                  saveState === "error" ? "text-destructive" : "text-muted-foreground",
+                  saveState === "error" || saveState === "conflict"
+                    ? "text-destructive"
+                    : "text-muted-foreground",
                 )}
                 role="status"
               >
@@ -362,6 +415,8 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
                   ? "Autosaving…"
                   : saveState === "unsaved"
                     ? "Unsaved changes"
+                    : saveState === "conflict"
+                      ? "Revision conflict — reload the latest version"
                     : saveState === "error"
                       ? "Autosave failed — use Save draft to retry"
                       : `Saved ${new Date(lastSavedAt).toLocaleTimeString([], {
@@ -371,17 +426,19 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
               </p>
             </div>
             <div className="flex gap-2">
-              {draft.strategy ? <Badge variant="outline">{draft.strategy.strategyName}</Badge> : null}
-              {typeof draft.qualityScore === "number" ? (
-                <Badge variant="secondary">Intent {draft.qualityScore}/100</Badge>
+              {currentDraft.strategy ? (
+                <Badge variant="outline">{currentDraft.strategy.strategyName}</Badge>
+              ) : null}
+              {typeof currentDraft.qualityScore === "number" ? (
+                <Badge variant="secondary">Intent {currentDraft.qualityScore}/100</Badge>
               ) : null}
             </div>
           </div>
-          <Progress value={draft.completionPercent} className="h-2" />
-          {draft.missingRequiredFields.length ? (
+          <Progress value={currentDraft.completionPercent} className="h-2" />
+          {currentDraft.missingRequiredFields.length ? (
             <p className="flex items-center gap-2 text-sm text-amber-700 dark:text-amber-400">
               <AlertTriangle className="h-4 w-4" />
-              Required: {draft.missingRequiredFields.map((key) => LABELS[key]).join(", ")}
+              Required: {currentDraft.missingRequiredFields.map((key) => LABELS[key]).join(", ")}
             </p>
           ) : (
             <p className="flex items-center gap-2 text-sm text-emerald-700 dark:text-emerald-400">
@@ -429,7 +486,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
             outreachThreshold={intentPlaybook.outreachThreshold}
             existingContactsForCompany={existingContacts}
             maxContactsPerCompany={maxContacts}
-            renderAnnotation={(key) => <DraftAnnotation draft={draft} fieldKey={key} />}
+            renderAnnotation={(key) => <DraftAnnotation draft={currentDraft} fieldKey={key} />}
           />
         </CardContent>
       </Card>
@@ -446,7 +503,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
               <div key={key} className={cn("space-y-2", isLong && "md:col-span-2")}>
                 <div className="flex items-center justify-between gap-2">
                   <label className="text-sm font-medium">{LABELS[fieldKey]}</label>
-                  <DraftAnnotation draft={draft} fieldKey={fieldKey} />
+                  <DraftAnnotation draft={currentDraft} fieldKey={fieldKey} />
                 </div>
                 {isLong ? (
                   <Textarea
@@ -476,9 +533,9 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
                     }}
                   />
                 )}
-                {draft.fields[fieldKey]?.evidence[0] ? (
+                {currentDraft.fields[fieldKey]?.evidence[0] ? (
                   <blockquote className="border-l-2 pl-3 text-xs text-muted-foreground">
-                    “{draft.fields[fieldKey]!.evidence[0]!.quote}”
+                    “{currentDraft.fields[fieldKey]!.evidence[0]!.quote}”
                   </blockquote>
                 ) : null}
               </div>
@@ -494,7 +551,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           {PROSPECT_DRAFT_FIELD_KEYS.map((key) => {
-            const field = draft.fields[key];
+            const field = currentDraft.fields[key];
             const controlProps = {
               value: values[key] ?? "",
               onChange: (
@@ -551,10 +608,10 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
 
       <Card>
         <CardHeader>
-          <CardTitle>Captured sources ({draft.sourceCount})</CardTitle>
+          <CardTitle>Captured sources ({currentDraft.sourceCount})</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2">
-          {draft.sources.map((source) => (
+          {currentDraft.sources.map((source) => (
             <a
               key={source.id}
               href={source.url}
@@ -578,15 +635,23 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           <Trash2 className="h-4 w-4" /> Discard draft
         </Button>
         <div className="flex gap-2">
+          {saveState === "conflict" ? (
+            <Button variant="outline" onClick={() => void reloadLatest()} disabled={Boolean(busy)}>
+              Reload latest
+            </Button>
+          ) : null}
           <Button
             variant="outline"
             onClick={handleSave}
-            disabled={Boolean(busy) || saveState === "saving"}
+            disabled={Boolean(busy) || saveState === "saving" || saveState === "conflict"}
           >
             <Save className="h-4 w-4" />{" "}
             {busy === "save" || saveState === "saving" ? "Saving…" : "Save draft"}
           </Button>
-          <Button onClick={handleComplete} disabled={Boolean(busy) || saveState === "saving"}>
+          <Button
+            onClick={handleComplete}
+            disabled={Boolean(busy) || saveState === "saving" || saveState === "conflict"}
+          >
             <Check className="h-4 w-4" />{" "}
             {busy === "complete" ? "Completing…" : "Complete prospect"}
           </Button>

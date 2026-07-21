@@ -21,6 +21,23 @@ export function emptyNewProspectFormDraft(): NewProspectFormDraft {
   return emptyProspectForm();
 }
 
+/** Keep offline recovery isolated between launcher contexts before a server id exists. */
+export function pendingProspectDraftId(launch?: {
+  source?: string;
+  destination?: string;
+  prefill?: unknown;
+}): string {
+  if (!launch?.source) return PENDING_PROSPECT_DRAFT_ID;
+  const input = JSON.stringify([launch.destination ?? "", launch.prefill ?? null]);
+  let hash = 2_166_136_261;
+  for (let index = 0; index < input.length; index += 1) {
+    hash ^= input.charCodeAt(index);
+    hash = Math.imul(hash, 16_777_619);
+  }
+  const source = launch.source.replace(/[^a-z0-9_-]/gi, "_");
+  return `pending-${source}-${(hash >>> 0).toString(36)}`;
+}
+
 /** Legacy shared session key retained solely for one-time migration. */
 export function legacyDraftStorageKey(userId: string | undefined): string | null {
   if (!userId?.trim()) return null;

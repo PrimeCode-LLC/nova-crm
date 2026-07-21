@@ -78,7 +78,8 @@ export function FitCheckClient() {
   }, []);
 
   React.useEffect(() => {
-    void loadScans();
+    const handle = window.setTimeout(() => void loadScans(), 0);
+    return () => window.clearTimeout(handle);
   }, [loadScans]);
 
   React.useEffect(() => {
@@ -99,14 +100,17 @@ export function FitCheckClient() {
   React.useEffect(() => {
     if (availableSourceTypes.length === 0) return;
     if (!availableSourceTypes.includes(sourceType)) {
-      setSourceType(availableSourceTypes[0]!);
+      const handle = window.setTimeout(() => setSourceType(availableSourceTypes[0]!), 0);
+      return () => window.clearTimeout(handle);
     }
   }, [availableSourceTypes, sourceType]);
 
   React.useEffect(() => {
     let cancelled = false;
-    setLoadingProfiles(true);
     void (async () => {
+      await Promise.resolve();
+      if (cancelled) return;
+      setLoadingProfiles(true);
       try {
         const res = await fetch(
           `/api/ai/fit-check/profile-options?sourceType=${encodeURIComponent(sourceType)}`,
@@ -133,7 +137,7 @@ export function FitCheckClient() {
     return () => {
       cancelled = true;
     };
-  }, [sourceType]);
+  }, [profileId, sourceType]);
 
   React.useEffect(() => {
     if (!profileId || typeof window === "undefined") return;
@@ -252,6 +256,7 @@ export function FitCheckClient() {
     openNewProspectForm({
       source: "fit_check",
       destination: "/fit-check",
+      sourceReference: activeScan?.id,
       prefill: {
         leadNotes: notes,
         channel: sourceTypeToChannel(sourceType),

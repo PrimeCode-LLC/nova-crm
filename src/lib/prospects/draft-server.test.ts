@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import crypto from "node:crypto";
 import { Timestamp } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
@@ -7,10 +8,13 @@ import {
   ProspectDraftRevisionError,
   addSourceToWorkingDraft,
   completeProspectDraft,
+  createManualProspectDraft,
   createAndSelectWorkingDraft,
   decodeProspectDraftCursor,
   encodeProspectDraftCursor,
+  getProspectDraft,
   listProspectDraftPage,
+  updateProspectDraftFields,
 } from "./draft-server";
 
 vi.mock("@/lib/firebase/admin", () => ({ getAdminDb: vi.fn() }));
@@ -222,7 +226,73 @@ describe("ProspectDraftRevisionError", () => {
   });
 });
 
+describe("legacy prospect draft hydration", () => {
+  it("infers extension origin from embedded sources when sourceCount is absent", async () => {
+    const db = new FakeFirestore();
+    db.seed(COLLECTIONS.prospectDrafts, "legacy-source-draft", {
+      organizationId: "org-1",
+      userId: "user-1",
+      status: "active",
+      fields: {},
+      sources: [
+        {
+          id: "source-1",
+          url: "https://example.com",
+          title: "Example",
+          domain: "example.com",
+          capturedAt: "2026-07-21T00:00:00.000Z",
+        },
+      ],
+      createdAt: "2026-07-21T00:00:00.000Z",
+      updatedAt: "2026-07-21T00:00:00.000Z",
+    });
+    vi.mocked(getAdminDb).mockReturnValue(db as never);
+
+    await expect(
+      getProspectDraft({
+        organizationId: "org-1",
+        userId: "user-1",
+        draftId: "legacy-source-draft",
+      }),
+    ).resolves.toMatchObject({ origin: "intent_radar", sourceCount: 1 });
+  });
+});
+
 describe("prospect draft transactions", () => {
+  it("allows multiple active manual drafts without acquiring an extension pointer", async () => {
+    const db = new FakeFirestore();
+    vi.mocked(getAdminDb).mockReturnValue(db as never);
+
+    const [first, second] = await Promise.all([
+      createManualProspectDraft({ organizationId: "org-1", userId: "user-1" }),
+      createManualProspectDraft({ organizationId: "org-1", userId: "user-1" }),
+    ]);
+
+    expect(first.id).not.toBe(second.id);
+    expect(
+      [...db.rows.keys()].filter((key) => key.startsWith(`${COLLECTIONS.prospectDrafts}/`)),
+    ).toHaveLength(2);
+    expect(
+      [...db.rows.keys()].filter((key) => key.startsWith(`${COLLECTIONS.prospectDraftLocks}/`)),
+    ).toHaveLength(0);
+  });
+
+  it("rejects stale revisions during updates", async () => {
+    const db = new FakeFirestore();
+    seedCompletableDraft(db, "stale-draft", "stale@example.com");
+    vi.mocked(getAdminDb).mockReturnValue(db as never);
+
+    await expect(
+      updateProspectDraftFields({
+        organizationId: "org-1",
+        userId: "user-1",
+        draftId: "stale-draft",
+        values: { companyName: "Changed" },
+        expectedRevision: 3,
+      }),
+    ).rejects.toMatchObject({ code: "revision_conflict", currentRevision: 0 });
+  });
+
   it("creates and selects idempotently in one transaction", async () => {
     const db = new FakeFirestore();
     vi.mocked(getAdminDb).mockReturnValue(db as never);
@@ -308,6 +378,33 @@ describe("prospect draft transactions", () => {
     expect(
       [...db.rows.keys()].filter((key) => key.startsWith(`${COLLECTIONS.contacts}/`)),
     ).toHaveLength(1);
+  });
+
+  it("returns the same lead on completion retry and conditionally clears its pointer", async () => {
+    const db = new FakeFirestore();
+    const pointerId = crypto.createHash("sha256").update("org-1:user-1").digest("hex");
+    db.seed(COLLECTIONS.organizations, "org-1", {});
+    seedCompletableDraft(db, "retry-draft", "retry@example.com");
+    db.seed(COLLECTIONS.prospectDraftLocks, pointerId, {
+      organizationId: "org-1",
+      userId: "user-1",
+      draftId: "retry-draft",
+    });
+    vi.mocked(getAdminDb).mockReturnValue(db as never);
+
+    const first = await completeProspectDraft({
+      organizationId: "org-1",
+      userId: "user-1",
+      draftId: "retry-draft",
+    });
+    const retry = await completeProspectDraft({
+      organizationId: "org-1",
+      userId: "user-1",
+      draftId: "retry-draft",
+    });
+
+    expect(retry).toEqual(first);
+    expect(db.rows.has(`${COLLECTIONS.prospectDraftLocks}/${pointerId}`)).toBe(false);
   });
 
   it("serializes per-company contact limits across concurrent completions", async () => {

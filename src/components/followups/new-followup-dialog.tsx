@@ -200,10 +200,12 @@ export function NewFollowupDialog({
     const prevLead = leads.find((l) => l.id === leadId);
     const prevDefault = defaultFollowupTitle(prevLead);
     const titleStillSynced = title.trim() === "" || title === prevDefault;
-    setLeadId(next?.id ?? "");
-    if (next && titleStillSynced) {
-      setTitle(defaultFollowupTitle(next));
-    }
+    React.startTransition(() => {
+      setLeadId(next?.id ?? "");
+      if (next && titleStillSynced) {
+        setTitle(defaultFollowupTitle(next));
+      }
+    });
   }, [open, fixedLeadId, isEdit, filteredLeads, leadId, leads, title]);
 
   const selectedLead =

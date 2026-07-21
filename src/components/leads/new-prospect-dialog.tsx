@@ -99,6 +99,7 @@ import {
   mergePrefillIntoDraft,
   NEW_PROSPECT_DRAFT_VERSION,
   PENDING_PROSPECT_DRAFT_ID,
+  pendingProspectDraftId,
   saveNewProspectDraft,
   serializeNewProspectDraft,
   type NewProspectFormDraft,
@@ -259,6 +260,7 @@ export function NewProspectDialog({
   launch?: NewProspectLaunch;
 }) {
   const initialPrefill = launch?.prefill;
+  const pendingRecoveryId = React.useMemo(() => pendingProspectDraftId(launch), [launch]);
   const router = useRouter();
   const {
     currentUserId,
@@ -383,7 +385,7 @@ export function NewProspectDialog({
   const [submitting, setSubmitting] = React.useState(false);
   const [draftId, setDraftId] = React.useState(launch?.draftId);
   const [draftSaveState, setDraftSaveState] = React.useState<
-    "idle" | "saving" | "saved" | "offline" | "conflict"
+    "idle" | "saving" | "saved" | "offline" | "conflict" | "error"
   >("idle");
   const [lastSavedAt, setLastSavedAt] = React.useState<string>();
   const [draftInitialized, setDraftInitialized] = React.useState(false);
@@ -578,7 +580,7 @@ export function NewProspectDialog({
       const form = buildDraft();
       saveNewProspectDraft(
         effectiveUid,
-        draftIdRef.current ?? PENDING_PROSPECT_DRAFT_ID,
+        draftIdRef.current ?? pendingRecoveryId,
         form,
         draftRevisionRef.current,
       );
@@ -602,6 +604,7 @@ export function NewProspectDialog({
                   form,
                   origin: "manual",
                   sourceContext: launch?.source,
+                  sourceReference: launch?.sourceReference,
                   destination: launch?.destination,
                   idempotencyKey: createIdempotencyKeyRef.current,
                 },
@@ -632,7 +635,7 @@ export function NewProspectDialog({
               ? "offline"
               : error instanceof TypeError
                 ? "offline"
-                : "idle",
+                : "error",
         );
         throw error;
       }
@@ -642,13 +645,14 @@ export function NewProspectDialog({
       () => undefined,
     );
     return operation;
-  }, [acceptServerDraft, buildDraft, effectiveUid, launch]);
+  }, [acceptServerDraft, buildDraft, effectiveUid, launch, pendingRecoveryId]);
 
   const finalizeClose = React.useCallback(
     (options?: { discard?: boolean }) => {
       if (options?.discard) {
         resetForm();
         if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
+        clearNewProspectDraft(effectiveUid, pendingRecoveryId);
         clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
         clearNewProspectDraft(effectiveUid);
         syncBaseline();
@@ -658,7 +662,7 @@ export function NewProspectDialog({
       setDiscardOpen(false);
       onOpenChange(false);
     },
-    [effectiveUid, isDirty, onOpenChange, resetForm, syncBaseline],
+    [effectiveUid, isDirty, onOpenChange, pendingRecoveryId, resetForm, syncBaseline],
   );
 
   const requestClose = React.useCallback(() => {
@@ -754,7 +758,11 @@ export function NewProspectDialog({
         return;
       }
 
-      const pending = loadNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
+      const pending =
+        loadNewProspectDraft(effectiveUid, pendingRecoveryId) ??
+        (!initialPrefill
+          ? loadNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID)
+          : null);
       const legacy = loadNewProspectDraft(effectiveUid);
       const recovered = pending?.form ?? legacy?.form;
       const next = recovered && !isNewProspectFormDraftEmpty(recovered)
@@ -779,13 +787,14 @@ export function NewProspectDialog({
     applyDraft,
     initialPrefill,
     launch?.draftId,
+    pendingRecoveryId,
   ]);
 
   React.useEffect(() => {
     if (!open || !draftInitialized || !isDirty || submitting) return;
     saveNewProspectDraft(
       effectiveUid,
-      draftIdRef.current ?? PENDING_PROSPECT_DRAFT_ID,
+      draftIdRef.current ?? pendingRecoveryId,
       buildDraft(),
       draftRevisionRef.current,
     );
@@ -799,6 +808,7 @@ export function NewProspectDialog({
     isDirty,
     submitting,
     effectiveUid,
+    pendingRecoveryId,
     buildDraft,
     saveServerDraft,
   ]);
@@ -984,6 +994,7 @@ export function NewProspectDialog({
           throw new Error(body.error ?? "Could not create prospect.");
         }
         clearNewProspectDraft(effectiveUid, savedDraft.id);
+        clearNewProspectDraft(effectiveUid, pendingRecoveryId);
         clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
         clearNewProspectDraft(effectiveUid);
         toast.success(
@@ -993,7 +1004,7 @@ export function NewProspectDialog({
         );
         resetForm();
         onOpenChange(false);
-        router.push(`/leads/${body.leadId}`);
+        router.push(`/leads/${body.leadId}?from=prospects`);
       } catch (error) {
         toast.error("Could not save prospect", {
           description: error instanceof Error ? error.message : String(error),
@@ -1173,9 +1184,11 @@ export function NewProspectDialog({
       );
       resetForm();
       if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
+      clearNewProspectDraft(effectiveUid, pendingRecoveryId);
       clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
       clearNewProspectDraft(effectiveUid);
       onOpenChange(false);
+      router.push(`/leads/${leadId}?from=prospects`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       toast.error("Could not save prospect", { description: msg });
@@ -1194,9 +1207,35 @@ export function NewProspectDialog({
     try {
       await saveServerDraft();
       toast.success(closeAfterSave ? "Draft saved" : "Draft saved for later");
-      if (closeAfterSave) onOpenChange(false);
+      if (closeAfterSave) {
+        onOpenChange(false);
+        if (launch?.destination) router.push(launch.destination);
+      }
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Could not save draft.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function reloadLatestDraft() {
+    const currentId = draftIdRef.current;
+    if (!currentId) return;
+    setSubmitting(true);
+    try {
+      const response = await fetch(`/api/prospect-drafts/${encodeURIComponent(currentId)}`, {
+        cache: "no-store",
+      });
+      const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
+      if (!response.ok || !body.draft) {
+        throw new Error(body.error ?? "Could not reload draft.");
+      }
+      const form = prospectFormFromDraft(body.draft);
+      applyDraft(form);
+      acceptServerDraft(body.draft, form);
+      toast.success("Latest draft loaded");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not reload draft.");
     } finally {
       setSubmitting(false);
     }
@@ -1210,7 +1249,9 @@ export function NewProspectDialog({
         : draftSaveState === "offline"
           ? "Offline recovery saved on this device"
           : draftSaveState === "conflict"
-            ? "Revision conflict — reopen to refresh"
+            ? "Revision conflict — reload the latest version"
+            : draftSaveState === "error"
+              ? "Autosave failed — use Save draft to retry"
             : draftId
               ? "Draft ready"
               : "Not saved yet";
@@ -1236,6 +1277,8 @@ export function NewProspectDialog({
                 "text-xs",
                 draftSaveState === "conflict"
                   ? "text-destructive"
+                  : draftSaveState === "error"
+                    ? "text-destructive"
                   : draftSaveState === "offline"
                     ? "text-amber-600 dark:text-amber-400"
                     : "text-muted-foreground",
@@ -1857,6 +1900,16 @@ export function NewProspectDialog({
             >
               {draftSaveState === "saving" ? "Saving…" : "Save draft"}
             </Button>
+            {draftSaveState === "conflict" ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void reloadLatestDraft()}
+                disabled={submitting}
+              >
+                Reload latest
+              </Button>
+            ) : null}
             <Button
               type="button"
               variant="secondary"

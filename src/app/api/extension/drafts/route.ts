@@ -98,8 +98,12 @@ export async function GET(req: Request) {
       }),
       getWorkingDraft({ organizationId, userId: uid }),
     ]);
+    const visibleDrafts =
+      selectedDraft && !drafts.some((draft) => draft.id === selectedDraft.id)
+        ? [selectedDraft, ...drafts]
+        : drafts;
     return Response.json(
-      { drafts, selectedDraftId: selectedDraft?.id ?? null },
+      { drafts: visibleDrafts, selectedDraftId: selectedDraft?.id ?? null },
       { headers: guarded.headers },
     );
   }

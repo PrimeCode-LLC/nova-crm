@@ -178,9 +178,10 @@ function IntentRadarPanel() {
       const result = await send<DraftListPayload>({ type: "list-drafts" });
       setDrafts(result.drafts);
       setSelectedDraftId(result.selectedDraftId);
-    } catch {
+    } catch (caught) {
       setDrafts([]);
       setSelectedDraftId(null);
+      setError(caught instanceof Error ? caught.message : "Could not load drafts.");
     }
   }, []);
 
@@ -322,6 +323,8 @@ function IntentRadarPanel() {
     const authenticating = state.status === "authenticating";
     return (
       <main className="panel centered">
+        {/* Browser-extension asset; next/image is unavailable in this Vite bundle. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img className="brand-mark" src="/icons/icon-128.png" alt="" />
         <p className="eyebrow">Nova</p>
         <h1>Intent Radar</h1>

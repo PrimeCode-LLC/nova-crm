@@ -5,6 +5,7 @@ import {
   emptyNewProspectFormDraft,
   legacyDraftStorageKey,
   parseLocalProspectDraftRecovery,
+  pendingProspectDraftId,
 } from "./new-prospect-form-draft";
 
 describe("new prospect local draft recovery", () => {
@@ -17,6 +18,35 @@ describe("new prospect local draft recovery", () => {
     );
     expect(draftStorageKey("user-1", "pd-2")).not.toBe(
       draftStorageKey("user-1", "pd-1"),
+    );
+  });
+
+  it("isolates pending recovery by launcher context and prefill", () => {
+    const strategy = pendingProspectDraftId({
+      source: "my_strategy",
+      destination: "/my-strategy",
+      prefill: { strategyId: "strategy-1" },
+    });
+    const fitCheck = pendingProspectDraftId({
+      source: "fit_check",
+      destination: "/fit-check",
+      prefill: { leadNotes: "Expansion signal" },
+    });
+
+    expect(strategy).toBe(
+      pendingProspectDraftId({
+        source: "my_strategy",
+        destination: "/my-strategy",
+        prefill: { strategyId: "strategy-1" },
+      }),
+    );
+    expect(strategy).not.toBe(fitCheck);
+    expect(strategy).not.toBe(
+      pendingProspectDraftId({
+        source: "my_strategy",
+        destination: "/my-strategy",
+        prefill: { strategyId: "strategy-2" },
+      }),
     );
   });
 

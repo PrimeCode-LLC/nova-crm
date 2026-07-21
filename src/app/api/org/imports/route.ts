@@ -18,7 +18,7 @@ export async function GET() {
       .where("organizationId", "==", guard.ctx.session.organizationId)
       .where("uploaderId", "==", guard.ctx.session.uid)
       .orderBy("createdAt", "desc")
-      .limit(10)
+      .limit(200)
       .get();
     docs = snapshot.docs;
   } catch (error) {
@@ -39,7 +39,7 @@ export async function GET() {
       .sort((a, b) =>
         String(b.data().createdAt ?? "").localeCompare(String(a.data().createdAt ?? "")),
       )
-      .slice(0, 10);
+      .slice(0, 200);
   }
 
   const jobs = docs.map((doc) => ({

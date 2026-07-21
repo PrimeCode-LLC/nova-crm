@@ -13,6 +13,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:prospect-drafts:emulator": "firebase emulators:exec --config firebase.emulator-test.json --only firestore --project demo-crm-prospect-drafts \"vitest run src/lib/prospects/draft-server.emulator.test.ts\"",
     "export:strategy-packs": "npx --yes tsx scripts/export-strategy-packs.ts",
     "dev:import-local": "npm --prefix functions run build && firebase emulators:exec --config firebase.emulator-test.json --only firestore,functions \"node scripts/start-local-import-dev.mjs\"",
     "firebase:deploy:rules": "npx firebase-tools deploy --only firestore:rules",
@@ -75,6 +76,7 @@
     "zustand": "^5.0.12"
   },
   "devDependencies": {
+    "@firebase/rules-unit-testing": "^5.0.1",
     "@tailwindcss/postcss": "^4",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^20",

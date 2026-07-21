@@ -12,6 +12,7 @@ const createSchema = z.object({
   form: prospectFormSchema.optional(),
   origin: z.enum(["manual", "intent_radar"]).optional(),
   sourceContext: z.string().trim().max(100).optional(),
+  sourceReference: z.string().trim().max(200).optional(),
   destination: z.string().trim().max(500).optional(),
   idempotencyKey: z.string().trim().min(1).max(200).optional(),
 });
@@ -27,7 +28,6 @@ export async function GET(req: Request) {
     requestedStatus === "discarded"
       ? requestedStatus
       : undefined;
-  const mine = url.searchParams.get("owner") !== "all";
   const requestedSource = url.searchParams.get("source");
   const origin =
     requestedSource === "manual" || requestedSource === "intent_radar"
@@ -42,7 +42,7 @@ export async function GET(req: Request) {
   try {
     const page = await listProspectDraftPage({
       organizationId: guarded.ctx.session.organizationId,
-      userId: mine ? guarded.ctx.session.uid : undefined,
+      userId: guarded.ctx.session.uid,
       status,
       origin,
       readiness,
@@ -73,6 +73,7 @@ export async function POST(req: Request) {
     form: parsed.data.form,
     origin: parsed.data.origin,
     sourceContext: parsed.data.sourceContext,
+    sourceReference: parsed.data.sourceReference,
     destination: parsed.data.destination,
     idempotencyKey:
       parsed.data.idempotencyKey ?? req.headers.get("Idempotency-Key") ?? undefined,

@@ -26,6 +26,7 @@ export type NewProspectLaunch = {
     | "draft_banner"
     | "draft_center";
   destination?: string;
+  sourceReference?: string;
   draftId?: string;
   prefill?: NewProspectPrefill;
 };

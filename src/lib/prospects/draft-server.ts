@@ -181,7 +181,8 @@ function serializeDraft(id: string, raw: Record<string, unknown>): ProspectDraft
   const form = parseProspectForm(raw.form) ?? undefined;
   const completion = completionMetadata(fields, form);
   const updatedAt = iso(raw.updatedAt);
-  const sourceCount = Number(raw.sourceCount ?? 0);
+  const sources = (raw.sources as ProspectDraftSourceSummary[] | undefined) ?? [];
+  const sourceCount = Number(raw.sourceCount ?? sources.length);
   return {
     id,
     organizationId: String(raw.organizationId ?? ""),
@@ -196,10 +197,12 @@ function serializeDraft(id: string, raw: Record<string, unknown>): ProspectDraft
           : "manual",
     sourceContext:
       typeof raw.sourceContext === "string" ? raw.sourceContext : undefined,
+    sourceReference:
+      typeof raw.sourceReference === "string" ? raw.sourceReference : undefined,
     destination: typeof raw.destination === "string" ? raw.destination : undefined,
     fields,
     form,
-    sources: (raw.sources as ProspectDraftSourceSummary[] | undefined) ?? [],
+    sources,
     sourceCount,
     qualityScore: typeof raw.qualityScore === "number" ? raw.qualityScore : undefined,
     qualityMatchedSignalIds: Array.isArray(raw.qualityMatchedSignalIds)
@@ -358,6 +361,7 @@ export async function createManualProspectDraft(input: {
   form?: ProspectFormValues;
   origin?: ProspectDraftOrigin;
   sourceContext?: string;
+  sourceReference?: string;
   destination?: string;
   idempotencyKey?: string;
 }): Promise<ProspectDraft> {
@@ -372,6 +376,7 @@ export async function createAndSelectWorkingDraft(input: {
   form?: ProspectFormValues;
   origin?: ProspectDraftOrigin;
   sourceContext?: string;
+  sourceReference?: string;
   destination?: string;
   idempotencyKey?: string;
 }): Promise<ProspectDraft> {
@@ -386,6 +391,7 @@ async function createProspectDraft(
     form?: ProspectFormValues;
     origin?: ProspectDraftOrigin;
     sourceContext?: string;
+    sourceReference?: string;
     destination?: string;
     idempotencyKey?: string;
   },
@@ -413,6 +419,7 @@ async function createProspectDraft(
       status: "active",
       origin: input.origin ?? "manual",
       ...(input.sourceContext ? { sourceContext: input.sourceContext } : {}),
+      ...(input.sourceReference ? { sourceReference: input.sourceReference } : {}),
       ...(input.destination ? { destination: input.destination } : {}),
       revision: 0,
       fields,

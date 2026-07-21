@@ -623,7 +623,13 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    // Installed-extension pointer only; manual and in-app drafts never acquire it.
     match /prospectDraftLocks/{id} {
+      allow read, write: if false;
+    }
+
+    // Transactional identity/contact-limit reservations used during draft completion.
+    match /prospectDraftReservations/{id} {
       allow read, write: if false;
     }
   }

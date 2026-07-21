@@ -95,6 +95,21 @@ describe("/api/extension/drafts compatibility", () => {
     });
   });
 
+  it("keeps an older selected pointer visible when it falls outside the list cap", async () => {
+    const newer = { ...draft, id: "pd-newer" };
+    vi.mocked(listProspectDrafts).mockResolvedValue([newer] as never);
+    vi.mocked(getWorkingDraft).mockResolvedValue(draft as never);
+
+    const response = await GET(
+      new Request("https://nova.test/api/extension/drafts?operation=list"),
+    );
+
+    expect(await response.json()).toEqual({
+      drafts: [draft, newer],
+      selectedDraftId: "pd-1",
+    });
+  });
+
   it("supports selecting and creating pointer-backed drafts", async () => {
     vi.mocked(selectWorkingDraft).mockResolvedValue(draft as never);
     vi.mocked(createAndSelectWorkingDraft).mockResolvedValue(draft as never);
@@ -152,6 +167,39 @@ describe("/api/extension/drafts compatibility", () => {
         draftId: "pd-1",
         expectedRevision: 3,
         idempotencyKey: "source-1",
+      }),
+    );
+  });
+
+  it("accepts the legacy source POST without draft or revision fields", async () => {
+    vi.mocked(addSourceToWorkingDraft).mockResolvedValue({
+      draft,
+      created: false,
+      ai: { status: "unavailable", acceptedCount: 0, rejectedCount: 0 },
+      warnings: [],
+    } as never);
+
+    const response = await POST(
+      new Request("https://nova.test/api/extension/drafts", {
+        method: "POST",
+        body: JSON.stringify({
+          page: {
+            url: "https://example.com/legacy",
+            title: "Legacy source",
+            text: "Enough source content for the original extension request contract.",
+            domain: "example.com",
+          },
+          quality: { score: 20, matchedSignalIds: [] },
+        }),
+      }),
+    );
+
+    expect(response.status).toBe(200);
+    expect(addSourceToWorkingDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftId: undefined,
+        expectedRevision: undefined,
+        idempotencyKey: undefined,
       }),
     );
   });
