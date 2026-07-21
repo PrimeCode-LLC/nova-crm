@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
 import {
   Calendar,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Loader2,
@@ -45,6 +46,7 @@ import {
   AlertDialogDescription,
   AlertDialogFooter,
   AlertDialogHeader,
+  AlertDialogMedia,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -190,6 +192,10 @@ export default function IntakePoolPage() {
   const [bulkProgress, setBulkProgress] = React.useState<{ done: number; total: number } | null>(
     null,
   );
+  const [bulkDeleteResult, setBulkDeleteResult] = React.useState<{
+    deleted: number;
+    total: number;
+  } | null>(null);
 
   const loadSequenceRef = React.useRef(0);
   const lastFetchAtRef = React.useRef(0);
@@ -622,25 +628,25 @@ export default function IntakePoolPage() {
     const total = mode === "selected" ? selectedIds.size : items.length;
 
     setBulkBusy(true);
+    setBulkDeleteResult(null);
     setBulkProgress({ done: 0, total });
     try {
       const body =
         mode === "all"
-          ? { action: "dismiss", allAvailable: true }
-          : { action: "dismiss", itemIds: Array.from(selectedIds) };
+          ? { action: "dismiss", allAvailable: true, streamProgress: true }
+          : {
+              action: "dismiss",
+              itemIds: Array.from(selectedIds),
+              streamProgress: true,
+            };
       const res = await fetch("/api/org/scraper-raw", {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      const data = (await res.json()) as {
-        dismissedIds?: string[];
-        count?: number;
-        totalMatched?: number;
-        error?: string;
-      };
       if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
         toast.error(
           res.status === 403
             ? "You don’t have permission to delete intake posts"
@@ -649,27 +655,66 @@ export default function IntakePoolPage() {
         return;
       }
 
-      const removed = new Set(data.dismissedIds ?? []);
-      const deletedCount = data.count ?? removed.size;
-      const actualTotal = mode === "all" ? (data.totalMatched ?? deletedCount) : total;
+      if (!res.body) throw new Error("Deletion progress stream unavailable");
+
+      type DeleteEvent =
+        | { type: "progress"; done: number; total: number }
+        | { type: "complete"; dismissedIds: string[]; count: number; total: number }
+        | { type: "error"; error: string };
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed: Extract<DeleteEvent, { type: "complete" }> | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as DeleteEvent;
+          if (event.type === "progress") {
+            setBulkProgress({ done: event.done, total: event.total });
+          } else if (event.type === "complete") {
+            completed = event;
+          } else {
+            throw new Error(event.error);
+          }
+        }
+
+        if (done) break;
+      }
+
+      if (!completed) throw new Error("Deletion did not complete");
+
+      const removed = new Set(completed.dismissedIds);
+      const deletedCount = completed.count;
+      const actualTotal = completed.total;
       setBulkProgress({ done: deletedCount, total: actualTotal });
       setItems((previous) => previous.filter((item) => !removed.has(item.id)));
-      toast.success(
-        deletedCount === 1 ? "Deleted 1 post" : `Deleted ${deletedCount} posts`,
-      );
-      setDeleteConfirm(null);
+      setBulkDeleteResult({ deleted: deletedCount, total: actualTotal });
       setSelectedIds(new Set());
-    } catch {
-      toast.error("Network error");
+      toast.success(deletedCount === 1 ? "1 post deleted" : `${deletedCount} posts deleted`);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Network error");
     } finally {
       setBulkBusy(false);
     }
   }
 
   const canDelete = canDeleteIntake && items.length > 0 && !bulkBusy;
+  const deleteDialogTotal =
+    bulkDeleteResult?.total ??
+    bulkProgress?.total ??
+    (deleteConfirm === "all" ? items.length : selectedCount);
+  const deleteDialogDone = bulkDeleteResult?.deleted ?? bulkProgress?.done ?? 0;
+  const deleteDialogRemaining = Math.max(0, deleteDialogTotal - deleteDialogDone);
   const bulkProgressPercent =
-    bulkProgress && bulkProgress.total > 0
-      ? Math.round((bulkProgress.done / bulkProgress.total) * 100)
+    deleteDialogTotal > 0
+      ? Math.round((deleteDialogDone / deleteDialogTotal) * 100)
       : 0;
 
   return (
@@ -677,47 +722,90 @@ export default function IntakePoolPage() {
       <AlertDialog
         open={deleteConfirm !== null}
         onOpenChange={(open) => {
-          if (!bulkBusy && !open) setDeleteConfirm(null);
+          if (!bulkBusy && !open) {
+            setDeleteConfirm(null);
+            setBulkDeleteResult(null);
+            setBulkProgress(null);
+          }
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
+            <AlertDialogMedia
+              className={
+                bulkDeleteResult
+                  ? "bg-emerald-500/10 text-emerald-500"
+                  : "bg-destructive/10 text-destructive"
+              }
+            >
+              {bulkDeleteResult ? <CheckCircle2 /> : <Trash2 />}
+            </AlertDialogMedia>
             <AlertDialogTitle>
-              {deleteConfirm === "all"
-                ? `Delete all ${bulkBusy && bulkProgress?.total ? bulkProgress.total : items.length} posts?`
-                : `Delete ${bulkBusy && bulkProgress ? bulkProgress.total : selectedCount} selected post${(bulkBusy && bulkProgress ? bulkProgress.total : selectedCount) === 1 ? "" : "s"}?`}
+              {bulkDeleteResult
+                ? "Deletion complete"
+                : deleteConfirm === "all"
+                  ? `Delete all ${deleteDialogTotal} posts?`
+                  : `Delete ${deleteDialogTotal} selected post${deleteDialogTotal === 1 ? "" : "s"}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              They will leave the intake pool and won&apos;t be promoted. New posts can still appear
-              when feeds run again. This does not delete anything already promoted.
+              {bulkDeleteResult
+                ? `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed from the intake pool.`
+                : "These posts will leave the intake pool and won’t be promoted. Already promoted prospects are not affected."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {bulkBusy ? (
-            <Progress
-              value={bulkProgress?.total ? bulkProgressPercent : null}
-              className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
-            >
-              <ProgressLabel className="text-sm text-muted-foreground">
-                {bulkProgress?.total ? "Deleting posts…" : "Preparing deletion…"}
-              </ProgressLabel>
-              {bulkProgress?.total ? (
-                <ProgressValue className="text-sm">
-                  {() =>
-                    `${bulkProgress.done} / ${bulkProgress.total} · ${bulkProgressPercent}%`
-                  }
-                </ProgressValue>
-              ) : null}
-            </Progress>
-          ) : null}
+          <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-center">
+            <div>
+              <div className="text-lg font-semibold tabular-nums">{deleteDialogTotal}</div>
+              <div className="text-xs text-muted-foreground">Total</div>
+            </div>
+            <div>
+              <div className="text-lg font-semibold tabular-nums text-destructive">
+                {deleteDialogDone}
+              </div>
+              <div className="text-xs text-muted-foreground">Deleted</div>
+            </div>
+            <div>
+              <div className="text-lg font-semibold tabular-nums">{deleteDialogRemaining}</div>
+              <div className="text-xs text-muted-foreground">Remaining</div>
+            </div>
+          </div>
+          <Progress
+            value={bulkProgressPercent}
+            className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
+          >
+            <ProgressLabel className="text-sm text-muted-foreground">
+              {bulkDeleteResult
+                ? "Deletion finished"
+                : bulkBusy
+                  ? "Deleting posts…"
+                  : "Ready to delete"}
+            </ProgressLabel>
+            <ProgressValue className="text-sm">
+              {() => `${bulkProgressPercent}%`}
+            </ProgressValue>
+          </Progress>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              disabled={bulkBusy}
-              onClick={() => void confirmBulkDelete()}
-            >
-              {bulkBusy ? "Deleting…" : "Delete"}
-            </AlertDialogAction>
+            {bulkDeleteResult ? (
+              <AlertDialogCancel variant="default">Done</AlertDialogCancel>
+            ) : (
+              <>
+                <AlertDialogCancel disabled={bulkBusy}>Keep posts</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={bulkBusy}
+                  onClick={() => void confirmBulkDelete()}
+                >
+                  {bulkBusy ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Deleting {bulkProgressPercent}%
+                    </>
+                  ) : (
+                    `Delete ${deleteDialogTotal} post${deleteDialogTotal === 1 ? "" : "s"}`
+                  )}
+                </AlertDialogAction>
+              </>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

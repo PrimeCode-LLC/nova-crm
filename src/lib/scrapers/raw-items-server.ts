@@ -201,6 +201,9 @@ export async function dismissScraperRawItemsBulkServer(input: {
   itemIds?: string[];
   /** When true, dismiss all currently available (non-expired) items for the org. */
   allAvailable?: boolean;
+  /** Smaller server-side writes allow one request to report deletion progress. */
+  progressBatchSize?: number;
+  onProgress?: (done: number, total: number) => void | Promise<void>;
 }): Promise<{ ok: true; dismissedIds: string[]; totalMatched: number } | { error: string }> {
   const col = rawCol();
   if (!col) return { error: "Database not configured" };
@@ -223,6 +226,7 @@ export async function dismissScraperRawItemsBulkServer(input: {
   }
 
   const totalMatched = ids.length;
+  await input.onProgress?.(0, totalMatched);
   if (ids.length === 0) {
     return { ok: true, dismissedIds: [], totalMatched };
   }
@@ -235,9 +239,10 @@ export async function dismissScraperRawItemsBulkServer(input: {
   });
   const dismissedIds: string[] = [];
   const db = getAdminDb()!;
+  const batchSize = Math.min(500, Math.max(1, input.progressBatchSize ?? 500));
 
-  for (let i = 0; i < ids.length; i += 500) {
-    const slice = ids.slice(i, i + 500);
+  for (let i = 0; i < ids.length; i += batchSize) {
+    const slice = ids.slice(i, i + batchSize);
     const refs = slice.map((id) => col.doc(id));
     const snaps = await db.getAll(...refs);
     const batch = db.batch();
@@ -256,6 +261,7 @@ export async function dismissScraperRawItemsBulkServer(input: {
       writes += 1;
     }
     if (writes > 0) await batch.commit();
+    await input.onProgress?.(dismissedIds.length, totalMatched);
   }
 
   return { ok: true, dismissedIds, totalMatched };

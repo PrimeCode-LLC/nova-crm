@@ -85,6 +85,7 @@ export async function PATCH(req: Request) {
     action?: unknown;
     itemIds?: unknown;
     allAvailable?: unknown;
+    streamProgress?: unknown;
   };
   const action = typeof body.action === "string" ? body.action : "";
 
@@ -99,6 +100,58 @@ export async function PATCH(req: Request) {
 
   if (!allAvailable && (!itemIds || itemIds.length === 0)) {
     return NextResponse.json({ error: "No items selected" }, { status: 400 });
+  }
+
+  if (body.streamProgress === true) {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream<Uint8Array>({
+      async start(controller) {
+        const send = (event: Record<string, unknown>) => {
+          controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+        };
+
+        try {
+          const result = await dismissScraperRawItemsBulkServer({
+            organizationId: g.ctx.session.organizationId,
+            userId: g.ctx.session.uid,
+            allAvailable,
+            itemIds: allAvailable ? undefined : itemIds,
+            progressBatchSize: 25,
+            onProgress: (done, total) => send({ type: "progress", done, total }),
+          });
+
+          if ("error" in result) {
+            send({ type: "error", error: result.error });
+          } else {
+            send({
+              type: "complete",
+              dismissedIds: result.dismissedIds,
+              count: result.dismissedIds.length,
+              total: result.totalMatched,
+            });
+          }
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              level: "error",
+              message: "Intake bulk deletion stream failed",
+              route: "/api/org/scraper-raw",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+          send({ type: "error", error: "Delete failed" });
+        } finally {
+          controller.close();
+        }
+      },
+    });
+
+    return new Response(stream, {
+      headers: {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+      },
+    });
   }
 
   const result = await dismissScraperRawItemsBulkServer({
