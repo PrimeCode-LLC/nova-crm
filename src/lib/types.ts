@@ -962,6 +962,8 @@ export interface ExternalCalendarEvent {
 export interface TimelineEvent {
   id: string;
   leadId: string;
+  /** Denormalized lead owner used for visibility and legacy activity attribution. */
+  leadOwnerId?: string;
   type: TimelineEventType;
   actorId?: string;
   summary: string;

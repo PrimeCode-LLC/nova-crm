@@ -363,6 +363,7 @@ function asTimelineEvent(id: string, raw: Record<string, unknown>): TimelineEven
   return {
     id,
     leadId: String(raw.leadId ?? ""),
+    leadOwnerId: typeof raw.leadOwnerId === "string" ? raw.leadOwnerId : undefined,
     type: raw.type as TimelineEvent["type"],
     actorId: typeof raw.actorId === "string" ? raw.actorId : undefined,
     summary: String(raw.summary ?? ""),

@@ -137,6 +137,7 @@ export async function POST(req: Request) {
     html,
     attachments: body.attachments,
     scheduledAt,
+    scheduledByUserId: g.ctx.session.uid,
     followupId: String(body.followupId ?? "").trim() || undefined,
     leadId,
     inReplyTo: normalizeMessageId(String(body.inReplyTo ?? "")),

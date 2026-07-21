@@ -191,17 +191,12 @@ export function StrategyScoreboard({
                 </div>
                 <WallMetricTiles
                   className={cn("mt-2.5 pl-8", r.thinSample && "opacity-70")}
-                  columns={8}
+                  columns={6}
                   items={[
                     { label: "Prospects", value: fmtNumber(r.prospects) },
-                    {
-                      label: "Quality",
-                      value: r.avgQuality == null ? "—" : String(Math.round(r.avgQuality)),
-                    },
-                    { label: "Qualified", value: fmtPercent(r.qualifiedRate) },
+                    { label: "Qualified %", value: fmtPercent(r.qualifiedRate) },
                     { label: "Leads", value: fmtNumber(r.salesLeads) },
                     { label: "Replies", value: fmtNumber(r.replies) },
-                    { label: "Reply %", value: fmtPercent(r.replyRate) },
                     { label: "Pipeline", value: fmtCurrency(r.openPipeline) },
                     { label: "Won", value: fmtCurrency(r.closedValue) },
                   ]}

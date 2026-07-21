@@ -1,5 +1,4 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
-import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
 import type { Deal, Followup, Lead, LeadTask, User } from "@/lib/types";
 
@@ -32,8 +31,8 @@ export type TeamCommandRow = {
   // Follow-ups
   followupsCompleted: number;
   scheduled: number;
-  // Closing (openPipeline/scheduled are live state; closed/won are window-scoped)
-  openPipeline: number;
+  // Closing (new pipeline + closed/won are window-scoped)
+  pipelineAdded: number;
   closedValue: number;
   wonCount: number;
   /** 0–100, team-normalized per lens. */
@@ -58,7 +57,7 @@ type RawMetrics = {
   followupsCompleted: number;
   scheduled: number;
   failed: number;
-  openPipeline: number;
+  pipelineAdded: number;
   closedValue: number;
   wonCount: number;
 };
@@ -139,7 +138,30 @@ function computeWindowMetrics(
         (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry"),
     ).length;
 
-    const openPipeline = computeUserOpenPipelineMetrics(u.id, leads as Lead[], deals as Deal[]).total;
+    // Period score must only reward pipeline created inside the selected window.
+    // Existing open pipeline remains useful elsewhere on the dashboard, but including it
+    // here makes a "24h" score look active even when no pipeline was added that day.
+    const allOpenDealLeadIds = new Set(
+      deals.filter((d) => !["won", "lost"].includes(d.stage)).map((d) => d.leadId),
+    );
+    const newOpenDeals = deals.filter(
+      (d) =>
+        d.ownerId === u.id &&
+        !["won", "lost"].includes(d.stage) &&
+        inWindow(d.createdAt, start, end),
+    );
+    const newLeadEstimates = leads.filter(
+      (l) =>
+        isSalesLead(l) &&
+        l.ownerId === u.id &&
+        !["won", "lost"].includes(l.stage) &&
+        !allOpenDealLeadIds.has(l.id) &&
+        (l.estimatedValue ?? 0) > 0 &&
+        inWindow(l.createdAt, start, end),
+    );
+    const pipelineAdded =
+      newOpenDeals.reduce((sum, deal) => sum + deal.value, 0) +
+      newLeadEstimates.reduce((sum, lead) => sum + (lead.estimatedValue ?? 0), 0);
     const wonDeals = deals.filter(
       (d) =>
         d.ownerId === u.id &&
@@ -162,7 +184,7 @@ function computeWindowMetrics(
       followupsCompleted,
       scheduled,
       failed,
-      openPipeline,
+      pipelineAdded,
       closedValue,
       wonCount: wonDeals.length,
     };
@@ -180,7 +202,7 @@ function lensRawScores(m: RawMetrics): LensRaw {
     leadgen: m.qualifiedProspects * 2 + unqualified * 0.25 + m.salesLeadsAdded * 3,
     outreach: m.emailsSent + m.replies * 4,
     followups: m.followupsCompleted,
-    closing: m.wonCount * 5 + m.closedValue / 1000 + m.openPipeline / 4000,
+    closing: m.wonCount * 5 + m.closedValue / 1000 + m.pipelineAdded / 4000,
   };
 }
 
@@ -273,7 +295,7 @@ export function buildTeamCommandRows(input: {
       failed: m.failed,
       followupsCompleted: m.followupsCompleted,
       scheduled: m.scheduled,
-      openPipeline: m.openPipeline,
+      pipelineAdded: m.pipelineAdded,
       closedValue: m.closedValue,
       wonCount: m.wonCount,
       scores,
@@ -291,7 +313,7 @@ export function buildTeamCommandRows(input: {
         r.followupsCompleted +
         r.failed >
         0 ||
-      r.openPipeline > 0 ||
+      r.pipelineAdded > 0 ||
       r.closedValue > 0,
   );
 }

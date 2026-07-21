@@ -172,6 +172,8 @@ export interface ScheduledEmail {
   scheduledAt: string;
   status: ScheduledEmailStatus;
   createdAt: string;
+  /** Workspace user who queued the email (distinct from the mailbox credential owner). */
+  scheduledByUserId?: string;
   sentAt?: string;
   /** RFC 5322 Message-ID after successful send (normalized, no angle brackets). */
   messageId?: string;

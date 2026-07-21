@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ArrowDown, ArrowUp, Minus, TriangleAlert } from "lucide-react";
+import { ArrowDown, ArrowUp, CircleCheck, Minus, TriangleAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserChip } from "@/components/common/user-chip";
@@ -26,11 +26,11 @@ import { WallMetricTiles } from "@/components/dashboard/wall-metric-tiles";
 import type { Deal, Followup, Lead, LeadTask } from "@/lib/types";
 
 const LENS_META: Record<TeamCommandLens, { label: string; blurb: string }> = {
-  overall: { label: "Overall", blurb: "Blended score across prospecting, outreach, follow-ups & closing" },
-  leadgen: { label: "Lead-gen", blurb: "Prospect quality & conversion to sales leads" },
+  overall: { label: "Overall", blurb: "Relative activity across prospecting, outreach, follow-ups & closing" },
+  leadgen: { label: "Prospecting", blurb: "Prospect quality & conversion to sales leads" },
   outreach: { label: "Outreach", blurb: "Emails sent & replies earned" },
   followups: { label: "Follow-ups", blurb: "Sequence steps completed & kept moving" },
-  closing: { label: "Closing", blurb: "Pipeline built & revenue won" },
+  closing: { label: "Closing", blurb: "New pipeline added & revenue won" },
 };
 
 type Metric = { label: string; value: string; tone?: "default" | "muted" | "success" | "warn" };
@@ -68,7 +68,7 @@ function lensMetrics(lens: TeamCommandLens, row: TeamCommandRow): Metric[] {
       return [
         { label: "Won", value: fmtNumber(row.wonCount) },
         { label: "Closed", value: fmtCurrency(row.closedValue), tone: "success" },
-        { label: "Pipeline", value: fmtCurrency(row.openPipeline), tone: "muted" },
+        { label: "Pipeline added", value: fmtCurrency(row.pipelineAdded), tone: "muted" },
       ];
     case "overall":
     default:
@@ -77,10 +77,91 @@ function lensMetrics(lens: TeamCommandLens, row: TeamCommandRow): Metric[] {
         { label: "Leads", value: fmtNumber(row.salesLeadsAdded) },
         { label: "Sent", value: fmtNumber(row.emailsSent) },
         { label: "Replies", value: fmtNumber(row.replies) },
-        { label: "Pipeline", value: fmtCurrency(row.openPipeline), tone: "muted" },
+        { label: "Pipeline added", value: fmtCurrency(row.pipelineAdded), tone: "muted" },
         { label: "Won", value: fmtCurrency(row.closedValue), tone: "success" },
       ];
   }
+}
+
+type ScoreInsight = {
+  helping: string;
+  improve: string;
+};
+
+function quickScoreInsights(lens: TeamCommandLens, row: TeamCommandRow): ScoreInsight {
+  if (lens === "overall") {
+    const lenses = TEAM_COMMAND_LENSES.filter(
+      (key): key is Exclude<TeamCommandLens, "overall"> => key !== "overall",
+    );
+    const ranked = [...lenses].sort((a, b) => row.scores[b] - row.scores[a]);
+    const strongest = ranked[0];
+    const weakest = ranked.at(-1) ?? ranked[0];
+    const outcomeGap =
+      row.emailsSent > 0 && row.replies === 0
+        ? `0 replies from ${fmtNumber(row.emailsSent)} sent is limiting outcomes`
+        : row.prospectsAdded > 0 && row.salesLeadsAdded === 0
+          ? `0 lead conversions from ${fmtNumber(row.prospectsAdded)} prospects`
+          : row.pipelineAdded > 0 && row.closedValue === 0
+            ? "Convert new pipeline into won revenue"
+            : row.closedValue === 0
+              ? "No won revenue in this period"
+              : `${LENS_META[weakest].label} is the weakest relative area (${row.scores[weakest]}/100)`;
+    return {
+      helping: `${LENS_META[strongest].label} is their strongest relative area (${row.scores[strongest]}/100)`,
+      improve: outcomeGap,
+    };
+  }
+
+  if (lens === "leadgen") {
+    return {
+      helping:
+        row.salesLeadsAdded > 0
+          ? `${fmtNumber(row.salesLeadsAdded)} converted lead${row.salesLeadsAdded === 1 ? "" : "s"} add 3× weight`
+          : row.qualifiedProspects > 0
+            ? `${fmtNumber(row.qualifiedProspects)} qualified prospect${row.qualifiedProspects === 1 ? "" : "s"} add 2× weight`
+            : `${fmtNumber(row.prospectsAdded)} prospect${row.prospectsAdded === 1 ? "" : "s"} sourced`,
+      improve:
+        row.salesLeadsAdded === 0
+          ? "Convert qualified prospects into sales leads"
+          : "Increase qualified prospect volume",
+    };
+  }
+
+  if (lens === "outreach") {
+    return {
+      helping:
+        row.replies > 0
+          ? `${fmtNumber(row.replies)} repl${row.replies === 1 ? "y" : "ies"} add 4× weight`
+          : `${fmtNumber(row.emailsSent)} email${row.emailsSent === 1 ? "" : "s"} sent add volume`,
+      improve:
+        row.replies === 0
+          ? "Earn replies — each reply counts 4×"
+          : "Scale sent volume while protecting reply rate",
+    };
+  }
+
+  if (lens === "followups") {
+    return {
+      helping: `${fmtNumber(row.followupsCompleted)} follow-up${row.followupsCompleted === 1 ? "" : "s"} completed`,
+      improve:
+        row.scheduled > 0
+          ? `Complete ${fmtNumber(row.scheduled)} scheduled follow-up${row.scheduled === 1 ? "" : "s"}`
+          : "Complete more follow-ups in this period",
+    };
+  }
+
+  return {
+    helping:
+      row.closedValue > 0
+        ? `${fmtCurrency(row.closedValue)} won is lifting closing`
+        : row.pipelineAdded > 0
+          ? `${fmtCurrency(row.pipelineAdded)} new pipeline is contributing`
+          : "No positive closing driver yet",
+    improve:
+      row.pipelineAdded > 0
+        ? "Convert new pipeline into won revenue"
+        : "Add qualified pipeline and close deals",
+  };
 }
 
 function DeltaBadge({ delta }: { delta: number }) {
@@ -185,7 +266,7 @@ export function TeamCommand({
               {canSeeTeam ? "Team command" : "Your performance"}
             </CardTitle>
             <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
-              {LENS_META[lens].blurb} · {rangeLabel}
+              {LENS_META[lens].blurb} · Team-relative score · {rangeLabel}
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -250,6 +331,7 @@ export function TeamCommand({
               {rows.map((r, i) => {
                 const metrics = lensMetrics(lens, r);
                 const score = r.scores[lens];
+                const insights = quickScoreInsights(lens, r);
                 return (
                   <li key={r.userId} className={cn(wall ? "py-3.5" : "py-2.5")}>
                     <div className="flex items-center gap-3">
@@ -265,14 +347,21 @@ export function TeamCommand({
                         <UserChip userId={r.userId} />
                       </div>
                       <div className="flex items-center gap-2">
-                        <span
-                          className={cn(
-                            "font-semibold tabular-nums",
-                            wall ? "text-lg" : "text-sm",
-                          )}
-                        >
-                          {score}
-                        </span>
+                        <div className="flex items-baseline gap-1.5">
+                          {wall ? (
+                            <span className="text-[9px] font-medium uppercase tracking-wide text-muted-foreground">
+                              Relative activity
+                            </span>
+                          ) : null}
+                          <span
+                            className={cn(
+                              "font-semibold tabular-nums",
+                              wall ? "text-lg" : "text-sm",
+                            )}
+                          >
+                            {score}
+                          </span>
+                        </div>
                         {!wall ? (
                           <span className="text-[11px]">
                             <DeltaBadge delta={r.deltas[lens]} />
@@ -296,11 +385,27 @@ export function TeamCommand({
                     </div>
 
                     {wall ? (
-                      <WallMetricTiles
-                        className="mt-2.5 pl-8"
-                        items={metrics}
-                        columns={metrics.length <= 4 ? 4 : 6}
-                      />
+                      <>
+                        <WallMetricTiles
+                          className="mt-2.5 pl-8"
+                          items={metrics}
+                          columns={metrics.length <= 4 ? 4 : 6}
+                        />
+                        <div className="mt-2 grid grid-cols-2 gap-2 pl-8 text-[11px] leading-tight">
+                          <p className="flex min-w-0 items-center gap-1.5 text-emerald-400">
+                            <CircleCheck className="h-3 w-3 shrink-0" />
+                            <span className="truncate">
+                              <span className="font-medium">Helping:</span> {insights.helping}
+                            </span>
+                          </p>
+                          <p className="flex min-w-0 items-center gap-1.5 text-amber-400">
+                            <TriangleAlert className="h-3 w-3 shrink-0" />
+                            <span className="truncate">
+                              <span className="font-medium">Improve:</span> {insights.improve}
+                            </span>
+                          </p>
+                        </div>
+                      </>
                     ) : (
                       <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-0.5 pl-7 text-xs">
                         {metrics.map((m) => (

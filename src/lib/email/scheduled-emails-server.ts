@@ -78,6 +78,10 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     scheduledAt: String(data.scheduledAt ?? ""),
     status: (String(data.status ?? "pending") as ScheduledEmailStatus) || "pending",
     createdAt: String(data.createdAt ?? ""),
+    scheduledByUserId:
+      typeof data.scheduledByUserId === "string" && data.scheduledByUserId.trim()
+        ? data.scheduledByUserId.trim()
+        : undefined,
     sentAt: data.sentAt ? String(data.sentAt) : undefined,
     messageId:
       typeof data.messageId === "string" && data.messageId.trim()
@@ -153,6 +157,8 @@ export async function createScheduledEmailServer(input: {
   html: string;
   attachments?: unknown;
   scheduledAt: string;
+  /** Authenticated workspace user who queued the email. */
+  scheduledByUserId?: string;
   followupId?: string;
   leadId?: string;
   inReplyTo?: string;
@@ -193,6 +199,9 @@ export async function createScheduledEmailServer(input: {
     status: "pending",
     createdAt: now,
     updatedAt: now,
+    ...(input.scheduledByUserId?.trim()
+      ? { scheduledByUserId: input.scheduledByUserId.trim() }
+      : {}),
     ...(followupId ? { followupId } : {}),
     ...(leadId ? { leadId } : {}),
     ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
@@ -332,7 +341,8 @@ async function notifyFollowupOwnerOfDeliveryFailure(input: {
 
 async function recordScheduledEmailSentTimeline(input: {
   organizationId: string;
-  uid: string;
+  mailboxOwnerUid: string;
+  scheduledByUserId?: string;
   leadId: string;
   subject: string;
   messageId?: string;
@@ -344,7 +354,7 @@ async function recordScheduledEmailSentTimeline(input: {
   try {
     const teId = `te-${crypto.randomUUID()}`;
     const now = new Date().toISOString();
-    let leadOwnerId = input.uid;
+    let leadOwnerId = input.mailboxOwnerUid;
     try {
       const leadSnap = await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
       if (leadSnap.exists) {
@@ -352,8 +362,11 @@ async function recordScheduledEmailSentTimeline(input: {
         if (typeof owner === "string" && owner.trim()) leadOwnerId = owner.trim();
       }
     } catch {
-      /* keep uid */
+      /* keep mailbox owner as the visibility fallback */
     }
+    // Credit the person who queued the outreach. Legacy queued rows do not have
+    // scheduledByUserId, so fall back to the lead owner rather than the mailbox admin.
+    const actorId = input.scheduledByUserId?.trim() || leadOwnerId || input.mailboxOwnerUid;
     await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
       stampForCreate(
         input.organizationId,
@@ -361,17 +374,23 @@ async function recordScheduledEmailSentTimeline(input: {
           leadId: input.leadId,
           leadOwnerId,
           type: "email_sent",
-          actorId: input.uid,
+          actorId,
           summary: `Email sent: ${input.subject.trim() || "(no subject)"}`,
           payload: {
             source: "scheduled",
             mailboxId: input.mailboxId,
+            ...(input.scheduledByUserId?.trim()
+              ? { scheduledByUserId: input.scheduledByUserId.trim() }
+              : {}),
+            ...(input.mailboxOwnerUid !== actorId
+              ? { mailboxOwnerUid: input.mailboxOwnerUid }
+              : {}),
             ...(input.messageId ? { messageId: input.messageId } : {}),
             ...(input.followupId ? { followupId: input.followupId } : {}),
           },
           createdAt: now,
         },
-        input.uid,
+        actorId,
       ),
     );
     await db
@@ -834,9 +853,14 @@ async function sendScheduledDoc(
       if (planId) await completePlanWhenAllStepsDone(planId, now);
     }
     if (leadId) {
+      const scheduledByUserId =
+        typeof data.scheduledByUserId === "string" && data.scheduledByUserId.trim()
+          ? data.scheduledByUserId.trim()
+          : undefined;
       await recordScheduledEmailSentTimeline({
         organizationId,
-        uid,
+        mailboxOwnerUid: uid,
+        scheduledByUserId,
         leadId,
         subject,
         messageId,

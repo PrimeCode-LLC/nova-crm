@@ -422,10 +422,16 @@ export function buildOpsActivityFeed(input: {
   for (const [leadId, events] of Object.entries(input.timelineByLead)) {
     for (const e of events) {
       if (!FEED_TYPES.has(e.type)) continue;
+      const legacyScheduledActor =
+        e.type === "email_sent" &&
+        e.payload?.source === "scheduled" &&
+        typeof e.payload?.scheduledByUserId !== "string"
+          ? e.leadOwnerId
+          : undefined;
       flat.push({
         id: e.id,
         type: e.type,
-        actorId: e.actorId,
+        actorId: legacyScheduledActor || e.actorId,
         summary: e.summary,
         createdAt: e.createdAt,
         leadId,
