@@ -3,7 +3,10 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { buildLeadAiContext } from "@/lib/ai/context/lead-context";
-import { buildFollowupPersonalizationProfile } from "@/lib/ai/followup-personalization";
+import {
+  buildFollowupPersonalizationProfile,
+  formatFollowupRoleGuidance,
+} from "@/lib/ai/followup-personalization";
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
@@ -78,6 +81,23 @@ const bodySchema = z.object({
       }),
     )
     .optional(),
+  emailThreads: z
+    .array(
+      z.object({
+        subject: z.string().max(500),
+        messages: z
+          .array(
+            z.object({
+              from: z.string().max(500),
+              date: z.string().max(100),
+              snippet: z.string().max(2_000),
+            }),
+          )
+          .max(20),
+      }),
+    )
+    .max(20)
+    .optional(),
   demoContext: z
     .object({
       lead: z.record(z.string(), z.unknown()),
@@ -89,6 +109,13 @@ const bodySchema = z.object({
       touchpoints: z.array(z.record(z.string(), z.unknown())).optional(),
       followups: z.array(z.record(z.string(), z.unknown())).optional(),
       tasks: z.array(z.record(z.string(), z.unknown())).optional(),
+      campaign: z.record(z.string(), z.unknown()).optional(),
+      profile: z.record(z.string(), z.unknown()).optional(),
+      strategy: z.record(z.string(), z.unknown()).optional(),
+      persona: z.record(z.string(), z.unknown()).optional(),
+      strategyAssignment: z.record(z.string(), z.unknown()).optional(),
+      caseStudy: z.record(z.string(), z.unknown()).optional(),
+      labels: z.array(z.record(z.string(), z.unknown())).optional(),
       emailThreads: z
         .array(
           z.object({
@@ -138,9 +165,16 @@ export async function POST(req: Request) {
     organizationId: orgId,
     leadId: parsed.data.leadId,
     demoContext: parsed.data.demoContext,
+    emailThreads: parsed.data.emailThreads,
   });
   if ("error" in loaded) {
     return NextResponse.json({ error: loaded.error }, { status: loaded.status });
+  }
+  if (loaded.lead.doNotContact) {
+    return NextResponse.json(
+      { error: "This prospect is marked do not contact. Remove that restriction before generating outreach." },
+      { status: 409 },
+    );
   }
 
   const context = buildLeadAiContext({
@@ -153,6 +187,17 @@ export async function POST(req: Request) {
     title: contactTitle,
     seniority: loaded.contact?.seniority,
   });
+  const roleGuidance = [
+    formatFollowupRoleGuidance(personalizationProfile),
+    `Lead stage: ${loaded.lead.stage || "unknown"}`,
+    `Temperature: ${loaded.lead.temperature || "unknown"}`,
+    `Channel: ${loaded.lead.channel || "unknown"}`,
+    loaded.lead.personalizationNote?.suggestedAngle
+      ? `Suggested angle: ${loaded.lead.personalizationNote.suggestedAngle}`
+      : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
   const feat = settings.features.followup_suggest;
   const ragMode = feat.ragMode ?? "reference";
   const chunks = await retrieveRagChunksServer({
@@ -164,6 +209,13 @@ export async function POST(req: Request) {
       contactTitle,
       loaded.contact?.seniority,
       loaded.account?.industry || loaded.lead.companyIndustry,
+      loaded.account?.businessDescription,
+      loaded.lead.primaryOpportunityLabel,
+      loaded.lead.personalizationNote?.suggestedAngle,
+      loaded.strategy?.name,
+      loaded.strategy?.objective,
+      loaded.persona?.name,
+      loaded.persona?.recommendedAngle,
       "follow-up",
       parsed.data.userPrompt,
     ]
@@ -204,6 +256,7 @@ export async function POST(req: Request) {
         sequenceMode,
         sequenceModeHint,
         regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
+        roleGuidance,
       },
       schema: parsed.data.singleStep ? singleStepSuggestSchema : suggestSchema,
       leadId: parsed.data.leadId,

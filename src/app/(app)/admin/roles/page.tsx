@@ -164,12 +164,12 @@ export default function AdminRolesPage() {
   return (
     <>
       <PageHeader
-        title="Roles"
-        description="CRM role catalog with module access and sensitive actions. System roles can be edited; custom roles can be created and deleted."
+        title="CRM permissions"
+        description="Permission roles define module access, data boundaries, and sensitive actions. They are separate from workspace Owner, Admin, Manager, and Member access."
         actions={
           <Button size="sm" onClick={() => setCreateOpen(true)}>
             <Plus className="h-3.5 w-3.5" />
-            Create role
+            Create permission role
           </Button>
         }
       />
@@ -177,9 +177,9 @@ export default function AdminRolesPage() {
         <div className="rounded-lg border bg-muted/20 p-4 flex gap-3">
           <Shield className="h-4 w-4 text-primary mt-0.5 shrink-0" />
           <div className="space-y-1 text-sm">
-            <p className="font-medium">Role matrix + person overrides</p>
+            <p className="font-medium">Permission roles + person overrides</p>
             <p className="text-muted-foreground text-xs">
-              Roles define default module CRUD, data scope, and sensitive actions. Use{" "}
+              Permission roles define default module CRUD, data scope, and sensitive actions. Use{" "}
               <Link href="/admin/permissions" className="underline underline-offset-2">
                 Person overrides
               </Link>{" "}
@@ -192,7 +192,7 @@ export default function AdminRolesPage() {
           <Table>
             <TableHeader className="bg-muted/30">
               <TableRow className="hover:bg-transparent">
-                <TableHead className="h-9">Role</TableHead>
+                <TableHead className="h-9">Permission role</TableHead>
                 <TableHead className="h-9">Type</TableHead>
                 <TableHead className="h-9">Members</TableHead>
                 <TableHead className="h-9">Updated</TableHead>
@@ -209,7 +209,7 @@ export default function AdminRolesPage() {
               ) : roles.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={5} className="py-8 text-center text-sm text-muted-foreground">
-                    No roles yet.
+                    No permission roles yet.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -297,7 +297,7 @@ export default function AdminRolesPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Create role</DialogTitle>
+            <DialogTitle>Create permission role</DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-1">
             <div className="space-y-1.5">

@@ -1,16 +1,26 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import type { DocumentSnapshot } from "firebase-admin/firestore";
 import type {
   Account,
+  Campaign,
   Contact,
+  CrmLabel,
   Deal,
   Followup,
   Lead,
   LeadTask,
   Note,
+  Profile,
+  ScriptLibraryItem,
   TimelineEvent,
   Touchpoint,
 } from "@/lib/types";
+import type {
+  BuyerPersona,
+  ProspectingStrategy,
+  StrategyAssignment,
+} from "@/lib/prospecting-strategy/types";
 
 export type LeadAiContextInput = {
   lead: Lead;
@@ -23,6 +33,13 @@ export type LeadAiContextInput = {
   followups: Followup[];
   tasks: LeadTask[];
   emailThreads?: { subject: string; messages: { from: string; date: string; snippet: string }[] }[];
+  campaign?: Campaign;
+  profile?: Profile;
+  strategy?: ProspectingStrategy;
+  persona?: BuyerPersona;
+  strategyAssignment?: StrategyAssignment;
+  caseStudy?: ScriptLibraryItem;
+  labels?: CrmLabel[];
 };
 
 const demoContextSchema = {
@@ -43,7 +60,15 @@ export async function loadLeadAiContextServer(input: {
     followups?: Record<string, unknown>[];
     tasks?: Record<string, unknown>[];
     emailThreads?: LeadAiContextInput["emailThreads"];
+    campaign?: Record<string, unknown>;
+    profile?: Record<string, unknown>;
+    strategy?: Record<string, unknown>;
+    persona?: Record<string, unknown>;
+    strategyAssignment?: Record<string, unknown>;
+    caseStudy?: Record<string, unknown>;
+    labels?: Record<string, unknown>[];
   };
+  emailThreads?: LeadAiContextInput["emailThreads"];
 }): Promise<LeadAiContextInput | { error: string; status: number }> {
   if (input.demoContext) {
     const d = input.demoContext;
@@ -57,7 +82,14 @@ export async function loadLeadAiContextServer(input: {
       touchpoints: (d.touchpoints ?? []) as unknown as Touchpoint[],
       followups: (d.followups ?? []) as unknown as Followup[],
       tasks: (d.tasks ?? []) as unknown as LeadTask[],
-      emailThreads: d.emailThreads,
+      emailThreads: input.emailThreads ?? d.emailThreads,
+      campaign: d.campaign as unknown as Campaign | undefined,
+      profile: d.profile as unknown as Profile | undefined,
+      strategy: d.strategy as unknown as ProspectingStrategy | undefined,
+      persona: d.persona as unknown as BuyerPersona | undefined,
+      strategyAssignment: d.strategyAssignment as unknown as StrategyAssignment | undefined,
+      caseStudy: d.caseStudy as unknown as ScriptLibraryItem | undefined,
+      labels: (d.labels ?? []) as unknown as CrmLabel[],
     };
   }
 
@@ -73,15 +105,72 @@ export async function loadLeadAiContextServer(input: {
   }
   const lead = { ...rawLead, id: leadSnap.id } as Lead;
 
-  const [accountSnap, contactSnap, notesSnap, timelineSnap, touchSnap, followSnap, tasksSnap] =
+  const [
+    accountSnap,
+    contactSnap,
+    notesSnap,
+    timelineSnap,
+    touchSnap,
+    followSnap,
+    tasksSnap,
+    campaignSnap,
+    profileSnap,
+    strategySnap,
+    personaSnap,
+    assignmentSnap,
+    caseStudySnap,
+  ] =
     await Promise.all([
       db.collection(COLLECTIONS.accounts).doc(lead.accountId).get(),
       db.collection(COLLECTIONS.contacts).doc(lead.contactId).get(),
-      db.collection(COLLECTIONS.notes).where("leadId", "==", lead.id).limit(30).get(),
-      db.collection(COLLECTIONS.timelineEvents).where("leadId", "==", lead.id).limit(40).get(),
-      db.collection(COLLECTIONS.touchpoints).where("leadId", "==", lead.id).limit(30).get(),
-      db.collection(COLLECTIONS.followups).where("leadId", "==", lead.id).limit(20).get(),
-      db.collection(COLLECTIONS.leadTasks).where("leadId", "==", lead.id).limit(20).get(),
+      db
+        .collection(COLLECTIONS.notes)
+        .where("leadId", "==", lead.id)
+        .orderBy("createdAt", "desc")
+        .limit(30)
+        .get(),
+      db
+        .collection(COLLECTIONS.timelineEvents)
+        .where("leadId", "==", lead.id)
+        .orderBy("createdAt", "desc")
+        .limit(40)
+        .get(),
+      db
+        .collection(COLLECTIONS.touchpoints)
+        .where("leadId", "==", lead.id)
+        .orderBy("occurredAt", "desc")
+        .limit(30)
+        .get(),
+      db
+        .collection(COLLECTIONS.followups)
+        .where("leadId", "==", lead.id)
+        .orderBy("dueAt", "desc")
+        .limit(30)
+        .get(),
+      db
+        .collection(COLLECTIONS.leadTasks)
+        .where("leadId", "==", lead.id)
+        .orderBy("createdAt", "desc")
+        .limit(30)
+        .get(),
+      lead.campaignId
+        ? db.collection(COLLECTIONS.campaigns).doc(lead.campaignId).get()
+        : Promise.resolve(undefined),
+      lead.profileId
+        ? db.collection(COLLECTIONS.profiles).doc(lead.profileId).get()
+        : Promise.resolve(undefined),
+      lead.strategyId
+        ? db.collection(COLLECTIONS.prospectingStrategies).doc(lead.strategyId).get()
+        : Promise.resolve(undefined),
+      lead.personaId
+        ? db.collection(COLLECTIONS.buyerPersonas).doc(lead.personaId).get()
+        : Promise.resolve(undefined),
+      lead.strategyAssignmentId
+        ? db.collection(COLLECTIONS.strategyAssignments).doc(lead.strategyAssignmentId).get()
+        : Promise.resolve(undefined),
+      lead.caseStudyId
+        ? db.collection(COLLECTIONS.scriptLibrary).doc(lead.caseStudyId).get()
+        : Promise.resolve(undefined),
     ]);
 
   let deal: Deal | undefined;
@@ -90,16 +179,27 @@ export async function loadLeadAiContextServer(input: {
     .where("leadId", "==", lead.id)
     .limit(1)
     .get();
-  if (!dealsSnap.empty) {
+  if (
+    !dealsSnap.empty &&
+    dealsSnap.docs[0].data().organizationId === input.organizationId
+  ) {
     deal = { ...dealsSnap.docs[0].data(), id: dealsSnap.docs[0].id } as Deal;
   }
 
+  const labelSnaps = lead.labelIds?.length
+    ? await Promise.all(
+        lead.labelIds.map((id) => db.collection(COLLECTIONS.labels).doc(id).get()),
+      )
+    : [];
+  const belongsToOrganization = (snap: DocumentSnapshot | undefined) =>
+    Boolean(snap?.exists && snap.data()?.organizationId === input.organizationId);
+
   return {
     lead,
-    account: accountSnap.exists
+    account: belongsToOrganization(accountSnap)
       ? ({ ...accountSnap.data(), id: accountSnap.id } as Account)
       : undefined,
-    contact: contactSnap.exists
+    contact: belongsToOrganization(contactSnap)
       ? ({ ...contactSnap.data(), id: contactSnap.id } as Contact)
       : undefined,
     deal,
@@ -108,6 +208,27 @@ export async function loadLeadAiContextServer(input: {
     touchpoints: touchSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Touchpoint),
     followups: followSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Followup),
     tasks: tasksSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as LeadTask),
-    emailThreads: [],
+    emailThreads: input.emailThreads ?? [],
+    campaign: belongsToOrganization(campaignSnap)
+      ? ({ ...campaignSnap!.data(), id: campaignSnap!.id } as Campaign)
+      : undefined,
+    profile: belongsToOrganization(profileSnap)
+      ? ({ ...profileSnap!.data(), id: profileSnap!.id } as Profile)
+      : undefined,
+    strategy: belongsToOrganization(strategySnap)
+      ? ({ ...strategySnap!.data(), id: strategySnap!.id } as ProspectingStrategy)
+      : undefined,
+    persona: belongsToOrganization(personaSnap)
+      ? ({ ...personaSnap!.data(), id: personaSnap!.id } as BuyerPersona)
+      : undefined,
+    strategyAssignment: belongsToOrganization(assignmentSnap)
+      ? ({ ...assignmentSnap!.data(), id: assignmentSnap!.id } as StrategyAssignment)
+      : undefined,
+    caseStudy: belongsToOrganization(caseStudySnap)
+      ? ({ ...caseStudySnap!.data(), id: caseStudySnap!.id } as ScriptLibraryItem)
+      : undefined,
+    labels: labelSnaps
+      .filter((snap) => belongsToOrganization(snap))
+      .map((snap) => ({ ...snap.data(), id: snap.id }) as CrmLabel),
   };
 }

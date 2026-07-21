@@ -122,12 +122,11 @@ service cloud.firestore {
               : (inCallerOrg(resource.data) && tenantUnchanged()));
     }
 
-    /**
-     * CRM read scope: workspace owner / admin / manager may load all org CRM docs.
-     * Members (`orgRole == 'member'`) are restricted to their own rows in rules + client queries.
-     */
+    /** CRM read scope: workspace owner/admin, super-admin, or CRM director may load all org rows. */
     function crmTenantReadAll() {
-      return isOrgAtLeast('manager');
+      return isOrgAtLeast('admin')
+        || userDoc().get('isSuperAdmin', false)
+        || userDoc().get('roleId', '') == 'director';
     }
 
     function ownsCrmDoc(data) {
@@ -145,19 +144,10 @@ service cloud.firestore {
         || request.auth.uid in rosterUser(ownerId).get('managerAncestorIds', []);
     }
 
-    /** Matches client `leadOwnerIdsVisibleToViewer` department peers (same `departmentId`). */
-    function callerSharesDepartmentWith(otherUid) {
-      let dept = userDoc().get('departmentId', '');
-      return dept != ''
-        && otherUid != ''
-        && dept == rosterUser(otherUid).get('departmentId', '');
-    }
-
     function canReadCrmOwnedBy(ownerId) {
       return crmTenantReadAll()
         || ownsCrmDoc({'ownerId': ownerId})
-        || callerManagesCrmOwner(ownerId)
-        || callerSharesDepartmentWith(ownerId);
+        || callerManagesCrmOwner(ownerId);
     }
 
     /** Channel assignees may read prospects they were assigned to work. */
@@ -190,7 +180,7 @@ service cloud.firestore {
       return request.auth.uid in data.get('sharedOwnerIds', []);
     }
 
-    /** Prospects use the same owner/team/dept scope as sales leads (no org-wide open pool). */
+    /** Prospects use the same owner/reporting-tree scope as sales leads (no org-wide open pool). */
     function canReadLead(data) {
       return crmTenantReadAll()
         || isProspectAssignee(data)
@@ -203,8 +193,7 @@ service cloud.firestore {
     function canReadCrmActivityUser(activityUserId) {
       return crmTenantReadAll()
         || activityUserId == request.auth.uid
-        || callerManagesCrmOwner(activityUserId)
-        || callerSharesDepartmentWith(activityUserId);
+        || callerManagesCrmOwner(activityUserId);
     }
 
     function workspaceChatChannelDoc(channelId) {
@@ -244,8 +233,6 @@ service cloud.firestore {
           || leadTaskElevated()
           || callerManagesCrmOwner(data.assigneeId)
           || callerManagesCrmOwner(data.createdById)
-          || callerSharesDepartmentWith(data.assigneeId)
-          || callerSharesDepartmentWith(data.createdById)
         );
     }
 

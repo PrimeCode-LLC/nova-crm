@@ -24,6 +24,23 @@ const analysisSchema = z.object({
 
 const bodySchema = z.object({
   leadId: z.string().min(1),
+  emailThreads: z
+    .array(
+      z.object({
+        subject: z.string().max(500),
+        messages: z
+          .array(
+            z.object({
+              from: z.string().max(500),
+              date: z.string().max(100),
+              snippet: z.string().max(2_000),
+            }),
+          )
+          .max(20),
+      }),
+    )
+    .max(20)
+    .optional(),
   demoContext: z
     .object({
       lead: z.record(z.string(), z.unknown()),
@@ -35,6 +52,13 @@ const bodySchema = z.object({
       touchpoints: z.array(z.record(z.string(), z.unknown())).optional(),
       followups: z.array(z.record(z.string(), z.unknown())).optional(),
       tasks: z.array(z.record(z.string(), z.unknown())).optional(),
+      campaign: z.record(z.string(), z.unknown()).optional(),
+      profile: z.record(z.string(), z.unknown()).optional(),
+      strategy: z.record(z.string(), z.unknown()).optional(),
+      persona: z.record(z.string(), z.unknown()).optional(),
+      strategyAssignment: z.record(z.string(), z.unknown()).optional(),
+      caseStudy: z.record(z.string(), z.unknown()).optional(),
+      labels: z.array(z.record(z.string(), z.unknown())).optional(),
       emailThreads: z
         .array(
           z.object({
@@ -81,6 +105,7 @@ export async function POST(req: Request) {
     organizationId: orgId,
     leadId: parsed.data.leadId,
     demoContext: parsed.data.demoContext,
+    emailThreads: parsed.data.emailThreads,
   });
   if ("error" in loaded) {
     return NextResponse.json({ error: loaded.error }, { status: loaded.status });
@@ -91,7 +116,31 @@ export async function POST(req: Request) {
   const ragMode = feat.ragMode ?? "reference";
   const chunks = await retrieveRagChunksServer({
     organizationId: orgId,
-    query: `${loaded.lead.stage} ${loaded.lead.channel} ${loaded.lead.painPoints ?? ""}`,
+    query: [
+      loaded.lead.stage,
+      loaded.lead.channel,
+      loaded.lead.temperature,
+      loaded.lead.priority,
+      loaded.lead.painPoints,
+      loaded.lead.triggerEvent,
+      loaded.lead.businessFocus,
+      loaded.lead.hiringSignals,
+      loaded.lead.recentNews,
+      loaded.lead.primaryOpportunityLabel,
+      loaded.lead.personalizationNote?.relevantService,
+      loaded.lead.personalizationNote?.suggestedAngle,
+      loaded.account?.industry || loaded.lead.companyIndustry,
+      loaded.account?.businessDescription,
+      loaded.contact?.title || loaded.lead.contactTitle,
+      loaded.contact?.seniority,
+      loaded.strategy?.name,
+      loaded.strategy?.objective,
+      loaded.persona?.name,
+      loaded.persona?.recommendedAngle,
+      "lead analysis qualification risk next action",
+    ]
+      .filter(Boolean)
+      .join(" "),
     libraryIds: feat.libraryIds,
     scope: {
       channel: loaded.lead.channel,

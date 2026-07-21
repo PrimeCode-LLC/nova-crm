@@ -22,6 +22,9 @@ import {
   DEFAULT_MAIL_FLAG_ID,
 } from "@/lib/email/mail-flags";
 
+/** Persisted mailbox selection used by the unified inbox. */
+export const ALL_MAILBOXES_ID = "__all_mailboxes__";
+
 export interface EmailAccountStore {
   /** Live workspace: true after /api/email/mailboxes load (or failed); demo: true immediately. */
   emailServerHydrated: boolean;
@@ -225,7 +228,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
   inboxWriteDisabled: false,
   mailViewAsUid: null,
   mailboxes: [defaultEmailMailboxSettings({ label: "Primary mailbox" })],
-  activeMailboxId: "",
+  activeMailboxId: ALL_MAILBOXES_ID,
   linkedLeadByMessageId: {},
   blockedSenderDomains: [],
   globalEmailFooter: "",
@@ -246,9 +249,11 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         : [defaultEmailMailboxSettings({ label: "Primary mailbox" })];
     const activeFromServer = payload.activeMailboxId.trim();
     const active =
-      activeFromServer && mailboxes.some((m) => m.id === activeFromServer)
-        ? activeFromServer
-        : mailboxes[0].id;
+      activeFromServer === ALL_MAILBOXES_ID
+        ? ALL_MAILBOXES_ID
+        : activeFromServer && mailboxes.some((m) => m.id === activeFromServer)
+          ? activeFromServer
+          : ALL_MAILBOXES_ID;
     const blocked = (payload.blockedSenderDomains ?? [])
       .map(normalizeBlockedSenderDomain)
       .filter(Boolean);
@@ -889,7 +894,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     const seed = buildDemoEmailSeed();
     set({
       mailboxes: seed.mailboxes,
-      activeMailboxId: seed.activeMailboxId,
+      activeMailboxId: ALL_MAILBOXES_ID,
       linkedLeadByMessageId: seed.linkedLeadByMessageId,
       blockedSenderDomains: [],
       globalEmailFooter: "",

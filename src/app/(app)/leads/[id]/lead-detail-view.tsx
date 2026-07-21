@@ -102,6 +102,7 @@ import {
   buildWorkspaceOwnerPickerOptions,
   ownerPickerTriggerLabel,
 } from "@/lib/owner-scope";
+import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 
 const LEAD_TABS = ["overview", "timeline", "touchpoints", "notes", "followups", "tasks", "emails"] as const;
 type LeadTab = (typeof LEAD_TABS)[number];
@@ -139,6 +140,7 @@ function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): 
 
 export function LeadDetailView({ leadId }: { leadId: string }) {
   const ws = useWorkspace();
+  const prospecting = useProspectingStrategyData();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -244,6 +246,51 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
   }, [inboundByMailbox, linkedLeadByMessageId, lead, relatedEmailAddress, sent]);
 
+  const relatedEmailThreads = React.useMemo(() => {
+    const normalizeSubject = (subject: string) =>
+      subject
+        .replace(/^\s*((re|fwd?|aw|wg)\s*:\s*)+/i, "")
+        .replace(/\s+/g, " ")
+        .trim();
+    const threads = new Map<
+      string,
+      {
+        subject: string;
+        messages: { from: string; date: string; snippet: string }[];
+        lastAt: string;
+      }
+    >();
+    for (const e of relatedEmails) {
+      const cleaned = normalizeSubject(e.subject) || "(no subject)";
+      const key = cleaned.toLowerCase();
+      const message = { from: e.from, date: e.at, snippet: e.body.slice(0, 2_000) };
+      const existing = threads.get(key);
+      if (existing) {
+        existing.messages.push(message);
+        if (e.at > existing.lastAt) existing.lastAt = e.at;
+      } else {
+        threads.set(key, { subject: cleaned, messages: [message], lastAt: e.at });
+      }
+    }
+    return Array.from(threads.values())
+      .sort((a, b) => (a.lastAt < b.lastAt ? 1 : -1))
+      .slice(0, 20)
+      .map((t) => ({
+        subject: t.subject,
+        // Oldest-first so the model reads each conversation in natural order.
+        messages: t.messages.sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 20),
+      }));
+  }, [relatedEmails]);
+  const attributedStrategy = lead?.strategyId
+    ? prospecting.strategies.find((item) => item.id === lead.strategyId)
+    : undefined;
+  const attributedPersona = lead?.personaId
+    ? prospecting.personas.find((item) => item.id === lead.personaId)
+    : undefined;
+  const attributedAssignment = lead?.strategyAssignmentId
+    ? prospecting.assignments.find((item) => item.id === lead.strategyAssignmentId)
+    : undefined;
+
   const followupAiContext = React.useMemo(() => {
     if (!lead) return undefined;
     return {
@@ -256,12 +303,23 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       touchpoints: ws.touchpoints.filter((t) => t.leadId === lead.id),
       followups: ws.followups.filter((f) => f.leadId === lead.id),
       tasks: filterLeadTasksForLeadDetail(ws.leadTasks, lead.id, viewerForTasks),
-      emailThreads: relatedEmails.map((e) => ({
-        subject: e.subject,
-        messages: [{ from: e.from, date: e.at, snippet: e.body.slice(0, 500) }],
-      })),
+      campaign: ws.getCampaignById(lead.campaignId),
+      profile: ws.getProfileById(lead.profileId),
+      strategy: attributedStrategy,
+      persona: attributedPersona,
+      strategyAssignment: attributedAssignment,
+      labels: ws.crmLabels.filter((label) => lead.labelIds?.includes(label.id)),
+      emailThreads: relatedEmailThreads,
     };
-  }, [lead, relatedEmails, viewerForTasks, ws]);
+  }, [
+    attributedAssignment,
+    attributedPersona,
+    attributedStrategy,
+    lead,
+    relatedEmailThreads,
+    viewerForTasks,
+    ws,
+  ]);
 
   const fallbackOwnerOptions = React.useMemo(
     () => buildWorkspaceOwnerPickerOptions(ws.users, ws.currentUserId, ws.getOwnerDisplayName),
@@ -786,6 +844,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <TabsContent value="overview">
                   <LeadOverview
                     lead={lead}
+                    account={account}
+                    contact={contact}
+                    deal={deal}
+                    campaign={campaign}
+                    profile={profile}
+                    strategy={attributedStrategy}
+                    persona={attributedPersona}
+                    strategyAssignment={attributedAssignment}
                     outreachProfileSummary={outreachProfileSummary}
                     outreachProfileFieldLabel={needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : undefined}
                     onEditSection={setEditingSection}
@@ -1130,6 +1196,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         open={analyzeOpen}
         onOpenChange={setAnalyzeOpen}
         lead={lead}
+        emailThreads={relatedEmailThreads}
         demoContext={
           ws.isDemo
             ? {
@@ -1142,10 +1209,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 touchpoints,
                 followups,
                 tasks: leadTasksForTab,
-                emailThreads: relatedEmails.map((e) => ({
-                  subject: e.subject,
-                  messages: [{ from: e.from, date: e.at, snippet: e.body.slice(0, 500) }],
-                })),
+                campaign: campaign ?? undefined,
+                profile: profile ?? undefined,
+                strategy: attributedStrategy,
+                persona: attributedPersona,
+                strategyAssignment: attributedAssignment,
+                labels: ws.crmLabels.filter((label) => lead.labelIds?.includes(label.id)),
+                emailThreads: relatedEmailThreads,
               }
             : undefined
         }

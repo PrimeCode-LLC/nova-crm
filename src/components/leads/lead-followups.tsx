@@ -737,7 +737,14 @@ export function LeadFollowups({
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" type="button" variant="outline" onClick={() => openSuggest()}>
+          <Button
+            size="sm"
+            type="button"
+            variant="outline"
+            disabled={lead.doNotContact}
+            title={lead.doNotContact ? "Remove do-not-contact before generating outreach" : undefined}
+            onClick={() => openSuggest()}
+          >
             <Sparkles className="h-3.5 w-3.5" /> Build sequence
           </Button>
           <Button size="sm" type="button" onClick={() => setDialogOpen(true)}>

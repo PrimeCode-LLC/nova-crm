@@ -129,7 +129,7 @@ export async function PATCH(req: Request) {
 
   if (targetId === g.ctx.session.uid && bodyRoleId !== undefined) {
     return NextResponse.json(
-      { error: "CRM role for your own account is managed via signup and org membership." },
+      { error: "Your own CRM permission role cannot be changed here." },
       { status: 400 },
     );
   }
@@ -169,7 +169,7 @@ export async function PATCH(req: Request) {
     const roleDoc = await getOrgRole(orgId, resolvedId);
     if (!roleDoc || !roleDoc.isActive) {
       return NextResponse.json(
-        { error: "Unknown or inactive CRM role. Create or activate it under Configuration → Roles." },
+        { error: "Unknown or inactive CRM permission role. Create or activate it under Configuration → CRM permissions." },
         { status: 400 },
       );
     }

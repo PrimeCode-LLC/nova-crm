@@ -210,15 +210,15 @@ export const MODULE_META: Record<ModuleKey, ModuleMeta> = {
     href: "/admin/hierarchy",
   },
   roles: {
-    label: "Roles",
-    description: "CRM role catalog and permission matrices",
-    cluster: "access",
+    label: "CRM permissions",
+    description: "Permission roles, module access, and data boundaries",
+    cluster: "company",
     href: "/admin/roles",
   },
   permissions: {
     label: "Person overrides",
     description: "Per-user permission exceptions",
-    cluster: "access",
+    cluster: "company",
     href: "/admin/permissions",
   },
   activity_logs: {
@@ -229,10 +229,10 @@ export const MODULE_META: Record<ModuleKey, ModuleMeta> = {
     href: "/admin/logs",
   },
   departments: {
-    label: "Departments",
-    description: "Department structure",
+    label: "Teams",
+    description: "Optional reporting and access groups",
     cluster: "company",
-    href: "/admin/departments",
+    href: "/admin/teams",
   },
   channels: {
     label: "Channels",
@@ -300,7 +300,7 @@ export const MODULE_KEYS = Object.keys(MODULE_META) as ModuleKey[];
 
 export const MODULE_CLUSTER_LABELS: Record<ModuleCluster, string> = {
   workspace: "Workspace",
-  company: "Company & team",
+  company: "Organization & access",
   access: "Access & channels",
   programs: "Programs & data",
   personal: "Personal",
@@ -541,8 +541,8 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
     group: "dashboard",
   },
   "dashboard.preview_as_role": {
-    label: "Preview as role",
-    description: "Preview dashboard as another CRM role",
+    label: "Preview as permission role",
+    description: "Preview the dashboard using another CRM permission role",
     group: "dashboard",
   },
   "dashboard.export": {
@@ -561,8 +561,8 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
     group: "people_access",
   },
   "people.edit_crm_role": {
-    label: "Edit CRM roles",
-    description: "Assign CRM roles to members",
+    label: "Edit CRM permissions",
+    description: "Assign CRM permission roles to members",
     group: "people_access",
   },
   "people.edit_feature_grants": {
@@ -572,12 +572,12 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
   },
   "people.edit_hierarchy": {
     label: "Edit hierarchy",
-    description: "Change reporting lines and departments",
+    description: "Change reporting lines and optional team membership",
     group: "people_access",
   },
   "roles.manage": {
-    label: "Manage roles",
-    description: "Create and edit CRM roles",
+    label: "Manage CRM permissions",
+    description: "Create and edit CRM permission roles",
     group: "people_access",
   },
   "permissions.manage_overrides": {
@@ -669,9 +669,8 @@ export const ACTION_GROUP_ORDER: ActionGroup[] = [
 export const DATA_SCOPE_OPTIONS: { value: DataScope; label: string }[] = [
   { value: "none", label: "None" },
   { value: "own", label: "Own" },
-  { value: "team", label: "Team" },
-  { value: "department", label: "Department" },
-  { value: "all", label: "All" },
+  { value: "team", label: "Reporting team" },
+  { value: "all", label: "Everyone" },
 ];
 
 export function emptyModulePermission(scope: DataScope = "none"): ModulePermission {
@@ -698,11 +697,14 @@ export function modulePermission(
 }
 
 /** Map admin feature keys / nav hrefs onto catalog modules. */
-export const MODULE_BY_HREF: Record<string, ModuleKey> = Object.fromEntries(
-  Object.entries(MODULE_META)
-    .filter(([, m]) => m.href)
-    .map(([k, m]) => [m.href!, k as ModuleKey]),
-) as Record<string, ModuleKey>;
+export const MODULE_BY_HREF: Record<string, ModuleKey> = {
+  ...Object.fromEntries(
+    Object.entries(MODULE_META)
+      .filter(([, m]) => m.href)
+      .map(([k, m]) => [m.href!, k as ModuleKey]),
+  ),
+  "/admin/departments": "departments",
+};
 
 export function modulesByCluster(): {
   cluster: ModuleCluster;

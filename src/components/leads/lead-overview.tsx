@@ -4,7 +4,7 @@ import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/componen
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import type { Lead } from "@/lib/types";
+import type { Account, Campaign, Contact, Deal, Lead, Profile } from "@/lib/types";
 import { PUSH_STATUS_TONE, TEMPERATURE_TONE, PRIORITY_TONE } from "@/lib/constants";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -23,6 +23,11 @@ import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { LeadIntentQualityCard } from "@/components/leads/lead-intent-quality-card";
+import type {
+  BuyerPersona,
+  ProspectingStrategy,
+  StrategyAssignment,
+} from "@/lib/prospecting-strategy/types";
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -33,13 +38,53 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+function Values({ values }: { values?: readonly string[] }) {
+  return values?.length ? (
+    <div className="flex flex-wrap gap-1">
+      {values.map((value) => (
+        <Badge key={value} variant="outline" className="text-[10px] font-normal">
+          {value}
+        </Badge>
+      ))}
+    </div>
+  ) : (
+    "-"
+  );
+}
+
+function ExternalValue({ href, children }: { href?: string; children?: React.ReactNode }) {
+  return href ? (
+    <a href={href} target="_blank" rel="noreferrer" className="break-all text-primary/80 hover:text-primary">
+      {children ?? href}
+    </a>
+  ) : (
+    "-"
+  );
+}
+
 export function LeadOverview({
   lead,
+  account,
+  contact,
+  deal,
+  campaign,
+  profile,
+  strategy,
+  persona,
+  strategyAssignment,
   outreachProfileSummary,
   outreachProfileFieldLabel,
   onEditSection,
 }: {
   lead: Lead;
+  account?: Account;
+  contact?: Contact;
+  deal?: Deal;
+  campaign?: Campaign;
+  profile?: Profile;
+  strategy?: ProspectingStrategy;
+  persona?: BuyerPersona;
+  strategyAssignment?: StrategyAssignment;
   /** When set (Upwork / job apply), show which workspace profile this lead uses. */
   outreachProfileSummary?: string;
   outreachProfileFieldLabel?: string;
@@ -73,6 +118,107 @@ export function LeadOverview({
           />
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Contact record</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <dl className="divide-y">
+            <Field label="Name">{contact?.fullName || lead.contactName || "-"}</Field>
+            <Field label="Title">{contact?.title || lead.contactTitle || "-"}</Field>
+            <Field label="Seniority">{contact?.seniority || "-"}</Field>
+            <Field label="Company email">{contact?.email || lead.contactEmail || "-"}</Field>
+            <Field label="Personal email">{contact?.personalEmail || "-"}</Field>
+            <Field label="Email status">
+              {contact?.emailVerificationStatus ||
+                (contact?.emailVerified || lead.emailVerified ? "Verified" : "Not verified")}
+            </Field>
+            <Field label="Phone">{contact?.phone || "-"}</Field>
+            <Field label="LinkedIn">
+              <ExternalValue href={contact?.linkedin || lead.contactLinkedIn} />
+            </Field>
+            <Field label="Location">{contact?.location || "-"}</Field>
+            <Field label="Best channel">{contact?.bestContactChannel || "-"}</Field>
+            <Field label="Source">{contact?.contactSource || "-"}</Field>
+            <Field label="Contact record dates">
+              {contact ? `${contact.createdAt} · updated ${contact.updatedAt}` : "-"}
+            </Field>
+          </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Company record</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <dl className="divide-y">
+            <Field label="Company">{account?.name || lead.companyName || "-"}</Field>
+            <Field label="Domain">{account?.domain || lead.companyDomain || "-"}</Field>
+            <Field label="Industry">{account?.industry || lead.companyIndustry || "-"}</Field>
+            <Field label="Description">{account?.businessDescription || "-"}</Field>
+            <Field label="Size">{account?.size || lead.companySize || "-"}</Field>
+            <Field label="Revenue">{account?.revenueRange || lead.revenueRange || "-"}</Field>
+            <Field label="Location">
+              {[account?.city, account?.state, account?.country].filter(Boolean).join(", ") ||
+                account?.location ||
+                "-"}
+            </Field>
+            <Field label="Founded">{account?.yearFounded ?? "-"}</Field>
+            <Field label="Business status">{account?.businessStatus || "-"}</Field>
+            <Field label="Website">
+              <ExternalValue href={account?.website}>{account?.domain || account?.website}</ExternalValue>
+            </Field>
+            <Field label="Website status">{account?.websiteStatus || "-"}</Field>
+            <Field label="Company LinkedIn">
+              <ExternalValue href={account?.linkedin} />
+            </Field>
+            <Field label="Technology"><Values values={account?.techStack} /></Field>
+            <Field label="Online activity">{account?.onlineActivityScore || "-"}</Field>
+            <Field label="Last site activity">
+              {[account?.lastWebsiteActivityAt, account?.lastWebsiteActivityNote]
+                .filter(Boolean)
+                .join(" · ") || "-"}
+            </Field>
+            <Field label="Careers page"><ExternalValue href={account?.careersPageUrl} /></Field>
+            <Field label="CRM totals">
+              {account
+                ? `${account.contactCount} contact(s) · ${account.leadCount} lead(s) · ${fmtCurrency(account.openDealValue)} open`
+                : "-"}
+            </Field>
+            <Field label="Company record dates">
+              {account ? `${account.createdAt} · updated ${account.updatedAt}` : "-"}
+            </Field>
+          </dl>
+        </CardContent>
+      </Card>
+
+      {deal ? (
+        <Card className="lg:col-span-2">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">Deal record</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <dl className="divide-y">
+              <Field label="Name">{deal.name}</Field>
+              <Field label="Stage">{deal.stage}</Field>
+              <Field label="Value">{fmtCurrency(deal.value)} {deal.currency}</Field>
+              <Field label="Probability">{deal.probability}%</Field>
+              <Field label="Expected close">{fmtDate(deal.expectedCloseDate)}</Field>
+              <Field label="Products"><Values values={deal.products} /></Field>
+              <Field label="Deal notes">{deal.notes || "-"}</Field>
+              <Field label="Outcome">
+                {deal.wonAt
+                  ? `Won ${fmtDate(deal.wonAt)}`
+                  : deal.lostAt
+                    ? `Lost ${fmtDate(deal.lostAt)}${deal.lostReason ? ` · ${deal.lostReason}` : ""}`
+                    : "Open"}
+              </Field>
+            </dl>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader className="pb-3">
@@ -177,6 +323,151 @@ export function LeadOverview({
               )}
             </Field>
           </dl>
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Prospect intelligence & attribution</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-5">
+          <dl className="divide-y">
+            <Field label="Qualification status">{lead.prospectQualifyStatus || "-"}</Field>
+            <Field label="Stored quality score">
+              {lead.qualityScore != null
+                ? `${lead.qualityScore}/100 · ${lead.qualitySignalCount ?? 0} signal(s)`
+                : "-"}
+            </Field>
+            <Field label="Primary opportunity">
+              {lead.primaryOpportunityLabel || lead.primaryOpportunityId || "-"}
+            </Field>
+            <Field label="Deeply personalized">{lead.deeplyPersonalized ? "Yes" : "No"}</Field>
+            <Field label="Rejection">
+              {[lead.rejectionReason, lead.rejectionNote].filter(Boolean).join(" · ") || "-"}
+            </Field>
+          </dl>
+
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Structured personalization
+            </p>
+            <dl className="divide-y rounded-md border px-3">
+              <Field label="Trigger">{lead.personalizationNote?.trigger || "-"}</Field>
+              <Field label="Likely impact">{lead.personalizationNote?.likelyImpact || "-"}</Field>
+              <Field label="Relevant service">{lead.personalizationNote?.relevantService || "-"}</Field>
+              <Field label="Suggested angle">{lead.personalizationNote?.suggestedAngle || "-"}</Field>
+            </dl>
+          </section>
+
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Verified intent evidence
+            </p>
+            {lead.intentEvidence?.length ? (
+              <div className="space-y-2">
+                {lead.intentEvidence.map((evidence) => (
+                  <div key={evidence.id} className="rounded-md border p-3 text-sm">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium">{evidence.label}</span>
+                      <Badge variant="outline" className="text-[10px]">
+                        {evidence.strength}
+                      </Badge>
+                      <Badge variant="secondary" className="text-[10px] font-normal">
+                        {evidence.category}
+                      </Badge>
+                    </div>
+                    <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                      {evidence.explanation || "No explanation"}
+                    </p>
+                    <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+                      <span className="text-muted-foreground">{evidence.observedAt || "Date unknown"}</span>
+                      {evidence.sourceUrl ? (
+                        <ExternalValue href={evidence.sourceUrl}>View source</ExternalValue>
+                      ) : null}
+                      {evidence.signalId ? (
+                        <span className="text-muted-foreground">Signal: {evidence.signalId}</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No structured evidence recorded.</p>
+            )}
+          </section>
+
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Strategy and buyer persona
+            </p>
+            <dl className="divide-y rounded-md border px-3">
+              <Field label="Strategy">{strategy?.name || lead.strategyId || "-"}</Field>
+              <Field label="Strategy objective">{strategy?.objective || strategy?.description || "-"}</Field>
+              <Field label="Strategy status/version">
+                {strategy
+                  ? `${strategy.status} · version ${lead.strategyVersion ?? strategy.version}`
+                  : lead.strategyVersion != null
+                    ? `Version ${lead.strategyVersion}`
+                    : "-"}
+              </Field>
+              <Field label="Strategy mission">{strategy?.missionBlurb || "-"}</Field>
+              <Field label="Strategy research">{strategy?.researchNotes || "-"}</Field>
+              <Field label="Strategy SOP">
+                {strategy?.sopMarkdown ? (
+                  <pre className="max-h-64 overflow-y-auto whitespace-pre-wrap font-sans text-sm">
+                    {strategy.sopMarkdown}
+                  </pre>
+                ) : (
+                  "-"
+                )}
+              </Field>
+              <Field label="Buyer persona">{persona?.name || lead.personaId || "-"}</Field>
+              <Field label="Persona description">{persona?.description || "-"}</Field>
+              <Field label="Department/seniority">
+                {[persona?.department, persona?.seniority].filter(Boolean).join(" · ") || "-"}
+              </Field>
+              <Field label="Responsibilities"><Values values={persona?.responsibilities} /></Field>
+              <Field label="Business goals"><Values values={persona?.businessGoals} /></Field>
+              <Field label="Persona pain points"><Values values={persona?.painPoints} /></Field>
+              <Field label="Buying triggers"><Values values={persona?.buyingTriggers} /></Field>
+              <Field label="Objections"><Values values={persona?.objections} /></Field>
+              <Field label="Relevant services"><Values values={persona?.relevantServices} /></Field>
+              <Field label="Recommended angle">{persona?.recommendedAngle || "-"}</Field>
+              <Field label="Value proposition">{persona?.valueProposition || "-"}</Field>
+              <Field label="Preferred CTA">{persona?.callToAction || "-"}</Field>
+              <Field label="Assignment">
+                {strategyAssignment
+                  ? `${strategyAssignment.assignmentType} · ${strategyAssignment.allocationPct}% · ${strategyAssignment.status}`
+                  : lead.strategyAssignmentId || "-"}
+              </Field>
+              <Field label="Assignment guidance">{strategyAssignment?.notes || "-"}</Field>
+            </dl>
+          </section>
+
+          <section className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Outreach attribution
+            </p>
+            <dl className="divide-y rounded-md border px-3">
+              <Field label="Campaign">{campaign?.name || lead.campaignId || "-"}</Field>
+              <Field label="Outreach profile">{profile?.name || lead.profileId || "-"}</Field>
+              <Field label="Profile guidance">{profile?.notes || "-"}</Field>
+              <Field label="Profile stack">{profile?.stackLabel || "-"}</Field>
+              <Field label="Case study/script">{lead.caseStudyId || "-"}</Field>
+              <Field label="Matched signal IDs"><Values values={lead.qualityMatchedSignalIds} /></Field>
+            </dl>
+          </section>
+
+          {lead.extensions && Object.keys(lead.extensions).length > 0 ? (
+            <section className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Channel-specific data
+              </p>
+              <pre className="max-h-64 overflow-auto rounded-md border bg-muted/30 p-3 text-xs whitespace-pre-wrap">
+                {JSON.stringify(lead.extensions, null, 2)}
+              </pre>
+            </section>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -288,7 +579,34 @@ export function LeadOverview({
             label="Response time"
             value={responseTimeMinutes != null ? `${responseTimeMinutes}m` : "-"}
           />
+          <Metric label="First contact" value={lead.firstContactAt ? fmtDate(lead.firstContactAt) : "-"} />
+          <Metric label="Idle" value={lead.isIdle ? `Yes · ${lead.idleDays ?? 0} day(s)` : "No"} />
+          <Metric label="Last reply" value={lead.lastReplyAt ? fmtDate(lead.lastReplyAt) : "-"} />
+          <Metric label="Reply source" value={lead.lastReplySource || "-"} />
           <Metric label="Created" value={fmtRelative(lead.createdAt)} />
+        </CardContent>
+      </Card>
+
+      <Card className="lg:col-span-2">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">Record linkage & lifecycle</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0">
+          <dl className="divide-y">
+            <Field label="Record type">{lead.intakeKind || "sales_lead"}</Field>
+            <Field label="Lead ID">{lead.id}</Field>
+            <Field label="Account ID">{lead.accountId}</Field>
+            <Field label="Contact ID">{lead.contactId}</Field>
+            <Field label="Prospect source">{lead.prospectSourceId || "-"}</Field>
+            <Field label="Linked sales lead">{lead.linkedSalesLeadId || "-"}</Field>
+            <Field label="Channel tags"><Values values={lead.channelTags} /></Field>
+            <Field label="Prospect visibility">{lead.prospectVisibility || "-"}</Field>
+            <Field label="Prospect owner">{lead.prospectOwnerId || "-"}</Field>
+            <Field label="Created">{lead.createdAt}</Field>
+            <Field label="Updated">{lead.updatedAt}</Field>
+            <Field label="Quality scored">{lead.qualityScoredAt || "-"}</Field>
+            <Field label="Reply review">{lead.replyReviewStatus || "-"}</Field>
+          </dl>
         </CardContent>
       </Card>
 

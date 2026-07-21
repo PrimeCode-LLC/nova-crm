@@ -86,10 +86,14 @@ export async function POST(req: Request) {
     const subjectLine = parsed.data.subject?.trim() || "(no subject)";
 
     const userPromptOverride = isImprove
-      ? `Improve and polish the user's email draft. Preserve intent and factual claims from the draft. Do not invent facts.
+      ? `Improve this email draft for higher reply and meeting rates. Preserve intent and factual claims. Do not invent facts.
 
-Tone: ${parsed.data.tone}
-Goal: ${parsed.data.goal}
+Rules while improving:
+- Keep it brief; short paragraphs; one idea; one clear CTA.
+- Make the first line about the recipient or their situation when the draft allows.
+- Prefer a micro-commit or specific 15-min ask over a vague "let me know".
+- Remove sales clichés ("just following up", "circling back", "touching base", "I know you're busy").
+- Match tone: ${parsed.data.tone}. Goal: ${parsed.data.goal}.
 
 Subject: ${subjectLine}
 

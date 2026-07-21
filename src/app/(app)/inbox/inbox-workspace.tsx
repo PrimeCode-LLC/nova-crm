@@ -65,6 +65,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  ALL_MAILBOXES_ID,
   isEmailAccountConfigured,
   getActiveMailbox,
   isImapInboxConfigured,
@@ -183,6 +184,7 @@ function shouldIgnoreMailListKeyboardTarget(target: EventTarget | null): boolean
 
 type MailListRow = {
   id: string;
+  mailboxId: string;
   title: string;
   subtitle: string;
   at: string;
@@ -468,6 +470,7 @@ export default function InboxWorkspace() {
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
   const inboxWriteDisabled = useEmailAccountStore((s) => s.inboxWriteDisabled);
+  const allMailboxesSelected = activeMailboxId === ALL_MAILBOXES_ID;
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
   const mailApiForUid = React.useMemo(
     () =>
@@ -527,6 +530,7 @@ export default function InboxWorkspace() {
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
   const [selectedThread, setSelectedThread] = React.useState<MailThread | null>(null);
+  const [selectedRowMailboxId, setSelectedRowMailboxId] = React.useState<string | null>(null);
   /** Expanded message UIDs when viewing a multi-message thread. */
   const [expandedThreadUids, setExpandedThreadUids] = React.useState<Set<number>>(() => new Set());
   const [selectedMail, setSelectedMail] = React.useState<MailDraft | MailSent | MailInbound | null>(null);
@@ -577,8 +581,8 @@ export default function InboxWorkspace() {
   const [imapTrashTotal, setImapTrashTotal] = React.useState<number | null>(null);
   const [imapSentTotal, setImapSentTotal] = React.useState<number | null>(null);
   const sentForMailbox = React.useMemo(
-    () => sent.filter((m) => m.mailboxId === account.id),
-    [sent, account.id],
+    () => sent.filter((m) => allMailboxesSelected || m.mailboxId === account.id),
+    [sent, allMailboxesSelected, account.id],
   );
   const inbound = React.useMemo(
     () => inboundByMailbox[account.id] ?? [],
@@ -589,7 +593,20 @@ export default function InboxWorkspace() {
     [trashInboundByMailbox, account.id],
   );
   const inboundThreads = React.useMemo(() => groupInboundIntoThreads(inbound), [inbound]);
-  const trashThreads = React.useMemo(() => groupInboundIntoThreads(trashInbound), [trashInbound]);
+  const scopedMailboxes = React.useMemo(
+    () => (allMailboxesSelected ? mailboxes : mailboxes.filter((mb) => mb.id === account.id)),
+    [allMailboxesSelected, mailboxes, account.id],
+  );
+  const selectedRowMailbox =
+    mailboxes.find((mailbox) => mailbox.id === selectedRowMailboxId) ?? account;
+  const actionAccount =
+    allMailboxesSelected && selectedRowMailboxId ? selectedRowMailbox : account;
+  const actionMailApiForUid = resolveMailApiForUserUid({
+    mailViewAsUid,
+    activeMailboxDataOwnerUid: actionAccount.dataOwnerUid,
+    selfUid: currentUserId,
+  });
+  const hasScopedImapMailbox = scopedMailboxes.some(isImapInboxConfigured);
   /** Row ids for bulk delete (inbox → trash, or permanent delete in trash). */
   const [selectedMailRowIds, setSelectedMailRowIds] = React.useState<Set<string>>(() => new Set());
   const [purgeTrashOpen, setPurgeTrashOpen] = React.useState(false);
@@ -610,7 +627,8 @@ export default function InboxWorkspace() {
   const emailFolderSupportsImapList = mailFolder === "inbox" || mailFolder === "trash";
   const canUseTrashFeatures = isDemo || isImapInboxConfigured(account);
   /** Bulk move/delete and row checkboxes require IMAP and must not run on another member’s mailbox. */
-  const showImapBulkMailActions = canUseTrashFeatures && (isDemo || !inboxReadOnly);
+  const showImapBulkMailActions =
+    !allMailboxesSelected && canUseTrashFeatures && (isDemo || !inboxReadOnly);
 
   React.useEffect(() => {
     setImapMailboxTotal(null);
@@ -621,10 +639,21 @@ export default function InboxWorkspace() {
   React.useEffect(() => {
     setSelectedThread((prev) => {
       if (!prev) return null;
-      const threads = mailFolder === "trash" ? trashThreads : inboundThreads;
+      const mailboxId = selectedRowMailboxId ?? account.id;
+      const messages =
+        mailFolder === "trash"
+          ? (trashInboundByMailbox[mailboxId] ?? [])
+          : (inboundByMailbox[mailboxId] ?? []);
+      const threads = groupInboundIntoThreads(messages);
       return threads.find((t) => t.threadId === prev.threadId) ?? null;
     });
-  }, [inboundThreads, trashThreads, mailFolder]);
+  }, [
+    inboundByMailbox,
+    trashInboundByMailbox,
+    mailFolder,
+    selectedRowMailboxId,
+    account.id,
+  ]);
 
   React.useEffect(() => {
     if (!selectedThread) {
@@ -672,7 +701,7 @@ export default function InboxWorkspace() {
     const threadId = selectedThread?.threadId;
     if (!threadId) return;
 
-    const acct = getActiveMailbox(useEmailAccountStore.getState());
+    const acct = selectedRowMailbox;
     if (!isImapInboxConfigured(acct)) return;
 
     const listFolder: ImapListFolder = mailFolder === "trash" ? "trash" : "inbox";
@@ -699,7 +728,7 @@ export default function InboxWorkspace() {
           const need = thread.messages.filter((m) => m.bodySynced === false).map((m) => m.uid);
           if (need.length === 0) return;
           const part = need.slice(0, CHUNK);
-          const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailApiForUid, currentUserId);
+          const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", actionMailApiForUid, currentUserId);
           const res = await fetch(url, {
             method: "POST",
             signal: ac.signal,
@@ -750,18 +779,18 @@ export default function InboxWorkspace() {
     selectedThread?.threadId,
     mergeInboundBodies,
     mergeTrashBodies,
-    account.id,
-    account.imap.host,
-    account.imap.port,
-    account.imap.secure,
-    account.imap.user,
-    account.imap.password,
-    mailViewAsUid, mailApiForUid,
+    selectedRowMailbox.id,
+    selectedRowMailbox.imap.host,
+    selectedRowMailbox.imap.port,
+    selectedRowMailbox.imap.secure,
+    selectedRowMailbox.imap.user,
+    selectedRowMailbox.imap.password,
+    mailViewAsUid, actionMailApiForUid,
     currentUserId,
   ]);
 
   const fetchImapListFolder = React.useCallback(
-    async (folder: ImapListFolder) => {
+    async (folder: ImapListFolder, mailboxOverride?: EmailMailboxSettings) => {
       if (isDemo) {
         if (folder === "inbox") {
           toast.message("Demo inbox", { description: "Sample threads only, no IMAP server is used." });
@@ -769,7 +798,7 @@ export default function InboxWorkspace() {
         return;
       }
       if (!useEmailAccountStore.getState().emailServerHydrated) return;
-      const acct = getActiveMailbox(useEmailAccountStore.getState());
+      const acct = mailboxOverride ?? getActiveMailbox(useEmailAccountStore.getState());
       const mailboxId = acct.id;
       if (!isImapInboxConfigured(acct)) {
         if (folder === "inbox") setInbound(acct.id, []);
@@ -797,7 +826,12 @@ export default function InboxWorkspace() {
         setTrashLoading(true);
       }
       try {
-        const url = appendMailDataOwnerParam("/api/email/imap-fetch", mailApiForUid, currentUserId);
+        const apiForUid = resolveMailApiForUserUid({
+          mailViewAsUid,
+          activeMailboxDataOwnerUid: acct.dataOwnerUid,
+          selfUid: currentUserId,
+        });
+        const url = appendMailDataOwnerParam("/api/email/imap-fetch", apiForUid, currentUserId);
         const res = await fetch(url, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -840,8 +874,8 @@ export default function InboxWorkspace() {
           if (folder === "sent") setSentFetchError(err);
           return;
         }
-        const stillActive = getActiveMailbox(useEmailAccountStore.getState()).id;
-        if (stillActive !== mailboxId) return;
+        const currentSelection = useEmailAccountStore.getState().activeMailboxId;
+        if (currentSelection !== ALL_MAILBOXES_ID && currentSelection !== mailboxId) return;
 
         let rows = Array.isArray(data.messages) ? data.messages : [];
         if (folder === "inbox") {
@@ -909,9 +943,24 @@ export default function InboxWorkspace() {
     ],
   );
 
-  const fetchInboundMail = React.useCallback(() => fetchImapListFolder("inbox"), [fetchImapListFolder]);
-  const fetchTrashMail = React.useCallback(() => fetchImapListFolder("trash"), [fetchImapListFolder]);
-  const fetchSentMail = React.useCallback(() => fetchImapListFolder("sent"), [fetchImapListFolder]);
+  const fetchScopedFolder = React.useCallback(
+    async (folder: ImapListFolder) => {
+      const state = useEmailAccountStore.getState();
+      const targets =
+        state.activeMailboxId === ALL_MAILBOXES_ID
+          ? state.mailboxes
+          : [getActiveMailbox(state)];
+      await Promise.all(
+        targets
+          .filter(isImapInboxConfigured)
+          .map((mailbox) => fetchImapListFolder(folder, mailbox)),
+      );
+    },
+    [fetchImapListFolder],
+  );
+  const fetchInboundMail = React.useCallback(() => fetchScopedFolder("inbox"), [fetchScopedFolder]);
+  const fetchTrashMail = React.useCallback(() => fetchScopedFolder("trash"), [fetchScopedFolder]);
+  const fetchSentMail = React.useCallback(() => fetchScopedFolder("sent"), [fetchScopedFolder]);
 
   const loadMoreSentMail = React.useCallback(async () => {
     if (isDemo || sentLoadingMore) return;
@@ -1047,7 +1096,7 @@ export default function InboxWorkspace() {
     inboundLoadingMore,
     imapMailboxTotal,
     appendInbound,
-    mailViewAsUid, mailApiForUid,
+    mailViewAsUid, actionMailApiForUid,
     currentUserId,
   ]);
 
@@ -1099,15 +1148,20 @@ export default function InboxWorkspace() {
     if (isDemo) return;
     if (!emailServerHydrated) return;
 
-    const acct = getActiveMailbox(useEmailAccountStore.getState());
-    if (!isImapInboxConfigured(acct)) {
-      setInbound(acct.id, []);
-      setTrashInbound(acct.id, []);
-      return;
+    const targets =
+      useEmailAccountStore.getState().activeMailboxId === ALL_MAILBOXES_ID
+        ? useEmailAccountStore.getState().mailboxes
+        : [getActiveMailbox(useEmailAccountStore.getState())];
+    for (const acct of targets) {
+      if (!isImapInboxConfigured(acct)) {
+        setInbound(acct.id, []);
+        setTrashInbound(acct.id, []);
+        continue;
+      }
+      if (mailFolder === "inbox") void fetchImapListFolder("inbox", acct);
+      else if (mailFolder === "sent") void fetchImapListFolder("sent", acct);
+      else void fetchImapListFolder("trash", acct);
     }
-    if (mailFolder === "inbox") void fetchImapListFolder("inbox");
-    else if (mailFolder === "sent") void fetchImapListFolder("sent");
-    else void fetchImapListFolder("trash");
   }, [
     mailFolder,
     isDemo,
@@ -1118,6 +1172,7 @@ export default function InboxWorkspace() {
     account.imap.port,
     account.imap.secure,
     account.imap.user,
+    mailboxes,
     fetchImapListFolder,
     setInbound,
     setTrashInbound,
@@ -1141,7 +1196,7 @@ export default function InboxWorkspace() {
 
     void (async () => {
       try {
-        const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", mailApiForUid, currentUserId);
+        const url = appendMailDataOwnerParam("/api/email/imap-fetch-bodies", actionMailApiForUid, currentUserId);
         const res = await fetch(url, {
           method: "POST",
           signal: ac.signal,
@@ -1195,13 +1250,13 @@ export default function InboxWorkspace() {
     mailFolder,
     selectedMail,
     mergeSentBodies,
-    account.id,
-    account.imap.host,
-    account.imap.port,
-    account.imap.secure,
-    account.imap.user,
-    account.imap.password,
-    mailViewAsUid, mailApiForUid,
+    selectedRowMailbox.id,
+    selectedRowMailbox.imap.host,
+    selectedRowMailbox.imap.port,
+    selectedRowMailbox.imap.secure,
+    selectedRowMailbox.imap.user,
+    selectedRowMailbox.imap.password,
+    mailViewAsUid, actionMailApiForUid,
     currentUserId,
   ]);
 
@@ -1224,7 +1279,7 @@ export default function InboxWorkspace() {
     setComposeTo(preset?.to ?? "");
     setComposeCc(preset?.cc?.trim() ? preset.cc.trim() : "");
     setComposeSubject(preset?.subject ?? "");
-    setComposeBody(preset?.body ?? (account.signature ? `\n\n${account.signature}` : ""));
+    setComposeBody(preset?.body ?? (actionAccount.signature ? `\n\n${actionAccount.signature}` : ""));
     setComposeDraftId(preset?.id);
     setComposeInReplyTo(preset?.inReplyTo);
     setComposeReferenceIds(preset?.referenceIds ?? []);
@@ -1327,7 +1382,7 @@ export default function InboxWorkspace() {
     }
     const toLine = toParsed.addresses.join(", ");
     const ccLine = ccParsed?.addresses.join(", ");
-    if (!account.emailAddress.trim()) {
+    if (!actionAccount.emailAddress.trim()) {
       toast.error("Set your From email in Settings → Email before sending.");
       return;
     }
@@ -1335,8 +1390,8 @@ export default function InboxWorkspace() {
       setSending(true);
       try {
         addSent({
-          mailboxId: account.id,
-          from: account.emailAddress.trim() || "demo@nova.local",
+          mailboxId: actionAccount.id,
+          from: actionAccount.emailAddress.trim() || "demo@nova.local",
           to: toLine,
           cc: ccLine || undefined,
           subject: composeSubject.trim() || "(no subject)",
@@ -1361,7 +1416,7 @@ export default function InboxWorkspace() {
       }
       return;
     }
-    if (!isEmailAccountConfigured(account)) {
+    if (!isEmailAccountConfigured(actionAccount)) {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
@@ -1373,16 +1428,16 @@ export default function InboxWorkspace() {
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const url = appendMailDataOwnerParam("/api/email/send", mailApiForUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/send", actionMailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mailboxId: account.id,
+          mailboxId: actionAccount.id,
           leadId: selectedLead?.id,
-          from: account.emailAddress,
-          displayName: account.displayName,
-          replyTo: account.replyTo,
+          from: actionAccount.emailAddress,
+          displayName: actionAccount.displayName,
+          replyTo: actionAccount.replyTo,
           to: toLine,
           cc: ccLine || undefined,
           subject: composeSubject.trim(),
@@ -1399,19 +1454,19 @@ export default function InboxWorkspace() {
                 }))
               : undefined,
           smtp: {
-            host: account.smtp.host,
-            port: account.smtp.port,
-            secure: account.smtp.secure,
-            user: account.smtp.user,
-            pass: account.smtp.password,
+            host: actionAccount.smtp.host,
+            port: actionAccount.smtp.port,
+            secure: actionAccount.smtp.secure,
+            user: actionAccount.smtp.user,
+            pass: actionAccount.smtp.password,
           },
           imap: isImapInboxConfigured(account)
             ? {
-                host: account.imap.host,
-                port: account.imap.port,
-                secure: account.imap.secure,
-                user: account.imap.user,
-                pass: account.imap.password,
+                host: actionAccount.imap.host,
+                port: actionAccount.imap.port,
+                secure: actionAccount.imap.secure,
+                user: actionAccount.imap.user,
+                pass: actionAccount.imap.password,
               }
             : undefined,
         }),
@@ -1445,8 +1500,8 @@ export default function InboxWorkspace() {
         await fetchImapListFolder("sent");
       } else {
         addSent({
-          mailboxId: account.id,
-          from: account.emailAddress,
+          mailboxId: actionAccount.id,
+          from: actionAccount.emailAddress,
           to: toLine,
           cc: ccLine || undefined,
           subject: composeSubject.trim(),
@@ -1494,8 +1549,8 @@ export default function InboxWorkspace() {
       setSending(true);
       try {
         addScheduled({
-          mailboxId: account.id,
-          from: account.emailAddress.trim() || "demo@nova.local",
+          mailboxId: actionAccount.id,
+          from: actionAccount.emailAddress.trim() || "demo@nova.local",
           to: toLine,
           cc: ccLine || undefined,
           subject: composeSubject.trim() || "(no subject)",
@@ -1520,7 +1575,7 @@ export default function InboxWorkspace() {
       return;
     }
 
-    if (!isEmailAccountConfigured(account)) {
+    if (!isEmailAccountConfigured(actionAccount)) {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
@@ -1533,16 +1588,16 @@ export default function InboxWorkspace() {
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const url = appendMailDataOwnerParam("/api/email/scheduled", mailApiForUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/scheduled", actionMailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mailboxId: account.id,
+          mailboxId: actionAccount.id,
           leadId: selectedLead?.id,
-          from: account.emailAddress,
-          displayName: account.displayName,
-          replyTo: account.replyTo,
+          from: actionAccount.emailAddress,
+          displayName: actionAccount.displayName,
+          replyTo: actionAccount.replyTo,
           to: toLine,
           cc: ccLine || undefined,
           subject: composeSubject.trim(),
@@ -1612,7 +1667,7 @@ export default function InboxWorkspace() {
   function saveDraft() {
     const id = upsertDraft({
       id: composeDraftId,
-      mailboxId: account.id,
+      mailboxId: actionAccount.id,
       to: composeTo,
       cc: composeCc.trim() || undefined,
       subject: composeSubject,
@@ -1941,36 +1996,45 @@ export default function InboxWorkspace() {
 
   const mailListRows: MailListRow[] = React.useMemo(() => {
     if (mailFolder === "inbox") {
-      return inboundThreads.map((t) => ({
-        id: `${account.id}:thread:${t.threadId}`,
-        title: t.conversationSubject,
-        subtitle:
-          t.messages.length > 1
-            ? `${t.latest.from} · ${t.messages.length} messages`
-            : t.latest.from,
-        at: t.latest.date,
-        row: t.latest,
-        muted: !t.hasUnread,
-        thread: t,
-      }));
+      return scopedMailboxes
+        .flatMap((mailbox) =>
+          groupInboundIntoThreads(inboundByMailbox[mailbox.id] ?? []).map((t) => ({
+            id: `${mailbox.id}:thread:${t.threadId}`,
+            mailboxId: mailbox.id,
+            title: t.conversationSubject,
+            subtitle: `${allMailboxesSelected ? `${mailboxDisplayLabel(mailbox)} · ` : ""}${
+              t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from
+            }`,
+            at: t.latest.date,
+            row: t.latest,
+            muted: !t.hasUnread,
+            thread: t,
+          })),
+        )
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     }
     if (mailFolder === "trash") {
-      return trashThreads.map((t) => ({
-        id: `${account.id}:trash-thread:${t.threadId}`,
-        title: t.conversationSubject,
-        subtitle:
-          t.messages.length > 1
-            ? `${t.latest.from} · ${t.messages.length} messages`
-            : t.latest.from,
-        at: t.latest.date,
-        row: t.latest,
-        muted: true,
-        thread: t,
-      }));
+      return scopedMailboxes
+        .flatMap((mailbox) =>
+          groupInboundIntoThreads(trashInboundByMailbox[mailbox.id] ?? []).map((t) => ({
+            id: `${mailbox.id}:trash-thread:${t.threadId}`,
+            mailboxId: mailbox.id,
+            title: t.conversationSubject,
+            subtitle: `${allMailboxesSelected ? `${mailboxDisplayLabel(mailbox)} · ` : ""}${
+              t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from
+            }`,
+            at: t.latest.date,
+            row: t.latest,
+            muted: true,
+            thread: t,
+          })),
+        )
+        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
     }
     if (mailFolder === "sent") {
       return sentForMailbox.map((m) => ({
         id: m.id,
+        mailboxId: m.mailboxId,
         title: m.subject || "(no subject)",
         subtitle: m.to,
         at: m.sentAt,
@@ -1978,8 +2042,9 @@ export default function InboxWorkspace() {
       }));
     }
     if (mailFolder === "drafts") {
-      return drafts.filter((m) => m.mailboxId === account.id).map((m) => ({
+      return drafts.filter((m) => allMailboxesSelected || m.mailboxId === account.id).map((m) => ({
         id: m.id,
+        mailboxId: m.mailboxId,
         title: m.subject || "(no subject)",
         subtitle: m.to || "No recipient",
         at: m.updatedAt,
@@ -1988,7 +2053,7 @@ export default function InboxWorkspace() {
     }
     if (mailFolder === "scheduled") {
       return scheduled
-        .filter((m) => m.mailboxId === account.id)
+        .filter((m) => allMailboxesSelected || m.mailboxId === account.id)
         .filter((m) =>
           scheduledTab === "pending"
             ? m.status === "pending" || m.status === "processing"
@@ -1996,6 +2061,7 @@ export default function InboxWorkspace() {
         )
         .map((m) => ({
           id: m.id,
+          mailboxId: m.mailboxId,
           title: m.subject || "(no subject)",
           subtitle:
             scheduledTab === "pending"
@@ -2008,32 +2074,43 @@ export default function InboxWorkspace() {
         }));
     }
     return [];
-  }, [mailFolder, sentForMailbox, drafts, scheduled, scheduledTab, inboundThreads, trashThreads, account.id]);
+  }, [
+    mailFolder,
+    scopedMailboxes,
+    inboundByMailbox,
+    trashInboundByMailbox,
+    sentForMailbox,
+    drafts,
+    scheduled,
+    scheduledTab,
+    allMailboxesSelected,
+    account.id,
+  ]);
 
   const scheduledPendingCount = React.useMemo(
     () =>
       scheduled.filter(
         (m) =>
-          m.mailboxId === account.id &&
+          (allMailboxesSelected || m.mailboxId === account.id) &&
           (m.status === "pending" || m.status === "processing"),
       ).length,
-    [scheduled, account.id],
+    [scheduled, allMailboxesSelected, account.id],
   );
 
   const inboxMailListRows = React.useMemo((): MailListRow[] => {
-    return inboundThreads.map((t) => ({
-      id: `${account.id}:thread:${t.threadId}`,
-      title: t.conversationSubject,
-      subtitle:
-        t.messages.length > 1
-          ? `${t.latest.from} · ${t.messages.length} messages`
-          : t.latest.from,
-      at: t.latest.date,
-      row: t.latest,
-      muted: !t.hasUnread,
-      thread: t,
-    }));
-  }, [inboundThreads, account.id]);
+    return scopedMailboxes.flatMap((mailbox) =>
+      groupInboundIntoThreads(inboundByMailbox[mailbox.id] ?? []).map((t) => ({
+        id: `${mailbox.id}:thread:${t.threadId}`,
+        mailboxId: mailbox.id,
+        title: t.conversationSubject,
+        subtitle: t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from,
+        at: t.latest.date,
+        row: t.latest,
+        muted: !t.hasUnread,
+        thread: t,
+      })),
+    );
+  }, [scopedMailboxes, inboundByMailbox]);
 
   const inboxMailFilterStats = React.useMemo(() => {
     const all = { ...EMPTY_MAIL_FILTER_STATS };
@@ -2048,7 +2125,7 @@ export default function InboxWorkspace() {
       all.total += 1;
       if (rowIsUnread(row)) all.unread += 1;
 
-      const lead = resolveLeadForMailListRow(row, account.id, linkedLeadByMessageId, leads);
+      const lead = resolveLeadForMailListRow(row, row.mailboxId, linkedLeadByMessageId, leads);
       const contact = resolveContactForMailListRow(row, contacts);
 
       if (lead) {
@@ -2112,7 +2189,7 @@ export default function InboxWorkspace() {
           row,
           entityMailFilter,
           entitySubFilter,
-          account.id,
+          row.mailboxId,
           linkedLeadByMessageId,
           leads,
           contacts,
@@ -2149,7 +2226,7 @@ export default function InboxWorkspace() {
           row,
           entityMailFilter,
           entitySubFilter,
-          account.id,
+          row.mailboxId,
           linkedLeadByMessageId,
           leads,
           contacts,
@@ -2161,12 +2238,12 @@ export default function InboxWorkspace() {
     }
     if (selectedMailLabelId) {
       rows = rows.filter((row) =>
-        rowHasMailLabel(row, account.id, mailFolder, labelsByMessageId, selectedMailLabelId),
+        rowHasMailLabel(row, row.mailboxId, mailFolder, labelsByMessageId, selectedMailLabelId),
       );
     }
     if (selectedMailFlagId) {
       rows = rows.filter((row) =>
-        rowHasMailFlag(row, account.id, mailFolder, flagByMessageId, selectedMailFlagId),
+        rowHasMailFlag(row, row.mailboxId, mailFolder, flagByMessageId, selectedMailFlagId),
       );
     }
     return rows.filter((row) => mailListRowMatchesSearch(row, q));
@@ -2210,28 +2287,33 @@ export default function InboxWorkspace() {
       const keys = new Set<string>();
       for (const row of rows) {
         if (!rowIds.has(row.id)) continue;
-        for (const key of collectMessageMetaKeysFromRow(row, account.id, mailFolder)) {
+        for (const key of collectMessageMetaKeysFromRow(row, row.mailboxId, mailFolder)) {
           keys.add(key);
         }
       }
       return [...keys];
     },
-    [account.id, mailFolder],
+    [mailFolder],
   );
 
   const mailLabelCounts = React.useMemo(() => {
     const counts: Record<string, number> = {};
     for (const label of mailLabels) {
-      counts[label.id] = countMessagesWithLabel(
-        inboxMailListRows,
-        account.id,
-        "inbox",
-        labelsByMessageId,
-        label.id,
+      counts[label.id] = inboxMailListRows.reduce(
+        (total, row) =>
+          total +
+          countMessagesWithLabel(
+            [row],
+            row.mailboxId,
+            "inbox",
+            labelsByMessageId,
+            label.id,
+          ),
+        0,
       );
     }
     return counts;
-  }, [mailLabels, inboxMailListRows, account.id, labelsByMessageId]);
+  }, [mailLabels, inboxMailListRows, labelsByMessageId]);
 
   const selectedMailLabel = React.useMemo(
     () => mailLabels.find((l) => l.id === selectedMailLabelId) ?? null,
@@ -2242,14 +2324,14 @@ export default function InboxWorkspace() {
     if (!selectedThread) return [] as string[];
     const folder = mailFolder === "trash" ? "trash" : "inbox";
     const keys = selectedThread.messages.flatMap((m) =>
-      messageMetaKeysForInbound(account.id, m, folder),
+      messageMetaKeysForInbound(selectedRowMailbox.id, m, folder),
     );
     const ids = new Set<string>();
     for (const key of keys) {
       for (const id of labelsByMessageId[key] ?? []) ids.add(id);
     }
     return [...ids];
-  }, [selectedThread, account.id, mailFolder, labelsByMessageId]);
+  }, [selectedThread, selectedRowMailbox.id, mailFolder, labelsByMessageId]);
 
   const handleCreateMailLabel = React.useCallback(
     (name: string, color: string) => {
@@ -2285,11 +2367,11 @@ export default function InboxWorkspace() {
       if (!selectedThread) return;
       const folder = mailFolder === "trash" ? "trash" : "inbox";
       const keys = selectedThread.messages.flatMap((m) =>
-        messageMetaKeysForInbound(account.id, m, folder),
+        messageMetaKeysForInbound(selectedRowMailbox.id, m, folder),
       );
       toggleMessageLabel(keys, labelId);
     },
-    [selectedThread, mailFolder, account.id, toggleMessageLabel],
+    [selectedThread, mailFolder, selectedRowMailbox.id, toggleMessageLabel],
   );
 
   const handleRemoveLabelFromSelection = React.useCallback(
@@ -2317,13 +2399,13 @@ export default function InboxWorkspace() {
       if (!selectedThread) return;
       const folder = mailFolder === "trash" ? "trash" : "inbox";
       const keys = selectedThread.messages.flatMap((m) =>
-        messageMetaKeysForInbound(account.id, m, folder),
+        messageMetaKeysForInbound(selectedRowMailbox.id, m, folder),
       );
       removeLabelFromMessages(keys, labelId);
       const name = mailLabels.find((l) => l.id === labelId)?.name ?? "label";
       toast.success(`Removed from “${name}”`);
     },
-    [selectedThread, mailFolder, account.id, removeLabelFromMessages, mailLabels],
+    [selectedThread, mailFolder, selectedRowMailbox.id, removeLabelFromMessages, mailLabels],
   );
 
   const handleRemoveFromActiveLabelFilter = React.useCallback(() => {
@@ -2347,7 +2429,7 @@ export default function InboxWorkspace() {
 
   const handleRemoveLabelFromMailRow = React.useCallback(
     (row: MailListRow, labelId: string) => {
-      const keys = collectMessageMetaKeysFromRow(row, account.id, mailFolder);
+      const keys = collectMessageMetaKeysFromRow(row, row.mailboxId, mailFolder);
       if (keys.length === 0) return;
       removeLabelFromMessages(keys, labelId);
     },
@@ -2368,7 +2450,7 @@ export default function InboxWorkspace() {
     const ids = new Set<string>();
     for (const row of visibleMailRows) {
       if (!selectedMailRowIds.has(row.id)) continue;
-      for (const id of labelIdsForRow(row, account.id, mailFolder, labelsByMessageId)) {
+      for (const id of labelIdsForRow(row, row.mailboxId, mailFolder, labelsByMessageId)) {
         ids.add(id);
       }
     }
@@ -2381,39 +2463,43 @@ export default function InboxWorkspace() {
       number
     >;
     for (const id of MAIL_FLAG_IDS) {
-      counts[id] = countMessagesWithFlag(
-        inboxMailListRows,
-        account.id,
-        "inbox",
-        flagByMessageId,
-        id,
+      counts[id] = inboxMailListRows.reduce(
+        (total, row) =>
+          total +
+          countMessagesWithFlag([row], row.mailboxId, "inbox", flagByMessageId, id),
+        0,
       );
     }
     return counts;
-  }, [inboxMailListRows, account.id, flagByMessageId]);
+  }, [inboxMailListRows, flagByMessageId]);
 
   const flaggedMailTotal = React.useMemo(
-    () => countFlaggedMessages(inboxMailListRows, account.id, "inbox", flagByMessageId),
-    [inboxMailListRows, account.id, flagByMessageId],
+    () =>
+      inboxMailListRows.reduce(
+        (total, row) =>
+          total + countFlaggedMessages([row], row.mailboxId, "inbox", flagByMessageId),
+        0,
+      ),
+    [inboxMailListRows, flagByMessageId],
   );
 
   const openThreadFlagId = React.useMemo(() => {
     if (!selectedThread) return null;
     const folder = mailFolder === "trash" ? "trash" : "inbox";
     const latest = selectedThread.latest;
-    const keys = messageMetaKeysForInbound(account.id, latest, folder);
+    const keys = messageMetaKeysForInbound(selectedRowMailbox.id, latest, folder);
     for (let i = keys.length - 1; i >= 0; i--) {
       const hit = flagByMessageId[keys[i]!];
       if (hit) return hit;
     }
     return null;
-  }, [selectedThread, account.id, mailFolder, flagByMessageId]);
+  }, [selectedThread, selectedRowMailbox.id, mailFolder, flagByMessageId]);
 
   const selectedRowsFlagId = React.useMemo((): MailFlagId | null => {
     const flags = new Set<MailFlagId>();
     for (const row of visibleMailRows) {
       if (!selectedMailRowIds.has(row.id)) continue;
-      const f = flagIdForRow(row, account.id, mailFolder, flagByMessageId);
+      const f = flagIdForRow(row, row.mailboxId, mailFolder, flagByMessageId);
       if (f) flags.add(f);
     }
     return flags.size === 1 ? [...flags][0]! : null;
@@ -2457,30 +2543,30 @@ export default function InboxWorkspace() {
       if (!selectedThread) return;
       const folder = mailFolder === "trash" ? "trash" : "inbox";
       const keys = selectedThread.messages.flatMap((m) =>
-        messageMetaKeysForInbound(account.id, m, folder),
+        messageMetaKeysForInbound(selectedRowMailbox.id, m, folder),
       );
       setMessageFlag(keys, flagId);
     },
-    [selectedThread, mailFolder, account.id, setMessageFlag],
+    [selectedThread, mailFolder, selectedRowMailbox.id, setMessageFlag],
   );
 
   const handleClearFlagOnOpenThread = React.useCallback(() => {
     if (!selectedThread) return;
     const folder = mailFolder === "trash" ? "trash" : "inbox";
     const keys = selectedThread.messages.flatMap((m) =>
-      messageMetaKeysForInbound(account.id, m, folder),
+      messageMetaKeysForInbound(selectedRowMailbox.id, m, folder),
     );
     setMessageFlag(keys, null);
-  }, [selectedThread, mailFolder, account.id, setMessageFlag]);
+  }, [selectedThread, mailFolder, selectedRowMailbox.id, setMessageFlag]);
 
   const handleToggleFlagOnOpenThread = React.useCallback(() => {
     if (!selectedThread) return;
     const folder = mailFolder === "trash" ? "trash" : "inbox";
     const keys = selectedThread.messages.flatMap((m) =>
-      messageMetaKeysForInbound(account.id, m, folder),
+      messageMetaKeysForInbound(selectedRowMailbox.id, m, folder),
     );
     toggleMessageFlag(keys);
-  }, [selectedThread, mailFolder, account.id, toggleMessageFlag]);
+  }, [selectedThread, mailFolder, selectedRowMailbox.id, toggleMessageFlag]);
 
   const showEntitySubFilter =
     entityMailFilter === ENTITY_LEAD_LINKED || entityMailFilter === ENTITY_CONTACT_LINKED;
@@ -2588,17 +2674,22 @@ export default function InboxWorkspace() {
 
       const folder = mailFolder === "trash" ? "trash" : "inbox";
       const patchLocal = folder === "trash" ? patchTrashSeen : patchInboundSeen;
-      patchLocal(account.id, uids, seen);
+      patchLocal(selectedRowMailbox.id, uids, seen);
 
       if (isDemo || inboxReadOnly) return;
 
-      const acct = getActiveMailbox(useEmailAccountStore.getState());
+      const acct = selectedRowMailbox;
       const action = seen ? "markSeen" : "markUnseen";
       const CHUNK = 60;
       try {
         for (let i = 0; i < uids.length; i += CHUNK) {
           const part = uids.slice(i, i + CHUNK);
-          const url = appendMailDataOwnerParam("/api/email/imap-mutate", mailApiForUid, currentUserId);
+          const apiForUid = resolveMailApiForUserUid({
+            mailViewAsUid,
+            activeMailboxDataOwnerUid: acct.dataOwnerUid,
+            selfUid: currentUserId,
+          });
+          const url = appendMailDataOwnerParam("/api/email/imap-mutate", apiForUid, currentUserId);
           const res = await fetch(url, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2631,7 +2722,7 @@ export default function InboxWorkspace() {
     },
     [
       mailFolder,
-      account.id,
+      selectedRowMailbox,
       patchInboundSeen,
       patchTrashSeen,
       isDemo,
@@ -2773,6 +2864,7 @@ export default function InboxWorkspace() {
   const mailRowElByIdRef = React.useRef<Map<string, HTMLElement>>(new Map());
 
   const selectVisibleMailRow = React.useCallback((row: MailListRow) => {
+    setSelectedRowMailboxId(row.mailboxId);
     if (row.thread) {
       setSelectedThread(row.thread);
       setSelectedMail(null);
@@ -2909,7 +3001,7 @@ export default function InboxWorkspace() {
           (mailFolder === "trash" && trashLoading) ||
           (mailFolder === "sent" && sentLoading) ||
           (!isDemo &&
-            !isImapInboxConfigured(account) &&
+            !hasScopedImapMailbox &&
             (mailFolder === "inbox" || mailFolder === "trash" || mailFolder === "sent"))
         }
         onClick={() => {
@@ -2920,7 +3012,7 @@ export default function InboxWorkspace() {
         title={
           isDemo
             ? "Sample inbox, refresh shows this reminder"
-            : isImapInboxConfigured(account)
+            : hasScopedImapMailbox
               ? mailFolder === "trash"
                 ? "Reload Trash from the server"
                 : mailFolder === "sent"
@@ -3205,18 +3297,27 @@ export default function InboxWorkspace() {
               </Select>
             ) : null}
             <Select
-              value={account.id}
+              value={activeMailboxId || ALL_MAILBOXES_ID}
               onValueChange={(v) => {
                 if (v) {
                   setActiveMailbox(v);
+                  setSelectedRowMailboxId(null);
+                  setSelectedThread(null);
+                  setSelectedMail(null);
+                  setSelectedScheduled(null);
                   clearMailRowSelection();
                 }
               }}
             >
               <SelectTrigger className="h-8 min-w-[200px] max-w-[min(100%,280px)]">
-                <SelectValue placeholder="Select mailbox">{mailboxDisplayLabel(account)}</SelectValue>
+                <SelectValue placeholder="Select mailbox">
+                  {allMailboxesSelected ? "All mailboxes" : mailboxDisplayLabel(account)}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
+                <SelectItem value={ALL_MAILBOXES_ID}>
+                  <span className="font-medium">All mailboxes</span>
+                </SelectItem>
                 {mailboxes.map((mb) => (
                   <SelectItem key={mb.id} value={mb.id}>
                     {mailboxDisplayLabel(mb)}
@@ -3345,7 +3446,9 @@ export default function InboxWorkspace() {
                     inboxMailFilterStats.all.unread > 0 ? (
                       <span
                         className="ml-auto flex h-4 min-w-4 shrink-0 items-center justify-center rounded-full bg-red-600 px-1 text-[9px] font-semibold leading-none text-white tabular-nums"
-                        title={`${inboxMailFilterStats.all.unread} unread · ${mailboxDisplayLabel(account)}`}
+                        title={`${inboxMailFilterStats.all.unread} unread · ${
+                          allMailboxesSelected ? "All mailboxes" : mailboxDisplayLabel(account)
+                        }`}
                       >
                         {inboxMailFilterStats.all.unread > 99 ? "99+" : inboxMailFilterStats.all.unread}
                       </span>
@@ -3353,9 +3456,9 @@ export default function InboxWorkspace() {
                       <Badge
                         variant="outline"
                         className="ml-auto h-5 max-w-[min(100%,5.75rem)] shrink-0 truncate px-1.5 text-[10px] font-normal"
-                        title={mailboxDisplayLabel(account)}
+                        title={allMailboxesSelected ? "All mailboxes" : mailboxDisplayLabel(account)}
                       >
-                        {mailboxDisplayLabel(account)}
+                        {allMailboxesSelected ? "All mailboxes" : mailboxDisplayLabel(account)}
                       </Badge>
                     )
                   ) : null}
@@ -3822,7 +3925,7 @@ export default function InboxWorkspace() {
                 </div>
               </div>
               <div className="flex-1 overflow-y-auto divide-y">
-                {mailFolder === "inbox" && !isImapInboxConfigured(account) && (
+                {mailFolder === "inbox" && !hasScopedImapMailbox && (
                   <div className="p-4 space-y-2">
                     <p className="text-sm text-muted-foreground">
                       Enter your IMAP server, username, and password in{" "}
@@ -3833,16 +3936,16 @@ export default function InboxWorkspace() {
                     </p>
                   </div>
                 )}
-                {mailFolder === "inbox" && isImapInboxConfigured(account) && inboundLoading && inbound.length === 0 && (
+                {mailFolder === "inbox" && hasScopedImapMailbox && inboundLoading && mailListRows.length === 0 && (
                   <div className="p-8 flex justify-center text-muted-foreground">
                     <Loader2 className="h-6 w-6 animate-spin" />
                   </div>
                 )}
                 {mailFolder === "inbox" &&
-                  isImapInboxConfigured(account) &&
+                  hasScopedImapMailbox &&
                   !inboundLoading &&
                   !inboundSyncing &&
-                  inbound.length === 0 && (
+                  mailListRows.length === 0 && (
                     <div className="p-6 text-center text-sm text-muted-foreground">No messages in INBOX.</div>
                   )}
                 {mailFolder === "trash" && !isDemo && !isImapInboxConfigured(account) && (
@@ -3942,15 +4045,17 @@ export default function InboxWorkspace() {
                     </div>
                   )}
                 {visibleMailRows.map((row, rowIndex) => {
-                  const isRowSelected = row.scheduled
-                    ? selectedScheduled?.id === row.scheduled.id
-                    : row.thread
-                      ? selectedThread?.threadId === row.thread.threadId
-                      : selectedMail?.id === row.row.id && selectedThread == null;
+                  const isRowSelected =
+                    selectedRowMailboxId === row.mailboxId &&
+                    (row.scheduled
+                      ? selectedScheduled?.id === row.scheduled.id
+                      : row.thread
+                        ? selectedThread?.threadId === row.thread.threadId
+                        : selectedMail?.id === row.row.id && selectedThread == null);
                   const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
                   const bulkChecked = selectedMailRowIds.has(row.id);
-                  const rowLabelIds = labelIdsForRow(row, account.id, mailFolder, labelsByMessageId);
-                  const rowFlagId = flagIdForRow(row, account.id, mailFolder, flagByMessageId);
+                  const rowLabelIds = labelIdsForRow(row, row.mailboxId, mailFolder, labelsByMessageId);
+                  const rowFlagId = flagIdForRow(row, row.mailboxId, mailFolder, flagByMessageId);
                   return (
                     <div
                       key={row.id}
@@ -4135,7 +4240,7 @@ export default function InboxWorkspace() {
                           openCompose({
                             to: addr,
                             subject: replySubject(latest.subject),
-                            body: withMailboxSignature(replyQuotedBody(latest), account.signature),
+                            body: withMailboxSignature(replyQuotedBody(latest), actionAccount.signature),
                             ...replyContextForMessage(latest),
                           });
                         }}
@@ -4159,7 +4264,7 @@ export default function InboxWorkspace() {
                             to: pack.to,
                             cc: pack.cc,
                             subject: replySubject(latest.subject),
-                            body: withMailboxSignature(replyQuotedBody(latest), account.signature),
+                            body: withMailboxSignature(replyQuotedBody(latest), actionAccount.signature),
                             ...replyContextForMessage(latest),
                           });
                         }}
@@ -4193,7 +4298,7 @@ export default function InboxWorkspace() {
                             to: "",
                             cc: "",
                             subject: forwardSubject(latest.subject),
-                            body: withMailboxSignature(forwardedBody(latest), account.signature),
+                            body: withMailboxSignature(forwardedBody(latest), actionAccount.signature),
                             attachments: composeAttachmentsFromInbound(latest.attachments),
                           });
                         }}
@@ -4522,7 +4627,7 @@ export default function InboxWorkspace() {
                             openCompose({
                               to: addr,
                               subject: replySubject(selectedMail.subject),
-                              body: withMailboxSignature(replyQuotedBody(selectedMail), account.signature),
+                              body: withMailboxSignature(replyQuotedBody(selectedMail), actionAccount.signature),
                               ...replyContextForMessage(selectedMail),
                             });
                           }}
@@ -4545,7 +4650,7 @@ export default function InboxWorkspace() {
                               to: pack.to,
                               cc: pack.cc,
                               subject: replySubject(selectedMail.subject),
-                              body: withMailboxSignature(replyQuotedBody(selectedMail), account.signature),
+                              body: withMailboxSignature(replyQuotedBody(selectedMail), actionAccount.signature),
                               ...replyContextForMessage(selectedMail),
                             });
                           }}
@@ -4578,7 +4683,7 @@ export default function InboxWorkspace() {
                               to: "",
                               cc: "",
                               subject: forwardSubject(selectedMail.subject),
-                              body: withMailboxSignature(forwardedBody(selectedMail), account.signature),
+                              body: withMailboxSignature(forwardedBody(selectedMail), actionAccount.signature),
                               attachments: composeAttachmentsFromInbound(selectedMail.attachments),
                             });
                           }}

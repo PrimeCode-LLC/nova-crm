@@ -2,9 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { ArrowLeft, Building, Users2, Pencil } from "lucide-react";
-import { toast } from "sonner";
+import { ArrowLeft, Users2 } from "lucide-react";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
@@ -21,38 +19,34 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 
-export function DepartmentDetailView({ departmentId }: { departmentId: string }) {
-  const router = useRouter();
+export function TeamDetailView({ teamId }: { teamId: string }) {
   const ws = useWorkspace();
-  const dept = ws.departments.find((d) => d.id === departmentId);
+  const team = ws.departments.find((candidate) => candidate.id === teamId);
 
   const members = React.useMemo(
-    () => ws.users.filter((u) => u.departmentId === departmentId),
-    [ws.users, departmentId],
+    () => ws.users.filter((u) => u.departmentId === teamId),
+    [ws.users, teamId],
   );
 
-  const deptLeads = React.useMemo(() => {
+  const teamLeads = React.useMemo(() => {
     const ownerIds = new Set(members.map((u) => u.id));
     return ws.leads.filter((l) => ownerIds.has(l.ownerId));
   }, [ws.leads, members]);
 
-  if (!dept) {
+  if (!team) {
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
-        <p className="text-sm text-muted-foreground">Department not found.</p>
+        <p className="text-sm text-muted-foreground">Team not found.</p>
         <Button
           size="sm"
           variant="outline"
           nativeButton={false}
-          render={<Link href="/admin/departments">Back to departments</Link>}
+          render={<Link href="/admin/teams">Back to teams</Link>}
         />
         {!ws.isDemo && <WorkspaceEmptyHint />}
       </PageBody>
     );
   }
-
-  const parent = dept.parentId ? ws.departments.find((d) => d.id === dept.parentId) : undefined;
-  const childDepartments = ws.departments.filter((d) => d.parentId === departmentId);
 
   return (
     <>
@@ -64,54 +58,29 @@ export function DepartmentDetailView({ departmentId }: { departmentId: string })
               size="icon-sm"
               nativeButton={false}
               render={
-                <Link href="/admin/departments" aria-label="Back to departments">
+                <Link href="/admin/teams" aria-label="Back to teams">
                   <ArrowLeft className="h-4 w-4" />
                 </Link>
               }
             />
             <div className="flex h-9 w-9 items-center justify-center rounded-md bg-primary/15 text-primary">
-              <Building className="h-4 w-4" />
+              <Users2 className="h-4 w-4" />
             </div>
             <div>
-              <div>{dept.name}</div>
-              {dept.description && (
+              <div>{team.name}</div>
+              {team.description && (
                 <p className="text-xs text-muted-foreground font-normal mt-0.5 max-w-xl">
-                  {dept.description}
+                  {team.description}
                 </p>
               )}
             </div>
           </div>
         }
-        description={
-          parent ? (
-            <span className="text-sm text-muted-foreground">
-              Sub-department of{" "}
-              <button
-                type="button"
-                className="text-primary hover:underline font-medium"
-                onClick={() => router.push(`/admin/departments/${parent.id}`)}
-              >
-                {parent.name}
-              </button>
-            </span>
-          ) : undefined
-        }
-        actions={
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() =>
-              toast.info("Department editing will use your workspace API when connected.")
-            }
-          >
-            <Pencil className="h-3.5 w-3.5" /> Edit
-          </Button>
-        }
+        description="Optional reporting group. Membership does not change reporting lines or grant CRM access."
       />
 
       <PageBody>
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -121,7 +90,7 @@ export function DepartmentDetailView({ departmentId }: { departmentId: string })
             </CardHeader>
             <CardContent className="space-y-2">
               {members.length === 0 ? (
-                <p className="text-xs text-muted-foreground">No users assigned to this department.</p>
+                <p className="text-xs text-muted-foreground">No people assigned to this team.</p>
               ) : (
                 <ul className="flex flex-wrap gap-2">
                   {members.map((u) => (
@@ -133,50 +102,15 @@ export function DepartmentDetailView({ departmentId }: { departmentId: string })
               )}
             </CardContent>
           </Card>
-
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Department lead</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {dept.leadUserId ? (
-                <UserChip userId={dept.leadUserId} size="sm" />
-              ) : (
-                <p className="text-xs text-muted-foreground">No lead assigned.</p>
-              )}
-            </CardContent>
-          </Card>
         </div>
-
-        {childDepartments.length > 0 && (
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm">Sub-departments ({childDepartments.length})</CardTitle>
-            </CardHeader>
-            <CardContent className="flex flex-wrap gap-2">
-              {childDepartments.map((c) => (
-                <Button
-                  key={c.id}
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  type="button"
-                  onClick={() => router.push(`/admin/departments/${c.id}`)}
-                >
-                  {c.name}
-                </Button>
-              ))}
-            </CardContent>
-          </Card>
-        )}
 
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Leads owned by this department ({deptLeads.length})</CardTitle>
+            <CardTitle className="text-sm">CRM leads owned by team members ({teamLeads.length})</CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
-            {deptLeads.length === 0 ? (
-              <p className="text-xs text-muted-foreground py-4">No leads from members in this department.</p>
+            {teamLeads.length === 0 ? (
+              <p className="text-xs text-muted-foreground py-4">No leads owned by this team.</p>
             ) : (
               <Table>
                 <TableHeader>
@@ -187,7 +121,7 @@ export function DepartmentDetailView({ departmentId }: { departmentId: string })
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {deptLeads.map((lead) => (
+                  {teamLeads.map((lead) => (
                     <TableRow key={lead.id}>
                       <TableCell className="text-sm font-medium">{lead.companyName}</TableCell>
                       <TableCell className="text-sm text-muted-foreground">

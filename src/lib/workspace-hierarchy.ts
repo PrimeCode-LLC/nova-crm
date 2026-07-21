@@ -28,7 +28,7 @@ export function collectDescendantUserIds(
 export function seesAllLeadsInTenant(viewer: User): boolean {
   if (viewer.roleId === "director") return true;
   if (viewer.isSuperAdmin) return true;
-  if (viewer.orgRole === "owner" || viewer.orgRole === "admin" || viewer.orgRole === "manager") {
+  if (viewer.orgRole === "owner" || viewer.orgRole === "admin") {
     return true;
   }
   return false;
@@ -36,8 +36,8 @@ export function seesAllLeadsInTenant(viewer: User): boolean {
 
 /**
  * User IDs whose owned CRM rows the viewer may see: self, everyone in their org-chart subtree
- * (direct + indirect reports from Admin → Org hierarchy), same-department peers when set, and
- * manager / team-lead role subtree (same as chart subtree when they have reports).
+ * (direct + indirect reports from Admin → Org hierarchy). Optional team membership is not an
+ * implicit data grant; selected-team access must come from an explicit role or person override.
  */
 export function leadOwnerIdsVisibleToViewer(
   viewer: User,
@@ -46,11 +46,6 @@ export function leadOwnerIdsVisibleToViewer(
   const ids = new Set<string>([viewer.id]);
   for (const id of collectDescendantUserIds(viewer.id, orgUsers)) {
     ids.add(id);
-  }
-  if (viewer.departmentId) {
-    for (const u of orgUsers) {
-      if (u.departmentId === viewer.departmentId) ids.add(u.id);
-    }
   }
   return ids;
 }
@@ -78,7 +73,7 @@ export function leadVisibleForLiveViewer(
 
   if (salesLeadVisibleViaSharedOwnership(lead, viewer.id)) return true;
 
-  /** Unassigned leads are only visible to owner / admin / manager (see Firestore `crmTenantReadAll`). */
+  /** Unassigned leads are only visible to owners, admins, and directors. */
   if (!lead.ownerId?.trim()) return false;
 
   if (leadOwnerIdsVisibleToViewer(viewer, orgUsers).has(lead.ownerId)) return true;
@@ -98,16 +93,13 @@ function directoryUserIdsForLive(viewer: User, orgUsers: readonly User[]): Set<s
     for (const id of descendants) s.add(id);
     return s;
   }
-  if (viewer.departmentId) {
-    return new Set(orgUsers.filter((u) => u.departmentId === viewer.departmentId).map((u) => u.id));
-  }
   return new Set([viewer.id]);
 }
 
 /**
  * User IDs whose activity rollups / records the viewer may see.
- * Includes the viewer, everyone in their manager-id subtree (so parents see reports even without manager role),
- * and same-department peers when departmentId is set. Owners/directors/admins see all (null).
+ * Includes the viewer and everyone in their manager-id subtree, so parents see reports even without
+ * a manager role. Owners, directors, and admins see all (null).
  */
 export function activityActorUserIdsVisibleToViewer(
   viewer: User,
@@ -117,11 +109,6 @@ export function activityActorUserIdsVisibleToViewer(
   const ids = new Set<string>([viewer.id]);
   for (const id of collectDescendantUserIds(viewer.id, orgUsers)) {
     ids.add(id);
-  }
-  if (viewer.departmentId) {
-    for (const u of orgUsers) {
-      if (u.departmentId === viewer.departmentId) ids.add(u.id);
-    }
   }
   return ids;
 }
@@ -142,8 +129,7 @@ export function followupVisibleInHierarchyScope(
 /**
  * Applies org-chart style visibility to a loaded tenant snapshot (live Firestore data).
  * Directors and workspace owner/admin see the full org; anyone with reports in the org chart sees
- * their subtree; same-department members see each other's pipeline when departmentId is set;
- * otherwise own rows only.
+ * their subtree; otherwise members see only their own rows.
  */
 export function applyLiveHierarchyScope(
   snapshot: WorkspaceSnapshot,

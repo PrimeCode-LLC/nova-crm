@@ -28,7 +28,6 @@ export default function AdminHierarchyPage() {
         ...prev,
         ...("managerId" in patch ? { managerId: patch.managerId ?? undefined } : {}),
         ...("departmentId" in patch ? { departmentId: patch.departmentId ?? undefined } : {}),
-        ...(patch.roleId !== undefined ? { roleId: patch.roleId } : {}),
       };
       const nextUsers = users.map((u) => (u.id === userId ? merged : u));
 
@@ -43,9 +42,6 @@ export default function AdminHierarchyPage() {
         const body: Record<string, unknown> = { userId };
         if ("managerId" in patch) body.managerId = patch.managerId ?? null;
         if ("departmentId" in patch) body.departmentId = patch.departmentId ?? null;
-        if (userId !== currentUserId && patch.roleId !== undefined) {
-          body.roleId = patch.roleId;
-        }
         if (Object.keys(body).length <= 1) return;
 
         const res = await fetch("/api/org/workspace-users", {
@@ -69,11 +65,10 @@ export default function AdminHierarchyPage() {
       const demoPatch: Partial<Omit<User, "id">> = {};
       if ("managerId" in patch) demoPatch.managerId = patch.managerId ?? undefined;
       if ("departmentId" in patch) demoPatch.departmentId = patch.departmentId ?? undefined;
-      if (patch.roleId !== undefined) demoPatch.roleId = patch.roleId;
       patchUser(userId, demoPatch);
       toast.success("Org chart updated (this tab)");
     },
-    [users, mode, patchUser, currentUserId],
+    [users, mode, patchUser],
   );
 
   /** Keep `managerAncestorIds` in Firestore aligned with reporting lines (required for manager CRM + inbox access). */
@@ -96,7 +91,7 @@ export default function AdminHierarchyPage() {
     <>
       <PageHeader
         title="Org hierarchy"
-        description="Vertical or horizontal chart, drag-and-drop reporting lines, and quick edits for department and CRM role. People above someone in this tree can see that person’s leads, deals, and activity in the CRM."
+        description="Manage reporting lines and manager visibility. People above someone in this tree can see that person’s leads, deals, and activity; optional team membership does not grant access by itself."
         actions={
           <Link
             href="/admin/people"
@@ -111,7 +106,6 @@ export default function AdminHierarchyPage() {
         <UserHierarchyPanel
           users={users}
           departments={departments}
-          currentUserId={currentUserId}
           canEdit={canEdit}
           onPersist={persist}
         />

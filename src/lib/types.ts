@@ -100,6 +100,7 @@ export interface User {
   displayName: string;
   photoURL?: string;
   roleId: Role;
+  /** Optional team id; legacy field name retained for stored-data compatibility. */
   departmentId?: string;
   managerId?: string;
   /** Denormalized chain of manager user ids (for Firestore read rules). Maintained on hierarchy edits. */
@@ -304,13 +305,18 @@ export interface CrmLabel {
   updatedAt: ISODate;
 }
 
-export interface Department {
+/** Optional reporting group. Persisted in the legacy `departments` collection for compatibility. */
+export interface Team {
   id: string;
   name: string;
+  /** Legacy fields remain readable but are no longer used to model reporting lines. */
   parentId?: string;
   leadUserId?: string;
   description?: string;
 }
+
+/** @deprecated Use `Team`; retained while stored documents and API fields are migrated. */
+export type Department = Team;
 
 export interface PermissionOverride {
   id: string;
@@ -319,7 +325,7 @@ export interface PermissionOverride {
   action: "read" | "write" | "delete";
   scope: "own" | "team" | "department" | "all" | "custom";
   effect: "grant" | "deny";
-  /** When `scope` is `department`, which workspace department this rule refers to (audit trail; row rules still org-wide until enforced). */
+  /** When `scope` is `department`, which optional team this explicit rule targets. */
   scopeDepartmentId?: string;
   /** When `scope` is `custom`, documents the intended boundary for admins and future policy work. */
   scopeCustomDefinition?: string;

@@ -42,7 +42,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { ROLES, roleLabel } from "@/lib/constants";
+import { roleLabel } from "@/lib/constants";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import {
   buildHierarchyForest,
@@ -50,7 +50,7 @@ import {
   managerAssignmentCreatesCycle,
   type HierarchyNode,
 } from "@/lib/user-hierarchy-tree";
-import type { Department, Role, User } from "@/lib/types";
+import type { Team, User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const NONE = "__none__" as const;
@@ -122,7 +122,7 @@ function collectManagerIdsWithReports(nodes: readonly HierarchyNode[]): string[]
   return out;
 }
 
-function deptLabel(user: User, departments: readonly Department[]): string | null {
+function deptLabel(user: User, departments: readonly Team[]): string | null {
   if (!user.departmentId) return null;
   return departments.find((d) => d.id === user.departmentId)?.name ?? null;
 }
@@ -146,7 +146,7 @@ function HierarchyNodeRow({
   search: string;
   selectedId: string | null;
   onSelect: (u: User) => void;
-  departments: readonly Department[];
+  departments: readonly Team[];
   canEdit: boolean;
   activeDragId: string | null;
 }) {
@@ -301,7 +301,7 @@ function TreeBlock({
   search: string;
   selectedId: string | null;
   onSelect: (u: User) => void;
-  departments: readonly Department[];
+  departments: readonly Team[];
   canEdit: boolean;
   activeDragId: string | null;
 }) {
@@ -344,7 +344,7 @@ function HorizontalOrgBlock({
   toggleCollapsed: (id: string) => void;
   selectedId: string | null;
   onSelect: (u: User) => void;
-  departments: readonly Department[];
+  departments: readonly Team[];
   canEdit: boolean;
   activeDragId: string | null;
 }) {
@@ -444,23 +444,20 @@ function HorizontalOrgBlock({
   );
 }
 
-/** Use `null` to clear manager or department; omit keys you are not changing. */
+/** Use `null` to clear manager or optional team; omit keys you are not changing. */
 export type HierarchyPersistPayload = {
   managerId?: string | null;
   departmentId?: string | null;
-  roleId?: Role;
 };
 
 export function UserHierarchyPanel({
   users,
   departments,
-  currentUserId,
   canEdit,
   onPersist,
 }: {
   users: readonly User[];
-  departments: readonly Department[];
-  currentUserId: string;
+  departments: readonly Team[];
   canEdit: boolean;
   onPersist: (userId: string, patch: HierarchyPersistPayload) => Promise<void>;
 }) {
@@ -474,7 +471,6 @@ export function UserHierarchyPanel({
 
   const [editManager, setEditManager] = React.useState<string>(NONE);
   const [editDept, setEditDept] = React.useState<string>(NONE);
-  const [editRole, setEditRole] = React.useState<Role>("salesperson");
 
   const sensors = useSensors(
     useSensor(PointerSensor, {
@@ -486,7 +482,6 @@ export function UserHierarchyPanel({
     setSelected(u);
     setEditManager(u.managerId ?? NONE);
     setEditDept(u.departmentId ?? NONE);
-    setEditRole(u.roleId);
   }
 
   const { roots, brokenManagerLinks, cycleOrphans } = React.useMemo(
@@ -532,7 +527,6 @@ export function UserHierarchyPanel({
       await onPersist(selected.id, {
         managerId: editManager === NONE ? null : editManager,
         departmentId: editDept === NONE ? null : editDept,
-        roleId: editRole,
       });
       setSelected(null);
     } catch {
@@ -816,7 +810,7 @@ export function UserHierarchyPanel({
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-xs">Department</Label>
+                  <Label className="text-xs">Team (optional)</Label>
                   <Select
                     value={editDept}
                     onValueChange={(v) => setEditDept(v ?? NONE)}
@@ -824,7 +818,7 @@ export function UserHierarchyPanel({
                   >
                     <SelectTrigger className="h-9">
                       <SelectValue placeholder="None">
-                        {editDept === NONE ? "None" : selectTriggerLabelByIdName(editDept, departments) ?? "Department"}
+                        {editDept === NONE ? "None" : selectTriggerLabelByIdName(editDept, departments) ?? "Team"}
                       </SelectValue>
                     </SelectTrigger>
                     <SelectContent>
@@ -836,31 +830,6 @@ export function UserHierarchyPanel({
                       ))}
                     </SelectContent>
                   </Select>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-xs">CRM role</Label>
-                  <Select
-                    value={editRole}
-                    onValueChange={(v) => setEditRole((v as Role) ?? "salesperson")}
-                    disabled={!canEdit || selected.id === currentUserId}
-                  >
-                    <SelectTrigger className="h-9">
-                      <SelectValue>{roleLabel(editRole)}</SelectValue>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {Object.entries(ROLES).map(([k, v]) => (
-                        <SelectItem key={k} value={k}>
-                          {v.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {selected.id === currentUserId ? (
-                    <p className="text-[11px] text-muted-foreground">
-                      Your CRM role cannot be changed from the org chart API.
-                    </p>
-                  ) : null}
                 </div>
 
                 {canEdit ? (

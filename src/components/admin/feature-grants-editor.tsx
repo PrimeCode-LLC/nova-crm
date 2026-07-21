@@ -9,7 +9,7 @@ import {
   type AdminFeatureKey,
 } from "@/lib/admin-features";
 import { userHasAdminFeature } from "@/lib/admin-feature-access";
-import type { Role, User } from "@/lib/types";
+import type { User } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 export function FeatureGrantsEditor({
@@ -37,8 +37,8 @@ export function FeatureGrantsEditor({
   return (
     <div className="space-y-4">
       <p className="text-xs text-muted-foreground">
-        Optional extras on top of this person&apos;s CRM role. Prefer editing the role matrix under{" "}
-        <span className="font-medium text-foreground">Configuration → Roles</span>; grants only add
+        Optional extras on top of this person&apos;s CRM permission role. Prefer editing the matrix under{" "}
+        <span className="font-medium text-foreground">Configuration → CRM permissions</span>; grants only add
         capabilities the role would not otherwise include.
       </p>
       {groups.map((group) => (

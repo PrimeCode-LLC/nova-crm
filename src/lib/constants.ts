@@ -78,7 +78,7 @@ export const KANBAN_STAGES: PipelineStage[] = [
 
 export const ROLES: Record<SystemRoleId, { label: string; description: string }> = {
   director: { label: "Director", description: "Sees and edits everything" },
-  manager: { label: "Manager", description: "Sees department; writes own + team" },
+  manager: { label: "Manager", description: "Sees their reporting tree; writes own + reporting team" },
   team_lead: { label: "Team Lead", description: "Sees team; writes own + team" },
   salesperson: { label: "Salesperson", description: "Sees + writes own leads" },
   data_scraper: {

@@ -47,11 +47,13 @@ export type EffectivePermissionSnapshot = {
 };
 
 export function normalizeDataScope(value: unknown): DataScope {
+  // Legacy role documents used "department" without naming a specific group.
+  // Treat it as the reporting tree; selected-team grants belong in person overrides.
+  if (value === "department") return "team";
   if (
     value === "none" ||
     value === "own" ||
     value === "team" ||
-    value === "department" ||
     value === "all"
   ) {
     return value;

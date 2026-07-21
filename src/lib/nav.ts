@@ -17,7 +17,6 @@ import {
   UserCog,
   FileText,
   FileCode2,
-  Megaphone,
   Mail,
   Radio,
   BarChart3,
@@ -70,7 +69,7 @@ export const ADMIN_CLUSTER_META: Record<
   AdminNavClusterId,
   { label: string; order: number }
 > = {
-  company: { label: "Company & team", order: 0 },
+  company: { label: "Organization & access", order: 0 },
   access: { label: "Access & channels", order: 1 },
   programs: { label: "Programs & data", order: 2 },
   personal: { label: "Personal", order: 3 },
@@ -139,15 +138,15 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Shield,
         minWorkspaceRole: "director",
         adminFeature: "permissions",
-        adminCluster: "access",
+        adminCluster: "company",
       },
       {
         href: "/admin/roles",
-        label: "Roles",
+        label: "CRM permissions",
         icon: UserCog,
         minWorkspaceRole: "director",
         adminFeature: "roles",
-        adminCluster: "access",
+        adminCluster: "company",
       },
       {
         href: "/admin/logs",
@@ -157,8 +156,8 @@ export const NAV_SECTIONS: NavSection[] = [
         adminCluster: "access",
       },
       {
-        href: "/admin/departments",
-        label: "Departments",
+        href: "/admin/teams",
+        label: "Teams",
         icon: Users,
         minWorkspaceRole: "manager",
         adminFeature: "departments",

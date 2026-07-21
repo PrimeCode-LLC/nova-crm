@@ -1,16 +1,46 @@
 import type {
   Account,
+  Campaign,
   Contact,
+  CrmLabel,
   Deal,
   Followup,
   FollowupPlan,
   Lead,
   LeadTask,
   Note,
+  Profile,
+  ScriptLibraryItem,
   TimelineEvent,
   Touchpoint,
 } from "@/lib/types";
 import { buildFollowupPersonalizationProfile } from "@/lib/ai/followup-personalization";
+import type {
+  BuyerPersona,
+  ProspectingStrategy,
+  StrategyAssignment,
+} from "@/lib/prospecting-strategy/types";
+
+const MAX_CONTEXT_STRING_LENGTH = 2_000;
+
+function contextValue(value: unknown, depth = 0): unknown {
+  if (value == null || typeof value === "boolean" || typeof value === "number") return value;
+  if (typeof value === "string") {
+    return value.length > MAX_CONTEXT_STRING_LENGTH
+      ? `${value.slice(0, MAX_CONTEXT_STRING_LENGTH)}…[field truncated]`
+      : value;
+  }
+  if (depth >= 6) return "[nested value omitted]";
+  if (Array.isArray(value)) return value.slice(0, 50).map((item) => contextValue(item, depth + 1));
+  if (typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>)
+        .filter(([, item]) => item !== undefined)
+        .map(([key, item]) => [key, contextValue(item, depth + 1)]),
+    );
+  }
+  return String(value);
+}
 
 export function buildLeadAiContext(input: {
   lead: Lead;
@@ -25,6 +55,13 @@ export function buildLeadAiContext(input: {
   emailThreads?: { subject: string; messages: { from: string; date: string; snippet: string }[] }[];
   followupPlans?: FollowupPlan[];
   regenerateContext?: string;
+  campaign?: Campaign;
+  profile?: Profile;
+  strategy?: ProspectingStrategy;
+  persona?: BuyerPersona;
+  strategyAssignment?: StrategyAssignment;
+  caseStudy?: ScriptLibraryItem;
+  labels?: CrmLabel[];
 }): string {
   const { lead, account, contact, deal, notes, timeline, touchpoints, followups, tasks } = input;
   const contactName = contact?.fullName?.trim() || lead.contactName;
@@ -35,72 +72,39 @@ export function buildLeadAiContext(input: {
     seniority: contact?.seniority,
   });
   const payload = {
-    lead: {
-      id: lead.id,
-      stage: lead.stage,
-      channel: lead.channel,
-      ownerId: lead.ownerId,
-      campaignId: lead.campaignId,
-      profileId: lead.profileId,
-      estimatedValue: lead.estimatedValue,
-      responseTimeMinutes: lead.responseTimeMinutes,
-      touches: lead.touches,
-      isIdle: lead.isIdle,
-      lastActivityAt: lead.lastActivityAt,
-      painPoints: lead.painPoints,
-      triggerEvent: lead.triggerEvent,
-      businessFocus: lead.businessFocus,
-      hiringSignals: lead.hiringSignals,
-      recentNews: lead.recentNews,
-      psLine: lead.psLine,
-      toolsUsed: lead.toolsUsed,
-      bant: lead.bant,
-    },
-    account: {
-      name: account?.name || lead.companyName,
-      industry: account?.industry || lead.companyIndustry,
-      domain: account?.domain || lead.companyDomain,
-      companySize: lead.companySize,
-      revenueRange: lead.revenueRange,
-    },
-    contact: {
+    lead: contextValue(lead),
+    account: contextValue(
+      account ?? {
+        name: lead.companyName,
+        industry: lead.companyIndustry,
+        domain: lead.companyDomain,
+        companySize: lead.companySize,
+        revenueRange: lead.revenueRange,
+      },
+    ),
+    contact: contextValue({
+      ...(contact ?? {}),
       name: contactName,
       email: contactEmail,
       title: contactTitle,
-      seniority: contact?.seniority,
-    },
+    }),
     personalizationProfile,
-    deal: deal
-      ? { stage: deal.stage, value: deal.value, expectedCloseDate: deal.expectedCloseDate }
-      : null,
-    notes: notes.slice(-15).map((n) => ({ body: n.body.slice(0, 500), createdAt: n.createdAt })),
-    timeline: timeline.slice(-20).map((t) => ({ type: t.type, summary: t.summary, createdAt: t.createdAt })),
-    touchpoints: touchpoints.slice(-15).map((t) => ({ state: t.state, summary: t.summary, occurredAt: t.occurredAt })),
-    followups: followups
-      .filter((f) => !f.completedAt)
-      .slice(0, 10)
-      .map((f) => ({
-        title: f.title,
-        dueAt: f.dueAt,
-        priority: f.priority,
-        channel: f.channel,
-        description: f.description?.slice(0, 200),
-        hasMessageBody: Boolean(f.messageBody),
-      })),
-    tasks: tasks
-      .filter((t) => !t.completedAt)
-      .slice(0, 10)
-      .map((t) => ({ title: t.title, dueAt: t.dueAt })),
-    emailThreads: input.emailThreads ?? [],
-    followupPlans: (input.followupPlans ?? []).slice(0, 5).map((p) => ({
-      id: p.id,
-      status: p.status,
-      planSummary: p.planSummary.slice(0, 300),
-      pausedReason: p.pausedReason?.slice(0, 200),
-      pausedAt: p.pausedAt,
-    })),
-    regenerateContext: input.regenerateContext?.slice(0, 800) ?? null,
+    deal: contextValue(deal ?? null),
+    campaign: contextValue(input.campaign ?? null),
+    outreachProfile: contextValue(input.profile ?? null),
+    prospectingStrategy: contextValue(input.strategy ?? null),
+    buyerPersona: contextValue(input.persona ?? null),
+    strategyAssignment: contextValue(input.strategyAssignment ?? null),
+    linkedCaseStudyOrScript: contextValue(input.caseStudy ?? null),
+    labels: contextValue(input.labels ?? []),
+    notes: contextValue(notes.slice(0, 30)),
+    timeline: contextValue(timeline.slice(0, 40)),
+    touchpoints: contextValue(touchpoints.slice(0, 30)),
+    followups: contextValue(followups.slice(0, 30)),
+    tasks: contextValue(tasks.slice(0, 30)),
+    emailThreads: contextValue(input.emailThreads?.slice(0, 20) ?? []),
+    followupPlans: contextValue((input.followupPlans ?? []).slice(0, 10)),
+    regenerateContext: contextValue(input.regenerateContext ?? null),
   };
-  const json = JSON.stringify(payload);
-  return json.length > 16_000 ? json.slice(0, 16_000) + "…[truncated]" : json;
+  return JSON.stringify(payload);
 }

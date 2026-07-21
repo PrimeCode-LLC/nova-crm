@@ -110,8 +110,8 @@ export function canPushProspectChannel(
 }
 
 /**
- * Same hierarchy scope as sales leads: owner, managers up the org chart, same-department
- * peers, plus channel assignees. Admins/managers (`seesAllLeadsInTenant`) see all.
+ * Same hierarchy scope as sales leads: owner, managers up the org chart, plus channel
+ * assignees and shared owners. Owners, admins, and directors see all.
  * `prospectVisibility` only tracks channel-assignment state — not org-wide read access.
  */
 export function prospectVisibleToViewer(
@@ -136,11 +136,6 @@ export function prospectVisibleToViewer(
 
   if (viewer.id === ownerId) return true;
   if (viewerManagesProspectOwner(viewer, prospect, orgUsers)) return true;
-
-  if (viewer.departmentId) {
-    const owner = orgUsers.find((u) => u.id === ownerId);
-    if (owner?.departmentId === viewer.departmentId) return true;
-  }
 
   if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
     return prospect.scraperId === viewer.id;

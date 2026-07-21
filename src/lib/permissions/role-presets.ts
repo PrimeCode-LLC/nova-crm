@@ -183,7 +183,7 @@ function directorModules(): Record<ModuleKey, ModulePermission> {
 
 function managerModules(): Record<ModuleKey, ModulePermission> {
   return allModules(
-    scopeFill("department", {
+    scopeFill("team", {
       configView: true,
       configEdit: true,
       workspaceCreate: true,

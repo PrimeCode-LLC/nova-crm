@@ -46,7 +46,7 @@ export function AdminFeatureGate({
           <p className="text-sm text-muted-foreground">
             Ask a director or workspace admin to grant you the{" "}
             <span className="font-medium text-foreground">{meta.label}</span> feature without
-            changing your CRM role.
+            changing your CRM permission role.
           </p>
           <Link
             href="/dashboard"

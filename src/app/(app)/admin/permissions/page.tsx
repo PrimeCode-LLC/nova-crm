@@ -42,7 +42,7 @@ import {
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtDate } from "@/lib/format";
-import type { Department, PermissionOverride, User } from "@/lib/types";
+import type { PermissionOverride, Team, User } from "@/lib/types";
 import { Plus, Shield, Trash2, Info, X } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -64,11 +64,18 @@ function resourceLabel(resource: string): string {
 
 const ACTIONS = ["read", "write", "delete"] as const;
 const SCOPES = ["own", "team", "department", "all", "custom"] as const;
+const SCOPE_LABEL: Record<(typeof SCOPES)[number], string> = {
+  own: "Own",
+  team: "Reporting team",
+  department: "Selected team",
+  all: "Everyone",
+  custom: "Custom",
+};
 
 const SCOPE_HELP: Record<(typeof SCOPES)[number], string> = {
   own: "Only CRM rows assigned to this person (owner / assignee fields).",
   team: "This person plus everyone in their reporting line below them (and optional anchor below).",
-  department: "Everyone who belongs to the department you pick (membership is on each user).",
+  department: "Everyone in the team you explicitly select. Team membership alone never grants access.",
   all: "Everyone in the workspace (tenant-wide).",
   custom: "Describe the boundary in writing until automated rules exist for this grant or deny.",
 };
@@ -122,7 +129,7 @@ function memberPickerLabel(
 
 function formatScopeTargetLine(
   po: PermissionOverride,
-  departments: readonly Department[],
+  departments: readonly Team[],
   users: readonly User[],
   getOwnerDisplayName: (uid: string) => string | undefined,
 ): string | null {
@@ -304,7 +311,7 @@ export default function AdminPermissionsPage() {
             <div className="flex items-center gap-2 text-muted-foreground text-xs flex-wrap">
               <span className="rounded-md bg-background border px-2 py-0.5">Role default</span>
               <span className="text-muted-foreground/60">→</span>
-              <span className="rounded-md bg-background border px-2 py-0.5">Department override</span>
+              <span className="rounded-md bg-background border px-2 py-0.5">Selected-team override</span>
               <span className="text-muted-foreground/60">→</span>
               <span className="rounded-md bg-primary/10 text-primary border border-primary/20 px-2 py-0.5 font-medium">
                 Person override (wins)
@@ -644,7 +651,7 @@ export default function AdminPermissionsPage() {
                   <SelectValue placeholder="Scope">
                     {(value) =>
                       value && SCOPES.includes(value as (typeof SCOPES)[number])
-                        ? (value as string).charAt(0).toUpperCase() + (value as string).slice(1)
+                        ? SCOPE_LABEL[value as (typeof SCOPES)[number]]
                         : "Scope"}
                   </SelectValue>
                 </SelectTrigger>
@@ -652,7 +659,7 @@ export default function AdminPermissionsPage() {
                   {SCOPES.map((s) => (
                     <SelectItem key={s} value={s} className="items-start py-2">
                       <span className="flex flex-col gap-0.5">
-                        <span className="font-medium capitalize leading-none">{s}</span>
+                        <span className="font-medium leading-none">{SCOPE_LABEL[s]}</span>
                         <span className="text-[11px] text-muted-foreground leading-snug whitespace-normal">
                           {SCOPE_HELP[s]}
                         </span>
@@ -669,12 +676,12 @@ export default function AdminPermissionsPage() {
 
               {scope === "department" && (
                 <div className="space-y-1.5 rounded-md border bg-muted/15 p-3">
-                  <Label className="text-xs">Department</Label>
+                  <Label className="text-xs">Team</Label>
                   {departments.length === 0 ? (
                     <p className="text-[11px] text-muted-foreground">
-                      No departments in this workspace yet. Add them under{" "}
-                      <span className="font-medium text-foreground">Admin → Departments</span> before
-                      using department scope.
+                      No teams in this workspace yet. Add one under{" "}
+                      <span className="font-medium text-foreground">Configuration → Teams</span> before
+                      using selected-team scope.
                     </p>
                   ) : (
                     <Select
@@ -682,7 +689,7 @@ export default function AdminPermissionsPage() {
                       onValueChange={(v) => setScopeDepartmentId(v ?? "")}
                     >
                       <SelectTrigger className="h-9 w-full min-w-0">
-                        <SelectValue placeholder="Select department" />
+                        <SelectValue placeholder="Select team" />
                       </SelectTrigger>
                       <SelectContent>
                         {departments.map((d) => (
@@ -799,7 +806,7 @@ export default function AdminPermissionsPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Remove this override?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes the person-level rule immediately. Role and department defaults still apply.
+              This removes the person-level rule immediately. The permission role still applies.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

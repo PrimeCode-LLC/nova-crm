@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Lead } from "@/lib/types";
+import type { LeadAiContextInput } from "@/lib/ai/load-lead-ai-context-server";
 
 type Analysis = {
   summary: string;
@@ -33,12 +34,14 @@ export function LeadAnalyzeDialog({
   onOpenChange,
   lead,
   demoContext,
+  emailThreads,
   onAnalysis,
 }: {
   open: boolean;
   onOpenChange: (o: boolean) => void;
   lead: Lead;
   demoContext?: Record<string, unknown>;
+  emailThreads?: LeadAiContextInput["emailThreads"];
   onAnalysis?: (a: Analysis) => void;
 }) {
   const [loading, setLoading] = React.useState(false);
@@ -55,6 +58,7 @@ export function LeadAnalyzeDialog({
         body: JSON.stringify({
           leadId: lead.id,
           demoContext,
+          emailThreads,
         }),
       });
       const data = await res.json();

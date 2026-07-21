@@ -12,38 +12,27 @@ import {
   DialogTitle,
   DialogFooter,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { Users2, Building, Plus } from "lucide-react";
+import { Users2, Plus } from "lucide-react";
 import { toast } from "sonner";
 
-const SELECT_NONE = "__none__";
-
-function newDepartmentId() {
+function newTeamId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return `d-${crypto.randomUUID()}`;
+    return `team-${crypto.randomUUID()}`;
   }
-  return `d-${Date.now()}`;
+  return `team-${Date.now()}`;
 }
 
-export default function AdminDepartmentsPage() {
+export default function AdminTeamsPage() {
   const router = useRouter();
   const { departments, users, leads, addDepartment } = useWorkspace();
+  const teams = departments;
   const [newOpen, setNewOpen] = React.useState(false);
   const [name, setName] = React.useState("");
   const [description, setDescription] = React.useState("");
-  const [parentId, setParentId] = React.useState("");
-  const [leadUserId, setLeadUserId] = React.useState("");
   const [loading, setLoading] = React.useState(false);
 
   function handleCreate() {
@@ -52,121 +41,125 @@ export default function AdminDepartmentsPage() {
       return;
     }
     setLoading(true);
-    const id = newDepartmentId();
+    const id = newTeamId();
     addDepartment({
       id,
       name: name.trim(),
       description: description.trim() || undefined,
-      parentId: parentId || undefined,
-      leadUserId: leadUserId || undefined,
     });
     setLoading(false);
-    toast.success(`Department "${name.trim()}" created`);
+    toast.success(`Team "${name.trim()}" created`);
     setNewOpen(false);
     setName("");
     setDescription("");
-    setParentId("");
-    setLeadUserId("");
-    router.push(`/admin/departments/${id}`);
+    router.push(`/admin/teams/${id}`);
   }
 
-  function openDepartment(id: string) {
-    router.push(`/admin/departments/${id}`);
+  function openTeam(id: string) {
+    router.push(`/admin/teams/${id}`);
   }
 
-  const deptStats = departments.map((d) => ({
-    ...d,
-    memberCount: users.filter((u) => u.departmentId === d.id).length,
+  const teamStats = teams.map((team) => ({
+    ...team,
+    memberCount: users.filter((u) => u.departmentId === team.id).length,
     leadCount: leads.filter((l) =>
-      users.find((u) => u.id === l.ownerId)?.departmentId === d.id,
+      users.find((u) => u.id === l.ownerId)?.departmentId === team.id,
     ).length,
   }));
 
   return (
     <>
       <PageHeader
-        title="Departments"
-        description="Organize your team into departments for scoped reporting and permissions."
+        title="Teams"
+        description="Optional groups for reporting, targets, and explicit access rules. Reporting lines remain managed in the org chart."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
-            <Plus className="h-3.5 w-3.5" /> New department
+            <Plus className="h-3.5 w-3.5" /> New team
           </Button>
         }
       />
       <PageBody>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-          {deptStats.map((d) => (
-            <Card
-              key={d.id}
-              role="button"
-              tabIndex={0}
-              aria-label={`Open department ${d.name}`}
-              className="hover:bg-muted/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-              onClick={() => openDepartment(d.id)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  openDepartment(d.id);
-                }
-              }}
-            >
-              <CardHeader className="pb-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
-                      <Building className="h-4 w-4" />
+        {teamStats.length === 0 ? (
+          <div className="flex min-h-56 flex-col items-center justify-center rounded-lg border border-dashed px-6 text-center">
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+              <Users2 className="h-5 w-5" />
+            </div>
+            <h2 className="mt-3 text-sm font-medium">Teams are optional</h2>
+            <p className="mt-1 max-w-md text-xs leading-relaxed text-muted-foreground">
+              Roles and the org chart work without teams. Create one only when you need a stable
+              reporting group, target, filter, or explicit team-level access rule.
+            </p>
+            <Button size="sm" className="mt-4" onClick={() => setNewOpen(true)}>
+              <Plus className="h-3.5 w-3.5" /> Create first team
+            </Button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {teamStats.map((team) => (
+              <Card
+                key={team.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open team ${team.name}`}
+                className="hover:bg-muted/20 transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                onClick={() => openTeam(team.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openTeam(team.id);
+                  }
+                }}
+              >
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                        <Users2 className="h-4 w-4" />
+                      </div>
+                      <CardTitle className="text-sm">{team.name}</CardTitle>
                     </div>
-                    <CardTitle className="text-sm">{d.name}</CardTitle>
                   </div>
-                </div>
-                {d.description && (
-                  <p className="text-xs text-muted-foreground mt-1">
-                    {d.description}
-                  </p>
-                )}
-              </CardHeader>
-              <CardContent className="pt-0 space-y-3">
-                <div className="flex items-center gap-4 text-xs">
-                  <div className="flex items-center gap-1.5 text-muted-foreground">
-                    <Users2 className="h-3.5 w-3.5" />
-                    <span className="tabular-nums font-medium text-foreground">
-                      {d.memberCount}
-                    </span>{" "}
-                    member{d.memberCount !== 1 ? "s" : ""}
-                  </div>
-                  <div className="text-muted-foreground">
-                    <span className="tabular-nums font-medium text-foreground">
-                      {d.leadCount}
-                    </span>{" "}
-                    lead{d.leadCount !== 1 ? "s" : ""}
-                  </div>
-                </div>
-                {d.leadUserId && (
-                  <div>
-                    <div className="text-[10px] uppercase tracking-wide text-muted-foreground mb-1">
-                      Lead
+                  {team.description && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {team.description}
+                    </p>
+                  )}
+                </CardHeader>
+                <CardContent className="pt-0 space-y-3">
+                  <div className="flex items-center gap-4 text-xs">
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <Users2 className="h-3.5 w-3.5" />
+                      <span className="tabular-nums font-medium text-foreground">
+                        {team.memberCount}
+                      </span>{" "}
+                      member{team.memberCount !== 1 ? "s" : ""}
                     </div>
-                    <UserChip userId={d.leadUserId} size="xs" />
+                    <div className="text-muted-foreground">
+                      <span className="tabular-nums font-medium text-foreground">
+                        {team.leadCount}
+                      </span>{" "}
+                      CRM lead{team.leadCount !== 1 ? "s" : ""}
+                    </div>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </PageBody>
 
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent className="max-w-sm">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Building className="h-4 w-4" /> New department
+              <Users2 className="h-4 w-4" /> New team
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-3 py-1">
             <div className="space-y-1.5">
               <Label className="text-xs">Name</Label>
               <Input
-                placeholder="e.g. Outbound Sales"
+                placeholder="e.g. Enterprise Sales"
                 className="h-9"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
@@ -175,57 +168,23 @@ export default function AdminDepartmentsPage() {
             <div className="space-y-1.5">
               <Label className="text-xs">Description</Label>
               <Textarea
-                placeholder="What does this department do?"
+                placeholder="What is this team responsible for?"
                 className="h-20 text-sm resize-none"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Parent department (optional)</Label>
-              <Select
-                value={parentId || SELECT_NONE}
-                onValueChange={(v) => setParentId(v === SELECT_NONE ? "" : (v ?? ""))}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="None (top-level)" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={SELECT_NONE}>None (top-level)</SelectItem>
-                  {departments.map((d) => (
-                    <SelectItem key={d.id} value={d.id}>
-                      {d.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Lead (optional)</Label>
-              <Select
-                value={leadUserId || SELECT_NONE}
-                onValueChange={(v) => setLeadUserId(v === SELECT_NONE ? "" : (v ?? ""))}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="None" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={SELECT_NONE}>None</SelectItem>
-                  {users.map((u) => (
-                    <SelectItem key={u.id} value={u.id}>
-                      {u.displayName}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Teams do not create reporting lines or automatically expose CRM records. Use the org
+              chart for managers and CRM permissions or Person overrides for access.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="ghost" size="sm" onClick={() => setNewOpen(false)}>
               Cancel
             </Button>
             <Button size="sm" onClick={handleCreate} disabled={loading}>
-              {loading ? "Creating…" : "Create department"}
+              {loading ? "Creating…" : "Create team"}
             </Button>
           </DialogFooter>
         </DialogContent>

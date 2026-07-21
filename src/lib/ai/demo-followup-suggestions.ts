@@ -34,62 +34,70 @@ function cleanSignal(value: string): string {
 }
 
 function getDemoSignal(lead: Lead): string | undefined {
-  if (lead.recentNews) return `I saw the recent update: ${cleanSignal(lead.recentNews)}.`;
-  if (lead.triggerEvent) return `I noticed ${cleanSignal(lead.triggerEvent)}.`;
-  if (lead.hiringSignals) return `I noticed ${cleanSignal(lead.hiringSignals)}.`;
+  if (lead.recentNews) return `Saw the update on ${cleanSignal(lead.recentNews)}.`;
+  if (lead.triggerEvent) return `Noticed ${cleanSignal(lead.triggerEvent)}.`;
+  if (lead.hiringSignals) return `Noticed ${cleanSignal(lead.hiringSignals)}.`;
   if (lead.businessFocus) {
     return `${lead.companyName}'s focus on ${cleanSignal(lead.businessFocus)} stood out.`;
   }
   if (lead.painPoints) return `You mentioned ${cleanSignal(lead.painPoints)}.`;
   if (lead.toolsUsed?.length) {
-    return `I noticed ${lead.companyName} uses ${lead.toolsUsed.slice(0, 3).join(", ")}.`;
+    return `Noticed ${lead.companyName} uses ${lead.toolsUsed.slice(0, 3).join(", ")}.`;
   }
   return undefined;
 }
 
 const ROLE_COPY: Record<
   FollowupRoleFamily,
-  { relevance: string; offer: string; subject: string }
+  { relevance: string; offer: string; subject: string; interestAsk: string }
 > = {
   executive: {
-    relevance: "There may be a direct way to improve the business outcome without adding management overhead.",
-    offer: "I can keep this to the decision, likely impact, and tradeoffs.",
-    subject: "one quick question",
+    relevance: "There may be a direct way to improve the outcome without adding management overhead.",
+    offer: "Happy to share the decision tradeoffs in two lines.",
+    subject: "timing on this",
+    interestAsk: "Worth a look?",
   },
   technical_executive: {
-    relevance: "This may be relevant to integration effort, delivery risk, and technical leverage.",
-    offer: "I can share a concise technical overview covering workflow and integration.",
+    relevance: "This may affect integration effort, delivery risk, and technical leverage.",
+    offer: "I can share a short technical overview of workflow and integration.",
     subject: "technical fit",
+    interestAsk: "Open to a 2-line overview?",
   },
   technical_practitioner: {
     relevance: "This may be useful at the workflow and implementation level.",
-    offer: "I can share a concrete example with the mechanism and setup involved.",
-    subject: "implementation question",
+    offer: "I can share a concrete example with the mechanism and setup.",
+    subject: "implementation note",
+    interestAsk: "Want the example?",
   },
   operations: {
-    relevance: "This may help reduce process friction while keeping the workflow reliable.",
+    relevance: "This may reduce process friction while keeping the workflow reliable.",
     offer: "I can share a short example focused on time saved and adoption.",
-    subject: "workflow question",
+    subject: "workflow idea",
+    interestAsk: "Useful to see?",
   },
   revenue: {
-    relevance: "This may be useful for improving pipeline speed and conversion without adding manual work.",
-    offer: "I can share a short example focused on the measurable revenue workflow.",
-    subject: "pipeline question",
+    relevance: "This may help pipeline speed and conversion without more manual work.",
+    offer: "I can share a short example of the measurable workflow.",
+    subject: "pipeline idea",
+    interestAsk: "Worth comparing?",
   },
   finance: {
     relevance: "The useful question is whether the economic impact and risk justify a closer look.",
     offer: "I can share a concise view of cost, expected impact, and tradeoffs.",
     subject: "business case",
+    interestAsk: "Want the short version?",
   },
   people: {
-    relevance: "This may help improve team capacity and experience without creating another heavy process.",
+    relevance: "This may help team capacity and experience without another heavy process.",
     offer: "I can share a practical example focused on adoption and time saved.",
     subject: "team workflow",
+    interestAsk: "Open to a short example?",
   },
   general: {
     relevance: "There may be a practical opportunity worth comparing against your current approach.",
-    offer: "I can share a concise example if that would be useful.",
-    subject: "quick question",
+    offer: "I can share a concise example if useful.",
+    subject: "one idea",
+    interestAsk: "Worth a look?",
   },
 };
 
@@ -108,19 +116,24 @@ export function demoFollowupSuggestions(
   const profile = buildFollowupPersonalizationProfile({ title: lead.contactTitle });
   const roleCopy = ROLE_COPY[profile.roleFamily];
   const signal = getDemoSignal(lead);
-  const relevanceOpener = signal ?? `I wanted to send a direct note about ${company}.`;
+  const relevanceOpener = signal ?? `A note on ${company}.`;
 
   const step1Body =
     channel === "upwork"
-      ? `Hi ${name}, following up on our conversation about ${company}. Happy to clarify scope or share a short case study if useful.`
+      ? `Hi ${name},\n\nOn ${company}: happy to clarify scope or share a short case study if useful.\n\n${roleCopy.interestAsk}`
       : continueMode
-        ? `Hi ${name},\n\nCircling back on my note about ${company}. ${roleCopy.offer}\n\nWould that be useful?`
-        : `Hi ${name},\n\n${relevanceOpener} ${roleCopy.relevance}\n\nOpen to a brief conversation?`;
+        ? `Hi ${name},\n\nOn my earlier note about ${company}: ${roleCopy.offer}\n\n${roleCopy.interestAsk}`
+        : `Hi ${name},\n\n${relevanceOpener} ${roleCopy.relevance}\n\n${roleCopy.interestAsk}`;
 
   const step2Body =
     channel === "linkedin_outbound" || channel === "linkedin_1to1"
-      ? `Hi ${name}, following up on ${company}. ${roleCopy.offer} Useful to connect?`
-      : `Hi ${name},\n\nOne useful follow-up to my earlier note: ${roleCopy.offer}\n\nWorth sending over?`;
+      ? `Hi ${name} — on ${company}: ${roleCopy.offer} Useful to connect?`
+      : `Hi ${name},\n\nOne new angle on ${company}: ${roleCopy.offer}\n\nWant me to send it over?`;
+
+  const step3Body =
+    channel === "linkedin_outbound" || channel === "linkedin_1to1"
+      ? `Hi ${name}, last note from me on ${company}. If timing is off, just say no and I'll close the loop.`
+      : `Hi ${name},\n\nI'll close the loop on my side unless you want to reopen. If ${company} still wants help later, reply here.`;
 
   const items: FollowupSuggestResponse["items"] = [];
 
@@ -132,10 +145,10 @@ export function demoFollowupSuggestions(
       offsetDays: 0,
       priority: "high",
       channel: emailish ? emailChannel : channel,
-      emailSubject: emailish ? `${company} — ${roleCopy.subject}` : undefined,
+      emailSubject: emailish ? roleCopy.subject : undefined,
       messageBody: step1Body,
       description: "First personalized touch",
-      rationale: "Open the thread with a specific hook",
+      rationale: "Open with a specific hook and soft interest check",
     });
   }
 
@@ -150,12 +163,12 @@ export function demoFollowupSuggestions(
     offsetDays: 3,
     priority: "high",
     channel: emailish ? emailChannel : channel === "upwork" ? "upwork" : "other",
-    emailSubject: emailish ? `Re: ${company} — helpful next step` : undefined,
+    emailSubject: emailish ? roleCopy.subject : undefined,
     messageBody: continueMode ? step1Body : step2Body,
-    description: continueMode ? "Next touch after intro already sent" : "First nudge after opener",
+    description: continueMode ? "Next touch after intro already sent" : "Proof/insight beat",
     rationale: continueMode
       ? "Lead already received intro; continue the thread"
-      : "Give the thread a second beat",
+      : "Add a new angle without repeating the opener",
   });
 
   items.push({
@@ -165,13 +178,10 @@ export function demoFollowupSuggestions(
     offsetDays: 5,
     priority: "medium",
     channel: emailish ? emailChannel : "other",
-    emailSubject: emailish ? `Should I close the loop on ${company}?` : undefined,
-    messageBody:
-      channel === "linkedin_outbound" || channel === "linkedin_1to1"
-        ? `Hi ${name}, last ping from me on ${company}. If timing is off, I'll check back later.`
-        : `Hi ${name},\n\nI'll close the loop on my side unless you want to reopen. If ${company} still wants help later, just reply here.`,
-    description: "Break-up or soft close",
-    rationale: "One more beat before marking cold",
+    emailSubject: emailish ? `closing the loop` : undefined,
+    messageBody: step3Body,
+    description: "Break-up / permission to decline",
+    rationale: "Easy out recovers silent prospects",
   });
 
   items.push({
@@ -179,11 +189,11 @@ export function demoFollowupSuggestions(
     offsetDays: 7,
     priority: "medium",
     channel: emailish ? emailChannel : "other",
-    emailSubject: emailish ? `Closing the loop on ${company}` : undefined,
+    emailSubject: emailish ? `last note` : undefined,
     messageBody:
       channel === "linkedin_outbound" || channel === "linkedin_1to1"
         ? `Hi ${name}, last note from me on ${company}. Happy to reconnect whenever timing is better.`
-        : `Hi ${name},\n\nLast note from me on ${company}. If a better time opens up, just reply here.`,
+        : `Hi ${name},\n\nLast note from me on ${company}. If a better time opens up, reply here.`,
     description: "Final follow-up in the cadence",
     rationale: "Complete the +3 / +5 / +7 business-day cadence",
   });

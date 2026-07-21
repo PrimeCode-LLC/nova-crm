@@ -17,19 +17,19 @@ const PILLARS = [
   {
     icon: Building2,
     title: "Mirrors how you actually organize",
-    body: "Departments and teams map to your real org chart. Managers inherit visibility for their span. Directors roll up without granting org-wide access to everyone.",
+    body: "Reporting lines map to your real org chart, so managers inherit visibility only for their span. Optional teams support reporting without silently exposing peer pipelines.",
   },
   {
     icon: Shield,
     title: "Admin policies with real overrides",
-    body: "Start from role templates, then layer department rules and per-person exceptions. Overrides are first-class so edge cases (coverage, audits, VIP accounts) don't break the model.",
+    body: "Start from permission roles, then add explicit selected-team rules or per-person exceptions. Overrides are first-class so edge cases (coverage, audits, VIP accounts) don't break the model.",
   },
 ];
 
 const LADDER = [
   { scope: "Individual rep", sees: "Own leads & assigned tasks" },
   { scope: "Team lead", sees: "Their team's pipeline + coaching views" },
-  { scope: "Department", sees: "Cross-team rollups inside the dept" },
+  { scope: "Selected team", sees: "Explicit cross-team reporting or access" },
   { scope: "Director / admin", sees: "Org-wide + policy editor + audit trail" },
 ];
 

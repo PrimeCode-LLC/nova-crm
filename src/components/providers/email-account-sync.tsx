@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useEmailAccountStore } from "@/stores/email-account-store";
+import { ALL_MAILBOXES_ID, useEmailAccountStore } from "@/stores/email-account-store";
 import { defaultEmailMailboxSettings } from "@/lib/email-account-types";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
@@ -88,9 +88,11 @@ export function EmailAccountSync() {
             : [defaultEmailMailboxSettings({ label: "Primary mailbox" })];
         const activeFromServer = (data.activeMailboxId ?? "").trim();
         const active =
-          activeFromServer && mailboxes.some((m) => m.id === activeFromServer)
-            ? activeFromServer
-            : mailboxes[0].id;
+          activeFromServer === ALL_MAILBOXES_ID
+            ? ALL_MAILBOXES_ID
+            : activeFromServer && mailboxes.some((m) => m.id === activeFromServer)
+              ? activeFromServer
+              : ALL_MAILBOXES_ID;
         hydrateFromServer({
           mailboxes,
           activeMailboxId: active,

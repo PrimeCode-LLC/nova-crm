@@ -24,8 +24,10 @@ import {
 } from "@/components/ui/select";
 import type {
   Account,
+  Campaign,
   ChannelKey,
   Contact,
+  CrmLabel,
   Deal,
   Followup,
   FollowupPlan,
@@ -35,9 +37,16 @@ import type {
   LeadPriority,
   LeadTask,
   Note,
+  Profile,
+  ScriptLibraryItem,
   TimelineEvent,
   Touchpoint,
 } from "@/lib/types";
+import type {
+  BuyerPersona,
+  ProspectingStrategy,
+  StrategyAssignment,
+} from "@/lib/prospecting-strategy/types";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { channelLabelFromValue } from "@/lib/channel-options";
@@ -58,6 +67,13 @@ export type LeadFollowupAiContext = {
   followups: Followup[];
   tasks: LeadTask[];
   emailThreads?: { subject: string; messages: { from: string; date: string; snippet: string }[] }[];
+  campaign?: Campaign;
+  profile?: Profile;
+  strategy?: ProspectingStrategy;
+  persona?: BuyerPersona;
+  strategyAssignment?: StrategyAssignment;
+  caseStudy?: ScriptLibraryItem;
+  labels?: CrmLabel[];
 };
 
 type SuggestApiItem = {
@@ -163,6 +179,13 @@ export function SuggestFollowupsDialog({
       followups: aiContext.followups,
       tasks: aiContext.tasks,
       emailThreads: aiContext.emailThreads,
+      campaign: aiContext.campaign,
+      profile: aiContext.profile,
+      strategy: aiContext.strategy,
+      persona: aiContext.persona,
+      strategyAssignment: aiContext.strategyAssignment,
+      caseStudy: aiContext.caseStudy,
+      labels: aiContext.labels,
     };
   }
 
@@ -212,6 +235,7 @@ export function SuggestFollowupsDialog({
             pausedReason: p.pausedReason,
             pausedAt: p.pausedAt,
           })),
+          emailThreads: aiContext.emailThreads,
           demoContext: demoContextPayload(),
         }),
       });

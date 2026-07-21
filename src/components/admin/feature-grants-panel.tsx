@@ -76,7 +76,7 @@ export function FeatureGrantsPanel() {
       <CardHeader className="pb-3">
         <CardTitle className="text-base">Feature access</CardTitle>
         <CardDescription>
-          Grant admin tools (Import, Scrapers, AI, etc.) without changing CRM role. Manage the same
+          Grant admin tools (Import, Scrapers, AI, etc.) without changing CRM permissions. Manage the same
           settings on the Users page when editing a person.
         </CardDescription>
       </CardHeader>

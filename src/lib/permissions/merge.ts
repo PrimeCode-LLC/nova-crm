@@ -4,7 +4,7 @@ export type ResourceKey = PermissionOverride["resource"];
 export type ActionKey = PermissionOverride["action"];
 export type ScopeKey = PermissionOverride["scope"];
 
-/** Default scope by role before department / overrides (v1 heuristic). */
+/** Default scope by role before explicit person overrides (legacy resolver). */
 const ROLE_DEFAULT_SCOPE: Record<
   string,
   Partial<Record<ResourceKey, ScopeKey>>
@@ -17,11 +17,11 @@ const ROLE_DEFAULT_SCOPE: Record<
     activities: "all",
   },
   manager: {
-    leads: "department",
-    deals: "department",
-    accounts: "department",
-    contacts: "department",
-    activities: "department",
+    leads: "team",
+    deals: "team",
+    accounts: "team",
+    contacts: "team",
+    activities: "team",
   },
   team_lead: {
     leads: "team",
@@ -73,7 +73,7 @@ export type EffectivePermission = {
 
 /**
  * Merges role defaults with per-user overrides. Deny wins over grant at the same resource+action.
- * Department-based rules are applied upstream (same shape as an override with scope).
+ * Selected-team rules are applied upstream as explicit overrides.
  */
 export function mergePermissions(
   role: Role,

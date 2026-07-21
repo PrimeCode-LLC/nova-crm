@@ -97,7 +97,7 @@ type OrgSummary = {
 const ROLE_OPTIONS: { value: OrgMemberRole; label: string; help: string }[] = [
   { value: "owner", label: "Owner", help: "Full access, billing, ownership transfer" },
   { value: "admin", label: "Admin", help: "Manage team, settings, all data" },
-  { value: "manager", label: "Manager", help: "Manage department + reports" },
+  { value: "manager", label: "Manager", help: "Manage workspace settings and reporting team" },
   { value: "member", label: "Member", help: "Standard CRM user" },
 ];
 
@@ -725,8 +725,8 @@ function PeoplePageClientInner({
         title="People"
         description={
           organization
-            ? `Who can access ${organization.name} and how they appear in the CRM, workspace access, roles, reporting lines, and admin tools.`
-            : "Workspace access, CRM profiles, invites, and admin permissions in one place."
+            ? `Manage access to ${organization.name}, CRM permissions, reporting lines, optional teams, and admin tools.`
+            : "Workspace access, CRM profiles, reporting lines, and permissions in one place."
         }
         actions={
           <div className="flex items-center gap-2">
@@ -844,10 +844,10 @@ function PeoplePageClientInner({
                   </Select>
                   <Select value={crmRoleFilter} onValueChange={(v) => setCrmRoleFilter(v ?? "all")}>
                     <SelectTrigger className="h-8 w-36">
-                      <SelectValue placeholder="CRM role" />
+                      <SelectValue placeholder="CRM permissions" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All CRM roles</SelectItem>
+                      <SelectItem value="all">All CRM permissions</SelectItem>
                       {crmRoleOptions.map((opt) => (
                         <SelectItem key={opt.value} value={opt.value}>
                           {opt.label}
@@ -876,8 +876,8 @@ function PeoplePageClientInner({
                       <TableHead>Name</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Workspace access</TableHead>
-                      <TableHead>CRM role</TableHead>
-                      <TableHead>Department</TableHead>
+                      <TableHead>CRM permissions</TableHead>
+                      <TableHead>Team</TableHead>
                       <TableHead>Account</TableHead>
                       <TableHead>CRM status</TableHead>
                       <TableHead>Joined</TableHead>
@@ -1601,7 +1601,7 @@ function PeoplePageClientInner({
                   >
                     {!crmUser && !canManageCrm ? (
                       <p className="text-sm text-muted-foreground">
-                        No CRM profile yet. An admin can set roles after they join.
+                        No CRM profile yet. An admin can assign CRM permissions after they join.
                       </p>
                     ) : (
                       <div className="space-y-3 pr-1">
@@ -1635,7 +1635,7 @@ function PeoplePageClientInner({
                           />
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">CRM role</Label>
+                          <Label className="text-xs">CRM permissions</Label>
                           <Select
                             value={editCrmRole}
                             onValueChange={(v) => setEditCrmRole((v as Role) ?? "salesperson")}
@@ -1654,7 +1654,7 @@ function PeoplePageClientInner({
                           </Select>
                         </div>
                         <div className="space-y-1.5">
-                          <Label className="text-xs">Department</Label>
+                          <Label className="text-xs">Team (optional)</Label>
                           <Select
                             value={editDept}
                             onValueChange={(v) => setEditDept(v ?? NONE)}
@@ -1664,7 +1664,7 @@ function PeoplePageClientInner({
                               <SelectValue placeholder="None">
                                 {editDept === NONE
                                   ? "None"
-                                  : selectTriggerLabelByIdName(editDept, departments) ?? "Department"}
+                                  : selectTriggerLabelByIdName(editDept, departments) ?? "Team"}
                               </SelectValue>
                             </SelectTrigger>
                             <SelectContent>

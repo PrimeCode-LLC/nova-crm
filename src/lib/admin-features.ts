@@ -67,14 +67,14 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
   permissions: {
     label: "Person overrides",
     description: "Per-user CRM access exceptions on top of roles",
-    cluster: "access",
+    cluster: "company",
     minWorkspaceRole: "director",
     href: "/admin/permissions",
   },
   roles: {
-    label: "Roles",
-    description: "CRM role catalog, modules, and sensitive actions",
-    cluster: "access",
+    label: "CRM permissions",
+    description: "Permission roles, module access, data scope, and sensitive actions",
+    cluster: "company",
     minWorkspaceRole: "director",
     minOrgRole: "admin",
     href: "/admin/roles",
@@ -142,25 +142,25 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
   },
   users: {
     label: "People (CRM profile)",
-    description: "CRM roles, hierarchy, and feature access",
+    description: "CRM permissions, hierarchy, optional teams, and feature access",
     cluster: "company",
     minWorkspaceRole: "manager",
     href: "/admin/people",
   },
   hierarchy: {
     label: "Org hierarchy",
-    description: "Reporting lines and departments on the chart",
+    description: "Reporting lines, managers, and CRM permissions on the chart",
     cluster: "company",
     minWorkspaceRole: "manager",
     href: "/admin/hierarchy",
   },
   departments: {
-    label: "Departments",
-    description: "Department structure and leads",
+    label: "Teams",
+    description: "Optional reporting groups, targets, and explicit access boundaries",
     cluster: "company",
     minWorkspaceRole: "manager",
     minOrgRole: "admin",
-    href: "/admin/departments",
+    href: "/admin/teams",
   },
   email_outreach: {
     label: "Email outreach",
@@ -190,11 +190,14 @@ export const GRANTABLE_ADMIN_FEATURES: AdminFeatureKey[] = (
   .filter(([key, m]) => key !== "activity_logs" && (m.minWorkspaceRole != null || m.minOrgRole != null))
   .map(([k]) => k);
 
-export const ADMIN_FEATURE_BY_HREF: Record<string, AdminFeatureKey> = Object.fromEntries(
-  Object.entries(ADMIN_FEATURES)
-    .filter(([, m]) => m.href)
-    .map(([k, m]) => [m.href!, k as AdminFeatureKey]),
-);
+export const ADMIN_FEATURE_BY_HREF: Record<string, AdminFeatureKey> = {
+  ...Object.fromEntries(
+    Object.entries(ADMIN_FEATURES)
+      .filter(([, m]) => m.href)
+      .map(([k, m]) => [m.href!, k as AdminFeatureKey]),
+  ),
+  "/admin/departments": "departments",
+};
 
 const CLUSTER_ORDER: AdminFeatureMeta["cluster"][] = [
   "programs",
@@ -211,7 +214,7 @@ export function grantableFeaturesByCluster(): {
   const labels: Record<AdminFeatureMeta["cluster"], string> = {
     programs: "Programs & data",
     access: "Access & channels",
-    company: "Company & team",
+    company: "Organization & access",
     workspace: "Workspace",
   };
   return CLUSTER_ORDER.map((cluster) => ({
