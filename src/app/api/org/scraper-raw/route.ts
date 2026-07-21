@@ -115,5 +115,6 @@ export async function PATCH(req: Request) {
   return NextResponse.json({
     dismissedIds: result.dismissedIds,
     count: result.dismissedIds.length,
+    totalMatched: result.totalMatched,
   });
 }

@@ -201,7 +201,7 @@ export async function dismissScraperRawItemsBulkServer(input: {
   itemIds?: string[];
   /** When true, dismiss all currently available (non-expired) items for the org. */
   allAvailable?: boolean;
-}): Promise<{ ok: true; dismissedIds: string[] } | { error: string }> {
+}): Promise<{ ok: true; dismissedIds: string[]; totalMatched: number } | { error: string }> {
   const col = rawCol();
   if (!col) return { error: "Database not configured" };
 
@@ -222,8 +222,9 @@ export async function dismissScraperRawItemsBulkServer(input: {
     if (ids.length === 0) return { error: "No items selected" };
   }
 
+  const totalMatched = ids.length;
   if (ids.length === 0) {
-    return { ok: true, dismissedIds: [] };
+    return { ok: true, dismissedIds: [], totalMatched };
   }
 
   const now = new Date().toISOString();
@@ -257,7 +258,7 @@ export async function dismissScraperRawItemsBulkServer(input: {
     if (writes > 0) await batch.commit();
   }
 
-  return { ok: true, dismissedIds };
+  return { ok: true, dismissedIds, totalMatched };
 }
 
 export async function markRawItemPromotedServer(input: {

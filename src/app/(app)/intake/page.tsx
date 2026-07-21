@@ -23,7 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Progress, ProgressLabel } from "@/components/ui/progress";
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -187,6 +187,9 @@ export default function IntakePoolPage() {
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = React.useState<null | "all" | "selected">(null);
   const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [bulkProgress, setBulkProgress] = React.useState<{ done: number; total: number } | null>(
+    null,
+  );
 
   const loadSequenceRef = React.useRef(0);
   const lastFetchAtRef = React.useRef(0);
@@ -615,10 +618,14 @@ export default function IntakePoolPage() {
 
   async function confirmBulkDelete() {
     if (!deleteConfirm) return;
+    const mode = deleteConfirm;
+    const total = mode === "selected" ? selectedIds.size : items.length;
+
     setBulkBusy(true);
+    setBulkProgress({ done: 0, total });
     try {
       const body =
-        deleteConfirm === "all"
+        mode === "all"
           ? { action: "dismiss", allAvailable: true }
           : { action: "dismiss", itemIds: Array.from(selectedIds) };
       const res = await fetch("/api/org/scraper-raw", {
@@ -630,6 +637,7 @@ export default function IntakePoolPage() {
       const data = (await res.json()) as {
         dismissedIds?: string[];
         count?: number;
+        totalMatched?: number;
         error?: string;
       };
       if (!res.ok) {
@@ -640,10 +648,15 @@ export default function IntakePoolPage() {
         );
         return;
       }
+
       const removed = new Set(data.dismissedIds ?? []);
-      setItems((prev) => prev.filter((i) => !removed.has(i.id)));
-      const count = data.count ?? removed.size;
-      toast.success(count === 1 ? "Deleted 1 post" : `Deleted ${count} posts`);
+      const deletedCount = data.count ?? removed.size;
+      const actualTotal = mode === "all" ? (data.totalMatched ?? deletedCount) : total;
+      setBulkProgress({ done: deletedCount, total: actualTotal });
+      setItems((previous) => previous.filter((item) => !removed.has(item.id)));
+      toast.success(
+        deletedCount === 1 ? "Deleted 1 post" : `Deleted ${deletedCount} posts`,
+      );
       setDeleteConfirm(null);
       setSelectedIds(new Set());
     } catch {
@@ -654,6 +667,10 @@ export default function IntakePoolPage() {
   }
 
   const canDelete = canDeleteIntake && items.length > 0 && !bulkBusy;
+  const bulkProgressPercent =
+    bulkProgress && bulkProgress.total > 0
+      ? Math.round((bulkProgress.done / bulkProgress.total) * 100)
+      : 0;
 
   return (
     <>
@@ -667,8 +684,8 @@ export default function IntakePoolPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>
               {deleteConfirm === "all"
-                ? `Delete all ${items.length} posts?`
-                : `Delete ${selectedCount} selected post${selectedCount === 1 ? "" : "s"}?`}
+                ? `Delete all ${bulkBusy && bulkProgress?.total ? bulkProgress.total : items.length} posts?`
+                : `Delete ${bulkBusy && bulkProgress ? bulkProgress.total : selectedCount} selected post${(bulkBusy && bulkProgress ? bulkProgress.total : selectedCount) === 1 ? "" : "s"}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               They will leave the intake pool and won&apos;t be promoted. New posts can still appear
@@ -677,14 +694,19 @@ export default function IntakePoolPage() {
           </AlertDialogHeader>
           {bulkBusy ? (
             <Progress
-              value={null}
+              value={bulkProgress?.total ? bulkProgressPercent : null}
               className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
             >
               <ProgressLabel className="text-sm text-muted-foreground">
-                {deleteConfirm === "all"
-                  ? "Deleting all intake posts…"
-                  : `Deleting ${selectedCount} selected post${selectedCount === 1 ? "" : "s"}…`}
+                {bulkProgress?.total ? "Deleting posts…" : "Preparing deletion…"}
               </ProgressLabel>
+              {bulkProgress?.total ? (
+                <ProgressValue className="text-sm">
+                  {() =>
+                    `${bulkProgress.done} / ${bulkProgress.total} · ${bulkProgressPercent}%`
+                  }
+                </ProgressValue>
+              ) : null}
             </Progress>
           ) : null}
           <AlertDialogFooter>
