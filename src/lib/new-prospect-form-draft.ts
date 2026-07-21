@@ -1,164 +1,146 @@
-import type {
-  BestContactChannel,
-  BusinessStatus,
-  ChannelKey,
-  CompanySize,
-  EmailVerificationStatus,
-  LeadPriority,
-  LeadTemperature,
-  OnlineActivityScore,
-  PipelineStage,
-  RevenueRange,
-  WebsiteStatus,
-} from "@/lib/types";
+import type { ChannelKey } from "@/lib/types";
 import {
-  emptyQualifyFormState,
+  emptyProspectForm,
+  emptyProspectQualifyForm,
+  parseProspectForm,
+  PROSPECT_FORM_VERSION,
+  type ProspectFormValues,
   type ProspectQualifyFormState,
-} from "@/components/prospecting/prospect-qualify-panel";
+} from "@/lib/prospects/prospect-form";
 
-const UNSET = "__unset__" as const;
-
-export const NEW_PROSPECT_DRAFT_VERSION = 1 as const;
-
-export type NewProspectFormDraft = {
-  v: typeof NEW_PROSPECT_DRAFT_VERSION;
-  channel: ChannelKey;
-  profileId: string;
-  stage: PipelineStage;
-  temperature: LeadTemperature;
-  priority: LeadPriority;
-  leadNotes: string;
-  triggerEvent: string;
-  painPoints: string;
-  doNotContact: boolean;
-  nextAction: string;
-  showAdvancedCompany: boolean;
-  strategyId: string;
-  personaId: string;
-  strategyAssignmentId: string;
-  strategyVersion?: number;
-  bizName: string;
-  industry: string;
-  bizDesc: string;
-  city: string;
-  state: string;
-  country: string;
-  yearFounded: string;
-  bizStatus: typeof UNSET | BusinessStatus;
-  size: typeof UNSET | CompanySize;
-  rev: typeof UNSET | RevenueRange;
-  website: string;
-  companyLinkedin: string;
-  webStatus: typeof UNSET | WebsiteStatus;
-  techStackStr: string;
-  activity: typeof UNSET | OnlineActivityScore;
-  lastSiteAt: string;
-  lastSiteNote: string;
-  careersUrl: string;
-  firstName: string;
-  lastName: string;
-  title: string;
-  seniority: string;
-  contactLocation: string;
-  email: string;
-  personalEmail: string;
-  emailVerify: typeof UNSET | EmailVerificationStatus;
-  phone: string;
-  contactSource: string;
-  bestChannel: typeof UNSET | BestContactChannel;
-  linkedin: string;
-  qualifyForm: ProspectQualifyFormState;
+export const NEW_PROSPECT_DRAFT_VERSION = PROSPECT_FORM_VERSION;
+export const PENDING_PROSPECT_DRAFT_ID = "pending";
+export type NewProspectFormDraft = ProspectFormValues;
+export type LocalProspectDraftRecovery = {
+  form: NewProspectFormDraft;
+  revision?: number;
+  savedAt: string;
 };
 
 export function emptyNewProspectFormDraft(): NewProspectFormDraft {
-  return {
-    v: NEW_PROSPECT_DRAFT_VERSION,
-    channel: "cold_email",
-    profileId: "",
-    stage: "new",
-    temperature: "cold",
-    priority: "medium",
-    leadNotes: "",
-    triggerEvent: "",
-    painPoints: "",
-    doNotContact: false,
-    nextAction: "",
-    showAdvancedCompany: false,
-    strategyId: "",
-    personaId: "",
-    strategyAssignmentId: "",
-    strategyVersion: undefined,
-    bizName: "",
-    industry: "",
-    bizDesc: "",
-    city: "",
-    state: "",
-    country: "",
-    yearFounded: "",
-    bizStatus: UNSET,
-    size: UNSET,
-    rev: UNSET,
-    website: "",
-    companyLinkedin: "",
-    webStatus: UNSET,
-    techStackStr: "",
-    activity: UNSET,
-    lastSiteAt: "",
-    lastSiteNote: "",
-    careersUrl: "",
-    firstName: "",
-    lastName: "",
-    title: "",
-    seniority: "",
-    contactLocation: "",
-    email: "",
-    personalEmail: "",
-    emailVerify: UNSET,
-    phone: "",
-    contactSource: "",
-    bestChannel: UNSET,
-    linkedin: "",
-    qualifyForm: emptyQualifyFormState(),
-  };
+  return emptyProspectForm();
 }
 
-export function draftStorageKey(userId: string | undefined): string | null {
+/** Legacy shared session key retained solely for one-time migration. */
+export function legacyDraftStorageKey(userId: string | undefined): string | null {
   if (!userId?.trim()) return null;
   return `crm:new-prospect-draft:v${NEW_PROSPECT_DRAFT_VERSION}:${userId.trim()}`;
 }
 
-export function loadNewProspectDraft(userId: string | undefined): NewProspectFormDraft | null {
-  const key = draftStorageKey(userId);
-  if (!key || typeof sessionStorage === "undefined") return null;
+function previousLegacyDraftStorageKey(userId: string | undefined): string | null {
+  if (!userId?.trim()) return null;
+  return `crm:new-prospect-draft:v1:${userId.trim()}`;
+}
+
+export function draftStorageKey(
+  userId: string | undefined,
+  draftId?: string,
+): string | null {
+  const legacy = legacyDraftStorageKey(userId);
+  if (!legacy) return null;
+  return draftId ? `${legacy}:draft:${draftId}` : legacy;
+}
+
+export function parseLocalProspectDraftRecovery(raw: string): LocalProspectDraftRecovery | null {
   try {
-    const raw = sessionStorage.getItem(key);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as NewProspectFormDraft;
-    if (parsed?.v !== NEW_PROSPECT_DRAFT_VERSION) return null;
-    return parsed;
+    const parsed = JSON.parse(raw) as unknown;
+    const isEnvelope = Boolean(parsed && typeof parsed === "object" && "form" in parsed);
+    const envelope = isEnvelope
+      ? (parsed as Partial<LocalProspectDraftRecovery>)
+      : { savedAt: "", revision: undefined };
+    const rawForm: unknown = isEnvelope
+      ? (parsed as { form?: unknown }).form
+      : parsed;
+    const candidate =
+      rawForm &&
+      typeof rawForm === "object" &&
+      "v" in rawForm &&
+      rawForm.v === 1
+        ? { ...rawForm, v: NEW_PROSPECT_DRAFT_VERSION }
+        : rawForm;
+    const form = parseProspectForm(candidate);
+    if (!form) return null;
+    return {
+      form,
+      revision:
+        typeof envelope.revision === "number" &&
+        Number.isSafeInteger(envelope.revision) &&
+        envelope.revision >= 0
+          ? envelope.revision
+          : undefined,
+      savedAt: typeof envelope.savedAt === "string" ? envelope.savedAt : "",
+    };
   } catch {
     return null;
   }
 }
 
-export function saveNewProspectDraft(userId: string | undefined, draft: NewProspectFormDraft): void {
-  const key = draftStorageKey(userId);
-  if (!key || typeof sessionStorage === "undefined") return;
+export function loadNewProspectDraft(
+  userId: string | undefined,
+  draftId?: string,
+): LocalProspectDraftRecovery | null {
+  const key = draftStorageKey(userId, draftId);
+  if (!key) return null;
   try {
-    sessionStorage.setItem(key, JSON.stringify(draft));
+    const storage = draftId ? localStorage : sessionStorage;
+    const raw =
+      storage.getItem(key) ??
+      (!draftId
+        ? storage.getItem(previousLegacyDraftStorageKey(userId) ?? "")
+        : null);
+    return raw ? parseLocalProspectDraftRecovery(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveNewProspectDraft(
+  userId: string | undefined,
+  draftId: string,
+  draft: NewProspectFormDraft,
+  revision?: number,
+): void {
+  const key = draftStorageKey(userId, draftId);
+  if (!key || typeof localStorage === "undefined") return;
+  try {
+    const recovery: LocalProspectDraftRecovery = {
+      form: draft,
+      revision,
+      savedAt: new Date().toISOString(),
+    };
+    localStorage.setItem(key, JSON.stringify(recovery));
   } catch {
     /* quota / private mode */
   }
 }
 
-export function clearNewProspectDraft(userId: string | undefined): void {
-  const key = draftStorageKey(userId);
-  if (!key || typeof sessionStorage === "undefined") return;
+export function clearNewProspectDraft(
+  userId: string | undefined,
+  draftId?: string,
+): void {
+  const key = draftStorageKey(userId, draftId);
+  if (!key) return;
   try {
-    sessionStorage.removeItem(key);
+    (draftId ? localStorage : sessionStorage).removeItem(key);
+    if (!draftId) {
+      const previousKey = previousLegacyDraftStorageKey(userId);
+      if (previousKey) sessionStorage.removeItem(previousKey);
+    }
   } catch {
     /* ignore */
   }
+}
+
+/** Move the old shared session value only after a server draft exists. */
+export function acknowledgeLegacyDraftMigration(
+  userId: string | undefined,
+  draftId: string,
+  draft: NewProspectFormDraft,
+  revision: number,
+): void {
+  saveNewProspectDraft(userId, draftId, draft, revision);
+  clearNewProspectDraft(userId);
+  clearNewProspectDraft(userId, PENDING_PROSPECT_DRAFT_ID);
 }
 
 export function serializeNewProspectDraft(draft: NewProspectFormDraft): string {
@@ -191,7 +173,7 @@ export function mergePrefillIntoDraft(
 }
 
 function qualifyIsEmpty(q: ProspectQualifyFormState): boolean {
-  const empty = emptyQualifyFormState();
+  const empty = emptyProspectQualifyForm();
   if (q.primaryOpportunityLabel.trim()) return false;
   if (q.rejectionNote.trim()) return false;
   if (q.rejectionReason) return false;

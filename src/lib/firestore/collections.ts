@@ -71,12 +71,14 @@ export const COLLECTIONS = {
   extensionAuthRateLimits: "extensionAuthRateLimits",
   /** Browser-extension discoveries and their Nova save attribution. */
   extensionFindings: "extensionFindings",
-  /** One server-managed working prospect draft per Nova user. */
+  /** Durable prospect drafts; users may own multiple active manual drafts. */
   prospectDrafts: "prospectDrafts",
   /** Full captured sources kept outside draft summaries to avoid document-size growth. */
   prospectDraftSources: "prospectDraftSources",
-  /** Transaction locks that enforce one active working draft per user. */
+  /** Legacy extension pointers to each user's current working draft. */
   prospectDraftLocks: "prospectDraftLocks",
+  /** Transactional email and per-company reservations used while completing drafts. */
+  prospectDraftReservations: "prospectDraftReservations",
 } as const;
 
 /** Subcollections under `organizations/{orgId}/*` (server-managed). */
@@ -143,4 +145,8 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.workspaceChatMessages,
   COLLECTIONS.workspaceChatReads,
   COLLECTIONS.userNotifications,
+  COLLECTIONS.prospectDrafts,
+  COLLECTIONS.prospectDraftSources,
+  COLLECTIONS.prospectDraftLocks,
+  COLLECTIONS.prospectDraftReservations,
 ] as const;

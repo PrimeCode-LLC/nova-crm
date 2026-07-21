@@ -6,6 +6,8 @@ import { useRouter } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Check, ExternalLink, Save, Trash2 } from "lucide-react";
 import { toast } from "sonner";
+import { ProspectFormSections } from "@/components/prospects/prospect-form-sections";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,11 +24,23 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Textarea } from "@/components/ui/textarea";
+import { useChannelOptions } from "@/hooks/use-channel-options";
+import { countCompanyContactsForUser } from "@/lib/prospecting-strategy/progress";
+import { resolveDailyTargets } from "@/lib/prospecting-strategy/types";
+import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import {
+  domainFromWebsiteOrEmail,
+  type ProspectFormValues,
+} from "@/lib/prospects/prospect-form";
+import {
+  DRAFT_FIELD_TO_FORM_KEY,
   PROSPECT_DRAFT_FIELD_KEYS,
+  prospectFormFromDraft,
   type ProspectDraft,
   type ProspectDraftFieldKey,
 } from "@/lib/prospects/draft-types";
+import { reviewedKeysAfterDraftSave } from "@/lib/prospects/draft-autosave";
+import { cn } from "@/lib/utils";
 
 const LABELS: Record<ProspectDraftFieldKey, string> = {
   companyName: "Company name",
@@ -77,20 +91,76 @@ async function loadDraft(id: string): Promise<ProspectDraft> {
 async function saveValues(
   id: string,
   values: Partial<Record<ProspectDraftFieldKey, string>>,
+  form: ProspectFormValues,
+  revision: number,
 ): Promise<ProspectDraft> {
   const response = await fetch(`/api/prospect-drafts/${encodeURIComponent(id)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ values }),
+    body: JSON.stringify({ values, form, revision }),
   });
   const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
   if (!response.ok || !body.draft) throw new Error(body.error ?? "Could not save draft.");
   return body.draft;
 }
 
+function DraftAnnotation({
+  draft,
+  fieldKey,
+}: {
+  draft: ProspectDraft;
+  fieldKey: ProspectDraftFieldKey;
+}) {
+  const field = draft.fields[fieldKey];
+  if (!field) return null;
+  const details = [
+    field.evidence[0]?.quote,
+    field.alternatives?.length
+      ? `Alternatives: ${field.alternatives.map((item) => item.value).join(" · ")}`
+      : undefined,
+  ]
+    .filter(Boolean)
+    .join("\n");
+  return (
+    <span className="inline-flex items-center gap-1">
+      <Badge
+        variant={field.status === "conflict" ? "destructive" : "outline"}
+        className="text-[10px]"
+        title={details}
+      >
+        {field.status} · {Math.round(field.confidence * 100)}%
+      </Badge>
+      {field.evidence[0] ? (
+        <a
+          href={field.evidence[0].sourceUrl}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open evidence for ${LABELS[fieldKey]}`}
+          className="text-muted-foreground hover:text-primary"
+        >
+          <ExternalLink className="size-3" />
+        </a>
+      ) : null}
+    </span>
+  );
+}
+
 function DraftForm({ draft }: { draft: ProspectDraft }) {
   const router = useRouter();
   const queryClient = useQueryClient();
+  const { profiles, leads, currentUserId, intentPlaybook } = useWorkspace();
+  const channelOptions = useChannelOptions();
+  const prospecting = useProspectingStrategyData();
+  const [form, setForm] = React.useState(() => prospectFormFromDraft(draft));
+  const [research, setResearch] = React.useState({
+    companyDomain: draft.fields.companyDomain?.value ?? "",
+    businessFocus: draft.fields.businessFocus?.value ?? "",
+    hiringSignals: draft.fields.hiringSignals?.value ?? "",
+    recentNews: draft.fields.recentNews?.value ?? "",
+  });
+  const [reviewedKeys, setReviewedKeys] = React.useState<Set<ProspectDraftFieldKey>>(
+    () => new Set(),
+  );
   const [values, setValues] = React.useState<Partial<Record<ProspectDraftFieldKey, string>>>(
     Object.fromEntries(
       PROSPECT_DRAFT_FIELD_KEYS.map((key) => [key, draft.fields[key]?.value ?? ""]),
@@ -98,21 +168,101 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
   );
   const [busy, setBusy] = React.useState<"save" | "complete" | "discard" | null>(null);
   const [discardOpen, setDiscardOpen] = React.useState(false);
+  const [qualifyBlockerOpen, setQualifyBlockerOpen] = React.useState(false);
+  const [qualifyBlockerMessage, setQualifyBlockerMessage] = React.useState("");
   const [discardReason, setDiscardReason] = React.useState("");
+  const latestRevisionRef = React.useRef(draft.revision);
+  const latestDraftRef = React.useRef(draft);
+  const formRef = React.useRef(form);
+  const researchRef = React.useRef(research);
+  const reviewedKeysRef = React.useRef(reviewedKeys);
+  const editVersionRef = React.useRef(0);
+  const savePromiseRef = React.useRef<Promise<ProspectDraft> | null>(null);
+  const [revision, setRevision] = React.useState(draft.revision);
+  const [lastSavedAt, setLastSavedAt] = React.useState(draft.lastSavedAt);
+  const [saveState, setSaveState] = React.useState<"saved" | "unsaved" | "saving" | "error">(
+    "saved",
+  );
 
-  async function persist(showToast = true) {
-    const updated = await saveValues(draft.id, values);
-    queryClient.setQueryData(["prospect-draft", draft.id], updated);
-    void queryClient.invalidateQueries({ queryKey: ["prospect-drafts"] });
-    if (showToast) toast.success("Draft saved");
-    return updated;
+  const persist = React.useCallback(async (showToast = true) => {
+    if (savePromiseRef.current) {
+      await savePromiseRef.current;
+    }
+    const keys = new Set(reviewedKeysRef.current);
+    if (keys.size === 0) return latestDraftRef.current;
+    const capturedForm = formRef.current;
+    const capturedResearch = researchRef.current;
+    const capturedEditVersion = editVersionRef.current;
+    setSaveState("saving");
+    const values: Partial<Record<ProspectDraftFieldKey, string>> = {};
+    for (const key of keys) {
+      if (key in capturedResearch) {
+        values[key] = capturedResearch[key as keyof typeof capturedResearch];
+        continue;
+      }
+      const formKey = DRAFT_FIELD_TO_FORM_KEY[key as keyof typeof DRAFT_FIELD_TO_FORM_KEY];
+      if (formKey) values[key] = String(capturedForm[formKey] ?? "");
+    }
+    if (keys.has("firstName") || keys.has("lastName")) {
+      values.contactName = `${capturedForm.firstName} ${capturedForm.lastName}`.trim();
+    }
+    const operation = saveValues(
+      draft.id,
+      values,
+      capturedForm,
+      latestRevisionRef.current,
+    ).then((updated) => {
+      latestRevisionRef.current = updated.revision;
+      latestDraftRef.current = updated;
+      setRevision(updated.revision);
+      setLastSavedAt(updated.lastSavedAt);
+      const remaining = reviewedKeysAfterDraftSave(
+        reviewedKeysRef.current,
+        capturedEditVersion,
+        editVersionRef.current,
+      );
+      reviewedKeysRef.current = remaining;
+      setReviewedKeys(remaining);
+      if (remaining.size === 0) {
+        setSaveState("saved");
+      } else {
+        setSaveState("unsaved");
+      }
+      void queryClient.invalidateQueries({ queryKey: ["prospect-drafts"] });
+      if (showToast) toast.success("Draft saved");
+      return updated;
+    });
+    savePromiseRef.current = operation;
+    try {
+      return await operation;
+    } finally {
+      if (savePromiseRef.current === operation) savePromiseRef.current = null;
+    }
+  }, [draft.id, queryClient]);
+
+  function markReviewed(key: ProspectDraftFieldKey) {
+    editVersionRef.current += 1;
+    setReviewedKeys((current) => {
+      const next = new Set(current).add(key);
+      reviewedKeysRef.current = next;
+      return next;
+    });
   }
+
+  React.useEffect(() => {
+    if (reviewedKeys.size === 0 || busy) return;
+    const timer = window.setTimeout(() => {
+      void persist(false).catch(() => setSaveState("error"));
+    }, 1_200);
+    return () => window.clearTimeout(timer);
+  }, [busy, persist, reviewedKeys.size]);
 
   async function handleSave() {
     setBusy("save");
     try {
       await persist();
     } catch (error) {
+      setSaveState("error");
       toast.error(error instanceof Error ? error.message : "Could not save draft.");
     } finally {
       setBusy(null);
@@ -126,20 +276,38 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
       if (updated.missingRequiredFields.length) {
         throw new Error(`Complete ${updated.missingRequiredFields.map((key) => LABELS[key]).join(" and ")}.`);
       }
-      const response = await fetch(
-        `/api/prospect-drafts/${encodeURIComponent(draft.id)}/complete`,
-        { method: "POST" },
-      );
-      const body = (await response.json()) as { leadId?: string; error?: string };
-      if (!response.ok || !body.leadId) throw new Error(body.error ?? "Could not complete draft.");
-      toast.success("Draft completed and prospect created");
-      void queryClient.invalidateQueries({ queryKey: ["prospect-drafts"] });
-      router.push(`/leads/${body.leadId}`);
+      await requestCompletion(false);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not complete draft.");
+      const message = error instanceof Error ? error.message : "Could not complete draft.";
+      if (message.startsWith("Qualification incomplete:")) {
+        setQualifyBlockerMessage(message.replace("Qualification incomplete:", "").trim());
+        setQualifyBlockerOpen(true);
+      } else {
+        toast.error(message);
+      }
     } finally {
       setBusy(null);
     }
+  }
+
+  async function requestCompletion(allowIncomplete: boolean) {
+    const response = await fetch(
+      `/api/prospect-drafts/${encodeURIComponent(draft.id)}/complete`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ allowIncomplete, revision: latestRevisionRef.current }),
+      },
+    );
+    const body = (await response.json()) as { leadId?: string; error?: string };
+    if (!response.ok || !body.leadId) throw new Error(body.error ?? "Could not complete draft.");
+    toast.success(
+      allowIncomplete
+        ? "Prospect created as incomplete"
+        : "Draft completed and prospect created",
+    );
+    void queryClient.invalidateQueries({ queryKey: ["prospect-drafts"] });
+    router.push(`/leads/${body.leadId}`);
   }
 
   async function handleDiscard() {
@@ -149,7 +317,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
       const response = await fetch(`/api/prospect-drafts/${encodeURIComponent(draft.id)}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ reason: discardReason }),
+        body: JSON.stringify({ reason: discardReason, revision: latestRevisionRef.current }),
       });
       const body = (await response.json()) as { error?: string };
       if (!response.ok) throw new Error(body.error ?? "Could not discard draft.");
@@ -164,6 +332,15 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
     }
   }
 
+  const selectedStrategy = prospecting.strategies.find((strategy) => strategy.id === form.strategyId);
+  const maxContacts = resolveDailyTargets(selectedStrategy).maxContactsPerCompany ?? 2;
+  const existingContacts = countCompanyContactsForUser(
+    leads,
+    currentUserId,
+    domainFromWebsiteOrEmail(form.website, form.email),
+    form.bizName,
+  );
+
   return (
     <div className="space-y-5">
       <Card className="border-amber-500/35 bg-amber-500/5">
@@ -173,6 +350,24 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
               <p className="font-semibold">Working draft · {draft.completionPercent}% complete</p>
               <p className="text-sm text-muted-foreground">
                 AI suggestions remain proposed until you review and save them.
+              </p>
+              <p
+                className={cn(
+                  "mt-1 text-xs",
+                  saveState === "error" ? "text-destructive" : "text-muted-foreground",
+                )}
+                role="status"
+              >
+                {saveState === "saving"
+                  ? "Autosaving…"
+                  : saveState === "unsaved"
+                    ? "Unsaved changes"
+                    : saveState === "error"
+                      ? "Autosave failed — use Save draft to retry"
+                      : `Saved ${new Date(lastSavedAt).toLocaleTimeString([], {
+                          hour: "numeric",
+                          minute: "2-digit",
+                        })} · revision ${revision}`}
               </p>
             </div>
             <div className="flex gap-2">
@@ -199,6 +394,103 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
       <Card>
         <CardHeader>
           <CardTitle>Prospect fields</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ProspectFormSections
+            values={form}
+            onChange={(next, changedKey) => {
+              if (next.strategyId !== form.strategyId) {
+                const assignment = prospecting.assignments.find(
+                  (item) =>
+                    item.userId === currentUserId &&
+                    item.strategyId === next.strategyId &&
+                    item.status === "active",
+                );
+                next = {
+                  ...next,
+                  strategyAssignmentId: assignment?.id ?? "",
+                };
+              }
+              formRef.current = next;
+              setForm(next);
+              if (changedKey) {
+                setSaveState("unsaved");
+                markReviewed(changedKey);
+              }
+            }}
+            channelOptions={channelOptions}
+            profiles={profiles}
+            strategies={prospecting.strategies.filter(
+              (strategy) => strategy.status === "published" || strategy.status === "draft",
+            )}
+            personas={prospecting.personas.filter(
+              (persona) => selectedStrategy?.personaIds.includes(persona.id),
+            )}
+            outreachThreshold={intentPlaybook.outreachThreshold}
+            existingContactsForCompany={existingContacts}
+            maxContactsPerCompany={maxContacts}
+            renderAnnotation={(key) => <DraftAnnotation draft={draft} fieldKey={key} />}
+          />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>AI research</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-2">
+          {(Object.keys(research) as Array<keyof typeof research>).map((key) => {
+            const fieldKey = key as ProspectDraftFieldKey;
+            const isLong = key !== "companyDomain";
+            return (
+              <div key={key} className={cn("space-y-2", isLong && "md:col-span-2")}>
+                <div className="flex items-center justify-between gap-2">
+                  <label className="text-sm font-medium">{LABELS[fieldKey]}</label>
+                  <DraftAnnotation draft={draft} fieldKey={fieldKey} />
+                </div>
+                {isLong ? (
+                  <Textarea
+                    value={research[key]}
+                    rows={3}
+                    onChange={(event) => {
+                      setSaveState("unsaved");
+                      setResearch((current) => {
+                        const next = { ...current, [key]: event.target.value };
+                        researchRef.current = next;
+                        return next;
+                      });
+                      markReviewed(fieldKey);
+                    }}
+                  />
+                ) : (
+                  <Input
+                    value={research[key]}
+                    onChange={(event) => {
+                      setSaveState("unsaved");
+                      setResearch((current) => {
+                        const next = { ...current, [key]: event.target.value };
+                        researchRef.current = next;
+                        return next;
+                      });
+                      markReviewed(fieldKey);
+                    }}
+                  />
+                )}
+                {draft.fields[fieldKey]?.evidence[0] ? (
+                  <blockquote className="border-l-2 pl-3 text-xs text-muted-foreground">
+                    “{draft.fields[fieldKey]!.evidence[0]!.quote}”
+                  </blockquote>
+                ) : null}
+              </div>
+            );
+          })}
+        </CardContent>
+      </Card>
+
+      {false ? (
+      <Card>
+        <CardHeader>
+          <CardTitle>Legacy prospect fields</CardTitle>
         </CardHeader>
         <CardContent className="grid gap-4 md:grid-cols-2">
           {PROSPECT_DRAFT_FIELD_KEYS.map((key) => {
@@ -255,6 +547,7 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           })}
         </CardContent>
       </Card>
+      ) : null}
 
       <Card>
         <CardHeader>
@@ -285,10 +578,15 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           <Trash2 className="h-4 w-4" /> Discard draft
         </Button>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={handleSave} disabled={Boolean(busy)}>
-            <Save className="h-4 w-4" /> {busy === "save" ? "Saving…" : "Save draft"}
+          <Button
+            variant="outline"
+            onClick={handleSave}
+            disabled={Boolean(busy) || saveState === "saving"}
+          >
+            <Save className="h-4 w-4" />{" "}
+            {busy === "save" || saveState === "saving" ? "Saving…" : "Save draft"}
           </Button>
-          <Button onClick={handleComplete} disabled={Boolean(busy)}>
+          <Button onClick={handleComplete} disabled={Boolean(busy) || saveState === "saving"}>
             <Check className="h-4 w-4" />{" "}
             {busy === "complete" ? "Completing…" : "Complete prospect"}
           </Button>
@@ -321,6 +619,30 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={qualifyBlockerOpen} onOpenChange={setQualifyBlockerOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Qualification not complete</AlertDialogTitle>
+            <AlertDialogDescription>{qualifyBlockerMessage}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={Boolean(busy)}>Keep editing</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={Boolean(busy)}
+              onClick={() => {
+                setBusy("complete");
+                void requestCompletion(true)
+                  .catch((error) => {
+                    toast.error(error instanceof Error ? error.message : "Could not complete draft.");
+                  })
+                  .finally(() => setBusy(null));
+              }}
+            >
+              Create as incomplete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -341,5 +663,5 @@ export function ProspectDraftEditor({ draftId }: { draftId: string }) {
       </div>
     );
   }
-  return <DraftForm key={data.updatedAt} draft={data} />;
+  return <DraftForm key={data.id} draft={data} />;
 }

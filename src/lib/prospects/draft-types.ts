@@ -1,3 +1,9 @@
+import {
+  emptyProspectForm,
+  parseProspectForm,
+  type ProspectFormValues,
+} from "@/lib/prospects/prospect-form";
+
 export const PROSPECT_DRAFT_FIELD_KEYS = [
   "companyName",
   "companyDomain",
@@ -57,12 +63,24 @@ export type ProspectDraftSourceSummary = {
   capturedAt: string;
 };
 
+export type ProspectDraftOrigin = "manual" | "intent_radar";
+
 export type ProspectDraft = {
   id: string;
   organizationId: string;
   userId: string;
+  /** Monotonic optimistic-concurrency token. Legacy documents begin at revision 0. */
+  revision: number;
   status: "active" | "completed" | "discarded";
+  /** How this draft was started. Missing legacy values are inferred from captured sources. */
+  origin: ProspectDraftOrigin;
+  /** Stable launcher identifier, such as `prospects_page` or `fit_check`. */
+  sourceContext?: string;
+  /** Route the launcher expected to return to after saving. */
+  destination?: string;
   fields: Partial<Record<ProspectDraftFieldKey, ProspectDraftField>>;
+  /** Full Start Prospecting form state. Legacy drafts hydrate this from `fields`. */
+  form?: ProspectFormValues;
   sources: ProspectDraftSourceSummary[];
   sourceCount: number;
   qualityScore?: number;
@@ -82,11 +100,68 @@ export type ProspectDraft = {
   completionPercent: number;
   createdAt: string;
   updatedAt: string;
+  /** User-facing alias for the most recent acknowledged server save. */
+  lastSavedAt: string;
   completedAt?: string;
   leadId?: string;
   discardedAt?: string;
   discardReason?: string;
 };
+
+export const DRAFT_FIELD_TO_FORM_KEY = {
+  companyName: "bizName",
+  companyWebsite: "website",
+  companyLinkedIn: "companyLinkedin",
+  industry: "industry",
+  businessDescription: "bizDesc",
+  city: "city",
+  state: "state",
+  country: "country",
+  yearFounded: "yearFounded",
+  companySize: "size",
+  revenueRange: "rev",
+  techStack: "techStackStr",
+  firstName: "firstName",
+  lastName: "lastName",
+  contactTitle: "title",
+  contactEmail: "email",
+  contactPhone: "phone",
+  contactLinkedIn: "linkedin",
+  triggerEvent: "triggerEvent",
+  painPoints: "painPoints",
+  notes: "leadNotes",
+} as const satisfies Partial<Record<ProspectDraftFieldKey, keyof ProspectFormValues>>;
+
+/** Hydrate both current and pre-full-form drafts without a Firestore migration. */
+export function prospectFormFromDraft(draft: ProspectDraft): ProspectFormValues {
+  const stored = parseProspectForm(draft.form);
+  const form = stored ?? emptyProspectForm();
+  if (!stored) {
+    for (const [draftKey, formKey] of Object.entries(DRAFT_FIELD_TO_FORM_KEY) as Array<
+      [keyof typeof DRAFT_FIELD_TO_FORM_KEY, keyof ProspectFormValues]
+    >) {
+      const value = draft.fields[draftKey]?.value;
+      if (value) {
+        // Draft AI fields are strings; every mapped form target is string-valued.
+        (form as unknown as Record<string, unknown>)[formKey] = value;
+      }
+    }
+    const contactName = draft.fields.contactName?.value.trim();
+    if (contactName && !form.firstName && !form.lastName) {
+      const [firstName = "", ...lastName] = contactName.split(/\s+/);
+      form.firstName = firstName;
+      form.lastName = lastName.join(" ");
+    }
+    if (draft.strategy) {
+      form.strategyId = draft.strategy.strategyId;
+      form.strategyAssignmentId = draft.strategy.strategyAssignmentId;
+      form.strategyVersion = draft.strategy.strategyVersion;
+      form.personaId = draft.strategy.personaId ?? "";
+    }
+    form.qualifyForm.primaryOpportunityLabel = draft.primaryOpportunityLabel ?? "";
+  }
+  return form;
+}
 
 export const PROSPECT_DRAFT_REQUIRED_FIELDS: ProspectDraftFieldKey[] = [
   "companyName",
@@ -134,6 +209,32 @@ export function normalizeProspectDraftFieldValue(
   return value;
 }
 
+/** Verify only fields the reviewer explicitly submitted; untouched AI metadata is preserved. */
+export function applyReviewedDraftValues(
+  current: Partial<Record<ProspectDraftFieldKey, ProspectDraftField>>,
+  values: Partial<Record<ProspectDraftFieldKey, string>>,
+  updatedAt = new Date().toISOString(),
+): Partial<Record<ProspectDraftFieldKey, ProspectDraftField>> {
+  const fields = { ...current };
+  for (const [key, rawValue] of Object.entries(values)) {
+    const fieldKey = key as ProspectDraftFieldKey;
+    if (!PROSPECT_DRAFT_FIELD_KEYS.includes(fieldKey)) continue;
+    const value = normalizeProspectDraftFieldValue(fieldKey, rawValue ?? "");
+    if (!value) {
+      delete fields[fieldKey];
+      continue;
+    }
+    fields[fieldKey] = {
+      value,
+      confidence: 1,
+      status: "verified",
+      evidence: fields[fieldKey]?.evidence ?? [],
+      updatedAt,
+    };
+  }
+  return fields;
+}
+
 export function draftCompletion(
   fields: Partial<Record<ProspectDraftFieldKey, ProspectDraftField>>,
 ): { missingRequiredFields: ProspectDraftFieldKey[]; completionPercent: number } {
@@ -158,4 +259,34 @@ export function draftCompletion(
     missingRequiredFields,
     completionPercent: Math.round((complete / usefulFields.length) * 100),
   };
+}
+
+/** Project the durable full form into the review fields used by readiness and search. */
+export function prospectDraftValuesFromForm(
+  form: ProspectFormValues,
+): Partial<Record<ProspectDraftFieldKey, string>> {
+  const values: Partial<Record<ProspectDraftFieldKey, string>> = {};
+  for (const [draftKey, formKey] of Object.entries(DRAFT_FIELD_TO_FORM_KEY) as Array<
+    [keyof typeof DRAFT_FIELD_TO_FORM_KEY, keyof ProspectFormValues]
+  >) {
+    const value = form[formKey];
+    if (typeof value === "string") {
+      values[draftKey] = value === "__unset__" ? "" : value;
+    }
+  }
+  const firstName = form.firstName.trim();
+  const lastName = form.lastName.trim();
+  values.contactName = firstName && lastName ? `${firstName} ${lastName}` : "";
+  return values;
+}
+
+/** Readiness must include manual-form values, including legacy form-only drafts. */
+export function draftCompletionForForm(
+  fields: Partial<Record<ProspectDraftFieldKey, ProspectDraftField>>,
+  form?: ProspectFormValues,
+): { missingRequiredFields: ProspectDraftFieldKey[]; completionPercent: number } {
+  if (!form) return draftCompletion(fields);
+  return draftCompletion(
+    applyReviewedDraftValues(fields, prospectDraftValuesFromForm(form), "1970-01-01T00:00:00.000Z"),
+  );
 }

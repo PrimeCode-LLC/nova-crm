@@ -21,14 +21,14 @@ export default async function ProspectDraftPage({
             size="sm"
             nativeButton={false}
             render={
-              <Link href="/prospects">
-                <ArrowLeft className="h-3.5 w-3.5" /> Prospects
+              <Link href="/prospects/drafts">
+                <ArrowLeft className="h-3.5 w-3.5" /> Prospect drafts
               </Link>
             }
           />
         }
       />
-      <PageBody contained>
+      <PageBody>
         <ProspectDraftEditor draftId={id} />
       </PageBody>
     </AppPage>

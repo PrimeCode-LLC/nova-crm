@@ -419,6 +419,8 @@ async function saveFinding(
   leadId?: string,
   strategyAssignmentId?: string,
   strategySelectionMode: "auto" | "manual" = "auto",
+  draftId?: string,
+  revision?: number,
 ): Promise<unknown> {
   await ensureAccess();
   const result = await storageGet<ScanResult>(RESULT_KEY);
@@ -434,7 +436,13 @@ async function saveFinding(
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      ...(action === "draft" ? {} : { action, leadId }),
+      ...(action === "draft"
+        ? {
+            draftId,
+            revision,
+            idempotencyKey: `${draftId ?? "working"}:${result.scannedAt}:${result.page.canonicalUrl || result.page.url}`,
+          }
+        : { action, leadId }),
       page: {
         url: result.page.canonicalUrl || result.page.url,
         title: result.page.title,
@@ -470,9 +478,12 @@ async function saveFinding(
 async function draftApi(
   method: "GET" | "PATCH" | "PUT" | "DELETE",
   body?: Record<string, unknown>,
+  operation?: "list",
 ): Promise<unknown> {
   await ensureAccess();
-  const response = await api("/api/extension/drafts", {
+  const response = await api(
+    operation ? `/api/extension/drafts?operation=${operation}` : "/api/extension/drafts",
+    {
     method,
     ...(body
       ? {
@@ -480,10 +491,29 @@ async function draftApi(
           body: JSON.stringify(body),
         }
       : {}),
-  });
+    },
+  );
   const value = (await response.json()) as { error?: unknown };
   if (!response.ok) {
     throw new Error(apiErrorMessage(value.error, "Could not update working draft."));
+  }
+  return value;
+}
+
+async function apiDraftOperation(body: {
+  operation: "select" | "new-draft";
+  draftId?: string;
+  idempotencyKey?: string;
+}): Promise<unknown> {
+  await ensureAccess();
+  const response = await api("/api/extension/drafts", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const value = (await response.json()) as { error?: unknown };
+  if (!response.ok) {
+    throw new Error(apiErrorMessage(value.error, "Could not select working draft."));
   }
   return value;
 }
@@ -624,20 +654,36 @@ chrome.runtime.onMessage.addListener(
             request.leadId,
             request.strategyAssignmentId,
             request.strategySelectionMode,
+            request.draftId,
+            request.revision,
           );
         case "get-draft":
           return draftApi("GET");
+        case "list-drafts":
+          return draftApi("GET", undefined, "list");
+        case "select-draft":
+          return apiDraftOperation({ operation: "select", draftId: request.draftId });
+        case "new-draft":
+          return apiDraftOperation({
+            operation: "new-draft",
+            idempotencyKey: request.idempotencyKey,
+          });
         case "update-draft":
           return draftApi("PATCH", {
             draftId: request.draftId,
             values: request.values,
+            revision: request.revision,
           });
         case "complete-draft":
-          return draftApi("PUT", { draftId: request.draftId });
+          return draftApi("PUT", {
+            draftId: request.draftId,
+            revision: request.revision,
+          });
         case "discard-draft":
           return draftApi("DELETE", {
             draftId: request.draftId,
             reason: request.reason,
+            revision: request.revision,
           });
         case "clear-highlights":
           await clearHighlights();

@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Bookmark, Download, Kanban, Upload, ChevronDown, Target } from "lucide-react";
+import { Bookmark, Download, FilePenLine, Kanban, Upload, ChevronDown, Target } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import type { LeadsTableRef, LeadsTablePreset } from "@/components/leads/leads-table";
@@ -51,9 +51,28 @@ function ProspectsPageInner() {
         description="Intake records from research. Prospect owners assign channels and teammates; assignees push their channel into one shared sales lead."
         actions={
           <>
-            <Button size="sm" type="button" onClick={() => openNewProspectForm()}>
+            <Button
+              size="sm"
+              type="button"
+              onClick={() =>
+                openNewProspectForm({
+                  source: "prospects_page",
+                  destination: "/prospects",
+                })
+              }
+            >
               New prospect
             </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/prospects/drafts">
+                  <FilePenLine className="h-3.5 w-3.5" /> Drafts
+                </Link>
+              }
+            />
             <DropdownMenu>
               <DropdownMenuTrigger
                 render={

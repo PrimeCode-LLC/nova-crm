@@ -1,5 +1,12 @@
 import crypto from "node:crypto";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
+import {
+  FieldPath,
+  FieldValue,
+  Timestamp,
+  type DocumentData,
+  type Query,
+  type QueryDocumentSnapshot,
+} from "firebase-admin/firestore";
 import { z } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
@@ -7,14 +14,27 @@ import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import {
   PROSPECT_DRAFT_FIELD_KEYS,
+  applyReviewedDraftValues,
   draftCompletion,
+  draftCompletionForForm,
   normalizeProspectDraftFieldValue,
+  prospectFormFromDraft,
+  prospectDraftValuesFromForm,
   type ProspectDraft,
   type ProspectDraftEvidence,
   type ProspectDraftField,
   type ProspectDraftFieldKey,
+  type ProspectDraftOrigin,
   type ProspectDraftSourceSummary,
 } from "@/lib/prospects/draft-types";
+import {
+  buildProspectEntities,
+  domainFromWebsiteOrEmail,
+  normalizedEmail,
+  parseProspectForm,
+  validateProspectForm,
+  type ProspectFormValues,
+} from "@/lib/prospects/prospect-form";
 
 const extractionSchema = z.object({
   fields: z
@@ -69,6 +89,52 @@ function lockId(organizationId: string, userId: string): string {
   return crypto.createHash("sha256").update(`${organizationId}:${userId}`).digest("hex");
 }
 
+function stableEntityId(prefix: string, organizationId: string, draftId: string): string {
+  const digest = crypto
+    .createHash("sha256")
+    .update(`${organizationId}:${draftId}:${prefix}`)
+    .digest("hex")
+    .slice(0, 32);
+  return `${prefix}-${digest}`;
+}
+
+function stableOperationId(prefix: string, ...parts: string[]): string {
+  const digest = crypto.createHash("sha256").update(parts.join("\u0000")).digest("hex").slice(0, 40);
+  return `${prefix}-${digest}`;
+}
+
+function normalizeIdempotencyKey(value: string | undefined): string | undefined {
+  const normalized = value?.trim();
+  return normalized ? normalized.slice(0, 200) : undefined;
+}
+
+function completionMetadata(
+  fields: ProspectDraft["fields"],
+  form?: ProspectFormValues,
+): ReturnType<typeof draftCompletion> & { readiness: "ready" | "needs_review" } {
+  const completion = draftCompletionForForm(fields, form);
+  return {
+    ...completion,
+    readiness: completion.missingRequiredFields.length ? "needs_review" : "ready",
+  };
+}
+
+export class ProspectDraftRevisionError extends Error {
+  readonly code = "revision_conflict";
+
+  constructor(readonly currentRevision: number) {
+    super("This draft changed after it was loaded.");
+    this.name = "ProspectDraftRevisionError";
+  }
+}
+
+function revisionOf(raw: Record<string, unknown> | undefined): number {
+  const revision = raw?.revision;
+  return typeof revision === "number" && Number.isSafeInteger(revision) && revision >= 0
+    ? revision
+    : 0;
+}
+
 function iso(value: unknown): string {
   if (value instanceof Timestamp) return value.toDate().toISOString();
   if (typeof value === "string") return value;
@@ -112,15 +178,29 @@ function withoutUndefined<T>(value: T): T {
 function serializeDraft(id: string, raw: Record<string, unknown>): ProspectDraft {
   const fields =
     (raw.fields as Partial<Record<ProspectDraftFieldKey, ProspectDraftField>> | undefined) ?? {};
-  const completion = draftCompletion(fields);
+  const form = parseProspectForm(raw.form) ?? undefined;
+  const completion = completionMetadata(fields, form);
+  const updatedAt = iso(raw.updatedAt);
+  const sourceCount = Number(raw.sourceCount ?? 0);
   return {
     id,
     organizationId: String(raw.organizationId ?? ""),
     userId: String(raw.userId ?? ""),
+    revision: revisionOf(raw),
     status: (raw.status as ProspectDraft["status"]) ?? "active",
+    origin:
+      raw.origin === "manual" || raw.origin === "intent_radar"
+        ? raw.origin
+        : sourceCount > 0
+          ? "intent_radar"
+          : "manual",
+    sourceContext:
+      typeof raw.sourceContext === "string" ? raw.sourceContext : undefined,
+    destination: typeof raw.destination === "string" ? raw.destination : undefined,
     fields,
+    form,
     sources: (raw.sources as ProspectDraftSourceSummary[] | undefined) ?? [],
-    sourceCount: Number(raw.sourceCount ?? 0),
+    sourceCount,
     qualityScore: typeof raw.qualityScore === "number" ? raw.qualityScore : undefined,
     qualityMatchedSignalIds: Array.isArray(raw.qualityMatchedSignalIds)
       ? (raw.qualityMatchedSignalIds as string[])
@@ -133,9 +213,11 @@ function serializeDraft(id: string, raw: Record<string, unknown>): ProspectDraft
       raw.strategy && typeof raw.strategy === "object"
         ? (raw.strategy as ProspectDraft["strategy"])
         : undefined,
-    ...completion,
+    missingRequiredFields: completion.missingRequiredFields,
+    completionPercent: completion.completionPercent,
     createdAt: iso(raw.createdAt),
-    updatedAt: iso(raw.updatedAt),
+    updatedAt,
+    lastSavedAt: updatedAt,
     completedAt: raw.completedAt ? iso(raw.completedAt) : undefined,
     leadId: typeof raw.leadId === "string" ? raw.leadId : undefined,
     discardedAt: raw.discardedAt ? iso(raw.discardedAt) : undefined,
@@ -181,11 +263,14 @@ export async function getOrCreateWorkingDraft(input: {
       {
         userId: input.userId,
         status: "active",
+        origin: "intent_radar",
         fields: {},
         sources: [],
         sourceCount: 0,
+        revision: 0,
         missingRequiredFields: ["companyName", "contactName"],
         completionPercent: 0,
+        readiness: "needs_review",
       },
       input.userId,
     );
@@ -208,6 +293,181 @@ export async function getOrCreateWorkingDraft(input: {
       }),
       created: true,
     };
+  });
+}
+
+export async function getWorkingDraft(input: {
+  organizationId: string;
+  userId: string;
+}): Promise<ProspectDraft | null> {
+  const db = getAdminDb();
+  if (!db) throw new Error("Database not configured.");
+  const lockSnap = await db
+    .collection(COLLECTIONS.prospectDraftLocks)
+    .doc(lockId(input.organizationId, input.userId))
+    .get();
+  const draftId = lockSnap.data()?.draftId;
+  if (typeof draftId !== "string") return null;
+  const draft = await getProspectDraft({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    draftId,
+  });
+  return draft?.status === "active" ? draft : null;
+}
+
+export async function selectWorkingDraft(input: {
+  organizationId: string;
+  userId: string;
+  draftId: string;
+}): Promise<ProspectDraft | null> {
+  const db = getAdminDb();
+  if (!db) throw new Error("Database not configured.");
+  const draftRef = db.collection(COLLECTIONS.prospectDrafts).doc(input.draftId);
+  const lockRef = db
+    .collection(COLLECTIONS.prospectDraftLocks)
+    .doc(lockId(input.organizationId, input.userId));
+  return db.runTransaction(async (tx) => {
+    const draftSnap = await tx.get(draftRef);
+    if (
+      !draftSnap.exists ||
+      draftSnap.data()?.organizationId !== input.organizationId ||
+      draftSnap.data()?.userId !== input.userId ||
+      draftSnap.data()?.status !== "active"
+    ) {
+      return null;
+    }
+    tx.set(
+      lockRef,
+      {
+        organizationId: input.organizationId,
+        userId: input.userId,
+        draftId: input.draftId,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      { merge: true },
+    );
+    return serializeDraft(draftSnap.id, draftSnap.data() as Record<string, unknown>);
+  });
+}
+
+export async function createManualProspectDraft(input: {
+  organizationId: string;
+  userId: string;
+  values?: Partial<Record<ProspectDraftFieldKey, string>>;
+  form?: ProspectFormValues;
+  origin?: ProspectDraftOrigin;
+  sourceContext?: string;
+  destination?: string;
+  idempotencyKey?: string;
+}): Promise<ProspectDraft> {
+  return createProspectDraft(input, false);
+}
+
+/** Create and select in one transaction so extension retries cannot orphan drafts. */
+export async function createAndSelectWorkingDraft(input: {
+  organizationId: string;
+  userId: string;
+  values?: Partial<Record<ProspectDraftFieldKey, string>>;
+  form?: ProspectFormValues;
+  origin?: ProspectDraftOrigin;
+  sourceContext?: string;
+  destination?: string;
+  idempotencyKey?: string;
+}): Promise<ProspectDraft> {
+  return createProspectDraft(input, true);
+}
+
+async function createProspectDraft(
+  input: {
+    organizationId: string;
+    userId: string;
+    values?: Partial<Record<ProspectDraftFieldKey, string>>;
+    form?: ProspectFormValues;
+    origin?: ProspectDraftOrigin;
+    sourceContext?: string;
+    destination?: string;
+    idempotencyKey?: string;
+  },
+  select: boolean,
+): Promise<ProspectDraft> {
+  const db = getAdminDb();
+  if (!db) throw new Error("Database not configured.");
+  const idempotencyKey = normalizeIdempotencyKey(input.idempotencyKey);
+  const draftId = idempotencyKey
+    ? stableOperationId("pd", input.organizationId, input.userId, "create", idempotencyKey)
+    : newId("pd");
+  const draftRef = db.collection(COLLECTIONS.prospectDrafts).doc(draftId);
+  const lockRef = db.collection(COLLECTIONS.prospectDraftLocks).doc(
+    lockId(input.organizationId, input.userId),
+  );
+  let fields = applyReviewedDraftValues({}, input.values ?? {});
+  if (input.form) {
+    fields = applyReviewedDraftValues(fields, prospectDraftValuesFromForm(input.form));
+  }
+  const completion = completionMetadata(fields, input.form);
+  const data = stampForCreate(
+    input.organizationId,
+    {
+      userId: input.userId,
+      status: "active",
+      origin: input.origin ?? "manual",
+      ...(input.sourceContext ? { sourceContext: input.sourceContext } : {}),
+      ...(input.destination ? { destination: input.destination } : {}),
+      revision: 0,
+      fields,
+      ...(input.form ? { form: withoutUndefined(input.form) } : {}),
+      sources: [],
+      sourceCount: 0,
+      ...completion,
+      ...(idempotencyKey ? { createIdempotencyKey: idempotencyKey } : {}),
+    },
+    input.userId,
+  );
+  return db.runTransaction(async (tx) => {
+    const existing = await tx.get(draftRef);
+    if (existing.exists) {
+      const raw = existing.data();
+      if (
+        !idempotencyKey ||
+        raw?.organizationId !== input.organizationId ||
+        raw?.userId !== input.userId ||
+        raw?.createIdempotencyKey !== idempotencyKey
+      ) {
+        throw new Error("Draft idempotency key collision.");
+      }
+      if (select && raw?.status === "active") {
+        tx.set(
+          lockRef,
+          {
+            organizationId: input.organizationId,
+            userId: input.userId,
+            draftId,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      }
+      return serializeDraft(existing.id, raw as Record<string, unknown>);
+    }
+    tx.create(draftRef, data);
+    if (select) {
+      tx.set(
+        lockRef,
+        {
+          organizationId: input.organizationId,
+          userId: input.userId,
+          draftId,
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+    }
+    return serializeDraft(draftId, {
+      ...data,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
   });
 }
 
@@ -322,8 +582,11 @@ function mergeExtractedFields(input: {
 export async function addSourceToWorkingDraft(input: {
   organizationId: string;
   userId: string;
+  draftId?: string;
   source: ProspectDraftSourceInput;
   finding: ProspectDraftFindingInput;
+  idempotencyKey?: string;
+  expectedRevision?: number;
 }): Promise<{
   draft: ProspectDraft;
   created: boolean;
@@ -332,8 +595,36 @@ export async function addSourceToWorkingDraft(input: {
 }> {
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured.");
-  const { draft, created } = await getOrCreateWorkingDraft(input);
-  const sourceId = newId("pds");
+  const targetedDraft = input.draftId
+    ? await getProspectDraft({
+        organizationId: input.organizationId,
+        userId: input.userId,
+        draftId: input.draftId,
+      })
+    : null;
+  if (input.draftId && targetedDraft?.status !== "active") {
+    throw new Error("Active draft not found.");
+  }
+  const { draft, created } = targetedDraft
+    ? { draft: targetedDraft, created: false }
+    : await getOrCreateWorkingDraft({
+        organizationId: input.organizationId,
+        userId: input.userId,
+      });
+  const contentHash = crypto.createHash("sha256").update(input.source.text).digest("hex");
+  const operationKey =
+    normalizeIdempotencyKey(input.idempotencyKey) ??
+    crypto
+      .createHash("sha256")
+      .update(`${input.source.url}\u0000${contentHash}`)
+      .digest("hex");
+  const sourceId = stableOperationId(
+    "pds",
+    input.organizationId,
+    input.userId,
+    draft.id,
+    operationKey,
+  );
   const sourceSummary: ProspectDraftSourceSummary = {
     id: sourceId,
     url: input.source.url,
@@ -376,25 +667,23 @@ export async function addSourceToWorkingDraft(input: {
       `This source appears to be about ${extractedCompany.value}, but your working draft is for ${currentCompany}. Complete or discard that draft first.`,
     );
   }
-  await sourceRef.set(
-    stampForCreate(
-      input.organizationId,
-      {
-        draftId: draft.id,
-        userId: input.userId,
-        ...sourceSummary,
-        text: input.source.text,
-        contentHash: crypto.createHash("sha256").update(input.source.text).digest("hex"),
-      },
-      input.userId,
-    ),
-  );
   const draftRef = db.collection(COLLECTIONS.prospectDrafts).doc(draft.id);
   let mergeCounts = { acceptedCount: 0, rejectedCount: 0 };
   await db.runTransaction(async (tx) => {
-    const currentSnap = await tx.get(draftRef);
+    const [currentSnap, existingSourceSnap] = await Promise.all([
+      tx.get(draftRef),
+      tx.get(sourceRef),
+    ]);
     if (!currentSnap.exists || currentSnap.data()?.status !== "active") {
       throw new Error("The working draft is no longer active.");
+    }
+    if (existingSourceSnap.exists) return;
+    const currentRevision = revisionOf(currentSnap.data());
+    if (
+      input.expectedRevision !== undefined &&
+      input.expectedRevision !== currentRevision
+    ) {
+      throw new ProspectDraftRevisionError(currentRevision);
     }
     const current = serializeDraft(
       currentSnap.id,
@@ -410,7 +699,7 @@ export async function addSourceToWorkingDraft(input: {
       acceptedCount: merged.acceptedCount,
       rejectedCount: merged.rejectedCount,
     };
-    const completion = draftCompletion(merged.fields);
+    const completion = completionMetadata(merged.fields, current.form);
     const sources = [
       ...current.sources.filter((source) => source.url !== input.source.url),
       sourceSummary,
@@ -422,6 +711,7 @@ export async function addSourceToWorkingDraft(input: {
           fields: merged.fields,
           sources,
           sourceCount: FieldValue.increment(1),
+          revision: FieldValue.increment(1),
           ...completion,
           qualityScore: Math.max(current.qualityScore ?? 0, input.finding.quality.score),
           qualityMatchedSignalIds: Array.from(
@@ -449,6 +739,21 @@ export async function addSourceToWorkingDraft(input: {
       ),
       { merge: true },
     );
+    tx.create(
+      sourceRef,
+      stampForCreate(
+        input.organizationId,
+        {
+          draftId: draft.id,
+          userId: input.userId,
+          ...sourceSummary,
+          text: input.source.text,
+          contentHash,
+          idempotencyKey: operationKey,
+        },
+        input.userId,
+      ),
+    );
   });
   const updated = await draftRef.get();
   return {
@@ -462,7 +767,7 @@ export async function addSourceToWorkingDraft(input: {
     warnings,
   };
   } catch (error) {
-    await sourceRef.delete().catch(() => undefined);
+    if (!created) throw error;
     const draftRef = db.collection(COLLECTIONS.prospectDrafts).doc(draft.id);
     const lockRef = db.collection(COLLECTIONS.prospectDraftLocks).doc(
       lockId(input.organizationId, input.userId),
@@ -493,38 +798,157 @@ export async function addSourceToWorkingDraft(input: {
   }
 }
 
+export type ProspectDraftPage = {
+  drafts: ProspectDraft[];
+  nextCursor?: string;
+};
+
+type ProspectDraftCursor = {
+  updatedAt: { seconds: number; nanoseconds: number };
+  id: string;
+};
+
+export function encodeProspectDraftCursor(cursor: ProspectDraftCursor): string {
+  return Buffer.from(JSON.stringify(cursor), "utf8").toString("base64url");
+}
+
+export function decodeProspectDraftCursor(value: string): ProspectDraftCursor {
+  try {
+    const parsed = JSON.parse(Buffer.from(value, "base64url").toString("utf8")) as unknown;
+    if (
+      !parsed ||
+      typeof parsed !== "object" ||
+      typeof (parsed as ProspectDraftCursor).id !== "string" ||
+      !(parsed as ProspectDraftCursor).updatedAt ||
+      typeof (parsed as ProspectDraftCursor).updatedAt.seconds !== "number" ||
+      typeof (parsed as ProspectDraftCursor).updatedAt.nanoseconds !== "number"
+    ) {
+      throw new Error("Invalid cursor.");
+    }
+    return parsed as ProspectDraftCursor;
+  } catch {
+    throw new Error("Invalid prospect draft cursor.");
+  }
+}
+
+export async function listProspectDraftPage(input: {
+  organizationId: string;
+  userId?: string;
+  status?: ProspectDraft["status"];
+  origin?: ProspectDraftOrigin;
+  readiness?: "ready" | "needs_review";
+  search?: string;
+  limit?: number;
+  cursor?: string;
+}): Promise<ProspectDraftPage> {
+  const db = getAdminDb();
+  if (!db) throw new Error("Database not configured.");
+  const limit = Math.min(Math.max(Math.trunc(input.limit ?? 25), 1), 100);
+  let query: Query<DocumentData> = db
+    .collection(COLLECTIONS.prospectDrafts)
+    .where("organizationId", "==", input.organizationId);
+  if (input.userId) query = query.where("userId", "==", input.userId);
+  if (input.status) query = query.where("status", "==", input.status);
+  query = query.orderBy("updatedAt", "desc").orderBy(FieldPath.documentId(), "desc");
+  let scanCursor = input.cursor ? decodeProspectDraftCursor(input.cursor) : undefined;
+  const search = input.search?.trim().toLocaleLowerCase() ?? "";
+  const matches: Array<{
+    draft: ProspectDraft;
+    doc: QueryDocumentSnapshot<DocumentData>;
+  }> = [];
+  const chunkSize = Math.min(Math.max(limit * 3, 50), 250);
+  while (matches.length < limit + 1) {
+    let pageQuery = query;
+    if (scanCursor) {
+      pageQuery = pageQuery.startAfter(
+        new Timestamp(scanCursor.updatedAt.seconds, scanCursor.updatedAt.nanoseconds),
+        scanCursor.id,
+      );
+    }
+    const snap = await pageQuery.limit(chunkSize).get();
+    for (const doc of snap.docs) {
+      const draft = serializeDraft(doc.id, doc.data());
+      if (input.origin && draft.origin !== input.origin) continue;
+      const ready = draft.missingRequiredFields.length === 0;
+      if (input.readiness === "ready" && !ready) continue;
+      if (input.readiness === "needs_review" && ready) continue;
+      if (search) {
+        const values = [
+          draft.fields.companyName?.value,
+          draft.form?.bizName,
+          draft.fields.contactName?.value,
+          draft.form ? `${draft.form.firstName} ${draft.form.lastName}` : undefined,
+          draft.fields.contactEmail?.value,
+          draft.form?.email,
+          draft.form?.personalEmail,
+          draft.fields.companyDomain?.value,
+          draft.form?.website,
+          draft.sourceContext,
+        ];
+        if (!values.some((value) => value?.toLocaleLowerCase().includes(search))) continue;
+      }
+      matches.push({ draft, doc });
+      if (matches.length >= limit + 1) break;
+    }
+    const scannedLast = snap.docs.at(-1);
+    const scannedUpdatedAt = scannedLast?.data().updatedAt;
+    if (
+      matches.length >= limit + 1 ||
+      snap.docs.length < chunkSize ||
+      !scannedLast ||
+      !(scannedUpdatedAt instanceof Timestamp)
+    ) {
+      break;
+    }
+    scanCursor = {
+      id: scannedLast.id,
+      updatedAt: {
+        seconds: scannedUpdatedAt.seconds,
+        nanoseconds: scannedUpdatedAt.nanoseconds,
+      },
+    };
+  }
+  const visible = matches.slice(0, limit).map(({ draft }) => draft);
+  const last = matches.length > limit ? matches[limit - 1]?.doc : undefined;
+  const lastUpdatedAt = last?.data().updatedAt;
+  return {
+    drafts: visible,
+    nextCursor: last && lastUpdatedAt instanceof Timestamp
+      ? encodeProspectDraftCursor({
+          id: last.id,
+          updatedAt: {
+            seconds: lastUpdatedAt.seconds,
+            nanoseconds: lastUpdatedAt.nanoseconds,
+          },
+        })
+      : undefined,
+  };
+}
+
+/** Legacy extension helper: keep returning a plain array. */
 export async function listProspectDrafts(input: {
   organizationId: string;
   userId?: string;
   status?: ProspectDraft["status"];
 }): Promise<ProspectDraft[]> {
-  const db = getAdminDb();
-  if (!db) throw new Error("Database not configured.");
-  const query = db
-    .collection(COLLECTIONS.prospectDrafts)
-    .where("organizationId", "==", input.organizationId);
-  const snap = await query.limit(100).get();
-  return snap.docs
-    .map((doc) => serializeDraft(doc.id, doc.data()))
-    .filter((draft) => !input.userId || draft.userId === input.userId)
-    .filter((draft) => !input.status || draft.status === input.status)
-    .filter(
-      (draft) =>
-        draft.status !== "active" ||
-        draft.sourceCount > 0 ||
-        Object.keys(draft.fields).length > 0,
-    )
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  return (await listProspectDraftPage({ ...input, limit: 100 })).drafts;
 }
 
 export async function getProspectDraft(input: {
   organizationId: string;
   draftId: string;
+  userId?: string;
 }): Promise<ProspectDraft | null> {
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured.");
   const snap = await db.collection(COLLECTIONS.prospectDrafts).doc(input.draftId).get();
-  if (!snap.exists || snap.data()?.organizationId !== input.organizationId) return null;
+  if (
+    !snap.exists ||
+    snap.data()?.organizationId !== input.organizationId ||
+    (input.userId && snap.data()?.userId !== input.userId)
+  ) {
+    return null;
+  }
   return serializeDraft(snap.id, snap.data() as Record<string, unknown>);
 }
 
@@ -533,6 +957,8 @@ export async function updateProspectDraftFields(input: {
   userId: string;
   draftId: string;
   values: Partial<Record<ProspectDraftFieldKey, string>>;
+  form?: ProspectFormValues;
+  expectedRevision?: number;
 }): Promise<ProspectDraft | null> {
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured.");
@@ -547,26 +973,33 @@ export async function updateProspectDraftFields(input: {
     ) {
       return false;
     }
-    const draft = serializeDraft(snap.id, snap.data() as Record<string, unknown>);
-    const fields = { ...draft.fields };
-    for (const [key, rawValue] of Object.entries(input.values)) {
-      const fieldKey = key as ProspectDraftFieldKey;
-      if (!PROSPECT_DRAFT_FIELD_KEYS.includes(fieldKey)) continue;
-      const value = normalizeProspectDraftFieldValue(fieldKey, rawValue ?? "");
-      if (!value) {
-        delete fields[fieldKey];
-        continue;
-      }
-      fields[fieldKey] = {
-        value,
-        confidence: 1,
-        status: "verified",
-        evidence: fields[fieldKey]?.evidence ?? [],
-        updatedAt: new Date().toISOString(),
-      };
+    const currentRevision = revisionOf(snap.data());
+    if (
+      input.expectedRevision !== undefined &&
+      input.expectedRevision !== currentRevision
+    ) {
+      throw new ProspectDraftRevisionError(currentRevision);
     }
-    const completion = draftCompletion(fields);
-    tx.set(ref, stampForUpdate({ fields, ...completion }, input.userId), { merge: true });
+    const draft = serializeDraft(snap.id, snap.data() as Record<string, unknown>);
+    let fields = applyReviewedDraftValues(draft.fields, input.values);
+    if (input.form) {
+      fields = applyReviewedDraftValues(fields, prospectDraftValuesFromForm(input.form));
+    }
+    const nextForm = input.form ?? draft.form;
+    const completion = completionMetadata(fields, nextForm);
+    tx.set(
+      ref,
+      stampForUpdate(
+        {
+          fields,
+          ...(input.form ? { form: withoutUndefined(input.form) } : {}),
+          revision: FieldValue.increment(1),
+          ...completion,
+        },
+        input.userId,
+      ),
+      { merge: true },
+    );
     return true;
   });
   if (!changed) return null;
@@ -579,16 +1012,31 @@ export async function discardProspectDraft(input: {
   userId: string;
   draftId: string;
   reason: string;
+  expectedRevision?: number;
 }): Promise<boolean> {
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured.");
-  const draft = await getProspectDraft(input);
-  if (!draft || draft.userId !== input.userId || draft.status !== "active") return false;
   const ref = db.collection(COLLECTIONS.prospectDrafts).doc(input.draftId);
   const lockRef = db.collection(COLLECTIONS.prospectDraftLocks).doc(
     lockId(input.organizationId, input.userId),
   );
-  await db.runTransaction(async (tx) => {
+  return db.runTransaction(async (tx) => {
+    const [draftSnap, lockSnap] = await Promise.all([tx.get(ref), tx.get(lockRef)]);
+    if (
+      !draftSnap.exists ||
+      draftSnap.data()?.organizationId !== input.organizationId ||
+      draftSnap.data()?.userId !== input.userId ||
+      draftSnap.data()?.status !== "active"
+    ) {
+      return false;
+    }
+    const currentRevision = revisionOf(draftSnap.data());
+    if (
+      input.expectedRevision !== undefined &&
+      input.expectedRevision !== currentRevision
+    ) {
+      throw new ProspectDraftRevisionError(currentRevision);
+    }
     tx.set(
       ref,
       stampForUpdate(
@@ -596,130 +1044,165 @@ export async function discardProspectDraft(input: {
           status: "discarded",
           discardedAt: FieldValue.serverTimestamp(),
           discardReason: input.reason,
+          revision: FieldValue.increment(1),
         },
         input.userId,
       ),
       { merge: true },
     );
-    tx.delete(lockRef);
+    if (lockSnap.data()?.draftId === input.draftId) tx.delete(lockRef);
+    return true;
   });
-  return true;
 }
 
 export async function completeProspectDraft(input: {
   organizationId: string;
   userId: string;
   draftId: string;
+  allowIncomplete?: boolean;
+  expectedRevision?: number;
 }): Promise<{ leadId: string } | { error: string }> {
   const db = getAdminDb();
   if (!db) return { error: "Database not configured." };
-  const draft = await getProspectDraft(input);
-  if (!draft || draft.userId !== input.userId || draft.status !== "active") {
+  const draft = await getProspectDraft({ ...input, userId: input.userId });
+  if (draft?.status === "completed" && draft.leadId) {
+    return { leadId: draft.leadId };
+  }
+  if (!draft || draft.status !== "active") {
     return { error: "Active draft not found." };
+  }
+  if (
+    input.expectedRevision !== undefined &&
+    input.expectedRevision !== draft.revision
+  ) {
+    throw new ProspectDraftRevisionError(draft.revision);
   }
   if (draft.missingRequiredFields.length) {
     return { error: `Complete required fields: ${draft.missingRequiredFields.join(", ")}.` };
   }
-  const value = (key: ProspectDraftFieldKey) => draft.fields[key]?.value.trim() || undefined;
-  const now = new Date().toISOString();
-  const accountId = newId("a");
-  const contactId = newId("ct");
-  const leadId = newId("l");
-  const companyName = value("companyName")!;
-  const contactName = value("contactName")!;
-  const names = contactName.split(/\s+/);
-  const firstName = value("firstName") ?? names[0] ?? contactName;
-  const lastName = value("lastName") ?? names.slice(1).join(" ") ?? "";
-  const account = withoutUndefined(stampForCreate(
-    input.organizationId,
-    {
-      id: accountId,
-      name: companyName,
-      domain: value("companyDomain"),
-      website: value("companyWebsite"),
-      linkedin: value("companyLinkedIn"),
-      industry: value("industry"),
-      businessDescription: value("businessDescription"),
-      city: value("city"),
-      state: value("state"),
-      country: value("country"),
-      yearFounded: value("yearFounded") ? Number(value("yearFounded")) : undefined,
-      size: value("companySize"),
-      revenueRange: value("revenueRange"),
-      techStack: value("techStack")
-        ?.split(",")
-        .map((item) => item.trim())
-        .filter(Boolean),
-      contactCount: 1,
-      leadCount: 1,
-      openDealValue: 0,
-      ownerId: input.userId,
-    },
-    input.userId,
-  ));
-  const contact = withoutUndefined(stampForCreate(
-    input.organizationId,
-    {
-      id: contactId,
-      accountId,
-      firstName,
-      lastName,
-      fullName: contactName,
-      email: value("contactEmail"),
-      phone: value("contactPhone"),
-      title: value("contactTitle"),
-      linkedin: value("contactLinkedIn"),
-      ownerId: input.userId,
-    },
-    input.userId,
-  ));
-  const notes = [
-    value("notes"),
-    value("businessFocus") ? `Business focus: ${value("businessFocus")}` : undefined,
-    value("hiringSignals") ? `Hiring signals: ${value("hiringSignals")}` : undefined,
-    value("recentNews") ? `Recent news: ${value("recentNews")}` : undefined,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-  const lead = withoutUndefined(stampForCreate(
-    input.organizationId,
-    {
-      id: leadId,
+  {
+    const form = prospectFormFromDraft(draft);
+    const [organizationSnap, strategySnap, ownedLeadsSnap] = await Promise.all([
+      db.collection(COLLECTIONS.organizations).doc(input.organizationId).get(),
+      form.strategyId
+        ? db.collection(COLLECTIONS.prospectingStrategies).doc(form.strategyId).get()
+        : Promise.resolve(null),
+      db.collection(COLLECTIONS.leads).where("prospectOwnerId", "==", input.userId).limit(500).get(),
+    ]);
+    const organization = organizationSnap.data();
+    const strategy = strategySnap?.data();
+    if (
+      form.strategyId &&
+      (!strategySnap?.exists ||
+        strategy?.organizationId !== input.organizationId ||
+        !["published", "draft"].includes(String(strategy?.status ?? "")))
+    ) {
+      return { error: "Selected prospecting strategy is not available." };
+    }
+    const [assignmentSnap, personaSnap] = await Promise.all([
+      form.strategyAssignmentId
+        ? db.collection(COLLECTIONS.strategyAssignments).doc(form.strategyAssignmentId).get()
+        : Promise.resolve(null),
+      form.personaId
+        ? db.collection(COLLECTIONS.buyerPersonas).doc(form.personaId).get()
+        : Promise.resolve(null),
+    ]);
+    const assignment = assignmentSnap?.data();
+    if (
+      assignmentSnap &&
+      (!assignmentSnap.exists ||
+        assignment?.organizationId !== input.organizationId ||
+        assignment?.userId !== input.userId ||
+        assignment?.strategyId !== form.strategyId ||
+        assignment?.status !== "active")
+    ) {
+      return { error: "Selected strategy assignment is not active for this user." };
+    }
+    const persona = personaSnap?.data();
+    if (
+      personaSnap &&
+      (!personaSnap.exists ||
+        persona?.organizationId !== input.organizationId ||
+        persona?.active === false ||
+        !Array.isArray(strategy?.personaIds) ||
+        !strategy.personaIds.includes(form.personaId))
+    ) {
+      return { error: "Selected buyer persona is not available for this strategy." };
+    }
+    const outreachThreshold =
+      typeof organization?.intentPlaybook?.outreachThreshold === "number"
+        ? organization.intentPlaybook.outreachThreshold
+        : 45;
+    const maxContactsPerCompany =
+      typeof strategy?.dailyTargets?.maxContactsPerCompany === "number"
+        ? strategy.dailyTargets.maxContactsPerCompany
+        : 2;
+    const companyDomain = domainFromWebsiteOrEmail(form.website, form.email)?.toLocaleLowerCase();
+    const companyName = form.bizName.trim().toLocaleLowerCase();
+    const existingContactsForCompany = ownedLeadsSnap.docs.filter((document) => {
+      const row = document.data();
+      if (row.organizationId !== input.organizationId) return false;
+      const rowDomain = String(row.companyDomain ?? "").trim().toLocaleLowerCase();
+      const rowName = String(row.companyName ?? "").trim().toLocaleLowerCase();
+      return Boolean(
+        (companyDomain && rowDomain === companyDomain) || (companyName && rowName === companyName),
+      );
+    }).length;
+    const validation = validateProspectForm(form, {
+      existingContactsForCompany,
+      maxContactsPerCompany,
+      outreachThreshold,
+    });
+    if (validation.errors.length) return { error: validation.errors[0]! };
+    const submittedEmails = [normalizedEmail(form.email), normalizedEmail(form.personalEmail)].filter(
+      Boolean,
+    );
+    if (submittedEmails.length) {
+      const duplicateQueries = submittedEmails.flatMap((email) => [
+        db.collection(COLLECTIONS.contacts).where("email", "==", email).limit(5).get(),
+        db.collection(COLLECTIONS.contacts).where("personalEmail", "==", email).limit(5).get(),
+      ]);
+      const duplicateSnapshots = await Promise.all(duplicateQueries);
+      const duplicate = duplicateSnapshots.some((snapshot) =>
+        snapshot.docs.some((document) => document.data().organizationId === input.organizationId),
+      );
+      if (duplicate) return { error: "A contact with this email already exists." };
+    }
+    const blockingQualifyIssues = validation.qualifyIssues.filter((issue) => issue.blocking);
+    if (
+      form.qualifyForm.qualifyStatus === "completed" &&
+      blockingQualifyIssues.length &&
+      !input.allowIncomplete
+    ) {
+      return {
+        error: `Qualification incomplete: ${blockingQualifyIssues.map((issue) => issue.message).join(" · ")}`,
+      };
+    }
+
+    const now = new Date().toISOString();
+    const accountId = stableEntityId("a", input.organizationId, draft.id);
+    const contactId = stableEntityId("ct", input.organizationId, draft.id);
+    const leadId = stableEntityId("l", input.organizationId, draft.id);
+    const timelineEventId = stableEntityId("te", input.organizationId, draft.id);
+    const entities = buildProspectEntities({
+      form,
       accountId,
       contactId,
-      channel: "cold_email",
-      stage: "new",
-      temperature: "cold",
-      priority: "medium",
+      leadId,
       ownerId: input.userId,
-      createdById: input.userId,
-      scraperId: input.userId,
-      intakeKind: "prospect",
-      prospectOwnerId: input.userId,
-      prospectVisibility: "open",
-      prospectQualifyStatus: "incomplete",
-      contactName,
-      contactTitle: value("contactTitle"),
-      contactEmail: value("contactEmail"),
-      contactLinkedIn: value("contactLinkedIn"),
-      companyName,
-      companyDomain: value("companyDomain"),
-      companyIndustry: value("industry"),
-      companySize: value("companySize"),
-      revenueRange: value("revenueRange"),
-      painPoints: value("painPoints"),
-      triggerEvent: value("triggerEvent"),
-      notes: notes || undefined,
-      qualityScore: draft.qualityScore,
-      qualityMatchedSignalIds: draft.qualityMatchedSignalIds,
-      primaryOpportunityId: draft.primaryOpportunityId,
-      primaryOpportunityLabel: draft.primaryOpportunityLabel,
-      strategyId: draft.strategy?.strategyId,
-      strategyAssignmentId: draft.strategy?.strategyAssignmentId,
-      strategyVersion: draft.strategy?.strategyVersion,
-      personaId: draft.strategy?.personaId,
-      touches: 0,
-      isIdle: false,
+      now,
+      qualifyAsIncomplete: input.allowIncomplete,
+      research: {
+        companyDomain: draft.fields.companyDomain?.value,
+        businessFocus: draft.fields.businessFocus?.value,
+        hiringSignals: draft.fields.hiringSignals?.value,
+        recentNews: draft.fields.recentNews?.value,
+      },
+      quality: {
+        score: draft.qualityScore,
+        matchedSignalIds: draft.qualityMatchedSignalIds,
+        primaryOpportunityId: draft.primaryOpportunityId,
+      },
       extensions: {
         intentRadarDraft: {
           draftId: draft.id,
@@ -727,30 +1210,158 @@ export async function completeProspectDraft(input: {
           completedAt: now,
         },
       },
-    },
-    input.userId,
-  ));
-  const batch = db.batch();
-  batch.create(db.collection(COLLECTIONS.accounts).doc(accountId), account);
-  batch.create(db.collection(COLLECTIONS.contacts).doc(contactId), contact);
-  batch.create(db.collection(COLLECTIONS.leads).doc(leadId), lead);
-  batch.set(
-    db.collection(COLLECTIONS.prospectDrafts).doc(draft.id),
-    stampForUpdate(
-      {
-        status: "completed",
-        completedAt: FieldValue.serverTimestamp(),
-        leadId,
-      },
+    });
+    const account = withoutUndefined(stampForCreate(
+      input.organizationId,
+      entities.account as unknown as Record<string, unknown>,
       input.userId,
-    ),
-    { merge: true },
-  );
-  batch.delete(
-    db.collection(COLLECTIONS.prospectDraftLocks).doc(
-      lockId(input.organizationId, input.userId),
-    ),
-  );
-  await batch.commit();
-  return { leadId };
+    ));
+    const contact = withoutUndefined(stampForCreate(
+      input.organizationId,
+      entities.contact as unknown as Record<string, unknown>,
+      input.userId,
+    ));
+    const lead = withoutUndefined(stampForCreate(
+      input.organizationId,
+      entities.lead as unknown as Record<string, unknown>,
+      input.userId,
+    ));
+    const draftRef = db.collection(COLLECTIONS.prospectDrafts).doc(draft.id);
+    const lockRef = db
+      .collection(COLLECTIONS.prospectDraftLocks)
+      .doc(lockId(input.organizationId, input.userId));
+    const reservationCollection = db.collection(COLLECTIONS.prospectDraftReservations);
+    const emailReservationRefs = submittedEmails.map((email) =>
+      reservationCollection.doc(
+        stableOperationId("email", input.organizationId, email),
+      ),
+    );
+    const companyIdentity = companyDomain
+      ? `domain:${companyDomain}`
+      : `name:${normalizeCompanyIdentity(companyName)}`;
+    const companyReservationRef = reservationCollection.doc(
+      stableOperationId(
+        "company",
+        input.organizationId,
+        input.userId,
+        companyIdentity,
+      ),
+    );
+    return db.runTransaction(async (tx) => {
+      const [currentSnap, lockSnap, companyReservationSnap, ...emailReservationSnaps] =
+        await Promise.all([
+        tx.get(draftRef),
+        tx.get(lockRef),
+        tx.get(companyReservationRef),
+        ...emailReservationRefs.map((ref) => tx.get(ref)),
+      ]);
+      const current = currentSnap.data();
+      if (
+        currentSnap.exists &&
+        current?.organizationId === input.organizationId &&
+        current?.userId === input.userId &&
+        current?.status === "completed" &&
+        typeof current.leadId === "string"
+      ) {
+        return { leadId: current.leadId };
+      }
+      if (
+        !currentSnap.exists ||
+        current?.organizationId !== input.organizationId ||
+        current?.userId !== input.userId ||
+        current?.status !== "active"
+      ) {
+        return { error: "Active draft not found." };
+      }
+      const currentRevision = revisionOf(current);
+      if (currentRevision !== draft.revision) {
+        throw new ProspectDraftRevisionError(currentRevision);
+      }
+      const conflictingEmail = emailReservationSnaps.some(
+        (snapshot) => snapshot.exists && snapshot.data()?.draftId !== draft.id,
+      );
+      if (conflictingEmail) {
+        return { error: "A contact with this email already exists." };
+      }
+      const reservedCompanyCount =
+        typeof companyReservationSnap.data()?.count === "number"
+          ? Number(companyReservationSnap.data()!.count)
+          : 0;
+      const effectiveCompanyCount = Math.max(
+        existingContactsForCompany,
+        reservedCompanyCount,
+      );
+      if (
+        companyReservationSnap.data()?.draftIds?.includes?.(draft.id) !== true &&
+        effectiveCompanyCount >= maxContactsPerCompany
+      ) {
+        return {
+          error: `This company already has the maximum of ${maxContactsPerCompany} contacts for this owner.`,
+        };
+      }
+      emailReservationRefs.forEach((ref) => {
+        tx.set(
+          ref,
+          {
+            organizationId: input.organizationId,
+            kind: "email",
+            valueHash: ref.id,
+            draftId: draft.id,
+            contactId,
+            updatedAt: FieldValue.serverTimestamp(),
+          },
+          { merge: true },
+        );
+      });
+      const priorDraftIds = Array.isArray(companyReservationSnap.data()?.draftIds)
+        ? (companyReservationSnap.data()!.draftIds as string[])
+        : [];
+      const nextDraftIds = priorDraftIds.includes(draft.id)
+        ? priorDraftIds
+        : [...priorDraftIds, draft.id];
+      tx.set(
+        companyReservationRef,
+        {
+          organizationId: input.organizationId,
+          userId: input.userId,
+          kind: "company_contact_limit",
+          companyIdentity,
+          count: priorDraftIds.includes(draft.id)
+            ? effectiveCompanyCount
+            : effectiveCompanyCount + 1,
+          draftIds: nextDraftIds.slice(-Math.max(maxContactsPerCompany, 10)),
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        { merge: true },
+      );
+      tx.create(db.collection(COLLECTIONS.accounts).doc(accountId), account);
+      tx.create(db.collection(COLLECTIONS.contacts).doc(contactId), contact);
+      tx.create(db.collection(COLLECTIONS.leads).doc(leadId), lead);
+      tx.create(db.collection(COLLECTIONS.timelineEvents).doc(timelineEventId), {
+        organizationId: input.organizationId,
+        leadId,
+        leadOwnerId: input.userId,
+        type: "lead_created",
+        actorId: input.userId,
+        summary: `Prospect created from working draft for ${form.channel.replaceAll("_", " ")}.`,
+        payload: { source: "intent_radar_draft", draftId: draft.id },
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      tx.set(
+        draftRef,
+        stampForUpdate(
+          {
+            status: "completed",
+            completedAt: FieldValue.serverTimestamp(),
+            leadId,
+            revision: FieldValue.increment(1),
+          },
+          input.userId,
+        ),
+        { merge: true },
+      );
+      if (lockSnap.data()?.draftId === draft.id) tx.delete(lockRef);
+      return { leadId };
+    });
+  }
 }

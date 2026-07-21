@@ -97,7 +97,10 @@ export function GlobalCommandMenu({
           <CommandItem
             onSelect={() => {
               onOpenChange(false);
-              openNewProspectForm();
+              openNewProspectForm({
+                source: "global_command",
+                destination: "/prospects",
+              });
             }}
           >
             <ScanSearch className="mr-2 h-4 w-4" /> Add new prospect

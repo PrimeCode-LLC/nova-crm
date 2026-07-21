@@ -250,8 +250,12 @@ export function FitCheckClient() {
       .filter(Boolean)
       .join("\n");
     openNewProspectForm({
-      leadNotes: notes,
-      channel: sourceTypeToChannel(sourceType),
+      source: "fit_check",
+      destination: "/fit-check",
+      prefill: {
+        leadNotes: notes,
+        channel: sourceTypeToChannel(sourceType),
+      },
     });
   }
 

@@ -1640,7 +1640,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             variant="outline"
             size="sm"
             type="button"
-            onClick={() => openNewProspectForm()}
+            onClick={() =>
+              openNewProspectForm({
+                source: "leads_table",
+                destination: "/prospects",
+              })
+            }
           >
             <Plus className="h-3.5 w-3.5" /> New prospect
           </Button>

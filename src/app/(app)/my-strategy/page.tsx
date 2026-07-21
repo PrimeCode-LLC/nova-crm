@@ -337,10 +337,14 @@ export default function MyStrategyPage() {
     const s = strategy ?? activeStrategy;
     if (!a || !s) return;
     quickAdd.openNewProspectForm({
-      strategyId: s.id,
-      strategyAssignmentId: a.id,
-      strategyVersion: s.version,
-      personaId: (a.personaIdsOverride ?? s.personaIds)?.[0],
+      source: "my_strategy",
+      destination: "/my-strategy",
+      prefill: {
+        strategyId: s.id,
+        strategyAssignmentId: a.id,
+        strategyVersion: s.version,
+        personaId: (a.personaIdsOverride ?? s.personaIds)?.[0],
+      },
     });
   };
 

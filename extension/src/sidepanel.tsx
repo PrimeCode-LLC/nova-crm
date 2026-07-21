@@ -1,6 +1,11 @@
 import * as React from "react";
 import { createRoot } from "react-dom/client";
-import type { ExtensionState, WorkerRequest, WorkingDraft } from "./types";
+import type {
+  DraftListPayload,
+  ExtensionState,
+  WorkerRequest,
+  WorkingDraft,
+} from "./types";
 import "./styles.css";
 
 type WorkerResponse<T> = { ok: true; value: T } | { ok: false; error: string };
@@ -154,7 +159,8 @@ function IntentRadarPanel() {
   const [error, setError] = React.useState("");
   const [notice, setNotice] = React.useState("");
   const [leadId, setLeadId] = React.useState("");
-  const [draft, setDraft] = React.useState<WorkingDraft | null>(null);
+  const [drafts, setDrafts] = React.useState<WorkingDraft[]>([]);
+  const [selectedDraftId, setSelectedDraftId] = React.useState<string | null>(null);
   const [selectedStrategyAssignmentId, setSelectedStrategyAssignmentId] = React.useState("");
   const [saveFeedback, setSaveFeedback] = React.useState<InlineFeedback>(null);
   const [draftFeedback, setDraftFeedback] = React.useState<InlineFeedback>(null);
@@ -169,10 +175,12 @@ function IntentRadarPanel() {
 
   const loadDraft = React.useCallback(async () => {
     try {
-      const result = await send<{ draft: WorkingDraft | null }>({ type: "get-draft" });
-      setDraft(result.draft);
+      const result = await send<DraftListPayload>({ type: "list-drafts" });
+      setDrafts(result.drafts);
+      setSelectedDraftId(result.selectedDraftId);
     } catch {
-      setDraft(null);
+      setDrafts([]);
+      setSelectedDraftId(null);
     }
   }, []);
 
@@ -221,6 +229,8 @@ function IntentRadarPanel() {
       if (
         request.type === "login" ||
         request.type === "save" ||
+        request.type === "select-draft" ||
+        request.type === "new-draft" ||
         request.type === "update-draft" ||
         request.type === "complete-draft" ||
         request.type === "discard-draft"
@@ -257,6 +267,8 @@ function IntentRadarPanel() {
     }
   }
 
+  const draft = drafts.find((item) => item.id === selectedDraftId) ?? null;
+
   async function saveDraft(
     values: { companyName: string; contactName: string; contactEmail: string },
     complete: boolean,
@@ -265,13 +277,18 @@ function IntentRadarPanel() {
     setBusy(complete ? "complete-draft" : "save-draft");
     setDraftFeedback(null);
     try {
-      await send({
+      const updated = await send<{ draft: WorkingDraft }>({
         type: "update-draft",
         draftId: draft.id,
+        revision: draft.revision,
         values,
       });
       if (complete) {
-        await send({ type: "complete-draft", draftId: draft.id });
+        await send({
+          type: "complete-draft",
+          draftId: draft.id,
+          revision: updated.draft.revision,
+        });
         setDraftFeedback({
           tone: "success",
           message: "Draft completed and prospect created",
@@ -296,7 +313,7 @@ function IntentRadarPanel() {
     if (!reason?.trim()) return;
     await act(
       "discard-draft",
-      { type: "discard-draft", draftId: draft.id, reason },
+      { type: "discard-draft", draftId: draft.id, revision: draft.revision, reason },
       "Working draft discarded",
     );
   }
@@ -383,9 +400,54 @@ function IntentRadarPanel() {
         </time>
       </section>
 
+      <section className="card draft-picker">
+        <div>
+          <label htmlFor="active-draft">Active prospect draft</label>
+          <select
+            id="active-draft"
+            value={selectedDraftId ?? ""}
+            disabled={Boolean(busy) || drafts.length === 0}
+            onChange={(event) => {
+              const draftId = event.target.value;
+              if (draftId) {
+                void act(
+                  "select-draft",
+                  { type: "select-draft", draftId },
+                  "Working draft selected",
+                );
+              }
+            }}
+          >
+            {drafts.length === 0 ? (
+              <option value="">No active drafts</option>
+            ) : selectedDraftId ? null : (
+              <option value="">Select a draft</option>
+            )}
+            {drafts.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.fields.companyName?.value || "Untitled company"} · {item.completionPercent}%
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          className="button secondary"
+          disabled={Boolean(busy)}
+          onClick={() =>
+            act(
+              "new-draft",
+              { type: "new-draft", idempotencyKey: crypto.randomUUID() },
+              "New draft selected",
+            )
+          }
+        >
+          {busy === "new-draft" ? "Creating…" : "New draft"}
+        </button>
+      </section>
+
       {draft ? (
         <WorkingDraftCard
-          key={`${draft.id}-${draft.fields.companyName?.value}-${draft.fields.contactName?.value}-${draft.fields.contactEmail?.value}`}
+          key={`${draft.id}-${draft.revision}`}
           draft={draft}
           busy={Boolean(busy)}
           feedback={draftFeedback}
@@ -579,6 +641,8 @@ function IntentRadarPanel() {
                     {
                       type: "save",
                       action: "draft",
+                      draftId: draft?.id,
+                      revision: draft?.revision,
                       strategyAssignmentId: selectedStrategy?.strategyAssignmentId,
                       strategySelectionMode,
                     },

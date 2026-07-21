@@ -75,7 +75,7 @@ import { findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { useChannelOptions } from "@/hooks/use-channel-options";
-import type { NewProspectPrefill } from "@/components/layout/quick-add-launcher";
+import type { NewProspectLaunch } from "@/components/layout/quick-add-launcher";
 import { cn } from "@/lib/utils";
 import {
   useProspectingStrategyData,
@@ -89,16 +89,24 @@ import {
   ProspectQualifyPanel,
   type ProspectQualifyFormState,
 } from "@/components/prospecting/prospect-qualify-panel";
+import { ProspectFormSections } from "@/components/prospects/prospect-form-sections";
 import {
+  acknowledgeLegacyDraftMigration,
   clearNewProspectDraft,
   emptyNewProspectFormDraft,
   isNewProspectFormDraftEmpty,
   loadNewProspectDraft,
   mergePrefillIntoDraft,
+  NEW_PROSPECT_DRAFT_VERSION,
+  PENDING_PROSPECT_DRAFT_ID,
   saveNewProspectDraft,
   serializeNewProspectDraft,
   type NewProspectFormDraft,
 } from "@/lib/new-prospect-form-draft";
+import {
+  prospectFormFromDraft,
+  type ProspectDraft,
+} from "@/lib/prospects/draft-types";
 
 const UNSET = "__unset__" as const;
 
@@ -244,12 +252,13 @@ function emptyFormDefaults() {
 export function NewProspectDialog({
   open,
   onOpenChange,
-  initialPrefill,
+  launch,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  initialPrefill?: NewProspectPrefill;
+  launch?: NewProspectLaunch;
 }) {
+  const initialPrefill = launch?.prefill;
   const router = useRouter();
   const {
     currentUserId,
@@ -372,6 +381,12 @@ export function NewProspectDialog({
   const [linkedin, setLinkedin] = React.useState(F.linkedin);
 
   const [submitting, setSubmitting] = React.useState(false);
+  const [draftId, setDraftId] = React.useState(launch?.draftId);
+  const [draftSaveState, setDraftSaveState] = React.useState<
+    "idle" | "saving" | "saved" | "offline" | "conflict"
+  >("idle");
+  const [lastSavedAt, setLastSavedAt] = React.useState<string>();
+  const [draftInitialized, setDraftInitialized] = React.useState(false);
   const [discardOpen, setDiscardOpen] = React.useState(false);
   const [qualifyBlockerOpen, setQualifyBlockerOpen] = React.useState(false);
   const [qualifyBlockerIssues, setQualifyBlockerIssues] = React.useState<QualifyIssue[]>([]);
@@ -380,11 +395,14 @@ export function NewProspectDialog({
   );
   const wasOpenRef = React.useRef(false);
   const restoredToastShownRef = React.useRef(false);
-  const pendingBaselineSyncRef = React.useRef(false);
+  const draftIdRef = React.useRef<string | undefined>(launch?.draftId);
+  const draftRevisionRef = React.useRef<number | undefined>(undefined);
+  const saveQueueRef = React.useRef<Promise<void>>(Promise.resolve());
+  const createIdempotencyKeyRef = React.useRef(crypto.randomUUID());
 
   const buildDraft = React.useCallback((): NewProspectFormDraft => {
     return {
-      v: 1,
+      v: NEW_PROSPECT_DRAFT_VERSION,
       channel,
       profileId,
       stage,
@@ -542,10 +560,96 @@ export function NewProspectDialog({
     return serializeNewProspectDraft(buildDraft()) !== baselineSerialized;
   }, [baselineSerialized, buildDraft]);
 
+  const acceptServerDraft = React.useCallback(
+    (draft: ProspectDraft, form: NewProspectFormDraft) => {
+      draftIdRef.current = draft.id;
+      draftRevisionRef.current = draft.revision;
+      setDraftId(draft.id);
+      setLastSavedAt(draft.lastSavedAt);
+      setBaselineSerialized(serializeNewProspectDraft(form));
+      setDraftSaveState("saved");
+      acknowledgeLegacyDraftMigration(effectiveUid, draft.id, form, draft.revision);
+    },
+    [effectiveUid],
+  );
+
+  const saveServerDraft = React.useCallback(async (): Promise<ProspectDraft> => {
+    const operation = saveQueueRef.current.catch(() => undefined).then(async () => {
+      const form = buildDraft();
+      saveNewProspectDraft(
+        effectiveUid,
+        draftIdRef.current ?? PENDING_PROSPECT_DRAFT_ID,
+        form,
+        draftRevisionRef.current,
+      );
+      setDraftSaveState("saving");
+      try {
+      const currentId = draftIdRef.current;
+      const response = await fetch(
+        currentId
+          ? `/api/prospect-drafts/${encodeURIComponent(currentId)}`
+          : "/api/prospect-drafts",
+        {
+          method: currentId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(
+            currentId
+              ? {
+                  form,
+                  revision: draftRevisionRef.current,
+                }
+              : {
+                  form,
+                  origin: "manual",
+                  sourceContext: launch?.source,
+                  destination: launch?.destination,
+                  idempotencyKey: createIdempotencyKeyRef.current,
+                },
+          ),
+        },
+      );
+      const body = (await response.json()) as {
+        draft?: ProspectDraft;
+        error?: string | { formErrors?: string[] };
+        code?: string;
+      };
+      if (response.status === 409 || body.code === "revision_conflict") {
+        setDraftSaveState("conflict");
+        throw new Error("This draft changed elsewhere. Reopen it to load the latest version.");
+      }
+      if (!response.ok || !body.draft) {
+        throw new Error(
+          typeof body.error === "string" ? body.error : "Could not save draft.",
+        );
+      }
+        acceptServerDraft(body.draft, form);
+        return body.draft;
+      } catch (error) {
+        setDraftSaveState((state) =>
+          state === "conflict"
+            ? state
+            : typeof navigator !== "undefined" && !navigator.onLine
+              ? "offline"
+              : error instanceof TypeError
+                ? "offline"
+                : "idle",
+        );
+        throw error;
+      }
+    });
+    saveQueueRef.current = operation.then(
+      () => undefined,
+      () => undefined,
+    );
+    return operation;
+  }, [acceptServerDraft, buildDraft, effectiveUid, launch]);
+
   const finalizeClose = React.useCallback(
     (options?: { discard?: boolean }) => {
       if (options?.discard) {
         resetForm();
+        if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
+        clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
         clearNewProspectDraft(effectiveUid);
         syncBaseline();
       } else if (!isDirty) {
@@ -592,43 +696,112 @@ export function NewProspectDialog({
     wasOpenRef.current = true;
     if (!justOpened) return;
 
-    const stored = loadNewProspectDraft(effectiveUid);
-    const inMemoryEmpty = isNewProspectFormDraftEmpty(buildDraft());
+    let cancelled = false;
+    void (async () => {
+      const requestedDraftId = launch?.draftId;
+      if (requestedDraftId) {
+        try {
+          const response = await fetch(
+            `/api/prospect-drafts/${encodeURIComponent(requestedDraftId)}`,
+            { cache: "no-store" },
+          );
+          const body = (await response.json()) as { draft?: ProspectDraft; error?: string };
+          if (!response.ok || !body.draft) {
+            throw new Error(body.error ?? "Draft not found.");
+          }
+          if (body.draft.origin !== "manual") {
+            throw new Error("Research drafts must be resumed from the draft editor.");
+          }
+          const serverForm = prospectFormFromDraft(body.draft);
+          const local = loadNewProspectDraft(effectiveUid, requestedDraftId);
+          const hasNewerLocal =
+            local &&
+            serializeNewProspectDraft(local.form) !== serializeNewProspectDraft(serverForm) &&
+            Date.parse(local.savedAt || "1970-01-01") > Date.parse(body.draft.lastSavedAt);
+          if (cancelled) return;
+          applyDraft(hasNewerLocal ? local.form : serverForm);
+          draftIdRef.current = body.draft.id;
+          draftRevisionRef.current = body.draft.revision;
+          setDraftId(body.draft.id);
+          setLastSavedAt(body.draft.lastSavedAt);
+          setBaselineSerialized(serializeNewProspectDraft(serverForm));
+          setDraftSaveState(hasNewerLocal ? "offline" : "saved");
+          if (hasNewerLocal) toast.message("Recovered newer changes saved on this device.");
+        } catch (error) {
+          if (!cancelled) {
+            const local = loadNewProspectDraft(effectiveUid, requestedDraftId);
+            if (local) {
+              applyDraft(local.form);
+              draftIdRef.current = requestedDraftId;
+              draftRevisionRef.current = local.revision;
+              setDraftId(requestedDraftId);
+              setBaselineSerialized(
+                serializeNewProspectDraft(emptyNewProspectFormDraft()),
+              );
+            }
+            setDraftSaveState("offline");
+            toast.error(
+              local
+                ? "Server unavailable. Recovered the copy saved on this device."
+                : error instanceof Error
+                  ? error.message
+                  : "Could not resume draft.",
+            );
+          }
+        } finally {
+          if (!cancelled) setDraftInitialized(true);
+        }
+        return;
+      }
 
-    if (stored && !isNewProspectFormDraftEmpty(stored) && inMemoryEmpty) {
-      applyDraft(stored);
-      if (!restoredToastShownRef.current) {
+      const pending = loadNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
+      const legacy = loadNewProspectDraft(effectiveUid);
+      const recovered = pending?.form ?? legacy?.form;
+      const next = recovered && !isNewProspectFormDraftEmpty(recovered)
+        ? recovered
+        : mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill);
+      if (cancelled) return;
+      applyDraft(next);
+      setBaselineSerialized(serializeNewProspectDraft(emptyNewProspectFormDraft()));
+      setDraftSaveState(recovered ? "offline" : "idle");
+      setDraftInitialized(true);
+      if (recovered && !restoredToastShownRef.current) {
         restoredToastShownRef.current = true;
         toast.message("Restored your unsaved prospect draft.");
       }
-    } else if (inMemoryEmpty) {
-      applyDraft(mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill));
-    } else {
-      applyDraft(mergePrefillIntoDraft(buildDraft(), initialPrefill));
-    }
-    pendingBaselineSyncRef.current = true;
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     open,
     effectiveUid,
     applyDraft,
-    buildDraft,
     initialPrefill,
-    resetForm,
+    launch?.draftId,
   ]);
 
   React.useEffect(() => {
-    if (!pendingBaselineSyncRef.current) return;
-    pendingBaselineSyncRef.current = false;
-    syncBaseline();
-  });
-
-  React.useEffect(() => {
-    if (!open || !isDirty) return;
+    if (!open || !draftInitialized || !isDirty || submitting) return;
+    saveNewProspectDraft(
+      effectiveUid,
+      draftIdRef.current ?? PENDING_PROSPECT_DRAFT_ID,
+      buildDraft(),
+      draftRevisionRef.current,
+    );
     const handle = window.setTimeout(() => {
-      saveNewProspectDraft(effectiveUid, buildDraft());
-    }, 400);
+      void saveServerDraft().catch(() => undefined);
+    }, 800);
     return () => window.clearTimeout(handle);
-  }, [open, isDirty, effectiveUid, buildDraft]);
+  }, [
+    open,
+    draftInitialized,
+    isDirty,
+    submitting,
+    effectiveUid,
+    buildDraft,
+    saveServerDraft,
+  ]);
 
   const channelNeedsProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel);
   const profileOptionsForChannel = React.useMemo(
@@ -780,6 +953,54 @@ export function NewProspectDialog({
     }
     if (lastSiteAt && new Date(`${lastSiteAt}T12:00:00`).getTime() > Date.now()) {
       toast.error("Last website activity cannot be in the future.");
+      return;
+    }
+
+    if (!isDemo && !isAuthDisabled()) {
+      setSubmitting(true);
+      try {
+        const savedDraft = await saveServerDraft();
+        const response = await fetch(
+          `/api/prospect-drafts/${encodeURIComponent(savedDraft.id)}/complete`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              allowIncomplete: skipQualifyGate,
+              revision: savedDraft.revision,
+            }),
+          },
+        );
+        const body = (await response.json()) as {
+          leadId?: string;
+          error?: string;
+          code?: string;
+        };
+        if (response.status === 409 || body.code === "revision_conflict") {
+          setDraftSaveState("conflict");
+          throw new Error("This draft changed elsewhere. Reopen it before creating the prospect.");
+        }
+        if (!response.ok || !body.leadId) {
+          throw new Error(body.error ?? "Could not create prospect.");
+        }
+        clearNewProspectDraft(effectiveUid, savedDraft.id);
+        clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
+        clearNewProspectDraft(effectiveUid);
+        toast.success(
+          skipQualifyGate
+            ? "Prospect created as incomplete."
+            : "Prospect created from your saved draft.",
+        );
+        resetForm();
+        onOpenChange(false);
+        router.push(`/leads/${body.leadId}`);
+      } catch (error) {
+        toast.error("Could not save prospect", {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        setSubmitting(false);
+      }
       return;
     }
 
@@ -951,8 +1172,9 @@ export function NewProspectDialog({
           : "Prospect created — add channels when ready.",
       );
       resetForm();
+      if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
+      clearNewProspectDraft(effectiveUid, PENDING_PROSPECT_DRAFT_ID);
       clearNewProspectDraft(effectiveUid);
-      pendingBaselineSyncRef.current = true;
       onOpenChange(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -966,6 +1188,32 @@ export function NewProspectDialog({
     e.preventDefault();
     await createProspect(false);
   }
+
+  async function handleSaveDraft(closeAfterSave = false) {
+    setSubmitting(true);
+    try {
+      await saveServerDraft();
+      toast.success(closeAfterSave ? "Draft saved" : "Draft saved for later");
+      if (closeAfterSave) onOpenChange(false);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Could not save draft.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  const saveStateLabel =
+    draftSaveState === "saving"
+      ? "Saving…"
+      : draftSaveState === "saved"
+        ? `Saved${lastSavedAt ? ` ${new Date(lastSavedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}`
+        : draftSaveState === "offline"
+          ? "Offline recovery saved on this device"
+          : draftSaveState === "conflict"
+            ? "Revision conflict — reopen to refresh"
+            : draftId
+              ? "Draft ready"
+              : "Not saved yet";
 
   return (
     <>
@@ -983,9 +1231,41 @@ export function NewProspectDialog({
             <DialogDescription>
               Add the essentials now. Company research can be completed later from the prospect record.
             </DialogDescription>
+            <p
+              className={cn(
+                "text-xs",
+                draftSaveState === "conflict"
+                  ? "text-destructive"
+                  : draftSaveState === "offline"
+                    ? "text-amber-600 dark:text-amber-400"
+                    : "text-muted-foreground",
+              )}
+              role="status"
+              aria-live="polite"
+            >
+              {saveStateLabel}
+            </p>
           </DialogHeader>
 
           <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4 space-y-6">
+            <ProspectFormSections
+              values={buildDraft()}
+              onChange={(next) => applyDraft(next)}
+              channelOptions={channelOptions}
+              profiles={profiles}
+              strategies={selectableStrategies}
+              personas={strategyPersonas}
+              outreachThreshold={intentPlaybook.outreachThreshold}
+              existingContactsForCompany={countCompanyContactsForUser(
+                leads,
+                currentUserId,
+                domainFromWebsiteOrEmail(website, email),
+                bizName,
+              )}
+              maxContactsPerCompany={maxContacts}
+            />
+            {false ? (
+              <>
             {selectableStrategies.length > 0 ? (
               <section className="space-y-3">
                 <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
@@ -1043,7 +1323,7 @@ export function NewProspectDialog({
                 {selectedStrategy ? (
                   <div className="rounded-md border bg-muted/30 px-3 py-2 space-y-1.5">
                     <p className="text-xs font-medium">Quality checklist</p>
-                    {selectedStrategy.qualityChecklist
+                    {selectedStrategy?.qualityChecklist
                       .filter((c) => c.requirement !== "not_needed")
                       .slice(0, 8)
                       .map((c) => (
@@ -1561,11 +1841,29 @@ export function NewProspectDialog({
               )}
               maxContactsPerCompany={maxContacts}
             />
+              </>
+            ) : null}
           </div>
 
           <DialogFooter className="px-6 py-4 border-t shrink-0 bg-muted/20">
             <Button type="button" variant="outline" onClick={requestClose} disabled={submitting}>
               Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => void handleSaveDraft(false)}
+              disabled={submitting || !draftInitialized || draftSaveState === "conflict"}
+            >
+              {draftSaveState === "saving" ? "Saving…" : "Save draft"}
+            </Button>
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => void handleSaveDraft(true)}
+              disabled={submitting || !draftInitialized || draftSaveState === "conflict"}
+            >
+              Save & close
             </Button>
             <Button type="submit" disabled={submitting}>
               {submitting ? "Saving…" : "Create prospect"}
@@ -1609,16 +1907,16 @@ export function NewProspectDialog({
     <AlertDialog open={discardOpen} onOpenChange={setDiscardOpen}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Discard unsaved prospect?</AlertDialogTitle>
+          <AlertDialogTitle>Close without saving the latest changes?</AlertDialogTitle>
           <AlertDialogDescription>
-            Your entries are saved locally while you work, but closing now without creating will discard
-            this draft unless you keep editing.
+            The last server-saved version will remain available. Changes made since then will be removed
+            from this device.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>Keep editing</AlertDialogCancel>
           <AlertDialogAction onClick={() => finalizeClose({ discard: true })}>
-            Discard
+            Close without saving
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

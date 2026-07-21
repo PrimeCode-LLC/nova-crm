@@ -471,7 +471,7 @@ export function NewFollowupDialog({
                     value={messageBody}
                     onChange={(e) => setMessageBody(e.target.value)}
                     rows={4}
-                    className="resize-none font-mono text-xs"
+                    className="resize-y font-mono text-xs"
                     placeholder="Copy-ready outreach message…"
                   />
                 </div>

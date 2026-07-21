@@ -16,7 +16,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   font: inherit;
 }
 
@@ -272,6 +273,42 @@ kbd {
 .draft-card {
   border-color: rgb(245 158 11 / 35%);
   background: rgb(120 53 15 / 10%);
+}
+
+.draft-picker {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.draft-picker > div {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.draft-picker label {
+  color: #a1a1aa;
+  font-size: 10px;
+  font-weight: 650;
+}
+
+.draft-picker select {
+  width: 100%;
+  min-width: 0;
+  height: 36px;
+  padding: 0 8px;
+  border: 1px solid #3f3f46;
+  border-radius: 7px;
+  outline: none;
+  color: #fafafa;
+  background: #09090b;
+  font-size: 11px;
+}
+
+.draft-picker select:focus {
+  border-color: #8b5cf6;
 }
 
 .new-draft-card {

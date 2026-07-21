@@ -18,16 +18,18 @@ import {
 import { Badge } from "@/components/ui/badge";
 import {
   emptyEvidence,
-  emptyPersonalization,
   evaluateQualifyGate,
   formatPersonalizationNote,
   summarizeEvidenceMatch,
   type IntentEvidence,
-  type PersonalizationNote,
   type ProspectQualifyStatus,
   type ProspectRejectionReason,
   PROSPECT_REJECTION_REASONS,
 } from "@/lib/prospecting-strategy/qualify";
+import {
+  emptyProspectQualifyForm,
+  type ProspectQualifyFormState,
+} from "@/lib/prospects/prospect-form";
 import { capitalizeSelectToken } from "@/lib/base-ui-select-label";
 
 const SIGNAL_CATEGORIES = [
@@ -45,27 +47,11 @@ const SIGNAL_CATEGORIES = [
   "Other",
 ];
 
-export type ProspectQualifyFormState = {
-  evidence: IntentEvidence[];
-  personalization: PersonalizationNote;
-  primaryOpportunityLabel: string;
-  deeplyPersonalized: boolean;
-  qualifyStatus: ProspectQualifyStatus;
-  rejectionReason: ProspectRejectionReason | "";
-  rejectionNote: string;
-};
-
 export function emptyQualifyFormState(): ProspectQualifyFormState {
-  return {
-    evidence: [emptyEvidence()],
-    personalization: emptyPersonalization(),
-    primaryOpportunityLabel: "",
-    deeplyPersonalized: false,
-    qualifyStatus: "completed",
-    rejectionReason: "",
-    rejectionNote: "",
-  };
+  return emptyProspectQualifyForm();
 }
+
+export type { ProspectQualifyFormState } from "@/lib/prospects/prospect-form";
 
 export function ProspectQualifyPanel({
   state,

@@ -16,6 +16,20 @@ export type NewProspectPrefill = {
   personaId?: string;
 };
 
+export type NewProspectLaunch = {
+  source:
+    | "global_command"
+    | "prospects_page"
+    | "leads_table"
+    | "my_strategy"
+    | "fit_check"
+    | "draft_banner"
+    | "draft_center";
+  destination?: string;
+  draftId?: string;
+  prefill?: NewProspectPrefill;
+};
+
 export type OpenQuickAddOpts = {
   initialPill?: QuickAddPill;
   initialLeadStage?: PipelineStage;
@@ -23,7 +37,7 @@ export type OpenQuickAddOpts = {
 
 type QuickAddLauncherContextValue = {
   openQuickAdd: (opts?: OpenQuickAddOpts) => void;
-  openNewProspectForm: (prefill?: NewProspectPrefill) => void;
+  openNewProspectForm: (launch: NewProspectLaunch) => void;
 };
 
 const QuickAddLauncherContext = React.createContext<QuickAddLauncherContextValue | null>(
@@ -44,16 +58,23 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
   const [open, setOpen] = React.useState(false);
   const [opts, setOpts] = React.useState<OpenQuickAddOpts>({});
   const [newProspectOpen, setNewProspectOpen] = React.useState(false);
-  const [prospectPrefill, setProspectPrefill] = React.useState<NewProspectPrefill | undefined>();
+  const [prospectLaunch, setProspectLaunch] = React.useState<NewProspectLaunch | undefined>();
+  const [prospectLaunchKey, setProspectLaunchKey] = React.useState(0);
 
   const openQuickAdd = React.useCallback((next?: OpenQuickAddOpts) => {
     setOpts(next ?? {});
     setOpen(true);
   }, []);
 
-  const openNewProspectForm = React.useCallback((prefill?: NewProspectPrefill) => {
-    setProspectPrefill(prefill);
+  const openNewProspectForm = React.useCallback((launch: NewProspectLaunch) => {
+    setProspectLaunch(launch);
+    setProspectLaunchKey((value) => value + 1);
     setNewProspectOpen(true);
+  }, []);
+
+  const handleNewProspectOpenChange = React.useCallback((nextOpen: boolean) => {
+    setNewProspectOpen(nextOpen);
+    if (!nextOpen) setProspectLaunch(undefined);
   }, []);
 
   const value = React.useMemo(
@@ -73,9 +94,10 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
         />
       ) : null}
       <NewProspectDialog
+        key={prospectLaunchKey}
         open={newProspectOpen}
-        onOpenChange={setNewProspectOpen}
-        initialPrefill={prospectPrefill}
+        onOpenChange={handleNewProspectOpenChange}
+        launch={prospectLaunch}
       />
     </QuickAddLauncherContext.Provider>
   );
