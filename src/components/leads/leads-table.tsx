@@ -647,12 +647,43 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     {
       id: "select",
       header: ({ table }) => (
-        <Checkbox
-          checked={table.getIsAllRowsSelected()}
-          indeterminate={table.getIsSomeRowsSelected() && !table.getIsAllRowsSelected()}
-          onCheckedChange={(v) => table.toggleAllRowsSelected(!!v)}
-          aria-label="Select all"
-        />
+        <div className="flex items-center gap-0.5">
+          <Checkbox
+            checked={table.getIsAllPageRowsSelected()}
+            indeterminate={
+              table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected()
+            }
+            onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
+            aria-label="Select current page"
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  aria-label="Selection options"
+                  className="h-6 w-6"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="start">
+              <DropdownMenuItem onClick={() => table.toggleAllPageRowsSelected(true)}>
+                Select current page
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => table.toggleAllRowsSelected(true)}>
+                Select all pages
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onClick={() => table.toggleAllRowsSelected(false)}>
+                Clear selection
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       ),
       cell: ({ row }) => (
         <Checkbox
@@ -663,7 +694,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         />
       ),
       enableSorting: false,
-      size: 32,
+      size: 56,
     },
     {
       id: "contact",

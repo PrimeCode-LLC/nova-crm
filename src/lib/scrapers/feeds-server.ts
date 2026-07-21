@@ -93,6 +93,34 @@ export async function updateScraperFeedServer(input: {
   return { ok: true, feed: mapScraperFeed(ref.id, next.data() as Record<string, unknown>) };
 }
 
+export async function setScraperFeedsEnabledServer(input: {
+  organizationId: string;
+  feedIds: string[];
+  enabled: boolean;
+  uid?: string;
+}): Promise<{ updatedIds: string[] }> {
+  const col = feedsCol();
+  if (!col || input.feedIds.length === 0) return { updatedIds: [] };
+
+  const refs = input.feedIds.map((feedId) => col.doc(feedId));
+  const snapshots = await getAdminDb()!.getAll(...refs);
+  const batch = getAdminDb()!.batch();
+  const updatedIds: string[] = [];
+
+  for (const snapshot of snapshots) {
+    if (
+      snapshot.exists &&
+      (snapshot.data() as Record<string, unknown>).organizationId === input.organizationId
+    ) {
+      batch.update(snapshot.ref, stampForUpdate({ enabled: input.enabled }, input.uid));
+      updatedIds.push(snapshot.id);
+    }
+  }
+
+  if (updatedIds.length > 0) await batch.commit();
+  return { updatedIds };
+}
+
 export async function deleteScraperFeedServer(
   organizationId: string,
   feedId: string,

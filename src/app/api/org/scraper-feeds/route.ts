@@ -9,6 +9,7 @@ import {
   createScraperFeedServer,
   listScraperFeedsServer,
   seedDefaultScraperFeedsServer,
+  setScraperFeedsEnabledServer,
 } from "@/lib/scrapers/feeds-server";
 import { runScraperFeedsServer } from "@/lib/scrapers/run-feeds-server";
 import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
@@ -21,6 +22,12 @@ const createSchema = z.object({
   feedUrl: z.string().url().max(2000),
   enabled: z.boolean().optional(),
   runIntervalMinutes: z.number().int().min(15).max(1440).optional(),
+});
+
+const bulkSetEnabledSchema = z.object({
+  action: z.literal("bulk_set_enabled"),
+  feedIds: z.array(z.string().min(1)).min(1).max(200),
+  enabled: z.boolean(),
 });
 
 export async function GET() {
@@ -73,6 +80,23 @@ export async function POST(req: Request) {
 
   const orgId = g.ctx.session.organizationId;
   const uid = g.ctx.session.uid;
+
+  if (action === "bulk_set_enabled") {
+    const parsed = bulkSetEnabledSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", issues: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const result = await setScraperFeedsEnabledServer({
+      organizationId: orgId,
+      uid,
+      feedIds: [...new Set(parsed.data.feedIds)],
+      enabled: parsed.data.enabled,
+    });
+    return NextResponse.json(result);
+  }
 
   if (action === "seed") {
     const result = await seedDefaultScraperFeedsServer({ organizationId: orgId, uid });

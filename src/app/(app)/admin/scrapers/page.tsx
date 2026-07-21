@@ -16,6 +16,7 @@ import { toast } from "sonner";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -94,6 +95,9 @@ export default function AdminScrapersPage() {
   const [seeding, setSeeding] = React.useState(false);
   const [runFeedId, setRunFeedId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
+  const [pendingFeedIds, setPendingFeedIds] = React.useState<Set<string>>(() => new Set());
+  const [selectedFeedIds, setSelectedFeedIds] = React.useState<Set<string>>(() => new Set());
+  const [bulkUpdating, setBulkUpdating] = React.useState(false);
 
   const [feedDialogOpen, setFeedDialogOpen] = React.useState(false);
   const [editFeedId, setEditFeedId] = React.useState<string | null>(null);
@@ -118,6 +122,14 @@ export default function AdminScrapersPage() {
   const paginatedFeeds = feeds.slice(pageStart, pageStart + pageSize);
   const rangeStart = feeds.length === 0 ? 0 : pageStart + 1;
   const rangeEnd = Math.min(pageStart + pageSize, feeds.length);
+  const selectedCount = selectedFeedIds.size;
+  const pageSelectedCount = paginatedFeeds.reduce(
+    (count, feed) => count + (selectedFeedIds.has(feed.id) ? 1 : 0),
+    0,
+  );
+  const allPageFeedsSelected =
+    paginatedFeeds.length > 0 && pageSelectedCount === paginatedFeeds.length;
+  const somePageFeedsSelected = pageSelectedCount > 0 && !allPageFeedsSelected;
 
   React.useEffect(() => {
     setPage((p) => Math.min(p, totalPages));
@@ -168,6 +180,7 @@ export default function AdminScrapersPage() {
         return;
       }
       setFeeds(data.feeds ?? []);
+      setSelectedFeedIds(new Set());
     } catch {
       toast.error("Network error");
     } finally {
@@ -309,21 +322,124 @@ export default function AdminScrapersPage() {
   }
 
   async function toggleEnabled(feed: ScraperFeed) {
+    const nextEnabled = !feed.enabled;
+    setPendingFeedIds((current) => new Set(current).add(feed.id));
+    setFeeds((current) =>
+      current.map((item) => (item.id === feed.id ? { ...item, enabled: nextEnabled } : item)),
+    );
     try {
       const res = await fetch(`/api/org/scraper-feeds/${feed.id}`, {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !feed.enabled }),
+        body: JSON.stringify({ enabled: nextEnabled }),
       });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
         toast.error(data.error ?? "Update failed");
+        setFeeds((current) =>
+          current.map((item) =>
+            item.id === feed.id ? { ...item, enabled: feed.enabled } : item,
+          ),
+        );
         return;
       }
-      await load();
     } catch {
       toast.error("Network error");
+      setFeeds((current) =>
+        current.map((item) =>
+          item.id === feed.id ? { ...item, enabled: feed.enabled } : item,
+        ),
+      );
+    } finally {
+      setPendingFeedIds((current) => {
+        const next = new Set(current);
+        next.delete(feed.id);
+        return next;
+      });
+    }
+  }
+
+  function setFeedSelected(feedId: string, selected: boolean) {
+    setSelectedFeedIds((current) => {
+      const next = new Set(current);
+      if (selected) next.add(feedId);
+      else next.delete(feedId);
+      return next;
+    });
+  }
+
+  function setPageSelected(selected: boolean) {
+    setSelectedFeedIds((current) => {
+      const next = new Set(current);
+      for (const feed of paginatedFeeds) {
+        if (selected) next.add(feed.id);
+        else next.delete(feed.id);
+      }
+      return next;
+    });
+  }
+
+  async function bulkSetEnabled(nextEnabled: boolean) {
+    const feedIds = feeds.filter((feed) => selectedFeedIds.has(feed.id)).map((feed) => feed.id);
+    if (feedIds.length === 0) return;
+
+    const previousEnabled = new Map(
+      feeds.filter((feed) => selectedFeedIds.has(feed.id)).map((feed) => [feed.id, feed.enabled]),
+    );
+    const feedIdSet = new Set(feedIds);
+    setBulkUpdating(true);
+    setFeeds((current) =>
+      current.map((feed) =>
+        feedIdSet.has(feed.id) ? { ...feed, enabled: nextEnabled } : feed,
+      ),
+    );
+
+    try {
+      const res = await fetch("/api/org/scraper-feeds", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk_set_enabled",
+          feedIds,
+          enabled: nextEnabled,
+        }),
+      });
+      const data = (await res.json()) as { updatedIds?: string[]; error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "Bulk update failed");
+        setFeeds((current) =>
+          current.map((feed) =>
+            previousEnabled.has(feed.id)
+              ? { ...feed, enabled: previousEnabled.get(feed.id)! }
+              : feed,
+          ),
+        );
+        return;
+      }
+
+      const updatedIds = new Set(data.updatedIds ?? []);
+      setFeeds((current) =>
+        current.map((feed) =>
+          previousEnabled.has(feed.id) && !updatedIds.has(feed.id)
+            ? { ...feed, enabled: previousEnabled.get(feed.id)! }
+            : feed,
+        ),
+      );
+      setSelectedFeedIds(new Set());
+      toast.success(`${updatedIds.size} feed${updatedIds.size === 1 ? "" : "s"} ${nextEnabled ? "enabled" : "disabled"}`);
+    } catch {
+      toast.error("Network error");
+      setFeeds((current) =>
+        current.map((feed) =>
+          previousEnabled.has(feed.id)
+            ? { ...feed, enabled: previousEnabled.get(feed.id)! }
+            : feed,
+        ),
+      );
+    } finally {
+      setBulkUpdating(false);
     }
   }
 
@@ -401,10 +517,62 @@ export default function AdminScrapersPage() {
           ) : (
             <Card className="flex min-h-0 flex-1 flex-col gap-0 overflow-hidden py-0">
               <CardContent className="flex min-h-0 flex-1 flex-col p-0">
+                <div className="flex min-h-12 shrink-0 flex-wrap items-center gap-2 border-b px-3 py-2">
+                  <span className="text-sm text-muted-foreground">
+                    {selectedCount} selected
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={selectedCount === feeds.length || bulkUpdating}
+                    onClick={() => setSelectedFeedIds(new Set(feeds.map((feed) => feed.id)))}
+                  >
+                    Select all
+                  </Button>
+                  {selectedCount > 0 ? (
+                    <>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        disabled={bulkUpdating}
+                        onClick={() => setSelectedFeedIds(new Set())}
+                      >
+                        Clear
+                      </Button>
+                      <div className="ml-auto flex items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={bulkUpdating}
+                          onClick={() => void bulkSetEnabled(true)}
+                        >
+                          {bulkUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                          Enable selected
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={bulkUpdating}
+                          onClick={() => void bulkSetEnabled(false)}
+                        >
+                          Disable selected
+                        </Button>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain scrollbar-thin">
                   <Table>
                 <TableHeader className="bg-muted/30">
                   <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-9 w-10 px-3">
+                      <Checkbox
+                        checked={allPageFeedsSelected}
+                        indeterminate={somePageFeedsSelected}
+                        onCheckedChange={(checked) => setPageSelected(checked === true)}
+                        aria-label="Select all feeds on this page"
+                      />
+                    </TableHead>
                     <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Name</TableHead>
                     <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Platform</TableHead>
                     <TableHead className="h-9 px-3 text-xs font-medium text-muted-foreground">Category</TableHead>
@@ -418,6 +586,13 @@ export default function AdminScrapersPage() {
                 <TableBody>
                   {paginatedFeeds.map((feed) => (
                     <TableRow key={feed.id}>
+                      <TableCell className="w-10 px-3 py-2.5 align-middle">
+                        <Checkbox
+                          checked={selectedFeedIds.has(feed.id)}
+                          onCheckedChange={(checked) => setFeedSelected(feed.id, checked === true)}
+                          aria-label={`Select ${feed.name}`}
+                        />
+                      </TableCell>
                       <TableCell className="px-3 py-2.5 align-top">
                         <div className="space-y-0.5">
                           <div className="font-medium leading-snug">{feed.name}</div>
@@ -462,7 +637,12 @@ export default function AdminScrapersPage() {
                       </TableCell>
                       <TableCell className="px-3 py-2.5 text-right align-middle">
                         <div className="flex items-center justify-end gap-2">
-                          <Switch checked={feed.enabled} onCheckedChange={() => void toggleEnabled(feed)} />
+                          <Switch
+                            checked={feed.enabled}
+                            disabled={pendingFeedIds.has(feed.id) || bulkUpdating}
+                            onCheckedChange={() => void toggleEnabled(feed)}
+                            aria-label={`${feed.enabled ? "Disable" : "Enable"} ${feed.name}`}
+                          />
                           <Button
                             variant="outline"
                             size="icon-sm"
