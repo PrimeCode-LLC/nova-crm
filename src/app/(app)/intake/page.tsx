@@ -4,7 +4,16 @@ import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "date-fns";
-import { Calendar, Loader2, Play, RefreshCw, Search, Trash2 } from "lucide-react";
+import {
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Play,
+  RefreshCw,
+  Search,
+  Trash2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { rankAssignedStrategies, type AssignedStrategyMatch } from "@nova/scoring";
 
@@ -14,6 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Progress, ProgressLabel } from "@/components/ui/progress";
 import {
   Select,
   SelectContent,
@@ -52,8 +62,8 @@ import { IntakeKeywordFilters } from "@/components/intake/intake-keyword-filters
 import { IntakeQualityBadge } from "@/components/intake/intake-quality-badge";
 import {
   intakeKeywordFiltersActive,
+  matchesAnyKeyword,
   mergeTeamAndPersonalKeywords,
-  passesKeywordFilters,
   rawItemSearchHaystack,
 } from "@/lib/intake/keyword-filter";
 import type { OrganizationIntakeFilterDefaults } from "@/lib/types";
@@ -71,6 +81,7 @@ import { cn } from "@/lib/utils";
 const ALL = "__all__" as const;
 const ANY_MY_STRATEGY = "__any_my_strategy__" as const;
 const NO_STRATEGY_MATCH = "__no_strategy_match__" as const;
+const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 type QualityFilter = "all" | "no_signals" | "not_matching" | "has_signals" | "ready";
 type SortMode = "newest" | "best_match";
 /** Soft auto-refresh when returning to the tab (ms). */
@@ -95,6 +106,34 @@ function passesPublishedDateRange(iso: string, fromYmd: string, toYmd: string): 
   if (from && rowYmd < from) return false;
   if (to && rowYmd > to) return false;
   return true;
+}
+
+type IntakePoolFetchResult = {
+  ok: boolean;
+  data: { items?: ScraperRawItem[]; error?: string };
+};
+
+const inFlightIntakePoolRequests = new Map<string, Promise<IntakePoolFetchResult>>();
+
+function fetchIntakePoolOnce(path: string): Promise<IntakePoolFetchResult> {
+  const existing = inFlightIntakePoolRequests.get(path);
+  if (existing) return existing;
+
+  const request = fetch(path, {
+    credentials: "same-origin",
+    cache: "no-store",
+  })
+    .then(async (response) => ({
+      ok: response.ok,
+      data: (await response.json()) as IntakePoolFetchResult["data"],
+    }))
+    .finally(() => {
+      if (inFlightIntakePoolRequests.get(path) === request) {
+        inFlightIntakePoolRequests.delete(path);
+      }
+    });
+  inFlightIntakePoolRequests.set(path, request);
+  return request;
 }
 
 export default function IntakePoolPage() {
@@ -133,6 +172,9 @@ export default function IntakePoolPage() {
   const [maximumScore, setMaximumScore] = React.useState("");
   const [strategyFilter, setStrategyFilter] = React.useState<string>(ALL);
   const [sortMode, setSortMode] = React.useState<SortMode>("newest");
+  const [pageIndex, setPageIndex] = React.useState(0);
+  const [pageSize, setPageSize] =
+    React.useState<(typeof PAGE_SIZE_OPTIONS)[number]>(25);
   const [teamDefaults, setTeamDefaults] = React.useState<OrganizationIntakeFilterDefaults>({
     ...EMPTY_INTAKE_FILTER_DEFAULTS,
   });
@@ -146,7 +188,7 @@ export default function IntakePoolPage() {
   const [deleteConfirm, setDeleteConfirm] = React.useState<null | "all" | "selected">(null);
   const [bulkBusy, setBulkBusy] = React.useState(false);
 
-  const abortRef = React.useRef<AbortController | null>(null);
+  const loadSequenceRef = React.useRef(0);
   const lastFetchAtRef = React.useRef(0);
   const itemsLenRef = React.useRef(0);
   React.useEffect(() => {
@@ -160,6 +202,11 @@ export default function IntakePoolPage() {
         excludeKeywords: personalExcludeKeywords,
       }),
     [teamDefaults, personalIncludeKeywords, personalExcludeKeywords],
+  );
+  const deferredSearchQuery = React.useDeferredValue(searchQuery);
+  const searchHaystackById = React.useMemo(
+    () => new Map(items.map((item) => [item.id, rawItemSearchHaystack(item)])),
+    [items],
   );
 
   const { qualityById, scoring: scoringQuality } = useIntakeQualityScores(
@@ -184,16 +231,14 @@ export default function IntakePoolPage() {
       const quality = qualityById.get(item.id);
       if (!quality) continue;
       const { title, body } = intakeItemPlainText(item);
-      matches.set(
-        item.id,
-        rankAssignedStrategies({
-          page: { title, text: body },
-          quality,
-          assignments: myActiveAssignments,
-          strategies: assignedStrategies,
-          personas: prospecting.personas,
-        }),
-      );
+      const ranked = rankAssignedStrategies({
+        page: { title, text: body },
+        quality,
+        assignments: myActiveAssignments,
+        strategies: assignedStrategies,
+        personas: prospecting.personas,
+      });
+      matches.set(item.id, ranked);
     }
     return matches;
   }, [
@@ -205,7 +250,7 @@ export default function IntakePoolPage() {
   ]);
 
   const filteredItems = React.useMemo(() => {
-    const q = searchQuery.trim().toLowerCase();
+    const q = deferredSearchQuery.trim().toLowerCase();
     const parsedMinimumScore = Number(minimumScore);
     const hasMinimumScore =
       minimumScore.trim() !== "" && Number.isFinite(parsedMinimumScore);
@@ -213,17 +258,16 @@ export default function IntakePoolPage() {
     const hasMaximumScore =
       maximumScore.trim() !== "" && Number.isFinite(parsedMaximumScore);
     const filtered = items.filter((item) => {
-      const haystack = rawItemSearchHaystack(item);
+      const haystack = searchHaystackById.get(item.id) ?? "";
       if (q && !haystack.includes(q)) return false;
       if (
-        !passesKeywordFilters(
-          haystack,
-          effectiveKeywords.includeKeywords,
-          effectiveKeywords.excludeKeywords,
-        )
-      ) {
-        return false;
-      }
+        effectiveKeywords.excludeKeywords.length > 0 &&
+        matchesAnyKeyword(haystack, effectiveKeywords.excludeKeywords)
+      ) return false;
+      if (
+        effectiveKeywords.includeKeywords.length > 0 &&
+        !matchesAnyKeyword(haystack, effectiveKeywords.includeKeywords)
+      ) return false;
       if (!passesPublishedDateRange(item.publishedAt, dateFrom, dateTo)) return false;
       const quality = qualityById.get(item.id);
       const score = quality?.score ?? 0;
@@ -276,7 +320,8 @@ export default function IntakePoolPage() {
     return filtered;
   }, [
     items,
-    searchQuery,
+    deferredSearchQuery,
+    searchHaystackById,
     effectiveKeywords,
     dateFrom,
     dateTo,
@@ -289,6 +334,10 @@ export default function IntakePoolPage() {
     strategyMatchesById,
     ws.intentPlaybook.outreachThreshold,
   ]);
+  const totalPages = Math.max(1, Math.ceil(filteredItems.length / pageSize));
+  const currentPageIndex = Math.min(pageIndex, totalPages - 1);
+  const pageStart = currentPageIndex * pageSize;
+  const paginatedItems = filteredItems.slice(pageStart, pageStart + pageSize);
   const categoryOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
     for (const preset of SCRAPER_CATEGORY_PRESETS) dynamic.add(preset);
@@ -318,8 +367,10 @@ export default function IntakePoolPage() {
   const selectedCount = selectedIds.size;
   const allFilteredSelected =
     filteredItems.length > 0 && filteredItems.every((item) => selectedIds.has(item.id));
-  const someFilteredSelected =
-    !allFilteredSelected && filteredItems.some((item) => selectedIds.has(item.id));
+  const allPageSelected =
+    paginatedItems.length > 0 && paginatedItems.every((item) => selectedIds.has(item.id));
+  const somePageSelected =
+    !allPageSelected && paginatedItems.some((item) => selectedIds.has(item.id));
 
   React.useEffect(() => {
     if (ws.isDemo) return;
@@ -348,9 +399,7 @@ export default function IntakePoolPage() {
       }
 
       const soft = opts?.soft ?? itemsLenRef.current > 0;
-      abortRef.current?.abort();
-      const ac = new AbortController();
-      abortRef.current = ac;
+      const loadSequence = ++loadSequenceRef.current;
 
       if (soft) setRefreshing(true);
       else setLoading(true);
@@ -359,14 +408,9 @@ export default function IntakePoolPage() {
         const params = new URLSearchParams({ status: "available", limit: "200" });
         if (platform !== ALL) params.set("platform", platform);
         if (category !== ALL) params.set("category", category);
-        const res = await fetch(`/api/org/scraper-raw?${params}`, {
-          credentials: "same-origin",
-          cache: "no-store",
-          signal: ac.signal,
-        });
-        if (ac.signal.aborted) return;
-        const data = (await res.json()) as { items?: ScraperRawItem[]; error?: string };
-        if (!res.ok) {
+        const { ok, data } = await fetchIntakePoolOnce(`/api/org/scraper-raw?${params}`);
+        if (loadSequence !== loadSequenceRef.current) return;
+        if (!ok) {
           toast.error(data.error ?? "Could not load intake pool");
           if (!soft) setItems([]);
           return;
@@ -380,11 +424,11 @@ export default function IntakePoolPage() {
           return next.size === previous.size ? previous : next;
         });
         lastFetchAtRef.current = Date.now();
-      } catch (e) {
-        if (ac.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) return;
+      } catch {
+        if (loadSequence !== loadSequenceRef.current) return;
         toast.error("Network error loading intake pool");
       } finally {
-        if (!ac.signal.aborted) {
+        if (loadSequence === loadSequenceRef.current) {
           setLoading(false);
           setRefreshing(false);
         }
@@ -397,7 +441,7 @@ export default function IntakePoolPage() {
     // Soft refresh when platform/category changes so the list doesn't blank for 10s+.
     void load({ soft: itemsLenRef.current > 0 });
     return () => {
-      abortRef.current?.abort();
+      loadSequenceRef.current += 1;
     };
   }, [load]);
 
@@ -458,6 +502,17 @@ export default function IntakePoolPage() {
     setSelectedIds((prev) => {
       const next = new Set(prev);
       for (const item of filteredItems) next.add(item.id);
+      return next;
+    });
+  }
+
+  function toggleSelectCurrentPage() {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      for (const item of paginatedItems) {
+        if (allPageSelected) next.delete(item.id);
+        else next.add(item.id);
+      }
       return next;
     });
   }
@@ -620,6 +675,18 @@ export default function IntakePoolPage() {
               when feeds run again. This does not delete anything already promoted.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {bulkBusy ? (
+            <Progress
+              value={null}
+              className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
+            >
+              <ProgressLabel className="text-sm text-muted-foreground">
+                {deleteConfirm === "all"
+                  ? "Deleting all intake posts…"
+                  : `Deleting ${selectedCount} selected post${selectedCount === 1 ? "" : "s"}…`}
+              </ProgressLabel>
+            </Progress>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
@@ -951,10 +1018,10 @@ export default function IntakePoolPage() {
             {canDeleteIntake && filteredItems.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
                 <Checkbox
-                  checked={allFilteredSelected}
-                  indeterminate={someFilteredSelected}
-                  onCheckedChange={() => toggleSelectAllFiltered()}
-                  aria-label="Select all visible posts"
+                  checked={allPageSelected}
+                  indeterminate={somePageSelected}
+                  onCheckedChange={() => toggleSelectCurrentPage()}
+                  aria-label="Select all posts on this page"
                 />
                 <span className="font-medium">
                   {selectedCount > 0
@@ -966,11 +1033,22 @@ export default function IntakePoolPage() {
                     variant="ghost"
                     size="sm"
                     type="button"
-                    onClick={toggleSelectAllFiltered}
-                    disabled={bulkBusy || filteredItems.length === 0}
+                    onClick={toggleSelectCurrentPage}
+                    disabled={bulkBusy || paginatedItems.length === 0}
                   >
-                    {allFilteredSelected ? "Deselect all" : "Select all"}
+                    {allPageSelected ? "Deselect page" : "Select page"}
                   </Button>
+                  {filteredItems.length > paginatedItems.length ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      type="button"
+                      onClick={toggleSelectAllFiltered}
+                      disabled={bulkBusy}
+                    >
+                      {allFilteredSelected ? "Deselect all results" : "Select all results"}
+                    </Button>
+                  ) : null}
                   <Button
                     variant="destructive"
                     size="sm"
@@ -1013,13 +1091,14 @@ export default function IntakePoolPage() {
                 </CardHeader>
               </Card>
             ) : (
-              <ul
-                className={cn(
-                  "space-y-3 transition-opacity",
-                  refreshing && "opacity-70",
-                )}
-              >
-                {filteredItems.map((item) => {
+              <>
+                <ul
+                  className={cn(
+                    "space-y-3 transition-opacity",
+                    refreshing && "opacity-70",
+                  )}
+                >
+                {paginatedItems.map((item) => {
                   const itemBusy = busy?.itemId === item.id ? busy.action : null;
                   const snippet =
                     item.contentSnippet?.trim() ||
@@ -1126,7 +1205,67 @@ export default function IntakePoolPage() {
                     </li>
                   );
                 })}
-              </ul>
+                </ul>
+                <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-3 text-xs text-muted-foreground">
+                  <span>
+                    Showing {pageStart + 1}–
+                    {Math.min(pageStart + pageSize, filteredItems.length)} of {filteredItems.length}
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <span>Posts per page</span>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(value) => {
+                        const next = Number(value);
+                        if (
+                          PAGE_SIZE_OPTIONS.includes(
+                            next as (typeof PAGE_SIZE_OPTIONS)[number],
+                          )
+                        ) {
+                          setPageSize(next as (typeof PAGE_SIZE_OPTIONS)[number]);
+                          setPageIndex(0);
+                        }
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[72px]">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAGE_SIZE_OPTIONS.map((option) => (
+                          <SelectItem key={option} value={String(option)}>
+                            {option}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      type="button"
+                      aria-label="Previous page"
+                      disabled={currentPageIndex === 0}
+                      onClick={() => setPageIndex(Math.max(0, currentPageIndex - 1))}
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" />
+                    </Button>
+                    <span className="min-w-[6.5rem] text-center font-medium tabular-nums text-foreground">
+                      Page {currentPageIndex + 1} of {totalPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="icon-sm"
+                      type="button"
+                      aria-label="Next page"
+                      disabled={currentPageIndex >= totalPages - 1}
+                      onClick={() =>
+                        setPageIndex(Math.min(totalPages - 1, currentPageIndex + 1))
+                      }
+                    >
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </>
         )}

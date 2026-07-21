@@ -10,6 +10,8 @@ import type { ScraperCategory, ScraperPlatform, ScraperRawItemStatus } from "@/l
 export const dynamic = "force-dynamic";
 
 export async function GET(req: Request) {
+  const startedAt = Date.now();
+  const requestId = req.headers.get("x-vercel-id");
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
@@ -20,28 +22,48 @@ export async function GET(req: Request) {
   const feedId = url.searchParams.get("feedId")?.trim() || undefined;
   const limit = Number(url.searchParams.get("limit") ?? "200");
 
-  const items = await listScraperRawItemsServer({
-    organizationId: g.ctx.session.organizationId,
-    status: status && ["available", "promoted", "dismissed"].includes(status) ? status : "available",
-    platform: platform ?? undefined,
-    category: category ?? undefined,
-    feedId,
-    limit: Number.isFinite(limit) ? limit : 200,
-  });
+  try {
+    const items = await listScraperRawItemsServer({
+      organizationId: g.ctx.session.organizationId,
+      status: status && ["available", "promoted", "dismissed"].includes(status) ? status : "available",
+      platform: platform ?? undefined,
+      category: category ?? undefined,
+      feedId,
+      limit: Number.isFinite(limit) ? limit : 200,
+      lean: true,
+    });
 
-  // Slim payload for the pool list — full HTML bodies make 200-row fetches multi‑second.
-  const lean = items.map((item) => {
-    const plain =
-      item.contentSnippet?.trim() ||
-      item.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
-    return {
-      ...item,
-      content: plain.slice(0, 800),
-      contentSnippet: plain.slice(0, 320),
-    };
-  });
-
-  return NextResponse.json({ items: lean });
+    // The Firestore query omits full HTML bodies; keep a compact plain-text list payload.
+    const lean = items.map((item) => {
+      const plain =
+        item.contentSnippet?.trim() ||
+        item.content.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+      return {
+        ...item,
+        content: plain.slice(0, 800),
+        contentSnippet: plain.slice(0, 320),
+      };
+    });
+    console.log(JSON.stringify({
+      level: "info",
+      message: "Intake pool loaded",
+      route: "/api/org/scraper-raw",
+      requestId,
+      count: lean.length,
+      durationMs: Date.now() - startedAt,
+    }));
+    return NextResponse.json({ items: lean });
+  } catch (error) {
+    console.error(JSON.stringify({
+      level: "error",
+      message: "Intake pool load failed",
+      route: "/api/org/scraper-raw",
+      requestId,
+      durationMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : String(error),
+    }));
+    return NextResponse.json({ error: "Could not load intake pool" }, { status: 500 });
+  }
 }
 
 export async function PATCH(req: Request) {

@@ -32,7 +32,9 @@ import {
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
@@ -62,7 +64,7 @@ import {
   isScraperCategoryPreset,
   isScraperPlatformPreset,
   SCRAPER_CATEGORY_PRESETS,
-  SCRAPER_PLATFORM_PRESETS,
+  SCRAPER_PLATFORM_GROUPS,
 } from "@/lib/scrapers/labels";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
 import { TeamIntakeFilterDefaultsCard } from "@/components/intake/team-intake-filter-defaults-card";
@@ -81,8 +83,8 @@ function resetFeedForm(setters: {
 }) {
   setters.setName("");
   setters.setFeedUrl("");
-  setters.setPlatform("reddit");
-  setters.setCategory("hiring");
+  setters.setPlatform("google_news");
+  setters.setCategory("procurement_rfp");
   setters.setEnabled(true);
   setters.setIntervalMin("60");
 }
@@ -104,9 +106,9 @@ export default function AdminScrapersPage() {
   const [savingFeed, setSavingFeed] = React.useState(false);
   const [name, setName] = React.useState("");
   const [feedUrl, setFeedUrl] = React.useState("");
-  const [platform, setPlatform] = React.useState<ScraperPlatform>("reddit");
+  const [platform, setPlatform] = React.useState<ScraperPlatform>("google_news");
   const [customPlatform, setCustomPlatform] = React.useState("");
-  const [category, setCategory] = React.useState<ScraperCategory>("hiring");
+  const [category, setCategory] = React.useState<ScraperCategory>("procurement_rfp");
   const [customCategory, setCustomCategory] = React.useState("");
   const [enabled, setEnabled] = React.useState(true);
   const [intervalMin, setIntervalMin] = React.useState("60");
@@ -117,11 +119,23 @@ export default function AdminScrapersPage() {
   const isEditing = editFeedId !== null;
   const selectedPlatformValue = isScraperPlatformPreset(platform) ? platform : CUSTOM_PLATFORM_VALUE;
   const selectedCategoryValue = isScraperCategoryPreset(category) ? category : CUSTOM_CATEGORY_VALUE;
-  const totalPages = Math.max(1, Math.ceil(feeds.length / pageSize));
+  const activeFeedCount = feeds.reduce((count, feed) => count + (feed.enabled ? 1 : 0), 0);
+  const sortedFeeds = React.useMemo(
+    () =>
+      [...feeds].sort((a, b) => {
+        if (a.enabled !== b.enabled) return a.enabled ? -1 : 1;
+
+        const aLastRun = a.lastRunAt ? new Date(a.lastRunAt).getTime() : 0;
+        const bLastRun = b.lastRunAt ? new Date(b.lastRunAt).getTime() : 0;
+        return bLastRun - aLastRun || a.name.localeCompare(b.name);
+      }),
+    [feeds],
+  );
+  const totalPages = Math.max(1, Math.ceil(sortedFeeds.length / pageSize));
   const pageStart = (page - 1) * pageSize;
-  const paginatedFeeds = feeds.slice(pageStart, pageStart + pageSize);
-  const rangeStart = feeds.length === 0 ? 0 : pageStart + 1;
-  const rangeEnd = Math.min(pageStart + pageSize, feeds.length);
+  const paginatedFeeds = sortedFeeds.slice(pageStart, pageStart + pageSize);
+  const rangeStart = sortedFeeds.length === 0 ? 0 : pageStart + 1;
+  const rangeEnd = Math.min(pageStart + pageSize, sortedFeeds.length);
   const selectedCount = selectedFeedIds.size;
   const pageSelectedCount = paginatedFeeds.reduce(
     (count, feed) => count + (selectedFeedIds.has(feed.id) ? 1 : 0),
@@ -470,6 +484,9 @@ export default function AdminScrapersPage() {
         description="RSS feeds (rss.app) ingested into the intake pool. Replaces n8n + Google Sheets."
         actions={
           <>
+            <Badge variant="outline" className="h-8 px-3 tabular-nums">
+              {activeFeedCount} active scraper{activeFeedCount === 1 ? "" : "s"}
+            </Badge>
             <Button variant="outline" size="sm" onClick={() => void load()} disabled={loading}>
               <RefreshCw className={loading ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
             </Button>
@@ -752,16 +769,16 @@ export default function AdminScrapersPage() {
               <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="r/hire" />
             </div>
             <div className="space-y-1.5">
-              <Label>Feed URL (rss.app)</Label>
+              <Label>Feed URL</Label>
               <Input
                 value={feedUrl}
                 onChange={(e) => setFeedUrl(e.target.value)}
-                placeholder="https://rss.app/feeds/….xml"
+                placeholder="https://example.com/feed.xml"
               />
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Platform</Label>
+                <Label>Platform / Source</Label>
                 <Select
                   value={selectedPlatformValue}
                   onValueChange={(v) => {
@@ -773,13 +790,20 @@ export default function AdminScrapersPage() {
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    {SCRAPER_PLATFORM_PRESETS.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {getScraperPlatformLabel(p)}
-                      </SelectItem>
+                  <SelectContent alignItemWithTrigger={false} className="min-w-80">
+                    {SCRAPER_PLATFORM_GROUPS.map((group) => (
+                      <SelectGroup key={group.label}>
+                        <SelectLabel>{group.label}</SelectLabel>
+                        {group.options.map((p) => (
+                          <SelectItem key={p} value={p}>
+                            {getScraperPlatformLabel(p)}
+                          </SelectItem>
+                        ))}
+                        {group.label === "Technical source type" ? (
+                          <SelectItem value={CUSTOM_PLATFORM_VALUE}>Custom</SelectItem>
+                        ) : null}
+                      </SelectGroup>
                     ))}
-                    <SelectItem value={CUSTOM_PLATFORM_VALUE}>Custom...</SelectItem>
                   </SelectContent>
                 </Select>
                 {platform === CUSTOM_PLATFORM_VALUE ? (
@@ -804,13 +828,13 @@ export default function AdminScrapersPage() {
                   <SelectTrigger>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent alignItemWithTrigger={false} className="min-w-72">
                     {SCRAPER_CATEGORY_PRESETS.map((c) => (
                       <SelectItem key={c} value={c}>
                         {getScraperCategoryLabel(c)}
                       </SelectItem>
                     ))}
-                    <SelectItem value={CUSTOM_CATEGORY_VALUE}>Custom...</SelectItem>
+                    <SelectItem value={CUSTOM_CATEGORY_VALUE}>Custom</SelectItem>
                   </SelectContent>
                 </Select>
                 {category === CUSTOM_CATEGORY_VALUE ? (

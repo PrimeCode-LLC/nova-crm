@@ -68,9 +68,13 @@ export type ListRawItemsFilter = {
   category?: string;
   feedId?: string;
   limit?: number;
+  /** Omit large HTML content bodies for list views. */
+  lean?: boolean;
 };
 
-export async function listScraperRawItemsServer(
+const inFlightRawItemLists = new Map<string, Promise<ScraperRawItem[]>>();
+
+async function queryScraperRawItemsServer(
   filter: ListRawItemsFilter,
 ): Promise<ScraperRawItem[]> {
   const col = rawCol();
@@ -89,7 +93,28 @@ export async function listScraperRawItemsServer(
   if (filter.platform) q = q.where("platform", "==", filter.platform);
   if (filter.category) q = q.where("category", "==", filter.category);
 
-  const snap = await q.orderBy("publishedAt", "desc").limit(fetchLimit).get();
+  let ordered = q.orderBy("publishedAt", "desc").limit(fetchLimit);
+  if (filter.lean) {
+    ordered = ordered.select(
+      "organizationId",
+      "feedId",
+      "feedName",
+      "platform",
+      "category",
+      "dedupeKey",
+      "link",
+      "title",
+      "contentSnippet",
+      "creator",
+      "dcCreator",
+      "publishedAt",
+      "status",
+      "expiresAt",
+      "createdAt",
+      "updatedAt",
+    );
+  }
+  const snap = await ordered.get();
   let items = snap.docs.map((d) => mapScraperRawItem(d.id, d.data() as Record<string, unknown>));
 
   if (status === "available") {
@@ -100,6 +125,34 @@ export async function listScraperRawItemsServer(
   }
 
   return items.slice(0, limit);
+}
+
+/**
+ * Coalesce identical concurrent reads. React development remounts and rapid filter changes can
+ * otherwise start the same expensive Firestore query more than once.
+ */
+export function listScraperRawItemsServer(
+  filter: ListRawItemsFilter,
+): Promise<ScraperRawItem[]> {
+  const key = JSON.stringify({
+    organizationId: filter.organizationId,
+    status: filter.status ?? "available",
+    platform: filter.platform ?? "",
+    category: filter.category ?? "",
+    feedId: filter.feedId ?? "",
+    limit: Math.min(500, Math.max(1, filter.limit ?? 200)),
+    lean: filter.lean === true,
+  });
+  const existing = inFlightRawItemLists.get(key);
+  if (existing) return existing;
+
+  const request = queryScraperRawItemsServer(filter).finally(() => {
+    if (inFlightRawItemLists.get(key) === request) {
+      inFlightRawItemLists.delete(key);
+    }
+  });
+  inFlightRawItemLists.set(key, request);
+  return request;
 }
 
 export async function getScraperRawItemServer(
