@@ -101,7 +101,7 @@ export function EmailVolumeChart({
               width={chartSize.w}
               height={chartSize.h}
               data={data}
-              margin={{ top: 6, right: 8, bottom: 0, left: -16 }}
+              margin={{ top: 6, right: 8, bottom: 0, left: 0 }}
             >
               <defs>
                 <linearGradient id="opsSent" x1="0" y1="0" x2="0" y2="1">
@@ -130,7 +130,7 @@ export function EmailVolumeChart({
                 tick={{ fontSize: 10, fill: "var(--muted-foreground)" }}
                 tickLine={false}
                 axisLine={false}
-                width={28}
+                width={36}
                 allowDecimals={false}
               />
               <Tooltip
