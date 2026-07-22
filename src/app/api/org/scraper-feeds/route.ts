@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { scraperFeedIntervalSchema } from "@/lib/scrapers/scraper-feed-interval-schema";
+import {
+  scraperFeedIntervalSchema,
+  scraperRunIntervalUnitSchema,
+} from "@/lib/scrapers/scraper-feed-interval-schema";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   guardAdminFeature,
@@ -11,6 +14,7 @@ import {
   listScraperFeedsServer,
   seedDefaultScraperFeedsServer,
   setScraperFeedsEnabledServer,
+  setScraperFeedsIntervalServer,
 } from "@/lib/scrapers/feeds-server";
 import { runScraperFeedsServer } from "@/lib/scrapers/run-feeds-server";
 import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
@@ -28,8 +32,15 @@ const createSchema = z.object({
 
 const bulkSetEnabledSchema = z.object({
   action: z.literal("bulk_set_enabled"),
-  feedIds: z.array(z.string().min(1)).min(1).max(200),
+  feedIds: z.array(z.string().min(1)).min(1).max(500),
   enabled: z.boolean(),
+});
+
+const bulkSetIntervalSchema = z.object({
+  action: z.literal("bulk_set_interval"),
+  feedIds: z.array(z.string().min(1)).min(1).max(500),
+  runIntervalValue: z.number().int().positive(),
+  runIntervalUnit: scraperRunIntervalUnitSchema,
 });
 
 export async function GET() {
@@ -172,6 +183,24 @@ export async function POST(req: Request) {
       uid,
       feedIds: [...new Set(parsed.data.feedIds)],
       enabled: parsed.data.enabled,
+    });
+    return NextResponse.json(result);
+  }
+
+  if (action === "bulk_set_interval") {
+    const parsed = bulkSetIntervalSchema.safeParse(json);
+    if (!parsed.success) {
+      return NextResponse.json(
+        { error: "Validation failed", issues: parsed.error.flatten() },
+        { status: 400 },
+      );
+    }
+    const result = await setScraperFeedsIntervalServer({
+      organizationId: orgId,
+      uid,
+      feedIds: [...new Set(parsed.data.feedIds)],
+      runIntervalValue: parsed.data.runIntervalValue,
+      runIntervalUnit: parsed.data.runIntervalUnit,
     });
     return NextResponse.json(result);
   }

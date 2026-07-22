@@ -70,6 +70,7 @@ import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
 import {
   decomposeRunIntervalMinutes,
   formatRunInterval,
+  normalizeRunInterval,
 } from "@/lib/scrapers/run-interval";
 import type { ScraperRunIntervalUnit } from "@/lib/types";
 import { TeamIntakeFilterDefaultsCard } from "@/components/intake/team-intake-filter-defaults-card";
@@ -115,6 +116,9 @@ export default function AdminScrapersPage() {
   const [pendingFeedIds, setPendingFeedIds] = React.useState<Set<string>>(() => new Set());
   const [selectedFeedIds, setSelectedFeedIds] = React.useState<Set<string>>(() => new Set());
   const [bulkUpdating, setBulkUpdating] = React.useState(false);
+  const [bulkIntervalValue, setBulkIntervalValue] = React.useState("1");
+  const [bulkIntervalUnit, setBulkIntervalUnit] =
+    React.useState<ScraperRunIntervalUnit>("hours");
   const runAllElapsed = useElapsedSeconds(runningAll);
 
   const [feedDialogOpen, setFeedDialogOpen] = React.useState(false);
@@ -509,7 +513,9 @@ export default function AdminScrapersPage() {
         ),
       );
       setSelectedFeedIds(new Set());
-      toast.success(`${updatedIds.size} feed${updatedIds.size === 1 ? "" : "s"} ${nextEnabled ? "enabled" : "disabled"}`);
+      toast.success(
+        `${updatedIds.size} feed${updatedIds.size === 1 ? "" : "s"} — schedule ${nextEnabled ? "on" : "off"}`,
+      );
     } catch {
       toast.error("Network error");
       setFeeds((current) =>
@@ -518,6 +524,96 @@ export default function AdminScrapersPage() {
             ? { ...feed, enabled: previousEnabled.get(feed.id)! }
             : feed,
         ),
+      );
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
+  async function bulkSetInterval() {
+    const feedIds = feeds.filter((feed) => selectedFeedIds.has(feed.id)).map((feed) => feed.id);
+    if (feedIds.length === 0) return;
+
+    const value = Number(bulkIntervalValue);
+    if (!Number.isFinite(value) || value < 1) {
+      toast.error("Enter a valid interval number");
+      return;
+    }
+
+    const interval = normalizeRunInterval({
+      runIntervalValue: value,
+      runIntervalUnit: bulkIntervalUnit,
+    });
+    const previous = new Map(
+      feeds
+        .filter((feed) => selectedFeedIds.has(feed.id))
+        .map((feed) => [
+          feed.id,
+          {
+            runIntervalValue: feed.runIntervalValue,
+            runIntervalUnit: feed.runIntervalUnit,
+            runIntervalMinutes: feed.runIntervalMinutes,
+          },
+        ]),
+    );
+    const feedIdSet = new Set(feedIds);
+    setBulkUpdating(true);
+    setFeeds((current) =>
+      current.map((feed) =>
+        feedIdSet.has(feed.id)
+          ? {
+              ...feed,
+              runIntervalValue: interval.runIntervalValue,
+              runIntervalUnit: interval.runIntervalUnit,
+              runIntervalMinutes: interval.runIntervalMinutes,
+            }
+          : feed,
+      ),
+    );
+
+    try {
+      const res = await fetch("/api/org/scraper-feeds", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "bulk_set_interval",
+          feedIds,
+          runIntervalValue: interval.runIntervalValue,
+          runIntervalUnit: interval.runIntervalUnit,
+        }),
+      });
+      const data = (await res.json()) as { updatedIds?: string[]; error?: string };
+      if (!res.ok) {
+        toast.error(data.error ?? "Bulk interval update failed");
+        setFeeds((current) =>
+          current.map((feed) => {
+            const prev = previous.get(feed.id);
+            return prev ? { ...feed, ...prev } : feed;
+          }),
+        );
+        return;
+      }
+
+      const updatedIds = new Set(data.updatedIds ?? []);
+      setFeeds((current) =>
+        current.map((feed) => {
+          const prev = previous.get(feed.id);
+          if (prev && !updatedIds.has(feed.id)) return { ...feed, ...prev };
+          return feed;
+        }),
+      );
+      setSelectedFeedIds(new Set());
+      toast.success(
+        `${updatedIds.size} feed${updatedIds.size === 1 ? "" : "s"} set to ${formatRunInterval(interval)}`,
+      );
+    } catch {
+      toast.error("Network error");
+      setFeeds((current) =>
+        current.map((feed) => {
+          const prev = previous.get(feed.id);
+          return prev ? { ...feed, ...prev } : feed;
+        }),
       );
     } finally {
       setBulkUpdating(false);
@@ -643,15 +739,60 @@ export default function AdminScrapersPage() {
                       >
                         Clear
                       </Button>
-                      <div className="ml-auto flex items-center gap-2">
+                      <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                        <div className="flex items-center gap-1.5 rounded-md border border-border/60 bg-muted/20 px-2 py-1">
+                          <span className="text-xs text-muted-foreground whitespace-nowrap">
+                            Fetch every
+                          </span>
+                          <Input
+                            type="number"
+                            min={1}
+                            className="h-8 w-14 px-2 tabular-nums"
+                            value={bulkIntervalValue}
+                            disabled={bulkUpdating}
+                            onChange={(e) => setBulkIntervalValue(e.target.value)}
+                            aria-label="Bulk interval amount"
+                          />
+                          <Select
+                            value={bulkIntervalUnit}
+                            disabled={bulkUpdating}
+                            onValueChange={(v) => {
+                              if (v === "minutes" || v === "hours" || v === "days") {
+                                setBulkIntervalUnit(v);
+                              }
+                            }}
+                          >
+                            <SelectTrigger className="h-8 w-[6.5rem]" aria-label="Bulk interval unit">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent alignItemWithTrigger={false}>
+                              {INTERVAL_UNITS.map((unit) => (
+                                <SelectItem key={unit} value={unit}>
+                                  {unit.charAt(0).toUpperCase() + unit.slice(1)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <Button
+                            variant="secondary"
+                            size="sm"
+                            className="h-8"
+                            disabled={bulkUpdating}
+                            onClick={() => void bulkSetInterval()}
+                          >
+                            {bulkUpdating ? (
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            ) : null}
+                            Set interval
+                          </Button>
+                        </div>
                         <Button
                           variant="outline"
                           size="sm"
                           disabled={bulkUpdating}
                           onClick={() => void bulkSetEnabled(true)}
                         >
-                          {bulkUpdating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                          Enable selected
+                          Schedule on
                         </Button>
                         <Button
                           variant="outline"
@@ -659,7 +800,7 @@ export default function AdminScrapersPage() {
                           disabled={bulkUpdating}
                           onClick={() => void bulkSetEnabled(false)}
                         >
-                          Disable selected
+                          Schedule off
                         </Button>
                       </div>
                     </>

@@ -154,6 +154,48 @@ export async function setScraperFeedsEnabledServer(input: {
   return { updatedIds };
 }
 
+export async function setScraperFeedsIntervalServer(input: {
+  organizationId: string;
+  feedIds: string[];
+  runIntervalValue: number;
+  runIntervalUnit: ScraperRunIntervalUnit;
+  uid?: string;
+}): Promise<{ updatedIds: string[] }> {
+  const col = feedsCol();
+  if (!col || input.feedIds.length === 0) return { updatedIds: [] };
+
+  const interval = normalizeRunInterval({
+    runIntervalValue: input.runIntervalValue,
+    runIntervalUnit: input.runIntervalUnit,
+  });
+  const patch = stampForUpdate(
+    {
+      runIntervalValue: interval.runIntervalValue,
+      runIntervalUnit: interval.runIntervalUnit,
+      runIntervalMinutes: interval.runIntervalMinutes,
+    },
+    input.uid,
+  );
+
+  const refs = input.feedIds.map((feedId) => col.doc(feedId));
+  const snapshots = await getAdminDb()!.getAll(...refs);
+  const batch = getAdminDb()!.batch();
+  const updatedIds: string[] = [];
+
+  for (const snapshot of snapshots) {
+    if (
+      snapshot.exists &&
+      (snapshot.data() as Record<string, unknown>).organizationId === input.organizationId
+    ) {
+      batch.update(snapshot.ref, patch);
+      updatedIds.push(snapshot.id);
+    }
+  }
+
+  if (updatedIds.length > 0) await batch.commit();
+  return { updatedIds };
+}
+
 export async function deleteScraperFeedServer(
   organizationId: string,
   feedId: string,
