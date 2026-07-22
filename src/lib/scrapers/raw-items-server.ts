@@ -129,6 +129,8 @@ async function queryScraperRawItemsServer(
       "status",
       "poolEpoch",
       "expiresAt",
+      "dismissedAt",
+      "dismissedByUserId",
       "createdAt",
       "updatedAt",
     );
@@ -302,6 +304,81 @@ export async function dismissScraperRawItemsBulkServer(input: {
   });
 
   return { ok: true, dismissedIds: result.dismissedIds, totalMatched };
+}
+
+/** Permanently delete a dismissed intake row. */
+export async function deleteScraperRawItemServer(input: {
+  organizationId: string;
+  itemId: string;
+}): Promise<{ ok: true; deletedId: string } | { error: string }> {
+  const col = rawCol();
+  if (!col) return { error: "Database not configured" };
+  const ref = col.doc(input.itemId);
+  const snap = await ref.get();
+  if (!snap.exists) return { error: "Item not found" };
+  const data = snap.data() as Record<string, unknown>;
+  if (data.organizationId !== input.organizationId) return { error: "Item not found" };
+  if (data.status === "promoted") {
+    return { error: "Promoted posts cannot be deleted from intake" };
+  }
+  if (data.status !== "dismissed") {
+    return { error: "Only dismissed posts can be permanently deleted" };
+  }
+  await ref.delete();
+  return { ok: true, deletedId: input.itemId };
+}
+
+/** Hard-delete selected dismissed intake rows. Max 500 ids. */
+export async function deleteScraperRawItemsBulkServer(input: {
+  organizationId: string;
+  itemIds: string[];
+  progressBatchSize?: number;
+  onProgress?: (done: number, total: number) => void | Promise<void>;
+}): Promise<{ ok: true; deletedIds: string[]; totalMatched: number } | { error: string }> {
+  const col = rawCol();
+  if (!col) return { error: "Database not configured" };
+  const db = getAdminDb();
+  if (!db) return { error: "Database not configured" };
+
+  const raw = input.itemIds ?? [];
+  if (raw.length === 0) return { error: "No items selected" };
+  if (raw.length > 500) return { error: "Too many items (max 500)" };
+  const ids = Array.from(new Set(raw.map((id) => id.trim()).filter(Boolean)));
+  if (ids.length === 0) return { error: "No items selected" };
+
+  const totalMatched = ids.length;
+  await input.onProgress?.(0, totalMatched);
+
+  const deleted = new Set<string>();
+  const progressEvery = Math.max(1, input.progressBatchSize ?? 100);
+
+  for (let i = 0; i < ids.length; i += DISMISS_WRITE_CHUNK) {
+    const chunk = ids.slice(i, i + DISMISS_WRITE_CHUNK);
+    const refs = chunk.map((id) => col.doc(id));
+    const snaps = await Promise.all(refs.map((ref) => ref.get()));
+    const batch = db.batch();
+    let writes = 0;
+
+    for (let j = 0; j < snaps.length; j += 1) {
+      const snap = snaps[j]!;
+      if (!snap.exists) continue;
+      const data = snap.data() as Record<string, unknown>;
+      if (data.organizationId !== input.organizationId) continue;
+      if (data.status !== "dismissed") continue;
+      batch.delete(snap.ref);
+      deleted.add(snap.id);
+      writes += 1;
+    }
+
+    if (writes > 0) await batch.commit();
+
+    const done = Math.min(i + chunk.length, totalMatched);
+    if (done % progressEvery === 0 || done === totalMatched) {
+      await input.onProgress?.(done, totalMatched);
+    }
+  }
+
+  return { ok: true, deletedIds: Array.from(deleted), totalMatched };
 }
 
 export async function markRawItemPromotedServer(input: {

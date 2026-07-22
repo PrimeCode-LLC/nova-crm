@@ -7,12 +7,14 @@ import { fmtDate, fmtRelative } from "@/lib/format";
 import {
   Calendar,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Loader2,
   Play,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -22,6 +24,11 @@ import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
@@ -88,6 +95,7 @@ const NO_STRATEGY_MATCH = "__no_strategy_match__" as const;
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 type QualityFilter = "all" | "no_signals" | "not_matching" | "has_signals" | "ready";
 type SortMode = "newest" | "best_match";
+type PoolView = "available" | "dismissed";
 /** Soft auto-refresh when returning to the tab (ms). */
 const VISIBILITY_REFRESH_MIN_MS = 90_000;
 
@@ -166,6 +174,8 @@ export default function IntakePoolPage() {
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [runningScrapers, setRunningScrapers] = React.useState(false);
+  const [poolView, setPoolView] = React.useState<PoolView>("available");
+  const [filtersOpen, setFiltersOpen] = React.useState(false);
   const [fetchProgress, setFetchProgress] = React.useState<{
     done: number;
     total: number;
@@ -192,7 +202,7 @@ export default function IntakePoolPage() {
   const [personalExcludeKeywords, setPersonalExcludeKeywords] = React.useState<string[]>([]);
   const [busy, setBusy] = React.useState<{
     itemId: string;
-    action: "assign" | "queue" | "dismiss";
+    action: "assign" | "queue" | "dismiss" | "delete";
   } | null>(null);
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [deleteConfirm, setDeleteConfirm] = React.useState<null | "all" | "selected">(null);
@@ -382,6 +392,64 @@ export default function IntakePoolPage() {
     }
     return counts;
   }, [items]);
+  const strategyCounts = React.useMemo(() => {
+    const threshold = ws.intentPlaybook.outreachThreshold;
+    let anyMatch = 0;
+    let noMatch = 0;
+    const byStrategy = new Map<string, number>();
+
+    for (const item of items) {
+      const qualifying = (strategyMatchesById.get(item.id) ?? []).filter(
+        (match) =>
+          !match.disqualified &&
+          match.missingRequiredSignalIds.length === 0 &&
+          match.score >= threshold,
+      );
+      if (qualifying.length === 0) {
+        noMatch += 1;
+        continue;
+      }
+      anyMatch += 1;
+      const seen = new Set<string>();
+      for (const match of qualifying) {
+        if (seen.has(match.strategyId)) continue;
+        seen.add(match.strategyId);
+        byStrategy.set(match.strategyId, (byStrategy.get(match.strategyId) ?? 0) + 1);
+      }
+    }
+
+    return {
+      all: items.length,
+      any: anyMatch,
+      none: noMatch,
+      byStrategy,
+    };
+  }, [items, strategyMatchesById, ws.intentPlaybook.outreachThreshold]);
+  const qualityCounts = React.useMemo(() => {
+    const threshold = ws.intentPlaybook.outreachThreshold;
+    let noSignals = 0;
+    let notMatching = 0;
+    let hasSignals = 0;
+    let ready = 0;
+
+    for (const item of items) {
+      const quality = qualityById.get(item.id);
+      const signalCount = quality?.signalCount ?? 0;
+      const score = quality?.score ?? 0;
+      if (signalCount === 0) noSignals += 1;
+      if (score < threshold) notMatching += 1;
+      if (quality && signalCount > 0) hasSignals += 1;
+      if (quality?.meetsThreshold) ready += 1;
+    }
+
+    return {
+      all: items.length,
+      no_signals: noSignals,
+      not_matching: notMatching,
+      has_signals: hasSignals,
+      ready,
+    };
+  }, [items, qualityById, ws.intentPlaybook.outreachThreshold]);
   const categoryOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
     for (const preset of SCRAPER_CATEGORY_PRESETS) dynamic.add(preset);
@@ -413,6 +481,32 @@ export default function IntakePoolPage() {
     maximumScore.trim().length > 0 ||
     strategyFilter !== ALL ||
     sortMode !== "newest";
+  const advancedFilterCount = [
+    platform !== ALL,
+    category !== ALL,
+    dateFrom.length > 0,
+    dateTo.length > 0,
+    keywordFiltersActive,
+    qualityFilter !== "all",
+    minimumScore.trim().length > 0,
+    maximumScore.trim().length > 0,
+    strategyFilter !== ALL,
+  ].filter(Boolean).length;
+
+  function clearFilters() {
+    setPlatform(ALL);
+    setCategory(ALL);
+    setSearchQuery("");
+    setDateFrom("");
+    setDateTo("");
+    setPersonalIncludeKeywords([]);
+    setPersonalExcludeKeywords([]);
+    setQualityFilter("all");
+    setMinimumScore("");
+    setMaximumScore("");
+    setStrategyFilter(ALL);
+    setSortMode("newest");
+  }
 
   const fetchElapsed = useElapsedSeconds(runningScrapers);
   const refreshElapsed = useElapsedSeconds(refreshing && !runningScrapers);
@@ -449,7 +543,10 @@ export default function IntakePoolPage() {
   } else if (filtersActive) {
     poolStatusLabel = `${filteredItems.length} of ${items.length} shown`;
   } else {
-    poolStatusLabel = `${items.length} available`;
+    poolStatusLabel =
+      poolView === "dismissed"
+        ? `${items.length} dismissed`
+        : `${items.length} available`;
   }
 
   const selectedCount = selectedIds.size;
@@ -496,7 +593,7 @@ export default function IntakePoolPage() {
       else if (!soft) setLoading(true);
 
       try {
-        const params = new URLSearchParams({ status: "available", limit: "200" });
+        const params = new URLSearchParams({ status: poolView, limit: "200" });
         const { ok, data } = await fetchIntakePoolOnce(`/api/org/scraper-raw?${params}`);
         if (loadSequence !== loadSequenceRef.current) return;
         if (!ok) {
@@ -523,7 +620,7 @@ export default function IntakePoolPage() {
         }
       }
     },
-    [ws.isDemo],
+    [ws.isDemo, poolView],
   );
 
   React.useEffect(() => {
@@ -535,6 +632,15 @@ export default function IntakePoolPage() {
       loadSequenceRef.current += 1;
     };
   }, [load]);
+
+  React.useEffect(() => {
+    setSelectedIds(new Set());
+    setPageIndex(0);
+  }, [poolView]);
+
+  React.useEffect(() => {
+    if (advancedFilterCount > 0) setFiltersOpen(true);
+  }, [advancedFilterCount]);
 
   React.useEffect(() => {
     setPageIndex(0);
@@ -780,14 +886,52 @@ export default function IntakePoolPage() {
     }
   }
 
+  async function deleteDismissedItem(itemId: string) {
+    setBusy({ itemId, action: "delete" });
+    try {
+      const res = await fetch(`/api/org/scraper-raw/${itemId}`, {
+        method: "PATCH",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "delete" }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) {
+        toast.error(
+          res.status === 403
+            ? "You don’t have permission to delete intake posts"
+            : (data.error ?? "Delete failed"),
+        );
+        return;
+      }
+      setItems((prev) => prev.filter((i) => i.id !== itemId));
+      setSelectedIds((previous) => {
+        if (!previous.has(itemId)) return previous;
+        const next = new Set(previous);
+        next.delete(itemId);
+        return next;
+      });
+      toast.success("Deleted permanently");
+    } catch {
+      toast.error("Network error");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function confirmBulkDelete() {
     if (!deleteConfirm) return;
     const mode = deleteConfirm;
+    const hardDelete = poolView === "dismissed";
 
     setBulkBusy(true);
     setBulkDeleteResult(null);
     try {
       if (mode === "all") {
+        if (hardDelete) {
+          toast.error("Empty pool is only available for active posts");
+          return;
+        }
         setBulkProgress(null);
         const res = await fetch("/api/org/scraper-raw", {
           method: "PATCH",
@@ -819,7 +963,7 @@ export default function IntakePoolPage() {
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          action: "dismiss",
+          action: hardDelete ? "delete" : "dismiss",
           itemIds: Array.from(selectedIds),
           streamProgress: true,
         }),
@@ -829,7 +973,7 @@ export default function IntakePoolPage() {
         toast.error(
           res.status === 403
             ? "You don’t have permission to delete intake posts"
-            : (data.error ?? "Delete failed"),
+            : (data.error ?? (hardDelete ? "Delete failed" : "Dismiss failed")),
         );
         return;
       }
@@ -838,7 +982,13 @@ export default function IntakePoolPage() {
 
       type DeleteEvent =
         | { type: "progress"; done: number; total: number }
-        | { type: "complete"; dismissedIds: string[]; count: number; total: number }
+        | {
+            type: "complete";
+            dismissedIds?: string[];
+            deletedIds?: string[];
+            count: number;
+            total: number;
+          }
         | { type: "error"; error: string };
 
       const reader = res.body.getReader();
@@ -869,20 +1019,20 @@ export default function IntakePoolPage() {
 
       if (!completed) throw new Error("Deletion did not complete");
 
-      const removed = new Set(completed.dismissedIds);
+      const removed = new Set(completed.deletedIds ?? completed.dismissedIds ?? []);
       const deletedCount = completed.count;
       const actualTotal = completed.total;
       setBulkProgress({ done: deletedCount, total: actualTotal });
-      if (removed.size > 0) {
-        setItems((previous) => previous.filter((item) => !removed.has(item.id)));
-      }
+      setItems((prev) => prev.filter((item) => !removed.has(item.id)));
       setSelectedIds(new Set());
-
-      await load({ soft: true });
       setBulkDeleteResult({ deleted: deletedCount, total: actualTotal });
-      toast.success(deletedCount === 1 ? "1 post deleted" : `${deletedCount} posts deleted`);
+      toast.success(
+        hardDelete
+          ? `${deletedCount} post${deletedCount === 1 ? "" : "s"} deleted permanently`
+          : `${deletedCount} post${deletedCount === 1 ? "" : "s"} dismissed`,
+      );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Network error");
+      toast.error(error instanceof Error ? error.message : "Delete failed");
     } finally {
       setBulkBusy(false);
     }
@@ -944,11 +1094,13 @@ export default function IntakePoolPage() {
                 ? bulkDeleteResult.emptied
                   ? "The intake pool is clear. New scraper runs will refill it. Already promoted prospects are not affected."
                   : items.length > 0
-                    ? `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed. ${items.length} still remain in the pool.`
-                    : `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed. The intake pool is empty.`
+                    ? `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed. ${items.length} still remain.`
+                    : `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed.`
                 : deleteConfirm === "all"
                   ? "This instantly hides every available post in the pool — not just the ones on screen. Old rows are cleaned up in the background. Already promoted prospects are not affected."
-                  : "Only the posts you selected will be removed. Other posts still in the pool (including ones hidden by filters or beyond the loaded page) will remain. Already promoted prospects are not affected."}
+                  : poolView === "dismissed"
+                    ? "Selected dismissed posts will be permanently deleted from the database. This cannot be undone."
+                    : "Only the posts you selected will be dismissed from the pool. Other posts (including ones hidden by filters) will remain. Already promoted prospects are not affected."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {deleteConfirm === "selected" ||
@@ -1007,8 +1159,10 @@ export default function IntakePoolPage() {
                     </>
                   ) : deleteConfirm === "all" ? (
                     "Empty entire pool"
+                  ) : poolView === "dismissed" ? (
+                    `Permanently delete ${deleteDialogTotal}`
                   ) : (
-                    `Delete ${deleteDialogTotal} post${deleteDialogTotal === 1 ? "" : "s"}`
+                    `Dismiss ${deleteDialogTotal} post${deleteDialogTotal === 1 ? "" : "s"}`
                   )}
                 </AlertDialogAction>
               </>
@@ -1075,23 +1229,27 @@ export default function IntakePoolPage() {
                     </Button>
                   }
                 />
-                <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuItem
                     variant="destructive"
                     disabled={selectedCount === 0 || bulkBusy}
                     onSelect={() => setDeleteConfirm("selected")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                    Delete selected
+                    {poolView === "dismissed"
+                      ? "Delete selected permanently"
+                      : "Dismiss selected"}
                   </DropdownMenuItem>
-                  <DropdownMenuItem
-                    variant="destructive"
-                    disabled={!canDelete}
-                    onSelect={() => setDeleteConfirm("all")}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                    Empty entire pool
-                  </DropdownMenuItem>
+                  {poolView === "available" ? (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      disabled={!canDelete}
+                      onSelect={() => setDeleteConfirm("all")}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                      Empty entire pool
+                    </DropdownMenuItem>
+                  ) : null}
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -1130,193 +1288,49 @@ export default function IntakePoolPage() {
           </Card>
         ) : (
           <>
-            <div className="space-y-3">
-              <div className="relative max-w-xl">
-                <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                <Input
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search title, feed, or content…"
-                  className="pl-8 h-9"
-                  aria-label="Search intake pool"
-                />
-              </div>
-              <IntakeKeywordFilters
-                organizationId={ws.organizationId}
-                teamIncludeKeywords={teamDefaults.includeKeywords}
-                teamExcludeKeywords={teamDefaults.excludeKeywords}
-                personalIncludeKeywords={personalIncludeKeywords}
-                personalExcludeKeywords={personalExcludeKeywords}
-                onPersonalIncludeChange={setPersonalIncludeKeywords}
-                onPersonalExcludeChange={setPersonalExcludeKeywords}
-                canManageTeamDefaults={canManageTeamDefaults}
-              />
-              <div className="flex flex-wrap items-end gap-3">
-                <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
-                  <SelectTrigger className="h-9 w-[14rem] max-w-full gap-2">
-                    <SelectValue placeholder="Platform" className="overflow-hidden">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate">
-                          {platform === ALL
-                            ? "All platforms"
-                            : getScraperPlatformLabel(platform)}
-                        </span>
-                        <span className="shrink-0 tabular-nums text-muted-foreground">
-                          ({platform === ALL ? items.length : platformCounts.get(platform) ?? 0})
-                        </span>
-                      </span>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectItem value={ALL}>
-                      <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                        <span className="truncate">All platforms</span>
-                        <span className="shrink-0 tabular-nums text-muted-foreground">
-                          {items.length}
-                        </span>
-                      </span>
-                    </SelectItem>
-                    {platformOptions.map((p) => (
-                      <SelectItem key={p} value={p}>
-                        <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                          <span className="truncate">{getScraperPlatformLabel(p)}</span>
-                          <span className="shrink-0 tabular-nums text-muted-foreground">
-                            {platformCounts.get(p) ?? 0}
-                          </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select value={category} onValueChange={(v) => v && setCategory(v)}>
-                  <SelectTrigger
-                    className="h-9 w-[19rem] max-w-full gap-2"
-                    title={
-                      category === ALL
-                        ? `All categories (${items.length})`
-                        : `${getScraperCategoryLabel(category)} (${categoryCounts.get(category) ?? 0})`
-                    }
+            <Collapsible open={filtersOpen} onOpenChange={setFiltersOpen} className="space-y-2">
+              <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className="inline-flex shrink-0 rounded-lg border bg-muted/40 p-0.5"
+                  role="group"
+                  aria-label="Intake pool view"
+                >
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={poolView === "available" ? "default" : "ghost"}
+                    className="h-8 px-3"
+                    onClick={() => setPoolView("available")}
                   >
-                    <SelectValue placeholder="Category" className="overflow-hidden">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate">
-                          {category === ALL
-                            ? "All categories"
-                            : getScraperCategoryLabel(category)}
-                        </span>
-                        <span className="shrink-0 tabular-nums text-muted-foreground">
-                          ({category === ALL ? items.length : categoryCounts.get(category) ?? 0})
-                        </span>
-                      </span>
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent align="start">
-                    <SelectItem value={ALL}>
-                      <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                        <span className="truncate">All categories</span>
-                        <span className="shrink-0 tabular-nums text-muted-foreground">
-                          {items.length}
-                        </span>
-                      </span>
-                    </SelectItem>
-                    {categoryOptions.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        <span className="flex w-full min-w-0 items-center justify-between gap-3">
-                          <span className="truncate">{getScraperCategoryLabel(c)}</span>
-                          <span className="shrink-0 tabular-nums text-muted-foreground">
-                            {categoryCounts.get(c) ?? 0}
-                          </span>
-                        </span>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Select
-                  value={qualityFilter}
-                  onValueChange={(v) => v && setQualityFilter(v as QualityFilter)}
-                >
-                  <SelectTrigger className="w-[160px]">
-                    <SelectValue placeholder="Match quality">
-                      {qualityFilter === "all"
-                        ? "All matches"
-                        : qualityFilter === "no_signals"
-                          ? "No signals"
-                          : qualityFilter === "not_matching"
-                            ? "Not matching"
-                        : qualityFilter === "has_signals"
-                          ? "Has signals"
-                          : "Ready (≥ threshold)"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All matches</SelectItem>
-                    <SelectItem value="no_signals">No signals</SelectItem>
-                    <SelectItem value="not_matching">Not matching</SelectItem>
-                    <SelectItem value="has_signals">Has signals</SelectItem>
-                    <SelectItem value="ready">Ready (≥ threshold)</SelectItem>
-                  </SelectContent>
-                </Select>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Minimum score</Label>
+                    Available
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={poolView === "dismissed" ? "default" : "ghost"}
+                    className="h-8 px-3"
+                    onClick={() => setPoolView("dismissed")}
+                  >
+                    Dismissed
+                  </Button>
+                </div>
+
+                <div className="relative min-w-[12rem] flex-1 max-w-xl">
+                  <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
                   <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    inputMode="numeric"
-                    value={minimumScore}
-                    onChange={(event) => setMinimumScore(event.target.value)}
-                    placeholder="0–100"
-                    className="h-9 w-[110px]"
-                    aria-label="Minimum match score"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search title, feed, or content…"
+                    className="h-8 pl-8"
+                    aria-label="Search intake pool"
                   />
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">Maximum score</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    max={100}
-                    inputMode="numeric"
-                    value={maximumScore}
-                    onChange={(event) => setMaximumScore(event.target.value)}
-                    placeholder="0–100"
-                    className="h-9 w-[110px]"
-                    aria-label="Maximum match score"
-                  />
-                </div>
-                <Select
-                  value={strategyFilter}
-                  onValueChange={(value) => value && setStrategyFilter(value)}
-                  disabled={prospecting.loading}
-                >
-                  <SelectTrigger className="w-[210px]">
-                    <SelectValue placeholder="Strategy match">
-                      {strategyFilter === ALL
-                        ? "All strategies"
-                        : strategyFilter === ANY_MY_STRATEGY
-                          ? "Matches my strategies"
-                          : strategyFilter === NO_STRATEGY_MATCH
-                            ? "No strategy match"
-                            : assignedStrategies.find((strategy) => strategy.id === strategyFilter)
-                                ?.name ?? "Assigned strategy"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All strategies</SelectItem>
-                    <SelectItem value={ANY_MY_STRATEGY}>Matches my strategies</SelectItem>
-                    <SelectItem value={NO_STRATEGY_MATCH}>No strategy match</SelectItem>
-                    {assignedStrategies.map((strategy) => (
-                      <SelectItem key={strategy.id} value={strategy.id}>
-                        {strategy.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+
                 <Select
                   value={sortMode}
                   onValueChange={(v) => v && setSortMode(v as SortMode)}
                 >
-                  <SelectTrigger className="w-[140px]">
+                  <SelectTrigger className="h-8 w-[8.5rem]">
                     <SelectValue placeholder="Sort">
                       {sortMode === "newest" ? "Newest" : "Best match"}
                     </SelectValue>
@@ -1326,58 +1340,44 @@ export default function IntakePoolPage() {
                     <SelectItem value="best_match">Best match</SelectItem>
                   </SelectContent>
                 </Select>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">From date</Label>
-                  <div className="relative">
-                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <Input
-                      type="date"
-                      value={dateFrom}
-                      onChange={(e) => setDateFrom(e.target.value)}
-                      className="pl-8 h-9 w-[150px]"
-                      aria-label="Published from date"
-                    />
-                  </div>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs text-muted-foreground">To date</Label>
-                  <div className="relative">
-                    <Calendar className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-                    <Input
-                      type="date"
-                      value={dateTo}
-                      onChange={(e) => setDateTo(e.target.value)}
-                      className="pl-8 h-9 w-[150px]"
-                      aria-label="Published to date"
-                    />
-                  </div>
-                </div>
+
+                <CollapsibleTrigger
+                  render={
+                    <Button variant="outline" size="sm" type="button" className="h-8 gap-1.5">
+                      <SlidersHorizontal className="h-3.5 w-3.5" />
+                      Filters
+                      {advancedFilterCount > 0 ? (
+                        <Badge
+                          variant="secondary"
+                          className="h-4 px-1.5 text-[10px] font-normal tabular-nums"
+                        >
+                          {advancedFilterCount}
+                        </Badge>
+                      ) : null}
+                      <ChevronDown
+                        className={cn(
+                          "h-3 w-3 opacity-60 transition-transform",
+                          filtersOpen && "rotate-180",
+                        )}
+                      />
+                    </Button>
+                  }
+                />
+
                 {filtersActive ? (
                   <Button
                     variant="ghost"
                     size="sm"
                     type="button"
-                    className="h-9"
-                    onClick={() => {
-                      setPlatform(ALL);
-                      setCategory(ALL);
-                      setSearchQuery("");
-                      setDateFrom("");
-                      setDateTo("");
-                      setPersonalIncludeKeywords([]);
-                      setPersonalExcludeKeywords([]);
-                      setQualityFilter("all");
-                      setMinimumScore("");
-                      setMaximumScore("");
-                      setStrategyFilter(ALL);
-                      setSortMode("newest");
-                    }}
+                    className="h-8"
+                    onClick={clearFilters}
                   >
-                    Clear filters
+                    Clear
                   </Button>
                 ) : null}
+
                 <span
-                  className="text-sm text-muted-foreground pb-2 ml-auto flex min-w-0 max-w-full flex-col items-end gap-1.5 sm:max-w-md"
+                  className="ml-auto flex min-w-0 max-w-full flex-col items-end gap-1 text-sm text-muted-foreground sm:max-w-sm"
                   aria-live="polite"
                 >
                   <span className="flex items-center gap-2">
@@ -1387,7 +1387,7 @@ export default function IntakePoolPage() {
                     <span className="truncate">{poolStatusLabel}</span>
                   </span>
                   {runningScrapers && fetchProgress && fetchProgress.total > 0 ? (
-                    <Progress value={fetchProgressPercent} className="w-full min-w-[12rem]">
+                    <Progress value={fetchProgressPercent} className="w-full min-w-[10rem]">
                       <ProgressLabel className="sr-only">Feed run progress</ProgressLabel>
                       <ProgressValue className="text-xs">
                         {() => `${fetchProgressPercent}%`}
@@ -1395,7 +1395,7 @@ export default function IntakePoolPage() {
                     </Progress>
                   ) : null}
                   {scoringQuality && !runningScrapers && !refreshing && scoringTotal > 0 ? (
-                    <Progress value={scoringProgressPercent} className="w-full min-w-[12rem]">
+                    <Progress value={scoringProgressPercent} className="w-full min-w-[10rem]">
                       <ProgressLabel className="sr-only">Match scoring progress</ProgressLabel>
                       <ProgressValue className="text-xs">
                         {() => `${scoringProgressPercent}%`}
@@ -1404,7 +1404,312 @@ export default function IntakePoolPage() {
                   ) : null}
                 </span>
               </div>
-            </div>
+
+              <CollapsibleContent className="overflow-hidden data-open:animate-in data-open:fade-in-0 data-closed:animate-out data-closed:fade-out-0">
+                <div className="space-y-3 rounded-lg border bg-muted/20 p-3">
+                  <IntakeKeywordFilters
+                    organizationId={ws.organizationId}
+                    teamIncludeKeywords={teamDefaults.includeKeywords}
+                    teamExcludeKeywords={teamDefaults.excludeKeywords}
+                    personalIncludeKeywords={personalIncludeKeywords}
+                    personalExcludeKeywords={personalExcludeKeywords}
+                    onPersonalIncludeChange={setPersonalIncludeKeywords}
+                    onPersonalExcludeChange={setPersonalExcludeKeywords}
+                    canManageTeamDefaults={canManageTeamDefaults}
+                  />
+
+                  <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
+                      <SelectTrigger className="h-8 w-full gap-2">
+                        <SelectValue placeholder="Platform" className="overflow-hidden">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate">
+                              {platform === ALL
+                                ? "All platforms"
+                                : getScraperPlatformLabel(platform)}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              ({platform === ALL ? items.length : platformCounts.get(platform) ?? 0})
+                            </span>
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectItem value={ALL}>
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">All platforms</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {items.length}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        {platformOptions.map((p) => (
+                          <SelectItem key={p} value={p}>
+                            <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                              <span className="truncate">{getScraperPlatformLabel(p)}</span>
+                              <span className="shrink-0 tabular-nums text-muted-foreground">
+                                {platformCounts.get(p) ?? 0}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Select value={category} onValueChange={(v) => v && setCategory(v)}>
+                      <SelectTrigger
+                        className="h-8 w-full gap-2"
+                        title={
+                          category === ALL
+                            ? `All categories (${items.length})`
+                            : `${getScraperCategoryLabel(category)} (${categoryCounts.get(category) ?? 0})`
+                        }
+                      >
+                        <SelectValue placeholder="Category" className="overflow-hidden">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate">
+                              {category === ALL
+                                ? "All categories"
+                                : getScraperCategoryLabel(category)}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              ({category === ALL ? items.length : categoryCounts.get(category) ?? 0})
+                            </span>
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectItem value={ALL}>
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">All categories</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {items.length}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        {categoryOptions.map((c) => (
+                          <SelectItem key={c} value={c}>
+                            <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                              <span className="truncate">{getScraperCategoryLabel(c)}</span>
+                              <span className="shrink-0 tabular-nums text-muted-foreground">
+                                {categoryCounts.get(c) ?? 0}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={qualityFilter}
+                      onValueChange={(v) => v && setQualityFilter(v as QualityFilter)}
+                    >
+                      <SelectTrigger className="h-8 w-full gap-2">
+                        <SelectValue placeholder="Match quality" className="overflow-hidden">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate">
+                              {qualityFilter === "all"
+                                ? "All matches"
+                                : qualityFilter === "no_signals"
+                                  ? "No signals"
+                                  : qualityFilter === "not_matching"
+                                    ? "Not matching"
+                                    : qualityFilter === "has_signals"
+                                      ? "Has signals"
+                                      : "Ready (≥ threshold)"}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              ({qualityCounts[qualityFilter]})
+                            </span>
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent align="start">
+                        <SelectItem value="all">
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">All matches</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {qualityCounts.all}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="no_signals">
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">No signals</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {qualityCounts.no_signals}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="not_matching">
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">Not matching</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {qualityCounts.not_matching}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="has_signals">
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">Has signals</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {qualityCounts.has_signals}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        <SelectItem value="ready">
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">Ready (≥ threshold)</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {qualityCounts.ready}
+                            </span>
+                          </span>
+                        </SelectItem>
+                      </SelectContent>
+                    </Select>
+
+                    <Select
+                      value={strategyFilter}
+                      onValueChange={(value) => value && setStrategyFilter(value)}
+                      disabled={prospecting.loading}
+                    >
+                      <SelectTrigger
+                        className="h-8 w-full gap-2"
+                        title={
+                          strategyFilter === ALL
+                            ? `All strategies (${strategyCounts.all})`
+                            : strategyFilter === ANY_MY_STRATEGY
+                              ? `Matches my strategies (${strategyCounts.any})`
+                              : strategyFilter === NO_STRATEGY_MATCH
+                                ? `No strategy match (${strategyCounts.none})`
+                                : `${assignedStrategies.find((strategy) => strategy.id === strategyFilter)?.name ?? "Assigned strategy"} (${strategyCounts.byStrategy.get(strategyFilter) ?? 0})`
+                        }
+                      >
+                        <SelectValue placeholder="Strategy match" className="overflow-hidden">
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate">
+                              {strategyFilter === ALL
+                                ? "All strategies"
+                                : strategyFilter === ANY_MY_STRATEGY
+                                  ? "Matches my strategies"
+                                  : strategyFilter === NO_STRATEGY_MATCH
+                                    ? "No strategy match"
+                                    : assignedStrategies.find(
+                                        (strategy) => strategy.id === strategyFilter,
+                                      )?.name ?? "Assigned strategy"}
+                            </span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              (
+                              {strategyFilter === ALL
+                                ? strategyCounts.all
+                                : strategyFilter === ANY_MY_STRATEGY
+                                  ? strategyCounts.any
+                                  : strategyFilter === NO_STRATEGY_MATCH
+                                    ? strategyCounts.none
+                                    : (strategyCounts.byStrategy.get(strategyFilter) ?? 0)}
+                              )
+                            </span>
+                          </span>
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent align="start" className="min-w-(--anchor-width) max-w-[24rem]">
+                        <SelectItem value={ALL}>
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">All strategies</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {strategyCounts.all}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        <SelectItem value={ANY_MY_STRATEGY}>
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">Matches my strategies</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {strategyCounts.any}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        <SelectItem value={NO_STRATEGY_MATCH}>
+                          <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                            <span className="truncate">No strategy match</span>
+                            <span className="shrink-0 tabular-nums text-muted-foreground">
+                              {strategyCounts.none}
+                            </span>
+                          </span>
+                        </SelectItem>
+                        {assignedStrategies.map((strategy) => (
+                          <SelectItem key={strategy.id} value={strategy.id}>
+                            <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                              <span className="line-clamp-2 text-left">{strategy.name}</span>
+                              <span className="shrink-0 self-start tabular-nums text-muted-foreground">
+                                {strategyCounts.byStrategy.get(strategy.id) ?? 0}
+                              </span>
+                            </span>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="flex flex-wrap items-end gap-2">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Min score</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        inputMode="numeric"
+                        value={minimumScore}
+                        onChange={(event) => setMinimumScore(event.target.value)}
+                        placeholder="0–100"
+                        className="h-8 w-[6.5rem]"
+                        aria-label="Minimum match score"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">Max score</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={100}
+                        inputMode="numeric"
+                        value={maximumScore}
+                        onChange={(event) => setMaximumScore(event.target.value)}
+                        placeholder="0–100"
+                        className="h-8 w-[6.5rem]"
+                        aria-label="Maximum match score"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">From</Label>
+                      <div className="relative">
+                        <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type="date"
+                          value={dateFrom}
+                          onChange={(e) => setDateFrom(e.target.value)}
+                          className="h-8 w-[9.5rem] pl-8"
+                          aria-label="Published from date"
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-muted-foreground">To</Label>
+                      <div className="relative">
+                        <Calendar className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          type="date"
+                          value={dateTo}
+                          onChange={(e) => setDateTo(e.target.value)}
+                          className="h-8 w-[9.5rem] pl-8"
+                          aria-label="Published to date"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </CollapsibleContent>
+            </Collapsible>
 
             {canDeleteIntake && filteredItems.length > 0 ? (
               <div className="flex flex-wrap items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
@@ -1448,7 +1753,7 @@ export default function IntakePoolPage() {
                     onClick={() => setDeleteConfirm("selected")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                    Delete selected
+                    {poolView === "dismissed" ? "Delete permanently" : "Dismiss selected"}
                   </Button>
                 </div>
               </div>
@@ -1461,10 +1766,13 @@ export default function IntakePoolPage() {
             ) : items.length === 0 ? (
               <Card>
                 <CardHeader>
-                  <CardTitle>No posts in the pool</CardTitle>
+                  <CardTitle>
+                    {poolView === "dismissed" ? "No dismissed posts" : "No posts in the pool"}
+                  </CardTitle>
                   <CardDescription>
-                    Run your feeds from Admin → Scrapers, or seed the default n8n/rss.app feeds and
-                    click Run all.
+                    {poolView === "dismissed"
+                      ? "Dismissed posts will appear here. You can permanently delete them from this view."
+                      : "Run your feeds from Admin → Scrapers, or seed the default n8n/rss.app feeds and click Run all."}
                   </CardDescription>
                 </CardHeader>
               </Card>
@@ -1474,7 +1782,8 @@ export default function IntakePoolPage() {
                   <CardTitle>No matches</CardTitle>
                   <CardDescription>
                     Try different search terms, keyword lists, dates, or match filters, or clear
-                    filters to see all {items.length} posts.
+                    filters to see all {items.length}{" "}
+                    {poolView === "dismissed" ? "dismissed posts" : "posts"}.
                     {scoringQuality && (qualityFilter === "has_signals" || qualityFilter === "ready")
                       ? " Match scores are still calculating — results may appear shortly."
                       : null}
@@ -1578,10 +1887,17 @@ export default function IntakePoolPage() {
                                 <span className="text-muted-foreground/80">Published · </span>
                                 {fmtRelative(item.publishedAt)}
                               </div>
-                              <div title={item.createdAt || undefined}>
-                                <span className="text-muted-foreground/80">Scraped · </span>
-                                {fmtDate(item.createdAt, "MMM d, yyyy · h:mm a")}
-                              </div>
+                              {poolView === "dismissed" && item.dismissedAt ? (
+                                <div title={item.dismissedAt}>
+                                  <span className="text-muted-foreground/80">Dismissed · </span>
+                                  {fmtRelative(item.dismissedAt)}
+                                </div>
+                              ) : (
+                                <div title={item.createdAt || undefined}>
+                                  <span className="text-muted-foreground/80">Scraped · </span>
+                                  {fmtDate(item.createdAt, "MMM d, yyyy · h:mm a")}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </CardHeader>
@@ -1590,10 +1906,13 @@ export default function IntakePoolPage() {
                           <IntakeItemActions
                             item={item}
                             busyAction={itemBusy}
+                            mode={poolView}
                             canDismiss={canDeleteIntake}
+                            canDelete={canDeleteIntake}
                             onAssignToMe={() => promote(item.id, true)}
                             onOpenQueue={() => promote(item.id, false)}
                             onDismissConfirmed={() => dismiss(item.id)}
+                            onDeleteConfirmed={() => deleteDismissedItem(item.id)}
                           />
                         </CardContent>
                       </Card>

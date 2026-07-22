@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import {
+  deleteScraperRawItemServer,
   dismissScraperRawItemServer,
   getScraperRawItemServer,
 } from "@/lib/scrapers/raw-items-server";
@@ -44,6 +45,17 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
     return NextResponse.json({ item: result.item });
+  }
+
+  if (action === "delete") {
+    const result = await deleteScraperRawItemServer({
+      organizationId: g.ctx.session.organizationId,
+      itemId,
+    });
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({ deletedId: result.deletedId });
   }
 
   return NextResponse.json({ error: "Unknown action" }, { status: 400 });

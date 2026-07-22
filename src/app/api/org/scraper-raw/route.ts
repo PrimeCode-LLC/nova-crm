@@ -3,13 +3,14 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { bumpIntakePoolEpochServer } from "@/lib/scrapers/intake-pool-epoch";
 import {
+  deleteScraperRawItemsBulkServer,
   dismissScraperRawItemsBulkServer,
   listScraperRawItemsServer,
 } from "@/lib/scrapers/raw-items-server";
 import type { ScraperCategory, ScraperPlatform, ScraperRawItemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
-/** Selected dismiss can stream progress for up to 500 ids. */
+/** Selected dismiss/delete can stream progress for up to 500 ids. */
 export const maxDuration = 60;
 
 export async function GET(req: Request) {
@@ -106,7 +107,7 @@ export async function PATCH(req: Request) {
     });
   }
 
-  if (action !== "dismiss") {
+  if (action !== "dismiss" && action !== "delete") {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
@@ -127,34 +128,53 @@ export async function PATCH(req: Request) {
         };
 
         try {
-          const result = await dismissScraperRawItemsBulkServer({
-            organizationId: g.ctx.session.organizationId,
-            userId: g.ctx.session.uid,
-            itemIds,
-            progressBatchSize: 100,
-            onProgress: (done, total) => send({ type: "progress", done, total }),
-          });
-
-          if ("error" in result) {
-            send({ type: "error", error: result.error });
-          } else {
-            send({
-              type: "complete",
-              dismissedIds: result.dismissedIds,
-              count: result.dismissedIds.length,
-              total: result.totalMatched,
+          if (action === "delete") {
+            const result = await deleteScraperRawItemsBulkServer({
+              organizationId: g.ctx.session.organizationId,
+              itemIds,
+              progressBatchSize: 100,
+              onProgress: (done, total) => send({ type: "progress", done, total }),
             });
+            if ("error" in result) {
+              send({ type: "error", error: result.error });
+            } else {
+              send({
+                type: "complete",
+                deletedIds: result.deletedIds,
+                count: result.deletedIds.length,
+                total: result.totalMatched,
+              });
+            }
+          } else {
+            const result = await dismissScraperRawItemsBulkServer({
+              organizationId: g.ctx.session.organizationId,
+              userId: g.ctx.session.uid,
+              itemIds,
+              progressBatchSize: 100,
+              onProgress: (done, total) => send({ type: "progress", done, total }),
+            });
+            if ("error" in result) {
+              send({ type: "error", error: result.error });
+            } else {
+              send({
+                type: "complete",
+                dismissedIds: result.dismissedIds,
+                count: result.dismissedIds.length,
+                total: result.totalMatched,
+              });
+            }
           }
         } catch (error) {
           console.error(
             JSON.stringify({
               level: "error",
-              message: "Intake bulk deletion stream failed",
+              message: "Intake bulk mutation stream failed",
               route: "/api/org/scraper-raw",
+              action,
               error: error instanceof Error ? error.message : String(error),
             }),
           );
-          send({ type: "error", error: "Delete failed" });
+          send({ type: "error", error: action === "delete" ? "Delete failed" : "Dismiss failed" });
         } finally {
           controller.close();
         }
@@ -166,6 +186,21 @@ export async function PATCH(req: Request) {
         "Content-Type": "application/x-ndjson; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
       },
+    });
+  }
+
+  if (action === "delete") {
+    const result = await deleteScraperRawItemsBulkServer({
+      organizationId: g.ctx.session.organizationId,
+      itemIds,
+    });
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({
+      deletedIds: result.deletedIds,
+      count: result.deletedIds.length,
+      totalMatched: result.totalMatched,
     });
   }
 
