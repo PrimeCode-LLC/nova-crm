@@ -303,6 +303,7 @@ function TaskCompactRow({
             </span>
           )}
           {task.contextCompany && <span>{task.contextCompany}</span>}
+          {task.contextContact && <span>{task.contextContact}</span>}
           {task.dueAt && (
             <span className={cn(dueSoon && "text-warning font-medium")}>
               Due {fmtDate(task.dueAt)} · {fmtRelative(task.dueAt)}

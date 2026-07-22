@@ -5,8 +5,10 @@ import Link from "next/link";
 import { AlertTriangle, ArrowRight, MailWarning, MessageSquareReply, Timer, ListTodo } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { UserChip } from "@/components/common/user-chip";
 import { cn } from "@/lib/utils";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
+import { contactFirstName, leadEntityLabel } from "@/lib/leads/lead-display-label";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 
 type AttentionItem = {
@@ -17,7 +19,31 @@ type AttentionItem = {
   time: number;
   severity: "urgent" | "warning" | "info";
   icon: typeof AlertTriangle;
+  /** Sales owner for the related lead (or follow-up owner when unlinked). */
+  ownerId?: string;
 };
+
+function withPerson(detail: string, lead: Lead | undefined): string {
+  const company = lead?.companyName?.trim();
+  const person = contactFirstName(lead?.contactName);
+  // Only prefix the person when the primary label is the company (avoid "Jordan · Jordan").
+  if (!person || !company) return detail;
+  return `${person} · ${detail}`;
+}
+
+function entityWithPerson(lead: Lead): string {
+  const company = lead.companyName?.trim();
+  const person = contactFirstName(lead.contactName);
+  if (company && person) return `${company} · ${person}`;
+  return company || lead.contactName || "Untitled";
+}
+
+function resolveOwnerId(lead: Lead | undefined, fallback?: string): string | undefined {
+  const fromLead = lead?.ownerId?.trim();
+  if (fromLead) return fromLead;
+  const fromFallback = fallback?.trim();
+  return fromFallback || undefined;
+}
 
 function timestamp(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -44,10 +70,8 @@ export function DashboardNeedsAttention({
 }) {
   const [now] = React.useState(() => Date.now());
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
-  const leadLabel = (leadId: string | undefined) => {
-    const lead = leadId ? leadById.get(leadId) : undefined;
-    return lead?.companyName || lead?.contactName || "Unlinked item";
-  };
+  const leadFor = (leadId: string | undefined) => (leadId ? leadById.get(leadId) : undefined);
+  const leadLabel = (leadId: string | undefined) => leadEntityLabel(leadFor(leadId));
 
   const items: AttentionItem[] = [];
 
@@ -55,7 +79,7 @@ export function DashboardNeedsAttention({
     if (!hasPendingReplyReview(lead)) continue;
     items.push({
       id: `reply-${lead.id}`,
-      label: `Reply to review · ${lead.companyName || lead.contactName}`,
+      label: `Reply to review · ${entityWithPerson(lead)}`,
       detail:
         lead.intakeKind === "prospect"
           ? "Promote to lead or confirm Replied on the dashboard."
@@ -64,20 +88,24 @@ export function DashboardNeedsAttention({
       time: timestamp(lead.lastReplyAt || lead.lastActivityAt, now),
       severity: "urgent",
       icon: MessageSquareReply,
+      ownerId: resolveOwnerId(lead),
     });
   }
 
   for (const followup of followups) {
     if (followup.completedAt || followup.pausedAt) continue;
+    const lead = leadFor(followup.leadId);
+    const ownerId = resolveOwnerId(lead, followup.ownerId);
     if (followup.deliveryStatus === "failed") {
       items.push({
         id: `failed-${followup.id}`,
         label: `Email failed · ${leadLabel(followup.leadId)}`,
-        detail: followup.deliveryError || followup.title,
+        detail: withPerson(followup.deliveryError || followup.title, lead),
         href: followup.leadId ? `/leads/${followup.leadId}` : "/followups",
         time: timestamp(followup.failedAt, now),
         severity: "urgent",
         icon: MailWarning,
+        ownerId,
       });
       continue;
     }
@@ -85,11 +113,12 @@ export function DashboardNeedsAttention({
       items.push({
         id: `retry-${followup.id}`,
         label: `Email retrying · ${leadLabel(followup.leadId)}`,
-        detail: followup.deliveryError || followup.title,
+        detail: withPerson(followup.deliveryError || followup.title, lead),
         href: followup.leadId ? `/leads/${followup.leadId}` : "/followups",
         time: timestamp(followup.nextRetryAt || followup.failedAt, now),
         severity: "warning",
         icon: MailWarning,
+        ownerId,
       });
       continue;
     }
@@ -98,11 +127,12 @@ export function DashboardNeedsAttention({
       items.push({
         id: `followup-${followup.id}`,
         label: `Overdue follow-up · ${leadLabel(followup.leadId)}`,
-        detail: followup.title,
+        detail: withPerson(followup.title, lead),
         href: followup.leadId ? `/leads/${followup.leadId}` : "/followups",
         time: due,
         severity: "warning",
         icon: Timer,
+        ownerId,
       });
     }
   }
@@ -111,14 +141,19 @@ export function DashboardNeedsAttention({
     if (task.completedAt || task.assigneeId !== currentUserId || !task.dueAt) continue;
     const due = timestamp(task.dueAt, Number.POSITIVE_INFINITY);
     if (due >= now) continue;
+    const lead = leadFor(task.leadId);
+    const person =
+      contactFirstName(task.contextContact) ||
+      (lead?.companyName?.trim() ? contactFirstName(lead.contactName) : undefined);
     items.push({
       id: `task-${task.id}`,
-      label: `Overdue task · ${leadLabel(task.leadId)}`,
-      detail: task.title,
+      label: `Overdue task · ${task.contextCompany || leadLabel(task.leadId)}`,
+      detail: person ? `${person} · ${task.title}` : task.title,
       href: "/tasks",
       time: due,
       severity: "warning",
       icon: ListTodo,
+      ownerId: resolveOwnerId(lead, task.assigneeId),
     });
   }
 
@@ -129,11 +164,15 @@ export function DashboardNeedsAttention({
     items.push({
       id: `plan-${plan.id}`,
       label: `Sequence stopped on reply · ${leadLabel(plan.leadId)}`,
-      detail: plan.pausedReason || "Review the response before continuing outreach.",
+      detail: withPerson(
+        plan.pausedReason || "Review the response before continuing outreach.",
+        planLead,
+      ),
       href: `/leads/${plan.leadId}`,
       time: timestamp(plan.pausedAt, now),
       severity: "info",
       icon: MessageSquareReply,
+      ownerId: resolveOwnerId(planLead, plan.ownerId),
     });
   }
 
@@ -142,12 +181,13 @@ export function DashboardNeedsAttention({
     if (hasPendingReplyReview(lead)) continue;
     items.push({
       id: `idle-${lead.id}`,
-      label: `Idle lead · ${lead.companyName || lead.contactName}`,
+      label: `Idle lead · ${entityWithPerson(lead)}`,
       detail: lead.idleDays ? `No activity for ${lead.idleDays} days` : "No recent activity",
       href: `/leads/${lead.id}`,
       time: timestamp(lead.lastActivityAt || lead.updatedAt, now),
       severity: "info",
       icon: AlertTriangle,
+      ownerId: resolveOwnerId(lead),
     });
   }
 
@@ -199,12 +239,15 @@ export function DashboardNeedsAttention({
                     <span className={cn("block truncate font-medium", wall ? "text-sm" : "text-xs")}>
                       {item.label}
                     </span>
-                    <span
-                      className="block truncate text-xs text-muted-foreground"
-                    >
-                      {item.detail}
-                    </span>
+                    <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
                   </span>
+                  {item.ownerId ? (
+                    <UserChip
+                      userId={item.ownerId}
+                      size="xs"
+                      className={cn("shrink-0", wall ? "max-w-[9rem]" : "max-w-[7.5rem]")}
+                    />
+                  ) : null}
                   {!wall ? (
                     <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
                   ) : null}

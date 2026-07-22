@@ -6,11 +6,13 @@ import { AlertTriangle, Calendar, CheckSquare, Clock, Maximize2 } from "lucide-r
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { UserChip } from "@/components/common/user-chip";
 import { ActionBoardDetailDialog } from "@/components/dashboard/action-board-detail-dialog";
 import { buildActionBoard } from "@/lib/dashboard-ops-analytics";
 import { fmtDate, fmtRelative } from "@/lib/format";
+import { contactFirstName } from "@/lib/leads/lead-display-label";
 import { cn } from "@/lib/utils";
-import type { Followup, LeadTask, Meeting } from "@/lib/types";
+import type { Followup, Lead, LeadTask, Meeting } from "@/lib/types";
 
 function Section({
   title,
@@ -41,16 +43,68 @@ function Section({
   );
 }
 
+function personForTask(task: LeadTask, leadById: Map<string, Lead>): string | undefined {
+  const fromContext = contactFirstName(task.contextContact);
+  if (fromContext) return fromContext;
+  if (!task.leadId) return undefined;
+  return contactFirstName(leadById.get(task.leadId)?.contactName);
+}
+
+function personForFollowup(followup: Followup, leadById: Map<string, Lead>): string | undefined {
+  if (!followup.leadId) return undefined;
+  return contactFirstName(leadById.get(followup.leadId)?.contactName);
+}
+
+function ownerIdForLead(leadId: string | undefined, leadById: Map<string, Lead>, fallback?: string) {
+  const fromLead = leadId ? leadById.get(leadId)?.ownerId?.trim() : undefined;
+  if (fromLead) return fromLead;
+  const fromFallback = fallback?.trim();
+  return fromFallback || undefined;
+}
+
+function metaLine(parts: Array<string | undefined>): string {
+  return parts.filter(Boolean).join(" · ");
+}
+
+function RowMeta({
+  ownerId,
+  meta,
+  tone,
+}: {
+  ownerId?: string;
+  meta?: string;
+  tone?: "danger" | "muted";
+}) {
+  if (!ownerId && !meta) return null;
+  return (
+    <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+      {ownerId ? <UserChip userId={ownerId} size="xs" className="min-w-0 max-w-[8.5rem] shrink" /> : null}
+      {meta ? (
+        <span
+          className={cn(
+            "min-w-0 truncate text-[10px]",
+            tone === "danger" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {meta}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
 export function ActionBoardPanel({
   tasks,
   followups,
   meetings,
+  leads = [],
   wall,
   className,
 }: {
   tasks: LeadTask[];
   followups: Followup[];
   meetings: Meeting[];
+  leads?: readonly Lead[];
   wall?: boolean;
   className?: string;
 }) {
@@ -59,6 +113,7 @@ export function ActionBoardPanel({
     () => buildActionBoard({ tasks, followups, meetings }),
     [tasks, followups, meetings],
   );
+  const leadById = React.useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
 
   return (
     <>
@@ -95,67 +150,72 @@ export function ActionBoardPanel({
           )}
         >
           <Section title="Urgent tasks" icon={AlertTriangle} empty="No overdue tasks" wall={wall}>
-            {board.urgentTasks.map((t) => (
-              <li key={t.id}>
-                <Link
-                  href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
-                  className={cn(
-                    "block rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5",
-                    wall ? "text-sm" : "text-xs",
-                    !wall && "hover:bg-destructive/10",
-                  )}
-                >
-                  <span className="font-medium line-clamp-1">{t.title}</span>
-                  {t.dueAt ? (
-                    <span className="mt-0.5 block text-[10px] text-destructive">
-                      Due {fmtRelative(t.dueAt)}
-                    </span>
-                  ) : null}
-                </Link>
-              </li>
-            ))}
+            {board.urgentTasks.map((t) => {
+              const person = personForTask(t, leadById);
+              const ownerId = ownerIdForLead(t.leadId, leadById, t.assigneeId);
+              const meta = metaLine([person, t.dueAt ? `Due ${fmtRelative(t.dueAt)}` : undefined]);
+              return (
+                <li key={t.id}>
+                  <Link
+                    href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
+                    className={cn(
+                      "block rounded-md border border-destructive/30 bg-destructive/5 px-2.5 py-1.5",
+                      wall ? "text-sm" : "text-xs",
+                      !wall && "hover:bg-destructive/10",
+                    )}
+                  >
+                    <span className="font-medium line-clamp-1">{t.title}</span>
+                    <RowMeta ownerId={ownerId} meta={meta} tone="danger" />
+                  </Link>
+                </li>
+              );
+            })}
           </Section>
 
           <Section title="Pending tasks" icon={CheckSquare} empty="Queue clear" wall={wall}>
-            {board.pendingTasks.map((t) => (
-              <li key={t.id}>
-                <Link
-                  href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
-                  className={cn(
-                    "block rounded-md border px-2.5 py-1.5",
-                    wall ? "text-sm" : "text-xs",
-                    !wall && "hover:bg-muted/40",
-                  )}
-                >
-                  <span className="line-clamp-1">{t.title}</span>
-                  {t.dueAt ? (
-                    <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                      {fmtDate(t.dueAt, "MMM d")}
-                    </span>
-                  ) : null}
-                </Link>
-              </li>
-            ))}
+            {board.pendingTasks.map((t) => {
+              const person = personForTask(t, leadById);
+              const ownerId = ownerIdForLead(t.leadId, leadById, t.assigneeId);
+              const meta = metaLine([person, t.dueAt ? fmtDate(t.dueAt, "MMM d") : undefined]);
+              return (
+                <li key={t.id}>
+                  <Link
+                    href={t.leadId ? `/leads/${t.leadId}` : "/tasks"}
+                    className={cn(
+                      "block rounded-md border px-2.5 py-1.5",
+                      wall ? "text-sm" : "text-xs",
+                      !wall && "hover:bg-muted/40",
+                    )}
+                  >
+                    <span className="line-clamp-1">{t.title}</span>
+                    <RowMeta ownerId={ownerId} meta={meta} />
+                  </Link>
+                </li>
+              );
+            })}
           </Section>
 
           <Section title="Overdue follow-ups" icon={Clock} empty="None overdue" wall={wall}>
-            {board.overdueFollowups.map((f) => (
-              <li key={f.id}>
-                <Link
-                  href={f.leadId ? `/leads/${f.leadId}` : "/followups"}
-                  className={cn(
-                    "block rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5",
-                    wall ? "text-sm" : "text-xs",
-                    !wall && "hover:bg-amber-500/10",
-                  )}
-                >
-                  <span className="line-clamp-1 font-medium">{f.title}</span>
-                  <span className="mt-0.5 block text-[10px] text-muted-foreground">
-                    Due {fmtRelative(f.dueAt)}
-                  </span>
-                </Link>
-              </li>
-            ))}
+            {board.overdueFollowups.map((f) => {
+              const person = personForFollowup(f, leadById);
+              const ownerId = ownerIdForLead(f.leadId, leadById, f.ownerId);
+              const meta = metaLine([person, `Due ${fmtRelative(f.dueAt)}`]);
+              return (
+                <li key={f.id}>
+                  <Link
+                    href={f.leadId ? `/leads/${f.leadId}` : "/followups"}
+                    className={cn(
+                      "block rounded-md border border-amber-500/30 bg-amber-500/5 px-2.5 py-1.5",
+                      wall ? "text-sm" : "text-xs",
+                      !wall && "hover:bg-amber-500/10",
+                    )}
+                  >
+                    <span className="line-clamp-1 font-medium">{f.title}</span>
+                    <RowMeta ownerId={ownerId} meta={meta} />
+                  </Link>
+                </li>
+              );
+            })}
           </Section>
 
           <Section title="Meetings" icon={Calendar} empty="No meetings lined up" wall={wall}>
@@ -176,6 +236,9 @@ export function ActionBoardPanel({
                   <span className="mt-0.5 block text-[10px] text-muted-foreground">
                     {fmtDate(m.startAt, "h:mm a")} · {m.attendeeName}
                   </span>
+                  {m.leadOwnerId || m.hostId ? (
+                    <RowMeta ownerId={m.leadOwnerId || m.hostId} />
+                  ) : null}
                 </div>
               </li>
             ))}
@@ -186,6 +249,9 @@ export function ActionBoardPanel({
                   <span className="mt-0.5 block text-[10px] text-muted-foreground">
                     {fmtDate(m.startAt, "MMM d · h:mm a")} · {m.attendeeName}
                   </span>
+                  {m.leadOwnerId || m.hostId ? (
+                    <RowMeta ownerId={m.leadOwnerId || m.hostId} />
+                  ) : null}
                 </div>
               </li>
             ))}
@@ -200,6 +266,7 @@ export function ActionBoardPanel({
           tasks={tasks}
           followups={followups}
           meetings={meetings}
+          leads={leads}
         />
       ) : null}
     </>

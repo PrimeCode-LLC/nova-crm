@@ -20,6 +20,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { UserChip } from "@/components/common/user-chip";
 import { CHANNELS } from "@/lib/constants";
 import { buildActionBoard } from "@/lib/dashboard-ops-analytics";
 import { fmtDate, fmtRelative } from "@/lib/format";
@@ -27,6 +28,7 @@ import { cn } from "@/lib/utils";
 import type {
   ChannelKey,
   Followup,
+  Lead,
   LeadTask,
   Meeting,
   MeetingLocationType,
@@ -139,8 +141,20 @@ function Column({
   );
 }
 
-function TaskRow({ task, urgent }: { task: LeadTask; urgent?: boolean }) {
-  const context = [task.contextCompany, task.contextContact].filter(Boolean).join(" · ");
+function TaskRow({
+  task,
+  urgent,
+  leadById,
+}: {
+  task: LeadTask;
+  urgent?: boolean;
+  leadById: Map<string, Lead>;
+}) {
+  const lead = task.leadId ? leadById.get(task.leadId) : undefined;
+  const person = task.contextContact?.trim() || lead?.contactName?.trim();
+  const company = task.contextCompany?.trim() || lead?.companyName?.trim();
+  const context = [company, person].filter(Boolean).join(" · ");
+  const ownerId = lead?.ownerId?.trim() || task.assigneeId;
   return (
     <Link
       href={task.leadId ? `/leads/${task.leadId}` : "/tasks"}
@@ -175,6 +189,11 @@ function TaskRow({ task, urgent }: { task: LeadTask; urgent?: boolean }) {
       {context ? (
         <p className="mt-1 truncate text-[11px] text-muted-foreground">{context}</p>
       ) : null}
+      {ownerId ? (
+        <div className="mt-1.5">
+          <UserChip userId={ownerId} size="xs" className="max-w-full" />
+        </div>
+      ) : null}
       {task.description ? (
         <p className="mt-1 line-clamp-2 text-[11px] text-muted-foreground/90">{task.description}</p>
       ) : null}
@@ -182,8 +201,19 @@ function TaskRow({ task, urgent }: { task: LeadTask; urgent?: boolean }) {
   );
 }
 
-function FollowupRow({ followup }: { followup: Followup }) {
+function FollowupRow({
+  followup,
+  leadById,
+}: {
+  followup: Followup;
+  leadById: Map<string, Lead>;
+}) {
   const channel = channelLabel(followup.channel);
+  const lead = followup.leadId ? leadById.get(followup.leadId) : undefined;
+  const person = lead?.contactName?.trim();
+  const company = lead?.companyName?.trim();
+  const who = [company, person].filter(Boolean).join(" · ");
+  const ownerId = lead?.ownerId?.trim() || followup.ownerId;
   return (
     <Link
       href={followup.leadId ? `/leads/${followup.leadId}` : "/followups"}
@@ -204,6 +234,12 @@ function FollowupRow({ followup }: { followup: Followup }) {
         </Badge>
         <span className="text-[11px] text-muted-foreground">Due {fmtRelative(followup.dueAt)}</span>
       </div>
+      {who ? <p className="mt-1 truncate text-[11px] text-muted-foreground">{who}</p> : null}
+      {ownerId ? (
+        <div className="mt-1.5">
+          <UserChip userId={ownerId} size="xs" className="max-w-full" />
+        </div>
+      ) : null}
       {followup.emailSubject ? (
         <p className="mt-1 truncate text-[11px] text-muted-foreground">{followup.emailSubject}</p>
       ) : null}
@@ -260,17 +296,20 @@ export function ActionBoardDetailDialog({
   tasks,
   followups,
   meetings,
+  leads = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   tasks: LeadTask[];
   followups: Followup[];
   meetings: Meeting[];
+  leads?: readonly Lead[];
 }) {
   const board = React.useMemo(
     () => buildActionBoard({ tasks, followups, meetings, limit: null }),
     [tasks, followups, meetings],
   );
+  const leadById = React.useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
 
   const meetingCount = board.todayMeetings.length + board.upcomingMeetings.length;
   const totalFocus =
@@ -325,7 +364,7 @@ export function ActionBoardDetailDialog({
             tone="danger"
           >
             {board.urgentTasks.map((t) => (
-              <TaskRow key={t.id} task={t} urgent />
+              <TaskRow key={t.id} task={t} urgent leadById={leadById} />
             ))}
           </Column>
 
@@ -337,7 +376,7 @@ export function ActionBoardDetailDialog({
             tone="warn"
           >
             {board.overdueFollowups.map((f) => (
-              <FollowupRow key={f.id} followup={f} />
+              <FollowupRow key={f.id} followup={f} leadById={leadById} />
             ))}
           </Column>
 
@@ -348,7 +387,7 @@ export function ActionBoardDetailDialog({
             empty="Queue clear"
           >
             {board.pendingTasks.map((t) => (
-              <TaskRow key={t.id} task={t} />
+              <TaskRow key={t.id} task={t} leadById={leadById} />
             ))}
           </Column>
 

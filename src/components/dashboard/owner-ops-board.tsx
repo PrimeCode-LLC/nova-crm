@@ -196,6 +196,7 @@ export function OwnerOpsBoard({
           tasks={tasks}
           followups={followups}
           meetings={meetings}
+          leads={leads}
           wall
           className="min-h-0 flex-1"
         />
@@ -496,7 +497,12 @@ export function OwnerOpsBoard({
                 />
               ) : null}
               {widgets.actionBoard ? (
-                <ActionBoardPanel tasks={tasks} followups={followups} meetings={meetings} />
+                <ActionBoardPanel
+                  tasks={tasks}
+                  followups={followups}
+                  meetings={meetings}
+                  leads={leads}
+                />
               ) : null}
             </div>
           ) : null}

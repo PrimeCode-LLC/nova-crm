@@ -45,7 +45,9 @@ export function UserChip({
           {initials}
         </AvatarFallback>
       </Avatar>
-      {!nameOnly && <span className="truncate text-sm">{displayName}</span>}
+      {!nameOnly && (
+        <span className={cn("truncate", size === "xs" ? "text-[11px]" : "text-sm")}>{displayName}</span>
+      )}
     </>
   );
 
