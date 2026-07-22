@@ -205,6 +205,11 @@ export interface Organization {
   /** Team-wide intake pool keyword defaults; readable by all members. */
   intakeFilterDefaults?: OrganizationIntakeFilterDefaults;
   /**
+   * Intake pool generation. Bumping this instantly hides older raw items from the pool.
+   * Defaults to `1` when unset. New ingest stamps `ScraperRawItem.poolEpoch` from this value.
+   */
+  intakePoolEpoch?: number;
+  /**
    * Workspace Intent Playbook — drives prospect/lead Quality Score.
    * Stored on the org doc; parsed via `parseIntentPlaybook`.
    */
@@ -1111,6 +1116,11 @@ export interface ScraperRawItem {
   isoDate?: ISODate;
   publishedAt: ISODate;
   status: ScraperRawItemStatus;
+  /**
+   * Pool generation this row belongs to. Missing / legacy rows are treated as epoch `1`.
+   * Hidden when the org's `intakePoolEpoch` advances past this value.
+   */
+  poolEpoch?: number;
   promotedToLeadId?: string;
   promotedAt?: ISODate;
   promotedByUserId?: string;

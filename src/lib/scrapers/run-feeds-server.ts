@@ -108,6 +108,12 @@ export async function runScraperFeedsServer(input: {
   organizationId: string;
   feedIds?: string[];
   force?: boolean;
+  onProgress?: (progress: {
+    done: number;
+    total: number;
+    newTotal: number;
+    result: RunFeedResult;
+  }) => void | Promise<void>;
 }): Promise<{ results: RunFeedResult[] }> {
   const db = getAdminDb();
   if (!db) return { results: [] };
@@ -128,13 +134,31 @@ export async function runScraperFeedsServer(input: {
     feeds = snap.docs.map((d) => mapScraperFeed(d.id, d.data() as Record<string, unknown>));
   }
 
-  const results: RunFeedResult[] = [];
+  const total = feeds.length;
+  const results: RunFeedResult[] = new Array(total);
+  let done = 0;
+  let newTotal = 0;
+
   for (let i = 0; i < feeds.length; i += FEED_CONCURRENCY) {
     const chunk = feeds.slice(i, i + FEED_CONCURRENCY);
-    const chunkResults = await Promise.all(chunk.map((f) => runOneFeed(f)));
-    results.push(...chunkResults);
+    await Promise.all(
+      chunk.map(async (feed, chunkIndex) => {
+        const index = i + chunkIndex;
+        const result = await runOneFeed(feed);
+        results[index] = result;
+        done += 1;
+        newTotal += result.newCount;
+        await input.onProgress?.({
+          done,
+          total,
+          newTotal,
+          result,
+        });
+      }),
+    );
   }
-  return { results };
+
+  return { results: results.filter((result): result is RunFeedResult => Boolean(result)) };
 }
 
 export async function runAllOrganizationsScrapersDueServer(): Promise<{

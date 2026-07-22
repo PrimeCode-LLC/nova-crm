@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
+import { bumpIntakePoolEpochServer } from "@/lib/scrapers/intake-pool-epoch";
 import {
   dismissScraperRawItemsBulkServer,
   listScraperRawItemsServer,
@@ -8,6 +9,8 @@ import {
 import type { ScraperCategory, ScraperPlatform, ScraperRawItemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
+/** Selected dismiss can stream progress for up to 500 ids. */
+export const maxDuration = 60;
 
 export async function GET(req: Request) {
   const startedAt = Date.now();
@@ -84,21 +87,34 @@ export async function PATCH(req: Request) {
   const body = json as {
     action?: unknown;
     itemIds?: unknown;
-    allAvailable?: unknown;
     streamProgress?: unknown;
   };
   const action = typeof body.action === "string" ? body.action : "";
+
+  if (action === "empty_pool") {
+    const result = await bumpIntakePoolEpochServer({
+      organizationId: g.ctx.session.organizationId,
+      userId: g.ctx.session.uid,
+    });
+    if ("error" in result) {
+      return NextResponse.json({ error: result.error }, { status: 400 });
+    }
+    return NextResponse.json({
+      ok: true,
+      previousEpoch: result.previousEpoch,
+      epoch: result.epoch,
+    });
+  }
 
   if (action !== "dismiss") {
     return NextResponse.json({ error: "Unknown action" }, { status: 400 });
   }
 
-  const allAvailable = body.allAvailable === true;
   const itemIds = Array.isArray(body.itemIds)
     ? body.itemIds.filter((id): id is string => typeof id === "string")
-    : undefined;
+    : [];
 
-  if (!allAvailable && (!itemIds || itemIds.length === 0)) {
+  if (itemIds.length === 0) {
     return NextResponse.json({ error: "No items selected" }, { status: 400 });
   }
 
@@ -114,9 +130,8 @@ export async function PATCH(req: Request) {
           const result = await dismissScraperRawItemsBulkServer({
             organizationId: g.ctx.session.organizationId,
             userId: g.ctx.session.uid,
-            allAvailable,
-            itemIds: allAvailable ? undefined : itemIds,
-            progressBatchSize: 25,
+            itemIds,
+            progressBatchSize: 100,
             onProgress: (done, total) => send({ type: "progress", done, total }),
           });
 
@@ -157,8 +172,7 @@ export async function PATCH(req: Request) {
   const result = await dismissScraperRawItemsBulkServer({
     organizationId: g.ctx.session.organizationId,
     userId: g.ctx.session.uid,
-    allAvailable,
-    itemIds: allAvailable ? undefined : itemIds,
+    itemIds,
   });
 
   if ("error" in result) {

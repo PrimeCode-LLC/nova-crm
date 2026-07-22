@@ -154,6 +154,12 @@ function docToOrg(id: string, data: DocumentData): Organization {
     settings,
     channelAdmin,
     intakeFilterDefaults,
+    intakePoolEpoch:
+      typeof data.intakePoolEpoch === "number" &&
+      Number.isFinite(data.intakePoolEpoch) &&
+      data.intakePoolEpoch >= 1
+        ? Math.floor(data.intakePoolEpoch)
+        : undefined,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
     openJoinTokenHash:

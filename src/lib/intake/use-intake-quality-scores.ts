@@ -9,9 +9,9 @@ const CHUNK = 25;
 const EMPTY_QUALITY_SCORES = new Map<string, QualityScoreResult>();
 
 /**
- * Score intake rows in animation-frame chunks so a 200-item pool doesn't block
- * first paint. Publishes the completed map once to avoid re-filtering and strategy
- * matching the whole pool after every chunk.
+ * Score intake rows in animation-frame chunks so a large pool doesn't block
+ * first paint. Publishes progress each chunk; commits the score map once finished
+ * so filters don't thrash mid-pass.
  */
 export function useIntakeQualityScores(
   items: readonly ScraperRawItem[],
@@ -19,18 +19,30 @@ export function useIntakeQualityScores(
 ): {
   qualityById: Map<string, QualityScoreResult>;
   scoring: boolean;
+  scored: number;
+  total: number;
 } {
   const [qualityById, setQualityById] = React.useState(
     () => new Map<string, QualityScoreResult>(),
   );
   const [scoring, setScoring] = React.useState(false);
+  const [scored, setScored] = React.useState(0);
+  const [total, setTotal] = React.useState(0);
 
   React.useEffect(() => {
-    if (items.length === 0) return;
+    if (items.length === 0) {
+      setQualityById(EMPTY_QUALITY_SCORES);
+      setScoring(false);
+      setScored(0);
+      setTotal(0);
+      return;
+    }
 
     let cancelled = false;
     let index = 0;
     const map = new Map<string, QualityScoreResult>();
+    setTotal(items.length);
+    setScored(0);
 
     const tick = () => {
       if (cancelled) return;
@@ -39,6 +51,7 @@ export function useIntakeQualityScores(
         const item = items[index]!;
         map.set(item.id, scoreIntakeItem(item, playbook));
       }
+      setScored(index);
       if (index < items.length) {
         requestAnimationFrame(tick);
       } else {
@@ -60,5 +73,7 @@ export function useIntakeQualityScores(
   return {
     qualityById: items.length === 0 ? EMPTY_QUALITY_SCORES : qualityById,
     scoring: items.length > 0 && scoring,
+    scored,
+    total: items.length === 0 ? 0 : total || items.length,
   };
 }

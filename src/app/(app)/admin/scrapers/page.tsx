@@ -68,8 +68,9 @@ import {
 } from "@/lib/scrapers/labels";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
 import { TeamIntakeFilterDefaultsCard } from "@/components/intake/team-intake-filter-defaults-card";
+import { formatElapsed, useElapsedSeconds } from "@/lib/hooks/use-elapsed-seconds";
 
-const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const CUSTOM_CATEGORY_VALUE = "__custom__";
 const CUSTOM_PLATFORM_VALUE = "__custom__";
 
@@ -94,12 +95,18 @@ export default function AdminScrapersPage() {
   const [feeds, setFeeds] = React.useState<ScraperFeed[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [runningAll, setRunningAll] = React.useState(false);
+  const [runAllProgress, setRunAllProgress] = React.useState<{
+    done: number;
+    total: number;
+    newTotal: number;
+  } | null>(null);
   const [seeding, setSeeding] = React.useState(false);
   const [runFeedId, setRunFeedId] = React.useState<string | null>(null);
   const [deleteId, setDeleteId] = React.useState<string | null>(null);
   const [pendingFeedIds, setPendingFeedIds] = React.useState<Set<string>>(() => new Set());
   const [selectedFeedIds, setSelectedFeedIds] = React.useState<Set<string>>(() => new Set());
   const [bulkUpdating, setBulkUpdating] = React.useState(false);
+  const runAllElapsed = useElapsedSeconds(runningAll);
 
   const [feedDialogOpen, setFeedDialogOpen] = React.useState(false);
   const [editFeedId, setEditFeedId] = React.useState<string | null>(null);
@@ -231,24 +238,72 @@ export default function AdminScrapersPage() {
 
   async function runAll() {
     setRunningAll(true);
+    setRunAllProgress({ done: 0, total: 0, newTotal: 0 });
     try {
       const res = await fetch("/api/org/scraper-feeds", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "run_all" }),
+        body: JSON.stringify({ action: "run_all", streamProgress: true }),
       });
-      const data = (await res.json()) as { newTotal?: number; error?: string };
       if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
         toast.error(data.error ?? "Run failed");
         return;
       }
-      toast.success(`${data.newTotal ?? 0} new posts ingested`);
+      if (!res.body) throw new Error("Feed progress stream unavailable");
+
+      type RunEvent =
+        | { type: "start" }
+        | { type: "progress"; done: number; total: number; newTotal: number }
+        | { type: "complete"; newTotal: number; feedCount: number }
+        | { type: "error"; error: string };
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed: Extract<RunEvent, { type: "complete" }> | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as RunEvent;
+          if (event.type === "progress") {
+            setRunAllProgress({
+              done: event.done,
+              total: event.total,
+              newTotal: event.newTotal,
+            });
+          } else if (event.type === "complete") {
+            completed = event;
+            setRunAllProgress({
+              done: event.feedCount,
+              total: event.feedCount,
+              newTotal: event.newTotal,
+            });
+          } else if (event.type === "error") {
+            throw new Error(event.error);
+          }
+        }
+
+        if (done) break;
+      }
+
+      if (!completed) throw new Error("Feed run did not complete");
+      toast.success(
+        `${completed.newTotal} new posts from ${completed.feedCount} feed${completed.feedCount === 1 ? "" : "s"}`,
+      );
       await load();
-    } catch {
-      toast.error("Network error");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Network error");
     } finally {
       setRunningAll(false);
+      setRunAllProgress(null);
     }
   }
 
@@ -494,9 +549,29 @@ export default function AdminScrapersPage() {
               {seeding ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
               Seed {DEFAULT_SCRAPER_FEEDS.length} defaults
             </Button>
-            <Button variant="outline" size="sm" disabled={runningAll || ws.isDemo} onClick={() => void runAll()}>
-              {runningAll ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
-              Run all
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={runningAll || ws.isDemo}
+              onClick={() => void runAll()}
+              title={
+                runningAll
+                  ? "Running all enabled feeds — keep this tab open"
+                  : "Run every enabled feed now"
+              }
+            >
+              {runningAll ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Play className="h-3.5 w-3.5" />
+              )}
+              {runningAll
+                ? runAllProgress && runAllProgress.total > 0
+                  ? `Running ${runAllProgress.done}/${runAllProgress.total}`
+                  : runAllElapsed > 0
+                    ? `Running… ${formatElapsed(runAllElapsed)}`
+                    : "Running…"
+                : "Run all"}
             </Button>
             <Button size="sm" disabled={ws.isDemo} onClick={openCreateDialog}>
               <Plus className="h-3.5 w-3.5" /> Add feed

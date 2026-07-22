@@ -23,7 +23,9 @@ export function fmtPercent(n?: number, digits = 0) {
 export function fmtDate(iso?: ISODate, pattern = "MMM d, yyyy") {
   if (!iso) return "-";
   try {
-    return format(new Date(iso), pattern);
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "-";
+    return format(d, pattern);
   } catch {
     return "-";
   }
@@ -32,7 +34,9 @@ export function fmtDate(iso?: ISODate, pattern = "MMM d, yyyy") {
 export function fmtRelative(iso?: ISODate) {
   if (!iso) return "-";
   try {
-    return formatDistanceToNowStrict(new Date(iso), { addSuffix: true });
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return "-";
+    return formatDistanceToNowStrict(d, { addSuffix: true });
   } catch {
     return "-";
   }

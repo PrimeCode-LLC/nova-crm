@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { formatDistanceToNow } from "date-fns";
+import { fmtDate, fmtRelative } from "@/lib/format";
 import {
   Calendar,
   CheckCircle2,
@@ -60,6 +60,7 @@ import {
 } from "@/lib/scrapers/labels";
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 import { IntakeItemActions } from "@/components/intake/intake-item-actions";
+import { IntakeItemBody } from "@/components/intake/intake-item-body";
 import { IntakeKeywordFilters } from "@/components/intake/intake-keyword-filters";
 import { IntakeQualityBadge } from "@/components/intake/intake-quality-badge";
 import {
@@ -73,6 +74,7 @@ import { EMPTY_INTAKE_FILTER_DEFAULTS } from "@/lib/intake/intake-filter-default
 import { useIntakeQualityScores } from "@/lib/intake/use-intake-quality-scores";
 import { intakeItemPlainText } from "@/lib/intent/score-intake-item";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
+import { formatElapsed, useElapsedSeconds } from "@/lib/hooks/use-elapsed-seconds";
 import { activeAssignmentsForUser } from "@/lib/prospecting-strategy/allocation";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { userCanDeleteIntakePool, userHasAdminFeature } from "@/lib/admin-feature-access";
@@ -83,7 +85,7 @@ import { cn } from "@/lib/utils";
 const ALL = "__all__" as const;
 const ANY_MY_STRATEGY = "__any_my_strategy__" as const;
 const NO_STRATEGY_MATCH = "__no_strategy_match__" as const;
-const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
+const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 type QualityFilter = "all" | "no_signals" | "not_matching" | "has_signals" | "ready";
 type SortMode = "newest" | "best_match";
 /** Soft auto-refresh when returning to the tab (ms). */
@@ -164,6 +166,12 @@ export default function IntakePoolPage() {
   const [loading, setLoading] = React.useState(true);
   const [refreshing, setRefreshing] = React.useState(false);
   const [runningScrapers, setRunningScrapers] = React.useState(false);
+  const [fetchProgress, setFetchProgress] = React.useState<{
+    done: number;
+    total: number;
+    newTotal: number;
+    feedName?: string;
+  } | null>(null);
   const [platform, setPlatform] = React.useState<string>(ALL);
   const [category, setCategory] = React.useState<string>(ALL);
   const [searchQuery, setSearchQuery] = React.useState("");
@@ -195,14 +203,19 @@ export default function IntakePoolPage() {
   const [bulkDeleteResult, setBulkDeleteResult] = React.useState<{
     deleted: number;
     total: number;
+    emptied?: boolean;
   } | null>(null);
 
   const loadSequenceRef = React.useRef(0);
   const lastFetchAtRef = React.useRef(0);
   const itemsLenRef = React.useRef(0);
+  const runningScrapersRef = React.useRef(false);
   React.useEffect(() => {
     itemsLenRef.current = items.length;
   }, [items.length]);
+  React.useEffect(() => {
+    runningScrapersRef.current = runningScrapers;
+  }, [runningScrapers]);
 
   const effectiveKeywords = React.useMemo(
     () =>
@@ -218,10 +231,12 @@ export default function IntakePoolPage() {
     [items],
   );
 
-  const { qualityById, scoring: scoringQuality } = useIntakeQualityScores(
-    items,
-    ws.intentPlaybook,
-  );
+  const {
+    qualityById,
+    scoring: scoringQuality,
+    scored: scoringScored,
+    total: scoringTotal,
+  } = useIntakeQualityScores(items, ws.intentPlaybook);
   const myActiveAssignments = React.useMemo(
     () => activeAssignmentsForUser(prospecting.assignments, ws.currentUserId),
     [prospecting.assignments, ws.currentUserId],
@@ -267,6 +282,8 @@ export default function IntakePoolPage() {
     const hasMaximumScore =
       maximumScore.trim() !== "" && Number.isFinite(parsedMaximumScore);
     const filtered = items.filter((item) => {
+      if (platform !== ALL && item.platform !== platform) return false;
+      if (category !== ALL && item.category !== category) return false;
       const haystack = searchHaystackById.get(item.id) ?? "";
       if (q && !haystack.includes(q)) return false;
       if (
@@ -329,6 +346,8 @@ export default function IntakePoolPage() {
     return filtered;
   }, [
     items,
+    platform,
+    category,
     deferredSearchQuery,
     searchHaystackById,
     effectiveKeywords,
@@ -347,15 +366,35 @@ export default function IntakePoolPage() {
   const currentPageIndex = Math.min(pageIndex, totalPages - 1);
   const pageStart = currentPageIndex * pageSize;
   const paginatedItems = filteredItems.slice(pageStart, pageStart + pageSize);
+  const platformCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      if (!item.platform) continue;
+      counts.set(item.platform, (counts.get(item.platform) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
+  const categoryCounts = React.useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const item of items) {
+      if (!item.category) continue;
+      counts.set(item.category, (counts.get(item.category) ?? 0) + 1);
+    }
+    return counts;
+  }, [items]);
   const categoryOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.category).filter(Boolean));
     for (const preset of SCRAPER_CATEGORY_PRESETS) dynamic.add(preset);
-    return Array.from(dynamic).sort((a, b) => getScraperCategoryLabel(a).localeCompare(getScraperCategoryLabel(b)));
+    return Array.from(dynamic).sort((a, b) =>
+      getScraperCategoryLabel(a).localeCompare(getScraperCategoryLabel(b)),
+    );
   }, [items]);
   const platformOptions = React.useMemo(() => {
     const dynamic = new Set(items.map((item) => item.platform).filter(Boolean));
     for (const preset of SCRAPER_PLATFORM_PRESETS) dynamic.add(preset);
-    return Array.from(dynamic).sort((a, b) => getScraperPlatformLabel(a).localeCompare(getScraperPlatformLabel(b)));
+    return Array.from(dynamic).sort((a, b) =>
+      getScraperPlatformLabel(a).localeCompare(getScraperPlatformLabel(b)),
+    );
   }, [items]);
 
   const keywordFiltersActive =
@@ -363,6 +402,8 @@ export default function IntakePoolPage() {
     intakeKeywordFiltersActive(personalIncludeKeywords, personalExcludeKeywords);
   const canManageTeamDefaults = roleAtLeast(ws.viewerOrgRole, "admin");
   const filtersActive =
+    platform !== ALL ||
+    category !== ALL ||
     searchQuery.trim().length > 0 ||
     dateFrom.length > 0 ||
     dateTo.length > 0 ||
@@ -372,6 +413,44 @@ export default function IntakePoolPage() {
     maximumScore.trim().length > 0 ||
     strategyFilter !== ALL ||
     sortMode !== "newest";
+
+  const fetchElapsed = useElapsedSeconds(runningScrapers);
+  const refreshElapsed = useElapsedSeconds(refreshing && !runningScrapers);
+  const poolBusy = runningScrapers || refreshing;
+  const statusBusy = poolBusy || scoringQuality;
+  const fetchProgressPercent =
+    fetchProgress && fetchProgress.total > 0
+      ? Math.min(100, Math.round((fetchProgress.done / fetchProgress.total) * 100))
+      : 0;
+  const scoringProgressPercent =
+    scoringQuality && scoringTotal > 0
+      ? Math.min(100, Math.round((scoringScored / scoringTotal) * 100))
+      : 0;
+
+  let poolStatusLabel: string;
+  if (loading && items.length === 0) {
+    poolStatusLabel = "Loading…";
+  } else if (runningScrapers) {
+    if (fetchProgress && fetchProgress.total > 0) {
+      const feedBit = fetchProgress.feedName ? ` · ${fetchProgress.feedName}` : "";
+      poolStatusLabel = `Fetching feeds ${fetchProgress.done}/${fetchProgress.total} · ${fetchProgress.newTotal} new${feedBit}`;
+    } else if (fetchElapsed > 0) {
+      poolStatusLabel = `Starting feed run… ${formatElapsed(fetchElapsed)}`;
+    } else {
+      poolStatusLabel = "Starting feed run…";
+    }
+  } else if (refreshing) {
+    poolStatusLabel =
+      refreshElapsed > 0
+        ? `Refreshing list… ${formatElapsed(refreshElapsed)}`
+        : "Refreshing list…";
+  } else if (scoringQuality) {
+    poolStatusLabel = `Scoring matches… ${scoringScored}/${scoringTotal}`;
+  } else if (filtersActive) {
+    poolStatusLabel = `${filteredItems.length} of ${items.length} shown`;
+  } else {
+    poolStatusLabel = `${items.length} available`;
+  }
 
   const selectedCount = selectedIds.size;
   const allFilteredSelected =
@@ -399,7 +478,7 @@ export default function IntakePoolPage() {
   }, [ws.isDemo, ws.organizationId]);
 
   const load = React.useCallback(
-    async (opts?: { soft?: boolean }) => {
+    async (opts?: { soft?: boolean; quiet?: boolean }) => {
       if (ws.isDemo) {
         setItems([]);
         setLoading(false);
@@ -408,15 +487,16 @@ export default function IntakePoolPage() {
       }
 
       const soft = opts?.soft ?? itemsLenRef.current > 0;
+      const quiet = opts?.quiet === true;
       const loadSequence = ++loadSequenceRef.current;
 
-      if (soft) setRefreshing(true);
-      else setLoading(true);
+      // Quiet reloads (e.g. after Fetch) keep a single primary busy state instead of
+      // stacking Fetching + Updating on the header and status row.
+      if (soft && !quiet) setRefreshing(true);
+      else if (!soft) setLoading(true);
 
       try {
         const params = new URLSearchParams({ status: "available", limit: "200" });
-        if (platform !== ALL) params.set("platform", platform);
-        if (category !== ALL) params.set("category", category);
         const { ok, data } = await fetchIntakePoolOnce(`/api/org/scraper-raw?${params}`);
         if (loadSequence !== loadSequenceRef.current) return;
         if (!ok) {
@@ -443,11 +523,13 @@ export default function IntakePoolPage() {
         }
       }
     },
-    [ws.isDemo, platform, category],
+    [ws.isDemo],
   );
 
   React.useEffect(() => {
-    // Soft refresh when platform/category changes so the list doesn't blank for 10s+.
+    // Soft refresh on mount / when load identity changes.
+    // Skip while a feed run is in flight so Fetch doesn't look like it restarts mid-run.
+    if (runningScrapersRef.current) return;
     void load({ soft: itemsLenRef.current > 0 });
     return () => {
       loadSequenceRef.current += 1;
@@ -455,9 +537,26 @@ export default function IntakePoolPage() {
   }, [load]);
 
   React.useEffect(() => {
+    setPageIndex(0);
+  }, [
+    platform,
+    category,
+    deferredSearchQuery,
+    dateFrom,
+    dateTo,
+    qualityFilter,
+    minimumScore,
+    maximumScore,
+    strategyFilter,
+    sortMode,
+    pageSize,
+  ]);
+
+  React.useEffect(() => {
     if (ws.isDemo) return;
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
+      if (runningScrapersRef.current) return;
       if (Date.now() - lastFetchAtRef.current < VISIBILITY_REFRESH_MIN_MS) return;
       void load({ soft: true });
     };
@@ -468,25 +567,84 @@ export default function IntakePoolPage() {
   async function runAllScrapers() {
     if (ws.isDemo || !canRunScrapers) return;
     setRunningScrapers(true);
+    setFetchProgress({ done: 0, total: 0, newTotal: 0 });
     try {
       const res = await fetch("/api/org/scraper-feeds", {
         method: "POST",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "run_all" }),
+        body: JSON.stringify({ action: "run_all", streamProgress: true }),
       });
-      const data = (await res.json()) as { newTotal?: number; error?: string };
       if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
         toast.error(data.error ?? "Could not run scrapers");
         return;
       }
-      const n = data.newTotal ?? 0;
-      toast.success(`${n} new post${n === 1 ? "" : "s"} fetched`);
-      await load({ soft: true });
-    } catch {
-      toast.error("Network error running scrapers");
+      if (!res.body) throw new Error("Feed progress stream unavailable");
+
+      type RunEvent =
+        | { type: "start" }
+        | {
+            type: "progress";
+            done: number;
+            total: number;
+            newTotal: number;
+            feedName?: string;
+            newCount?: number;
+            ok?: boolean;
+            error?: string;
+          }
+        | { type: "complete"; newTotal: number; feedCount: number }
+        | { type: "error"; error: string };
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let completed: Extract<RunEvent, { type: "complete" }> | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        buffer += decoder.decode(value, { stream: !done });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() ?? "";
+
+        for (const line of lines) {
+          if (!line.trim()) continue;
+          const event = JSON.parse(line) as RunEvent;
+          if (event.type === "progress") {
+            setFetchProgress({
+              done: event.done,
+              total: event.total,
+              newTotal: event.newTotal,
+              feedName: event.feedName,
+            });
+          } else if (event.type === "complete") {
+            completed = event;
+            setFetchProgress({
+              done: event.feedCount,
+              total: event.feedCount,
+              newTotal: event.newTotal,
+            });
+          } else if (event.type === "error") {
+            throw new Error(event.error);
+          }
+        }
+
+        if (done) break;
+      }
+
+      if (!completed) throw new Error("Feed run did not complete");
+
+      const n = completed.newTotal;
+      toast.success(
+        `${n} new post${n === 1 ? "" : "s"} from ${completed.feedCount} feed${completed.feedCount === 1 ? "" : "s"}`,
+      );
+      await load({ soft: true, quiet: true });
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Network error running scrapers");
     } finally {
       setRunningScrapers(false);
+      setFetchProgress(null);
     }
   }
 
@@ -625,25 +783,46 @@ export default function IntakePoolPage() {
   async function confirmBulkDelete() {
     if (!deleteConfirm) return;
     const mode = deleteConfirm;
-    const total = mode === "selected" ? selectedIds.size : items.length;
 
     setBulkBusy(true);
     setBulkDeleteResult(null);
-    setBulkProgress({ done: 0, total });
     try {
-      const body =
-        mode === "all"
-          ? { action: "dismiss", allAvailable: true, streamProgress: true }
-          : {
-              action: "dismiss",
-              itemIds: Array.from(selectedIds),
-              streamProgress: true,
-            };
+      if (mode === "all") {
+        setBulkProgress(null);
+        const res = await fetch("/api/org/scraper-raw", {
+          method: "PATCH",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ action: "empty_pool" }),
+        });
+        const data = (await res.json()) as { error?: string };
+        if (!res.ok) {
+          toast.error(
+            res.status === 403
+              ? "You don’t have permission to delete intake posts"
+              : (data.error ?? "Could not empty pool"),
+          );
+          return;
+        }
+        setItems([]);
+        setSelectedIds(new Set());
+        await load({ soft: true });
+        setBulkDeleteResult({ deleted: 0, total: 0, emptied: true });
+        toast.success("Intake pool emptied");
+        return;
+      }
+
+      const total = selectedIds.size;
+      setBulkProgress({ done: 0, total });
       const res = await fetch("/api/org/scraper-raw", {
         method: "PATCH",
         credentials: "same-origin",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          action: "dismiss",
+          itemIds: Array.from(selectedIds),
+          streamProgress: true,
+        }),
       });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
@@ -694,9 +873,13 @@ export default function IntakePoolPage() {
       const deletedCount = completed.count;
       const actualTotal = completed.total;
       setBulkProgress({ done: deletedCount, total: actualTotal });
-      setItems((previous) => previous.filter((item) => !removed.has(item.id)));
-      setBulkDeleteResult({ deleted: deletedCount, total: actualTotal });
+      if (removed.size > 0) {
+        setItems((previous) => previous.filter((item) => !removed.has(item.id)));
+      }
       setSelectedIds(new Set());
+
+      await load({ soft: true });
+      setBulkDeleteResult({ deleted: deletedCount, total: actualTotal });
       toast.success(deletedCount === 1 ? "1 post deleted" : `${deletedCount} posts deleted`);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Network error");
@@ -706,16 +889,23 @@ export default function IntakePoolPage() {
   }
 
   const canDelete = canDeleteIntake && items.length > 0 && !bulkBusy;
+  const isEmptyPoolDialog = deleteConfirm === "all";
   const deleteDialogTotal =
-    bulkDeleteResult?.total ??
-    bulkProgress?.total ??
-    (deleteConfirm === "all" ? items.length : selectedCount);
-  const deleteDialogDone = bulkDeleteResult?.deleted ?? bulkProgress?.done ?? 0;
+    bulkDeleteResult?.emptied
+      ? 0
+      : (bulkDeleteResult?.total ??
+        bulkProgress?.total ??
+        (isEmptyPoolDialog ? 0 : selectedCount));
+  const deleteDialogDone = bulkDeleteResult?.emptied
+    ? 0
+    : (bulkDeleteResult?.deleted ?? bulkProgress?.done ?? 0);
   const deleteDialogRemaining = Math.max(0, deleteDialogTotal - deleteDialogDone);
   const bulkProgressPercent =
     deleteDialogTotal > 0
       ? Math.round((deleteDialogDone / deleteDialogTotal) * 100)
-      : 0;
+      : bulkDeleteResult?.emptied
+        ? 100
+        : 0;
 
   return (
     <>
@@ -742,48 +932,61 @@ export default function IntakePoolPage() {
             </AlertDialogMedia>
             <AlertDialogTitle>
               {bulkDeleteResult
-                ? "Deletion complete"
+                ? bulkDeleteResult.emptied
+                  ? "Pool emptied"
+                  : "Deletion complete"
                 : deleteConfirm === "all"
-                  ? `Delete all ${deleteDialogTotal} posts?`
+                  ? "Empty the entire intake pool?"
                   : `Delete ${deleteDialogTotal} selected post${deleteDialogTotal === 1 ? "" : "s"}?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {bulkDeleteResult
-                ? `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed from the intake pool.`
-                : "These posts will leave the intake pool and won’t be promoted. Already promoted prospects are not affected."}
+                ? bulkDeleteResult.emptied
+                  ? "The intake pool is clear. New scraper runs will refill it. Already promoted prospects are not affected."
+                  : items.length > 0
+                    ? `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed. ${items.length} still remain in the pool.`
+                    : `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed. The intake pool is empty.`
+                : deleteConfirm === "all"
+                  ? "This instantly hides every available post in the pool — not just the ones on screen. Old rows are cleaned up in the background. Already promoted prospects are not affected."
+                  : "Only the posts you selected will be removed. Other posts still in the pool (including ones hidden by filters or beyond the loaded page) will remain. Already promoted prospects are not affected."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-center">
-            <div>
-              <div className="text-lg font-semibold tabular-nums">{deleteDialogTotal}</div>
-              <div className="text-xs text-muted-foreground">Total</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold tabular-nums text-destructive">
-                {deleteDialogDone}
+          {deleteConfirm === "selected" ||
+          (bulkDeleteResult && !bulkDeleteResult.emptied) ? (
+            <>
+              <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-center">
+                <div>
+                  <div className="text-lg font-semibold tabular-nums">{deleteDialogTotal}</div>
+                  <div className="text-xs text-muted-foreground">Total</div>
+                </div>
+                <div>
+                  <div className="text-lg font-semibold tabular-nums text-destructive">
+                    {deleteDialogDone}
+                  </div>
+                  <div className="text-xs text-muted-foreground">Deleted</div>
+                </div>
+                <div>
+                  <div className="text-lg font-semibold tabular-nums">{deleteDialogRemaining}</div>
+                  <div className="text-xs text-muted-foreground">Remaining</div>
+                </div>
               </div>
-              <div className="text-xs text-muted-foreground">Deleted</div>
-            </div>
-            <div>
-              <div className="text-lg font-semibold tabular-nums">{deleteDialogRemaining}</div>
-              <div className="text-xs text-muted-foreground">Remaining</div>
-            </div>
-          </div>
-          <Progress
-            value={bulkProgressPercent}
-            className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
-          >
-            <ProgressLabel className="text-sm text-muted-foreground">
-              {bulkDeleteResult
-                ? "Deletion finished"
-                : bulkBusy
-                  ? "Deleting posts…"
-                  : "Ready to delete"}
-            </ProgressLabel>
-            <ProgressValue className="text-sm">
-              {() => `${bulkProgressPercent}%`}
-            </ProgressValue>
-          </Progress>
+              <Progress
+                value={bulkProgressPercent}
+                className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
+              >
+                <ProgressLabel className="text-sm text-muted-foreground">
+                  {bulkDeleteResult
+                    ? "Deletion finished"
+                    : bulkBusy
+                      ? "Deleting posts…"
+                      : "Ready to delete"}
+                </ProgressLabel>
+                <ProgressValue className="text-sm">
+                  {() => `${bulkProgressPercent}%`}
+                </ProgressValue>
+              </Progress>
+            </>
+          ) : null}
           <AlertDialogFooter>
             {bulkDeleteResult ? (
               <AlertDialogCancel variant="default">Done</AlertDialogCancel>
@@ -798,8 +1001,12 @@ export default function IntakePoolPage() {
                   {bulkBusy ? (
                     <>
                       <Loader2 className="h-4 w-4 animate-spin" />
-                      Deleting {bulkProgressPercent}%
+                      {deleteConfirm === "all"
+                        ? "Emptying…"
+                        : `Deleting ${bulkProgressPercent}%`}
                     </>
+                  ) : deleteConfirm === "all" ? (
+                    "Empty entire pool"
                   ) : (
                     `Delete ${deleteDialogTotal} post${deleteDialogTotal === 1 ? "" : "s"}`
                   )}
@@ -821,14 +1028,25 @@ export default function IntakePoolPage() {
                 size="sm"
                 type="button"
                 onClick={() => void runAllScrapers()}
-                disabled={loading || refreshing || runningScrapers}
+                disabled={loading || poolBusy}
+                title={
+                  runningScrapers
+                    ? "Running all feeds — keep this tab open"
+                    : "Run all enabled scrapers and refresh the pool"
+                }
               >
                 {runningScrapers ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
                 ) : (
                   <Play className="h-3.5 w-3.5" />
                 )}{" "}
-                {runningScrapers ? "Fetching…" : "Fetch new posts"}
+                {runningScrapers
+                  ? fetchProgress && fetchProgress.total > 0
+                    ? `Fetching ${fetchProgress.done}/${fetchProgress.total}`
+                    : fetchElapsed > 0
+                      ? `Fetching… ${formatElapsed(fetchElapsed)}`
+                      : "Fetching…"
+                  : "Fetch new posts"}
               </Button>
             ) : null}
             <Button
@@ -836,14 +1054,17 @@ export default function IntakePoolPage() {
               size="sm"
               type="button"
               onClick={() => void load({ soft: items.length > 0 })}
-              disabled={loading || refreshing || runningScrapers}
+              disabled={loading || poolBusy}
+              title="Reload the intake pool from the server"
             >
               <RefreshCw
                 className={
-                  loading || refreshing ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"
+                  refreshing && !runningScrapers
+                    ? "h-3.5 w-3.5 animate-spin"
+                    : "h-3.5 w-3.5"
                 }
               />{" "}
-              {refreshing ? "Updating…" : "Refresh"}
+              Refresh
             </Button>
             {!ws.isDemo && canDeleteIntake ? (
               <DropdownMenu>
@@ -869,7 +1090,7 @@ export default function IntakePoolPage() {
                     onSelect={() => setDeleteConfirm("all")}
                   >
                     <Trash2 className="h-3.5 w-3.5" />
-                    Delete all
+                    Empty entire pool
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
@@ -932,35 +1153,80 @@ export default function IntakePoolPage() {
               />
               <div className="flex flex-wrap items-end gap-3">
                 <Select value={platform} onValueChange={(v) => v && setPlatform(v)}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Platform">
-                      {platform === ALL
-                        ? "All platforms"
-                        : getScraperPlatformLabel(platform)}
+                  <SelectTrigger className="h-9 w-[14rem] max-w-full gap-2">
+                    <SelectValue placeholder="Platform" className="overflow-hidden">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">
+                          {platform === ALL
+                            ? "All platforms"
+                            : getScraperPlatformLabel(platform)}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          ({platform === ALL ? items.length : platformCounts.get(platform) ?? 0})
+                        </span>
+                      </span>
                     </SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All platforms</SelectItem>
+                  <SelectContent align="start">
+                    <SelectItem value={ALL}>
+                      <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                        <span className="truncate">All platforms</span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {items.length}
+                        </span>
+                      </span>
+                    </SelectItem>
                     {platformOptions.map((p) => (
                       <SelectItem key={p} value={p}>
-                        {getScraperPlatformLabel(p)}
+                        <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                          <span className="truncate">{getScraperPlatformLabel(p)}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {platformCounts.get(p) ?? 0}
+                          </span>
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 <Select value={category} onValueChange={(v) => v && setCategory(v)}>
-                  <SelectTrigger className="w-[150px]">
-                    <SelectValue placeholder="Category">
-                      {category === ALL
-                        ? "All categories"
-                        : getScraperCategoryLabel(category)}
+                  <SelectTrigger
+                    className="h-9 w-[19rem] max-w-full gap-2"
+                    title={
+                      category === ALL
+                        ? `All categories (${items.length})`
+                        : `${getScraperCategoryLabel(category)} (${categoryCounts.get(category) ?? 0})`
+                    }
+                  >
+                    <SelectValue placeholder="Category" className="overflow-hidden">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate">
+                          {category === ALL
+                            ? "All categories"
+                            : getScraperCategoryLabel(category)}
+                        </span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          ({category === ALL ? items.length : categoryCounts.get(category) ?? 0})
+                        </span>
+                      </span>
                     </SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={ALL}>All categories</SelectItem>
+                  <SelectContent align="start">
+                    <SelectItem value={ALL}>
+                      <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                        <span className="truncate">All categories</span>
+                        <span className="shrink-0 tabular-nums text-muted-foreground">
+                          {items.length}
+                        </span>
+                      </span>
+                    </SelectItem>
                     {categoryOptions.map((c) => (
                       <SelectItem key={c} value={c}>
-                        {getScraperCategoryLabel(c)}
+                        <span className="flex w-full min-w-0 items-center justify-between gap-3">
+                          <span className="truncate">{getScraperCategoryLabel(c)}</span>
+                          <span className="shrink-0 tabular-nums text-muted-foreground">
+                            {categoryCounts.get(c) ?? 0}
+                          </span>
+                        </span>
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -1093,6 +1359,8 @@ export default function IntakePoolPage() {
                     type="button"
                     className="h-9"
                     onClick={() => {
+                      setPlatform(ALL);
+                      setCategory(ALL);
                       setSearchQuery("");
                       setDateFrom("");
                       setDateTo("");
@@ -1108,19 +1376,32 @@ export default function IntakePoolPage() {
                     Clear filters
                   </Button>
                 ) : null}
-                <span className="text-sm text-muted-foreground pb-2 ml-auto flex items-center gap-2">
-                  {refreshing || scoringQuality ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                <span
+                  className="text-sm text-muted-foreground pb-2 ml-auto flex min-w-0 max-w-full flex-col items-end gap-1.5 sm:max-w-md"
+                  aria-live="polite"
+                >
+                  <span className="flex items-center gap-2">
+                    {statusBusy ? (
+                      <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+                    ) : null}
+                    <span className="truncate">{poolStatusLabel}</span>
+                  </span>
+                  {runningScrapers && fetchProgress && fetchProgress.total > 0 ? (
+                    <Progress value={fetchProgressPercent} className="w-full min-w-[12rem]">
+                      <ProgressLabel className="sr-only">Feed run progress</ProgressLabel>
+                      <ProgressValue className="text-xs">
+                        {() => `${fetchProgressPercent}%`}
+                      </ProgressValue>
+                    </Progress>
                   ) : null}
-                  {loading && items.length === 0
-                    ? "Loading…"
-                    : refreshing
-                      ? "Updating…"
-                      : scoringQuality
-                        ? `Scoring matches… · ${filteredItems.length} of ${items.length}`
-                        : filtersActive
-                          ? `${filteredItems.length} of ${items.length} shown`
-                          : `${items.length} available`}
+                  {scoringQuality && !runningScrapers && !refreshing && scoringTotal > 0 ? (
+                    <Progress value={scoringProgressPercent} className="w-full min-w-[12rem]">
+                      <ProgressLabel className="sr-only">Match scoring progress</ProgressLabel>
+                      <ProgressValue className="text-xs">
+                        {() => `${scoringProgressPercent}%`}
+                      </ProgressValue>
+                    </Progress>
+                  ) : null}
                 </span>
               </div>
             </div>
@@ -1205,14 +1486,11 @@ export default function IntakePoolPage() {
                 <ul
                   className={cn(
                     "space-y-3 transition-opacity",
-                    refreshing && "opacity-70",
+                    refreshing && !runningScrapers && "opacity-70",
                   )}
                 >
                 {paginatedItems.map((item) => {
                   const itemBusy = busy?.itemId === item.id ? busy.action : null;
-                  const snippet =
-                    item.contentSnippet?.trim() ||
-                    item.content.replace(/<[^>]+>/g, " ").slice(0, 280);
                   const isSelected = selectedIds.has(item.id);
                   const quality = qualityById.get(item.id);
                   const matchingStrategies = (strategyMatchesById.get(item.id) ?? []).filter(
@@ -1295,13 +1573,20 @@ export default function IntakePoolPage() {
                                 </div>
                               </div>
                             </div>
-                            <span className="text-xs text-muted-foreground shrink-0">
-                              {formatDistanceToNow(new Date(item.publishedAt), { addSuffix: true })}
-                            </span>
+                            <div className="shrink-0 space-y-0.5 text-right text-xs text-muted-foreground">
+                              <div title={item.publishedAt || undefined}>
+                                <span className="text-muted-foreground/80">Published · </span>
+                                {fmtRelative(item.publishedAt)}
+                              </div>
+                              <div title={item.createdAt || undefined}>
+                                <span className="text-muted-foreground/80">Scraped · </span>
+                                {fmtDate(item.createdAt, "MMM d, yyyy · h:mm a")}
+                              </div>
+                            </div>
                           </div>
                         </CardHeader>
                         <CardContent className="space-y-3">
-                          <p className="text-sm text-muted-foreground line-clamp-3">{snippet}</p>
+                          <IntakeItemBody item={item} />
                           <IntakeItemActions
                             item={item}
                             busyAction={itemBusy}

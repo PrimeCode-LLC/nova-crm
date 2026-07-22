@@ -5,6 +5,10 @@ import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
 import type { ScraperRawItem, ScraperRawItemStatus } from "@/lib/types";
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 import { mapScraperRawItem } from "@/lib/scrapers/map-documents";
+import {
+  effectiveItemPoolEpoch,
+  getIntakePoolEpochServer,
+} from "@/lib/scrapers/intake-pool-epoch";
 
 function rawCol() {
   const db = getAdminDb();
@@ -18,28 +22,36 @@ export function rawItemExpiresAt(from = new Date()): string {
   return d.toISOString();
 }
 
+/**
+ * Find a raw item with the same dedupe key in the **current** pool epoch.
+ * Older-epoch rows (hidden by Empty pool) do not block re-ingest.
+ */
 export async function findRawItemByDedupeKeyServer(
   organizationId: string,
   dedupeKey: string,
 ): Promise<ScraperRawItem | null> {
   const col = rawCol();
   if (!col) return null;
+  const epoch = await getIntakePoolEpochServer(organizationId);
   const snap = await col
     .where("organizationId", "==", organizationId)
     .where("dedupeKey", "==", dedupeKey)
-    .limit(1)
+    .limit(25)
     .get();
   if (snap.empty) return null;
-  const doc = snap.docs[0]!;
-  return mapScraperRawItem(doc.id, doc.data() as Record<string, unknown>);
+  for (const doc of snap.docs) {
+    const item = mapScraperRawItem(doc.id, doc.data() as Record<string, unknown>);
+    if (effectiveItemPoolEpoch(item.poolEpoch) === epoch) return item;
+  }
+  return null;
 }
 
 export async function createScraperRawItemServer(
   organizationId: string,
   payload: Omit<
     ScraperRawItem,
-    "id" | "organizationId" | "createdAt" | "updatedAt" | "status" | "expiresAt"
-  > & { status?: ScraperRawItemStatus },
+    "id" | "organizationId" | "createdAt" | "updatedAt" | "status" | "expiresAt" | "poolEpoch"
+  > & { status?: ScraperRawItemStatus; poolEpoch?: number },
 ): Promise<{ ok: true; item: ScraperRawItem } | { error: string }> {
   const col = rawCol();
   if (!col) return { error: "Database not configured" };
@@ -47,10 +59,16 @@ export async function createScraperRawItemServer(
   const existing = await findRawItemByDedupeKeyServer(organizationId, payload.dedupeKey);
   if (existing) return { error: "duplicate" };
 
+  const poolEpoch =
+    typeof payload.poolEpoch === "number" && payload.poolEpoch >= 1
+      ? Math.floor(payload.poolEpoch)
+      : await getIntakePoolEpochServer(organizationId);
+
   const now = new Date().toISOString();
   const ref = col.doc();
   const doc = {
     ...payload,
+    poolEpoch,
     status: payload.status ?? "available",
     expiresAt: rawItemExpiresAt(),
     createdAt: now,
@@ -83,9 +101,9 @@ async function queryScraperRawItemsServer(
   const status = filter.status ?? "available";
   const limit = Math.min(500, Math.max(1, filter.limit ?? 200));
   const now = new Date().toISOString();
-  // Over-fetch slightly so filtering expired rows still returns up to `limit` items.
+  // Over-fetch so expired / wrong-epoch rows can be filtered while still filling `limit`.
   const fetchLimit =
-    status === "available" ? Math.min(500, Math.ceil(limit * 1.25)) : limit;
+    status === "available" ? Math.min(500, Math.ceil(limit * 2.5)) : limit;
 
   let q = col
     .where("organizationId", "==", filter.organizationId)
@@ -109,6 +127,7 @@ async function queryScraperRawItemsServer(
       "dcCreator",
       "publishedAt",
       "status",
+      "poolEpoch",
       "expiresAt",
       "createdAt",
       "updatedAt",
@@ -118,7 +137,12 @@ async function queryScraperRawItemsServer(
   let items = snap.docs.map((d) => mapScraperRawItem(d.id, d.data() as Record<string, unknown>));
 
   if (status === "available") {
-    items = items.filter((i) => !i.expiresAt || i.expiresAt > now);
+    const epoch = await getIntakePoolEpochServer(filter.organizationId);
+    items = items.filter(
+      (i) =>
+        (!i.expiresAt || i.expiresAt > now) &&
+        effectiveItemPoolEpoch(i.poolEpoch) === epoch,
+    );
   }
   if (filter.feedId) {
     items = items.filter((i) => i.feedId === filter.feedId);
@@ -194,42 +218,18 @@ export async function dismissScraperRawItemServer(input: {
   return { ok: true, item: mapScraperRawItem(ref.id, next.data() as Record<string, unknown>) };
 }
 
-/** Soft-remove available items from the intake pool (status → dismissed). Max 500 ids. */
-export async function dismissScraperRawItemsBulkServer(input: {
+const DISMISS_WRITE_CHUNK = 100;
+
+async function dismissRawItemIdsServer(input: {
   organizationId: string;
   userId: string;
-  itemIds?: string[];
-  /** When true, dismiss all currently available (non-expired) items for the org. */
-  allAvailable?: boolean;
-  /** Smaller server-side writes allow one request to report deletion progress. */
+  ids: string[];
   progressBatchSize?: number;
+  progressTotal?: number;
   onProgress?: (done: number, total: number) => void | Promise<void>;
-}): Promise<{ ok: true; dismissedIds: string[]; totalMatched: number } | { error: string }> {
+}): Promise<{ dismissedIds: string[] }> {
   const col = rawCol();
-  if (!col) return { error: "Database not configured" };
-
-  let ids: string[] = [];
-
-  if (input.allAvailable) {
-    const items = await listScraperRawItemsServer({
-      organizationId: input.organizationId,
-      status: "available",
-      limit: 500,
-    });
-    ids = items.map((i) => i.id);
-  } else {
-    const raw = input.itemIds ?? [];
-    if (raw.length === 0) return { error: "No items selected" };
-    if (raw.length > 500) return { error: "Too many items (max 500)" };
-    ids = Array.from(new Set(raw.map((id) => id.trim()).filter(Boolean)));
-    if (ids.length === 0) return { error: "No items selected" };
-  }
-
-  const totalMatched = ids.length;
-  await input.onProgress?.(0, totalMatched);
-  if (ids.length === 0) {
-    return { ok: true, dismissedIds: [], totalMatched };
-  }
+  if (!col) return { dismissedIds: [] };
 
   const now = new Date().toISOString();
   const stamp = stampForUpdate({
@@ -237,9 +237,13 @@ export async function dismissScraperRawItemsBulkServer(input: {
     dismissedAt: now,
     dismissedByUserId: input.userId,
   });
-  const dismissedIds: string[] = [];
+  const dismissed = new Set<string>();
   const db = getAdminDb()!;
-  const batchSize = Math.min(500, Math.max(1, input.progressBatchSize ?? 500));
+  const batchSize = Math.min(
+    DISMISS_WRITE_CHUNK,
+    Math.max(1, input.progressBatchSize ?? DISMISS_WRITE_CHUNK),
+  );
+  const ids = input.ids;
 
   for (let i = 0; i < ids.length; i += batchSize) {
     const slice = ids.slice(i, i + batchSize);
@@ -253,18 +257,51 @@ export async function dismissScraperRawItemsBulkServer(input: {
       if (data.organizationId !== input.organizationId) continue;
       if (data.status === "promoted") continue;
       if (data.status === "dismissed") {
-        dismissedIds.push(snap.id);
+        dismissed.add(snap.id);
         continue;
       }
       batch.update(snap.ref, stamp);
-      dismissedIds.push(snap.id);
+      dismissed.add(snap.id);
       writes += 1;
     }
     if (writes > 0) await batch.commit();
-    await input.onProgress?.(dismissedIds.length, totalMatched);
+    const done = dismissed.size;
+    const total = Math.max(input.progressTotal ?? done, done);
+    await input.onProgress?.(done, total);
   }
 
-  return { ok: true, dismissedIds, totalMatched };
+  return { dismissedIds: Array.from(dismissed) };
+}
+
+/** Soft-remove selected available items from the intake pool (status → dismissed). Max 500 ids. */
+export async function dismissScraperRawItemsBulkServer(input: {
+  organizationId: string;
+  userId: string;
+  itemIds: string[];
+  progressBatchSize?: number;
+  onProgress?: (done: number, total: number) => void | Promise<void>;
+}): Promise<{ ok: true; dismissedIds: string[]; totalMatched: number } | { error: string }> {
+  const col = rawCol();
+  if (!col) return { error: "Database not configured" };
+
+  const raw = input.itemIds ?? [];
+  if (raw.length === 0) return { error: "No items selected" };
+  if (raw.length > 500) return { error: "Too many items (max 500)" };
+  const ids = Array.from(new Set(raw.map((id) => id.trim()).filter(Boolean)));
+  if (ids.length === 0) return { error: "No items selected" };
+
+  const totalMatched = ids.length;
+  await input.onProgress?.(0, totalMatched);
+  const result = await dismissRawItemIdsServer({
+    organizationId: input.organizationId,
+    userId: input.userId,
+    ids,
+    progressBatchSize: input.progressBatchSize,
+    progressTotal: totalMatched,
+    onProgress: input.onProgress,
+  });
+
+  return { ok: true, dismissedIds: result.dismissedIds, totalMatched };
 }
 
 export async function markRawItemPromotedServer(input: {
@@ -317,4 +354,65 @@ export async function deleteExpiredRawItemsServer(organizationId?: string): Prom
   }
   await batch.commit();
   return snap.size;
+}
+
+/** Hard-delete available rows from previous pool generations after Empty pool. */
+export async function deleteStalePoolEpochItemsServer(
+  organizationId: string,
+  currentEpoch: number,
+): Promise<number> {
+  if (currentEpoch <= 1) return 0;
+  const col = rawCol();
+  if (!col) return 0;
+  const db = getAdminDb()!;
+  let deleted = 0;
+
+  for (let pass = 0; pass < 20; pass += 1) {
+    const snap = await col
+      .where("organizationId", "==", organizationId)
+      .where("status", "==", "available")
+      .orderBy("publishedAt", "desc")
+      .limit(500)
+      .get();
+    if (snap.empty) break;
+
+    const stale = snap.docs.filter(
+      (doc) => effectiveItemPoolEpoch(doc.data()?.poolEpoch) < currentEpoch,
+    );
+    if (stale.length === 0) break;
+
+    const batch = db.batch();
+    for (const doc of stale) batch.delete(doc.ref);
+    await batch.commit();
+    deleted += stale.length;
+    if (stale.length < snap.size) break;
+  }
+
+  return deleted;
+}
+
+/** Cron helper: expire old available rows + remove hidden prior-epoch rows. */
+export async function cleanupIntakePoolServer(): Promise<{
+  expiredDeleted: number;
+  staleEpochDeleted: number;
+}> {
+  const expiredDeleted = await deleteExpiredRawItemsServer();
+  let staleEpochDeleted = 0;
+
+  const db = getAdminDb();
+  if (!db) return { expiredDeleted, staleEpochDeleted };
+
+  const orgSnap = await db
+    .collection(COLLECTIONS.organizations)
+    .select("intakePoolEpoch")
+    .limit(500)
+    .get();
+
+  for (const doc of orgSnap.docs) {
+    const epoch = effectiveItemPoolEpoch(doc.data()?.intakePoolEpoch);
+    if (epoch <= 1) continue;
+    staleEpochDeleted += await deleteStalePoolEpochItemsServer(doc.id, epoch);
+  }
+
+  return { expiredDeleted, staleEpochDeleted };
 }

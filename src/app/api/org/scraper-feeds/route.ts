@@ -15,6 +15,8 @@ import { runScraperFeedsServer } from "@/lib/scrapers/run-feeds-server";
 import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
 import { recordAudit } from "@/lib/firestore/audit";
 
+export const maxDuration = 300;
+
 const createSchema = z.object({
   name: z.string().min(1).max(200),
   platform: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()),
@@ -58,6 +60,82 @@ export async function POST(req: Request) {
 
     const orgId = g.ctx.session.organizationId;
     const uid = g.ctx.session.uid;
+    const streamProgress =
+      typeof json === "object" &&
+      json !== null &&
+      "streamProgress" in json &&
+      (json as { streamProgress?: unknown }).streamProgress === true;
+
+    if (streamProgress) {
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream<Uint8Array>({
+        async start(controller) {
+          const send = (event: Record<string, unknown>) => {
+            controller.enqueue(encoder.encode(`${JSON.stringify(event)}\n`));
+          };
+
+          try {
+            send({ type: "start" });
+            const { results } = await runScraperFeedsServer({
+              organizationId: orgId,
+              force: true,
+              onProgress: (progress) => {
+                send({
+                  type: "progress",
+                  done: progress.done,
+                  total: progress.total,
+                  newTotal: progress.newTotal,
+                  feedId: progress.result.feedId,
+                  feedName: progress.result.feedName,
+                  ok: progress.result.ok,
+                  newCount: progress.result.newCount,
+                  error: progress.result.error,
+                });
+              },
+            });
+            const newTotal = results.reduce((n, r) => n + r.newCount, 0);
+            void recordAudit({
+              organizationId: orgId,
+              actorUid: uid,
+              event: "scraper.run",
+              meta: { feedCount: results.length, newTotal },
+            });
+            void recordScraperRunOrgActivity({
+              organizationId: orgId,
+              actorId: uid,
+              newTotal,
+              feedCount: results.length,
+            });
+            send({
+              type: "complete",
+              results,
+              newTotal,
+              feedCount: results.length,
+            });
+          } catch (error) {
+            console.error(
+              JSON.stringify({
+                level: "error",
+                message: "Scraper run_all stream failed",
+                route: "/api/org/scraper-feeds",
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+            send({ type: "error", error: "Could not run scrapers" });
+          } finally {
+            controller.close();
+          }
+        },
+      });
+
+      return new Response(stream, {
+        headers: {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-cache, no-transform",
+        },
+      });
+    }
+
     const { results } = await runScraperFeedsServer({ organizationId: orgId, force: true });
     const newTotal = results.reduce((n, r) => n + r.newCount, 0);
     void recordAudit({
