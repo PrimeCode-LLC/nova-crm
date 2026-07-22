@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
+import { scraperFeedIntervalSchema } from "@/lib/scrapers/scraper-feed-interval-schema";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   guardAdminFeature,
@@ -23,8 +24,7 @@ const createSchema = z.object({
   category: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()),
   feedUrl: z.string().url().max(2000),
   enabled: z.boolean().optional(),
-  runIntervalMinutes: z.number().int().min(15).max(1440).optional(),
-});
+}).merge(scraperFeedIntervalSchema);
 
 const bulkSetEnabledSchema = z.object({
   action: z.literal("bulk_set_enabled"),

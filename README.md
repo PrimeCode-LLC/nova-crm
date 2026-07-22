@@ -97,7 +97,7 @@ Writes a tenant-stamped doc to **`ingestQueue`** via Admin SDK (clients cannot w
 - **Admin → Scrapers** (`/admin/scrapers`): manage rss.app feed URLs, seed ~46 default feeds from the legacy n8n workflow, run feeds manually.
 - **Intake pool** (`/intake`): team browses new posts (7-day retention), promotes to **prospect** (open queue or assign to self), or dismisses.
 - Promoted prospects use the existing **Claim** flow on `/prospects` when left in the open queue.
-- Scheduled ingest: set `CRON_SECRET` and deploy with `vercel.json` (hourly `GET /api/cron/scrapers/run` with `Authorization: Bearer $CRON_SECRET`), or call that URL from your scheduler.
+- Scheduled ingest: set `CRON_SECRET` on **App Hosting** and **Cloud Functions**, deploy functions (`runDueScrapers` every 15 minutes → `GET /api/cron/scrapers/run`). Per-feed interval and **Enabled** are stored in Firestore — disabled feeds are skipped. (`vercel.json` crons apply only on Vercel.)
 
 Deploy Firestore indexes after pulling: `npm run firebase:deploy:rules` (rules + indexes).
 
@@ -112,7 +112,12 @@ cd functions && npm install && npm run build
 Exports:
 
 - **`health`**: HTTP sanity check  
-- **`recomputePermissionsOnUserWrite`**: on `users/{userId}` write, merges role + `permissionOverrides` into `computedPermissions/{userId}` (merge logic duplicated in `functions/src/mergePermissions.ts`; keep in sync with `src/lib/permissions/merge.ts` or extract to a shared package later).
+- **`recomputePermissionsOnUserWrite`**: on `users/{userId}` write, merges role + `permissionOverrides` into `computedPermissions/{userId}`  
+- **`runDueScrapers`**: every 15 minutes, calls App Hosting `/api/cron/scrapers/run` (due feeds only; honors disable + interval)  
+- **`sendDueScheduledEmails`**: every 5 minutes, calls `/api/cron/scheduled-emails/send`  
+- **`cleanupProspectImportTemporaryData`**: hourly import cleanup  
+
+Set Cloud Function secret: `firebase functions:secrets:set CRON_SECRET` (same value as App Hosting). Optional param `SITE_URL` defaults to production origin.
 
 Deploy: `npm run firebase:deploy:functions` from `crm/` (requires Blaze for callable HTTP/functions).
 

@@ -13,6 +13,7 @@ import {
 import { runScraperFeedByIdServer } from "@/lib/scrapers/run-feeds-server";
 import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
 import { recordAudit } from "@/lib/firestore/audit";
+import { scraperFeedIntervalSchema } from "@/lib/scrapers/scraper-feed-interval-schema";
 
 const patchSchema = z
   .object({
@@ -21,8 +22,8 @@ const patchSchema = z
     category: z.string().trim().min(1).max(50).transform((v) => v.toLowerCase()).optional(),
     feedUrl: z.string().url().max(2000).optional(),
     enabled: z.boolean().optional(),
-    runIntervalMinutes: z.number().int().min(15).max(1440).optional(),
   })
+  .merge(scraperFeedIntervalSchema)
   .strict();
 
 type RouteCtx = { params: Promise<{ feedId: string }> };

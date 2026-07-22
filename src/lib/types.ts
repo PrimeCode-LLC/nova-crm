@@ -1078,6 +1078,8 @@ export type ScraperPlatform = string;
 /** Intent bucket for scraped posts (preset keys like `hiring`/`problem` or custom). */
 export type ScraperCategory = string;
 
+export type ScraperRunIntervalUnit = "minutes" | "hours" | "days";
+
 /** Admin-configured RSS feed (`scraperFeeds`). */
 export interface ScraperFeed {
   id: string;
@@ -1086,8 +1088,12 @@ export interface ScraperFeed {
   platform: ScraperPlatform;
   category: ScraperCategory;
   feedUrl: string;
+  /** When false, scheduled server runs skip this feed. */
   enabled: boolean;
-  /** Minutes between scheduled runs (default 60). */
+  /** Display interval (with `runIntervalUnit`). */
+  runIntervalValue: number;
+  runIntervalUnit: ScraperRunIntervalUnit;
+  /** Canonical minutes between scheduled runs (derived on write). */
   runIntervalMinutes: number;
   lastRunAt?: ISODate;
   lastSuccessAt?: ISODate;

@@ -67,6 +67,11 @@ import {
   SCRAPER_PLATFORM_GROUPS,
 } from "@/lib/scrapers/labels";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
+import {
+  decomposeRunIntervalMinutes,
+  formatRunInterval,
+} from "@/lib/scrapers/run-interval";
+import type { ScraperRunIntervalUnit } from "@/lib/types";
 import { TeamIntakeFilterDefaultsCard } from "@/components/intake/team-intake-filter-defaults-card";
 import { formatElapsed, useElapsedSeconds } from "@/lib/hooks/use-elapsed-seconds";
 
@@ -74,20 +79,24 @@ const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 const CUSTOM_CATEGORY_VALUE = "__custom__";
 const CUSTOM_PLATFORM_VALUE = "__custom__";
 
+const INTERVAL_UNITS: ScraperRunIntervalUnit[] = ["minutes", "hours", "days"];
+
 function resetFeedForm(setters: {
   setName: (v: string) => void;
   setFeedUrl: (v: string) => void;
   setPlatform: (v: ScraperPlatform) => void;
   setCategory: (v: ScraperCategory) => void;
   setEnabled: (v: boolean) => void;
-  setIntervalMin: (v: string) => void;
+  setIntervalValue: (v: string) => void;
+  setIntervalUnit: (v: ScraperRunIntervalUnit) => void;
 }) {
   setters.setName("");
   setters.setFeedUrl("");
   setters.setPlatform("google_news");
   setters.setCategory("procurement_rfp");
   setters.setEnabled(true);
-  setters.setIntervalMin("60");
+  setters.setIntervalValue("1");
+  setters.setIntervalUnit("hours");
 }
 
 export default function AdminScrapersPage() {
@@ -118,7 +127,8 @@ export default function AdminScrapersPage() {
   const [category, setCategory] = React.useState<ScraperCategory>("procurement_rfp");
   const [customCategory, setCustomCategory] = React.useState("");
   const [enabled, setEnabled] = React.useState(true);
-  const [intervalMin, setIntervalMin] = React.useState("60");
+  const [intervalValue, setIntervalValue] = React.useState("1");
+  const [intervalUnit, setIntervalUnit] = React.useState<ScraperRunIntervalUnit>("hours");
 
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState<(typeof PAGE_SIZE_OPTIONS)[number]>(10);
@@ -162,7 +172,7 @@ export default function AdminScrapersPage() {
 
   function openCreateDialog() {
     setEditFeedId(null);
-    resetFeedForm({ setName, setFeedUrl, setPlatform, setCategory, setEnabled, setIntervalMin });
+    resetFeedForm({ setName, setFeedUrl, setPlatform, setCategory, setEnabled, setIntervalValue, setIntervalUnit });
     setCustomPlatform("");
     setCustomCategory("");
     setFeedDialogOpen(true);
@@ -177,7 +187,8 @@ export default function AdminScrapersPage() {
     setCategory(isScraperCategoryPreset(feed.category) ? feed.category : CUSTOM_CATEGORY_VALUE);
     setCustomCategory(isScraperCategoryPreset(feed.category) ? "" : feed.category);
     setEnabled(feed.enabled);
-    setIntervalMin(String(feed.runIntervalMinutes));
+    setIntervalValue(String(feed.runIntervalValue ?? decomposeRunIntervalMinutes(feed.runIntervalMinutes).value));
+    setIntervalUnit(feed.runIntervalUnit ?? decomposeRunIntervalMinutes(feed.runIntervalMinutes).unit);
     setFeedDialogOpen(true);
   }
 
@@ -362,7 +373,8 @@ export default function AdminScrapersPage() {
       platform: nextPlatform,
       category: nextCategory,
       enabled,
-      runIntervalMinutes: Number(intervalMin) || 60,
+      runIntervalValue: Number(intervalValue) || 1,
+      runIntervalUnit: intervalUnit,
     };
     setSavingFeed(true);
     try {
@@ -536,7 +548,7 @@ export default function AdminScrapersPage() {
     <AppPage>
       <PageHeader
         title="Scrapers"
-        description="RSS feeds (rss.app) ingested into the intake pool. Replaces n8n + Google Sheets."
+        description="RSS feeds (rss.app) ingested into the intake pool. Automatic fetches run on Firebase (no browser needed). Disable a feed to pause its schedule."
         actions={
           <>
             <Badge variant="outline" className="h-8 px-3 tabular-nums">
@@ -711,7 +723,7 @@ export default function AdminScrapersPage() {
                         <Badge variant="outline">{getScraperCategoryLabel(feed.category)}</Badge>
                       </TableCell>
                       <TableCell className="px-3 py-2.5 align-middle tabular-nums">
-                        {feed.runIntervalMinutes}m
+                        {formatRunInterval(feed)}
                       </TableCell>
                       <TableCell className="px-3 py-2.5 align-top text-sm text-muted-foreground">
                         <div className="space-y-0.5 leading-snug">
@@ -924,18 +936,42 @@ export default function AdminScrapersPage() {
             </div>
             <div className="grid grid-cols-2 gap-3 items-end">
               <div className="space-y-1.5">
-                <Label>Run every (minutes)</Label>
-                <Input
-                  type="number"
-                  min={15}
-                  max={1440}
-                  value={intervalMin}
-                  onChange={(e) => setIntervalMin(e.target.value)}
-                />
+                <Label>Fetch every</Label>
+                <div className="flex gap-2">
+                  <Input
+                    type="number"
+                    min={1}
+                    className="w-24"
+                    value={intervalValue}
+                    onChange={(e) => setIntervalValue(e.target.value)}
+                  />
+                  <Select
+                    value={intervalUnit}
+                    onValueChange={(v) => {
+                      if (v === "minutes" || v === "hours" || v === "days") setIntervalUnit(v);
+                    }}
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent alignItemWithTrigger={false}>
+                      {INTERVAL_UNITS.map((unit) => (
+                        <SelectItem key={unit} value={unit}>
+                          {unit.charAt(0).toUpperCase() + unit.slice(1)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Server checks about every 15 minutes; disabled feeds are skipped.
+                </p>
               </div>
-              <div className="flex items-center gap-2 pb-2">
-                <Switch checked={enabled} onCheckedChange={setEnabled} />
-                <Label>Enabled</Label>
+              <div className="flex flex-col gap-1 pb-2">
+                <div className="flex items-center gap-2">
+                  <Switch checked={enabled} onCheckedChange={setEnabled} />
+                  <Label>Enabled (scheduled fetch)</Label>
+                </div>
               </div>
             </div>
           </div>

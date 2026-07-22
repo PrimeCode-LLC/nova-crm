@@ -4,6 +4,8 @@ import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
 import type { ScraperCategory, ScraperFeed, ScraperPlatform } from "@/lib/types";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
 import { mapScraperFeed } from "@/lib/scrapers/map-documents";
+import { normalizeRunInterval } from "@/lib/scrapers/run-interval";
+import type { ScraperRunIntervalUnit } from "@/lib/types";
 
 function feedsCol() {
   const db = getAdminDb();
@@ -42,18 +44,27 @@ export async function createScraperFeedServer(input: {
   feedUrl: string;
   enabled?: boolean;
   runIntervalMinutes?: number;
+  runIntervalValue?: number;
+  runIntervalUnit?: ScraperRunIntervalUnit;
 }): Promise<{ ok: true; feed: ScraperFeed } | { error: string }> {
   const col = feedsCol();
   if (!col) return { error: "Database not configured" };
   const now = new Date().toISOString();
   const ref = col.doc();
+  const interval = normalizeRunInterval({
+    runIntervalMinutes: input.runIntervalMinutes,
+    runIntervalValue: input.runIntervalValue,
+    runIntervalUnit: input.runIntervalUnit,
+  });
   const payload = {
     name: input.name.trim(),
     platform: input.platform,
     category: input.category,
     feedUrl: input.feedUrl.trim(),
     enabled: input.enabled !== false,
-    runIntervalMinutes: Math.max(15, Math.min(24 * 60, input.runIntervalMinutes ?? 60)),
+    runIntervalValue: interval.runIntervalValue,
+    runIntervalUnit: interval.runIntervalUnit,
+    runIntervalMinutes: interval.runIntervalMinutes,
     createdAt: now,
     updatedAt: now,
   };
@@ -67,7 +78,17 @@ export async function updateScraperFeedServer(input: {
   feedId: string;
   uid?: string;
   patch: Partial<
-    Pick<ScraperFeed, "name" | "platform" | "category" | "feedUrl" | "enabled" | "runIntervalMinutes">
+    Pick<
+      ScraperFeed,
+      | "name"
+      | "platform"
+      | "category"
+      | "feedUrl"
+      | "enabled"
+      | "runIntervalMinutes"
+      | "runIntervalValue"
+      | "runIntervalUnit"
+    >
   >;
 }): Promise<{ ok: true; feed: ScraperFeed } | { error: string }> {
   const col = feedsCol();
@@ -84,8 +105,20 @@ export async function updateScraperFeedServer(input: {
   if (input.patch.category !== undefined) patch.category = input.patch.category;
   if (input.patch.feedUrl !== undefined) patch.feedUrl = input.patch.feedUrl.trim();
   if (input.patch.enabled !== undefined) patch.enabled = input.patch.enabled;
-  if (input.patch.runIntervalMinutes !== undefined) {
-    patch.runIntervalMinutes = Math.max(15, Math.min(24 * 60, input.patch.runIntervalMinutes));
+  if (
+    input.patch.runIntervalMinutes !== undefined ||
+    input.patch.runIntervalValue !== undefined ||
+    input.patch.runIntervalUnit !== undefined
+  ) {
+    const current = mapScraperFeed(ref.id, data);
+    const interval = normalizeRunInterval({
+      runIntervalMinutes: input.patch.runIntervalMinutes ?? current.runIntervalMinutes,
+      runIntervalValue: input.patch.runIntervalValue ?? current.runIntervalValue,
+      runIntervalUnit: input.patch.runIntervalUnit ?? current.runIntervalUnit,
+    });
+    patch.runIntervalValue = interval.runIntervalValue;
+    patch.runIntervalUnit = interval.runIntervalUnit;
+    patch.runIntervalMinutes = interval.runIntervalMinutes;
   }
 
   await ref.update(stampForUpdate(patch, input.uid));

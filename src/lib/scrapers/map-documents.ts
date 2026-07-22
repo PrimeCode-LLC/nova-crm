@@ -1,4 +1,5 @@
 import type { ScraperFeed, ScraperRawItem } from "@/lib/types";
+import { normalizeRunInterval } from "@/lib/scrapers/run-interval";
 
 /** Normalize Firestore Timestamp | ISO string | Date into an ISO string (or ""). */
 function mapIsoField(value: unknown): string {
@@ -39,10 +40,26 @@ export function mapScraperFeed(id: string, raw: Record<string, unknown>): Scrape
     category: (raw.category as ScraperFeed["category"]) ?? "other",
     feedUrl: String(raw.feedUrl ?? ""),
     enabled: raw.enabled !== false,
-    runIntervalMinutes:
-      typeof raw.runIntervalMinutes === "number" && raw.runIntervalMinutes > 0
-        ? raw.runIntervalMinutes
-        : 60,
+    ...(() => {
+      const unit =
+        raw.runIntervalUnit === "minutes" ||
+        raw.runIntervalUnit === "hours" ||
+        raw.runIntervalUnit === "days"
+          ? raw.runIntervalUnit
+          : undefined;
+      const interval = normalizeRunInterval({
+        runIntervalMinutes:
+          typeof raw.runIntervalMinutes === "number" ? raw.runIntervalMinutes : undefined,
+        runIntervalValue:
+          typeof raw.runIntervalValue === "number" ? raw.runIntervalValue : undefined,
+        runIntervalUnit: unit,
+      });
+      return {
+        runIntervalValue: interval.runIntervalValue,
+        runIntervalUnit: interval.runIntervalUnit,
+        runIntervalMinutes: interval.runIntervalMinutes,
+      };
+    })(),
     lastRunAt: mapIsoField(raw.lastRunAt) || undefined,
     lastSuccessAt: mapIsoField(raw.lastSuccessAt) || undefined,
     lastError: typeof raw.lastError === "string" ? raw.lastError : undefined,
