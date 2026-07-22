@@ -7,6 +7,10 @@ import {
   buildFollowupPersonalizationProfile,
   formatFollowupRoleGuidance,
 } from "@/lib/ai/followup-personalization";
+import {
+  buildLeadSignalProfile,
+  formatLeadSignalGuidance,
+} from "@/lib/ai/lead-signal-profile";
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
@@ -233,8 +237,14 @@ export async function POST(req: Request) {
     title: contactTitle,
     seniority: loaded.contact?.seniority,
   });
+  const signalProfile = buildLeadSignalProfile({
+    lead: loaded.lead,
+    account: loaded.account,
+    contact: loaded.contact,
+  });
   const roleGuidance = [
     formatFollowupRoleGuidance(personalizationProfile),
+    formatLeadSignalGuidance(signalProfile),
     `Lead stage: ${loaded.lead.stage || "unknown"}`,
     `Temperature: ${loaded.lead.temperature || "unknown"}`,
     `Channel: ${loaded.lead.channel || "unknown"}`,
