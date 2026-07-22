@@ -473,9 +473,9 @@ export default function DashboardPage() {
                 setTimeRange(v);
               }}
             >
-              <SelectTrigger size="sm" className="w-32">
-                <Calendar className="h-3.5 w-3.5 mr-1" />
-                <SelectValue>
+              <SelectTrigger size="sm" className="w-auto min-w-40 gap-1.5 whitespace-nowrap">
+                <Calendar className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+                <SelectValue className="whitespace-nowrap">
                   {selectTriggerLabelByKey(timeRange, DASHBOARD_RANGE_OPTIONS) ?? undefined}
                 </SelectValue>
               </SelectTrigger>
