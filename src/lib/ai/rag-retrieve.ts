@@ -1,3 +1,4 @@
+import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import type { AiLibraryScope } from "@/lib/ai/types";
@@ -9,6 +10,18 @@ export type RagChunkHit = {
   libraryId: string;
   documentId: string;
 };
+
+/**
+ * Reads a stored embedding whether it was written as a native Firestore vector
+ * (VectorValue with `.toArray()`) or as a legacy plain number[] array.
+ */
+function embeddingToArray(value: unknown): number[] | undefined {
+  if (!value) return undefined;
+  if (Array.isArray(value)) return value as number[];
+  const maybe = value as { toArray?: () => number[] };
+  if (typeof maybe.toArray === "function") return maybe.toArray();
+  return undefined;
+}
 
 function cosineSimilarity(a: number[], b: number[]): number {
   if (a.length !== b.length || a.length === 0) return 0;
@@ -52,6 +65,90 @@ export function ragHybridScore(semantic: number, keyword: number): number {
   return 0.72 * semantic + 0.28 * keyword;
 }
 
+/**
+ * KNN retrieval via Firestore native vector search (`findNearest`) over the
+ * `chunks` collection group. Pre-filters by organization (always) and by a
+ * single library when exactly one is requested; library/section allow-lists are
+ * post-filtered on the returned neighbours.
+ *
+ * Returns `null` (never throws) when vector search is unavailable — the vector
+ * index has not been deployed yet, or the chunks have not been re-indexed to
+ * native vectors. Callers should fall back to the in-app cosine scan.
+ */
+async function retrieveRagChunksByVectorSearch(input: {
+  organizationId: string;
+  libraryIds?: string[];
+  sections?: string[];
+  topK?: number;
+  queryEmbedding: number[];
+}): Promise<RagChunkHit[] | null> {
+  const db = getAdminDb();
+  if (!db) return null;
+
+  try {
+    let query = db
+      .collectionGroup("chunks")
+      .where("organizationId", "==", input.organizationId);
+
+    // Equality pre-filter is only valid for a single library; multiple libraries
+    // are handled by the post-filter below.
+    if (input.libraryIds && input.libraryIds.length === 1) {
+      query = query.where("libraryId", "==", input.libraryIds[0]);
+    }
+
+    const topK = input.topK ?? 6;
+    // Over-fetch so library/section post-filtering still leaves enough neighbours.
+    const limit = Math.max(topK * 4, 16);
+
+    const snap = await query
+      .findNearest({
+        vectorField: "embedding",
+        queryVector: FieldValue.vector(input.queryEmbedding),
+        limit,
+        distanceMeasure: "COSINE",
+        distanceResultField: "__vectorDistance",
+      })
+      .get();
+
+    // Empty result usually means the chunks are still legacy arrays (not native
+    // vectors); fall back to the cosine scan so retrieval keeps working.
+    if (snap.empty) return null;
+
+    const librarySet =
+      input.libraryIds && input.libraryIds.length > 0 ? new Set(input.libraryIds) : null;
+    const sectionSet =
+      input.sections && input.sections.length > 0 ? new Set(input.sections) : null;
+
+    const hits: RagChunkHit[] = [];
+    for (const chunkSnap of snap.docs) {
+      const data = chunkSnap.data();
+      const libraryId = String(data.libraryId ?? "");
+      if (librarySet && !librarySet.has(libraryId)) continue;
+      if (sectionSet) {
+        const section = data.knowledgeSection as string | null | undefined;
+        if (section && !sectionSet.has(section)) continue;
+      }
+      const distance = Number(data.__vectorDistance ?? 1);
+      const documentId = chunkSnap.ref.parent.parent?.id ?? "";
+      hits.push({
+        title: String(data.title ?? "chunk"),
+        content: String(data.content ?? ""),
+        // COSINE distance in [0,2]; map to a [0,1] similarity for ranking parity.
+        score: 1 - distance,
+        libraryId,
+        documentId,
+      });
+    }
+
+    if (hits.length === 0) return null;
+    return hits.sort((a, b) => b.score - a.score).slice(0, topK);
+  } catch {
+    // Missing/not-yet-built vector index, or an SDK signature mismatch: let the
+    // caller fall back to the in-app cosine scan rather than failing the request.
+    return null;
+  }
+}
+
 export async function retrieveRagChunksServer(input: {
   organizationId: string;
   query: string;
@@ -68,6 +165,24 @@ export async function retrieveRagChunksServer(input: {
 }): Promise<RagChunkHit[]> {
   const db = getAdminDb();
   if (!db) return [];
+
+  // Prefer Firestore native vector search when we have a query embedding and an
+  // explicit library target. It pushes KNN ranking into the database instead of
+  // scanning every chunk in process. We require explicit libraryIds so the
+  // library `scope` matching in the cosine scan below is never silently bypassed
+  // (scope-only library selection still uses the scan). Returns null (and we
+  // fall through to the cosine scan) whenever the vector index or native-vector
+  // chunks are not yet available.
+  if (input.queryEmbedding?.length && input.libraryIds?.length) {
+    const vectorHits = await retrieveRagChunksByVectorSearch({
+      organizationId: input.organizationId,
+      libraryIds: input.libraryIds,
+      sections: input.sections,
+      topK: input.topK,
+      queryEmbedding: input.queryEmbedding,
+    });
+    if (vectorHits) return vectorHits;
+  }
 
   const libsSnap = await db
     .collection(COLLECTIONS.organizations)
@@ -104,7 +219,7 @@ export async function retrieveRagChunksServer(input: {
         const data = chunkSnap.data();
         const content = String(data.content ?? "");
         const title = String(data.title ?? docSnap.data().title ?? "chunk");
-        const embedding = data.embedding as number[] | undefined;
+        const embedding = embeddingToArray(data.embedding);
         const kw = ragKeywordScore(input.query, content);
         let score = kw;
         if (input.queryEmbedding?.length && embedding?.length) {
@@ -153,7 +268,7 @@ export async function retrieveRagChunksForDocumentsServer(input: {
       const data = chunkSnap.data();
       const content = String(data.content ?? "");
       const title = String(data.title ?? docSnap.data()?.title ?? "chunk");
-      const embedding = data.embedding as number[] | undefined;
+      const embedding = embeddingToArray(data.embedding);
       const kw = ragKeywordScore(input.query, content);
       let score = kw;
       if (input.queryEmbedding?.length && embedding?.length) {

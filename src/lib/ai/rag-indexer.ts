@@ -40,6 +40,7 @@ export async function indexAiDocumentServer(input: {
   const content = String(data.content ?? "");
   const libraryId = String(data.libraryId ?? "");
   const title = String(data.title ?? "Document");
+  const knowledgeSection = (data.knowledgeSection as string | undefined) ?? null;
   const chunks = chunkText(content);
 
   const settings = await getOrganizationAiSettingsServer(input.organizationId);
@@ -79,10 +80,17 @@ export async function indexAiDocumentServer(input: {
 
   chunks.forEach((text, idx) => {
     const ref = docRef.collection("chunks").doc(`c_${idx}`);
+    const vector = embeddings[idx] ?? [];
     batch.set(ref, {
       title,
       content: text,
-      embedding: embeddings[idx] ?? [],
+      // Native Firestore vector enables `findNearest` KNN search. Falls back to []
+      // for providers that do not return embeddings (still readable by cosine path).
+      embedding: vector.length ? FieldValue.vector(vector) : [],
+      // Denormalized so vector search + fallback can filter by org/library/section.
+      organizationId: input.organizationId,
+      libraryId,
+      knowledgeSection,
       index: idx,
       updatedAt: new Date().toISOString(),
     });
