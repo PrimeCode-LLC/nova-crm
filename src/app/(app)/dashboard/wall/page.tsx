@@ -65,6 +65,7 @@ export default function DashboardWallPage() {
     followups,
     followupPlans,
     leadTasks,
+    contacts,
     users,
     timelineByLead,
     orgActivityEvents,
@@ -259,10 +260,11 @@ export default function DashboardWallPage() {
         followups,
         plans: followupPlans,
         tasks: leadTasks,
+        contacts,
         currentUserId,
         range,
       }),
-    [leads, followups, followupPlans, leadTasks, currentUserId],
+    [leads, followups, followupPlans, leadTasks, contacts, currentUserId],
   );
 
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
@@ -486,6 +488,7 @@ export default function DashboardWallPage() {
           followups={followups}
           plans={followupPlans}
           tasks={leadTasks}
+          contacts={contacts}
           users={users}
           timelineByLead={timelineByLead}
           orgActivityEvents={orgActivityEvents}

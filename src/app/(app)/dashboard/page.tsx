@@ -684,6 +684,7 @@ export default function DashboardPage() {
                 followups={workflowFollowups}
                 plans={workflowPlans}
                 tasks={workflowTasks}
+                contacts={contacts}
                 users={users}
                 timelineByLead={timelineByLead}
                 orgActivityEvents={orgActivityEvents}

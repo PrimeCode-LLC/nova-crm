@@ -26,6 +26,7 @@ import type { DashboardWidgets } from "@/lib/dashboard-preferences";
 import { defaultWallPreferences, type WallPreferences } from "@/lib/wall-preferences";
 import type {
   ActivityRecord,
+  Contact,
   Deal,
   Followup,
   FollowupPlan,
@@ -96,6 +97,7 @@ export function OwnerOpsBoard({
   followups,
   plans,
   tasks,
+  contacts,
   users,
   timelineByLead,
   orgActivityEvents,
@@ -119,6 +121,7 @@ export function OwnerOpsBoard({
   followups: Followup[];
   plans: FollowupPlan[];
   tasks: LeadTask[];
+  contacts?: Contact[];
   users: User[];
   timelineByLead: Record<string, TimelineEvent[]>;
   orgActivityEvents?: OrgActivityEvent[];
@@ -288,7 +291,14 @@ export function OwnerOpsBoard({
         >
           {widgets.emailVolume ? (
             <div className="min-h-0 flex-1">
-              <EmailVolumeChartWall followups={followups} leads={leads} fill />
+              <EmailVolumeChartWall
+                followups={followups}
+                leads={leads}
+                contacts={contacts}
+                tasks={tasks}
+                timelineByLead={timelineByLead}
+                fill
+              />
             </div>
           ) : null}
           {widgets.followupSchedule ? (
@@ -419,7 +429,13 @@ export function OwnerOpsBoard({
                   )}
                 >
                   {widgets.emailVolume ? (
-                    <EmailVolumeChart followups={followups} leads={leads} />
+                    <EmailVolumeChart
+                      followups={followups}
+                      leads={leads}
+                      contacts={contacts}
+                      tasks={tasks}
+                      timelineByLead={timelineByLead}
+                    />
                   ) : null}
                   {widgets.followupSchedule ? (
                     <FollowupScheduleChart followups={followups} />

@@ -3,8 +3,10 @@ import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
 import type {
   ActivityRecord,
+  Contact,
   Deal,
   Followup,
   Lead,
@@ -25,6 +27,7 @@ export type EmailVolumePoint = {
   key: string;
   sent: number;
   replies: number;
+  bounces: number;
 };
 
 export type FollowupSchedulePoint = {
@@ -99,6 +102,47 @@ function hourLabel(h: number): string {
   return `${h12}${ampm}`;
 }
 
+function isBounceReviewTask(task: LeadTask): boolean {
+  if (task.source === "email_bounce") return true;
+  return task.taskType === "review" && task.title === BOUNCE_REVIEW_TASK_TITLE;
+}
+
+function countInWindow(times: readonly number[], startMs: number, endMs: number): number {
+  return times.filter((t) => t >= startMs && t < endMs).length;
+}
+
+/** Bounce event timestamps for the email-volume series (timeline → contacts → tasks). */
+export function collectEmailBounceTimes(input: {
+  contacts?: readonly Contact[];
+  tasks?: readonly LeadTask[];
+  timelineByLead?: Record<string, readonly TimelineEvent[]>;
+}): number[] {
+  const fromTimeline: number[] = [];
+  if (input.timelineByLead) {
+    for (const events of Object.values(input.timelineByLead)) {
+      for (const event of events) {
+        if (event.type !== "email_bounced") continue;
+        const t = validTime(event.createdAt);
+        if (t !== undefined) fromTimeline.push(t);
+      }
+    }
+  }
+  if (fromTimeline.length > 0) return fromTimeline;
+
+  const times: number[] = [];
+  for (const contact of input.contacts ?? []) {
+    if (contact.emailVerificationStatus !== "bounced") continue;
+    const t = validTime(contact.emailBouncedAt);
+    if (t !== undefined) times.push(t);
+  }
+  for (const task of input.tasks ?? []) {
+    if (!isBounceReviewTask(task)) continue;
+    const t = validTime(task.createdAt);
+    if (t !== undefined) times.push(t);
+  }
+  return times;
+}
+
 /** Owner / manager ops board vs frontline personal dashboard. */
 export function showOwnerOpsDashboard(
   viewer: User | undefined,
@@ -127,10 +171,18 @@ export function buildEmailVolumeSeries(input: {
   leads: readonly Lead[];
   period: EmailVolumePeriod;
   now?: Date;
+  contacts?: readonly Contact[];
+  tasks?: readonly LeadTask[];
+  timelineByLead?: Record<string, readonly TimelineEvent[]>;
 }): EmailVolumePoint[] {
   const now = input.now ?? new Date();
   const sent = input.followups.filter((f) => f.deliveryStatus === "sent" && validTime(f.sentAt) !== undefined);
   const replies = input.leads.filter((l) => validTime(l.lastReplyAt) !== undefined);
+  const bounceTimes = collectEmailBounceTimes({
+    contacts: input.contacts,
+    tasks: input.tasks,
+    timelineByLead: input.timelineByLead,
+  });
 
   if (input.period === "today") {
     const start = startOfLocalDay(now);
@@ -153,6 +205,7 @@ export function buildEmailVolumeSeries(input: {
           const t = validTime(l.lastReplyAt)!;
           return t >= bs && t < be;
         }).length,
+        bounces: countInWindow(bounceTimes, bs, be),
       });
     }
     return points;
@@ -179,6 +232,7 @@ export function buildEmailVolumeSeries(input: {
         const t = validTime(l.lastReplyAt)!;
         return t >= bs && t < be;
       }).length,
+      bounces: countInWindow(bounceTimes, bs, be),
     });
   }
   return points;
@@ -538,9 +592,17 @@ export function buildActionBoard(input: {
   return { urgentTasks, pendingTasks, overdueFollowups, todayMeetings, upcomingMeetings };
 }
 
-export function emailVolumeTotals(points: readonly EmailVolumePoint[]): { sent: number; replies: number } {
+export function emailVolumeTotals(points: readonly EmailVolumePoint[]): {
+  sent: number;
+  replies: number;
+  bounces: number;
+} {
   return points.reduce(
-    (acc, p) => ({ sent: acc.sent + p.sent, replies: acc.replies + p.replies }),
-    { sent: 0, replies: 0 },
+    (acc, p) => ({
+      sent: acc.sent + p.sent,
+      replies: acc.replies + p.replies,
+      bounces: acc.bounces + p.bounces,
+    }),
+    { sent: 0, replies: 0, bounces: 0 },
   );
 }

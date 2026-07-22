@@ -12,7 +12,7 @@ import {
 } from "@/lib/dashboard-ops-analytics";
 import { fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Followup, Lead } from "@/lib/types";
+import type { Contact, Followup, Lead, LeadTask, TimelineEvent } from "@/lib/types";
 
 const PERIODS: { key: EmailVolumePeriod; label: string }[] = [
   { key: "today", label: "Today" },
@@ -23,19 +23,33 @@ const PERIODS: { key: EmailVolumePeriod; label: string }[] = [
 export function EmailVolumeChart({
   followups,
   leads,
+  contacts,
+  tasks,
+  timelineByLead,
   compact,
   fill,
 }: {
   followups: Followup[];
   leads: Lead[];
+  contacts?: Contact[];
+  tasks?: LeadTask[];
+  timelineByLead?: Record<string, TimelineEvent[]>;
   compact?: boolean;
   /** Grow to fill the parent's height instead of a fixed chart height. */
   fill?: boolean;
 }) {
   const [period, setPeriod] = React.useState<EmailVolumePeriod>("week");
   const data = React.useMemo(
-    () => buildEmailVolumeSeries({ followups, leads, period }),
-    [followups, leads, period],
+    () =>
+      buildEmailVolumeSeries({
+        followups,
+        leads,
+        period,
+        contacts,
+        tasks,
+        timelineByLead,
+      }),
+    [followups, leads, period, contacts, tasks, timelineByLead],
   );
   const totals = React.useMemo(() => emailVolumeTotals(data), [data]);
   const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });
@@ -47,7 +61,8 @@ export function EmailVolumeChart({
           <div>
             <CardTitle className="text-sm font-semibold">Email volume</CardTitle>
             <CardDescription className="text-xs">
-              Sent vs replies · {fmtNumber(totals.sent)} sent · {fmtNumber(totals.replies)} replies
+              Sent · replies · bounces · {fmtNumber(totals.sent)} sent ·{" "}
+              {fmtNumber(totals.replies)} replies · {fmtNumber(totals.bounces)} bounced
             </CardDescription>
           </div>
           {!compact ? (
@@ -68,10 +83,18 @@ export function EmailVolumeChart({
           ) : null}
         </div>
       </CardHeader>
-      <CardContent className={cn("pt-0", fill && "min-h-0 flex-1")}>
+      <CardContent
+        className={cn(
+          "pt-0",
+          fill && "flex min-h-0 flex-1 flex-col overflow-hidden pb-1",
+        )}
+      >
         <div
           ref={wrapRef}
-          className={cn("w-full min-w-0", fill ? "h-full min-h-[120px]" : compact ? "h-36" : "h-52")}
+          className={cn(
+            "w-full min-w-0",
+            fill ? "min-h-0 flex-1" : compact ? "h-36" : "h-52",
+          )}
         >
           {chartSize.w > 0 && chartSize.h > 0 ? (
             <AreaChart
@@ -88,6 +111,10 @@ export function EmailVolumeChart({
                 <linearGradient id="opsReplies" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.35} />
                   <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="opsBounces" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--destructive)" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="var(--destructive)" stopOpacity={0} />
                 </linearGradient>
               </defs>
               <CartesianGrid vertical={false} stroke="var(--border)" />
@@ -132,8 +159,30 @@ export function EmailVolumeChart({
                 fill="url(#opsReplies)"
                 isAnimationActive={!compact}
               />
+              <Area
+                type="monotone"
+                dataKey="bounces"
+                name="Bounces"
+                stroke="var(--destructive)"
+                strokeWidth={2}
+                fill="url(#opsBounces)"
+                isAnimationActive={!compact}
+              />
             </AreaChart>
           ) : null}
+        </div>
+        <div className="mt-2 flex shrink-0 flex-wrap gap-x-4 gap-y-1 pb-0.5 text-[11px] leading-none text-muted-foreground">
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-1)" }} />{" "}
+            Sent
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-2)" }} />{" "}
+            Replies
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 shrink-0 rounded-sm bg-destructive" /> Bounces
+          </span>
         </div>
       </CardContent>
     </Card>
