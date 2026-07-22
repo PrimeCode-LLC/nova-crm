@@ -1,8 +1,9 @@
 import type { ActivityCounterRow, ActivityRecord, Deal, Lead } from "@/lib/types";
 
-export type DashboardTimeRangeKey = "1d" | "7d" | "30d" | "90d" | "qtd" | "ytd" | "all";
+export type DashboardTimeRangeKey = "12h" | "1d" | "7d" | "30d" | "90d" | "qtd" | "ytd" | "all";
 
 export const DASHBOARD_TIME_RANGE_LABELS: Record<DashboardTimeRangeKey, string> = {
+  "12h": "Last 12 hours",
   "1d": "Last 24 hours",
   "7d": "Last 7 days",
   "30d": "Last 30 days",
@@ -13,10 +14,11 @@ export const DASHBOARD_TIME_RANGE_LABELS: Record<DashboardTimeRangeKey, string> 
 };
 
 /** Compact presets shown on Team Command (and similar ops widgets). */
-export const TEAM_COMMAND_TIME_RANGES = ["1d", "7d", "30d", "all"] as const;
+export const TEAM_COMMAND_TIME_RANGES = ["12h", "1d", "7d", "30d", "all"] as const;
 export type TeamCommandTimeRangeKey = (typeof TEAM_COMMAND_TIME_RANGES)[number];
 
 export const TEAM_COMMAND_TIME_RANGE_SHORT_LABELS: Record<TeamCommandTimeRangeKey, string> = {
+  "12h": "12h",
   "1d": "24h",
   "7d": "7d",
   "30d": "30d",
@@ -28,6 +30,10 @@ export function getDashboardRangeStart(key: DashboardTimeRangeKey, now = new Dat
     return new Date(0);
   }
   const d = new Date(now);
+  if (key === "12h") {
+    d.setTime(d.getTime() - 12 * 60 * 60 * 1000);
+    return d;
+  }
   if (key === "1d") {
     d.setTime(d.getTime() - 24 * 60 * 60 * 1000);
     return d;
