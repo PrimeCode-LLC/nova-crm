@@ -302,6 +302,10 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
     supersededByPlanId:
       typeof raw.supersededByPlanId === "string" ? raw.supersededByPlanId : undefined,
     completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
+    sourceScriptId:
+      typeof raw.sourceScriptId === "string" && raw.sourceScriptId.trim()
+        ? raw.sourceScriptId.trim()
+        : undefined,
   };
 }
 

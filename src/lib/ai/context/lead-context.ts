@@ -61,6 +61,11 @@ export function buildLeadAiContext(input: {
   persona?: BuyerPersona;
   strategyAssignment?: StrategyAssignment;
   caseStudy?: ScriptLibraryItem;
+  /** Optional Script library template chosen in Build sequence (style guide — not pasted). */
+  selectedTemplate?: Pick<
+    ScriptLibraryItem,
+    "id" | "title" | "category" | "primaryText" | "secondaryText"
+  > | null;
   labels?: CrmLabel[];
 }): string {
   const { lead, account, contact, deal, notes, timeline, touchpoints, followups, tasks } = input;
@@ -96,6 +101,7 @@ export function buildLeadAiContext(input: {
     buyerPersona: contextValue(input.persona ?? null),
     strategyAssignment: contextValue(input.strategyAssignment ?? null),
     linkedCaseStudyOrScript: contextValue(input.caseStudy ?? null),
+    selectedTemplate: contextValue(input.selectedTemplate ?? null),
     labels: contextValue(input.labels ?? []),
     notes: contextValue(notes.slice(0, 30)),
     timeline: contextValue(timeline.slice(0, 40)),

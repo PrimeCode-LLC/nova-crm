@@ -16,14 +16,18 @@ export async function recordScraperRunOrgActivity(input: {
   newTotal: number;
   feedCount: number;
   feedName?: string;
+  /** Cron / due-feed runs (actor is usually `system`). */
+  scheduled?: boolean;
 }): Promise<void> {
   const db = getAdminDb();
   if (!db) return;
 
-  const summary =
+  const posts = `fetched ${input.newTotal} new post${input.newTotal === 1 ? "" : "s"}`;
+  const body =
     input.feedName != null
-      ? `${input.feedName}: fetched ${input.newTotal} new post${input.newTotal === 1 ? "" : "s"}`
-      : `Fetched ${input.newTotal} new post${input.newTotal === 1 ? "" : "s"} from ${input.feedCount} feed${input.feedCount === 1 ? "" : "s"}`;
+      ? `${input.feedName}: ${posts}`
+      : `${posts} from ${input.feedCount} feed${input.feedCount === 1 ? "" : "s"}`;
+  const summary = input.scheduled ? `Scheduled scrape — ${body}` : body.charAt(0).toUpperCase() + body.slice(1);
 
   const oaId = newOrgActivityId();
   await db.collection(COLLECTIONS.orgActivityEvents).doc(oaId).set(
@@ -40,6 +44,7 @@ export async function recordScraperRunOrgActivity(input: {
           newTotal: input.newTotal,
           feedCount: input.feedCount,
           feedName: input.feedName ?? null,
+          scheduled: input.scheduled === true,
         },
       },
       input.actorId,

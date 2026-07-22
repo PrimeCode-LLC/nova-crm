@@ -15,7 +15,9 @@ import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { recordAudit } from "@/lib/firestore/audit";
-import type { ChannelKey, Role } from "@/lib/types";
+import { getScriptServer } from "@/lib/platform/script-library-server";
+import { roleAtLeast } from "@/lib/platform/org-role";
+import type { ChannelKey, Role, ScriptLibraryItem } from "@/lib/types";
 import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
 
 const CHANNEL_VALUES = [
@@ -64,10 +66,20 @@ function normalizeSuggestResult(result: z.infer<typeof suggestSchema>) {
   };
 }
 
+const selectedTemplateSchema = z.object({
+  id: z.string().min(1),
+  title: z.string().max(200),
+  category: z.string().max(40),
+  primaryText: z.string().max(10_000),
+  secondaryText: z.string().max(10_000).optional(),
+});
+
 const bodySchema = z.object({
   leadId: z.string().min(1),
   userPrompt: z.string().max(500).optional(),
   sequenceMode: z.enum(["full", "continue"]).optional(),
+  /** Optional Script library id — style guide only; omit to generate without a template. */
+  scriptId: z.string().min(1).max(120).optional(),
   singleStep: z.boolean().optional(),
   regenerateContext: z.string().max(800).optional(),
   followupPlans: z
@@ -115,6 +127,8 @@ const bodySchema = z.object({
       persona: z.record(z.string(), z.unknown()).optional(),
       strategyAssignment: z.record(z.string(), z.unknown()).optional(),
       caseStudy: z.record(z.string(), z.unknown()).optional(),
+      /** Demo-only: client-resolved template when scriptId is not in Firestore. */
+      selectedTemplate: selectedTemplateSchema.optional(),
       labels: z.array(z.record(z.string(), z.unknown())).optional(),
       emailThreads: z
         .array(
@@ -177,10 +191,42 @@ export async function POST(req: Request) {
     );
   }
 
+  let selectedTemplate: Pick<
+    ScriptLibraryItem,
+    "id" | "title" | "category" | "primaryText" | "secondaryText"
+  > | null = null;
+  const scriptId = parsed.data.scriptId?.trim();
+  if (scriptId) {
+    const script = await getScriptServer(scriptId);
+    const canUse =
+      script &&
+      script.organizationId === orgId &&
+      (roleAtLeast(g.ctx.role, "admin") || script.ownerUid === uid);
+    if (canUse && script) {
+      selectedTemplate = {
+        id: script.id,
+        title: script.title,
+        category: script.category,
+        primaryText: script.primaryText,
+        secondaryText: script.secondaryText,
+      };
+    } else if (parsed.data.demoContext?.selectedTemplate?.id === scriptId) {
+      const t = parsed.data.demoContext.selectedTemplate;
+      selectedTemplate = {
+        id: t.id,
+        title: t.title,
+        category: t.category as ScriptLibraryItem["category"],
+        primaryText: t.primaryText,
+        secondaryText: t.secondaryText,
+      };
+    }
+  }
+
   const context = buildLeadAiContext({
     ...loaded,
     followupPlans: parsed.data.followupPlans as import("@/lib/types").FollowupPlan[] | undefined,
     regenerateContext: parsed.data.regenerateContext,
+    selectedTemplate,
   });
   const contactTitle = loaded.contact?.title?.trim() || loaded.lead.contactTitle;
   const personalizationProfile = buildFollowupPersonalizationProfile({
@@ -241,6 +287,9 @@ export async function POST(req: Request) {
     : sequenceMode === "continue"
       ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+)."
       : "Full personalized outreach from first touch through last email/touch.";
+  const templateHint = selectedTemplate
+    ? `Rep selected style template "${selectedTemplate.title}" (${selectedTemplate.category}). Match its tone, length, structure, and CTA style — rewrite for this lead; do not copy verbatim. Full text is in context.selectedTemplate.`
+    : "(none — no style template selected; generate from lead context and instructions only)";
 
   try {
     const result = await runAiStructuredFeature({
@@ -255,6 +304,7 @@ export async function POST(req: Request) {
         userPrompt,
         sequenceMode,
         sequenceModeHint,
+        templateHint,
         regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
         roleGuidance,
       },
@@ -270,6 +320,7 @@ export async function POST(req: Request) {
         itemCount: result.items.length,
         sequenceMode,
         singleStep: parsed.data.singleStep === true,
+        scriptId: selectedTemplate?.id ?? null,
       },
     });
     return NextResponse.json({

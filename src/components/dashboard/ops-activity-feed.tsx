@@ -14,11 +14,13 @@ import {
   ShieldAlert,
   ShieldCheck,
   Sparkles,
+  Trash2,
   UploadCloud,
   UserPlus,
   Users,
   Workflow,
   Rss,
+  EyeOff,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UserChip } from "@/components/common/user-chip";
@@ -54,6 +56,9 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   strategy_assignment_removed: Crosshair,
   strategy_pack_imported: Package,
   intake_promoted: UploadCloud,
+  intake_dismissed: EyeOff,
+  intake_deleted: Trash2,
+  intake_pool_emptied: Trash2,
   scraper_run: Rss,
   import_completed: UploadCloud,
   wall_exit_denied: ShieldAlert,
@@ -91,7 +96,11 @@ function FeedRow({ item, wall }: { item: OpsFeedItem; wall?: boolean }) {
           {item.summary}
         </p>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-          {item.actorId ? <UserChip userId={item.actorId} size="xs" /> : null}
+          {item.actorId === "system" ? (
+            <span>System</span>
+          ) : item.actorId ? (
+            <UserChip userId={item.actorId} size="xs" />
+          ) : null}
           <span>{fmtRelative(item.createdAt)}</span>
         </div>
       </div>

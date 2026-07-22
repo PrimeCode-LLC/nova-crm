@@ -704,6 +704,8 @@ export interface FollowupPlan {
   supersededByPlanId?: string;
   /** Set when every step in the sequence has been completed or sent. */
   completedAt?: ISODate;
+  /** Optional Script library item used as a style guide when the sequence was generated. */
+  sourceScriptId?: string;
 }
 
 export interface Followup {
@@ -1010,6 +1012,9 @@ export type OrgActivityEventType =
   | "strategy_assignment_removed"
   | "strategy_pack_imported"
   | "intake_promoted"
+  | "intake_dismissed"
+  | "intake_deleted"
+  | "intake_pool_emptied"
   | "scraper_run"
   | "import_completed"
   | "wall_exit_denied"

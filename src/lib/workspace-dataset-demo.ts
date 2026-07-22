@@ -152,7 +152,9 @@ function applyDemoPersonaScope(snapshot: WorkspaceSnapshot): WorkspaceSnapshot {
   const orgActivityEvents =
     activityActorIds === null
       ? snapshot.orgActivityEvents
-      : snapshot.orgActivityEvents.filter((e) => activityActorIds.has(e.actorId));
+      : snapshot.orgActivityEvents.filter(
+          (e) => e.actorId === "system" || activityActorIds.has(e.actorId),
+        );
 
   return {
     ...snapshot,

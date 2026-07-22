@@ -7,6 +7,7 @@ import {
   dismissScraperRawItemsBulkServer,
   listScraperRawItemsServer,
 } from "@/lib/scrapers/raw-items-server";
+import { recordIntakeOrgActivity } from "@/lib/scrapers/record-intake-org-activity";
 import type { ScraperCategory, ScraperPlatform, ScraperRawItemStatus } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -100,6 +101,12 @@ export async function PATCH(req: Request) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    void recordIntakeOrgActivity({
+      organizationId: g.ctx.session.organizationId,
+      actorId: g.ctx.session.uid,
+      type: "intake_pool_emptied",
+      count: 1,
+    });
     return NextResponse.json({
       ok: true,
       previousEpoch: result.previousEpoch,
@@ -138,6 +145,14 @@ export async function PATCH(req: Request) {
             if ("error" in result) {
               send({ type: "error", error: result.error });
             } else {
+              if (result.deletedIds.length > 0) {
+                void recordIntakeOrgActivity({
+                  organizationId: g.ctx.session.organizationId,
+                  actorId: g.ctx.session.uid,
+                  type: "intake_deleted",
+                  count: result.deletedIds.length,
+                });
+              }
               send({
                 type: "complete",
                 deletedIds: result.deletedIds,
@@ -156,6 +171,14 @@ export async function PATCH(req: Request) {
             if ("error" in result) {
               send({ type: "error", error: result.error });
             } else {
+              if (result.dismissedIds.length > 0) {
+                void recordIntakeOrgActivity({
+                  organizationId: g.ctx.session.organizationId,
+                  actorId: g.ctx.session.uid,
+                  type: "intake_dismissed",
+                  count: result.dismissedIds.length,
+                });
+              }
               send({
                 type: "complete",
                 dismissedIds: result.dismissedIds,
@@ -197,6 +220,14 @@ export async function PATCH(req: Request) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    if (result.deletedIds.length > 0) {
+      void recordIntakeOrgActivity({
+        organizationId: g.ctx.session.organizationId,
+        actorId: g.ctx.session.uid,
+        type: "intake_deleted",
+        count: result.deletedIds.length,
+      });
+    }
     return NextResponse.json({
       deletedIds: result.deletedIds,
       count: result.deletedIds.length,
@@ -212,6 +243,15 @@ export async function PATCH(req: Request) {
 
   if ("error" in result) {
     return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+
+  if (result.dismissedIds.length > 0) {
+    void recordIntakeOrgActivity({
+      organizationId: g.ctx.session.organizationId,
+      actorId: g.ctx.session.uid,
+      type: "intake_dismissed",
+      count: result.dismissedIds.length,
+    });
   }
 
   return NextResponse.json({

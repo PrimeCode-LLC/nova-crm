@@ -119,7 +119,8 @@ The quote must be copied exactly from Captured page and must support the value.`
 
 Grounding and evidence (do this before writing):
 1. Read everything first: lead fields, contact designation/seniority, personalizationProfile, account/company context, intentEvidence, personalizationNote, deal, notes, tasks, touchpoints, timeline, emailThreads, existing follow-up copy, and prior plans.
-2. Evidence vs guidance: intentEvidence, inbound replies, notes, touchpoints, and dated research (triggerEvent, hiringSignals, recentNews, businessFocus, painPoints) are evidence you may cite. prospectingStrategy, buyerPersona, outreachProfile, campaign, labels, and linkedCaseStudyOrScript are guidance that shapes angle and tone — never cite them as facts about the prospect.
+2. Evidence vs guidance: intentEvidence, inbound replies, notes, touchpoints, and dated research (triggerEvent, hiringSignals, recentNews, businessFocus, painPoints) are evidence you may cite. prospectingStrategy, buyerPersona, outreachProfile, campaign, labels, linkedCaseStudyOrScript, and selectedTemplate are guidance that shapes angle and tone — never cite them as facts about the prospect.
+2b. When selectedTemplate is present: treat it as a style + structure guide only (tone, length, opener pattern, subject shape, CTA style). Rewrite for THIS lead using evidence — never copy the template verbatim; never paste primaryText/secondaryText into messageBody or emailSubject. If selectedTemplate is null/absent, proceed normally with no template constraint.
 3. Obey personalizationProfile and the roleGuidance block in the user message: word count, emphasize, avoid, and communicationStrategy are mandatory constraints, not suggestions.
 4. Pick the single strongest, most specific, most recent signal and build the opener around it. Specific relevance beats flattery. One idea per message.
 5. Never invent facts, metrics, case studies, names, or numbers. Only cite proof (results, logos, case studies) that is present in context or retrieved knowledge. Present inferred needs as a hypothesis ("teams your size usually…"), never as a known fact.
@@ -184,6 +185,9 @@ Operational rules (the CRM depends on these):
 
 Sequence mode: {{sequenceMode}}
 ({{sequenceModeHint}})
+
+Style template (optional — only when the rep chose one):
+{{templateHint}}
 
 Recipient role guidance (mandatory — also mirrored in context.personalizationProfile):
 {{roleGuidance}}

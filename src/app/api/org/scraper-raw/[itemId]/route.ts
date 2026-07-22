@@ -6,6 +6,7 @@ import {
   dismissScraperRawItemServer,
   getScraperRawItemServer,
 } from "@/lib/scrapers/raw-items-server";
+import { recordIntakeOrgActivity } from "@/lib/scrapers/record-intake-org-activity";
 
 type RouteCtx = { params: Promise<{ itemId: string }> };
 
@@ -44,10 +45,19 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    void recordIntakeOrgActivity({
+      organizationId: g.ctx.session.organizationId,
+      actorId: g.ctx.session.uid,
+      type: "intake_dismissed",
+      count: 1,
+      title: result.item.title,
+      itemId,
+    });
     return NextResponse.json({ item: result.item });
   }
 
   if (action === "delete") {
+    const existing = await getScraperRawItemServer(g.ctx.session.organizationId, itemId);
     const result = await deleteScraperRawItemServer({
       organizationId: g.ctx.session.organizationId,
       itemId,
@@ -55,6 +65,14 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     if ("error" in result) {
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
+    void recordIntakeOrgActivity({
+      organizationId: g.ctx.session.organizationId,
+      actorId: g.ctx.session.uid,
+      type: "intake_deleted",
+      count: 1,
+      title: existing?.title,
+      itemId,
+    });
     return NextResponse.json({ deletedId: result.deletedId });
   }
 

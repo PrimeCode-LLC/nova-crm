@@ -175,11 +175,27 @@ export async function runAllOrganizationsScrapersDueServer(): Promise<{
   }
 
   const results: RunFeedResult[] = [];
-  for (const feeds of byOrg.values()) {
+  for (const [organizationId, feeds] of byOrg.entries()) {
+    const orgResults: RunFeedResult[] = [];
     for (let i = 0; i < feeds.length; i += FEED_CONCURRENCY) {
       const chunk = feeds.slice(i, i + FEED_CONCURRENCY);
       const chunkResults = await Promise.all(chunk.map((f) => runOneFeed(f)));
-      results.push(...chunkResults);
+      orgResults.push(...chunkResults);
+    }
+    results.push(...orgResults);
+
+    if (orgResults.length > 0) {
+      const newTotal = orgResults.reduce((n, r) => n + r.newCount, 0);
+      const { recordScraperRunOrgActivity } = await import(
+        "@/lib/scrapers/record-scraper-run-activity"
+      );
+      void recordScraperRunOrgActivity({
+        organizationId,
+        actorId: "system",
+        newTotal,
+        feedCount: orgResults.length,
+        scheduled: true,
+      });
     }
   }
   return { orgCount: byOrg.size, results };

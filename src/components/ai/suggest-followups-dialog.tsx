@@ -55,6 +55,7 @@ import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { cn } from "@/lib/utils";
 import type { LeadAiContextInput } from "@/lib/ai/load-lead-ai-context-server";
 import { toast } from "sonner";
+import { ScriptTemplatePicker } from "@/components/ai/script-template-picker";
 
 export type LeadFollowupAiContext = {
   lead: Lead;
@@ -147,6 +148,8 @@ export function SuggestFollowupsDialog({
   const [planSummary, setPlanSummary] = React.useState("");
   const [items, setItems] = React.useState<EditableItem[]>([]);
   const [leadChannel, setLeadChannel] = React.useState<ChannelKey>(lead.channel);
+  const [scriptId, setScriptId] = React.useState("");
+  const [selectedScript, setSelectedScript] = React.useState<ScriptLibraryItem | null>(null);
 
   React.useEffect(() => {
     if (!open) return;
@@ -164,6 +167,8 @@ export function SuggestFollowupsDialog({
     setPlanSummary("");
     setItems([]);
     setLeadChannel(lead.channel);
+    setScriptId(regenerateFromPlan?.sourceScriptId ?? "");
+    setSelectedScript(null);
   }, [open, lead.id, lead.channel, regenerateFromPlan, initialSequenceMode]);
 
   function demoContextPayload(): LeadAiContextInput | undefined {
@@ -218,6 +223,24 @@ export function SuggestFollowupsDialog({
     setLoading(true);
     setError(null);
     try {
+      const demoBase = demoContextPayload();
+      const demoContext =
+        isDemo && demoBase
+          ? {
+              ...demoBase,
+              ...(selectedScript
+                ? {
+                    selectedTemplate: {
+                      id: selectedScript.id,
+                      title: selectedScript.title,
+                      category: selectedScript.category,
+                      primaryText: selectedScript.primaryText,
+                      secondaryText: selectedScript.secondaryText,
+                    },
+                  }
+                : {}),
+            }
+          : undefined;
       const res = await fetch("/api/ai/followup-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -225,6 +248,7 @@ export function SuggestFollowupsDialog({
           leadId: lead.id,
           userPrompt: userPrompt.trim() || undefined,
           sequenceMode,
+          scriptId: scriptId || undefined,
           regenerateContext: regenerateFromPlan
             ? `${regenerateFromPlan.pausedReason ?? "Lead replied"}. Prior: ${regenerateFromPlan.planSummary}`
             : undefined,
@@ -236,7 +260,7 @@ export function SuggestFollowupsDialog({
             pausedAt: p.pausedAt,
           })),
           emailThreads: aiContext.emailThreads,
-          demoContext: demoContextPayload(),
+          demoContext,
         }),
       });
       const data = await res.json();
@@ -285,6 +309,7 @@ export function SuggestFollowupsDialog({
       sequenceMode,
       createdAt: new Date().toISOString(),
       supersededByPlanId: undefined,
+      sourceScriptId: scriptId || undefined,
     };
     const created: Followup[] = selected.map((it) => ({
       id: newFollowupId(),
@@ -362,6 +387,18 @@ export function SuggestFollowupsDialog({
                 </div>
               </div>
             ) : null}
+            <ScriptTemplatePicker
+              key={`tpl-${open ? "1" : "0"}-${regenerateFromPlan?.id ?? "new"}-${sequenceMode}`}
+              isDemo={isDemo}
+              viewerId={currentUserId}
+              sequenceMode={sequenceMode}
+              value={scriptId}
+              preferredScriptId={regenerateFromPlan?.sourceScriptId}
+              onChange={(id, item) => {
+                setScriptId(id);
+                setSelectedScript(item);
+              }}
+            />
             <div className="grid gap-2">
               <Label htmlFor="followup-ai-prompt" className="text-xs">
                 Instructions (optional)
@@ -376,8 +413,8 @@ export function SuggestFollowupsDialog({
                 maxLength={500}
               />
               <p className="text-[10px] text-muted-foreground">
-                Combined with full lead context: stage, notes, emails, open follow-ups, and scripts
-                (when RAG is enabled).
+                Combined with full lead context: stage, notes, emails, open follow-ups, optional
+                template above, and RAG scripts (when enabled).
               </p>
             </div>
             {error && <p className="text-xs text-destructive">{error}</p>}
