@@ -1,7 +1,39 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ArrowDownRight, ArrowUpRight, Minus, type LucideIcon } from "lucide-react";
+
+export type KpiTone = "default" | "info" | "accent" | "success" | "warn" | "danger";
+
+const TONE_STYLES: Record<
+  Exclude<KpiTone, "default">,
+  { shell: string; icon: string; value?: string }
+> = {
+  info: {
+    shell: "border-chart-1/25 bg-chart-1/[0.04]",
+    icon: "text-chart-1",
+  },
+  accent: {
+    shell: "border-chart-2/25 bg-chart-2/[0.04]",
+    icon: "text-chart-2",
+  },
+  success: {
+    shell: "border-success/25 bg-success/[0.04]",
+    icon: "text-success",
+    value: "text-success",
+  },
+  warn: {
+    shell: "border-warning/30 bg-warning/[0.05]",
+    icon: "text-warning",
+    value: "text-warning",
+  },
+  danger: {
+    shell: "border-destructive/30 bg-destructive/[0.05]",
+    icon: "text-destructive",
+    value: "text-destructive",
+  },
+};
 
 export function KpiCard({
   label,
@@ -15,10 +47,11 @@ export function KpiCard({
   onClick,
   selected,
   dense,
+  tone = "default",
 }: {
   label: string;
-  value: React.ReactNode;
-  hint?: React.ReactNode;
+  value: ReactNode;
+  hint?: ReactNode;
   delta?: number; // percent change
   icon?: LucideIcon;
   deltaType?: "auto" | "positive-up" | "positive-down";
@@ -29,6 +62,8 @@ export function KpiCard({
   selected?: boolean;
   /** Tighter padding/type for wall / dense strips. */
   dense?: boolean;
+  /** Semantic accent for glanceability (urgency / status). */
+  tone?: KpiTone;
 }) {
   let trend: "up" | "down" | "flat" = "flat";
   if (delta != null) {
@@ -42,6 +77,7 @@ export function KpiCard({
   const TrendIcon = trend === "up" ? ArrowUpRight : trend === "down" ? ArrowDownRight : Minus;
 
   const interactive = Boolean(href || onClick);
+  const toneStyle = tone === "default" ? null : TONE_STYLES[tone];
 
   const card = (
     <Card
@@ -49,6 +85,7 @@ export function KpiCard({
         "relative h-full overflow-hidden transition-colors",
         interactive && "cursor-pointer hover:bg-muted/40",
         selected && "ring-2 ring-primary/60 border-primary/40",
+        toneStyle?.shell,
         className,
       )}
       role={interactive && !href ? "button" : undefined}
@@ -65,8 +102,21 @@ export function KpiCard({
           : undefined
       }
     >
+      {tone !== "default" ? (
+        <span
+          aria-hidden
+          className={cn(
+            "absolute inset-y-0 left-0 w-0.5",
+            tone === "info" && "bg-chart-1",
+            tone === "accent" && "bg-chart-2",
+            tone === "success" && "bg-success",
+            tone === "warn" && "bg-warning",
+            tone === "danger" && "bg-destructive",
+          )}
+        />
+      ) : null}
       <CardContent className={cn("flex h-full flex-col", dense ? "p-2.5" : "p-4")}>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-2">
           <span
             className={cn(
               "font-medium uppercase tracking-wide text-muted-foreground",
@@ -77,13 +127,21 @@ export function KpiCard({
           </span>
           {Icon ? (
             <Icon
-              className={cn("text-muted-foreground/70", dense ? "h-3.5 w-3.5" : "h-4 w-4")}
+              className={cn(
+                "shrink-0",
+                dense ? "h-3.5 w-3.5" : "h-4 w-4",
+                toneStyle?.icon ?? "text-muted-foreground/70",
+              )}
             />
           ) : null}
         </div>
         <div className={cn("flex items-baseline gap-2", dense ? "mt-1" : "mt-2")}>
           <span
-            className={cn("font-semibold tabular-nums", dense ? "text-xl" : "text-2xl")}
+            className={cn(
+              "font-semibold tabular-nums",
+              dense ? "text-xl" : "text-2xl",
+              (tone === "danger" || tone === "warn") && toneStyle?.value,
+            )}
           >
             {value}
           </span>

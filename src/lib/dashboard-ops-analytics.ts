@@ -1,6 +1,7 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
+import { canAction, type PermissionSubject } from "@/lib/permissions/can";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
 import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
@@ -148,7 +149,12 @@ export function showOwnerOpsDashboard(
   viewer: User | undefined,
   /** Live org membership role — used when the CRM user doc is incomplete. */
   orgRole?: OrgMemberRole | null,
+  /** Optional permission subject — custom roles with `dashboard.view_team_ops` qualify. */
+  permissionSubject?: PermissionSubject,
 ): boolean {
+  if (permissionSubject && canAction(permissionSubject, "dashboard.view_team_ops")) {
+    return true;
+  }
   if (viewer) {
     if (viewerHasElevatedWorkspaceRole(viewer)) return true;
     if (viewer.orgRole === "manager") return true;

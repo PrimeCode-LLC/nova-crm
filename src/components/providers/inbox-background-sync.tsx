@@ -37,8 +37,9 @@ export function InboxBackgroundSync() {
 
   const bootstrappedRef = React.useRef(false);
   const syncingRef = React.useRef(false);
+  const lastSyncAtRef = React.useRef(0);
 
-  const runSync = React.useCallback(async () => {
+  const runSync = React.useCallback(async (opts?: { force?: boolean }) => {
     if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
     if (!emailServerSyncEnabled) return;
 
@@ -46,6 +47,8 @@ export function InboxBackgroundSync() {
     const acct = getActiveMailbox(st);
     if (!isImapInboxConfigured(acct)) return;
     if (syncingRef.current) return;
+    // Tab-focus / visibility shouldn't re-hit IMAP if we just synced.
+    if (!opts?.force && Date.now() - lastSyncAtRef.current < 60_000) return;
 
     syncingRef.current = true;
     const before = snapshotUnreadMailUids(st.inboundByMailbox[acct.id] ?? []);
@@ -87,6 +90,7 @@ export function InboxBackgroundSync() {
         }
       }
       bootstrappedRef.current = true;
+      lastSyncAtRef.current = Date.now();
     } catch {
       /* best-effort */
     } finally {
@@ -113,10 +117,10 @@ export function InboxBackgroundSync() {
     const acct = getActiveMailbox({ mailboxes, activeMailboxId });
     if (!isImapInboxConfigured(acct)) return;
 
-    void runSync();
+    void runSync({ force: true });
 
     const ms = syncIntervalMs(mailboxes, activeMailboxId);
-    const timer = window.setInterval(() => void runSync(), ms);
+    const timer = window.setInterval(() => void runSync({ force: true }), ms);
 
     const onVisible = () => {
       if (document.visibilityState === "visible") void runSync();

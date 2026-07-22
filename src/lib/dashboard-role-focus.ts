@@ -19,10 +19,10 @@ export function getDashboardOverviewDescription(role: Role | undefined): string 
     case "team_lead":
       return "Squad pipeline, coaching signals, and the next actions your reps owe.";
     case "salesperson":
-      return "Your next follow-ups and tasks first, then pipeline context for the leads you own.";
+      return "Your day first: due follow-ups, tasks, replies, then pipeline for leads you own.";
     case "data_scraper":
     case "prospecting":
-      return "Intake and handoff work in focus, plus pipeline context for leads you touch.";
+      return "Route and push prospects, clear handoff work, then track replies on your intake.";
     default:
       return "Live pipeline state, team performance, and funnel diagnostics.";
   }
@@ -37,10 +37,10 @@ export function getDashboardRoleFocusLine(role: Role | undefined): string {
     case "team_lead":
       return "Balance rep-level follow-ups with funnel stages where the team stalls.";
     case "salesperson":
-      return "Clear due follow-ups and assigned tasks before diving into charts.";
+      return "Work My day top-down: overdue follow-ups and tasks, replies to review, then pipeline value.";
     case "data_scraper":
     case "prospecting":
-      return "Keep source quality high: resolve follow-ups tied to your leads and handoffs.";
+      return "Clear prospects that need routing, push ready ones to sales, then review replies on handoffs.";
     default:
       return "Use filters to slice by channel or owner when you need a narrower view.";
   }

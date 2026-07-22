@@ -46,6 +46,8 @@ export async function syncImapInboxHead(opts: {
       folder: "inbox",
       limit: INBOX_IMAP_HEAD_LIMIT,
       offset: 0,
+      // Background badge/list sync only needs envelopes — full bodies load on thread open.
+      headsOnly: true,
       imap: {
         host: acct.imap.host,
         port: acct.imap.port,

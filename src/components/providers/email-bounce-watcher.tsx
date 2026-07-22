@@ -20,6 +20,8 @@ import {
 } from "@/stores/email-account-store";
 
 const PROCESSED_KEY = "nova-email-bounce-processed-v2";
+/** Don't re-attempt the same DSN more often than this while waiting for body/parse. */
+const RETRY_COOLDOWN_MS = 60_000;
 
 function readProcessed(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -124,6 +126,7 @@ export function EmailBounceWatcher() {
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const processedRef = React.useRef(readProcessed());
   const inFlightRef = React.useRef(new Set<string>());
+  const nextRetryAtRef = React.useRef(new Map<string, number>());
 
   React.useEffect(() => {
     if (!sessionHydrated || !currentUserId || isDemo || !emailServerHydrated) return;
@@ -135,10 +138,13 @@ export function EmailBounceWatcher() {
       activeMailboxDataOwnerUid: acct.dataOwnerUid,
       selfUid: currentUserId,
     });
+    const now = Date.now();
 
     for (const raw of messages) {
       const mid = `${acct.id}:in:${raw.id}`;
       if (processedRef.current.has(mid) || inFlightRef.current.has(mid)) continue;
+      const retryAt = nextRetryAtRef.current.get(mid) ?? 0;
+      if (retryAt > now) continue;
       if (!isDeliveryStatusNotification(raw)) continue;
 
       inFlightRef.current.add(mid);
@@ -162,6 +168,7 @@ export function EmailBounceWatcher() {
           if (!bounce) {
             processedRef.current.add(mid);
             writeProcessed(processedRef.current);
+            nextRetryAtRef.current.delete(mid);
             return;
           }
 
@@ -171,6 +178,7 @@ export function EmailBounceWatcher() {
             bounce.failedRecipients.length === 0 &&
             !bounce.originalMessageId
           ) {
+            nextRetryAtRef.current.set(mid, Date.now() + RETRY_COOLDOWN_MS);
             return;
           }
 
@@ -219,11 +227,13 @@ export function EmailBounceWatcher() {
 
           if (!data.ok) {
             // Incomplete body / transient — leave unprocessed for next sync.
+            nextRetryAtRef.current.set(mid, Date.now() + RETRY_COOLDOWN_MS);
             return;
           }
 
           processedRef.current.add(mid);
           writeProcessed(processedRef.current);
+          nextRetryAtRef.current.delete(mid);
 
           if (data.alreadyProcessed || data.skippedSoft) return;
 
@@ -236,7 +246,7 @@ export function EmailBounceWatcher() {
             });
           }
         } catch {
-          /* retry on next sync */
+          nextRetryAtRef.current.set(mid, Date.now() + RETRY_COOLDOWN_MS);
         } finally {
           inFlightRef.current.delete(mid);
         }

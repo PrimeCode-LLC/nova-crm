@@ -18,12 +18,14 @@ import {
 } from "@/components/dashboard/wall-pin-lock";
 import { cn } from "@/lib/utils";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
-import { useWorkspace } from "@/components/providers/workspace-mode-provider";import { useSidebar } from "@/components/ui/sidebar";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
 import { useWallPreferences } from "@/hooks/use-wall-preferences";
 import { resolveWallPrefsUserId } from "@/lib/wall-preferences";
+import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
@@ -81,7 +83,15 @@ export default function DashboardWallPage() {
   } = useWorkspace();
 
   const viewer = currentUserId ? getUserById(currentUserId) : undefined;
-  const allowed = showOwnerOpsDashboard(viewer, viewerOrgRole);
+  const navAccess = useNavAccessContext();
+  const permissionSubject = {
+    roleId: viewer?.roleId ?? navAccess.roleId ?? "salesperson",
+    isSuperAdmin: Boolean(viewer?.isSuperAdmin || navAccess.isSuperAdmin),
+    featureGrants: viewer?.featureGrants ?? navAccess.featureGrants,
+    orgRole: viewer?.orgRole ?? navAccess.orgRole,
+    roleSnapshot: navAccess.roleSnapshot,
+  };
+  const allowed = showOwnerOpsDashboard(viewer, viewerOrgRole, permissionSubject);
   const { prefs: wallPrefs } = useWallPreferences(
     resolveWallPrefsUserId(currentUserId, demoPersonaId),
   );

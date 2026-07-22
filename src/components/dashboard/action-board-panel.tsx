@@ -100,6 +100,8 @@ export function ActionBoardPanel({
   leads = [],
   wall,
   className,
+  title = "Action board",
+  description = "Urgent work · pending tasks · meetings",
 }: {
   tasks: LeadTask[];
   followups: Followup[];
@@ -107,6 +109,8 @@ export function ActionBoardPanel({
   leads?: readonly Lead[];
   wall?: boolean;
   className?: string;
+  title?: string;
+  description?: string;
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
   const board = React.useMemo(
@@ -122,10 +126,10 @@ export function ActionBoardPanel({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 space-y-1">
               <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
-                Action board
+                {title}
               </CardTitle>
               <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
-                Urgent work · pending tasks · meetings
+                {description}
               </CardDescription>
             </div>
             {!wall ? (

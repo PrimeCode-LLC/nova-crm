@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
-const POLL_MS = 15_000;
+const POLL_MS = 60_000;
 
 /**
  * Local/dev-only sender for due scheduled emails.

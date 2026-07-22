@@ -18,12 +18,44 @@ export type ResolvedTenantContext = {
     | "suspended_organization";
 };
 
+/** Short in-process TTL — Fluid Compute reuses instances; cuts repeated Firestore fan-out. */
+const TENANT_CACHE_TTL_MS = 30_000;
+const tenantCache = new Map<
+  string,
+  { expiresAt: number; value: ResolvedTenantContext }
+>();
+
+function tenantCacheKey(
+  session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
+): string {
+  return `${session.uid}:${session.organizationId ?? ""}:${session.orgRole ?? ""}`;
+}
+
 /**
  * Resolves the caller's tenant id and org role from Firestore membership,
  * preferring live data over JWT session-cookie claims (which can lag behind
  * admin role changes until the client re-exchanges the session).
  */
 export async function resolveLiveTenantForSession(
+  session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
+): Promise<ResolvedTenantContext> {
+  const key = tenantCacheKey(session);
+  const hit = tenantCache.get(key);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+
+  const value = await resolveLiveTenantForSessionUncached(session);
+  tenantCache.set(key, { expiresAt: Date.now() + TENANT_CACHE_TTL_MS, value });
+  // Bound memory on long-lived Fluid instances
+  if (tenantCache.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of tenantCache) {
+      if (v.expiresAt <= now) tenantCache.delete(k);
+    }
+  }
+  return value;
+}
+
+async function resolveLiveTenantForSessionUncached(
   session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
 ): Promise<ResolvedTenantContext> {
   const db = getAdminDb();

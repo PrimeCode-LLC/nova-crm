@@ -14,6 +14,7 @@ import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { IdleLeads } from "@/components/dashboard/idle-leads";
 import { ChannelMix } from "@/components/dashboard/channel-mix";
 import { OwnerOpsBoard } from "@/components/dashboard/owner-ops-board";
+import { FrontlineBoard } from "@/components/dashboard/frontline-board";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -21,7 +22,7 @@ import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
 import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
-import { CHANNEL_LIST, ROLES, roleLabel } from "@/lib/constants";
+import { CHANNEL_LIST, roleLabel } from "@/lib/constants";
 import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 import {
   getDashboardOverviewDescription,
@@ -34,6 +35,8 @@ import {
   resolveFrontlineLayout,
   resolveOpsLayout,
 } from "@/lib/dashboard-preferences";
+import { can, canAction } from "@/lib/permissions/can";
+import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
 import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
@@ -42,6 +45,7 @@ import { DashboardSettingsSheet } from "@/components/dashboard/dashboard-setting
 import { DashboardAiBrief } from "@/components/ai/dashboard-ai-brief";
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
+import type { KpiTone } from "@/components/common/kpi-card";
 import {
   computeAverageResponseTimeMinutes,
   resolveLeadResponseTimeMinutes,
@@ -143,8 +147,8 @@ export default function DashboardPage() {
     viewerOrgRole,
     contacts,
   } = useWorkspace();
-  const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
-  const emailResponseCtx = useLeadEmailResponseContext();
+  const navAccess = useNavAccessContext();
+  const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();  const emailResponseCtx = useLeadEmailResponseContext();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
     () => mergeActivityCounters(activityCounters, localRollups),
@@ -309,7 +313,19 @@ export default function DashboardPage() {
     () => (currentUserId ? getUserById(currentUserId) : undefined),
     [currentUserId, getUserById],
   );
-  const canCustomizeLayout = showOwnerOpsDashboard(viewer, viewerOrgRole);
+  const permissionSubject = React.useMemo(
+    () => ({
+      roleId: viewer?.roleId ?? navAccess.roleId ?? "salesperson",
+      isSuperAdmin: Boolean(viewer?.isSuperAdmin || navAccess.isSuperAdmin),
+      featureGrants: viewer?.featureGrants ?? navAccess.featureGrants,
+      orgRole: viewer?.orgRole ?? navAccess.orgRole,
+      roleSnapshot: navAccess.roleSnapshot,
+    }),
+    [viewer, navAccess],
+  );
+  const canCustomizeLayout = showOwnerOpsDashboard(viewer, viewerOrgRole, permissionSubject);
+  const canExportDashboard = canAction(permissionSubject, "dashboard.export");
+  const canViewOutreachCampaigns = can(permissionSubject, "email_outreach", "view");
   const {
     prefs,
     setViewMode,
@@ -327,7 +343,17 @@ export default function DashboardPage() {
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;
   const w = prefs.widgets;
-
+  const canViewMailboxUtilization = canAction(
+    permissionSubject,
+    "dashboard.view_mailbox_utilization",
+  );
+  const opsWidgets = React.useMemo(
+    () => ({
+      ...w,
+      mailboxUtilization: w.mailboxUtilization && canViewMailboxUtilization,
+    }),
+    [w, canViewMailboxUtilization],
+  );
   const pipelineHint = React.useMemo(() => {
     const parts = [`${pipelineMetrics.openDealCount} open deal${pipelineMetrics.openDealCount === 1 ? "" : "s"}`];
     if (pipelineMetrics.leadEstimateContributors > 0) {
@@ -466,6 +492,7 @@ export default function DashboardPage() {
               <DashboardSettingsSheet
                 prefs={prefs}
                 canCustomize={canCustomizeLayout}
+                canPreviewAsRole={canAction(permissionSubject, "dashboard.preview_as_role")}
                 onViewModeChange={setViewMode}
                 onPreviewRoleChange={setPreviewRole}
                 onWidgetChange={setWidget}
@@ -543,16 +570,17 @@ export default function DashboardPage() {
                 </Badge>
               )}
             </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              type="button"
-              onClick={exportOverviewCsv}
-              disabled={!isDemo && leads.length === 0}
-            >
-              <Download className="h-3.5 w-3.5 mr-1.5" /> Export
-            </Button>
-          </>
+            {canExportDashboard ? (
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={exportOverviewCsv}
+                disabled={!isDemo && leads.length === 0}
+              >
+                <Download className="h-3.5 w-3.5 mr-1.5" /> Export
+              </Button>
+            ) : null}          </>
         }
       />
 
@@ -695,8 +723,25 @@ export default function DashboardPage() {
                 teamCommandFollowups={followups}
                 currentUserId={currentUserId}
                 orgMeetingsScope={orgMeetingsScope}
-                widgets={w}
+                widgets={opsWidgets}
                 isDemo={isDemo}
+              />
+            ) : frontlineLayout ? (
+              <FrontlineBoard
+                role={effectiveRole}
+                metrics={workflowMetrics}
+                leads={scopedLeads}
+                followups={workflowFollowups}
+                plans={workflowPlans}
+                tasks={workflowTasks}
+                currentUserId={currentUserId}
+                range={timeRange as DashboardTimeRangeKey}
+                widgets={w}
+                pipelineValue={pipelineValue}
+                closedValue={closedValue}
+                pipelineHint={pipelineHint}
+                wonDealCount={scopedDeals.filter((d) => d.stage === "won").length}
+                avgResponseMin={avgResponseMin}
               />
             ) : w.classicKpis ? (
               <>
@@ -707,6 +752,13 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.idleSalesLeads} idle`}
                     icon={Target}
                     href="/leads"
+                    tone={
+                      workflowMetrics.idleSalesLeads > 0
+                        ? "warn"
+                        : workflowMetrics.openSalesLeads > 0
+                          ? "info"
+                          : "default"
+                    }
                   />
                   <KpiCard
                     label="Prospects"
@@ -714,6 +766,13 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsPushed} pushed`}
                     icon={UserRoundSearch}
                     href="/prospects"
+                    tone={
+                      workflowMetrics.prospectsNeedRouting > 0
+                        ? "warn"
+                        : scopedProspects.length > 0
+                          ? "info"
+                          : "default"
+                    }
                   />
                   <KpiCard
                     label="Total replies"
@@ -721,6 +780,13 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.repliesInRange} in ${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey].toLowerCase()} · ${workflowMetrics.repliesPendingReview} to review`}
                     icon={MessageSquareReply}
                     href="/leads?stage=replied"
+                    tone={
+                      workflowMetrics.repliesPendingReview > 0
+                        ? "warn"
+                        : workflowMetrics.repliesInRange > 0
+                          ? "success"
+                          : "default"
+                    }
                   />
                   <KpiCard
                     label="Follow-ups due"
@@ -728,6 +794,13 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.overdueFollowups} overdue · ${workflowMetrics.scheduledSteps} scheduled`}
                     icon={CalendarClock}
                     href="/followups"
+                    tone={
+                      workflowMetrics.overdueFollowups > 0
+                        ? "danger"
+                        : workflowMetrics.followupsDue > 0
+                          ? "warn"
+                          : "default"
+                    }
                   />
                   <KpiCard
                     label="Active sequences"
@@ -735,6 +808,7 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.remainingSequenceSteps} steps remaining · ${workflowMetrics.pausedOnReply} stopped on reply`}
                     icon={Workflow}
                     href="/followups"
+                    tone={workflowMetrics.activeSequences > 0 ? "info" : "default"}
                   />
                   <KpiCard
                     label="Tasks"
@@ -742,6 +816,13 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.overdueTasks} overdue · ${workflowMetrics.waitingOnOthers} waiting on others`}
                     icon={ListTodo}
                     href="/tasks"
+                    tone={
+                      workflowMetrics.overdueTasks > 0
+                        ? "danger"
+                        : workflowMetrics.myOpenTasks > 0
+                          ? "info"
+                          : "default"
+                    }
                   />
                   <KpiCard
                     label="Email delivery"
@@ -758,6 +839,19 @@ export default function DashboardPage() {
                     }`}
                     icon={Send}
                     href="/inbox?folder=scheduled"
+                    tone={
+                      ((): KpiTone => {
+                        if (workflowMetrics.failedDeliveries > 0) return "danger";
+                        if (
+                          workflowMetrics.bouncedEmailsInRange > 0 ||
+                          workflowMetrics.openBounceReviewTasks > 0
+                        ) {
+                          return "warn";
+                        }
+                        if (workflowMetrics.sentInRange > 0) return "info";
+                        return "default";
+                      })()
+                    }
                   />
                 </div>
 
@@ -769,6 +863,7 @@ export default function DashboardPage() {
                       hint={pipelineHint}
                       icon={TrendingUp}
                       href="/deals"
+                      tone={pipelineValue > 0 ? "info" : "default"}
                     />
                     <KpiCard
                       label={`Closed (${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey]})`}
@@ -776,6 +871,9 @@ export default function DashboardPage() {
                       hint={`${scopedDeals.filter((d) => d.stage === "won").length} deals won`}
                       icon={DollarSign}
                       href="/deals"
+                      tone={
+                        scopedDeals.some((d) => d.stage === "won") ? "success" : "default"
+                      }
                     />
                     <KpiCard
                       label="Avg response"
@@ -784,6 +882,9 @@ export default function DashboardPage() {
                       deltaType="positive-down"
                       icon={Clock}
                       href="/activity"
+                      tone={
+                        avgResponseMin != null && avgResponseMin > 120 ? "warn" : "default"
+                      }
                     />
                   </div>
                 ) : null}
@@ -792,7 +893,7 @@ export default function DashboardPage() {
 
             {w.replyReviews ? <DashboardReplyReviews leads={scopedLeads} /> : null}
 
-            {!opsLayout && w.needsAttention ? (
+            {!opsLayout && !frontlineLayout && w.needsAttention ? (
               <DashboardNeedsAttention
                 leads={scopedLeads}
                 followups={workflowFollowups}
@@ -801,7 +902,6 @@ export default function DashboardPage() {
                 currentUserId={currentUserId}
               />
             ) : null}
-
             {!frontlineLayout && w.aiBrief ? (
               <DashboardAiBrief
                 channelScope={channelScope}
@@ -924,7 +1024,7 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {campaigns.length > 0 && w.campaigns ? (
+            {campaigns.length > 0 && w.campaigns && canViewOutreachCampaigns ? (
               <section className="space-y-3">
                 <div>
                   <h2 className="text-sm font-semibold">Outreach campaigns</h2>

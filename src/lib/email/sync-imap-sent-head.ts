@@ -37,6 +37,8 @@ export async function syncImapSentHead(opts: {
       folder: "sent",
       limit: INBOX_IMAP_HEAD_LIMIT,
       offset: 0,
+      // Background Sent sync only needs envelopes — full bodies load on thread open.
+      headsOnly: true,
       imap: {
         host: acct.imap.host,
         port: acct.imap.port,

@@ -82,7 +82,7 @@ export const DASHBOARD_WIDGET_META: {
   label: string;
   group: "ops" | "shared" | "classic";
 }[] = [
-  { key: "pulse", label: "Ops pulse strip", group: "ops" },
+  { key: "pulse", label: "Pulse strip", group: "shared" },
   { key: "emailVolume", label: "Email volume chart", group: "ops" },
   { key: "followupSchedule", label: "Follow-up schedule chart", group: "ops" },
   { key: "teamCommand", label: "Team command", group: "ops" },
@@ -92,7 +92,7 @@ export const DASHBOARD_WIDGET_META: {
   { key: "inboxPerformance", label: "Top performers", group: "ops" },
   { key: "mailboxUtilization", label: "Inbox utilization", group: "ops" },
   { key: "activityFeed", label: "Live activity", group: "ops" },
-  { key: "actionBoard", label: "Action board", group: "ops" },
+  { key: "actionBoard", label: "Action board / My day", group: "shared" },
   { key: "wallLink", label: "Wall mode link", group: "ops" },
   { key: "classicKpis", label: "Classic KPI cards", group: "classic" },
   { key: "pipelineKpis", label: "Pipeline & response KPIs", group: "shared" },

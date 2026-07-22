@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { ROLES, roleLabel } from "@/lib/constants";
+import { roleLabel } from "@/lib/constants";
 import {
   DASHBOARD_VIEW_MODE_OPTIONS,
   DASHBOARD_WIDGET_META,
@@ -45,6 +45,7 @@ const VIEW_OPTIONS = DASHBOARD_VIEW_MODE_OPTIONS.map((o) => ({ key: o.key, label
 export function DashboardSettingsSheet({
   prefs,
   canCustomize,
+  canPreviewAsRole = true,
   onViewModeChange,
   onPreviewRoleChange,
   onWidgetChange,
@@ -54,6 +55,8 @@ export function DashboardSettingsSheet({
 }: {
   prefs: DashboardPreferences;
   canCustomize: boolean;
+  /** When false, hides the “Preview as role” control (`dashboard.preview_as_role`). */
+  canPreviewAsRole?: boolean;
   onViewModeChange: (mode: DashboardViewMode) => void;
   onPreviewRoleChange: (role: Role | null) => void;
   onWidgetChange: (key: DashboardWidgetKey, enabled: boolean) => void;
@@ -126,45 +129,46 @@ export function DashboardSettingsSheet({
             </Select>
           </section>
 
-          <section className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Preview as role
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              See the board the way a teammate with that CRM role would — without changing their
-              access.
-            </p>
-            <Select
-              value={prefs.previewRole ?? "none"}
-              onValueChange={(v) => {
-                if (!v || v === "none") onPreviewRoleChange(null);
-                else onPreviewRoleChange(v as Role);
-              }}
-            >
-              <SelectTrigger size="sm" className="w-full">
-                <SelectValue>
-                  {prefs.previewRole
-                    ? roleLabel(prefs.previewRole)
-                    : "Off — use my role"}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Off — use my role</SelectItem>
-                {PREVIEW_ROLES.map((role) => (
-                  <SelectItem key={role} value={role}>
-                    {roleLabel(role)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </section>
+          {canPreviewAsRole ? (
+            <section className="space-y-3">
+              <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Preview as role
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                See the board the way a teammate with that CRM role would — without changing their
+                access.
+              </p>
+              <Select
+                value={prefs.previewRole ?? "none"}
+                onValueChange={(v) => {
+                  if (!v || v === "none") onPreviewRoleChange(null);
+                  else onPreviewRoleChange(v as Role);
+                }}
+              >
+                <SelectTrigger size="sm" className="w-full">
+                  <SelectValue>
+                    {prefs.previewRole
+                      ? roleLabel(prefs.previewRole)
+                      : "Off — use my role"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Off — use my role</SelectItem>
+                  {PREVIEW_ROLES.map((role) => (
+                    <SelectItem key={role} value={role}>
+                      {roleLabel(role)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </section>
+          ) : null}
 
           <section className="space-y-3">
             <div className="flex items-center justify-between gap-2">
               <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Visible cards
-              </h3>
-              <div className="flex gap-1">
+              </h3>              <div className="flex gap-1">
                 <Button type="button" variant="ghost" size="xs" onClick={onEnableAll}>
                   All on
                 </Button>
