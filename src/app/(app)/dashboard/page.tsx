@@ -330,6 +330,7 @@ export default function DashboardPage() {
     prefs,
     setViewMode,
     setPreviewRole,
+    exitPreview,
     setWidget,
     setAllWidgets,
     setChannelFunnelVisible,
@@ -656,10 +657,7 @@ export default function DashboardPage() {
                 <button
                   type="button"
                   className="ml-auto text-primary underline-offset-4 hover:underline"
-                  onClick={() => {
-                    setPreviewRole(null);
-                    setViewMode("auto");
-                  }}
+                  onClick={exitPreview}
                 >
                   Exit preview
                 </button>

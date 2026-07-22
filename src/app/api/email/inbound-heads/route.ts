@@ -1,0 +1,83 @@
+import { NextResponse } from "next/server";
+import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
+import { listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-server";
+import { readInboxHeadsServer } from "@/lib/email/inbox-heads-server";
+import type { MailInbound } from "@/lib/email-account-types";
+
+/**
+ * Reads cron-persisted IMAP inbox heads for the mailbox owner (or view-as owner).
+ * Used by the client to hydrate Zustand without opening an IMAP connection.
+ */
+export async function GET(req: Request) {
+  const started = Date.now();
+  try {
+    const g = await guardTenantApi();
+    if (!g.ok) return g.response;
+
+    const url = new URL(req.url);
+    const forUser = url.searchParams.get("forUser");
+    const mailboxIdFilter = (url.searchParams.get("mailboxId") ?? "").trim();
+
+    const resolved = await resolveMailboxDataOwnerUid({
+      organizationId: g.ctx.session.organizationId,
+      viewerUid: g.ctx.session.uid,
+      viewerRole: g.ctx.role,
+      forUserParam: forUser,
+      mailboxId: mailboxIdFilter || undefined,
+    });
+    if (!resolved.ok) {
+      return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+    }
+
+    const mailboxes = await listMailboxesForMemberServer({
+      organizationId: g.ctx.session.organizationId,
+      uid: resolved.dataOwnerUid,
+    });
+    const targets = mailboxIdFilter
+      ? mailboxes.filter((m) => m.id === mailboxIdFilter)
+      : mailboxes.filter((m) => Boolean(m.imap.host?.trim()) && m.enabled !== false);
+
+    const byMailbox: Record<
+      string,
+      { messages: MailInbound[]; syncedAt: string | null; mailboxTotal: number }
+    > = {};
+
+    await Promise.all(
+      targets.map(async (mb) => {
+        const heads = await readInboxHeadsServer({
+          organizationId: g.ctx.session.organizationId,
+          uid: resolved.dataOwnerUid,
+          mailboxId: mb.id,
+        });
+        byMailbox[mb.id] = heads;
+      }),
+    );
+
+    console.log(
+      JSON.stringify({
+        level: "info",
+        msg: "inbound-heads read",
+        mailboxes: targets.length,
+        ms: Date.now() - started,
+      }),
+    );
+
+    return NextResponse.json({
+      ok: true,
+      dataOwnerUid: resolved.dataOwnerUid,
+      byMailbox,
+    });
+  } catch (e) {
+    const error = e instanceof Error ? e.message : String(e);
+    console.error(
+      JSON.stringify({
+        level: "error",
+        msg: "inbound-heads failed",
+        error,
+        ms: Date.now() - started,
+      }),
+    );
+    return NextResponse.json({ ok: false, error }, { status: 500 });
+  }
+}

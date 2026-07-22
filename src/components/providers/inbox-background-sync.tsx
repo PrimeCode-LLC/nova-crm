@@ -7,23 +7,28 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { diffAddedUnreadUids, snapshotUnreadMailUids } from "@/lib/email/snapshot-unread-mail-uids";
 import { syncImapInboxHead } from "@/lib/email/sync-imap-inbox-head";
 import { syncImapSentHead } from "@/lib/email/sync-imap-sent-head";
+import {
+  appendMailDataOwnerParam,
+  resolveMailApiForUserUid,
+} from "@/lib/email/mail-data-owner-query";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
-import type { EmailMailboxSettings } from "@/lib/email-account-types";
+import type { MailInbound } from "@/lib/email-account-types";
 import {
   getActiveMailbox,
   isImapInboxConfigured,
   useEmailAccountStore,
 } from "@/stores/email-account-store";
 
-function syncIntervalMs(mailboxes: EmailMailboxSettings[], activeMailboxId: string): number {
-  const acct = getActiveMailbox({ mailboxes, activeMailboxId });
-  const minutes = Math.max(5, Math.min(120, acct.syncIntervalMinutes || 15));
-  return minutes * 60 * 1000;
-}
+/** Poll cron-persisted heads while the app is open (no IMAP). */
+const HEADS_POLL_MS = 120_000;
+/** On the Inbox route, still do a light IMAP refresh on this interval. */
+const INBOX_IMAP_MIN_MS = 5 * 60_000;
 
 /**
- * Polls IMAP on the mailbox sync interval (Settings → Email) app-wide so the Inbox badge
- * and email store stay fresh even when the user is on Dashboard or other routes.
+ * Keeps the Inbox badge / email store fresh without every open tab hammering IMAP.
+ *
+ * - Always: hydrate from cron-persisted Firestore heads (`/api/email/inbound-heads`).
+ * - Only on `/inbox`: optional IMAP envelope refresh (headsOnly) for the active mailbox.
  */
 export function InboxBackgroundSync() {
   const pathname = usePathname();
@@ -37,33 +42,60 @@ export function InboxBackgroundSync() {
 
   const bootstrappedRef = React.useRef(false);
   const syncingRef = React.useRef(false);
-  const lastSyncAtRef = React.useRef(0);
+  const lastHeadsAtRef = React.useRef(0);
+  const lastImapAtRef = React.useRef(0);
 
-  const runSync = React.useCallback(async (opts?: { force?: boolean }) => {
+  const hydrateFromServerHeads = React.useCallback(async () => {
     if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
     if (!emailServerSyncEnabled) return;
+    if (syncingRef.current) return;
+    if (Date.now() - lastHeadsAtRef.current < 15_000) return;
 
     const st = useEmailAccountStore.getState();
-    const acct = getActiveMailbox(st);
-    if (!isImapInboxConfigured(acct)) return;
-    if (syncingRef.current) return;
-    // Tab-focus / visibility shouldn't re-hit IMAP if we just synced.
-    if (!opts?.force && Date.now() - lastSyncAtRef.current < 60_000) return;
+    const configured = st.mailboxes.filter((m) => isImapInboxConfigured(m));
+    if (configured.length === 0) return;
 
     syncingRef.current = true;
+    const acct = getActiveMailbox(st);
     const before = snapshotUnreadMailUids(st.inboundByMailbox[acct.id] ?? []);
     const isBootstrap = !bootstrappedRef.current;
 
     try {
-      await syncImapInboxHead({
+      const forUid = resolveMailApiForUserUid({
         mailViewAsUid,
-        currentUserId,
-        inboxReadOnly: inboxWriteDisabled,
+        activeMailboxDataOwnerUid: acct.dataOwnerUid,
+        selfUid: currentUserId,
       });
-      await syncImapSentHead({
-        mailViewAsUid,
-        currentUserId,
-      });
+      const url = appendMailDataOwnerParam("/api/email/inbound-heads", forUid, currentUserId);
+      const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        byMailbox?: Record<
+          string,
+          { messages?: MailInbound[]; syncedAt?: string | null; mailboxTotal?: number }
+        >;
+      };
+      if (!data.ok || !data.byMailbox) return;
+
+      const reconcile = useEmailAccountStore.getState().reconcileInboundHeadFromSync;
+      let anySynced = false;
+      for (const [mailboxId, payload] of Object.entries(data.byMailbox)) {
+        const rows = Array.isArray(payload.messages) ? payload.messages : [];
+        if (rows.length === 0 && !payload.syncedAt) continue;
+        anySynced = true;
+        reconcile(mailboxId, rows);
+      }
+
+      // First-run / local: cron may not have written heads yet — one IMAP seed for the active box.
+      if (!anySynced && isImapInboxConfigured(acct)) {
+        await syncImapInboxHead({
+          mailViewAsUid,
+          currentUserId,
+          inboxReadOnly: inboxWriteDisabled,
+        });
+        lastImapAtRef.current = Date.now();
+      }
+
       const after = snapshotUnreadMailUids(
         useEmailAccountStore.getState().inboundByMailbox[acct.id] ?? [],
       );
@@ -90,7 +122,47 @@ export function InboxBackgroundSync() {
         }
       }
       bootstrappedRef.current = true;
-      lastSyncAtRef.current = Date.now();
+      lastHeadsAtRef.current = Date.now();
+    } catch {
+      /* best-effort */
+    } finally {
+      syncingRef.current = false;
+    }
+  }, [
+    isDemo,
+    sessionHydrated,
+    currentUserId,
+    emailServerHydrated,
+    emailServerSyncEnabled,
+    mailViewAsUid,
+    inboxWriteDisabled,
+    pathname,
+  ]);
+
+  const runInboxRouteImap = React.useCallback(async () => {
+    if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
+    if (!emailServerSyncEnabled) return;
+    const onInbox = pathname === "/inbox" || pathname.startsWith("/inbox/");
+    if (!onInbox) return;
+    if (syncingRef.current) return;
+    if (Date.now() - lastImapAtRef.current < 60_000) return;
+
+    const st = useEmailAccountStore.getState();
+    const acct = getActiveMailbox(st);
+    if (!isImapInboxConfigured(acct)) return;
+
+    syncingRef.current = true;
+    try {
+      await syncImapInboxHead({
+        mailViewAsUid,
+        currentUserId,
+        inboxReadOnly: inboxWriteDisabled,
+      });
+      await syncImapSentHead({
+        mailViewAsUid,
+        currentUserId,
+      });
+      lastImapAtRef.current = Date.now();
     } catch {
       /* best-effort */
     } finally {
@@ -114,21 +186,25 @@ export function InboxBackgroundSync() {
   React.useEffect(() => {
     if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
     if (!emailServerSyncEnabled) return;
-    const acct = getActiveMailbox({ mailboxes, activeMailboxId });
-    if (!isImapInboxConfigured(acct)) return;
+    const hasImap = mailboxes.some((m) => isImapInboxConfigured(m));
+    if (!hasImap) return;
 
-    void runSync({ force: true });
+    void hydrateFromServerHeads();
 
-    const ms = syncIntervalMs(mailboxes, activeMailboxId);
-    const timer = window.setInterval(() => void runSync({ force: true }), ms);
+    const headsTimer = window.setInterval(() => void hydrateFromServerHeads(), HEADS_POLL_MS);
+    const imapTimer = window.setInterval(() => void runInboxRouteImap(), INBOX_IMAP_MIN_MS);
 
     const onVisible = () => {
-      if (document.visibilityState === "visible") void runSync();
+      if (document.visibilityState === "visible") {
+        void hydrateFromServerHeads();
+        void runInboxRouteImap();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
 
     return () => {
-      window.clearInterval(timer);
+      window.clearInterval(headsTimer);
+      window.clearInterval(imapTimer);
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [
@@ -140,7 +216,8 @@ export function InboxBackgroundSync() {
     activeMailboxId,
     mailViewAsUid,
     mailboxes,
-    runSync,
+    hydrateFromServerHeads,
+    runInboxRouteImap,
   ]);
 
   return null;

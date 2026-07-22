@@ -14,7 +14,7 @@ export {
   processProspectImportChunk,
 } from "./prospectImportWorker";
 
-export { runDueScrapers, sendDueScheduledEmails } from "./appHostingCron";
+export { runDueScrapers, sendDueScheduledEmails, syncInboxImapHeads } from "./appHostingCron";
 
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 

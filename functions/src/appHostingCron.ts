@@ -72,3 +72,17 @@ export const sendDueScheduledEmails = onSchedule(
     console.log(JSON.stringify({ level: "info", message: "Scheduled email cron ok", result }));
   },
 );
+
+/** Syncs IMAP inbox heads server-side so open browser tabs don't hammer IMAP. */
+export const syncInboxImapHeads = onSchedule(
+  {
+    ...cronScheduleOptions,
+    schedule: "every 5 minutes",
+    timeoutSeconds: 540,
+    memory: "1GiB" as const,
+  },
+  async () => {
+    const result = await callAppHostingCron("/api/cron/inbox-imap/sync", "Inbox IMAP cron");
+    console.log(JSON.stringify({ level: "info", message: "Inbox IMAP cron ok", result }));
+  },
+);

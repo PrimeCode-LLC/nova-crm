@@ -25,33 +25,43 @@ export function useDashboardPreferences(userId: string) {
   }, [userId]);
 
   const commit = React.useCallback(
-    (next: DashboardPreferences) => {
-      setPrefs(next);
-      saveDashboardPreferences(userId, next);
+    (updater: DashboardPreferences | ((prev: DashboardPreferences) => DashboardPreferences)) => {
+      setPrefs((prev) => {
+        const next = typeof updater === "function" ? updater(prev) : updater;
+        saveDashboardPreferences(userId, next);
+        return next;
+      });
     },
     [userId],
   );
 
   const setViewMode = React.useCallback(
     (viewMode: DashboardViewMode) => {
-      commit({ ...prefs, viewMode });
+      commit((prev) => ({ ...prev, viewMode }));
     },
-    [commit, prefs],
+    [commit],
   );
 
   const setPreviewRole = React.useCallback(
     (previewRole: Role | null) => {
-      commit({ ...prefs, previewRole });
+      commit((prev) => ({ ...prev, previewRole }));
     },
-    [commit, prefs],
+    [commit],
   );
+
+  /** Clears role preview and restores Auto layout in one write (avoids stale overwrites). */
+  const exitPreview = React.useCallback(() => {
+    commit((prev) => ({ ...prev, previewRole: null, viewMode: "auto" }));
+  }, [commit]);
 
   const setWidget = React.useCallback(
     (key: DashboardWidgetKey, enabled: boolean) => {
-      const widgets: DashboardWidgets = { ...prefs.widgets, [key]: enabled };
-      commit({ ...prefs, widgets });
+      commit((prev) => ({
+        ...prev,
+        widgets: { ...prev.widgets, [key]: enabled },
+      }));
     },
-    [commit, prefs],
+    [commit],
   );
 
   const setAllWidgets = React.useCallback(
@@ -60,20 +70,22 @@ export function useDashboardPreferences(userId: string) {
       for (const key of Object.keys(widgets) as DashboardWidgetKey[]) {
         widgets[key] = enabled;
       }
-      commit({ ...prefs, widgets });
+      commit((prev) => ({ ...prev, widgets }));
     },
-    [commit, prefs],
+    [commit],
   );
 
   const setChannelFunnelVisible = React.useCallback(
     (channel: ChannelKey, enabled: boolean) => {
-      const channelFunnelsVisible: ChannelFunnelsVisibility = {
-        ...prefs.channelFunnelsVisible,
-        [channel]: enabled,
-      };
-      commit({ ...prefs, channelFunnelsVisible });
+      commit((prev) => ({
+        ...prev,
+        channelFunnelsVisible: {
+          ...prev.channelFunnelsVisible,
+          [channel]: enabled,
+        },
+      }));
     },
-    [commit, prefs],
+    [commit],
   );
 
   const setAllChannelFunnelsVisible = React.useCallback(
@@ -82,33 +94,35 @@ export function useDashboardPreferences(userId: string) {
       for (const key of Object.keys(channelFunnelsVisible) as ChannelKey[]) {
         channelFunnelsVisible[key] = enabled;
       }
-      commit({ ...prefs, channelFunnelsVisible });
+      commit((prev) => ({ ...prev, channelFunnelsVisible }));
     },
-    [commit, prefs],
+    [commit],
   );
 
   const setStrategyScoreboardVisible = React.useCallback(
     (strategyId: string, enabled: boolean) => {
-      commit({
-        ...prefs,
+      commit((prev) => ({
+        ...prev,
         strategyScoreboardVisible: {
-          ...prefs.strategyScoreboardVisible,
+          ...prev.strategyScoreboardVisible,
           [strategyId]: enabled,
         },
-      });
+      }));
     },
-    [commit, prefs],
+    [commit],
   );
 
   const setAllStrategyScoreboardVisible = React.useCallback(
     (strategyIds: string[], enabled: boolean) => {
-      const strategyScoreboardVisible = { ...prefs.strategyScoreboardVisible };
-      for (const id of strategyIds) {
-        strategyScoreboardVisible[id] = enabled;
-      }
-      commit({ ...prefs, strategyScoreboardVisible });
+      commit((prev) => {
+        const strategyScoreboardVisible = { ...prev.strategyScoreboardVisible };
+        for (const id of strategyIds) {
+          strategyScoreboardVisible[id] = enabled;
+        }
+        return { ...prev, strategyScoreboardVisible };
+      });
     },
-    [commit, prefs],
+    [commit],
   );
 
   const reset = React.useCallback(() => {
@@ -120,6 +134,7 @@ export function useDashboardPreferences(userId: string) {
     hydrated,
     setViewMode,
     setPreviewRole,
+    exitPreview,
     setWidget,
     setAllWidgets,
     setChannelFunnelVisible,

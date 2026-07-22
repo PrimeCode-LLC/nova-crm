@@ -64,7 +64,8 @@ export async function getMailboxSendCountForDayServer(input: {
 
 /**
  * Counts pending/processing scheduled emails for a mailbox, bucketed by UTC day.
- * Uses existing status + scheduledAt indexes; mailboxId filtered in memory.
+ * Filters by mailboxId in the query when the composite index is available;
+ * falls back to status+scheduledAt + in-memory filter if the index is not ready.
  */
 export async function countPendingScheduledByUtcDayServer(input: {
   organizationId: string;
@@ -84,20 +85,40 @@ export async function countPendingScheduledByUtcDayServer(input: {
     return out;
   }
 
+  const bump = (scheduledAt: string) => {
+    const dayKey = utcSendDayKey(new Date(scheduledAt));
+    if (!dayKey || dayKey < input.fromDayKey || dayKey > input.toDayKey) return;
+    out[dayKey] = (out[dayKey] ?? 0) + 1;
+  };
+
   const countsForStatus = async (status: "pending" | "processing") => {
-    const snap = await root
-      .where("status", "==", status)
-      .where("scheduledAt", ">=", fromIso)
-      .where("scheduledAt", "<", toIso)
-      .orderBy("scheduledAt", "asc")
-      .limit(2000)
-      .get();
-    for (const doc of snap.docs) {
-      const data = doc.data() as Record<string, unknown>;
-      if (String(data.mailboxId ?? "") !== input.mailboxId) continue;
-      const dayKey = utcSendDayKey(new Date(String(data.scheduledAt ?? "")));
-      if (!dayKey || dayKey < input.fromDayKey || dayKey > input.toDayKey) continue;
-      out[dayKey] = (out[dayKey] ?? 0) + 1;
+    try {
+      const snap = await root
+        .where("mailboxId", "==", input.mailboxId)
+        .where("status", "==", status)
+        .where("scheduledAt", ">=", fromIso)
+        .where("scheduledAt", "<", toIso)
+        .orderBy("scheduledAt", "asc")
+        .limit(2000)
+        .get();
+      for (const doc of snap.docs) {
+        const data = doc.data() as Record<string, unknown>;
+        bump(String(data.scheduledAt ?? ""));
+      }
+    } catch {
+      // Index may still be building — fall back to broader query.
+      const snap = await root
+        .where("status", "==", status)
+        .where("scheduledAt", ">=", fromIso)
+        .where("scheduledAt", "<", toIso)
+        .orderBy("scheduledAt", "asc")
+        .limit(2000)
+        .get();
+      for (const doc of snap.docs) {
+        const data = doc.data() as Record<string, unknown>;
+        if (String(data.mailboxId ?? "") !== input.mailboxId) continue;
+        bump(String(data.scheduledAt ?? ""));
+      }
     }
   };
 
