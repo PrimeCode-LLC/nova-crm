@@ -113,6 +113,38 @@ function decodeHtmlEntities(text: string): string {
     .replace(/&#39;/g, "'");
 }
 
+/**
+ * Isolates the substantive page region before text extraction: prefers the
+ * <main> element and strips repeated site chrome (header/nav/footer/aside) that
+ * otherwise pollutes every crawled document with the same menu and legal text.
+ */
+export function isolateMainContentHtml(html: string): string {
+  const main = html.match(/<main\b[^>]*>([\s\S]*?)<\/main>/i);
+  const region = main?.[1] ?? html;
+  return region
+    .replace(/<header\b[\s\S]*?<\/header>/gi, " ")
+    .replace(/<footer\b[\s\S]*?<\/footer>/gi, " ")
+    .replace(/<nav\b[\s\S]*?<\/nav>/gi, " ")
+    .replace(/<aside\b[\s\S]*?<\/aside>/gi, " ");
+}
+
+/** Common marketing/nav/legal boilerplate that survives tag stripping. */
+const BOILERPLATE_PATTERNS: RegExp[] = [
+  /skip to main content/gi,
+  /\bloading\.{0,3}/gi,
+  /schedule a (free )?(discovery )?call/gi,
+  /reviews?\s*(&|and)\s*listings[\s\S]{0,80}?(clutch|goodfirms|trustpilot)[\s\S]{0,40}/gi,
+  /©\s*\d{4}[\s\S]{0,120}?all rights reserved\.?/gi,
+  /privacy policy/gi,
+  /terms of service/gi,
+];
+
+export function stripBoilerplate(text: string): string {
+  let out = text;
+  for (const pattern of BOILERPLATE_PATTERNS) out = out.replace(pattern, " ");
+  return out.replace(/\s+/g, " ").trim();
+}
+
 export function htmlToPlainText(html: string): string {
   return decodeHtmlEntities(
     html
@@ -201,7 +233,9 @@ async function mapPool<T, R>(
 async function fetchPage(url: string): Promise<CrawledSitePage | null> {
   const html = await fetchHtml(url);
   if (!html) return null;
-  const plain = htmlToPlainText(html);
+  const cleaned = stripBoilerplate(htmlToPlainText(isolateMainContentHtml(html)));
+  // Fall back to the full page text if chrome-stripping removed too much.
+  const plain = cleaned.length >= 120 ? cleaned : htmlToPlainText(html);
   if (plain.length < 120) return null;
   return {
     url,

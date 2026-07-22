@@ -56,6 +56,12 @@ export async function retrieveRagChunksServer(input: {
   organizationId: string;
   query: string;
   libraryIds?: string[];
+  /**
+   * Optional `knowledgeSection` allow-list. Documents whose section is set and not
+   * in this list are skipped (documents without a section always pass through, so
+   * non-Fit-Check libraries are unaffected).
+   */
+  sections?: string[];
   scope?: { channel?: string; profileId?: string; campaignId?: string };
   topK?: number;
   queryEmbedding?: number[];
@@ -70,6 +76,7 @@ export async function retrieveRagChunksServer(input: {
     .get();
 
   const libraryIds = new Set(input.libraryIds ?? []);
+  const sections = input.sections && input.sections.length > 0 ? new Set(input.sections) : null;
   const hits: RagChunkHit[] = [];
 
   for (const libDoc of libsSnap.docs) {
@@ -88,6 +95,10 @@ export async function retrieveRagChunksServer(input: {
       .get();
 
     for (const docSnap of docsSnap.docs) {
+      if (sections) {
+        const section = docSnap.data().knowledgeSection as string | undefined;
+        if (section && !sections.has(section)) continue;
+      }
       const chunksSnap = await docSnap.ref.collection("chunks").limit(200).get();
       for (const chunkSnap of chunksSnap.docs) {
         const data = chunkSnap.data();

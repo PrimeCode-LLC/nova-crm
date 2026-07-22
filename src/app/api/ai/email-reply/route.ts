@@ -4,8 +4,7 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiTextFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
-import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
+import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
@@ -63,21 +62,17 @@ export async function POST(req: Request) {
     parsed.data.mode === "improve"
       ? (parsed.data.draft ?? "").slice(0, 500)
       : (parsed.data.thread ?? "").slice(0, 500);
-  const chunks = await retrieveRagChunksServer({
+  const { ragBlock } = await retrieveOutreachKnowledgeServer({
     organizationId: orgId,
     query: ragQuery,
-    libraryIds: feat.libraryIds,
+    configuredLibraryIds: feat.libraryIds,
+    ragMode: feat.ragMode ?? "reference",
     scope: {
       channel: parsed.data.channel,
       profileId: parsed.data.profileId,
       campaignId: parsed.data.campaignId,
     },
-    topK: 6,
   });
-  const ragBlock = buildRagInstructionBlock(
-    feat.ragMode ?? "reference",
-    chunks.map((c) => ({ title: c.title, content: c.content })),
-  );
 
   try {
     const isImprove = parsed.data.mode === "improve";

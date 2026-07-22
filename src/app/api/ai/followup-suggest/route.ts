@@ -14,8 +14,7 @@ import {
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
-import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
+import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { recordAudit } from "@/lib/firestore/audit";
@@ -256,39 +255,36 @@ export async function POST(req: Request) {
     .join("\n");
   const feat = settings.features.followup_suggest;
   const ragMode = feat.ragMode ?? "reference";
-  const chunks = await retrieveRagChunksServer({
+  const ragQuery = [
+    loaded.lead.stage,
+    loaded.lead.channel,
+    personalizationProfile.roleFamily,
+    contactTitle,
+    loaded.contact?.seniority,
+    loaded.account?.industry || loaded.lead.companyIndustry,
+    loaded.account?.businessDescription,
+    loaded.lead.primaryOpportunityLabel,
+    loaded.lead.personalizationNote?.suggestedAngle,
+    loaded.strategy?.name,
+    loaded.strategy?.objective,
+    loaded.persona?.name,
+    loaded.persona?.recommendedAngle,
+    "follow-up",
+    parsed.data.userPrompt,
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const { ragBlock } = await retrieveOutreachKnowledgeServer({
     organizationId: orgId,
-    query: [
-      loaded.lead.stage,
-      loaded.lead.channel,
-      personalizationProfile.roleFamily,
-      contactTitle,
-      loaded.contact?.seniority,
-      loaded.account?.industry || loaded.lead.companyIndustry,
-      loaded.account?.businessDescription,
-      loaded.lead.primaryOpportunityLabel,
-      loaded.lead.personalizationNote?.suggestedAngle,
-      loaded.strategy?.name,
-      loaded.strategy?.objective,
-      loaded.persona?.name,
-      loaded.persona?.recommendedAngle,
-      "follow-up",
-      parsed.data.userPrompt,
-    ]
-      .filter(Boolean)
-      .join(" "),
-    libraryIds: feat.libraryIds,
+    query: ragQuery,
+    configuredLibraryIds: feat.libraryIds,
+    ragMode,
     scope: {
       channel: loaded.lead.channel,
       profileId: loaded.lead.profileId,
       campaignId: loaded.lead.campaignId,
     },
-    topK: 6,
   });
-  const ragBlock = buildRagInstructionBlock(
-    ragMode,
-    chunks.map((c) => ({ title: c.title, content: c.content })),
-  );
 
   const userPrompt = parsed.data.userPrompt?.trim() || "(none, use lead context only)";
   const sequenceMode = parsed.data.sequenceMode ?? "full";
