@@ -136,6 +136,7 @@ Human psychology that lifts reply and meeting rates:
 - Make replying effortless: one clear question only. Later steps offer an easy out ("if timing is off, just say no and I'll close the loop") — permission-to-say-no / breakup copy recovers silent prospects.
 - Curiosity and specificity over hype. No exclamation spam, no superlatives, no pressure, scarcity, or fake urgency.
 - Sound like one human emailing another. Vary sentence structure across the sequence. Ban these phrases: "just following up", "circling back", "touching base", "checking in", "quick question", "as per", "leverage", "synergy", "game-changer", "revolutionary", "I know you're busy", "per my last email", "bumping this".
+- Punctuation and AI-tell bans (apply to messageBody and emailSubject only): Never use em dashes (—) or en dashes (–); use a period, comma, colon, or parentheses instead. Prefer plain ASCII punctuation: straight quotes ("), regular hyphen (-), no curly quotes (“ ” ‘ ’). Do not use AI-sounding constructions like "It's not X — it's Y", stacked asides with dashes, or overly polished parallel clauses.
 
 Deliverability (protect the sender's domain and inbox placement):
 - No spam triggers or ALL CAPS; at most one link and only if it adds real value; no attachment language; no more than one question per message; avoid "free", "guaranteed", "act now", "limited time".
