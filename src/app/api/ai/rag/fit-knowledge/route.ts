@@ -18,6 +18,7 @@ import {
   FIT_CHECK_LIBRARY_KIND_GLOBAL,
   FIT_CHECK_LIBRARY_KIND_LEGACY,
 } from "@/lib/ai/fit-check-knowledge-types";
+import { probeRagVectorHealthServer } from "@/lib/ai/rag-vector-health";
 
 export async function GET() {
   const g = await guardAdminFeature("ai_knowledge");
@@ -74,7 +75,8 @@ export async function GET() {
     }
   }
 
-  return NextResponse.json({ config, libraries });
+  const vectorHealth = await probeRagVectorHealthServer(orgId);
+  return NextResponse.json({ config, libraries, vectorHealth });
 }
 
 const categorySchema = z.object({

@@ -23,8 +23,8 @@ import {
   STELLIXSOFT_SITE_ORIGIN,
 } from "@/lib/ai/stellixsoft-site-crawler";
 
-export const FIT_CHECK_GLOBAL_LIBRARY_NAME = "Fit Check, Global (company)";
-export const FIT_CHECK_CATEGORY_LIBRARY_PREFIX = "Fit Check, ";
+export const FIT_CHECK_GLOBAL_LIBRARY_NAME = "Sales knowledge, Global (company)";
+export const FIT_CHECK_CATEGORY_LIBRARY_PREFIX = "Sales knowledge, ";
 
 export type SeedFitCheckLibraryResult = {
   globalLibraryId: string;
@@ -112,11 +112,20 @@ async function ensureLibrary(
     fitCategory?: OpportunitySourceType;
   },
 ): Promise<string> {
-  const existing = await findLibrary(organizationId, input.libraryKind, input.fitCategory);
-  if (existing) return existing;
-
   const db = getAdminDb();
   if (!db) throw new Error("Database not configured");
+
+  const existing = await findLibrary(organizationId, input.libraryKind, input.fitCategory);
+  if (existing) {
+    const now = new Date().toISOString();
+    await db
+      .collection(COLLECTIONS.organizations)
+      .doc(organizationId)
+      .collection(ORG_SUBCOLLECTIONS.aiLibraries)
+      .doc(existing)
+      .set({ name: input.name, description: input.description, updatedAt: now }, { merge: true });
+    return existing;
+  }
 
   const scope: AiLibraryScope = { type: "org" };
   const now = new Date().toISOString();
@@ -252,7 +261,7 @@ export async function seedFitCheckLibraryServer(input: {
   const globalLibraryId = await ensureLibrary(input.organizationId, {
     name: FIT_CHECK_GLOBAL_LIBRARY_NAME,
     description:
-      "Global company knowledge for Fit Check, ICP, services, pricing, case studies (website crawled once).",
+      "Global company corpus for sales RAG: ICP, services, pricing, case studies (website crawled once).",
     libraryKind: FIT_CHECK_LIBRARY_KIND_GLOBAL,
   });
 
@@ -260,7 +269,7 @@ export async function seedFitCheckLibraryServer(input: {
   for (const cat of OPPORTUNITY_SOURCE_TYPES) {
     categoryLibraryIds[cat] = await ensureLibrary(input.organizationId, {
       name: `${FIT_CHECK_CATEGORY_LIBRARY_PREFIX}${OPPORTUNITY_SOURCE_LABELS[cat]}`,
-      description: `Category playbook and rules for ${OPPORTUNITY_SOURCE_LABELS[cat]} opportunities.`,
+      description: `Channel playbook for ${OPPORTUNITY_SOURCE_LABELS[cat]} opportunities (sales RAG).`,
       libraryKind: FIT_CHECK_LIBRARY_KIND_CATEGORY,
       fitCategory: cat,
     });
@@ -364,7 +373,7 @@ export async function seedFitCheckCategoryLibraryServer(input: {
 }): Promise<SeedFitCheckCategoryResult | { error: string }> {
   const categoryLibraryId = await ensureLibrary(input.organizationId, {
     name: `${FIT_CHECK_CATEGORY_LIBRARY_PREFIX}${OPPORTUNITY_SOURCE_LABELS[input.category]}`,
-    description: `Category playbook and rules for ${OPPORTUNITY_SOURCE_LABELS[input.category]} opportunities.`,
+    description: `Channel playbook for ${OPPORTUNITY_SOURCE_LABELS[input.category]} opportunities (sales RAG).`,
     libraryKind: FIT_CHECK_LIBRARY_KIND_CATEGORY,
     fitCategory: input.category,
   });

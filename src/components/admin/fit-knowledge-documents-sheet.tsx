@@ -211,8 +211,8 @@ export function FitKnowledgeDocumentsSheet({
         <DialogHeader className="shrink-0 border-b px-6 pb-4 pt-6 pr-12">
           <DialogTitle className="text-base">{libraryLabel}</DialogTitle>
           <DialogDescription className="text-xs">
-            View and edit markdown knowledge used by Fit Check retrieval. Changes are re-embedded on
-            save.
+            View and edit markdown used by sales RAG retrieval (Fit Check and related AI). Changes
+            are re-embedded on save.
           </DialogDescription>
         </DialogHeader>
 

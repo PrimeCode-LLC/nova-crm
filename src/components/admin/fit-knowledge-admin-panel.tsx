@@ -16,6 +16,7 @@ import {
   type FitCheckKnowledgeConfig,
 } from "@/lib/ai/fit-check-knowledge-types";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
+import type { RagVectorHealth } from "@/lib/ai/rag-vector-health";
 import { cn } from "@/lib/utils";
 
 type FitLibraryRow = {
@@ -40,6 +41,7 @@ export function FitKnowledgeAdminPanel({
   const [seedingCategory, setSeedingCategory] = React.useState<OpportunitySourceType | null>(null);
   const [config, setConfig] = React.useState<FitCheckKnowledgeConfig | null>(null);
   const [libraries, setLibraries] = React.useState<FitLibraryRow[]>([]);
+  const [vectorHealth, setVectorHealth] = React.useState<RagVectorHealth | null>(null);
   const [docSheet, setDocSheet] = React.useState<{ libraryId: string; label: string } | null>(
     null,
   );
@@ -52,9 +54,11 @@ export function FitKnowledgeAdminPanel({
       const data = (await res.json()) as {
         config: FitCheckKnowledgeConfig;
         libraries: FitLibraryRow[];
+        vectorHealth?: RagVectorHealth;
       };
       setConfig(data.config);
       setLibraries(data.libraries ?? []);
+      setVectorHealth(data.vectorHealth ?? null);
     } finally {
       setLoading(false);
     }
@@ -102,7 +106,7 @@ export function FitKnowledgeAdminPanel({
         return;
       }
       toast.success(
-        `Seeded global + ${OPPORTUNITY_SOURCE_TYPES.length} category libraries, ${data.documentsCreated ?? 0} docs, ${data.chunksIndexed ?? 0} chunks`,
+        `Indexed global + ${OPPORTUNITY_SOURCE_TYPES.length} channel playbooks, ${data.documentsCreated ?? 0} docs, ${data.chunksIndexed ?? 0} chunks`,
       );
       await load();
       onSeeded?.();
@@ -139,7 +143,7 @@ export function FitKnowledgeAdminPanel({
 
   async function deleteCategoryLibrary(libraryId: string, cat: OpportunitySourceType) {
     const ok = confirm(
-      `Delete category "${OPPORTUNITY_SOURCE_LABELS[cat]}"?\nThis removes its knowledge documents and disables it for end-user Fit Check.`,
+      `Delete category "${OPPORTUNITY_SOURCE_LABELS[cat]}"?\nThis removes its playbook documents and hides it from Fit Check and related AI retrieval.`,
     );
     if (!ok) return;
 
@@ -164,7 +168,7 @@ export function FitKnowledgeAdminPanel({
   if (loading && !config) {
     return (
       <p className="text-sm text-muted-foreground flex items-center gap-2">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading fit knowledge…
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading sales knowledge…
       </p>
     );
   }
@@ -178,23 +182,24 @@ export function FitKnowledgeAdminPanel({
       <Card className="border-primary/25 bg-primary/5">
         <CardHeader>
           <CardTitle className="text-sm flex items-center gap-2">
-            <Sparkles className="h-4 w-4" /> Fit Check knowledge (cost-efficient layers)
+            <Sparkles className="h-4 w-4" /> Sales knowledge (RAG)
           </CardTitle>
           <CardDescription className="text-xs leading-relaxed">
-            <strong>Global</strong> holds your website + ICP (embedded once). Each{" "}
-            <strong>category</strong> has a small playbook only (~1 doc), no duplicate crawl.
-            Per check we pull up to {budget.globalChunks} global + {budget.categoryChunks}{" "}
-            category chunks (cheap vs re-indexing everything).
+            Indexed company and channel knowledge, retrieved into AI prompts (Fit Check scoring and
+            discuss today). <strong>Global</strong> = website + ICP (embedded once). Each{" "}
+            <strong>category</strong> = a small channel playbook (~1 doc), no duplicate crawl. Per
+            request we pull up to {budget.globalChunks} global + {budget.categoryChunks} category
+            chunks.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <Button type="button" disabled={!aiEnabled || seeding} onClick={() => void seedAll()}>
             {seeding ? (
               <>
-                <Loader2 className="h-4 w-4 animate-spin" /> Seeding all layers…
+                <Loader2 className="h-4 w-4 animate-spin" /> Indexing all layers…
               </>
             ) : (
-              "Seed / refresh global + all categories"
+              "Index / refresh all layers"
             )}
           </Button>
           {!aiEnabled && (
@@ -209,8 +214,8 @@ export function FitKnowledgeAdminPanel({
             <Globe className="h-4 w-4" /> Global knowledge base
           </CardTitle>
           <CardDescription className="text-xs">
-            Company-wide: stellixsoft.com pages + curated ICP. Sections: ICP, services, pricing, case
-            studies, website.
+            Company-wide corpus: stellixsoft.com + curated ICP. Sections: ICP, services, pricing,
+            case studies, website. Shared across categories when Global is linked.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -226,28 +231,54 @@ export function FitKnowledgeAdminPanel({
             />
           </div>
           {globalLib ? (
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs text-muted-foreground">
-                {globalLib.documentCount ?? 0} documents · {globalLib.chunkCount ?? 0} chunks indexed
-              </p>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-7 text-xs"
-                onClick={() =>
-                  setDocSheet({
-                    libraryId: globalLib.id,
-                    label: "Global knowledge, website & ICP",
-                  })
-                }
-              >
-                <FileText className="h-3 w-3 mr-1" /> View & edit documents
-              </Button>
+            <div className="space-y-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <p className="text-xs text-muted-foreground">
+                  {globalLib.documentCount ?? 0} documents · {globalLib.chunkCount ?? 0} chunks indexed
+                </p>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() =>
+                    setDocSheet({
+                      libraryId: globalLib.id,
+                      label: "Global knowledge, website & ICP",
+                    })
+                  }
+                >
+                  <FileText className="h-3 w-3 mr-1" /> View & edit documents
+                </Button>
+              </div>
+              {vectorHealth && (
+                <div className="flex flex-wrap items-start gap-2 rounded-md border bg-muted/40 px-2.5 py-2">
+                  <span className="text-xs text-muted-foreground shrink-0 pt-0.5">
+                    Vector search
+                  </span>
+                  <Badge
+                    variant="outline"
+                    className={cn(
+                      "text-[10px] font-medium",
+                      vectorHealth.status === "active" &&
+                        "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400",
+                      vectorHealth.status === "fallback" &&
+                        "border-amber-500/40 bg-amber-500/10 text-amber-700 dark:text-amber-400",
+                      vectorHealth.status === "not_indexed" &&
+                        "border-muted-foreground/30 text-muted-foreground",
+                    )}
+                  >
+                    {vectorHealth.label}
+                  </Badge>
+                  <p className="text-[11px] leading-snug text-muted-foreground min-w-0 flex-1">
+                    {vectorHealth.detail}
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-              Not seeded yet, run seed above.
+            Not indexed yet — run Index / refresh above.
             </p>
           )}
         </CardContent>
@@ -255,9 +286,10 @@ export function FitKnowledgeAdminPanel({
 
       <Card>
         <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Category libraries</CardTitle>
+          <CardTitle className="text-sm">Channel playbooks</CardTitle>
           <CardDescription className="text-xs">
-            Toggle each channel and connect/disconnect global knowledge for that category only.
+            Per opportunity source (Upwork, LinkedIn, …). Turn a channel on/off and choose whether
+            to also pull Global knowledge when scoring it.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-2">
@@ -275,7 +307,7 @@ export function FitKnowledgeAdminPanel({
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-medium">{OPPORTUNITY_SOURCE_LABELS[cat]}</p>
                   <p className="text-[10px] text-muted-foreground">
-                    Playbook {lib ? `· ${lib.chunkCount ?? 0} chunks` : "· not seeded"}
+                    Playbook {lib ? `· ${lib.chunkCount ?? 0} chunks` : "· not indexed"}
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2 sm:gap-3">
@@ -303,7 +335,7 @@ export function FitKnowledgeAdminPanel({
                       })();
                     }}
                   >
-                    <FileText className="h-3 w-3 mr-1" /> {lib ? "Edit" : "Seed & edit"}
+                    <FileText className="h-3 w-3 mr-1" /> {lib ? "Edit" : "Index & edit"}
                   </Button>
                   {lib ? (
                     <Button
@@ -359,7 +391,7 @@ export function FitKnowledgeAdminPanel({
         <CardHeader className="pb-2">
           <CardTitle className="text-sm">Retrieval budget (cost control)</CardTitle>
           <CardDescription className="text-xs">
-            Max chunks per fit check, lower = smaller prompts and lower LLM cost.
+            Max chunks injected per AI request. Lower = smaller prompts and lower LLM cost.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-wrap gap-4">
@@ -384,7 +416,7 @@ export function FitKnowledgeAdminPanel({
             </div>
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Category chunks</Label>
+            <Label className="text-xs">Playbook chunks</Label>
             <div className="flex gap-1">
               {[2, 4, 6].map((n) => (
                 <Button
@@ -404,7 +436,7 @@ export function FitKnowledgeAdminPanel({
             </div>
           </div>
           <Badge variant="outline" className="text-[10px] self-end">
-            Total ≤ {budget.globalChunks + budget.categoryChunks} chunks / check
+            Total ≤ {budget.globalChunks + budget.categoryChunks} chunks / request
           </Badge>
         </CardContent>
       </Card>
