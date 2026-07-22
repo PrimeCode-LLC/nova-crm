@@ -24,6 +24,13 @@ const FollowupPlanReplyWatcher = dynamic(
     })),
   { ssr: false },
 );
+const EmailBounceWatcher = dynamic(
+  () =>
+    import("@/components/providers/email-bounce-watcher").then((m) => ({
+      default: m.EmailBounceWatcher,
+    })),
+  { ssr: false },
+);
 const LeadResponseTimeSync = dynamic(
   () => import("@/components/providers/lead-response-time-sync").then((m) => ({ default: m.LeadResponseTimeSync })),
   { ssr: false },
@@ -96,6 +103,7 @@ export function DeferredAppSync() {
           <PlatformNotificationsAlertSync />
           <FollowupDueNotificationSync />
           <ActivityAuditTracker />
+          <EmailBounceWatcher />
           {needsFollowupReplyWatcher(pathname) ? <FollowupPlanReplyWatcher /> : null}
           {needsLeadResponseTimeSync(pathname) ? <LeadResponseTimeSync /> : null}
           {needsChannelAdminSync(pathname) ? <ChannelAdminSync /> : null}

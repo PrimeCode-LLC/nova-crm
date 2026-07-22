@@ -126,6 +126,7 @@ function asContact(id: string, raw: Record<string, unknown>): Contact {
     id,
     createdAt: firestoreValueToIso(raw.createdAt),
     updatedAt: firestoreValueToIso(raw.updatedAt),
+    emailBouncedAt: raw.emailBouncedAt ? firestoreValueToIso(raw.emailBouncedAt) : undefined,
   };
 }
 
@@ -324,6 +325,10 @@ function asLeadTask(id: string, raw: Record<string, unknown>): LeadTask {
     createdAt: firestoreValueToIso(raw.createdAt),
     contextCompany: optionalNonEmptyString(raw.contextCompany),
     contextContact: optionalNonEmptyString(raw.contextContact),
+    source:
+      raw.source === "email_bounce" || raw.source === "manual" || raw.source === "system"
+        ? raw.source
+        : undefined,
   };
 }
 

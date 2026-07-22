@@ -1,7 +1,8 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { PIPELINE_STAGES } from "@/lib/constants";
-import type { Followup, FollowupPlan, Lead, LeadTask, PipelineStage } from "@/lib/types";
+import type { Contact, Followup, FollowupPlan, Lead, LeadTask, PipelineStage } from "@/lib/types";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
+import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
 
 const STAGE_ORDER = PIPELINE_STAGES.map((s) => s.key);
 
@@ -13,6 +14,11 @@ function stageAtOrAfterReplied(stage: PipelineStage): boolean {
 
 function leadHasReply(lead: Lead): boolean {
   return Boolean(lead.lastReplyAt) || stageAtOrAfterReplied(lead.stage);
+}
+
+function isBounceReviewTask(task: LeadTask): boolean {
+  if (task.source === "email_bounce") return true;
+  return task.taskType === "review" && task.title === BOUNCE_REVIEW_TASK_TITLE;
 }
 
 export type DashboardWorkflowMetrics = {
@@ -29,6 +35,10 @@ export type DashboardWorkflowMetrics = {
   failedDeliveries: number;
   /** Transient failures awaiting auto-retry. */
   retryingDeliveries: number;
+  /** Hard bounces detected in the selected range (contacts or bounce-review tasks). */
+  bouncedEmailsInRange: number;
+  /** Open review tasks created from hard bounces (find valid email). */
+  openBounceReviewTasks: number;
   activeSequences: number;
   remainingSequenceSteps: number;
   pausedOnReply: number;
@@ -66,6 +76,8 @@ export function computeDashboardWorkflowMetrics(input: {
   currentUserId: string;
   range: DashboardTimeRangeKey;
   now?: Date;
+  /** Optional contacts for bounce timestamp metrics. */
+  contacts?: readonly Contact[];
 }): DashboardWorkflowMetrics {
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
@@ -84,6 +96,20 @@ export function computeDashboardWorkflowMetrics(input: {
     input.plans.filter((plan) => plan.status === "active").map((plan) => plan.id),
   );
   const openTasks = input.tasks.filter((task) => !task.completedAt);
+  const bounceReviewTasks = input.tasks.filter(isBounceReviewTask);
+  const openBounceReviewTasks = bounceReviewTasks.filter((task) => !task.completedAt).length;
+
+  const bouncedFromContacts =
+    input.contacts?.filter((c) => {
+      if (c.emailVerificationStatus !== "bounced") return false;
+      const at = validTime(c.emailBouncedAt);
+      return at !== undefined && at >= start;
+    }).length ?? 0;
+  const bouncedFromTasks = bounceReviewTasks.filter((task) => {
+    const at = validTime(task.createdAt);
+    return at !== undefined && at >= start;
+  }).length;
+  const bouncedEmailsInRange = Math.max(bouncedFromContacts, bouncedFromTasks);
 
   return {
     openSalesLeads: salesLeads.filter((lead) => !["won", "lost"].includes(lead.stage)).length,
@@ -117,6 +143,8 @@ export function computeDashboardWorkflowMetrics(input: {
     retryingDeliveries: input.followups.filter(
       (followup) => followup.deliveryStatus === "needs_retry" && !followup.completedAt,
     ).length,
+    bouncedEmailsInRange,
+    openBounceReviewTasks,
     activeSequences: activePlanIds.size,
     remainingSequenceSteps: actionableFollowups.filter(
       (followup) => Boolean(followup.planId && activePlanIds.has(followup.planId)),

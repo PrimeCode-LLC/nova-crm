@@ -33,6 +33,10 @@ export function OpsPulseStrip({
       value: metrics.sentInRange,
       hint: `${metrics.scheduledSteps} queued · ${metrics.failedDeliveries} failed${
         metrics.retryingDeliveries > 0 ? ` · ${metrics.retryingDeliveries} retrying` : ""
+      }${
+        metrics.bouncedEmailsInRange > 0 || metrics.openBounceReviewTasks > 0
+          ? ` · ${metrics.bouncedEmailsInRange} bounced · ${metrics.openBounceReviewTasks} to review`
+          : ""
       }`,
       icon: Send,
       href: "/inbox?folder=scheduled",

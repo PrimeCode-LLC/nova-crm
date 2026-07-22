@@ -260,6 +260,7 @@ export async function persistLeadTaskCreate(
   if (t.completedAt) data.completedAt = t.completedAt;
   if (t.contextCompany) data.contextCompany = t.contextCompany;
   if (t.contextContact) data.contextContact = t.contextContact;
+  if (t.source) data.source = t.source;
   await setDoc(doc(db, COLLECTIONS.leadTasks, t.id), data);
 }
 

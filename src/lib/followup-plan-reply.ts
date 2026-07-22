@@ -1,9 +1,9 @@
 import type { FollowupPlan, Lead } from "@/lib/types";
 import type { MailInbound } from "@/lib/email-account-types";
 import { leadContactEmails } from "@/lib/followup-plans";
+import { isDeliveryStatusNotification } from "@/lib/email/detect-hard-bounce";
 
-const OOO_RE =
-  /out of office|automatic reply|auto[- ]?reply|delivery status notification|mail delivery failed/i;
+const OOO_RE = /out of office|automatic reply|auto[- ]?reply/i;
 
 export function extractEmailAddress(header: string): string | null {
   const angle = header.match(/<([^>]+)>/);
@@ -13,6 +13,7 @@ export function extractEmailAddress(header: string): string | null {
   return null;
 }
 
+/** True for OOO / vacation / generic auto-replies — not bounce DSNs (see detectHardBounce). */
 export function isLikelyAutoReply(message: Pick<MailInbound, "subject" | "preview">): boolean {
   return OOO_RE.test(`${message.subject} ${message.preview}`);
 }
@@ -45,7 +46,10 @@ export function isInboundFromLeadContact(input: {
   lead: Lead;
   mailboxEmail?: string;
 }): boolean {
-  if (isLikelyAutoReply(input.message)) return false;
+  // Bounce DSNs and OOO must not pause sequences as a human reply.
+  if (isDeliveryStatusNotification(input.message) || isLikelyAutoReply(input.message)) {
+    return false;
+  }
   const fromAddr = extractEmailAddress(input.message.from);
   if (!fromAddr) return false;
   const mailbox = input.mailboxEmail?.trim().toLowerCase();

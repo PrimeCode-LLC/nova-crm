@@ -388,6 +388,8 @@ export interface Contact {
   personalEmail?: string;
   emailVerified?: boolean;
   emailVerificationStatus?: EmailVerificationStatus;
+  /** When `emailVerificationStatus` was last set to `bounced` (hard bounce). */
+  emailBouncedAt?: ISODate;
   phone?: string;
   linkedin?: string;
   title?: string;
@@ -762,6 +764,8 @@ export type LeadTaskType = "review" | "email" | "call" | "document" | "other";
  */
 export type LeadTaskVisibility = "on_lead" | "assignees_only";
 
+export type LeadTaskSource = "email_bounce" | "manual" | "system";
+
 export interface LeadTask {
   id: string;
   leadId?: string;
@@ -777,6 +781,8 @@ export interface LeadTask {
   /** Denormalized when `leadId` is set so assignees still see company/contact without lead ACL. */
   contextCompany?: string;
   contextContact?: string;
+  /** Origin of auto-created tasks (e.g. hard-bounce review). */
+  source?: LeadTaskSource;
 }
 
 export interface Note {
@@ -797,6 +803,7 @@ export type TimelineEventType =
   | "touchpoint_added"
   | "email_sent"
   | "email_replied"
+  | "email_bounced"
   | "note_added"
   | "followup_created"
   | "followup_completed"

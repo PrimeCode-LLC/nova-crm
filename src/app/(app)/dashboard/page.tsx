@@ -141,6 +141,7 @@ export default function DashboardPage() {
     timelineByLead,
     orgActivityEvents,
     viewerOrgRole,
+    contacts,
   } = useWorkspace();
   const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
   const emailResponseCtx = useLeadEmailResponseContext();
@@ -263,6 +264,7 @@ export default function DashboardPage() {
         followups: workflowFollowups,
         plans: workflowPlans,
         tasks: workflowTasks,
+        contacts,
         currentUserId,
         range: timeRange as DashboardTimeRangeKey,
       }),
@@ -271,6 +273,7 @@ export default function DashboardPage() {
       workflowFollowups,
       workflowPlans,
       workflowTasks,
+      contacts,
       currentUserId,
       timeRange,
     ],
@@ -419,6 +422,11 @@ export default function DashboardPage() {
         ...(workflowMetrics.retryingDeliveries > 0
           ? [{ label: "Email retrying", value: String(workflowMetrics.retryingDeliveries) }]
           : []),
+        { label: "Emails bounced in range", value: String(workflowMetrics.bouncedEmailsInRange) },
+        {
+          label: "Open bounce review tasks",
+          value: String(workflowMetrics.openBounceReviewTasks),
+        },
         { label: "My open tasks", value: String(workflowMetrics.myOpenTasks) },
         { label: "Pipeline value (USD)", value: String(Math.round(pipelineValue)) },
         { label: "Closed revenue (USD)", value: String(Math.round(closedValue)) },
@@ -740,6 +748,11 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.failedDeliveries} failed${
                       workflowMetrics.retryingDeliveries > 0
                         ? ` · ${workflowMetrics.retryingDeliveries} retrying`
+                        : ""
+                    }${
+                      workflowMetrics.bouncedEmailsInRange > 0 ||
+                      workflowMetrics.openBounceReviewTasks > 0
+                        ? ` · ${workflowMetrics.bouncedEmailsInRange} bounced · ${workflowMetrics.openBounceReviewTasks} to review`
                         : ""
                     }`}
                     icon={Send}
