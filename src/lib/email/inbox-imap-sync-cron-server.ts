@@ -12,6 +12,7 @@ import {
   markInboxSyncErrorServer,
   writeInboxHeadsServer,
 } from "@/lib/email/inbox-heads-server";
+import { processInboxBouncesFromHeadsServer } from "@/lib/email/process-inbox-bounces-server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 
 /** Cap IMAP connects per cron tick (cost + duration). */
@@ -91,7 +92,13 @@ async function listDueMailboxesForOrg(organizationId: string, nowMs: number): Pr
   return due;
 }
 
-async function syncOneMailbox(mb: DueMailbox): Promise<{ ok: boolean; error?: string; count?: number }> {
+async function syncOneMailbox(mb: DueMailbox): Promise<{
+  ok: boolean;
+  error?: string;
+  count?: number;
+  bouncesApplied?: number;
+  bounceCandidates?: number;
+}> {
   try {
     const auth = await resolveMailboxTransportAuthServer({
       organizationId: mb.organizationId,
@@ -131,7 +138,36 @@ async function syncOneMailbox(mb: DueMailbox): Promise<{ ok: boolean; error?: st
       mailboxTotal: result.mailboxTotal,
     });
 
-    return { ok: true, count: result.messages.length };
+    // Server-side bounce apply so CRM tasks/leads update without an open browser tab.
+    let bouncesApplied = 0;
+    let bounceCandidates = 0;
+    try {
+      const bounceResult = await processInboxBouncesFromHeadsServer({
+        organizationId: mb.organizationId,
+        dataOwnerUid: mb.uid,
+        mailboxId: mb.mailboxId,
+        messages: result.messages,
+        imap: {
+          host: mb.imapHost,
+          port: mb.imapPort,
+          secure: mb.imapSecure,
+          user: auth.user,
+          pass: auth.pass,
+          accessToken: auth.accessToken,
+        },
+      });
+      bouncesApplied = bounceResult.applied;
+      bounceCandidates = bounceResult.candidates;
+    } catch {
+      /* head sync succeeded; bounce apply retries next tick */
+    }
+
+    return {
+      ok: true,
+      count: result.messages.length,
+      bouncesApplied,
+      bounceCandidates,
+    };
   } catch (e) {
     const error = toImapFetchErrorMessage(e);
     await markInboxSyncErrorServer({
@@ -149,6 +185,8 @@ export type InboxImapCronResult = {
   synced: number;
   failed: number;
   skipped: number;
+  bouncesApplied: number;
+  bounceCandidates: number;
   errors: Array<{ organizationId: string; mailboxId: string; error: string }>;
 };
 
@@ -172,13 +210,18 @@ export async function runInboxImapSyncCronServer(): Promise<InboxImapCronResult>
 
   let synced = 0;
   let failed = 0;
+  let bouncesApplied = 0;
+  let bounceCandidates = 0;
   const errors: InboxImapCronResult["errors"] = [];
 
   // Sequential IMAP connects — safer for provider rate limits than a fan-out.
   for (const mb of batch) {
     const result = await syncOneMailbox(mb);
-    if (result.ok) synced += 1;
-    else {
+    if (result.ok) {
+      synced += 1;
+      bouncesApplied += result.bouncesApplied ?? 0;
+      bounceCandidates += result.bounceCandidates ?? 0;
+    } else {
       failed += 1;
       if (result.error) {
         errors.push({
@@ -195,6 +238,8 @@ export async function runInboxImapSyncCronServer(): Promise<InboxImapCronResult>
     synced,
     failed,
     skipped,
+    bouncesApplied,
+    bounceCandidates,
     errors: errors.slice(0, 20),
   };
 }
