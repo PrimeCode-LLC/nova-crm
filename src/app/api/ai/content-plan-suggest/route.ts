@@ -34,7 +34,14 @@ const CTAS = [
   "start_trial",
   "none",
 ] as const;
-const FORMATS = ["text_post", "thread", "carousel", "short_video", "long_form"] as const;
+const FORMATS = [
+  "text_post",
+  "graphic_post",
+  "thread",
+  "carousel",
+  "short_video",
+  "long_form",
+] as const;
 
 const bodySchema = z.object({
   brandId: z.string().min(1),

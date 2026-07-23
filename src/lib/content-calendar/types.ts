@@ -32,6 +32,7 @@ export type ContentStrategyStyle =
 
 export type ContentFormat =
   | "text_post"
+  | "graphic_post"
   | "thread"
   | "carousel"
   | "short_video"
@@ -263,6 +264,7 @@ export const CONTENT_STRATEGY_LABELS: Record<ContentStrategyStyle, string> = {
 
 export const CONTENT_FORMAT_LABELS: Record<ContentFormat, string> = {
   text_post: "Text post",
+  graphic_post: "Graphic post",
   thread: "Thread",
   carousel: "Carousel",
   short_video: "Short video",

@@ -224,7 +224,7 @@ export const B2B_AGENCY_STRATEGY_PACK: ContentStrategyPack = {
     community: "industry_commentary",
   },
   defaultPlatforms: ["linkedin", "x"],
-  defaultFormats: ["text_post", "thread"],
+  defaultFormats: ["text_post", "graphic_post", "thread"],
   pillarsForKind: (kind) => {
     if (kind === "founder") return founderPillars();
     if (kind === "product") return productPillars();

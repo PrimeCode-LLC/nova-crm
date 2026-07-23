@@ -378,7 +378,7 @@ User notes: {{userPrompt}}
 
 Return JSON with:
 - planSummary: string
-- slots: { publishAt (ISO datetime), platform, pillarKey, title, angle, rationale, proofHint, targetAudienceHint, format (text_post|thread|carousel|short_video|long_form), ctaType }[]`,
+- slots: { publishAt (ISO datetime), platform, pillarKey, title, angle, rationale, proofHint, targetAudienceHint, format (text_post|graphic_post|thread|carousel|short_video|long_form), ctaType }[]`
   },
   content_draft_generate: {
     systemPrompt: `You write platform-native social posts for a B2B services / software agency content calendar.
