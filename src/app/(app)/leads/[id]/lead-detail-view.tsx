@@ -430,7 +430,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
   const deal = ws.deals.find((d) => d.leadId === lead.id);
-  const primaryEmail = contact?.email || lead.contactEmail;
+  const companyEmail = (contact?.email || lead.contactEmail || "").trim() || undefined;
+  const personalEmail = contact?.personalEmail?.trim() || undefined;
+  const primaryEmail = companyEmail || personalEmail;
   const primaryPhone = contact?.phone;
   const emailBounced = contactHasBouncedEmail(contact);
   const openBounceTasks = React.useMemo(
@@ -809,18 +811,26 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                           ? `Apply suggested email: ${suggestedNewEmail}`
                           : lead.nextAction || "Add a next action to keep this record moving"}
                   </p>
-                  {!lead.doNotContact && (primaryEmail || primaryPhone) ? (
+                  {!lead.doNotContact && (companyEmail || personalEmail || primaryPhone) ? (
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
-                      {primaryEmail ? (
-                        <a href={`mailto:${primaryEmail}`} className="inline-flex items-center gap-1 hover:text-primary">
+                      {companyEmail ? (
+                        <a href={`mailto:${companyEmail}`} className="inline-flex items-center gap-1 hover:text-primary">
                           <Mail className="h-3 w-3" />
-                          {primaryEmail}
+                          <span className="text-muted-foreground/80">Company</span>
+                          {companyEmail}
                           {emailBounced ? (
                             <span className="inline-flex items-center gap-0.5 text-destructive">
                               <MailWarning className="h-3 w-3" />
                               bounced
                             </span>
                           ) : null}
+                        </a>
+                      ) : null}
+                      {personalEmail ? (
+                        <a href={`mailto:${personalEmail}`} className="inline-flex items-center gap-1 hover:text-primary">
+                          <Mail className="h-3 w-3" />
+                          <span className="text-muted-foreground/80">Personal</span>
+                          {personalEmail}
                         </a>
                       ) : null}
                       {primaryPhone ? (
@@ -1050,12 +1060,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 ) : null}
               </CardHeader>
               <CardContent className="pt-0 space-y-2 text-sm">
-                {primaryEmail && (
+                {companyEmail ? (
                   <div className="flex items-center gap-2">
                     <Mail className={cn("h-3.5 w-3.5 shrink-0", emailBounced ? "text-destructive" : "text-muted-foreground")} />
-                    <a href={`mailto:${primaryEmail}`} className="min-w-0 flex-1 truncate hover:text-primary">
-                      {primaryEmail}
-                    </a>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Company</p>
+                      <a href={`mailto:${companyEmail}`} className="block truncate hover:text-primary">
+                        {companyEmail}
+                      </a>
+                    </div>
                     {emailBounced ? (
                       <Badge variant="outline" className="shrink-0 border-destructive/40 text-[10px] text-destructive">
                         bounced
@@ -1066,21 +1079,34 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       variant="ghost"
                       size="icon-sm"
                       className="h-6 w-6 shrink-0"
-                      aria-label="Copy email address"
-                      onClick={() => void copyToClipboard(primaryEmail, "Email copied")}
+                      aria-label="Copy company email"
+                      onClick={() => void copyToClipboard(companyEmail, "Company email copied")}
                     >
                       <Copy className="h-3 w-3" />
                     </Button>
                   </div>
-                )}
-                {contact?.personalEmail && (
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                    <span className="shrink-0">Personal</span>
-                    <a href={`mailto:${contact.personalEmail}`} className="truncate hover:text-primary">
-                      {contact.personalEmail}
-                    </a>
+                ) : null}
+                {personalEmail ? (
+                  <div className="flex items-center gap-2">
+                    <Mail className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Personal</p>
+                      <a href={`mailto:${personalEmail}`} className="block truncate hover:text-primary">
+                        {personalEmail}
+                      </a>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon-sm"
+                      className="h-6 w-6 shrink-0"
+                      aria-label="Copy personal email"
+                      onClick={() => void copyToClipboard(personalEmail, "Personal email copied")}
+                    >
+                      <Copy className="h-3 w-3" />
+                    </Button>
                   </div>
-                )}
+                ) : null}
                 {primaryPhone && (
                   <div className="flex items-center gap-2">
                     <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />

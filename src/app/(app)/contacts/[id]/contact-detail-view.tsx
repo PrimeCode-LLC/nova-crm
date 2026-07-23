@@ -134,14 +134,28 @@ export function ContactDetailView({ contactId }: { contactId: string }) {
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Contact info</CardTitle>
               </CardHeader>
               <CardContent className="pt-0 space-y-2 text-sm">
-                {contact.email && (
+                {contact.email ? (
                   <div className="flex items-center gap-2">
                     <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
-                    <a href={`mailto:${contact.email}`} className="truncate hover:text-primary">
-                      {contact.email}
-                    </a>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Company</p>
+                      <a href={`mailto:${contact.email}`} className="block truncate hover:text-primary">
+                        {contact.email}
+                      </a>
+                    </div>
                   </div>
-                )}
+                ) : null}
+                {contact.personalEmail ? (
+                  <div className="flex items-center gap-2">
+                    <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Personal</p>
+                      <a href={`mailto:${contact.personalEmail}`} className="block truncate hover:text-primary">
+                        {contact.personalEmail}
+                      </a>
+                    </div>
+                  </div>
+                ) : null}
                 {contact.phone && (
                   <div className="flex items-center gap-2">
                     <Phone className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
