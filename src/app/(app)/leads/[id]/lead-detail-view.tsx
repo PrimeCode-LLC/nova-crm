@@ -389,6 +389,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     ? fallbackOwnerOptions
     : (activeMemberOptions ?? fallbackOwnerOptions);
 
+  const openBounceTasks = React.useMemo(
+    () => (lead ? openBounceReviewTasksForLead(leadTasksForTab, lead.id) : []),
+    [leadTasksForTab, lead?.id],
+  );
+
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
@@ -435,10 +440,6 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const primaryEmail = companyEmail || personalEmail;
   const primaryPhone = contact?.phone;
   const emailBounced = contactHasBouncedEmail(contact);
-  const openBounceTasks = React.useMemo(
-    () => openBounceReviewTasksForLead(leadTasksForTab, lead.id),
-    [leadTasksForTab, lead.id],
-  );
   const needsEmailFix = emailBounced || openBounceTasks.length > 0;
   const openFollowupCount = followups.filter((f) => !f.completedAt).length;
   const openTaskCount = leadTasksForTab.filter((t) => !t.completedAt).length;
