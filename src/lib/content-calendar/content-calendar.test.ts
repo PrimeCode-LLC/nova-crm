@@ -1,8 +1,15 @@
 import { describe, expect, it } from "vitest";
 import { computeContentConsistency } from "@/lib/content-calendar/consistency";
-import { isContentItemOverdue, buildContentChecklist, type ContentItem } from "@/lib/content-calendar/types";
+import { isContentItemOverdue, buildContentChecklist, type ContentCaptureRequiredField, type ContentItem } from "@/lib/content-calendar/types";
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import { can } from "@/lib/permissions/can";
+import {
+  isBehindCaptureCadence,
+  isCapturerIdle,
+  normalizeCapturePolicy,
+  shouldRemindCapturer,
+  validateCaptureFields,
+} from "@/lib/content-calendar/capture-policy";
 
 function item(partial: Partial<ContentItem> & Pick<ContentItem, "id" | "status" | "dueAt" | "publishAt">): ContentItem {
   return {
@@ -133,6 +140,17 @@ describe("content calendar", () => {
     });
     expect(textOnly.map((s) => s.key)).toEqual(["write", "publish"]);
   });
+
+  it("suggests designer canvas sizes by platform and format", async () => {
+    const { contentGraphicsSizeHint, formatNeedsGraphics } = await import(
+      "@/lib/content-calendar/types"
+    );
+    expect(formatNeedsGraphics("graphic_post")).toBe(true);
+    expect(formatNeedsGraphics("text_post")).toBe(false);
+    expect(contentGraphicsSizeHint("instagram", "graphic_post")).toContain("1080");
+    expect(contentGraphicsSizeHint("instagram", "short_video")).toContain("1920");
+    expect(contentGraphicsSizeHint("linkedin", "carousel")).toContain("carousel");
+  });
 });
 
 describe("content schedule", () => {
@@ -169,5 +187,96 @@ describe("content schedule", () => {
       "without disruption, book a Fit Check",
     );
     expect(scrubAiTellPunctuation("smart–simple")).toBe("smart-simple");
+    expect(
+      scrubAiTellPunctuation("**Myth 1:** Successful IoT\n- **Reality:** Keep it simple"),
+    ).toBe("Myth 1: Successful IoT\nReality: Keep it simple");
+    expect(scrubAiTellPunctuation("Read [this](https://example.com) next")).toBe(
+      "Read this next",
+    );
+  });
+});
+
+describe("capture policy", () => {
+  const brandBase = {
+    id: "b1",
+    organizationId: "org",
+    name: "Acme",
+    kind: "company" as const,
+    primaryOutcome: "authority_inbound" as const,
+    contentStrategy: "case_studies" as const,
+    strategyPackId: "b2b_agency_v1",
+    platforms: ["linkedin" as const],
+    positioning: "",
+    voiceRules: "",
+    bannedPhrases: [] as string[],
+    targetAudience: "",
+    offersToPromote: "",
+    topicsToAvoid: [] as string[],
+    referenceCreators: "",
+    proofSources: "",
+    preferredCtas: "",
+    defaultFormats: ["text_post" as const],
+    approvalRequired: true,
+    knowledgeLibraryIds: [] as string[],
+    pillars: [],
+    cadence: { postsPerWeek: {}, preferredWeekdays: [1, 2, 3, 4] },
+    defaultCtaType: "none" as const,
+    ownerUserId: "owner1",
+    responsibilities: { capturer: "cap1" },
+    active: true,
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  };
+
+  it("always requires problem and solution", () => {
+    const policy = normalizeCapturePolicy({ requiredFields: ["outcome"] });
+    expect(policy.requiredFields).toEqual(["problem", "solution", "outcome"]);
+    expect(validateCaptureFields(policy, { problem: "", solution: "x" }).ok).toBe(false);
+    expect(
+      validateCaptureFields(policy, {
+        problem: "p",
+        solution: "s",
+        outcome: "o",
+      }).ok,
+    ).toBe(true);
+  });
+
+  it("detects idle and behind cadence", () => {
+    const nowMs = new Date("2026-07-23T12:00:00.000Z").getTime();
+    const brand = {
+      ...brandBase,
+      capturePolicy: {
+        capturesPerWeek: 3,
+        idleDays: 7,
+        requiredFields: ["problem", "solution"] as ContentCaptureRequiredField[],
+        remindersEnabled: true,
+      },
+    };
+    const captures = [
+      {
+        brandId: "b1",
+        createdAt: "2026-07-20T10:00:00.000Z",
+      },
+    ];
+    expect(isBehindCaptureCadence({ brand, captures, nowMs })).toBe(true);
+    expect(
+      isCapturerIdle({ brand, captures, capturerUserId: "cap1", nowMs }),
+    ).toBe(false);
+    expect(
+      isCapturerIdle({
+        brand,
+        captures: [],
+        capturerUserId: "cap1",
+        nowMs,
+      }),
+    ).toBe(true);
+    expect(shouldRemindCapturer({ brand, captures, nowMs })).toBe(true);
+    expect(
+      shouldRemindCapturer({
+        brand: { ...brand, capturePolicy: { ...brand.capturePolicy, remindersEnabled: false } },
+        captures,
+        nowMs,
+      }),
+    ).toBe(false);
   });
 });

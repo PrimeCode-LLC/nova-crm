@@ -26,29 +26,15 @@ import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import { fmtRelative } from "@/lib/format";
 import {
   resolveBrandResponsibility,
-  type ContentBrand,
 } from "@/lib/content-calendar/types";
+import {
+  CAPTURE_REQUIRED_FIELD_LABELS,
+  brandCapturePolicy,
+  brandsNeedingCaptureAttention,
+  getCaptureProgress,
+  validateCaptureFields,
+} from "@/lib/content-calendar/capture-policy";
 import { UserChip } from "@/components/common/user-chip";
-
-const CAPTURE_IDLE_DAYS = 7;
-
-function capturerIdleBrands(
-  brands: ContentBrand[],
-  captures: { brandId?: string; createdAt: string }[],
-  currentUserId: string,
-  now: number,
-): ContentBrand[] {
-  const cutoff = now - CAPTURE_IDLE_DAYS * 86_400_000;
-  return brands.filter((brand) => {
-    if (!brand.active) return false;
-    const capturer = resolveBrandResponsibility(brand, "capturer");
-    if (!capturer || capturer !== currentUserId) return false;
-    const latest = captures
-      .filter((c) => c.brandId === brand.id)
-      .reduce((max, c) => Math.max(max, new Date(c.createdAt).getTime() || 0), 0);
-    return latest === 0 || latest < cutoff;
-  });
-}
 
 export function ContentCaptureClient() {
   const navAccess = useNavAccessContext();
@@ -82,15 +68,40 @@ export function ContentCaptureClient() {
   const capturerId = selectedBrand
     ? resolveBrandResponsibility(selectedBrand, "capturer")
     : "";
-  const idleBrands = React.useMemo(
-    () => capturerIdleBrands(data.brands, data.captures, data.currentUserId, Date.now()),
+  const policy = selectedBrand
+    ? brandCapturePolicy(selectedBrand)
+    : brandCapturePolicy({});
+  const progress = selectedBrand
+    ? getCaptureProgress({
+        brand: selectedBrand,
+        captures: data.captures,
+        currentUserId: data.currentUserId,
+        nowMs: Date.now(),
+      })
+    : null;
+  const attention = React.useMemo(
+    () =>
+      brandsNeedingCaptureAttention({
+        brands: data.brands,
+        captures: data.captures,
+        currentUserId: data.currentUserId,
+        nowMs: Date.now(),
+      }),
     [data.brands, data.captures, data.currentUserId],
   );
 
   async function submit() {
     if (!canCreate) return;
-    if (!problem.trim() || !solution.trim()) {
-      toast.error("Problem and solution are required");
+    const check = validateCaptureFields(policy, {
+      problem,
+      solution,
+      outcome,
+      notes,
+    });
+    if (!check.ok) {
+      toast.error(
+        `Required: ${check.missing.map((f) => CAPTURE_REQUIRED_FIELD_LABELS[f]).join(", ")}`,
+      );
       return;
     }
     setBusy(true);
@@ -108,16 +119,17 @@ export function ContentCaptureClient() {
         toast.error("Could not save capture");
         return;
       }
-
       const res = await fetch("/api/ai/content-capture-normalize", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        credentials: "same-origin",
         body: JSON.stringify({ captureId: capture.id }),
       });
-      const json = (await res.json()) as { error?: string; title?: string };
+      const json = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        title?: string;
+      };
       if (!res.ok) {
-        toast.error(json.error || "Normalize / index failed");
+        toast.error(json.error || "Normalize failed");
         return;
       }
       toast.success(json.title ? `Indexed: ${json.title}` : "Captured and indexed");
@@ -125,11 +137,16 @@ export function ContentCaptureClient() {
       setSolution("");
       setOutcome("");
       setNotes("");
+      setQueueForPosts(false);
     } catch {
       toast.error("Capture failed");
     } finally {
       setBusy(false);
     }
+  }
+
+  function fieldRequired(field: keyof typeof CAPTURE_REQUIRED_FIELD_LABELS): boolean {
+    return policy.requiredFields.includes(field);
   }
 
   return (
@@ -144,11 +161,34 @@ export function ContentCaptureClient() {
         }
       />
       <PageBody>
-        {idleBrands.length > 0 ? (
-          <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
-            You are the capturer for{" "}
-            {idleBrands.map((b) => b.name).join(", ")} and there have been no
-            captures in the last {CAPTURE_IDLE_DAYS} days.
+        {attention.length > 0 ? (
+          <div className="mb-4 space-y-2">
+            {attention.map(({ brand, progress: p }) => (
+              <div
+                key={brand.id}
+                className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm"
+              >
+                <span className="font-medium">{brand.name}</span>
+                {": "}
+                {p.behindCadence && p.target > 0
+                  ? `${p.weekCount}/${p.target} captures this week`
+                  : null}
+                {p.behindCadence && p.idle ? " · " : null}
+                {p.idle
+                  ? p.daysSinceLast == null
+                    ? "no captures yet"
+                    : `idle ${p.daysSinceLast}+ days (limit ${p.policy.idleDays})`
+                  : null}
+                {" — "}
+                <button
+                  type="button"
+                  className="underline underline-offset-2"
+                  onClick={() => setBrandId(brand.id)}
+                >
+                  Capture now
+                </button>
+              </div>
+            ))}
           </div>
         ) : null}
         <div className="grid gap-6 lg:grid-cols-2">
@@ -183,9 +223,43 @@ export function ContentCaptureClient() {
                     Capturer for this brand: <UserChip userId={capturerId} size="xs" />
                   </p>
                 ) : null}
+                {selectedBrand && progress ? (
+                  <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground space-y-1">
+                    {progress.target > 0 ? (
+                      <p>
+                        This week:{" "}
+                        <span
+                          className={cn(
+                            "font-medium",
+                            progress.behindCadence ? "text-amber-600 dark:text-amber-400" : "text-foreground",
+                          )}
+                        >
+                          {progress.weekCount}/{progress.target}
+                        </span>{" "}
+                        captures
+                      </p>
+                    ) : (
+                      <p>No weekly capture quota set for this brand.</p>
+                    )}
+                    <p>
+                      Idle after {progress.policy.idleDays} days
+                      {progress.policy.remindersEnabled ? " · reminders on" : " · reminders off"}
+                    </p>
+                    {progress.policy.requirementsNotes ? (
+                      <p className="text-foreground/90 pt-1">
+                        {progress.policy.requirementsNotes}
+                      </p>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2">
-                <Label>Problem</Label>
+                <Label>
+                  Problem
+                  {fieldRequired("problem") ? (
+                    <span className="text-destructive"> *</span>
+                  ) : null}
+                </Label>
                 <Textarea
                   value={problem}
                   onChange={(e) => setProblem(e.target.value)}
@@ -194,7 +268,12 @@ export function ContentCaptureClient() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Solution</Label>
+                <Label>
+                  Solution
+                  {fieldRequired("solution") ? (
+                    <span className="text-destructive"> *</span>
+                  ) : null}
+                </Label>
                 <Textarea
                   value={solution}
                   onChange={(e) => setSolution(e.target.value)}
@@ -203,7 +282,14 @@ export function ContentCaptureClient() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Outcome (optional)</Label>
+                <Label>
+                  Outcome
+                  {fieldRequired("outcome") ? (
+                    <span className="text-destructive"> *</span>
+                  ) : (
+                    " (optional)"
+                  )}
+                </Label>
                 <Textarea
                   value={outcome}
                   onChange={(e) => setOutcome(e.target.value)}
@@ -212,7 +298,12 @@ export function ContentCaptureClient() {
                 />
               </div>
               <div className="space-y-2">
-                <Label>Extra notes</Label>
+                <Label>
+                  Extra notes
+                  {fieldRequired("notes") ? (
+                    <span className="text-destructive"> *</span>
+                  ) : null}
+                </Label>
                 <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
               </div>
               <label className="flex items-center gap-2 text-sm">

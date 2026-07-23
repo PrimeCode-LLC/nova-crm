@@ -23,6 +23,8 @@ import type {
   ContentChecklistStepKey,
   ContentChecklistStepStatus,
   ContentAssetLink,
+  ContentCapturePolicy,
+  ContentCaptureRequiredField,
 } from "@/lib/content-calendar/types";
 import {
   normalizeBrandKind,
@@ -30,6 +32,7 @@ import {
   normalizeItemStatus,
   normalizePrimaryOutcome,
 } from "@/lib/content-calendar/types";
+import { normalizeCapturePolicy } from "@/lib/content-calendar/capture-policy";
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
@@ -114,6 +117,7 @@ export function mapContentBrand(id: string, data: Record<string, unknown>): Cont
     ownerUserId: str(data.ownerUserId),
     defaultOwnerUserId: str(data.defaultOwnerUserId) || undefined,
     responsibilities: mapResponsibilities(data.responsibilities),
+    capturePolicy: mapCapturePolicy(data.capturePolicy),
     active: bool(data.active, true),
     createdAt: str(data.createdAt),
     updatedAt: str(data.updatedAt),
@@ -143,6 +147,24 @@ function mapResponsibilities(
     }
   }
   return any ? out : undefined;
+}
+
+function mapCapturePolicy(raw: unknown): ContentCapturePolicy | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const requiredRaw = Array.isArray(o.requiredFields)
+    ? (o.requiredFields as unknown[]).filter(
+        (f): f is ContentCaptureRequiredField =>
+          f === "problem" || f === "solution" || f === "outcome" || f === "notes",
+      )
+    : undefined;
+  return normalizeCapturePolicy({
+    capturesPerWeek: typeof o.capturesPerWeek === "number" ? o.capturesPerWeek : undefined,
+    idleDays: typeof o.idleDays === "number" ? o.idleDays : undefined,
+    requiredFields: requiredRaw,
+    remindersEnabled: bool(o.remindersEnabled, false),
+    requirementsNotes: str(o.requirementsNotes) || undefined,
+  });
 }
 
 export function mapContentItem(id: string, data: Record<string, unknown>): ContentItem {
@@ -194,6 +216,7 @@ export function mapContentItem(id: string, data: Record<string, unknown>): Conte
     assigneeUserId: str(data.assigneeUserId),
     ownerUserId: str(data.ownerUserId),
     checklist: mapChecklist(data.checklist),
+    designInstructions: str(data.designInstructions) || undefined,
     assetLinks: mapAssetLinks(data.assetLinks),
     planId: str(data.planId) || undefined,
     captureId: str(data.captureId) || undefined,

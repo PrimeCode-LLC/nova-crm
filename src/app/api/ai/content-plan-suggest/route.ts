@@ -53,7 +53,11 @@ const bodySchema = z.object({
   platforms: z.array(z.enum(PLATFORMS)).min(1).max(4),
   userPrompt: z.string().max(800).optional(),
   recentAngles: z.array(z.string().max(300)).max(40).optional(),
-  startDate: z.string().optional(),
+  /** Inclusive window start as YYYY-MM-DD. Defaults to tomorrow (or today before 10:00). */
+  startDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "startDate must be YYYY-MM-DD")
+    .optional(),
 });
 
 const slotSchema = z.object({

@@ -16,6 +16,7 @@ export type AiFeatureKey =
   | "content_capture_normalize"
   | "content_plan_suggest"
   | "content_draft_generate"
+  | "content_graphics_brief"
   | "rag_index";
 
 export type AiRagMode = "strict" | "reference" | "open";
@@ -186,6 +187,10 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
       ragMode: "reference",
     },
     content_draft_generate: {
+      enabled: true,
+      ragMode: "reference",
+    },
+    content_graphics_brief: {
       enabled: true,
       ragMode: "reference",
     },

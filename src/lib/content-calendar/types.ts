@@ -115,6 +115,30 @@ export interface ContentCadence {
   weeklyPublishTarget?: number;
 }
 
+/** Fields that brand capture policy can require on each capture. */
+export type ContentCaptureRequiredField =
+  | "problem"
+  | "solution"
+  | "outcome"
+  | "notes";
+
+/**
+ * Brand-level rules for continuous proof capture.
+ * Distinct from checklist “Write copy” (post drafting).
+ */
+export interface ContentCapturePolicy {
+  /** Target captures in a rolling 7-day window. 0 = no weekly target. */
+  capturesPerWeek: number;
+  /** Days without a capture before the capturer is considered idle. */
+  idleDays: number;
+  /** Fields that must be filled on submit (problem + solution always enforced). */
+  requiredFields: ContentCaptureRequiredField[];
+  /** In-app daily reminders when idle or behind cadence. */
+  remindersEnabled: boolean;
+  /** Free-text guidance shown to the capturer (what proof to feed). */
+  requirementsNotes?: string;
+}
+
 export interface ContentPillar {
   key: ContentPillarKey;
   name: string;
@@ -158,6 +182,8 @@ export interface ContentBrand {
   defaultOwnerUserId?: string;
   /** People responsible for each content ops slot (empty = fall back to owner). */
   responsibilities?: Partial<Record<ContentResponsibilityKey, string>>;
+  /** How often / what the capturer must feed into Capture. */
+  capturePolicy?: ContentCapturePolicy;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -201,6 +227,8 @@ export interface ContentItem {
   ownerUserId: string;
   /** Parallel checklist; when present, drives dashboard “my content” work. */
   checklist?: ContentChecklistStep[];
+  /** Short designer brief (size, overlay text, focal idea, tone). */
+  designInstructions?: string;
   /** Designer-pasted asset URLs (Drive, Figma, etc.). */
   assetLinks?: ContentAssetLink[];
   planId?: string;
@@ -369,6 +397,29 @@ export const CONTENT_GRAPHICS_FORMATS: ContentFormat[] = [
 
 export function formatNeedsGraphics(format: ContentFormat | undefined): boolean {
   return Boolean(format && CONTENT_GRAPHICS_FORMATS.includes(format));
+}
+
+/** Recommended canvas size for designers (platform + format). */
+export function contentGraphicsSizeHint(
+  platform: ContentPlatform,
+  format: ContentFormat | undefined,
+): string {
+  if (format === "carousel") {
+    if (platform === "instagram") return "1080×1350 (portrait carousel slides)";
+    if (platform === "linkedin") return "1080×1080 (carousel slides)";
+    return "1080×1080 (carousel slides)";
+  }
+  if (format === "short_video") {
+    if (platform === "instagram" || platform === "linkedin") return "1080×1920 (9:16 vertical)";
+    if (platform === "x") return "1280×720 or 1080×1920";
+    return "1080×1920 (9:16 vertical)";
+  }
+  // graphic_post and fallback
+  if (platform === "instagram") return "1080×1080 (square) or 1080×1350 (portrait)";
+  if (platform === "linkedin") return "1200×627 (landscape) or 1080×1080 (square)";
+  if (platform === "x") return "1600×900 (16:9) or 1080×1080 (square)";
+  if (platform === "reddit") return "1200×628 (link preview) or 1080×1080";
+  return "1080×1080";
 }
 
 /** Resolve brand slot → userId, falling back to brand owner. */

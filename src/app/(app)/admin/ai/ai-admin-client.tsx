@@ -54,6 +54,7 @@ const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "content_capture_normalize", label: "Content capture normalize" },
   { key: "content_plan_suggest", label: "Content plan suggest" },
   { key: "content_draft_generate", label: "Content draft generate" },
+  { key: "content_graphics_brief", label: "Content graphics brief" },
 ];
 
 export function AiAdminClient() {

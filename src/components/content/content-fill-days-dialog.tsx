@@ -2,9 +2,12 @@
 
 import * as React from "react";
 import { toast } from "sonner";
-import { CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import { addDays, differenceInCalendarDays, format, startOfDay } from "date-fns";
+import type { DateRange } from "react-day-picker";
+import { Calendar as CalendarIcon, CheckCircle2, Loader2, Sparkles } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -15,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -39,12 +43,19 @@ import {
   CONTENT_PLATFORM_LABELS,
   buildContentChecklist,
   firstPendingChecklistAssignee,
+  formatNeedsGraphics,
   resolveBrandResponsibility,
 } from "@/lib/content-calendar/types";
+import { scrubAiTellPunctuation } from "@/lib/content-calendar/schedule";
 
 type PlanSuggestResponse = {
   plan: ContentPlan;
 };
+
+type DayPreset = "7" | "10" | "14" | "custom";
+
+const MIN_CUSTOM_DAYS = 3;
+const MAX_CUSTOM_DAYS = 21;
 
 function formatSlotWhen(iso: string) {
   const d = new Date(iso);
@@ -56,6 +67,20 @@ function formatSlotWhen(iso: string) {
     hour: "numeric",
     minute: "2-digit",
   });
+}
+
+function summarizeCustomRange(range?: DateRange) {
+  if (!range?.from) return "Pick start and end dates";
+  if (!range.to) return `${format(range.from, "MMM d")} – …`;
+  if (differenceInCalendarDays(range.to, range.from) === 0) {
+    return format(range.from, "MMM d, yyyy");
+  }
+  return `${format(range.from, "MMM d")} – ${format(range.to, "MMM d, yyyy")}`;
+}
+
+function customRangeDayCount(range?: DateRange) {
+  if (!range?.from || !range.to) return null;
+  return differenceInCalendarDays(range.to, range.from) + 1;
 }
 
 export function ContentFillDaysDialog({
@@ -80,7 +105,8 @@ export function ContentFillDaysDialog({
   savePlan: (plan: ContentPlan, isNew: boolean) => Promise<void>;
 }) {
   const [brandId, setBrandId] = React.useState(initialBrandId ?? "");
-  const [dayCount, setDayCount] = React.useState<"7" | "10" | "14">("7");
+  const [dayPreset, setDayPreset] = React.useState<DayPreset>("7");
+  const [customRange, setCustomRange] = React.useState<DateRange | undefined>();
   const [userPrompt, setUserPrompt] = React.useState("");
   const [step, setStep] = React.useState<"setup" | "plan" | "drafting">("setup");
   const [busy, setBusy] = React.useState(false);
@@ -98,6 +124,8 @@ export function ContentFillDaysDialog({
   React.useEffect(() => {
     if (open && !wasOpen.current) {
       setBrandId(initialBrandId ?? brands[0]?.id ?? "");
+      setDayPreset("7");
+      setCustomRange(undefined);
       setStep("setup");
       setPlan(null);
       setUserPrompt("");
@@ -106,6 +134,16 @@ export function ContentFillDaysDialog({
     }
     wasOpen.current = open;
   }, [open, initialBrandId, brands]);
+
+  const customDays = customRangeDayCount(customRange);
+  const customRangeValid =
+    customDays != null &&
+    customDays >= MIN_CUSTOM_DAYS &&
+    customDays <= MAX_CUSTOM_DAYS;
+  const canGenerate =
+    Boolean(brandId) &&
+    !busy &&
+    (dayPreset !== "custom" || customRangeValid);
 
   const brand = brands.find((b) => b.id === brandId);
   const approvedCount = plan?.slots.filter((s) => s.approved).length ?? 0;
@@ -135,6 +173,24 @@ export function ContentFillDaysDialog({
       toast.error("This brand has no platforms. Add at least one in brand settings.");
       return;
     }
+
+    let dayCount: number;
+    let startDate: string | undefined;
+    if (dayPreset === "custom") {
+      if (!customRange?.from || !customRange.to) {
+        toast.error("Pick a start and end date");
+        return;
+      }
+      dayCount = differenceInCalendarDays(customRange.to, customRange.from) + 1;
+      if (dayCount < MIN_CUSTOM_DAYS || dayCount > MAX_CUSTOM_DAYS) {
+        toast.error(`Custom range must be ${MIN_CUSTOM_DAYS}–${MAX_CUSTOM_DAYS} days`);
+        return;
+      }
+      startDate = format(customRange.from, "yyyy-MM-dd");
+    } else {
+      dayCount = Number(dayPreset);
+    }
+
     setBusy(true);
     try {
       const res = await fetch("/api/ai/content-plan-suggest", {
@@ -143,7 +199,8 @@ export function ContentFillDaysDialog({
         credentials: "same-origin",
         body: JSON.stringify({
           brandId: brand.id,
-          dayCount: Number(dayCount),
+          dayCount,
+          startDate,
           platforms: brand.platforms,
           userPrompt: userPrompt.trim() || undefined,
           recentAngles: items
@@ -261,6 +318,38 @@ export function ContentFillDaysDialog({
           resolveBrandResponsibility(brand, "planner") || brand.ownerUserId || currentUserId;
         const assigneeUserId = firstPendingChecklistAssignee(checklist, currentUserId);
 
+        let designInstructions: string | undefined;
+        if (formatNeedsGraphics(format)) {
+          try {
+            const briefRes = await fetch("/api/ai/content-graphics-brief", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              credentials: "same-origin",
+              body: JSON.stringify({
+                brandId: brand.id,
+                platform: slot.platform,
+                format,
+                pillarKey: slot.pillarKey,
+                title: slot.title,
+                angle: slot.angle,
+                ctaType: slot.ctaType,
+                hook: data.hook,
+                body: data.body || slot.angle,
+              }),
+            });
+            if (briefRes.ok) {
+              const briefJson = (await briefRes.json()) as { designInstructions?: string };
+              designInstructions =
+                scrubAiTellPunctuation(briefJson.designInstructions ?? "") || undefined;
+            }
+          } catch {
+            // Draft still saves; designer can generate the brief on the item page.
+          }
+        }
+
+        const cleanBody = scrubAiTellPunctuation(data.body || slot.angle);
+        const cleanHook = data.hook ? scrubAiTellPunctuation(data.hook) : data.hook;
+
         const item = await createItem({
           brandId: brand.id,
           pillarKey: slot.pillarKey,
@@ -275,8 +364,8 @@ export function ContentFillDaysDialog({
           variants: [
             {
               platform: slot.platform,
-              body: data.body || slot.angle,
-              hook: data.hook,
+              body: cleanBody,
+              hook: cleanHook,
               format,
             },
           ],
@@ -284,6 +373,7 @@ export function ContentFillDaysDialog({
           ragCitations: data.citations,
           verifiedFromKnowledge: Boolean(data.citations?.length),
           checklist,
+          designInstructions,
           assigneeUserId,
           ownerUserId,
           planId: plan.id,
@@ -378,26 +468,74 @@ export function ContentFillDaysDialog({
               <div className="space-y-2">
                 <Label>Days</Label>
                 <Select
-                  value={dayCount}
+                  value={dayPreset}
                   onValueChange={(v) => {
-                    if (v === "7" || v === "10" || v === "14") setDayCount(v);
+                    if (v === "7" || v === "10" || v === "14" || v === "custom") {
+                      setDayPreset(v);
+                    }
                   }}
                 >
                   <SelectTrigger>
                     <SelectValue>
-                      {dayCount === "7"
+                      {dayPreset === "7"
                         ? "Next 7 days"
-                        : dayCount === "10"
+                        : dayPreset === "10"
                           ? "Next 10 days"
-                          : "Next 14 days"}
+                          : dayPreset === "14"
+                            ? "Next 14 days"
+                            : "Custom range"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="7">Next 7 days</SelectItem>
                     <SelectItem value="10">Next 10 days</SelectItem>
                     <SelectItem value="14">Next 14 days</SelectItem>
+                    <SelectItem value="custom">Custom range</SelectItem>
                   </SelectContent>
                 </Select>
+                {dayPreset === "custom" ? (
+                  <div className="space-y-1.5">
+                    <Popover>
+                      <PopoverTrigger
+                        render={
+                          <Button
+                            type="button"
+                            variant="outline"
+                            className="w-full justify-start gap-2 font-normal"
+                          >
+                            <CalendarIcon className="h-4 w-4 shrink-0 opacity-70" />
+                            <span className="truncate">{summarizeCustomRange(customRange)}</span>
+                          </Button>
+                        }
+                      />
+                      <PopoverContent className="w-auto p-0" align="start" sideOffset={6}>
+                        <Calendar
+                          mode="range"
+                          numberOfMonths={1}
+                          selected={customRange}
+                          defaultMonth={customRange?.from ?? new Date()}
+                          onSelect={setCustomRange}
+                          disabled={(date) => {
+                            const today = startOfDay(new Date());
+                            if (date < today) return true;
+                            if (customRange?.from && !customRange.to) {
+                              const max = addDays(customRange.from, MAX_CUSTOM_DAYS - 1);
+                              return date < customRange.from || date > max;
+                            }
+                            return false;
+                          }}
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    <p className="text-xs text-muted-foreground">
+                      {customDays == null
+                        ? `Choose ${MIN_CUSTOM_DAYS}–${MAX_CUSTOM_DAYS} days starting today or later.`
+                        : customRangeValid
+                          ? `${customDays} day${customDays === 1 ? "" : "s"} selected`
+                          : `Range must be ${MIN_CUSTOM_DAYS}–${MAX_CUSTOM_DAYS} days (currently ${customDays}).`}
+                    </p>
+                  </div>
+                ) : null}
               </div>
               {brand && (
                 <div className="space-y-1.5">
@@ -619,7 +757,7 @@ export function ContentFillDaysDialog({
               <p className="hidden text-xs text-muted-foreground sm:block">
                 Usually takes 10–20 seconds
               </p>
-              <Button type="button" onClick={() => void suggestPlan()} disabled={busy || !brandId}>
+              <Button type="button" onClick={() => void suggestPlan()} disabled={!canGenerate}>
                 {busy ? (
                   <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (

@@ -18,6 +18,7 @@ const FEATURE_KEYS = [
   "content_capture_normalize",
   "content_plan_suggest",
   "content_draft_generate",
+  "content_graphics_brief",
   "rag_index",
 ] as const;
 

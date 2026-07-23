@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Copy, ExternalLink, Plus, SkipForward, Trash2 } from "lucide-react";
+import { Check, Copy, ExternalLink, Plus, SkipForward, Sparkles, Trash2 } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -27,12 +27,15 @@ import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import {
   CONTENT_CHECKLIST_STEP_LABELS,
+  CONTENT_FORMAT_LABELS,
   CONTENT_PILLAR_LABELS,
   CONTENT_PLATFORM_LABELS,
   CONTENT_STATUS_LABELS,
   buildContentChecklist,
+  contentGraphicsSizeHint,
   contentVariantCharLimit,
   firstPendingChecklistAssignee,
+  formatNeedsGraphics,
   isContentItemOverdue,
   statusFromChecklist,
   type ContentAssetLink,
@@ -43,6 +46,7 @@ import {
   type ContentPlatform,
 } from "@/lib/content-calendar/types";
 import { fmtDate } from "@/lib/format";
+import { scrubAiTellPunctuation } from "@/lib/content-calendar/schedule";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { OrganizationMember } from "@/lib/types";
 
@@ -71,13 +75,16 @@ export function ContentItemDetailClient() {
   const [bodies, setBodies] = React.useState<Record<string, string>>({});
   const [assetUrl, setAssetUrl] = React.useState("");
   const [assetLabel, setAssetLabel] = React.useState("");
+  const [designDraft, setDesignDraft] = React.useState("");
+  const [briefBusy, setBriefBusy] = React.useState(false);
   const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
 
   React.useEffect(() => {
     if (!item) return;
     const next: Record<string, string> = {};
-    for (const v of item.variants) next[v.platform] = v.body;
+    for (const v of item.variants) next[v.platform] = scrubAiTellPunctuation(v.body);
     setBodies(next);
+    setDesignDraft(scrubAiTellPunctuation(item.designInstructions ?? ""));
   }, [item]);
 
   React.useEffect(() => {
@@ -227,13 +234,92 @@ export function ContentItemDetailClient() {
     toast.success("Link removed");
   }
 
+  async function saveDesignInstructions() {
+    if (!canEdit || !item) return;
+    const designInstructions = scrubAiTellPunctuation(designDraft) || undefined;
+    setDesignDraft(designInstructions ?? "");
+    await data.updateItem(item.id, { designInstructions });
+    toast.success("Design brief saved");
+  }
+
+  async function copyDesignBrief() {
+    const text = scrubAiTellPunctuation(designDraft);
+    if (!text) {
+      toast.message("Nothing to copy");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("Design brief copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
+
+  async function generateDesignBrief() {
+    if (!canEdit || !item || !brand) return;
+    const platform = item.platforms[0];
+    if (!platform) {
+      toast.error("Add a platform first");
+      return;
+    }
+    const format = item.format ?? "graphic_post";
+    if (!formatNeedsGraphics(format)) {
+      toast.message("This format does not need graphics");
+      return;
+    }
+    setBriefBusy(true);
+    try {
+      const variant = item.variants.find((v) => v.platform === platform);
+      const res = await fetch("/api/ai/content-graphics-brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          brandId: brand.id,
+          platform,
+          format,
+          pillarKey: item.pillarKey,
+          title: item.title,
+          angle: item.angle,
+          ctaType: item.ctaType,
+          hook: variant?.hook,
+          body: bodies[platform] || variant?.body || item.angle,
+        }),
+      });
+      const json = (await res.json()) as { error?: unknown; designInstructions?: string };
+      if (!res.ok) {
+        toast.error(
+          typeof json.error === "string" ? json.error : "Could not generate design brief",
+        );
+        return;
+      }
+      const designInstructions = scrubAiTellPunctuation(json.designInstructions ?? "");
+      setDesignDraft(designInstructions);
+      await data.updateItem(item.id, { designInstructions: designInstructions || undefined });
+      toast.success("Design brief ready");
+    } finally {
+      setBriefBusy(false);
+    }
+  }
+
   async function saveBodies() {
     if (!canEdit || !item) return;
-    const variants = item.platforms.map((p) => ({
-      platform: p,
-      body: bodies[p] ?? item.variants.find((v) => v.platform === p)?.body ?? "",
-      hook: item.variants.find((v) => v.platform === p)?.hook,
-    }));
+    const cleaned: Record<string, string> = {};
+    const variants = item.platforms.map((p) => {
+      const body = scrubAiTellPunctuation(
+        bodies[p] ?? item.variants.find((v) => v.platform === p)?.body ?? "",
+      );
+      cleaned[p] = body;
+      const prev = item.variants.find((v) => v.platform === p);
+      return {
+        platform: p,
+        body,
+        hook: prev?.hook ? scrubAiTellPunctuation(prev.hook) : prev?.hook,
+        format: prev?.format,
+      };
+    });
+    setBodies(cleaned);
     await data.updateItem(item.id, {
       variants,
       status: item.status === "idea" || item.status === "research" ? "draft" : item.status,
@@ -249,9 +335,17 @@ export function ContentItemDetailClient() {
 
   async function copy(platform: ContentPlatform) {
     if (!item) return;
-    const text = bodies[platform] || item.variants.find((v) => v.platform === platform)?.body || "";
+    const raw = bodies[platform] || item.variants.find((v) => v.platform === platform)?.body || "";
+    const text = scrubAiTellPunctuation(raw);
+    if (!text) {
+      toast.message("Nothing to copy");
+      return;
+    }
     try {
       await navigator.clipboard.writeText(text);
+      if (text !== raw) {
+        setBodies((prev) => ({ ...prev, [platform]: text }));
+      }
       toast.success("Copied");
     } catch {
       toast.error("Could not copy");
@@ -286,7 +380,11 @@ export function ContentItemDetailClient() {
     const platforms = [...item.platforms, platform];
     const variants = [
       ...item.variants,
-      { platform, body: json.body || item.angle, hook: json.hook },
+      {
+        platform,
+        body: scrubAiTellPunctuation(json.body || item.angle),
+        hook: json.hook ? scrubAiTellPunctuation(json.hook) : json.hook,
+      },
     ];
     await data.updateItem(item.id, { platforms, variants });
     toast.success(`Added ${CONTENT_PLATFORM_LABELS[platform]}`);
@@ -417,63 +515,143 @@ export function ContentItemDetailClient() {
         </Card>
 
         <Card>
-          <CardHeader className="pb-2">
+          <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
             <CardTitle className="text-base">Graphics / assets</CardTitle>
+            {item.format && formatNeedsGraphics(item.format) ? (
+              <Badge variant="secondary" className="font-normal">
+                {CONTENT_FORMAT_LABELS[item.format]}
+              </Badge>
+            ) : null}
           </CardHeader>
-          <CardContent className="space-y-3">
-            {(item.assetLinks ?? []).length === 0 ? (
-              <p className="text-sm text-muted-foreground">
-                Designers can paste Drive, Figma, or CDN links here.
-              </p>
-            ) : (
-              <ul className="space-y-2">
-                {(item.assetLinks ?? []).map((link, index) => (
-                  <li
-                    key={`${link.url}-${index}`}
-                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
-                  >
-                    <a
-                      href={link.url}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="min-w-0 flex-1 truncate text-primary hover:underline"
-                    >
-                      {link.label || link.url}
-                    </a>
-                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    {canEdit && (
+          <CardContent className="space-y-4">
+            {(formatNeedsGraphics(item.format) || designDraft.trim()) && (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <Label className="text-sm">Design brief</Label>
+                    {item.platforms[0] && item.format && formatNeedsGraphics(item.format) ? (
+                      <p className="text-xs text-muted-foreground">
+                        Suggested size:{" "}
+                        {contentGraphicsSizeHint(item.platforms[0], item.format)}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {designDraft.trim() ? (
                       <Button
-                        size="sm"
-                        variant="ghost"
                         type="button"
-                        onClick={() => void removeAssetLink(index)}
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void copyDesignBrief()}
                       >
-                        <Trash2 className="h-3.5 w-3.5" />
+                        <Copy className="h-3.5 w-3.5" /> Copy
+                      </Button>
+                    ) : null}
+                    {canEdit && formatNeedsGraphics(item.format) && (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={briefBusy}
+                        onClick={() => void generateDesignBrief()}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        {briefBusy
+                          ? "Generating…"
+                          : designDraft.trim()
+                            ? "Regenerate"
+                            : "Generate brief"}
                       </Button>
                     )}
-                  </li>
-                ))}
-              </ul>
-            )}
-            {canEdit && (
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <Input
-                  value={assetUrl}
-                  onChange={(e) => setAssetUrl(e.target.value)}
-                  placeholder="https://…"
-                  className="flex-1"
-                />
-                <Input
-                  value={assetLabel}
-                  onChange={(e) => setAssetLabel(e.target.value)}
-                  placeholder="Label (optional)"
-                  className="sm:w-40"
-                />
-                <Button type="button" size="sm" onClick={() => void addAssetLink()}>
-                  <Plus className="h-3.5 w-3.5" /> Add link
-                </Button>
+                  </div>
+                </div>
+                {canEdit ? (
+                  <>
+                    <Textarea
+                      value={designDraft}
+                      onChange={(e) => setDesignDraft(e.target.value)}
+                      rows={7}
+                      placeholder={`Short designer brief, e.g.\nPlatform / format / size: Instagram · Graphic · 1080×1080\nOn-graphic headline: …\nMust show: …\nTone: …\nAvoid: …`}
+                      className="font-mono text-xs leading-relaxed"
+                    />
+                    <div className="flex justify-end">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => void saveDesignInstructions()}
+                        disabled={designDraft.trim() === (item.designInstructions ?? "").trim()}
+                      >
+                        Save brief
+                      </Button>
+                    </div>
+                  </>
+                ) : designDraft.trim() ? (
+                  <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs leading-relaxed">
+                    {designDraft}
+                  </pre>
+                ) : (
+                  <p className="text-sm text-muted-foreground">No design brief yet.</p>
+                )}
               </div>
             )}
+
+            <div className="space-y-3">
+              <Label className="text-sm">Asset links</Label>
+              {(item.assetLinks ?? []).length === 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  Designers can paste Drive, Figma, or CDN links here.
+                </p>
+              ) : (
+                <ul className="space-y-2">
+                  {(item.assetLinks ?? []).map((link, index) => (
+                    <li
+                      key={`${link.url}-${index}`}
+                      className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                    >
+                      <a
+                        href={link.url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="min-w-0 flex-1 truncate text-primary hover:underline"
+                      >
+                        {link.label || link.url}
+                      </a>
+                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                      {canEdit && (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          type="button"
+                          onClick={() => void removeAssetLink(index)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+              {canEdit && (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    value={assetUrl}
+                    onChange={(e) => setAssetUrl(e.target.value)}
+                    placeholder="https://…"
+                    className="flex-1"
+                  />
+                  <Input
+                    value={assetLabel}
+                    onChange={(e) => setAssetLabel(e.target.value)}
+                    placeholder="Label (optional)"
+                    className="sm:w-40"
+                  />
+                  <Button type="button" size="sm" onClick={() => void addAssetLink()}>
+                    <Plus className="h-3.5 w-3.5" /> Add link
+                  </Button>
+                </div>
+              )}
+            </div>
           </CardContent>
         </Card>
 

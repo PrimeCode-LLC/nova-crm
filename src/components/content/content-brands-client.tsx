@@ -51,16 +51,24 @@ import {
   CONTENT_STRATEGY_LABELS,
   type ContentBrand,
   type ContentBrandKind,
+  type ContentCaptureRequiredField,
   type ContentFormat,
   type ContentPlatform,
   type ContentPrimaryOutcome,
   type ContentResponsibilityKey,
   type ContentStrategyStyle,
 } from "@/lib/content-calendar/types";
+import {
+  CAPTURE_REQUIRED_FIELD_LABELS,
+  DEFAULT_CAPTURE_POLICY,
+  brandCapturePolicy,
+  capturePolicyForPersist,
+} from "@/lib/content-calendar/capture-policy";
 import { CONTENT_STRATEGY_PACKS } from "@/lib/content-calendar/strategy-packs";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { OrganizationMember } from "@/lib/types";
 import { UserChip } from "@/components/common/user-chip";
+import { Switch } from "@/components/ui/switch";
 
 const ALL_PLATFORMS = Object.keys(CONTENT_PLATFORM_LABELS) as ContentPlatform[];
 const ALL_KINDS = Object.keys(CONTENT_BRAND_KIND_LABELS) as ContentBrandKind[];
@@ -82,7 +90,7 @@ const FORM_STEPS = [
   {
     id: "team",
     label: "Team",
-    description: "Who plans, writes, designs, posts, and captures.",
+    description: "Roles, capture cadence, and proof requirements.",
   },
   {
     id: "knowledge",
@@ -115,6 +123,11 @@ type BrandFormState = {
   preferredWeekdays: number[];
   knowledgeLibraryIds: string[];
   responsibilities: Partial<Record<ContentResponsibilityKey, string>>;
+  capturesPerWeek: string;
+  captureIdleDays: string;
+  captureRequiredFields: ContentCaptureRequiredField[];
+  captureRemindersEnabled: boolean;
+  captureRequirementsNotes: string;
 };
 
 const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
@@ -147,9 +160,15 @@ const EMPTY_FORM: BrandFormState = {
   preferredWeekdays: [1, 2, 3, 4],
   knowledgeLibraryIds: [],
   responsibilities: {},
+  capturesPerWeek: String(DEFAULT_CAPTURE_POLICY.capturesPerWeek),
+  captureIdleDays: String(DEFAULT_CAPTURE_POLICY.idleDays),
+  captureRequiredFields: [...DEFAULT_CAPTURE_POLICY.requiredFields],
+  captureRemindersEnabled: DEFAULT_CAPTURE_POLICY.remindersEnabled,
+  captureRequirementsNotes: "",
 };
 
 function formFromBrand(brand: ContentBrand): BrandFormState {
+  const capture = brandCapturePolicy(brand);
   return {
     name: brand.name,
     kind: brand.kind,
@@ -172,6 +191,11 @@ function formFromBrand(brand: ContentBrand): BrandFormState {
       : [1, 2, 3, 4],
     knowledgeLibraryIds: [...brand.knowledgeLibraryIds],
     responsibilities: { ...(brand.responsibilities ?? {}) },
+    capturesPerWeek: String(capture.capturesPerWeek),
+    captureIdleDays: String(capture.idleDays),
+    captureRequiredFields: [...capture.requiredFields],
+    captureRemindersEnabled: capture.remindersEnabled,
+    captureRequirementsNotes: capture.requirementsNotes ?? "",
   };
 }
 
@@ -379,6 +403,13 @@ export function ContentBrandsClient() {
         .map((s) => s.trim())
         .filter(Boolean);
       const weeklyPublishTarget = Number(form.weeklyPublishTarget) || undefined;
+      const capturePolicy = capturePolicyForPersist({
+        capturesPerWeek: Number(form.capturesPerWeek) || 0,
+        idleDays: Number(form.captureIdleDays) || DEFAULT_CAPTURE_POLICY.idleDays,
+        requiredFields: form.captureRequiredFields,
+        remindersEnabled: form.captureRemindersEnabled,
+        requirementsNotes: form.captureRequirementsNotes,
+      });
       const payload = {
         name: form.name.trim(),
         kind: form.kind,
@@ -398,6 +429,7 @@ export function ContentBrandsClient() {
         knowledgeLibraryIds: form.knowledgeLibraryIds,
         weeklyPublishTarget,
         responsibilities: form.responsibilities,
+        capturePolicy,
       };
 
       if (editingBrand) {
@@ -515,6 +547,27 @@ export function ContentBrandsClient() {
                     ? brand.knowledgeLibraryIds.map(libraryName).join(", ")
                     : "Org default (Fit Check global)"}
                 </div>
+                {(() => {
+                  const cap = brandCapturePolicy(brand);
+                  if (
+                    cap.capturesPerWeek <= 0 &&
+                    !cap.remindersEnabled &&
+                    !(cap.requirementsNotes ?? "").trim()
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <div className="text-xs text-muted-foreground">
+                      Capture:{" "}
+                      {cap.capturesPerWeek > 0
+                        ? `${cap.capturesPerWeek}/week`
+                        : "no weekly quota"}
+                      {" · idle "}
+                      {cap.idleDays}d
+                      {cap.remindersEnabled ? " · reminders on" : ""}
+                    </div>
+                  );
+                })()}
                 {brand.responsibilities &&
                 Object.values(brand.responsibilities).some((id) => Boolean(id?.trim())) ? (
                   <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
@@ -948,51 +1001,172 @@ export function ContentBrandsClient() {
               ) : null}
 
               {formStep === "team" ? (
-                <div className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Assign people to each role for this brand. Leave empty to use the brand owner.
-                    One person can hold every slot, or split across the team.
-                  </p>
-                  <div className="grid gap-4 sm:grid-cols-2">
-                    {CONTENT_RESPONSIBILITY_KEYS.map((key) => {
-                      const value = form.responsibilities[key] ?? "";
-                      return (
-                        <div key={key} className="space-y-2">
-                          <Label>{CONTENT_RESPONSIBILITY_LABELS[key]}</Label>
-                          <Select
-                            value={value || "__owner__"}
-                            onValueChange={(v) => {
-                              setForm((prev) => {
-                                const next = { ...prev.responsibilities };
-                                if (!v || v === "__owner__") delete next[key];
-                                else next[key] = v;
-                                return { ...prev, responsibilities: next };
-                              });
-                            }}
-                          >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Brand owner (default)">
-                                {value ? (
-                                  <span className="flex items-center gap-2 truncate">
-                                    <UserChip userId={value} size="sm" />
-                                  </span>
-                                ) : (
-                                  "Brand owner (default)"
-                                )}
-                              </SelectValue>
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="__owner__">Brand owner (default)</SelectItem>
-                              {members.map((m) => (
-                                <SelectItem key={m.uid} value={m.uid}>
-                                  {m.label}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      );
-                    })}
+                <div className="space-y-6">
+                  <div className="space-y-4">
+                    <p className="text-sm text-muted-foreground">
+                      Assign people to each role for this brand. Leave empty to use the brand owner.
+                      One person can hold every slot, or split across the team.
+                    </p>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      {CONTENT_RESPONSIBILITY_KEYS.map((key) => {
+                        const value = form.responsibilities[key] ?? "";
+                        return (
+                          <div key={key} className="space-y-2">
+                            <Label>{CONTENT_RESPONSIBILITY_LABELS[key]}</Label>
+                            <Select
+                              value={value || "__owner__"}
+                              onValueChange={(v) => {
+                                setForm((prev) => {
+                                  const next = { ...prev.responsibilities };
+                                  if (!v || v === "__owner__") delete next[key];
+                                  else next[key] = v;
+                                  return { ...prev, responsibilities: next };
+                                });
+                              }}
+                            >
+                              <SelectTrigger>
+                                <SelectValue placeholder="Brand owner (default)">
+                                  {value ? (
+                                    <span className="flex items-center gap-2 truncate">
+                                      <UserChip userId={value} size="sm" />
+                                    </span>
+                                  ) : (
+                                    "Brand owner (default)"
+                                  )}
+                                </SelectValue>
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="__owner__">Brand owner (default)</SelectItem>
+                                {members.map((m) => (
+                                  <SelectItem key={m.uid} value={m.uid}>
+                                    {m.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4 rounded-md border p-4">
+                    <div>
+                      <h3 className="text-sm font-medium">Capture requirements</h3>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Enforce what the Capturer must feed continuously. Separate from Write copy
+                        on calendar items.
+                      </p>
+                    </div>
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label htmlFor="brand-captures-week">Captures per week</Label>
+                        <Input
+                          id="brand-captures-week"
+                          type="number"
+                          min={0}
+                          max={50}
+                          value={form.capturesPerWeek}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, capturesPerWeek: e.target.value }))
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Rolling 7-day target. 0 = no weekly quota.
+                        </p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="brand-capture-idle">Idle after (days)</Label>
+                        <Input
+                          id="brand-capture-idle"
+                          type="number"
+                          min={1}
+                          max={90}
+                          value={form.captureIdleDays}
+                          onChange={(e) =>
+                            setForm((prev) => ({ ...prev, captureIdleDays: e.target.value }))
+                          }
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Nudge when no capture for this many days.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Required fields on each capture</Label>
+                      <div className="flex flex-wrap gap-3">
+                        {(
+                          Object.keys(CAPTURE_REQUIRED_FIELD_LABELS) as ContentCaptureRequiredField[]
+                        ).map((field) => {
+                          const locked = field === "problem" || field === "solution";
+                          const checked = form.captureRequiredFields.includes(field);
+                          return (
+                            <label
+                              key={field}
+                              className="flex items-center gap-2 text-sm"
+                            >
+                              <Checkbox
+                                checked={checked}
+                                disabled={locked}
+                                onCheckedChange={(c) => {
+                                  if (locked) return;
+                                  setForm((prev) => {
+                                    const set = new Set(prev.captureRequiredFields);
+                                    if (c === true) set.add(field);
+                                    else set.delete(field);
+                                    return {
+                                      ...prev,
+                                      captureRequiredFields: (
+                                        Object.keys(
+                                          CAPTURE_REQUIRED_FIELD_LABELS,
+                                        ) as ContentCaptureRequiredField[]
+                                      ).filter((f) => set.has(f)),
+                                    };
+                                  });
+                                }}
+                              />
+                              {CAPTURE_REQUIRED_FIELD_LABELS[field]}
+                              {locked ? (
+                                <span className="text-xs text-muted-foreground">(always)</span>
+                              ) : null}
+                            </label>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="brand-capture-notes">What to capture (guidance)</Label>
+                      <Textarea
+                        id="brand-capture-notes"
+                        value={form.captureRequirementsNotes}
+                        onChange={(e) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            captureRequirementsNotes: e.target.value,
+                          }))
+                        }
+                        rows={3}
+                        placeholder="e.g. Client wins with metrics, delivery lessons, objections we overcame…"
+                      />
+                    </div>
+                    <div className="flex items-center justify-between gap-4 rounded-md border px-3 py-2">
+                      <div>
+                        <Label htmlFor="brand-capture-reminders">Daily in-app reminders</Label>
+                        <p className="text-xs text-muted-foreground">
+                          Notify the Capturer when idle or behind the weekly target.
+                        </p>
+                      </div>
+                      <Switch
+                        id="brand-capture-reminders"
+                        checked={form.captureRemindersEnabled}
+                        onCheckedChange={(checked) =>
+                          setForm((prev) => ({
+                            ...prev,
+                            captureRemindersEnabled: checked,
+                          }))
+                        }
+                      />
+                    </div>
                   </div>
                 </div>
               ) : null}

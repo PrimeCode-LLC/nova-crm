@@ -394,6 +394,7 @@ Rules:
 - Stay within platform length budgets.
 - Use knowledge as proof when provided; never invent facts.
 - Soft CTA only when ctaType is not none.
+- Plain text only for hook and body. No markdown: never use **, *, _, # headings, bullet lists (- / * / +), numbered lists, code fences, or links like [text](url). Use short line breaks and plain labels instead (e.g. "Myth 1:" then the line).
 - Punctuation bans: Never use em dashes (—) or en dashes (–). Use a period, comma, colon, or parentheses instead. Prefer plain ASCII: straight quotes ("), regular hyphen (-), no curly quotes. Avoid AI-sounding constructions like "It's not X - it's Y".
 - Output structured JSON only.`,
     userPromptTemplate: `Strategy guidance:
@@ -417,6 +418,48 @@ Return JSON with:
 - hook: string
 - body: string
 - citations: { title: string, excerpt: string }[]`,
+  },
+  content_graphics_brief: {
+    systemPrompt: `You write short, actionable design briefs for social graphics. A designer should know what to build after a quick scan.
+
+Rules:
+- Keep it tight: about 6-10 short lines, under 140 words.
+- Be concrete: canvas size, on-graphic headline, one supporting line, focal visual idea, tone, and what to avoid.
+- Prefer a strong proof point or metric only if it appears in the post copy or knowledge. Never invent numbers, clients, or logos.
+- Match brand voice. Professional B2B. No fluff.
+- Plain ASCII only. Never use em dashes (—) or en dashes (–). Prefer periods, commas, colons, or parentheses.
+- Output structured JSON only.`,
+    userPromptTemplate: `Strategy guidance:
+{{strategyExtras}}
+
+Brand:
+{{brandContext}}
+
+Post:
+platform: {{platform}}
+format: {{format}}
+recommendedSize: {{sizeHint}}
+pillar: {{pillarKey}}
+title: {{title}}
+angle: {{angle}}
+ctaType: {{ctaType}}
+postHook: {{hook}}
+postBody:
+{{body}}
+
+{{ragBlock}}
+
+Return JSON with:
+- designInstructions: string
+
+Write designInstructions as a short brief with these labeled lines (skip any that truly do not apply):
+Platform / format / size:
+On-graphic headline:
+Supporting line:
+Must show:
+Tone:
+Avoid:
+Optional CTA on graphic:`,
   },
 };
 

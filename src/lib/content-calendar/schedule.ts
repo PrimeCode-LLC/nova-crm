@@ -154,13 +154,30 @@ export function buildContentScheduleSlots(input: {
   return slots;
 }
 
-/** Strip common AI-tell punctuation from generated copy. */
+/** Strip common AI-tell punctuation and markdown from generated social copy. */
 export function scrubAiTellPunctuation(text: string): string {
   return text
     .replace(/\u2014/g, ", ") // em dash —
     .replace(/\u2013/g, "-") // en dash –
+    .replace(/\u2026/g, "...") // ellipsis …
     .replace(/[\u201C\u201D]/g, '"')
     .replace(/[\u2018\u2019]/g, "'")
+    // Markdown links / images → label only
+    .replace(/!\[([^\]]*)\]\([^)]+\)/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    // Bold / italic wrappers
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/(?<![\w/])\*([^*\n]+)\*(?![\w/])/g, "$1")
+    .replace(/(?<![\w/])_([^_\n]+)_(?![\w/])/g, "$1")
+    // Stray markdown markers
+    .replace(/`{1,3}/g, "")
+    .replace(/\*{1,2}/g, "")
+    // Headers, horizontal rules, list markers at line start
+    .replace(/^#{1,6}\s+/gm, "")
+    .replace(/^[\t ]*[-*_]{3,}[\t ]*$/gm, "")
+    .replace(/^[\t ]*[-*+]\s+/gm, "")
+    .replace(/^[\t ]*\d+[.)]\s+/gm, "")
     .replace(/\s+,/g, ",")
     .replace(/,{2,}/g, ",")
     .replace(/[ \t]{2,}/g, " ")

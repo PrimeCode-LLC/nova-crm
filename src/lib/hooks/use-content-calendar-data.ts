@@ -162,6 +162,7 @@ export function useContentCalendarData() {
       weeklyPublishTarget?: number;
       preferredWeekdays?: number[];
       responsibilities?: ContentBrand["responsibilities"];
+      capturePolicy?: ContentBrand["capturePolicy"];
     }) => {
       if (!organizationId) throw new Error("No organization");
       if (isDemo) {
@@ -219,6 +220,7 @@ export function useContentCalendarData() {
           capturer: currentUserId,
           approver: currentUserId,
         },
+        capturePolicy: input.capturePolicy,
         active: true,
         createdAt: now,
         updatedAt: now,
