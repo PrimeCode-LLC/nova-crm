@@ -320,6 +320,12 @@ export interface Team {
   parentId?: string;
   leadUserId?: string;
   description?: string;
+  /**
+   * Suggested CRM permission role for this team (system preset or custom role id).
+   * Applied when adding members / via “Apply to members”; does not auto-change existing
+   * people until applied.
+   */
+  defaultRoleId?: Role;
 }
 
 /** @deprecated Use `Team`; retained while stored documents and API fields are migrated. */

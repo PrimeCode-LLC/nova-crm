@@ -633,56 +633,86 @@ function PeoplePageClientInner({
       toast.error("Name and email are required");
       return;
     }
-    setProfileSaving(true);
+
+    const crm = getUserById(editMember.uid);
+    const nextDept = editDept === NONE ? undefined : editDept;
+    const nextManager = editManager === NONE ? undefined : editManager;
+    const nextTitle = editTitle.trim() || undefined;
+
     const patch: Partial<Omit<User, "id">> = {
       displayName,
       email,
-      title: editTitle.trim() || undefined,
+      title: nextTitle,
       roleId: editCrmRole,
-      departmentId: editDept === NONE ? undefined : editDept,
-      managerId: editManager === NONE ? undefined : editManager,
+      departmentId: nextDept,
+      managerId: nextManager,
       status: editCrmStatus,
       featureGrants: editFeatureGrants.length ? editFeatureGrants : undefined,
     };
 
-    const writeLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
-    if (writeLive) {
-      const body: Record<string, unknown> = {
-        userId: editMember.uid,
-        displayName,
-        email,
-        title: editTitle.trim() || null,
-        status: editCrmStatus,
-        departmentId: editDept === NONE ? null : editDept,
-        managerId: editManager === NONE ? null : editManager,
-      };
-      if (editMember.uid !== currentUserId) {
-        body.roleId = editCrmRole;
-      }
-      if (canEditFeatureGrants) {
-        body.featureGrants = editFeatureGrants;
+    setProfileSaving(true);
+    try {
+      const writeLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
+      if (writeLive) {
+        const body: Record<string, unknown> = { userId: editMember.uid };
+
+        if (displayName !== (crm?.displayName ?? editMember.displayName ?? "")) {
+          body.displayName = displayName;
+        }
+        if (email.toLowerCase() !== (crm?.email ?? editMember.email).toLowerCase()) {
+          body.email = email;
+        }
+        if ((nextTitle ?? null) !== (crm?.title ?? null)) {
+          body.title = nextTitle ?? null;
+        }
+        if (editCrmStatus !== (crm?.status ?? "active")) {
+          body.status = editCrmStatus;
+        }
+        if (nextDept !== (crm?.departmentId ?? undefined)) {
+          body.departmentId = nextDept ?? null;
+        }
+        if (nextManager !== (crm?.managerId ?? undefined)) {
+          body.managerId = nextManager ?? null;
+        }
+        if (editMember.uid !== currentUserId && editCrmRole !== crm?.roleId) {
+          body.roleId = editCrmRole;
+        }
+        if (canEditFeatureGrants) {
+          const prevGrants = [...(crm?.featureGrants ?? [])].sort().join(",");
+          const nextGrants = [...editFeatureGrants].sort().join(",");
+          if (prevGrants !== nextGrants) {
+            body.featureGrants = editFeatureGrants;
+          }
+        }
+
+        if (Object.keys(body).length <= 1) {
+          toast.message("No changes to save");
+          return;
+        }
+
+        const res = await fetch("/api/org/workspace-users", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+        const data = (await res.json()) as { error?: unknown };
+        if (!res.ok) {
+          const msg =
+            typeof data.error === "string"
+              ? data.error
+              : JSON.stringify(data.error ?? "Failed to save profile");
+          toast.error(msg);
+          return;
+        }
       }
 
-      const res = await fetch("/api/org/workspace-users", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const data = (await res.json()) as { error?: unknown };
-      if (!res.ok) {
-        const msg =
-          typeof data.error === "string"
-            ? data.error
-            : JSON.stringify(data.error ?? "Failed to save profile");
-        toast.error(msg);
-        setProfileSaving(false);
-        return;
-      }
+      patchUser(editMember.uid, patch);
+      toast.success(writeLive ? "Profile saved" : "Profile saved (this tab)");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save profile");
+    } finally {
+      setProfileSaving(false);
     }
-
-    patchUser(editMember.uid, patch);
-    setProfileSaving(false);
-    toast.success(writeLive ? "Profile saved" : "Profile saved (this tab)");
   }
 
   const activeMembers = members.filter((m) => m.status !== "pending");

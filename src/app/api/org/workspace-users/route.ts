@@ -143,12 +143,6 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: "User is not in this organization" }, { status: 403 });
   }
 
-  const rosterSnap = await db
-    .collection(COLLECTIONS.users)
-    .where("organizationId", "==", orgId)
-    .get();
-  const orgUsers = rosterSnap.docs.map((d) => asUserFromAdmin(d.id, d.data()));
-
   const targetUser = asUserFromAdmin(targetId, targetData);
   let nextManager = targetUser.managerId;
   if (bodyManagerId !== undefined) {
@@ -159,38 +153,67 @@ export async function PATCH(req: Request) {
     nextDept = bodyDeptId === null ? undefined : bodyDeptId;
   }
   let nextRole = targetUser.roleId;
+  const roleChanging =
+    bodyRoleId !== undefined &&
+    (bodyRoleId === "data_scraper" ? "prospecting" : bodyRoleId) !== targetUser.roleId;
+
+  const managerChanging =
+    bodyManagerId !== undefined &&
+    (bodyManagerId === null ? undefined : bodyManagerId) !== targetUser.managerId;
+
+  /** Full roster only needed when the reporting line actually changes. */
+  let orgUsers: User[] | null = null;
+  if (managerChanging) {
+    const rosterSnap = await db
+      .collection(COLLECTIONS.users)
+      .where("organizationId", "==", orgId)
+      .get();
+    orgUsers = rosterSnap.docs.map((d) => asUserFromAdmin(d.id, d.data()));
+  }
+
   if (bodyRoleId !== undefined) {
     const resolvedId = bodyRoleId === "data_scraper" ? "prospecting" : bodyRoleId;
-    await resolveRoleForUser({
-      organizationId: orgId,
-      roleId: resolvedId,
-      actorUid: g.ctx.session.uid,
-    });
-    const roleDoc = await getOrgRole(orgId, resolvedId);
+    let roleDoc = await getOrgRole(orgId, resolvedId);
+    if (!roleDoc) {
+      roleDoc = await resolveRoleForUser({
+        organizationId: orgId,
+        roleId: resolvedId,
+        actorUid: g.ctx.session.uid,
+      });
+      roleDoc = (await getOrgRole(orgId, resolvedId)) ?? roleDoc;
+    }
     if (!roleDoc || !roleDoc.isActive) {
       return NextResponse.json(
-        { error: "Unknown or inactive CRM permission role. Create or activate it under Configuration → CRM permissions." },
+        {
+          error:
+            "Unknown or inactive CRM permission role. Create or activate it under Configuration → CRM permissions.",
+        },
         { status: 400 },
       );
     }
     nextRole = roleDoc.id;
   }
 
-  const orgIds = new Set(orgUsers.map((u) => u.id));
-  if (nextManager && !orgIds.has(nextManager)) {
-    return NextResponse.json({ error: "Manager must be a user in this organization" }, { status: 400 });
-  }
+  if (managerChanging && orgUsers) {
+    const orgIds = new Set(orgUsers.map((u) => u.id));
+    if (nextManager && !orgIds.has(nextManager)) {
+      return NextResponse.json(
+        { error: "Manager must be a user in this organization" },
+        { status: 400 },
+      );
+    }
 
-  const nextUsers = orgUsers.map((u) =>
-    u.id === targetId
-      ? { ...u, managerId: nextManager, departmentId: nextDept, roleId: nextRole }
-      : u,
-  );
-  if (managerAssignmentCreatesCycle(nextUsers, targetId, nextManager)) {
-    return NextResponse.json(
-      { error: "That manager assignment would create a reporting loop" },
-      { status: 400 },
+    const nextUsers = orgUsers.map((u) =>
+      u.id === targetId
+        ? { ...u, managerId: nextManager, departmentId: nextDept, roleId: nextRole }
+        : u,
     );
+    if (managerAssignmentCreatesCycle(nextUsers, targetId, nextManager)) {
+      return NextResponse.json(
+        { error: "That manager assignment would create a reporting loop" },
+        { status: 400 },
+      );
+    }
   }
 
   const payload: Record<string, unknown> = { updatedAt: FieldValue.serverTimestamp() };
@@ -232,7 +255,7 @@ export async function PATCH(req: Request) {
 
   await db.collection(COLLECTIONS.users).doc(targetId).update(payload);
 
-  if (bodyRoleId !== undefined) {
+  if (roleChanging) {
     try {
       const roleDoc = await resolveRoleForUser({
         organizationId: orgId,
@@ -249,45 +272,61 @@ export async function PATCH(req: Request) {
     }
   }
 
-  if (bodyManagerId !== undefined) {
+  if (managerChanging && orgUsers) {
+    const previousAncestors = buildOrgManagerAncestorIdsMap(orgUsers);
     const nextUsers = orgUsers.map((u) =>
       u.id === targetId
         ? {
             ...u,
-            managerId: bodyManagerId === null ? undefined : bodyManagerId,
+            managerId: nextManager,
           }
         : u,
     );
     const ancestorMap = buildOrgManagerAncestorIdsMap(nextUsers);
+
+    const changedUserIds: string[] = [];
     const batch = db.batch();
+    let batchOps = 0;
     for (const u of nextUsers) {
-      const ancestors = ancestorMap.get(u.id) ?? [];
+      const nextAncestors = ancestorMap.get(u.id) ?? [];
+      const prev = previousAncestors.get(u.id) ?? [];
+      const same =
+        prev.length === nextAncestors.length &&
+        prev.every((id, i) => id === nextAncestors[i]);
+      if (same && u.id !== targetId) continue;
+      changedUserIds.push(u.id);
       batch.update(db.collection(COLLECTIONS.users).doc(u.id), {
-        managerAncestorIds: ancestors,
+        managerAncestorIds: nextAncestors,
         updatedAt: FieldValue.serverTimestamp(),
       });
+      batchOps += 1;
     }
-    await batch.commit();
+    if (batchOps > 0) {
+      await batch.commit();
+    }
 
-    try {
-      const { restampOwnerManagerIdsForOrgUsers } = await import(
-        "@/lib/firestore/restamp-owner-manager-ids-server"
-      );
-      await restampOwnerManagerIdsForOrgUsers({
-        db,
-        organizationId: orgId,
-        users: nextUsers.map((u) => ({
-          id: u.id,
-          managerId: u.id === targetId
-            ? bodyManagerId === null
-              ? undefined
-              : (bodyManagerId ?? undefined)
-            : u.managerId,
-          managerAncestorIds: ancestorMap.get(u.id) ?? [],
-        })),
-      });
-    } catch (e) {
-      console.error("[workspace-users] restamp ownerManagerIds", e);
+    if (changedUserIds.length > 0) {
+      try {
+        const { restampOwnerManagerIdsForOwners } = await import(
+          "@/lib/firestore/restamp-owner-manager-ids-server"
+        );
+        await restampOwnerManagerIdsForOwners({
+          db,
+          organizationId: orgId,
+          ownerIds: changedUserIds,
+          usersById: new Map(
+            nextUsers.map((u) => [
+              u.id,
+              {
+                managerId: u.managerId,
+                managerAncestorIds: ancestorMap.get(u.id) ?? [],
+              },
+            ]),
+          ),
+        });
+      } catch (e) {
+        console.error("[workspace-users] restamp ownerManagerIds", e);
+      }
     }
   }
 
@@ -297,9 +336,9 @@ export async function PATCH(req: Request) {
     bodyEmail !== undefined ||
     bodyTitle !== undefined;
   const hierarchyTouched =
-    bodyManagerId !== undefined ||
+    managerChanging ||
     bodyDeptId !== undefined ||
-    bodyRoleId !== undefined;
+    roleChanging;
   const auditEvent =
     bodyFeatureGrants !== undefined && !hierarchyTouched && !profileOnly
       ? "user.feature_grants_updated"

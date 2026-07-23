@@ -147,6 +147,7 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     addPermissionOverride: (override: PermissionOverride) => void;
     removePermissionOverride: (id: string) => void;
     addDepartment: (dept: Department) => void;
+    updateDepartment: (id: string, patch: Partial<Omit<Department, "id">>) => void;
     updateProfile: (id: string, patch: Partial<Profile>) => void;
     addProfile: (profile: Profile) => void;
     updateCampaign: (id: string, patch: Partial<Campaign>) => void;
@@ -339,6 +340,9 @@ export function WorkspaceModeProvider({
   }>({ added: [], removedIds: [] });
 
   const [addedDepartments, setAddedDepartments] = React.useState<Department[]>([]);
+  const [departmentPatches, setDepartmentPatches] = React.useState<
+    Record<string, Partial<Omit<Department, "id">>>
+  >({});
 
   const [profileDelta, setProfileDelta] = React.useState<{
     updates: Record<string, Partial<Profile>>;
@@ -501,6 +505,7 @@ export function WorkspaceModeProvider({
   React.useEffect(() => {
     setPoDelta({ added: [], removedIds: [] });
     setAddedDepartments([]);
+    setDepartmentPatches({});
     setProfileDelta({ updates: {}, added: [] });
     setCampaignEdits({});
     setCampaignsAdded([]);
@@ -530,6 +535,19 @@ export function WorkspaceModeProvider({
   const addDepartment = React.useCallback((dept: Department) => {
     setAddedDepartments((prev) => [...prev, dept]);
   }, []);
+
+  const updateDepartment = React.useCallback(
+    (id: string, patch: Partial<Omit<Department, "id">>) => {
+      setAddedDepartments((prev) =>
+        prev.map((d) => (d.id === id ? { ...d, ...patch } : d)),
+      );
+      setDepartmentPatches((prev) => ({
+        ...prev,
+        [id]: { ...prev[id], ...patch },
+      }));
+    },
+    [],
+  );
 
   const updateProfile = React.useCallback(
     (id: string, patch: Partial<Profile>) => {
@@ -2141,7 +2159,10 @@ export function WorkspaceModeProvider({
     return {
       ...tenantBaseSnapshot,
       permissionOverrides,
-      departments: [...tenantBaseSnapshot.departments, ...addedDepartments],
+      departments: [...tenantBaseSnapshot.departments, ...addedDepartments].map((d) => {
+        const patch = departmentPatches[d.id];
+        return patch ? { ...d, ...patch } : d;
+      }),
       profiles,
       campaigns,
       accounts: accountsMerged,
@@ -2154,6 +2175,7 @@ export function WorkspaceModeProvider({
     tenantBaseSnapshot,
     poDelta,
     addedDepartments,
+    departmentPatches,
     profileDelta,
     campaignEdits,
     campaignsAdded,
@@ -2285,6 +2307,7 @@ export function WorkspaceModeProvider({
       addPermissionOverride,
       removePermissionOverride,
       addDepartment,
+      updateDepartment,
       updateProfile,
       addProfile,
       updateCampaign,
@@ -2355,6 +2378,7 @@ export function WorkspaceModeProvider({
     addPermissionOverride,
     removePermissionOverride,
     addDepartment,
+    updateDepartment,
     updateProfile,
     addProfile,
     updateCampaign,
