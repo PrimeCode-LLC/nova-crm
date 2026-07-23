@@ -27,6 +27,11 @@ import {
 } from "@/lib/email/mailbox-schedule-capacity";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
+import { ContactRecipientSelect } from "@/components/leads/contact-recipient-select";
+import {
+  buildContactRecipientOptions,
+  defaultContactRecipientEmail,
+} from "@/lib/email/contact-recipient-options";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,7 +80,12 @@ export function ScheduleFollowupEmailDialog({
     schedule: { scheduledEmailId: string; emailScheduledAt: string },
   ) => void;
 }) {
-  const { isDemo } = useWorkspace();
+  const { isDemo, getContactById } = useWorkspace();
+  const contact = getContactById(lead.contactId);
+  const recipientOptions = React.useMemo(
+    () => buildContactRecipientOptions(lead, contact),
+    [lead, contact],
+  );
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const addScheduled = useEmailAccountStore((s) => s.addScheduled);
@@ -112,14 +122,14 @@ export function ScheduleFollowupEmailDialog({
     const defaultId =
       mailboxOptions.find((mb) => mb.id === activeMailboxId)?.id ?? mailboxOptions[0]?.id ?? "";
     setMailboxId(defaultId);
-    setTo(lead.contactEmail?.trim() ?? "");
+    setTo(defaultContactRecipientEmail(recipientOptions));
     setSubject(followup.emailSubject?.trim() || followup.title || "");
     setScheduledAt(defaultScheduleDatetimeLocal(followup.dueAt));
     setBody(followup.messageBody ?? "");
     setIncludeSignature(true);
     setIncludeFooter(true);
     setSubmitting(false);
-  }, [open, followup, lead.contactEmail, mailboxOptions, activeMailboxId]);
+  }, [open, followup, recipientOptions, mailboxOptions, activeMailboxId]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {
@@ -197,6 +207,10 @@ export function ScheduleFollowupEmailDialog({
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!followup) return;
+    if (!to.trim()) {
+      toast.error("Pick a recipient email");
+      return;
+    }
     if (overLimit) {
       toast.error("That day is over the send limit", {
         description: "Change the date, use Auto-fix, or pick another mailbox.",
@@ -317,18 +331,17 @@ export function ScheduleFollowupEmailDialog({
               includeFooter={includeFooter}
               onIncludeChange={setIncludeFooter}
             />
-            <div className="space-y-1.5">
-              <Label htmlFor="followup-schedule-to">To</Label>
-              <Input
-                id="followup-schedule-to"
-                type="email"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                placeholder="lead@example.com"
-                autoComplete="email"
-                required
-              />
-            </div>
+            <ContactRecipientSelect
+              id="followup-schedule-to"
+              options={recipientOptions}
+              value={to}
+              onValueChange={setTo}
+              hint={
+                recipientOptions.some((o) => o.kind === "personal")
+                  ? "Defaults to company email. Switch to personal if the company address bounces."
+                  : undefined
+              }
+            />
             <div className="space-y-1.5">
               <Label htmlFor="followup-schedule-subject">Subject</Label>
               <Input
@@ -398,7 +411,7 @@ export function ScheduleFollowupEmailDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
               Cancel
             </Button>
-            <Button type="submit" disabled={submitting || !followup || !mailboxId || overLimit}>
+            <Button type="submit" disabled={submitting || !followup || !mailboxId || !to.trim() || overLimit}>
               {submitting ? "Scheduling…" : "Schedule"}
             </Button>
           </DialogFooter>

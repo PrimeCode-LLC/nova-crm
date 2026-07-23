@@ -28,6 +28,11 @@ import {
 } from "@/lib/email/mailbox-schedule-capacity";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
+import { ContactRecipientSelect } from "@/components/leads/contact-recipient-select";
+import {
+  buildContactRecipientOptions,
+  defaultContactRecipientEmail,
+} from "@/lib/email/contact-recipient-options";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -84,7 +89,12 @@ export function ScheduleSequenceEmailsDialog({
     schedule: { scheduledEmailId: string; emailScheduledAt: string },
   ) => void;
 }) {
-  const { isDemo } = useWorkspace();
+  const { isDemo, getContactById } = useWorkspace();
+  const contact = getContactById(lead.contactId);
+  const recipientOptions = React.useMemo(
+    () => buildContactRecipientOptions(lead, contact),
+    [lead, contact],
+  );
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const addScheduled = useEmailAccountStore((s) => s.addScheduled);
@@ -129,7 +139,7 @@ export function ScheduleSequenceEmailsDialog({
     const defaultId =
       mailboxOptions.find((mb) => mb.id === activeMailboxId)?.id ?? mailboxOptions[0]?.id ?? "";
     setMailboxId(defaultId);
-    setTo(lead.contactEmail?.trim() ?? "");
+    setTo(defaultContactRecipientEmail(recipientOptions));
     setIncludeSignature(true);
     setIncludeFooter(true);
     setSteps(
@@ -143,7 +153,7 @@ export function ScheduleSequenceEmailsDialog({
       })),
     );
     setSubmitting(false);
-  }, [open, lead.contactEmail, mailboxOptions, activeMailboxId, schedulable]);
+  }, [open, recipientOptions, mailboxOptions, activeMailboxId, schedulable]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {
@@ -249,6 +259,10 @@ export function ScheduleSequenceEmailsDialog({
     }
     if (!mailboxId) {
       toast.error("Pick a mailbox");
+      return;
+    }
+    if (!to.trim()) {
+      toast.error("Pick a recipient email");
       return;
     }
     if (overLimit) {
@@ -385,18 +399,17 @@ export function ScheduleSequenceEmailsDialog({
               includeFooter={includeFooter}
               onIncludeChange={setIncludeFooter}
             />
-            <div className="space-y-1.5">
-              <Label htmlFor="seq-schedule-to">To</Label>
-              <Input
-                id="seq-schedule-to"
-                type="email"
-                value={to}
-                onChange={(e) => setTo(e.target.value)}
-                placeholder="lead@example.com"
-                autoComplete="email"
-                required
-              />
-            </div>
+            <ContactRecipientSelect
+              id="seq-schedule-to"
+              options={recipientOptions}
+              value={to}
+              onValueChange={setTo}
+              hint={
+                recipientOptions.some((o) => o.kind === "personal")
+                  ? "Defaults to company email. Switch to personal if the company address bounces."
+                  : undefined
+              }
+            />
             {steps.length === 0 ? (
               <p className="text-sm text-muted-foreground py-4 text-center">
                 No email steps ready to schedule.
@@ -487,7 +500,12 @@ export function ScheduleSequenceEmailsDialog({
             </Button>
             <Button
               type="submit"
-              disabled={submitting || steps.every((s) => !s.included) || overLimit}
+              disabled={
+                submitting ||
+                !to.trim() ||
+                steps.every((s) => !s.included) ||
+                overLimit
+              }
             >
               {submitting
                 ? "Scheduling…"
