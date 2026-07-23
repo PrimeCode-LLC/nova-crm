@@ -86,7 +86,7 @@ export function InboxBackgroundSync() {
         reconcile(mailboxId, rows);
       }
 
-      // First-run / local: cron may not have written heads yet — one IMAP seed for the active box.
+      // First-run / local: cron may not have written heads yet - one IMAP seed for the active box.
       if (!anySynced && isImapInboxConfigured(acct)) {
         await syncImapInboxHead({
           mailViewAsUid,

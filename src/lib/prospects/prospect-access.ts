@@ -59,7 +59,7 @@ const PROSPECT_ONLY_PATCH_KEYS = new Set([
   "linkedSalesLeadId",
 ]);
 
-/** Fields on shared sales leads that channel push manages — do not overwrite from prospect edits. */
+/** Fields on shared sales leads that channel push manages - do not overwrite from prospect edits. */
 const SALES_LEAD_PUSH_MANAGED_PATCH_KEYS = new Set([
   "channelTags",
   "sharedOwnerIds",
@@ -112,7 +112,7 @@ export function canPushProspectChannel(
 /**
  * Same hierarchy scope as sales leads: owner, managers up the org chart, plus channel
  * assignees and shared owners. Owners, admins, and directors see all.
- * `prospectVisibility` only tracks channel-assignment state — not org-wide read access.
+ * `prospectVisibility` only tracks channel-assignment state - not org-wide read access.
  */
 export function prospectVisibleToViewer(
   prospect: Lead,

@@ -24,7 +24,7 @@ import { createUserNotifications } from "@/lib/notifications/create-user-notific
 
 const DEMO_CHAT_ORG = DEMO_WORKSPACE_ORG_ID;
 
-/** Stable fallbacks for Zustand selectors — `?? []` would allocate a new array each snapshot and break useSyncExternalStore. */
+/** Stable fallbacks for Zustand selectors - `?? []` would allocate a new array each snapshot and break useSyncExternalStore. */
 const EMPTY_DEMO_CHANNELS: WorkspaceChatChannel[] = [];
 const EMPTY_DEMO_MESSAGES: WorkspaceChatMessage[] = [];
 

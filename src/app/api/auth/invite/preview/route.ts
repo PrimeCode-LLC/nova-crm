@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { lookupInviteByTokenServer } from "@/lib/platform/invites-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
-/** Public endpoint — used by /signup?invite=… to verify the link before account creation. */
+/** Public endpoint - used by /signup?invite=… to verify the link before account creation. */
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";

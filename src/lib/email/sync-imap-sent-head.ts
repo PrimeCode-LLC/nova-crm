@@ -12,7 +12,7 @@ import {
 
 /**
  * Fetches the newest Sent-folder page into the email store (Gmail web/mobile, other clients, Nova).
- * Silent on failure — the Sent tab surfaces errors when opened.
+ * Silent on failure - the Sent tab surfaces errors when opened.
  */
 export async function syncImapSentHead(opts: {
   mailViewAsUid: string | null;
@@ -37,7 +37,7 @@ export async function syncImapSentHead(opts: {
       folder: "sent",
       limit: INBOX_IMAP_HEAD_LIMIT,
       offset: 0,
-      // Background Sent sync only needs envelopes — full bodies load on thread open.
+      // Background Sent sync only needs envelopes - full bodies load on thread open.
       headsOnly: true,
       imap: {
         host: acct.imap.host,

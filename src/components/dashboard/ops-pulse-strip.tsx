@@ -58,7 +58,7 @@ function repliesTone(metrics: DashboardWorkflowMetrics): KpiTone {
 }
 
 function prospectsTone(_metrics: DashboardWorkflowMetrics): KpiTone {
-  // Neutral identity — routing volume is not the same urgency as overdue work.
+  // Neutral identity - routing volume is not the same urgency as overdue work.
   return "default";
 }
 

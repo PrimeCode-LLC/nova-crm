@@ -172,7 +172,7 @@ export function EmailBounceWatcher() {
             return;
           }
 
-          // Wait for body sync before applying — empty recipient = incomplete parse.
+          // Wait for body sync before applying - empty recipient = incomplete parse.
           if (
             bounce.bounceKind === "hard" &&
             bounce.failedRecipients.length === 0 &&
@@ -226,7 +226,7 @@ export function EmailBounceWatcher() {
           };
 
           if (!data.ok) {
-            // Incomplete body / transient — leave unprocessed for next sync.
+            // Incomplete body / transient - leave unprocessed for next sync.
             nextRetryAtRef.current.set(mid, Date.now() + RETRY_COOLDOWN_MS);
             return;
           }
@@ -238,7 +238,7 @@ export function EmailBounceWatcher() {
           if (data.alreadyProcessed || data.skippedSoft) return;
 
           if (bounce.bounceKind === "hard" && (data.leadId || leadIdHint)) {
-            toast.message("Email bounced — review prospect", {
+            toast.message("Email bounced - review prospect", {
               description: bounce.failedRecipients[0]
                 ? `${bounce.failedRecipients[0]}: find a valid email and resume outreach.`
                 : "Marked bounced and queued a review task.",

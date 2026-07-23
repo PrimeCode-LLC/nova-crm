@@ -145,7 +145,7 @@ export default function ScriptsPage() {
     setCanViewAll(demoScriptsCanViewAll(uid));
   }, []);
 
-  /** Demo scripts: local mock + session — never call the org API (avoids race with in-flight live fetches). */
+  /** Demo scripts: local mock + session - never call the org API (avoids race with in-flight live fetches). */
   React.useEffect(() => {
     if (!isDemo) return;
     setLoading(true);

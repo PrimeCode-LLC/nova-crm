@@ -69,7 +69,7 @@ export const DASHBOARD_VIEW_MODE_OPTIONS: {
   {
     key: "auto",
     label: "Auto (my role)",
-    description: "Uses your real role — ops for owners/managers, personal for frontline.",
+    description: "Uses your real role - ops for owners/managers, personal for frontline.",
   },
   {
     key: "ops",

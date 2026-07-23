@@ -403,7 +403,7 @@ export function ScheduleFollowupEmailDialog({
                 required
               />
               <p className="text-[10px] text-muted-foreground">
-                Do not paste a signature here — it is added from the mailbox above when scheduled.
+                Do not paste a signature here - it is added from the mailbox above when scheduled.
               </p>
             </div>
           </div>

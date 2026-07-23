@@ -9,7 +9,7 @@ import { useChannelAdminStore } from "@/stores/channel-admin-store";
 import type { ChannelKey } from "@/lib/types";
 import { CHANNEL_LIST } from "@/lib/constants";
 
-/** Channel options for pickers — disabled channels excluded by default. */
+/** Channel options for pickers - disabled channels excluded by default. */
 export function useChannelOptions(opts?: {
   includeDisabled?: boolean;
 }): ChannelOption[] {

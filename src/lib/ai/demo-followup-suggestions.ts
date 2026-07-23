@@ -146,7 +146,7 @@ export function demoFollowupSuggestions(
   const enterprise = segment === "enterprise" || segment === "mid_market";
   const isLinkedin = channel === "linkedin_outbound" || channel === "linkedin_1to1";
 
-  // Step 1 — opener: specific signal + role-relevant value hypothesis + soft interest check.
+  // Step 1 - opener: specific signal + role-relevant value hypothesis + soft interest check.
   const step1Body =
     channel === "upwork"
       ? `Hi ${name},\n\nOn ${company}: happy to clarify scope or share a short case study if useful.\n\n${roleCopy.interestAsk}`
@@ -154,19 +154,19 @@ export function demoFollowupSuggestions(
         ? `Hi ${name},\n\nOn my earlier note about ${company}: ${roleCopy.offer}\n\n${roleCopy.interestAsk}`
         : `Hi ${name},\n\n${relevanceOpener} ${roleCopy.relevance}\n\n${roleCopy.interestAsk}`;
 
-  // Step 2 — proof/value: a distinct angle, written so it can be forwarded internally at larger accounts.
+  // Step 2 - proof/value: a distinct angle, written so it can be forwarded internally at larger accounts.
   const step2Body = isLinkedin
-    ? `Hi ${name} — quick add on ${company}: ${roleCopy.offer} Useful to connect?`
+    ? `Hi ${name} - quick add on ${company}: ${roleCopy.offer} Useful to connect?`
     : enterprise
       ? `Hi ${name},\n\nDifferent angle on ${company}: ${roleCopy.offer} Happy to keep it to a short, forwardable summary if anyone else on your side weighs in.\n\nWant me to send it over?`
       : `Hi ${name},\n\nOne new angle on ${company}: ${roleCopy.offer}\n\nWant me to send it over?`;
 
-  // Step 3 — reframe: change the lens; for larger accounts, offer to reach the right owner instead of pushing.
+  // Step 3 - reframe: change the lens; for larger accounts, offer to reach the right owner instead of pushing.
   const step3Body = isLinkedin
     ? `Hi ${name}, one more thought on ${company}. ${roleCopy.reframe}`
     : `Hi ${name},\n\nRethinking this for ${company}: ${roleCopy.reframe}\n\nEither way, is this on your radar this quarter?`;
 
-  // Step 4 — break-up: gracious take-away with permission to decline; recovers silent prospects.
+  // Step 4 - break-up: gracious take-away with permission to decline; recovers silent prospects.
   const step4Body = isLinkedin
     ? `Hi ${name}, last note from me on ${company}. If timing is off, just say no and I'll close the loop.`
     : `Hi ${name},\n\nI'll close the loop on my side unless you want to reopen. If ${company} still wants help later, just reply here.`;
@@ -177,7 +177,7 @@ export function demoFollowupSuggestions(
   // Full: Day 0 → +3 BD → +5 BD → +7 BD. Continue: +3 BD → +5 BD → +7 BD.
   if (!continueMode) {
     items.push({
-      title: emailish ? `Email 1 — Intro to ${name}` : `Touch 1 — Reach ${name}`,
+      title: emailish ? `Email 1 - Intro to ${name}` : `Touch 1 - Reach ${name}`,
       offsetDays: 0,
       priority: "high",
       channel: emailish ? emailChannel : channel,
@@ -191,10 +191,10 @@ export function demoFollowupSuggestions(
   items.push({
     title: continueMode
       ? emailish
-        ? `Email 2 — Value bump for ${company}`
+        ? `Email 2 - Value bump for ${company}`
         : `Follow-up with ${name}`
       : emailish
-        ? `Email 2 — Value bump`
+        ? `Email 2 - Value bump`
         : `Second touch, ${company}`,
     offsetDays: 3,
     priority: "high",
@@ -214,7 +214,7 @@ export function demoFollowupSuggestions(
   });
 
   items.push({
-    title: emailish ? `Email 3 — Reframe` : `Reframe for ${company}`,
+    title: emailish ? `Email 3 - Reframe` : `Reframe for ${company}`,
     offsetDays: 5,
     priority: "medium",
     channel: emailish ? emailChannel : "other",
@@ -229,7 +229,7 @@ export function demoFollowupSuggestions(
   });
 
   items.push({
-    title: emailish ? `Email 4 — Break-up` : `Last touch, ${company}`,
+    title: emailish ? `Email 4 - Break-up` : `Last touch, ${company}`,
     offsetDays: 7,
     priority: "medium",
     channel: emailish ? emailChannel : "other",

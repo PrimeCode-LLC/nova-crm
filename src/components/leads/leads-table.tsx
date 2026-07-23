@@ -323,7 +323,7 @@ export interface LeadsTableProps {
   idleOnly?: boolean;
   /** Default intake filter (e.g. prospects-only page). */
   initialIntakeScope?: "all" | "prospect" | "sales_lead";
-  /** When set, intake scope is fixed (toolbar control hidden) — e.g. Leads vs Prospects routes. */
+  /** When set, intake scope is fixed (toolbar control hidden) - e.g. Leads vs Prospects routes. */
   lockedIntakeScope?: "all" | "prospect" | "sales_lead";
   /** Origin route for lead-detail back navigation (appended as `?from=…`). */
   linkFromKey?: "prospects" | "pipeline";

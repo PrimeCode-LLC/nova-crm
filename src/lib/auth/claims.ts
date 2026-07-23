@@ -5,14 +5,14 @@ import type { OrgMemberRole } from "@/lib/types";
  * Custom claims attached to Firebase ID tokens. Read by Firestore security
  * rules (`request.auth.token.organizationId`) and by `getVerifiedSession`.
  *
- * Keep this object SMALL — every claim costs JWT bytes on every request.
+ * Keep this object SMALL - every claim costs JWT bytes on every request.
  */
 export type AppClaims = {
   /** Tenant id this user belongs to. Absent until the user has joined or created an org. */
   organizationId?: string;
   /** Member role inside the org. */
   orgRole?: OrgMemberRole;
-  /** Mirrors `platformAdmins` — convenience for the rules layer. */
+  /** Mirrors `platformAdmins` - convenience for the rules layer. */
   platformAdmin?: boolean;
 };
 

@@ -165,7 +165,7 @@ export async function POST(req: Request) {
     isFreshSignup = true;
   }
 
-  // (a2) org-wide open join link — creates a pending member until an admin approves.
+  // (a2) org-wide open join link - creates a pending member until an admin approves.
   if (!organizationId && openJoinToken) {
     const joinOrg = await verifyOpenJoinTokenServer(openJoinToken);
     if (!joinOrg) {
@@ -228,7 +228,7 @@ export async function POST(req: Request) {
 
   // (b) reuse existing membership
   if (!organizationId && !membershipPending) {
-    // Fast path: `users/{uid}.organizationId` + direct `members/{uid}` read — no
+    // Fast path: `users/{uid}.organizationId` + direct `members/{uid}` read - no
     // collection-group index (covers normal sign-in after at least one session).
     const uData = existingUserSnap.exists ? existingUserSnap.data() : undefined;
     const mirroredOrgId =
@@ -334,7 +334,7 @@ export async function POST(req: Request) {
       try {
         pendingOrgId = (await findMembershipForUserServer(uid))?.organizationId;
       } catch {
-        /* ignore — user doc may still list membershipPendingOrgId from prior write */
+        /* ignore - user doc may still list membershipPendingOrgId from prior write */
       }
     }
     if (pendingOrgId) {

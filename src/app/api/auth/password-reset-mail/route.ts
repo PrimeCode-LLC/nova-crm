@@ -12,7 +12,7 @@ function normalizeEmail(raw: string): string {
 
 /**
  * Generates a Firebase password reset link (Admin SDK) and emails it via
- * SYSTEM_SMTP_* — not Firebase's built-in mailer.
+ * SYSTEM_SMTP_* - not Firebase's built-in mailer.
  */
 export async function POST(req: Request) {
   try {

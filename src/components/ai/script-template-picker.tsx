@@ -146,7 +146,7 @@ export function ScriptTemplatePicker({
     ? optionLabel(selected)
     : value
       ? undefined
-      : "None — AI only";
+      : "None - AI only";
 
   React.useEffect(() => {
     if (loading || hydratedRef.current) return;
@@ -225,13 +225,13 @@ export function ScriptTemplatePicker({
       >
         <SelectTrigger className="h-9 text-sm">
           <SelectValue
-            placeholder={loading ? "Loading templates…" : "None — AI only"}
+            placeholder={loading ? "Loading templates…" : "None - AI only"}
           >
             {triggerLabel}
           </SelectValue>
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value={NONE_VALUE}>None — AI only</SelectItem>
+          <SelectItem value={NONE_VALUE}>None - AI only</SelectItem>
           {options.map((s) => (
             <SelectItem key={s.id} value={s.id}>
               {optionLabel(s)}
@@ -249,7 +249,7 @@ export function ScriptTemplatePicker({
         </p>
       ) : (
         <p className="text-[10px] text-muted-foreground leading-snug">
-          Optional. AI matches this template&apos;s style — it will not paste it.
+          Optional. AI matches this template&apos;s style - it will not paste it.
         </p>
       )}
 
@@ -288,7 +288,7 @@ export function ScriptTemplatePicker({
                 {labels.primary}
               </p>
               <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                {selected.primaryText || "—"}
+                {selected.primaryText || "-"}
               </p>
             </div>
             <div className="grid gap-1.5">
@@ -296,7 +296,7 @@ export function ScriptTemplatePicker({
                 {labels.secondary}
               </p>
               <p className="whitespace-pre-wrap text-sm leading-relaxed">
-                {selected.secondaryText?.trim() || "—"}
+                {selected.secondaryText?.trim() || "-"}
               </p>
             </div>
           </div>

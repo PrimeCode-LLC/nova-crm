@@ -38,7 +38,7 @@ export function LeadQualityBadge({
         className,
       )}
     >
-      <span>{result.score || "—"}</span>
+      <span>{result.score || "-"}</span>
       {result.signalCount > 0 ? (
         <span className="opacity-70 text-[10px] font-normal">{result.signalCount}sig</span>
       ) : null}
@@ -65,7 +65,7 @@ export function LeadQualityBadge({
           {result.meetsThreshold
             ? `Ready for outreach (≥ ${playbook.outreachThreshold})`
             : result.qualificationNotes[0] ||
-              `Below threshold (${playbook.outreachThreshold}) — warn before outreach`}
+              `Below threshold (${playbook.outreachThreshold}) - warn before outreach`}
         </p>
         {result.primaryOpportunity ? (
           <p className="text-xs">
@@ -89,7 +89,7 @@ export function LeadQualityBadge({
           </ul>
         ) : (
           <p className="text-xs text-muted-foreground border-t pt-2">
-            No intent signals yet — fill research fields or add matching labels.
+            No intent signals yet - fill research fields or add matching labels.
           </p>
         )}
       </PopoverContent>

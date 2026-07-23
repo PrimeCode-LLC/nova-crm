@@ -17,8 +17,8 @@ export const OUTREACH_KNOWLEDGE_SECTIONS: KnowledgeSection[] = [
 
 /**
  * Shared knowledge retrieval for outbound features (follow-up sequences, email
- * reply/improve). Uses semantic + keyword hybrid retrieval, and — when the
- * feature has no explicitly configured libraries — targets the global company
+ * reply/improve). Uses semantic + keyword hybrid retrieval, and - when the
+ * feature has no explicitly configured libraries - targets the global company
  * library's proof sections instead of scanning every org library.
  *
  * Degrades gracefully: if embeddings are unavailable it falls back to keyword

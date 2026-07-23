@@ -55,7 +55,7 @@ const TRANSIENT_PATTERNS = [
 
 /**
  * Classify a send/schedule error so the cron can retry, defer, or permanently fail.
- * Quota is also detected from dedicated send-path checks — pass `kindHint: "quota"` when known.
+ * Quota is also detected from dedicated send-path checks - pass `kindHint: "quota"` when known.
  */
 export function classifyScheduledSendError(
   error: string,

@@ -18,7 +18,7 @@ export type ResolvedTenantContext = {
     | "suspended_organization";
 };
 
-/** Short in-process TTL — Fluid Compute reuses instances; cuts repeated Firestore fan-out. */
+/** Short in-process TTL - Fluid Compute reuses instances; cuts repeated Firestore fan-out. */
 const TENANT_CACHE_TTL_MS = 30_000;
 const tenantCache = new Map<
   string,

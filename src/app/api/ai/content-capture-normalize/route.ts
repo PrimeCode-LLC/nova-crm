@@ -78,7 +78,7 @@ export async function POST(req: Request) {
       feature: "content_capture_normalize",
       schema: normalizeSchema,
       promptVars: {
-        brandContext: brand ? formatBrandContextForPrompt(brand) : "No brand selected — company knowledge base.",
+        brandContext: brand ? formatBrandContextForPrompt(brand) : "No brand selected - company knowledge base.",
         publicSafe: String(Boolean(capture.publicSafe)),
         problem: String(capture.problem ?? ""),
         solution: String(capture.solution ?? ""),

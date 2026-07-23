@@ -653,7 +653,7 @@ export default function DashboardPage() {
                     ? `Previewing as ${roleLabel(prefs.previewRole)}`
                     : `View: ${prefs.viewMode === "ops" ? "Owner command board" : prefs.viewMode === "classic" ? "Pipeline classic" : "Employee board"}`}
                 </span>
-                <span className="text-muted-foreground">Layout only — data access is unchanged.</span>
+                <span className="text-muted-foreground">Layout only - data access is unchanged.</span>
                 <button
                   type="button"
                   className="ml-auto text-primary underline-offset-4 hover:underline"

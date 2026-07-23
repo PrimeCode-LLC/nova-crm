@@ -388,7 +388,7 @@ export function LeadEmailsPanel({
               firstError =
                 error instanceof Error
                   ? error.name === "TimeoutError" || error.name === "AbortError"
-                    ? "Mailbox check timed out — try Refresh or open Inbox."
+                    ? "Mailbox check timed out - try Refresh or open Inbox."
                     : error.message
                   : "Could not refresh mail";
             }

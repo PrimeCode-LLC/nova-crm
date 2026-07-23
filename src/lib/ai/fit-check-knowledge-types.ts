@@ -50,7 +50,7 @@ export interface FitCheckRetrievalBudget {
 
 export interface FitCheckKnowledgeConfig {
   globalLibraryId?: string;
-  /** Master switch — when false, global library is never queried even if useGlobal is on. */
+  /** Master switch - when false, global library is never queried even if useGlobal is on. */
   globalEnabled: boolean;
   categories: Record<OpportunitySourceType, FitCheckCategoryKnowledgeConfig>;
   retrievalBudget: FitCheckRetrievalBudget;

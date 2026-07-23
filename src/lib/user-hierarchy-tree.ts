@@ -79,7 +79,7 @@ function classFind(parent: Map<string, string>, x: string): string {
 /**
  * Builds reporting-line trees: each user appears exactly once.
  * Natural roots: no valid manager in the roster.
- * Synthetic roots: users not reachable from any natural root (manager cycles, etc.) — one anchor per weak component.
+ * Synthetic roots: users not reachable from any natural root (manager cycles, etc.) - one anchor per weak component.
  */
 export function buildHierarchyForest(users: readonly User[]): {
   roots: HierarchyNode[];

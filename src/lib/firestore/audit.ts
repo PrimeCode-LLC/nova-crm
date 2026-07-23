@@ -151,7 +151,7 @@ function normalizeDetailFields(input: RecordAuditInput): Required<AuditLogDetail
 }
 
 /**
- * Append-only per-tenant audit log. Always-on side-channel — failures
+ * Append-only per-tenant audit log. Always-on side-channel - failures
  * are swallowed because audit must never break a primary write.
  */
 export async function recordAudit(input: RecordAuditInput): Promise<void> {

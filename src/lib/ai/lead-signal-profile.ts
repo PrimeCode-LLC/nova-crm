@@ -73,25 +73,25 @@ export type LeadSignalProfile = {
 function authorityHint(authority: number): string | null {
   if (!Number.isFinite(authority) || authority <= 0) return null;
   if (authority >= 4)
-    return "Likely a final decision-maker — you may address the decision directly.";
+    return "Likely a final decision-maker - you may address the decision directly.";
   if (authority === 3)
-    return "Shared authority / strong influencer — advance it internally and keep it easy to forward up.";
-  return "Likely an influencer or gatekeeper, not the signer — win them as a champion and make the email forwardable to the real decision-maker.";
+    return "Shared authority / strong influencer - advance it internally and keep it easy to forward up.";
+  return "Likely an influencer or gatekeeper, not the signer - win them as a champion and make the email forwardable to the real decision-maker.";
 }
 
 function timelineHint(timeline: number): string | null {
   if (!Number.isFinite(timeline) || timeline <= 0) return null;
   if (timeline >= 4)
-    return "Active / near-term timeline — a concrete next step is appropriate once interest shows.";
-  if (timeline === 3) return "Medium timeline — advance gently; do not force a meeting.";
-  return "No clear timeline — stay curiosity-led; do not push a calendar ask.";
+    return "Active / near-term timeline - a concrete next step is appropriate once interest shows.";
+  if (timeline === 3) return "Medium timeline - advance gently; do not force a meeting.";
+  return "No clear timeline - stay curiosity-led; do not push a calendar ask.";
 }
 
 function needHint(need: number): string | null {
   if (!Number.isFinite(need) || need <= 0) return null;
-  if (need >= 4) return "Need is established — you may speak to the problem directly.";
-  if (need === 3) return "Need is partial — connect the signal to a likely problem.";
-  return "Need is unproven — present value as a hypothesis, never as a known fact.";
+  if (need >= 4) return "Need is established - you may speak to the problem directly.";
+  if (need === 3) return "Need is partial - connect the signal to a likely problem.";
+  return "Need is unproven - present value as a hypothesis, never as a known fact.";
 }
 
 function clampSignalText(value: string): string {
@@ -174,11 +174,11 @@ export function buildLeadSignalProfile(input: {
 }
 
 const SEGMENT_LABEL: Record<AccountSegment, string> = {
-  smb: "SMB (small / founder-led — usually the direct decision-maker; you may move faster)",
+  smb: "SMB (small / founder-led - usually the direct decision-maker; you may move faster)",
   mid_market:
-    "Mid-market (a small buying group is likely — balance directness with forwardable copy)",
+    "Mid-market (a small buying group is likely - balance directness with forwardable copy)",
   enterprise:
-    "Enterprise (assume a buying committee — lower the ask and write forwardable copy)",
+    "Enterprise (assume a buying committee - lower the ask and write forwardable copy)",
   unknown: "unknown (do not assume company scale; keep claims scale-agnostic)",
 };
 
@@ -203,7 +203,7 @@ export function formatLeadSignalGuidance(profile: LeadSignalProfile): string {
     const { ageDays, strength, text } = profile.freshestSignal;
     const ageBit =
       ageDays != null
-        ? ` (~${ageDays}d old${ageDays > 60 ? " — likely stale, use only if nothing fresher exists" : ""})`
+        ? ` (~${ageDays}d old${ageDays > 60 ? " - likely stale, use only if nothing fresher exists" : ""})`
         : "";
     lines.push(
       `Strongest recent ${strength ? `${strength} signal` : "signal"} to open around: ${text}${ageBit}`,
@@ -216,9 +216,9 @@ export function formatLeadSignalGuidance(profile: LeadSignalProfile): string {
   if (profile.qualityScore != null) {
     const note =
       profile.qualityScore >= 70
-        ? " (high — a more direct ask is justified)"
+        ? " (high - a more direct ask is justified)"
         : profile.qualityScore < 40
-          ? " (low — stay soft and curiosity-led)"
+          ? " (low - stay soft and curiosity-led)"
           : "";
     lines.push(`Intent quality score: ${profile.qualityScore}/100${note}`);
   }

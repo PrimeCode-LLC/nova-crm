@@ -77,7 +77,7 @@ export function ChannelAdminSync() {
         }
         const merged = mergeChannelAdminConfig(data.channelAdmin ?? undefined);
         const prev = useChannelAdminStore.getState();
-        /** Org has no Firestore payload yet — keep browser-local custom channels once, then PUT migrates them. */
+        /** Org has no Firestore payload yet - keep browser-local custom channels once, then PUT migrates them. */
         const customChannels =
           data.channelAdmin != null
             ? merged.customChannels

@@ -1,7 +1,7 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 
-/** Comma-separated emails in env — bootstrap access when `platformAdmins` is empty. */
+/** Comma-separated emails in env - bootstrap access when `platformAdmins` is empty. */
 export function parseBootstrapPlatformAdminEmails(): Set<string> {
   const raw = process.env.PLATFORM_ADMIN_EMAILS ?? "";
   return new Set(

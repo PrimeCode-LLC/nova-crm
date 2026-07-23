@@ -103,7 +103,7 @@ export function OwnerOpsBoard({
   orgActivityEvents,
   activityRecords,
   range,
-  /** Channel/owner-scoped but not date-capped — Team Command applies its own window. */
+  /** Channel/owner-scoped but not date-capped - Team Command applies its own window. */
   teamCommandLeads,
   teamCommandDeals,
   teamCommandFollowups,
@@ -179,7 +179,7 @@ export function OwnerOpsBoard({
 
     const scenes: WallScene[] = [];
 
-    // Scene 1 — Priorities: what needs a decision or action right now.
+    // Scene 1 - Priorities: what needs a decision or action right now.
     const nowWidgets = [
       widgets.needsAttention ? (
         <DashboardNeedsAttention
@@ -227,7 +227,7 @@ export function OwnerOpsBoard({
       });
     }
 
-    // Scene 2 — Team & capacity: who is delivering and where the send capacity is.
+    // Scene 2 - Team & capacity: who is delivering and where the send capacity is.
     const teamCard = widgets.teamCommand ? (
       <TeamCommand
         key="team"
@@ -280,7 +280,7 @@ export function OwnerOpsBoard({
       });
     }
 
-    // Scene 3 — Pipeline: strategy health beside outreach/follow-up trends.
+    // Scene 3 - Pipeline: strategy health beside outreach/follow-up trends.
     if (wallSettings.scenes.pipeline && (widgets.strategyScoreboard || showCharts)) {
       const chartsColumn = showCharts ? (
         <div

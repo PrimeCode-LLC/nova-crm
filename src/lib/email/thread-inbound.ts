@@ -57,7 +57,7 @@ function uidKey(m: MailInbound): string {
 
 /**
  * Groups IMAP messages into conversation threads using Message-ID, In-Reply-To,
- * and References — same signals Outlook and other clients use (RFC 5322).
+ * and References - same signals Outlook and other clients use (RFC 5322).
  */
 export function groupInboundIntoThreads(messages: MailInbound[]): MailThread[] {
   if (messages.length === 0) return [];

@@ -1,4 +1,4 @@
-/** Wall / TV display preferences — stored per browser (same pattern as dashboard prefs). */
+/** Wall / TV display preferences - stored per browser (same pattern as dashboard prefs). */
 
 export type WallProgressBarPosition = "top" | "bottom";
 

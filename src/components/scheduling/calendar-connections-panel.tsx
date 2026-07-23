@@ -125,7 +125,7 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
       if (result.ok) {
         toast.success(
           result.eventCount === 0
-            ? "Google Calendar synced — no upcoming events found"
+            ? "Google Calendar synced - no upcoming events found"
             : `Synced ${result.eventCount} event${result.eventCount === 1 ? "" : "s"} from Google Calendar`,
           result.refreshedAccess
             ? { description: "Google access was refreshed." }
@@ -277,7 +277,7 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
           {!isDemo && oauth.google && (
             <p className="text-xs text-muted-foreground">
               {oauth.googleMethod === "oauth" || oauth.googleMethod === "gis"
-                ? "Your Nova login and Google Calendar can be different accounts — pick whichever Google account has the calendar you want."
+                ? "Your Nova login and Google Calendar can be different accounts - pick whichever Google account has the calendar you want."
                 : "Without a Google Calendar client id, email/password Nova users can connect a different Google account. Google Nova sign-in must use the same Google account unless you add GOOGLE_CALENDAR_CLIENT_ID (see .env.example)."}
               {" "}
               Reconnect if sync stops after about an hour.
@@ -309,7 +309,7 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <RefreshCw className="h-3.5 w-3.5" />
-        Use Sync now to pull events from Google Calendar. Access expires after about an hour — Sync now will refresh it automatically.
+        Use Sync now to pull events from Google Calendar. Access expires after about an hour - Sync now will refresh it automatically.
       </div>
     </div>
   );

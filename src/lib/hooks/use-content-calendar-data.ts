@@ -163,7 +163,7 @@ export function useContentCalendarData() {
     }) => {
       if (!organizationId) throw new Error("No organization");
       if (isDemo) {
-        toast.message("Demo mode — brands are not persisted");
+        toast.message("Demo mode - brands are not persisted");
         return null;
       }
       const db = getFirebaseDb();
@@ -221,7 +221,7 @@ export function useContentCalendarData() {
   const updateBrand = React.useCallback(
     async (brandId: string, patch: Partial<ContentBrand>) => {
       if (isDemo) {
-        toast.message("Demo mode — not persisted");
+        toast.message("Demo mode - not persisted");
         return;
       }
       const db = getFirebaseDb();
@@ -251,7 +251,7 @@ export function useContentCalendarData() {
   const updateItemStatus = React.useCallback(
     async (itemId: string, status: ContentItemStatus) => {
       if (isDemo) {
-        toast.message("Demo mode — not persisted");
+        toast.message("Demo mode - not persisted");
         return;
       }
       const db = getFirebaseDb();

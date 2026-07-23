@@ -108,7 +108,7 @@ async function sumSendStatsForDays(input: {
 
 /**
  * Org-wide mailbox capacity utilization for owners/managers.
- * Uses sendStats (durable) + pending scheduled counts — no IMAP secrets loaded.
+ * Uses sendStats (durable) + pending scheduled counts - no IMAP secrets loaded.
  */
 export async function buildOrgMailboxUtilizationServer(input: {
   organizationId: string;

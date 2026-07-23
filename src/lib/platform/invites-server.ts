@@ -59,7 +59,7 @@ export function hashInviteToken(token: string): string {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
-/** 32 bytes of url-safe randomness — short enough for an email link, plenty of entropy. */
+/** 32 bytes of url-safe randomness - short enough for an email link, plenty of entropy. */
 export function generateInviteToken(): string {
   return crypto.randomBytes(24).toString("base64url");
 }

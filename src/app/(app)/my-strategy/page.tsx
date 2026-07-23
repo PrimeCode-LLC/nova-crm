@@ -365,7 +365,7 @@ export default function MyStrategyPage() {
     <AppPage>
       <PageHeader
         title="My Strategy"
-        description="Workbench for today’s prospecting — switch strategies, copy fields fast, track progress."
+        description="Workbench for today’s prospecting - switch strategies, copy fields fast, track progress."
         actions={
           activeAssignment && activeStrategy ? (
             <Button size="sm" type="button" onClick={() => startProspecting()}>
@@ -387,7 +387,7 @@ export default function MyStrategyPage() {
           </Card>
         ) : (
           <>
-            {/* Compact day strip — stays pinned while scrolling */}
+            {/* Compact day strip - stays pinned while scrolling */}
             <div className="sticky top-0 z-20 rounded-lg border bg-card/95 px-3 py-2.5 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm shadow-sm backdrop-blur supports-[backdrop-filter]:bg-card/80">
               <span className="text-xs font-medium text-muted-foreground">Today · all strategies</span>
               <div className="h-4 w-px bg-border hidden sm:block" />
@@ -573,7 +573,7 @@ function StrategyWorkbench({
               <span className="text-foreground font-medium tabular-nums">
                 {allocated}
               </span>
-              {multiStrategy ? ` of ${baseTarget} base` : ""} — {targetSourceLabel(source)}
+              {multiStrategy ? ` of ${baseTarget} base` : ""} - {targetSourceLabel(source)}
             </CardDescription>
           </div>
           <Button size="sm" type="button" className="shrink-0" onClick={onStart}>
@@ -634,7 +634,7 @@ function StrategyWorkbench({
 
         {strategy.missionBlurb ? (
           <CollapsibleSection
-            title="Mission — why we prospect"
+            title="Mission - why we prospect"
             open={openMap.mission ?? true}
             onToggle={() => toggle("mission")}
             actions={

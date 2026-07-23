@@ -27,7 +27,7 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
   };
 }
 
-/** Same access rule as the /outreach page — CRM role, org role, or explicit Email outreach grant. */
+/** Same access rule as the /outreach page - CRM role, org role, or explicit Email outreach grant. */
 export async function guardInstantlyOutreachApi(): Promise<
   | { ok: true; organizationId: string; uid: string; apiKey: string }
   | { ok: false; response: NextResponse }

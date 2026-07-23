@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
-/** Public — used by `/signup?join=…` to confirm the link before account creation. */
+/** Public - used by `/signup?join=…` to confirm the link before account creation. */
 export async function GET(req: Request) {
   const url = new URL(req.url);
   const token = url.searchParams.get("token") ?? "";

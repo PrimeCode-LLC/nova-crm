@@ -214,7 +214,7 @@ export async function runInboxImapSyncCronServer(): Promise<InboxImapCronResult>
   let bounceCandidates = 0;
   const errors: InboxImapCronResult["errors"] = [];
 
-  // Sequential IMAP connects — safer for provider rate limits than a fan-out.
+  // Sequential IMAP connects - safer for provider rate limits than a fan-out.
   for (const mb of batch) {
     const result = await syncOneMailbox(mb);
     if (result.ok) {

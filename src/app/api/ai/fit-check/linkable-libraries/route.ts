@@ -34,7 +34,7 @@ function libraryGroup(
   return { id: "custom", label: "Custom libraries" };
 }
 
-/** Full knowledge tree for profile linking — all libraries and documents. */
+/** Full knowledge tree for profile linking - all libraries and documents. */
 export async function GET() {
   const gProfiles = await guardAdminFeature("profiles");
   const gAi = gProfiles.ok ? gProfiles : await guardAdminFeature("ai_knowledge");

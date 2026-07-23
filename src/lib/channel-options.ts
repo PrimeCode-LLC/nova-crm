@@ -9,7 +9,7 @@ export type BuildChannelOptionsInput = {
   enabledMap?: Partial<Record<ChannelKey, boolean>>;
   /**
    * When true, include disabled channels (admin lists, labels on existing data).
-   * Default false — only enabled channels for pickers/widgets.
+   * Default false - only enabled channels for pickers/widgets.
    */
   includeDisabled?: boolean;
 };

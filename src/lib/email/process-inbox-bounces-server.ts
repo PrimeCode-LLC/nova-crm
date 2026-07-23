@@ -91,7 +91,7 @@ export async function processInboxBouncesFromHeadsServer(input: {
       continue;
     }
 
-    // Incomplete hard bounce — wait for a later tick / body parse.
+    // Incomplete hard bounce - wait for a later tick / body parse.
     if (
       bounce.bounceKind === "hard" &&
       bounce.failedRecipients.length === 0 &&

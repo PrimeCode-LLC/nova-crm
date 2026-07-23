@@ -93,7 +93,7 @@ export function DeferredAppSync() {
 
   return (
     <>
-      {/* Mailbox hydrate must not wait on idle — settings/inbox need real boxes ASAP */}
+      {/* Mailbox hydrate must not wait on idle - settings/inbox need real boxes ASAP */}
       <EmailAccountSync />
       {ready ? (
         <>

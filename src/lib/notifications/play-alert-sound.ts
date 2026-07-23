@@ -67,6 +67,6 @@ export function playAlertSound(kind: AlertSoundKind): void {
     playTone(ctx, profile.freqA, now, toneSec, profile.gain);
     playTone(ctx, profile.freqB, now + toneSec * 0.55, toneSec, profile.gain * 0.85);
   } catch {
-    /* ignore — audio is best-effort */
+    /* ignore - audio is best-effort */
   }
 }

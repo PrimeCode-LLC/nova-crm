@@ -48,7 +48,7 @@ export interface EmailAccountStore {
   /** Sender domains whose INBOX messages are auto-moved to Trash. */
   blockedSenderDomains: string[];
   /**
-   * Shared footer for all mailboxes — appended after signature on followup /
+   * Shared footer for all mailboxes - appended after signature on followup /
    * sequence schedule when includeFooter is on.
    */
   globalEmailFooter: string;

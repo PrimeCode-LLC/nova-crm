@@ -2,7 +2,7 @@ import type { ScraperFeed } from "@/lib/types";
 
 export type ScraperRunIntervalUnit = "minutes" | "hours" | "days";
 
-/** Cloud scheduler tick — checks due feeds at this cadence (minimum supported minute interval). */
+/** Cloud scheduler tick - checks due feeds at this cadence (minimum supported minute interval). */
 export const SCRAPER_SCHEDULER_TICK_MINUTES = 15;
 
 const LIMITS: Record<ScraperRunIntervalUnit, { min: number; max: number }> = {

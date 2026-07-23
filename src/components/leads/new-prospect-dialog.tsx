@@ -1179,8 +1179,8 @@ export function NewProspectDialog({
       });
       toast.success(
         prospectQualifyStatus === "incomplete" && qualifyForm.qualifyStatus === "completed"
-          ? "Prospect created as incomplete — finish qualification on the record when ready."
-          : "Prospect created — add channels when ready.",
+          ? "Prospect created as incomplete - finish qualification on the record when ready."
+          : "Prospect created - add channels when ready.",
       );
       resetForm();
       if (draftIdRef.current) clearNewProspectDraft(effectiveUid, draftIdRef.current);
@@ -1249,9 +1249,9 @@ export function NewProspectDialog({
         : draftSaveState === "offline"
           ? "Offline recovery saved on this device"
           : draftSaveState === "conflict"
-            ? "Revision conflict — reload the latest version"
+            ? "Revision conflict - reload the latest version"
             : draftSaveState === "error"
-              ? "Autosave failed — use Save draft to retry"
+              ? "Autosave failed - use Save draft to retry"
             : draftId
               ? "Draft ready"
               : "Not saved yet";

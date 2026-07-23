@@ -249,7 +249,7 @@ export function CalendarInviteBanner({
       if (action === "accept") {
         const ge = data.googleErrors ?? [];
         if (ge.length) {
-          toast.warning("Accepted — some calendars could not be updated", {
+          toast.warning("Accepted - some calendars could not be updated", {
             description: ge.map((e) => e.error).join("; "),
           });
         } else {

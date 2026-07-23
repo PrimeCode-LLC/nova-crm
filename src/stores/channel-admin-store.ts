@@ -9,7 +9,7 @@ import {
   DEFAULT_CHANNEL_ENABLED,
 } from "@/lib/channel-admin-defaults";
 
-/** @deprecated name — use OrganizationCustomChannelRow */
+/** @deprecated name - use OrganizationCustomChannelRow */
 export type CustomChannelRow = OrganizationCustomChannelRow;
 
 export type ChannelAdminPersisted = OrganizationChannelAdminConfig;

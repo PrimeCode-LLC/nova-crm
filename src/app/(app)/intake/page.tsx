@@ -569,7 +569,7 @@ export default function IntakePoolPage() {
           setTeamDefaults(data.defaults);
         }
       } catch {
-        /* optional — personal filters still work */
+        /* optional - personal filters still work */
       }
     })();
   }, [ws.isDemo, ws.organizationId]);
@@ -1097,7 +1097,7 @@ export default function IntakePoolPage() {
                     ? `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed. ${items.length} still remain.`
                     : `${bulkDeleteResult.deleted} post${bulkDeleteResult.deleted === 1 ? "" : "s"} removed.`
                 : deleteConfirm === "all"
-                  ? "This instantly hides every available post in the pool — not just the ones on screen. Old rows are cleaned up in the background. Already promoted prospects are not affected."
+                  ? "This instantly hides every available post in the pool - not just the ones on screen. Old rows are cleaned up in the background. Already promoted prospects are not affected."
                   : poolView === "dismissed"
                     ? "Selected dismissed posts will be permanently deleted from the database. This cannot be undone."
                     : "Only the posts you selected will be dismissed from the pool. Other posts (including ones hidden by filters) will remain. Already promoted prospects are not affected."}
@@ -1185,7 +1185,7 @@ export default function IntakePoolPage() {
                 disabled={loading || poolBusy}
                 title={
                   runningScrapers
-                    ? "Running all feeds — keep this tab open"
+                    ? "Running all feeds - keep this tab open"
                     : "Run all enabled scrapers and refresh the pool"
                 }
               >
@@ -1785,7 +1785,7 @@ export default function IntakePoolPage() {
                     filters to see all {items.length}{" "}
                     {poolView === "dismissed" ? "dismissed posts" : "posts"}.
                     {scoringQuality && (qualityFilter === "has_signals" || qualityFilter === "ready")
-                      ? " Match scores are still calculating — results may appear shortly."
+                      ? " Match scores are still calculating - results may appear shortly."
                       : null}
                   </CardDescription>
                 </CardHeader>

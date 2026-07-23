@@ -59,9 +59,9 @@ export const COLLECTIONS = {
   workspaceChatReads: "workspaceChatReads",
   /** Durable in-app notifications targeted at a recipient (ownership, strategy, mentions, …). */
   userNotifications: "userNotifications",
-  /** SaaS tenants — read/write only through server (Admin SDK). */
+  /** SaaS tenants - read/write only through server (Admin SDK). */
   organizations: "organizations",
-  /** Product-level operators — read/write only through server (Admin SDK). */
+  /** Product-level operators - read/write only through server (Admin SDK). */
   platformAdmins: "platformAdmins",
   /** Single-use PKCE authorization codes for the Nova browser extension. */
   extensionAuthCodes: "extensionAuthCodes",

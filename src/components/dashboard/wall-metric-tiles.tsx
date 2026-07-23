@@ -103,7 +103,7 @@ function accentFor(item: WallMetricItem): Accent {
   };
 }
 
-/** Dense metric tiles for TV / wall boards — readable from across a room. */
+/** Dense metric tiles for TV / wall boards - readable from across a room. */
 export function WallMetricTiles({
   items,
   className,
@@ -117,7 +117,7 @@ export function WallMetricTiles({
   /** Tighter padding/type for dense boards (e.g. non-wall strategy grids). */
   compact?: boolean;
 }) {
-  // Use fixed column counts (not `sm:`) — wall panels are often narrower than the
+  // Use fixed column counts (not `sm:`) - wall panels are often narrower than the
   // viewport breakpoint, which was collapsing 4-col grids into 2-per-row.
   const colClass =
     columns === 3

@@ -21,7 +21,7 @@ type SmtpCred = {
 
 /**
  * Try SMTP connect + `fn`. If the TCP phase times out on an IPv4 literal, retry with the
- * hostname so Nodemailer can use IPv6 / its own A+AAAA fallback — IMAP may already work that way.
+ * hostname so Nodemailer can use IPv6 / its own A+AAAA fallback - IMAP may already work that way.
  */
 export async function runWithSmtpTransporter<T>(
   fqdnHost: string,

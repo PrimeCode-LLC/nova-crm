@@ -55,7 +55,7 @@ export function AuthSessionSync() {
           router.refresh();
         }
       } catch {
-        /* non-fatal — user can still sign out/in */
+        /* non-fatal - user can still sign out/in */
       } finally {
         syncingRef.current = false;
       }

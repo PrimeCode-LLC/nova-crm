@@ -5,13 +5,13 @@
  *   npx --yes tsx scripts/export-strategy-packs.ts
  *
  * Outputs:
- *   packs/template.empty.json          — canonical empty template (public)
- *   packs/sample-b2b-saas.json         — neutral product sample (public)
- *   packs/private/stellix-master.json  — Stellix master (gitignored)
- *   packs/private/stellix-supply-chain.json — logistics / Person 1 (gitignored)
- *   packs/private/stellix-iot-hardware.json — RFID / IoT / Person 2 (gitignored)
- *   packs/private/stellix-dotnet-modernization.json — .NET / cloud / Person 3 (gitignored)
- *   packs/private/stellix-saas-ai-healthcare.json — SaaS / AI / healthcare / Person 4 (gitignored)
+ *   packs/template.empty.json          - canonical empty template (public)
+ *   packs/sample-b2b-saas.json         - neutral product sample (public)
+ *   packs/private/stellix-master.json  - Stellix master (gitignored)
+ *   packs/private/stellix-supply-chain.json - logistics / Person 1 (gitignored)
+ *   packs/private/stellix-iot-hardware.json - RFID / IoT / Person 2 (gitignored)
+ *   packs/private/stellix-dotnet-modernization.json - .NET / cloud / Person 3 (gitignored)
+ *   packs/private/stellix-saas-ai-healthcare.json - SaaS / AI / healthcare / Person 4 (gitignored)
  *
  * Private seed sources live in packs/private/seeds/ (also gitignored).
  */
@@ -64,7 +64,7 @@ write(join(packsDir, "sample-b2b-saas.json"), buildSampleB2bSaasPack());
       packId: "stellix-master",
       name: strategy.name,
       description:
-        "PRIVATE — Stellix Soft master ICP. Import only into your org. Not a product default.",
+        "PRIVATE - Stellix Soft master ICP. Import only into your org. Not a product default.",
       strategy,
       personas,
     }),
@@ -80,7 +80,7 @@ write(join(packsDir, "sample-b2b-saas.json"), buildSampleB2bSaasPack());
       packId: "stellix-supply-chain",
       name: strategy.name,
       description:
-        "PRIVATE — Supply chain / logistics / Person 1 pack. Import only into your org. Not a product default.",
+        "PRIVATE - Supply chain / logistics / Person 1 pack. Import only into your org. Not a product default.",
       strategy,
       personas,
     }),
@@ -96,7 +96,7 @@ write(join(packsDir, "sample-b2b-saas.json"), buildSampleB2bSaasPack());
       packId: "stellix-iot-hardware",
       name: strategy.name,
       description:
-        "PRIVATE — RFID / IoT / connected hardware / Person 2 pack. Import only into your org. Not a product default.",
+        "PRIVATE - RFID / IoT / connected hardware / Person 2 pack. Import only into your org. Not a product default.",
       strategy,
       personas,
     }),
@@ -112,7 +112,7 @@ write(join(packsDir, "sample-b2b-saas.json"), buildSampleB2bSaasPack());
       packId: "stellix-dotnet-modernization",
       name: strategy.name,
       description:
-        "PRIVATE — Legacy .NET / cloud / DevOps / Person 3 pack. Import only into your org. Not a product default.",
+        "PRIVATE - Legacy .NET / cloud / DevOps / Person 3 pack. Import only into your org. Not a product default.",
       strategy,
       personas,
     }),
@@ -128,7 +128,7 @@ write(join(packsDir, "sample-b2b-saas.json"), buildSampleB2bSaasPack());
       packId: "stellix-saas-ai-healthcare",
       name: strategy.name,
       description:
-        "PRIVATE — SaaS / AI / healthcare / custom apps / Person 4 pack. Import only into your org. Not a product default.",
+        "PRIVATE - SaaS / AI / healthcare / custom apps / Person 4 pack. Import only into your org. Not a product default.",
       strategy,
       personas,
     }),

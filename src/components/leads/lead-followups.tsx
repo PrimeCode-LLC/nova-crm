@@ -97,7 +97,7 @@ function OutboundTrailersPreview() {
       <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground mb-1">
         How it lands in inbox · {mailboxLabel}
       </p>
-      {/* Blank line after body — matches `\n\n` before signature at schedule time */}
+      {/* Blank line after body - matches `\n\n` before signature at schedule time */}
       <div className="h-5 border-t border-dotted border-muted-foreground/20" aria-hidden />
       {signature ? (
         <pre className="text-xs whitespace-pre-wrap font-mono text-muted-foreground/90">
@@ -109,7 +109,7 @@ function OutboundTrailersPreview() {
             {`Best regards,\nYour Name\nTitle · Company`}
           </pre>
           <p className="text-[10px] text-amber-700 dark:text-amber-400">
-            Placeholder — set a real signature in Settings → Email
+            Placeholder - set a real signature in Settings → Email
           </p>
         </div>
       )}
@@ -689,7 +689,7 @@ export function LeadFollowups({
           emailScheduledAt: result.scheduledAt,
         });
       }
-      toast.success("Retry queued — will send shortly");
+      toast.success("Retry queued - will send shortly");
     } finally {
       setRetryingId(null);
     }
@@ -732,7 +732,7 @@ export function LeadFollowups({
         <div>
           <p className="text-sm font-medium">Reminders & sequences</p>
           <p className="text-xs text-muted-foreground">
-            One-off reminders, or AI sequences you can edit, verify, and schedule — email
+            One-off reminders, or AI sequences you can edit, verify, and schedule - email
             autopilot or copy-ready steps for LinkedIn and other channels.
           </p>
         </div>

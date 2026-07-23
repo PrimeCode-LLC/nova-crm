@@ -6,7 +6,7 @@ import type {
 } from "@/lib/prospecting-strategy/qualify";
 import { DEFAULT_DAILY_TARGETS } from "@/lib/prospecting-strategy/qualify";
 
-/** Buyer / ICP persona — not an outreach Profile. */
+/** Buyer / ICP persona - not an outreach Profile. */
 export type BuyerPersonaTitleKind = "approved" | "similar" | "excluded";
 
 export type BuyerPersonaTitle = {

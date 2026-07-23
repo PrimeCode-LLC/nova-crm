@@ -145,7 +145,7 @@ export function FollowupPlanReplyWatcher() {
 
           const openedReview = shouldOpenReplyReview(lead);
           if (openedReview) {
-            toast.message("Reply received — review on Dashboard", {
+            toast.message("Reply received - review on Dashboard", {
               description:
                 lead.companyName || lead.contactName
                   ? `${lead.companyName || lead.contactName}: promote or move to Replied`

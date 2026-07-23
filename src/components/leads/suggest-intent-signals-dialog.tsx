@@ -150,7 +150,7 @@ export function SuggestIntentSignalsDialog({
           </DialogTitle>
           <DialogDescription>
             Review AI suggestions grounded in this lead’s research. Choose what to write into
-            research fields — scoring updates automatically after apply.
+            research fields - scoring updates automatically after apply.
           </DialogDescription>
         </DialogHeader>
 

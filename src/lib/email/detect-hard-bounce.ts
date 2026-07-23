@@ -145,7 +145,7 @@ export function detectHardBounce(
   // Fallback: sometimes the failed address only appears in the To of the DSN (rare).
   // Never treat the mailbox owner (DSN To) as the failed recipient when the To is the sender.
   if (failedRecipients.length === 0) {
-    /* keep empty — caller should wait for body sync rather than mis-attributing */
+    /* keep empty - caller should wait for body sync rather than mis-attributing */
   }
 
   const originalMessageId =
@@ -171,4 +171,4 @@ export function bounceEventDocId(mailboxId: string, inboundMessageId: string): s
 }
 
 export const BOUNCE_REVIEW_TASK_TITLE = "Find valid email (bounced)";
-export const BOUNCE_PAUSE_REASON = "Email bounced — invalid address";
+export const BOUNCE_PAUSE_REASON = "Email bounced - invalid address";

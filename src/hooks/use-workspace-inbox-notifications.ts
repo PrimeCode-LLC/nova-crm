@@ -44,7 +44,7 @@ function filterByPrefs(rows: DemoNotification[]): DemoNotification[] {
   });
 }
 
-/** Demo + durable Firestore + tasks + Activity log rows — same source for Notifications and top bar. */
+/** Demo + durable Firestore + tasks + Activity log rows - same source for Notifications and top bar. */
 export function useWorkspaceInboxNotifications() {
   const {
     leads,

@@ -18,7 +18,7 @@ export type AdminFeatureAccessInput = Pick<
 };
 
 /**
- * Whether a user may use an admin feature — via role catalog, CRM/org role,
+ * Whether a user may use an admin feature - via role catalog, CRM/org role,
  * explicit grant, or super admin.
  */
 export function userHasAdminFeature(

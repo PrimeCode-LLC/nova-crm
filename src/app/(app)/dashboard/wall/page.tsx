@@ -247,7 +247,7 @@ export default function DashboardWallPage() {
     return () => window.removeEventListener("beforeunload", onBeforeUnload);
   }, [armedHash]);
 
-  /** Trap browser Back while armed — re-open lock instead of leaving. */
+  /** Trap browser Back while armed - re-open lock instead of leaving. */
   React.useEffect(() => {
     if (!armedHash) return;
     const marker = { wallPin: true };

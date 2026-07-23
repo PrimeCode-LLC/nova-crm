@@ -15,7 +15,7 @@ import {
  * create a personal workspace named after their `company` field (or email
  * domain), enroll them as owner, and stamp claims.
  *
- * Idempotent — re-running it skips users that already have a membership.
+ * Idempotent - re-running it skips users that already have a membership.
  * Platform-admin only.
  */
 export async function POST() {

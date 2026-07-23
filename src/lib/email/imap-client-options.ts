@@ -2,7 +2,7 @@ import type { ImapFlowOptions } from "imapflow";
 
 const CONNECTION_MS = 12_000;
 const GREETING_MS = 12_000;
-/** Short idle limit — fine for connect + verify + light commands. */
+/** Short idle limit - fine for connect + verify + light commands. */
 const SOCKET_MS = 25_000;
 /** Listing/fetching many messages can leave the socket idle longer than 25s on slow hosts. */
 const SOCKET_MS_FETCH = 180_000;
@@ -35,7 +35,7 @@ export function imapFlowConnectionOptions(input: {
   };
 }
 
-/** imapflow throws AuthenticationFailure, but the package entry does not export that class — use shape check. */
+/** imapflow throws AuthenticationFailure, but the package entry does not export that class - use shape check. */
 function isImapAuthenticationFailure(err: unknown): boolean {
   return (
     typeof err === "object" &&
@@ -60,7 +60,7 @@ const IMAP_AUTH_ACTION =
 function formatImapLoginRejected(err: unknown): string {
   const server = imapServerResponseSnippet(err);
 
-  /* Standard IMAP reply — don’t repeat “authentication failed” three times in one toast. */
+  /* Standard IMAP reply - don’t repeat “authentication failed” three times in one toast. */
   if (server && /AUTHENTICATIONFAILED|Authentication failed/i.test(server)) {
     return `${server.trim()} ${IMAP_AUTH_ACTION}`;
   }

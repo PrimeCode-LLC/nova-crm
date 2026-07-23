@@ -218,7 +218,7 @@ export function ContentBrandsClient() {
           })),
         );
       } catch {
-        /* optional — form still works without libraries */
+        /* optional - form still works without libraries */
       }
     })();
   }, []);
@@ -389,7 +389,7 @@ export function ContentBrandsClient() {
     <AppPage>
       <PageHeader
         title="Content brands"
-        description="Separate brand type, outcome, and strategy — with voice, pillars, proof sources, and cadence."
+        description="Separate brand type, outcome, and strategy - with voice, pillars, proof sources, and cadence."
         actions={
           <>
             <Link

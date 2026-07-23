@@ -219,7 +219,7 @@ export async function applyEmailBounceServer(
   const reason = (input.reason?.trim() || "Permanent delivery failure").slice(0, 300);
   const now = new Date().toISOString();
 
-  // Incomplete parse (body not synced yet) — do not write a blocking ledger entry.
+  // Incomplete parse (body not synced yet) - do not write a blocking ledger entry.
   if (
     input.bounceKind === "hard" &&
     failedRecipients.length === 0 &&
@@ -232,7 +232,7 @@ export async function applyEmailBounceServer(
     };
   }
 
-  // Soft bounces: record ledger only — do not mark contact bounced or create review tasks.
+  // Soft bounces: record ledger only - do not mark contact bounced or create review tasks.
   if (input.bounceKind === "soft") {
     await eventRef.set(
       stampForCreate(
@@ -278,7 +278,7 @@ export async function applyEmailBounceServer(
       : null);
 
   if (!matched || (!matched.leadId && !matched.contactId)) {
-    // Keep unmatched as mergeable/retryable — do not permanently lock the bounce key.
+    // Keep unmatched as mergeable/retryable - do not permanently lock the bounce key.
     await eventRef.set(
       stampForCreate(
         input.organizationId,
@@ -504,7 +504,7 @@ export async function applyEmailBounceServer(
           leadOwnerManagerIds,
           type: "email_bounced",
           actorId: input.actorUid,
-          summary: `Email bounced: ${failedRecipients[0] ?? "unknown"} — ${reason}`,
+          summary: `Email bounced: ${failedRecipients[0] ?? "unknown"} - ${reason}`,
           payload: {
             failedRecipients,
             originalMessageId,

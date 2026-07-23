@@ -31,7 +31,7 @@ export type StrategyPackStrategy = Omit<
   | "publishedAt"
   | "personaIds"
 > & {
-  /** Local persona ids from this pack — remapped on import. */
+  /** Local persona ids from this pack - remapped on import. */
   personaRefs: string[];
 };
 
@@ -122,7 +122,7 @@ export function strategyToPack(args: {
   };
 }
 
-/** Empty canonical template — use as the shape for every new pack. */
+/** Empty canonical template - use as the shape for every new pack. */
 export function emptyStrategyPackTemplate(): StrategyPack {
   return {
     packVersion: STRATEGY_PACK_VERSION,
@@ -367,7 +367,7 @@ export function materializeStrategyPack(
 
   for (const ref of pack.strategy.personaRefs) {
     if (!personaIdMap[ref]) {
-      warnings.push(`personaRef "${ref}" not found in pack personas — skipped`);
+      warnings.push(`personaRef "${ref}" not found in pack personas - skipped`);
     }
   }
 

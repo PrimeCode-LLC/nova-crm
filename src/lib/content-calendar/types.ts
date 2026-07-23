@@ -98,7 +98,7 @@ export interface ContentBrand {
   organizationId: string;
   name: string;
   kind: ContentBrandKind;
-  /** @deprecated Use primaryOutcome — kept for older docs via map-docs. */
+  /** @deprecated Use primaryOutcome - kept for older docs via map-docs. */
   goal?: ContentPrimaryOutcome | string;
   primaryOutcome: ContentPrimaryOutcome;
   contentStrategy: ContentStrategyStyle;

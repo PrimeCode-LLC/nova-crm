@@ -257,7 +257,7 @@ export function StrategyScoreboard({
                       <Metric label="Prospects" value={fmtNumber(r.prospects)} />
                       <Metric
                         label="Avg quality"
-                        value={r.avgQuality == null ? "—" : String(Math.round(r.avgQuality))}
+                        value={r.avgQuality == null ? "-" : String(Math.round(r.avgQuality))}
                       />
                       <Metric label="Qualified" value={fmtPercent(r.qualifiedRate)} />
                       <Metric label="Leads" value={fmtNumber(r.salesLeads)} tone="success" />

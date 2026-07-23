@@ -147,9 +147,9 @@ export function collectEmailBounceTimes(input: {
 /** Owner / manager ops board vs frontline personal dashboard. */
 export function showOwnerOpsDashboard(
   viewer: User | undefined,
-  /** Live org membership role — used when the CRM user doc is incomplete. */
+  /** Live org membership role - used when the CRM user doc is incomplete. */
   orgRole?: OrgMemberRole | null,
-  /** Optional permission subject — custom roles with `dashboard.view_team_ops` qualify. */
+  /** Optional permission subject - custom roles with `dashboard.view_team_ops` qualify. */
   permissionSubject?: PermissionSubject,
 ): boolean {
   if (permissionSubject && canAction(permissionSubject, "dashboard.view_team_ops")) {

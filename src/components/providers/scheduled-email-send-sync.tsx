@@ -84,7 +84,7 @@ export function ScheduledEmailSendSync() {
   }, [currentUserId, mailViewAsUid, setScheduled]);
 
   React.useEffect(() => {
-    // Production: do not poll — cron + existing Inbox demo interval remain the source of truth.
+    // Production: do not poll - cron + existing Inbox demo interval remain the source of truth.
     if (!isLocalDev) return;
     if (!sessionHydrated || !currentUserId) return;
 

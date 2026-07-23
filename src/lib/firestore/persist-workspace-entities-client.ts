@@ -29,7 +29,7 @@ export async function persistNoteCreate(
   note: Note,
   opts?: { leadOwnerId?: string; leadOwnerManagerIds?: string[] },
 ): Promise<void> {
-  /** Omit optional string fields instead of writing `null` — Firestore `null` was deserialized so `asNote` dropped `leadId` and notes disappeared from the lead tab. */
+  /** Omit optional string fields instead of writing `null` - Firestore `null` was deserialized so `asNote` dropped `leadId` and notes disappeared from the lead tab. */
   const data: Record<string, unknown> = {
     organizationId,
     authorId: note.authorId,

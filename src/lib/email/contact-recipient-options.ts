@@ -7,7 +7,7 @@ export type ContactRecipientOption = {
   kind: ContactRecipientKind;
   email: string;
   label: string;
-  /** Company address marked bounced — prefer personal when available. */
+  /** Company address marked bounced - prefer personal when available. */
   bounced?: boolean;
 };
 

@@ -13,7 +13,7 @@ export function extractEmailAddress(header: string): string | null {
   return null;
 }
 
-/** True for OOO / vacation / generic auto-replies — not bounce DSNs (see detectHardBounce). */
+/** True for OOO / vacation / generic auto-replies - not bounce DSNs (see detectHardBounce). */
 export function isLikelyAutoReply(message: Pick<MailInbound, "subject" | "preview">): boolean {
   return OOO_RE.test(`${message.subject} ${message.preview}`);
 }

@@ -81,7 +81,7 @@ const bodySchema = z.object({
   leadId: z.string().min(1),
   userPrompt: z.string().max(500).optional(),
   sequenceMode: z.enum(["full", "continue"]).optional(),
-  /** Optional Script library id — style guide only; omit to generate without a template. */
+  /** Optional Script library id - style guide only; omit to generate without a template. */
   scriptId: z.string().min(1).max(120).optional(),
   singleStep: z.boolean().optional(),
   regenerateContext: z.string().max(800).optional(),
@@ -294,8 +294,8 @@ export async function POST(req: Request) {
       ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+)."
       : "Full personalized outreach from first touch through last email/touch.";
   const templateHint = selectedTemplate
-    ? `Rep selected style template "${selectedTemplate.title}" (${selectedTemplate.category}). Match its tone, length, structure, and CTA style — rewrite for this lead; do not copy verbatim. Full text is in context.selectedTemplate.`
-    : "(none — no style template selected; generate from lead context and instructions only)";
+    ? `Rep selected style template "${selectedTemplate.title}" (${selectedTemplate.category}). Match its tone, length, structure, and CTA style - rewrite for this lead; do not copy verbatim. Full text is in context.selectedTemplate.`
+    : "(none - no style template selected; generate from lead context and instructions only)";
 
   try {
     const result = await runAiStructuredFeature({

@@ -77,7 +77,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
     }
   } catch {
-    /* No Firebase account yet — invite is fine. */
+    /* No Firebase account yet - invite is fine. */
   }
 
   const result = await createInviteServer({

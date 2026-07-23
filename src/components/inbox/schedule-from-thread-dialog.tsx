@@ -250,7 +250,7 @@ export function ScheduleFromThreadDialog({
       } else {
         const ge = data.googleErrors ?? [];
         if (ge.length) {
-          toast.warning("Meeting saved — some calendars could not be updated", {
+          toast.warning("Meeting saved - some calendars could not be updated", {
             description: ge.map((e) => e.error).join("; "),
           });
         } else {

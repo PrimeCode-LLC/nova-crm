@@ -86,7 +86,7 @@ export async function guardAdminFeature(
 
 /**
  * Allow when the role catalog action is granted, or (optionally) when a related
- * admin feature is granted — used for scraper runs from Intake without full feed admin.
+ * admin feature is granted - used for scraper runs from Intake without full feed admin.
  */
 export async function guardPermissionAction(
   action: ActionKey,

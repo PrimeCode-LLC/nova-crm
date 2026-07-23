@@ -54,7 +54,7 @@ export async function probeRagVectorHealthServer(
     return empty({
       status: "fallback",
       label: "Fallback",
-      detail: "Database not configured — retrieval cannot run.",
+      detail: "Database not configured - retrieval cannot run.",
     });
   }
 
@@ -69,7 +69,7 @@ export async function probeRagVectorHealthServer(
     return empty({
       status: "not_indexed",
       label: "Not indexed",
-      detail: "No knowledge documents yet — seed or add documents first.",
+      detail: "No knowledge documents yet - seed or add documents first.",
     });
   }
 
@@ -101,7 +101,7 @@ export async function probeRagVectorHealthServer(
     return empty({
       status: "not_indexed",
       label: "Not indexed",
-      detail: "Documents exist but have no chunks yet — re-seed or re-index.",
+      detail: "Documents exist but have no chunks yet - re-seed or re-index.",
       sampledChunks,
     });
   }
@@ -150,7 +150,7 @@ export async function probeRagVectorHealthServer(
   if (findNearestOk) {
     const mixed =
       legacyArrayChunks > 0
-        ? ` Mixed storage: ${nativeVectorChunks} native / ${legacyArrayChunks} legacy in sample — re-seed to convert remaining.`
+        ? ` Mixed storage: ${nativeVectorChunks} native / ${legacyArrayChunks} legacy in sample - re-seed to convert remaining.`
         : "";
     return {
       status: "active",
@@ -174,7 +174,7 @@ export async function probeRagVectorHealthServer(
   return {
     status: "fallback",
     label: "Fallback",
-    detail: `Native vectors are stored, but vector search is not usable yet — using in-app cosine scan.${indexHint}`,
+    detail: `Native vectors are stored, but vector search is not usable yet - using in-app cosine scan.${indexHint}`,
     sampledChunks,
     nativeVectorChunks,
     legacyArrayChunks,

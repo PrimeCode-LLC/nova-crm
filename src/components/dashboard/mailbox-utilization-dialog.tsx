@@ -48,7 +48,7 @@ function statusTone(status: MailboxUtilizationStatus): string {
 
 function UtilBar({ value }: { value: number | null }) {
   if (value == null) {
-    return <span className="text-xs text-muted-foreground">—</span>;
+    return <span className="text-xs text-muted-foreground">-</span>;
   }
   const capped = Math.min(100, Math.max(0, value));
   return (
@@ -137,7 +137,7 @@ export function MailboxUtilizationDialog({
             <div className="min-w-0 space-y-1">
               <DialogTitle className="text-base">Inbox utilization</DialogTitle>
               <DialogDescription className="text-xs sm:text-sm">
-                Capacity ROI across every connected mailbox — reassign idle inboxes or push assignees
+                Capacity ROI across every connected mailbox - reassign idle inboxes or push assignees
                 who are leaving limit on the table.
               </DialogDescription>
             </div>
@@ -188,7 +188,7 @@ export function MailboxUtilizationDialog({
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{row.label}</p>
                           <p className="truncate text-[11px] text-muted-foreground">
-                            {row.emailAddress || "—"}
+                            {row.emailAddress || "-"}
                           </p>
                         </div>
                       </TableCell>
@@ -204,7 +204,7 @@ export function MailboxUtilizationDialog({
                         )}
                       </TableCell>
                       <TableCell className="py-2.5 text-right tabular-nums align-top">
-                        {row.dailySendLimit != null ? fmtNumber(row.dailySendLimit) : "—"}
+                        {row.dailySendLimit != null ? fmtNumber(row.dailySendLimit) : "-"}
                       </TableCell>
                       <TableCell className="py-2.5 text-right tabular-nums align-top font-medium">
                         {fmtNumber(row.sentToday)}

@@ -178,7 +178,7 @@ export function IntentPlaybookAdminClient({
     <>
       <PageHeader
         title="Intent playbook"
-        description="Configure how prospect Quality Score is calculated. Soft-gates outreach below the threshold — never hard-blocks."
+        description="Configure how prospect Quality Score is calculated. Soft-gates outreach below the threshold - never hard-blocks."
         actions={
           <Button size="sm" disabled={saving || ws.isDemo} onClick={() => void save()}>
             {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -492,7 +492,7 @@ export function IntentPlaybookAdminClient({
             </Card>
           ))}
           {!playbook.signals.length ? (
-            <p className="text-sm text-muted-foreground">No signals — add one or apply a template.</p>
+            <p className="text-sm text-muted-foreground">No signals - add one or apply a template.</p>
           ) : null}
         </div>
       </PageBody>

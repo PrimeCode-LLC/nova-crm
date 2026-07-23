@@ -59,7 +59,7 @@ export function FollowupDueNotificationSync() {
         id: `un-followup-due-${f.id}-${today}`,
         organizationId: organizationId || "demo",
         recipientId: currentUserId,
-        // System-style: use self as actor so createUserNotification would skip —
+        // System-style: use self as actor so createUserNotification would skip -
         // use a sentinel actor that differs from recipient for system alerts.
         actorId: "system",
         kind: "followup",

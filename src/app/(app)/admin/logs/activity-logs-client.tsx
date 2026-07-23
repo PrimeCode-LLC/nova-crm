@@ -115,7 +115,7 @@ const CATEGORY_VARIANT: Record<
 };
 
 function ScrollableValue({ value }: { value: string | null | undefined }) {
-  if (!value) return <span className="text-muted-foreground">—</span>;
+  if (!value) return <span className="text-muted-foreground">-</span>;
   return (
     <div
       className="max-w-[140px] overflow-x-auto overscroll-x-contain [scrollbar-width:thin]"
@@ -127,7 +127,7 @@ function ScrollableValue({ value }: { value: string | null | undefined }) {
 }
 
 function formatOperation(op: AuditOperation | null): string {
-  if (!op) return "—";
+  if (!op) return "-";
   return op.charAt(0).toUpperCase() + op.slice(1);
 }
 
@@ -182,7 +182,7 @@ function LeadStageHistoryStrip({
                 <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2.5">
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <time className="tabular-nums" title={fmtDate(entry.at, "PPpp")}>
-                      {entry.at ? fmtDate(entry.at, "MMM d, yyyy h:mm a") : "—"}
+                      {entry.at ? fmtDate(entry.at, "MMM d, yyyy h:mm a") : "-"}
                     </time>
                     {entry.source === "timeline" ? (
                       <Badge variant="outline" className="h-5 text-[10px] font-normal">
@@ -438,7 +438,7 @@ export function ActivityLogsClient({
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Activity logs"
-        description="Team intelligence from the audit log — analytics above, detailed event trail below."
+        description="Team intelligence from the audit log - analytics above, detailed event trail below."
         actions={
           <Button
             variant="outline"
@@ -660,7 +660,7 @@ export function ActivityLogsClient({
                 <TableBody>
                   {items.map((row) => {
                     const cat = categoryForAuditEvent(row.event);
-                    const accountLabel = row.actorEmail ?? row.actorDisplayName ?? "—";
+                    const accountLabel = row.actorEmail ?? row.actorDisplayName ?? "-";
                     const rowLeadId = leadIdFromRow(row);
                     const rowLeadLabel =
                       row.leadLabel?.trim() ||
@@ -696,14 +696,14 @@ export function ActivityLogsClient({
                           {formatOperation(row.operation)}
                         </TableCell>
                         <TableCell className="align-top whitespace-normal text-xs font-mono">
-                          {row.tableName ?? "—"}
+                          {row.tableName ?? "-"}
                         </TableCell>
                         <TableCell className="align-top whitespace-normal text-xs font-mono">
-                          {row.fieldName ?? "—"}
+                          {row.fieldName ?? "-"}
                         </TableCell>
                         <TableCell className="align-top whitespace-normal text-sm">
                           <div className="flex flex-col gap-1 min-w-0">
-                            <span className="line-clamp-2">{row.message ?? "—"}</span>
+                            <span className="line-clamp-2">{row.message ?? "-"}</span>
                             <Badge variant={CATEGORY_VARIANT[cat]} className="w-fit text-[10px]">
                               {CATEGORY_LABELS[cat]}
                             </Badge>
@@ -725,7 +725,7 @@ export function ActivityLogsClient({
                               {rowLeadLabel ?? rowLeadId}
                             </button>
                           ) : (
-                            <span className="text-muted-foreground">—</span>
+                            <span className="text-muted-foreground">-</span>
                           )}
                         </TableCell>
                         <TableCell className="align-top whitespace-normal overflow-hidden">

@@ -15,10 +15,10 @@ function tooltipFromAssignment(
 ): string {
   if (assignment.pushedAt && assignment.pushedByUserId) {
     const name = getUserName(assignment.pushedByUserId)?.trim() || "Teammate";
-    return `${channelLabel} — Pushed by ${name}`;
+    return `${channelLabel} - Pushed by ${name}`;
   }
   const assignee = getUserName(assignment.assigneeId)?.trim() || "Teammate";
-  return `${channelLabel} — Assigned to ${assignee}`;
+  return `${channelLabel} - Assigned to ${assignee}`;
 }
 
 /** Hover text for channel badges on prospects and prospect-derived sales leads. */

@@ -2017,7 +2017,7 @@ export function WorkspaceModeProvider({
       return demoSnapshot ?? LIVE_SNAPSHOT;
     }
     const uid = fbUser?.uid ?? "";
-    /** Firestore query uses `organizationId`; if the member doc is missing that field, the roster is empty but leads still store `ownerId` as Firebase uid — merge the viewer so UserChip and owner pickers resolve. */
+    /** Firestore query uses `organizationId`; if the member doc is missing that field, the roster is empty but leads still store `ownerId` as Firebase uid - merge the viewer so UserChip and owner pickers resolve. */
     let usersForSnapshot = liveFs.users;
     if (uid && userDoc && !usersForSnapshot.some((u) => u.id === uid)) {
       usersForSnapshot = [...usersForSnapshot, { ...userDoc, id: uid }];

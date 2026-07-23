@@ -45,10 +45,10 @@ export function replyReviewActionLabel(action: ReplyReviewAction, lead: Lead): s
 export function replyReviewDetail(lead: Lead): string {
   if (isProspectRow(lead)) {
     return lead.linkedSalesLeadId?.trim()
-      ? "Reply received on a prospect that already has a sales lead — confirm moving it to Replied."
-      : "Reply received — promote this prospect into the sales pipeline at Replied.";
+      ? "Reply received on a prospect that already has a sales lead - confirm moving it to Replied."
+      : "Reply received - promote this prospect into the sales pipeline at Replied.";
   }
-  return "Reply received — confirm moving this opportunity to Replied.";
+  return "Reply received - confirm moving this opportunity to Replied.";
 }
 
 /** Patch applied when an inbound reply is detected. */

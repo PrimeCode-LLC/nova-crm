@@ -155,7 +155,7 @@ export function ContentCalendarClient() {
     <AppPage>
       <PageHeader
         title="Content calendar"
-        description="Strategy-first posts for LinkedIn, X, Instagram, and Reddit — capture proof, fill days, execute."
+        description="Strategy-first posts for LinkedIn, X, Instagram, and Reddit - capture proof, fill days, execute."
         actions={
           <>
             <Link
@@ -193,7 +193,7 @@ export function ContentCalendarClient() {
           <div className="space-y-4">
             <WorkspaceEmptyHint
               title="Set up a content brand"
-              description="Create a personal or company brand with goal, pillars, and platforms — then fill your calendar."
+              description="Create a personal or company brand with goal, pillars, and platforms - then fill your calendar."
             />
             <div className="flex justify-center">
               <Link href="/content/brands" className={cn(buttonVariants({ size: "sm" }))}>
@@ -294,7 +294,7 @@ export function ContentCalendarClient() {
                 value={
                   selectedBrand?.cadence.weeklyPublishTarget
                     ? String(selectedBrand.cadence.weeklyPublishTarget)
-                    : "—"
+                    : "-"
                 }
               />
             </div>

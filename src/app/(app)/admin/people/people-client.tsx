@@ -281,7 +281,7 @@ function PeoplePageClientInner({
   }, [orgRoles]);
 
   function crmRoleLabel(roleId: string | undefined): string {
-    if (!roleId) return "—";
+    if (!roleId) return "-";
     const fromOrg = orgRoles.find((r) => r.id === roleId);
     if (fromOrg) return fromOrg.name;
     if (roleId in ROLES) return ROLES[roleId as keyof typeof ROLES].label;
@@ -359,7 +359,7 @@ function PeoplePageClientInner({
       setEditCrmStatus("active");
       setEditFeatureGrants([]);
     }
-    // Reload when the dialog opens for a member — not on every roster refresh.
+    // Reload when the dialog opens for a member - not on every roster refresh.
     // eslint-disable-next-line react-hooks/exhaustive-deps -- getUserById
   }, [editMember]);
 
@@ -380,7 +380,7 @@ function PeoplePageClientInner({
     }
   }, []);
 
-  // Fetch on mount — `refresh` does setState only after the network call returns,
+  // Fetch on mount - `refresh` does setState only after the network call returns,
   // which is the canonical "fetch on mount" effect pattern.
   React.useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect

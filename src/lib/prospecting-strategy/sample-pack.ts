@@ -3,7 +3,7 @@ import { emptyFirmographics } from "@/lib/prospecting-strategy/types";
 import { DEFAULT_DAILY_TARGETS } from "@/lib/prospecting-strategy/qualify";
 
 /**
- * Neutral product sample — safe to ship as the only built-in pack.
+ * Neutral product sample - safe to ship as the only built-in pack.
  * No Stellix Soft / Person 1 / real customer ICP content.
  */
 export function buildSampleB2bSaasPack(): StrategyPack {
@@ -12,7 +12,7 @@ export function buildSampleB2bSaasPack(): StrategyPack {
     packId: "sample-b2b-saas",
     name: "Sample B2B SaaS Prospecting",
     description:
-      "Neutral demo pack for any SaaS org. Mid-market software buyers with modernization or integration intent — not a real customer ICP.",
+      "Neutral demo pack for any SaaS org. Mid-market software buyers with modernization or integration intent - not a real customer ICP.",
     personas: [
       {
         id: "sample-persona-cto",

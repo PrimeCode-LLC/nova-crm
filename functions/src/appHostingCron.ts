@@ -45,7 +45,7 @@ const cronScheduleOptions = {
 
 /**
  * Wakes App Hosting to run due RSS scrapers (respects per-feed interval + enabled flag in Firestore).
- * Tick is every 15 minutes — matches the minimum minute interval in scraper settings.
+ * Tick is every 15 minutes - matches the minimum minute interval in scraper settings.
  */
 export const runDueScrapers = onSchedule(
   {

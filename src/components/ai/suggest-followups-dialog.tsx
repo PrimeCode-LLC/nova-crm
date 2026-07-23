@@ -343,7 +343,7 @@ export function SuggestFollowupsDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             {regenerateFromPlan
-              ? "Lead replied — draft a new cadence that reflects their message. Edit before activating."
+              ? "Lead replied - draft a new cadence that reflects their message. Edit before activating."
               : "AI proposes a personalized multi-step cadence. Edit, then activate. Email steps can be scheduled; other channels stay as copy-ready reminders."}
           </DialogDescription>
         </DialogHeader>
@@ -366,7 +366,7 @@ export function SuggestFollowupsDialog({
                   >
                     <p className="text-sm font-medium">Full outreach</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                      First touch through last email — complete autopilot sequence.
+                      First touch through last email - complete autopilot sequence.
                     </p>
                   </button>
                   <button
@@ -381,7 +381,7 @@ export function SuggestFollowupsDialog({
                   >
                     <p className="text-sm font-medium">Continue / follow-ups only</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                      Intro already sent — draft remaining touches starting from the next email.
+                      Intro already sent - draft remaining touches starting from the next email.
                     </p>
                   </button>
                 </div>

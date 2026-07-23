@@ -200,7 +200,7 @@ export default function AdminStrategiesPage() {
     <>
       <PageHeader
         title="Prospecting strategies"
-        description="Guidance, personas, signal focus, checklists, and assignments — scoring stays in Intent Playbook."
+        description="Guidance, personas, signal focus, checklists, and assignments - scoring stays in Intent Playbook."
         actions={
           <div className="flex flex-wrap items-center gap-2">
             <input
@@ -376,7 +376,7 @@ export default function AdminStrategiesPage() {
                                 <UserChip userId={row.userId} size="sm" />
                               </td>
                               <td className="px-3 py-2 text-muted-foreground">
-                                {row.strategies.map((s) => s.name).join(", ") || "—"}
+                                {row.strategies.map((s) => s.name).join(", ") || "-"}
                               </td>
                               <td className="px-3 py-2">
                                 <span

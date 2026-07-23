@@ -84,7 +84,7 @@ function isMailboxTransportConnected(mb: EmailMailboxSettings): boolean {
   return Boolean(mb.emailAddress.trim() && normalizeMailHost(mb.smtp.host));
 }
 
-/** Active teammates only — skips disabled/inactive/invited org members and inactive CRM users. */
+/** Active teammates only - skips disabled/inactive/invited org members and inactive CRM users. */
 function buildActiveAssignableOptions(
   users: readonly User[],
   members: readonly OrganizationMember[] | null,
@@ -192,7 +192,7 @@ function MailboxQuickStatus({
       ? "Google OAuth connected"
       : "SMTP host configured"
     : mailbox.connectionType === "google_workspace"
-      ? "Google not connected — sign in required"
+      ? "Google not connected - sign in required"
       : "SMTP not configured yet";
 
   const limitLabel = limit == null ? "∞" : String(limit);
@@ -420,7 +420,7 @@ export function EmailInboxSettingsCard() {
 
   /**
    * Persists owned mailboxes to the server (skips boxes assigned from teammates).
-   * @param manual — when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
+   * @param manual - when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
    */
   const persistMailboxesRemote = React.useCallback(async (manual?: boolean): Promise<boolean> => {
     const s = useEmailAccountStore.getState();
@@ -603,7 +603,7 @@ export function EmailInboxSettingsCard() {
             restored = true;
           }
         }
-        // Restoring from server is not a user edit — refresh baseline after store updates.
+        // Restoring from server is not a user edit - refresh baseline after store updates.
         if (restored) {
           queueMicrotask(() => {
             persistBaselineRef.current = JSON.stringify(
@@ -1319,8 +1319,8 @@ export function EmailInboxSettingsCard() {
                         <div className="rounded-lg border p-3 space-y-3">
                           <p className="text-xs text-muted-foreground">
                             Google no longer accepts Inboxlogy preferred passwords (or normal Workspace
-                            passwords) for SMTP/IMAP. Sign in with Google once — use the inbox email and
-                            preferred password on Google&apos;s login screen — then Nova uses OAuth tokens.
+                            passwords) for SMTP/IMAP. Sign in with Google once - use the inbox email and
+                            preferred password on Google&apos;s login screen - then Nova uses OAuth tokens.
                           </p>
                           {mb.googleAuthConnected ? (
                             <div className="flex flex-wrap items-center gap-2.5 rounded-md border border-success/25 bg-success/10 px-3 py-2.5">

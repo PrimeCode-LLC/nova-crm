@@ -1,6 +1,6 @@
 /**
  * Crawls stellixsoft.com marketing pages for Fit Check RAG seeding.
- * Public content only — same paths a visitor can browse.
+ * Public content only - same paths a visitor can browse.
  */
 
 export const STELLIXSOFT_SITE_ORIGIN = "https://stellixsoft.com";

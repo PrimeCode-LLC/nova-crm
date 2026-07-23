@@ -336,7 +336,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.description}
                 onChange={(e) => setDraft((d) => ({ ...d, description: e.target.value }))}
-                placeholder="Who this buyer is and what they own — e.g. Operational buyer owning inventory flow and supply-chain tech."
+                placeholder="Who this buyer is and what they own - e.g. Operational buyer owning inventory flow and supply-chain tech."
               />
             </div>
             <div className="space-y-1.5">
@@ -367,7 +367,7 @@ export default function AdminBuyerPersonasPage() {
             <div className="space-y-1.5">
               <Label>Similar titles</Label>
               <p className="text-xs text-muted-foreground">
-                Acceptable alternatives — one per line.
+                Acceptable alternatives - one per line.
               </p>
               <Textarea
                 rows={3}
@@ -379,7 +379,7 @@ export default function AdminBuyerPersonasPage() {
             <div className="space-y-1.5">
               <Label>Excluded titles</Label>
               <p className="text-xs text-muted-foreground">
-                Do not outreach these — one per line.
+                Do not outreach these - one per line.
               </p>
               <Textarea
                 rows={2}
@@ -411,7 +411,7 @@ export default function AdminBuyerPersonasPage() {
             <div className="space-y-1.5">
               <Label>Buying triggers</Label>
               <p className="text-xs text-muted-foreground">
-                Events that open a conversation — one per line.
+                Events that open a conversation - one per line.
               </p>
               <Textarea
                 rows={3}
@@ -423,7 +423,7 @@ export default function AdminBuyerPersonasPage() {
             <div className="space-y-1.5">
               <Label>Relevant services</Label>
               <p className="text-xs text-muted-foreground">
-                Stellix Soft offerings this persona buys — one per line.
+                Stellix Soft offerings this persona buys - one per line.
               </p>
               <Textarea
                 rows={2}
@@ -480,7 +480,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.goodExamples}
                 onChange={(e) => setDraft((d) => ({ ...d, goodExamples: e.target.value }))}
-                placeholder="e.g. A 3PL announcing a new DC + hiring a WMS admin — Hot when VP Supply Chain is attached."
+                placeholder="e.g. A 3PL announcing a new DC + hiring a WMS admin - Hot when VP Supply Chain is attached."
               />
             </div>
             <div className="space-y-1.5">
@@ -489,7 +489,7 @@ export default function AdminBuyerPersonasPage() {
                 rows={2}
                 value={draft.badExamples}
                 onChange={(e) => setDraft((d) => ({ ...d, badExamples: e.target.value }))}
-                placeholder="e.g. SAP present with no project, pain, or hiring — technology alone is not intent."
+                placeholder="e.g. SAP present with no project, pain, or hiring - technology alone is not intent."
               />
             </div>
             <div className="space-y-1.5">

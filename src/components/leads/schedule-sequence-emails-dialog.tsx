@@ -304,7 +304,7 @@ export function ScheduleSequenceEmailsDialog({
         toast.success(
           `Scheduled ${okCount} email${okCount === 1 ? "" : "s"}`,
           okCount < selected.length
-            ? { description: "Stopped after an error — remaining steps not scheduled." }
+            ? { description: "Stopped after an error - remaining steps not scheduled." }
             : undefined,
         );
         if (okCount === selected.length) onOpenChange(false);

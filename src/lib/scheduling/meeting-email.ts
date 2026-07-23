@@ -48,7 +48,7 @@ export function renderMeetingConfirmationEmail(input: {
     with ${escapeHtml(hostDisplayName)}</p>
     <p style="color:#444;">${escapeHtml(locationLine)}</p>
     ${meeting.attendeeNotes?.trim() ? `<p style="color:#666;font-size:14px;">Notes: ${escapeHtml(meeting.attendeeNotes.trim())}</p>` : ""}
-    <p style="font-size:12px;color:#888;margin-top:32px;">A calendar invite (.ics) is attached — add it to your calendar or Accept in your email client.</p>
+    <p style="font-size:12px;color:#888;margin-top:32px;">A calendar invite (.ics) is attached - add it to your calendar or Accept in your email client.</p>
   </div>
 </body></html>`;
 

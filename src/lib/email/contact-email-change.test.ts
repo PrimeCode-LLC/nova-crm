@@ -29,7 +29,7 @@ describe("extractSuggestedNewEmail", () => {
   it("extracts address after 'new email is'", () => {
     expect(
       extractSuggestedNewEmail(
-        "Hi — my new email is filip@newco.com. Please use that going forward.",
+        "Hi - my new email is filip@newco.com. Please use that going forward.",
         ["filip.kaliszan@verkada.com"],
       ),
     ).toBe("filip@newco.com");

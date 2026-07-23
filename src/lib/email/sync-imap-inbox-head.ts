@@ -13,7 +13,7 @@ import {
 
 /**
  * Fetches the newest INBOX page into the email store (for sidebar unread badge + inbox UI).
- * Silent on failure — callers may surface errors in the inbox UI.
+ * Silent on failure - callers may surface errors in the inbox UI.
  */
 export async function syncImapInboxHead(opts: {
   mailViewAsUid: string | null;
@@ -46,7 +46,7 @@ export async function syncImapInboxHead(opts: {
       folder: "inbox",
       limit: INBOX_IMAP_HEAD_LIMIT,
       offset: 0,
-      // Background badge/list sync only needs envelopes — full bodies load on thread open.
+      // Background badge/list sync only needs envelopes - full bodies load on thread open.
       headsOnly: true,
       imap: {
         host: acct.imap.host,

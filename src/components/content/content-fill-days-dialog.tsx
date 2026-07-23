@@ -233,7 +233,7 @@ export function ContentFillDaysDialog({
           <DialogTitle>Generate content plan</DialogTitle>
           <DialogDescription>
             Review topics, sources, pillars, and outcomes before drafts are added to the calendar.
-            The AI should fill strategic gaps — not empty dates.
+            The AI should fill strategic gaps - not empty dates.
           </DialogDescription>
         </DialogHeader>
 

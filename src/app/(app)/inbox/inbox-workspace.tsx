@@ -2769,7 +2769,7 @@ export default function InboxWorkspace() {
     }
   }
 
-  /** Mark read once when a conversation is opened — not when the user marks it unread again. */
+  /** Mark read once when a conversation is opened - not when the user marks it unread again. */
   const autoReadConversationRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
@@ -2777,7 +2777,7 @@ export default function InboxWorkspace() {
       autoReadConversationRef.current = null;
       return;
     }
-    /** Unread tab: user marks read manually (Reply / trash / Mark as read) — no open-on-select auto-read. */
+    /** Unread tab: user marks read manually (Reply / trash / Mark as read) - no open-on-select auto-read. */
     if (readStatusFilter === READ_STATUS_UNREAD) {
       return;
     }

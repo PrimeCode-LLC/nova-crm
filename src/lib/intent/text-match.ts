@@ -7,7 +7,7 @@
  *
  * This module normalizes text into a set of "concepts" (tokens after stemming +
  * a small synonym map) and matches a keyword when enough of its concepts co-occur
- * in the corpus. It stays free, instant, deterministic and explainable — no AI.
+ * in the corpus. It stays free, instant, deterministic and explainable - no AI.
  */
 
 const STOPWORDS = new Set([
@@ -89,7 +89,7 @@ const SYNONYM_GROUPS: Record<string, string[]> = {
  * Anchor concepts are specific enough that their presence meaningfully implies a
  * signal (e.g. "integration", "acquisition", "kubernetes"). Weak/generic concepts
  * (dev, platform, team, scale, data…) can support a match but never trigger one on
- * their own — this is what stops "builds a platform with engineers" from firing
+ * their own - this is what stops "builds a platform with engineers" from firing
  * every demand signal.
  */
 const ANCHOR_CONCEPTS = new Set<string>([

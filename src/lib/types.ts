@@ -210,7 +210,7 @@ export interface Organization {
    */
   intakePoolEpoch?: number;
   /**
-   * Workspace Intent Playbook — drives prospect/lead Quality Score.
+   * Workspace Intent Playbook - drives prospect/lead Quality Score.
    * Stored on the org doc; parsed via `parseIntentPlaybook`.
    */
   intentPlaybook?: import("@/lib/intent/types").IntentPlaybook;
@@ -574,7 +574,7 @@ export interface Lead {
   rejectionNote?: string;
   /** Counted toward deeply-personalized daily target. */
   deeplyPersonalized?: boolean;
-  /** Denormalized from contact at create — used for daily verified-email targets. */
+  /** Denormalized from contact at create - used for daily verified-email targets. */
   emailVerified?: boolean;
 
   // Activity metrics
@@ -673,8 +673,8 @@ export type FollowupPlanStatus = "active" | "paused" | "superseded" | "completed
 
 /**
  * How an AI sequence was scoped:
- * - `full` — first touch through last email
- * - `continue` — intro already sent; draft remaining touches only
+ * - `full` - first touch through last email
+ * - `continue` - intro already sent; draft remaining touches only
  */
 export type FollowupSequenceMode = "full" | "continue";
 export type FollowupDeliveryStatus =
@@ -760,7 +760,7 @@ export type LeadTaskType = "review" | "email" | "call" | "document" | "other";
  * Controls how the task is **linked** in the UI, not who can read it: visibility is always limited to
  * assignee, requester, and oversight roles (org owner/admin, CRM director, super-admin).
  *
- * `on_lead` — tied to the lead (Tasks tab, context); `assignees_only` — handoff-style link with the same privacy.
+ * `on_lead` - tied to the lead (Tasks tab, context); `assignees_only` - handoff-style link with the same privacy.
  */
 export type LeadTaskVisibility = "on_lead" | "assignees_only";
 
@@ -1072,7 +1072,7 @@ export interface WorkspaceChatMessage {
   createdAt: ISODate;
 }
 
-/** Firestore `workspaceChatReads/{organizationId}__{userId}` — per-channel last seen message time (ISO). */
+/** Firestore `workspaceChatReads/{organizationId}__{userId}` - per-channel last seen message time (ISO). */
 export interface WorkspaceChatReadState {
   organizationId: string;
   userId: string;

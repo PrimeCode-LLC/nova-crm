@@ -135,7 +135,7 @@ export function DashboardSettingsSheet({
                 Preview as role
               </h3>
               <p className="text-xs text-muted-foreground">
-                See the board the way a teammate with that CRM role would — without changing their
+                See the board the way a teammate with that CRM role would - without changing their
                 access.
               </p>
               <Select
@@ -149,11 +149,11 @@ export function DashboardSettingsSheet({
                   <SelectValue>
                     {prefs.previewRole
                       ? roleLabel(prefs.previewRole)
-                      : "Off — use my role"}
+                      : "Off - use my role"}
                   </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="none">Off — use my role</SelectItem>
+                  <SelectItem value="none">Off - use my role</SelectItem>
                   {PREVIEW_ROLES.map((role) => (
                     <SelectItem key={role} value={role}>
                       {roleLabel(role)}

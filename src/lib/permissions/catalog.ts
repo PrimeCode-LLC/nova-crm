@@ -1,5 +1,5 @@
 /**
- * Nova Role Catalog — complete ModuleKey + ActionKey surface.
+ * Nova Role Catalog - complete ModuleKey + ActionKey surface.
  * Used by role presets, the Roles editor UI, and the permission resolver.
  */
 
@@ -14,7 +14,7 @@ export type ModuleCluster =
   | "programs"
   | "personal";
 
-/** Layer A — modules with CRUD + data scope. */
+/** Layer A - modules with CRUD + data scope. */
 export type ModuleKey =
   | "dashboard"
   | "leads"
@@ -321,7 +321,7 @@ export const MODULE_CLUSTER_ORDER: ModuleCluster[] = [
   "personal",
 ];
 
-/** Layer B — sensitive action flags. */
+/** Layer B - sensitive action flags. */
 export type ActionKey =
   | "leads.reassign"
   | "leads.archive"

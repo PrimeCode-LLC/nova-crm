@@ -497,7 +497,7 @@ export default function StrategyDetailPage() {
                     onChange={(e) =>
                       setDraft((d) => (d ? { ...d, description: e.target.value } : d))
                     }
-                    placeholder="One or two sentences shown in the strategy list — who this assignment is for and what they hunt."
+                    placeholder="One or two sentences shown in the strategy list - who this assignment is for and what they hunt."
                   />
                 </div>
                 <div className="sm:col-span-2 space-y-1.5">
@@ -514,7 +514,7 @@ export default function StrategyDetailPage() {
                 <div className="sm:col-span-2 space-y-1.5">
                   <Label>Mission blurb (pinned on My Strategy)</Label>
                   <p className="text-xs text-muted-foreground">
-                    What researchers see first — include what to find, what not to submit, and the
+                    What researchers see first - include what to find, what not to submit, and the
                     qualifying questions every prospect must answer.
                   </p>
                   <Textarea
@@ -647,7 +647,7 @@ A qualified prospect must answer:
                 <div className="space-y-1.5">
                   <Label>Regions / states</Label>
                   <p className="text-xs text-muted-foreground">
-                    Priority regions — not hard restrictions. One per line.
+                    Priority regions - not hard restrictions. One per line.
                   </p>
                   <Textarea
                     rows={2}
@@ -903,7 +903,7 @@ A qualified prospect must answer:
                           : d,
                       )
                     }
-                    placeholder="e.g. A 12-person trucking company with no tech team or recent project — too small, no intent."
+                    placeholder="e.g. A 12-person trucking company with no tech team or recent project - too small, no intent."
                   />
                 </div>
               </CardContent>
@@ -959,7 +959,7 @@ A qualified prospect must answer:
               <CardHeader>
                 <CardTitle className="text-base">Intent signals</CardTitle>
                 <CardDescription>
-                  Link signals from the org Intent Playbook. Points and scoring stay there — here you
+                  Link signals from the org Intent Playbook. Points and scoring stay there - here you
                   add priority, recency, and research instructions.
                 </CardDescription>
               </CardHeader>
@@ -1071,7 +1071,7 @@ A qualified prospect must answer:
                                 onChange={(e) =>
                                   updateLinkedSignal(sig.id, { messageAngle: e.target.value })
                                 }
-                                placeholder="e.g. Lead with the software and integration layer around the RFID hardware — not hardware sales."
+                                placeholder="e.g. Lead with the software and integration layer around the RFID hardware - not hardware sales."
                               />
                             </div>
                           </div>
@@ -1340,7 +1340,7 @@ A qualified prospect must answer:
               <CardHeader>
                 <CardTitle className="text-base">SOP / daily process</CardTitle>
                 <CardDescription>
-                  Written in markdown — use Preview to see bold, headings, and lists.
+                  Written in markdown - use Preview to see bold, headings, and lists.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-3">
@@ -1352,11 +1352,11 @@ A qualified prospect must answer:
                     setDraft((d) => (d ? { ...d, sopMarkdown } : d))
                   }
                   placeholder={`## Daily process
-1. **Signal discovery (90m)** — Start with signals, not directories.
-2. **Company qualification (60m)** — Industry, size, geo, service fit.
-3. **Decision-maker ID (90m)** — One ops buyer; one technical when justified.
-4. **Enrichment & scoring (90m)** — LinkedIn, verified email, evidence, score.
-5. **Personalization & QA (60m)** — Structured notes; deeply personalize top 15.
+1. **Signal discovery (90m)** - Start with signals, not directories.
+2. **Company qualification (60m)** - Industry, size, geo, service fit.
+3. **Decision-maker ID (90m)** - One ops buyer; one technical when justified.
+4. **Enrichment & scoring (90m)** - LinkedIn, verified email, evidence, score.
+5. **Personalization & QA (60m)** - Structured notes; deeply personalize top 15.
 
 ## Qualification
 One strong signal OR two medium signals from different categories.
@@ -1590,7 +1590,7 @@ function AssignmentsPanel({
         description:
           Math.abs(total - 100) <= 0.5
             ? `${userOptions.find((u) => u.id === a.userId)?.label ?? "User"} totals 100%.`
-            : `Person now totals ${total}% across strategies — aim for 100%.`,
+            : `Person now totals ${total}% across strategies - aim for 100%.`,
       });
     } catch (e) {
       toast.error("Could not update allocation", {
@@ -1708,7 +1708,7 @@ function AssignmentsPanel({
                   ? " ✓"
                   : projectedTotal < 100
                     ? ` (${100 - projectedTotal}% still free for other strategies)`
-                    : ` (over by ${projectedTotal - 100}% — edit other strategies down)`}
+                    : ` (over by ${projectedTotal - 100}% - edit other strategies down)`}
               </span>
             </div>
           ) : null}
@@ -1736,7 +1736,7 @@ function AssignmentsPanel({
                     }
                   >
                     {row.total}% across {row.count} strateg{row.count === 1 ? "y" : "ies"}
-                    {row.ok ? " ✓" : " — adjust to 100%"}
+                    {row.ok ? " ✓" : " - adjust to 100%"}
                   </span>
                 </li>
               ))}

@@ -278,7 +278,7 @@ export function FitKnowledgeAdminPanel({
             </div>
           ) : (
             <p className="text-xs text-amber-600 dark:text-amber-400">
-            Not indexed yet — run Index / refresh above.
+            Not indexed yet - run Index / refresh above.
             </p>
           )}
         </CardContent>

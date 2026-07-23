@@ -249,7 +249,7 @@ export function ActivityLogsDashboard({
                   {byPerson.slice(0, 10).map((row) => (
                     <TableRow key={row.actorUid}>
                       <TableCell className="text-sm font-medium truncate max-w-[160px]">
-                        {(memberLabels[row.actorUid] ?? row.actorUid) || "—"}
+                        {(memberLabels[row.actorUid] ?? row.actorUid) || "-"}
                       </TableCell>
                       <TableCell className="text-right tabular-nums text-sm">
                         {fmtNumber(row.totalEvents)}

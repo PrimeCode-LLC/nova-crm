@@ -78,7 +78,7 @@ export async function requireSession(): Promise<AppSession> {
 }
 
 /**
- * Server pages that touch tenant data should call this — it short-circuits
+ * Server pages that touch tenant data should call this - it short-circuits
  * to `/onboarding` when a signed-in user has no organization yet.
  */
 export async function requireTenantSession(): Promise<

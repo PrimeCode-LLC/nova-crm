@@ -106,7 +106,7 @@ export async function countPendingScheduledByUtcDayServer(input: {
         bump(String(data.scheduledAt ?? ""));
       }
     } catch {
-      // Index may still be building — fall back to broader query.
+      // Index may still be building - fall back to broader query.
       const snap = await root
         .where("status", "==", status)
         .where("scheduledAt", ">=", fromIso)

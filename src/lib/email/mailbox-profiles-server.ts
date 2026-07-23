@@ -307,7 +307,7 @@ export async function listMailboxesAssignedToViewerServer(input: {
           .collection("emailMailboxes")
           .where("assignedUserIds", "array-contains", input.viewerUid)
           .get();
-        // Assigned mailboxes are read-only for the viewer — skip secret vault reads.
+        // Assigned mailboxes are read-only for the viewer - skip secret vault reads.
         return snap.docs.map((doc) =>
           firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, null, {
             dataOwnerUid: u.id,
@@ -315,7 +315,7 @@ export async function listMailboxesAssignedToViewerServer(input: {
           }),
         );
       } catch {
-        // Older profiles without the indexable field — skip.
+        // Older profiles without the indexable field - skip.
         return [] as EmailMailboxSettings[];
       }
     }),

@@ -201,7 +201,7 @@ function evaluateQualification(
 
 /**
  * Deterministic Quality Score from an Intent Playbook + lead research/labels/engagement.
- * Pure — safe for client and server.
+ * Pure - safe for client and server.
  */
 export function computeQualityScore(
   lead: QualityScoreLeadInput,

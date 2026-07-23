@@ -40,10 +40,10 @@ function lensMetrics(lens: TeamCommandLens, row: TeamCommandRow): Metric[] {
     case "leadgen":
       return [
         { label: "Prospects", value: fmtNumber(row.prospectsAdded) },
-        { label: "Avg quality", value: row.avgQuality == null ? "—" : String(Math.round(row.avgQuality)) },
+        { label: "Avg quality", value: row.avgQuality == null ? "-" : String(Math.round(row.avgQuality)) },
         {
           label: "Qualified",
-          value: row.prospectsAdded > 0 ? fmtPercent((row.qualifiedProspects / row.prospectsAdded) * 100) : "—",
+          value: row.prospectsAdded > 0 ? fmtPercent((row.qualifiedProspects / row.prospectsAdded) * 100) : "-",
         },
         { label: "Leads", value: fmtNumber(row.salesLeadsAdded), tone: "success" },
       ];
@@ -135,7 +135,7 @@ function quickScoreInsights(lens: TeamCommandLens, row: TeamCommandRow): ScoreIn
           : `${fmtNumber(row.emailsSent)} email${row.emailsSent === 1 ? "" : "s"} sent add volume`,
       improve:
         row.replies === 0
-          ? "Earn replies — each reply counts 4×"
+          ? "Earn replies - each reply counts 4×"
           : "Scale sent volume while protecting reply rate",
     };
   }

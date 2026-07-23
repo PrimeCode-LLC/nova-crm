@@ -204,7 +204,7 @@ export function FitKnowledgeDocumentsSheet({
       <DialogContent
         className={cn(
           "flex h-[min(90vh,56rem)] w-[min(96vw,80rem)] max-w-[min(96vw,80rem)] flex-col gap-0 overflow-hidden p-0",
-          // DialogContent defaults to sm:max-w-sm — override at every breakpoint.
+          // DialogContent defaults to sm:max-w-sm - override at every breakpoint.
           "sm:max-w-[min(96vw,80rem)]",
         )}
       >

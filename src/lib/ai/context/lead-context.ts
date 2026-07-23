@@ -61,7 +61,7 @@ export function buildLeadAiContext(input: {
   persona?: BuyerPersona;
   strategyAssignment?: StrategyAssignment;
   caseStudy?: ScriptLibraryItem;
-  /** Optional Script library template chosen in Build sequence (style guide — not pasted). */
+  /** Optional Script library template chosen in Build sequence (style guide - not pasted). */
   selectedTemplate?: Pick<
     ScriptLibraryItem,
     "id" | "title" | "category" | "primaryText" | "secondaryText"

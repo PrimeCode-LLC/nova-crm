@@ -23,7 +23,7 @@ function sig(
   return { enabled: true, fieldKeys: [...RESEARCH_FIELDS], ...partial };
 }
 
-/** Your modernization / .NET services playbook — default for new orgs. */
+/** Your modernization / .NET services playbook - default for new orgs. */
 export function modernizationServicesPlaybook(): IntentPlaybook {
   return {
     templateId: "modernization_services",
@@ -349,13 +349,13 @@ export const INTENT_PLAYBOOK_TEMPLATES: Record<
     id: "stellix_soft",
     name: "Stellix Soft Qualified Opportunities",
     description:
-      "Master Stellix Soft playbook: partner-search, modernization, IoT/RFID, logistics, enterprise apps, integrations, cloud, AI — with qualification gates and primary opportunity routing.",
+      "Master Stellix Soft playbook: partner-search, modernization, IoT/RFID, logistics, enterprise apps, integrations, cloud, AI - with qualification gates and primary opportunity routing.",
     build: stellixSoftPlaybook,
   },
   modernization_services: {
     id: "modernization_services",
     name: "Modernization services",
-    description: ".NET legacy, hiring, funding, warehouse, ERP — ideal for custom software / modernization sellers.",
+    description: ".NET legacy, hiring, funding, warehouse, ERP - ideal for custom software / modernization sellers.",
     build: modernizationServicesPlaybook,
   },
   saas_outbound: {

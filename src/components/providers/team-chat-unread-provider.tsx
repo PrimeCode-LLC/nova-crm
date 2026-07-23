@@ -28,7 +28,7 @@ import type { User, WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/typ
 const RECENT_MSG_LIMIT = 250;
 const CHANNEL_ID_IN_QUERY_LIMIT = 10;
 
-/** Stable fallbacks for Zustand selectors — `?? []` allocates a new array each snapshot, which makes `useSyncExternalStore` think the value changed every render and triggers React #185 (max update depth) in production builds. */
+/** Stable fallbacks for Zustand selectors - `?? []` allocates a new array each snapshot, which makes `useSyncExternalStore` think the value changed every render and triggers React #185 (max update depth) in production builds. */
 const EMPTY_DEMO_CHANNELS: WorkspaceChatChannel[] = [];
 const EMPTY_DEMO_MESSAGES: WorkspaceChatMessage[] = [];
 const EMPTY_DEMO_LAST_READ_ROOT: Record<string, Record<string, Record<string, string>>> = {};

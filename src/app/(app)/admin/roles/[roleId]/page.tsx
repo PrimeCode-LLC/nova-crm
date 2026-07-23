@@ -243,8 +243,8 @@ export default function AdminRoleEditorPage() {
         title={role.name}
         description={
           role.kind === "system"
-            ? "System role — edit permissions freely; reset restores catalog defaults."
-            : "Custom role — full control over modules and actions."
+            ? "System role - edit permissions freely; reset restores catalog defaults."
+            : "Custom role - full control over modules and actions."
         }
         actions={
           <div className="flex items-center gap-2">
@@ -415,7 +415,7 @@ export default function AdminRoleEditorPage() {
                                   title={`${cap} is not available for ${meta.label}`}
                                   aria-label={`${meta.label} ${cap}: not available`}
                                 >
-                                  —
+                                  -
                                 </span>
                               ) : (
                                 <Checkbox

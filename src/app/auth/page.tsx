@@ -11,7 +11,7 @@ function firstString(
   return undefined;
 }
 
-/** Same-origin path only — blocks open redirects via callbackUrl. */
+/** Same-origin path only - blocks open redirects via callbackUrl. */
 function safeInternalPath(raw: string | undefined): string {
   if (!raw || typeof raw !== "string") return "/dashboard";
   let decoded: string;

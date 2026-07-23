@@ -43,7 +43,7 @@ export const recomputePermissionsOnUserWrite = onDocumentWritten(
 
     const existing = await db.collection("computedPermissions").doc(userId).get();
     if (existing.exists && existing.data()?.modules) {
-      // Roles catalog owns this document — do not clobber with legacy shape.
+      // Roles catalog owns this document - do not clobber with legacy shape.
       return;
     }
 

@@ -1,4 +1,4 @@
-/** USD per 1M tokens — estimates for admin usage display only. */
+/** USD per 1M tokens - estimates for admin usage display only. */
 export const AI_MODEL_PRICING: Record<
   string,
   { inputPer1M: number; outputPer1M: number }

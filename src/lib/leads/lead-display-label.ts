@@ -9,7 +9,7 @@ export function leadDisplayLabel(
   return company ? `${name} (${company})` : name;
 }
 
-/** First name from a contact display name — useful for compact dashboard / wall rows. */
+/** First name from a contact display name - useful for compact dashboard / wall rows. */
 export function contactFirstName(contactName?: string | null): string | undefined {
   const trimmed = contactName?.trim();
   if (!trimmed) return undefined;

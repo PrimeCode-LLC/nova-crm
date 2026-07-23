@@ -245,7 +245,7 @@ export type QualifyIssue = {
 };
 
 /**
- * Phase 1.5 qualify gate — blocking issues prevent "completed" status.
+ * Phase 1.5 qualify gate - blocking issues prevent "completed" status.
  * Soft issues (duplicates density) warn but do not block unless over hard max.
  */
 export function evaluateQualifyGate(input: QualifyGateInput): {
@@ -340,7 +340,7 @@ export function evaluateQualifyGate(input: QualifyGateInput): {
   } else if (existing === maxContacts - 1) {
     issues.push({
       code: "second_contact",
-      message: "Second contact for this company — ensure a different buying function (ops vs IT).",
+      message: "Second contact for this company - ensure a different buying function (ops vs IT).",
       blocking: false,
     });
   }

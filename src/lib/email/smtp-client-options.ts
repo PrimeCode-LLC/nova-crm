@@ -76,14 +76,14 @@ export function formatSmtpError(err: unknown): string {
       msg,
     )
   ) {
-    return "Login rejected. Google Workspace no longer accepts normal account passwords for SMTP — use Sign in with Google (OAuth) in Settings → Email, or an app password if your admin still allows it.";
+    return "Login rejected. Google Workspace no longer accepts normal account passwords for SMTP - use Sign in with Google (OAuth) in Settings → Email, or an app password if your admin still allows it.";
   }
   if (
     /550|5\.1\.1|5\.1\.0|no such user|user unknown|mailbox unavailable|all recipients were rejected|recipient address rejected|invalid recipient/i.test(
       msg,
     )
   ) {
-    return "The mail server rejected the recipient (550). Check the To address for typos and confirm that mailbox exists. If the address is correct, your SMTP provider may not relay to that domain — verify outgoing mail settings and that your From address matches your SMTP account.";
+    return "The mail server rejected the recipient (550). Check the To address for typos and confirm that mailbox exists. If the address is correct, your SMTP provider may not relay to that domain - verify outgoing mail settings and that your From address matches your SMTP account.";
   }
   if (/553|sender address rejected|5\.7\.1.*from/i.test(msg)) {
     return "The mail server rejected the From address. In Settings → Email, set your mailbox email to the same address you use for SMTP login.";

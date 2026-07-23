@@ -32,7 +32,7 @@ function msg(
   };
 }
 
-describe("detectHardBounce — Gmail Address not found", () => {
+describe("detectHardBounce - Gmail Address not found", () => {
   const gmailDsn = msg({
     from: "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
     subject: "Delivery Status Notification (Failure)",
@@ -75,7 +75,7 @@ Original-Message-ID: <abc-123@mailtech360.com>
   });
 });
 
-describe("detectHardBounce — soft bounce", () => {
+describe("detectHardBounce - soft bounce", () => {
   it("classifies mailbox full as soft", () => {
     const soft = msg({
       from: "Mail Delivery Subsystem <mailer-daemon@googlemail.com>",
@@ -92,7 +92,7 @@ Status: 4.2.2
   });
 });
 
-describe("detectHardBounce — out of office", () => {
+describe("detectHardBounce - out of office", () => {
   it("does not treat OOO as a bounce", () => {
     const ooo = msg({
       from: "Jane Doe <jane@acme.com>",

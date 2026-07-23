@@ -190,7 +190,7 @@ export type ProspectingStrategyData = {
   /** Build a portable pack from a live strategy (for download). */
   exportStrategyPack: (strategyId: string) => StrategyPack | null;
   /**
-   * @deprecated Internal/dev only — exports Stellix master into Firestore with fixed ids.
+   * @deprecated Internal/dev only - exports Stellix master into Firestore with fixed ids.
    * Prefer private JSON packs + importStrategyPack.
    */
   seedMasterPack: () => Promise<void>;

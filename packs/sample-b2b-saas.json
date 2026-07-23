@@ -2,7 +2,7 @@
   "packVersion": 1,
   "packId": "sample-b2b-saas",
   "name": "Sample B2B SaaS Prospecting",
-  "description": "Neutral demo pack for any SaaS org. Mid-market software buyers with modernization or integration intent — not a real customer ICP.",
+  "description": "Neutral demo pack for any SaaS org. Mid-market software buyers with modernization or integration intent - not a real customer ICP.",
   "personas": [
     {
       "id": "sample-persona-cto",

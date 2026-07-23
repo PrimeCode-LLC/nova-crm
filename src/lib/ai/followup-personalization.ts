@@ -34,7 +34,7 @@ const ROLE_RULES: {
       /\b(cto|cio|ciso|chief (technology|technical|information|information security|digital) officer)\b|\b(vp|vice president|head|director)\b.*\b(engineering|technology|technical|it|platform|infrastructure|data|security)\b/i,
     strategy: {
       communicationStrategy:
-        "Open with the technical or delivery consequence of the observed signal, add one credible implementation detail, and close with a low-friction interest check — not a calendar demand.",
+        "Open with the technical or delivery consequence of the observed signal, add one credible implementation detail, and close with a low-friction interest check - not a calendar demand.",
       committeeHint:
         "Usually the technical evaluator or a key champion; give them proof that de-risks the technical decision and something they can forward to the economic buyer.",
       targetEmailWords: "70-120 words",
@@ -61,7 +61,7 @@ const ROLE_RULES: {
       communicationStrategy:
         "Lead with one verified signal and one business outcome in the first two lines, then ask a yes/no or one-sentence decision question. No setup, no feature tour.",
       committeeHint:
-        "Usually the economic buyer or final decision-maker; at larger accounts they often delegate, so keep it outcome-first and easy to forward to a lieutenant. At founder-led SMBs they decide directly — a concrete next step can come sooner.",
+        "Usually the economic buyer or final decision-maker; at larger accounts they often delegate, so keep it outcome-first and easy to forward to a lieutenant. At founder-led SMBs they decide directly - a concrete next step can come sooner.",
       targetEmailWords: "45-85 words",
       emphasize: ["business outcome", "strategic relevance", "risk", "speed", "decision clarity"],
       avoid: ["theory", "long setup", "feature lists", "multiple calls to action", "technical deep-dives"],
@@ -143,7 +143,7 @@ const GENERAL_STRATEGY = {
   communicationStrategy:
     "Lead with the strongest verified signal, connect it lightly to the recipient's likely responsibilities without inventing facts, and ask one simple interest-check question.",
   committeeHint:
-    "Committee role unclear: write it to be useful and forwardable to whoever decides — outcome-first, no assumptions about their authority.",
+    "Committee role unclear: write it to be useful and forwardable to whoever decides - outcome-first, no assumptions about their authority.",
   targetEmailWords: "60-110 words",
   emphasize: ["role relevance", "specific value", "clarity", "easy reply"],
   avoid: ["generic compliments", "invented pain points", "multiple calls to action"],

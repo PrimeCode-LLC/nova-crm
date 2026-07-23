@@ -514,7 +514,7 @@ export default function AdminScrapersPage() {
       );
       setSelectedFeedIds(new Set());
       toast.success(
-        `${updatedIds.size} feed${updatedIds.size === 1 ? "" : "s"} — schedule ${nextEnabled ? "on" : "off"}`,
+        `${updatedIds.size} feed${updatedIds.size === 1 ? "" : "s"} - schedule ${nextEnabled ? "on" : "off"}`,
       );
     } catch {
       toast.error("Network error");
@@ -664,7 +664,7 @@ export default function AdminScrapersPage() {
               onClick={() => void runAll()}
               title={
                 runningAll
-                  ? "Running all enabled feeds — keep this tab open"
+                  ? "Running all enabled feeds - keep this tab open"
                   : "Run every enabled feed now"
               }
             >

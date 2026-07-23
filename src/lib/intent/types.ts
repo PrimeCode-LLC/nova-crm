@@ -101,7 +101,7 @@ export type IntentOpportunityRoute = {
   signalIds: string[];
 };
 
-/** Org-level Intent Playbook — drives Quality Score. */
+/** Org-level Intent Playbook - drives Quality Score. */
 export type IntentPlaybook = {
   templateId: IntentPlaybookTemplateId;
   name: string;

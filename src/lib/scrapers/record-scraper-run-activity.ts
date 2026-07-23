@@ -27,7 +27,7 @@ export async function recordScraperRunOrgActivity(input: {
     input.feedName != null
       ? `${input.feedName}: ${posts}`
       : `${posts} from ${input.feedCount} feed${input.feedCount === 1 ? "" : "s"}`;
-  const summary = input.scheduled ? `Scheduled scrape — ${body}` : body.charAt(0).toUpperCase() + body.slice(1);
+  const summary = input.scheduled ? `Scheduled scrape - ${body}` : body.charAt(0).toUpperCase() + body.slice(1);
 
   const oaId = newOrgActivityId();
   await db.collection(COLLECTIONS.orgActivityEvents).doc(oaId).set(

@@ -17,7 +17,7 @@ import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 import type { KnowledgeSection } from "@/lib/ai/fit-check-knowledge-types";
 import type { AiLibraryScope } from "@/lib/ai/types";
 
-/** Chars per chunk in the LLM prompt — keeps quality while limiting tokens. */
+/** Chars per chunk in the LLM prompt - keeps quality while limiting tokens. */
 export const FIT_CHECK_CHUNK_PROMPT_CHARS = 900;
 /** Pinned ICP/stack docs are smaller but always included. */
 export const FIT_CHECK_PINNED_PROMPT_CHARS = 650;

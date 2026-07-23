@@ -66,7 +66,7 @@ async function resolveAccountEmail(accessToken: string): Promise<string> {
 }
 
 /**
- * Calendar-only Google OAuth (GIS). Does not change Nova login — pick any Google account.
+ * Calendar-only Google OAuth (GIS). Does not change Nova login - pick any Google account.
  * Requires a public OAuth client id (NEXT_PUBLIC_GOOGLE_CALENDAR_CLIENT_ID or server-exposed id).
  */
 export async function connectGoogleCalendarGis(clientId: string): Promise<{

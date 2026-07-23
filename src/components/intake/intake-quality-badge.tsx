@@ -35,7 +35,7 @@ export function IntakeQualityBadge({
         className,
       )}
     >
-      <span>{result.score || "—"}</span>
+      <span>{result.score || "-"}</span>
       {result.signalCount > 0 ? (
         <span className="opacity-70 text-[10px] font-normal">{result.signalCount}sig</span>
       ) : null}
@@ -67,7 +67,7 @@ export function IntakeQualityBadge({
           {result.meetsThreshold
             ? `Looks like a playbook fit (≥ ${playbook.outreachThreshold})`
             : result.signalCount > 0
-              ? `Some signals — below threshold (${playbook.outreachThreshold})`
+              ? `Some signals - below threshold (${playbook.outreachThreshold})`
               : "No playbook signals in this post yet"}
         </p>
         {result.primaryOpportunity ? (
@@ -95,7 +95,7 @@ export function IntakeQualityBadge({
           </ul>
         ) : (
           <p className="text-xs text-muted-foreground border-t pt-2">
-            Scored with “{playbook.name}”. Promote still works — quality improves once research is
+            Scored with “{playbook.name}”. Promote still works - quality improves once research is
             filled.
           </p>
         )}

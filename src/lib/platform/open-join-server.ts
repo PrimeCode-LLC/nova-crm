@@ -4,7 +4,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
-/** 32 bytes url-safe — entropy for the secret segment of `orgId.secret`. */
+/** 32 bytes url-safe - entropy for the secret segment of `orgId.secret`. */
 export function generateOpenJoinSecret(): string {
   return crypto.randomBytes(24).toString("base64url");
 }

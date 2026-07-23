@@ -328,7 +328,7 @@ async function notifyFollowupOwnerOfDeliveryFailure(input: {
       recipientId: ownerId,
       actorId: "system",
       kind: "followup",
-      message: `${prefix}: ${title} — ${input.error.slice(0, 180)}`,
+      message: `${prefix}: ${title} - ${input.error.slice(0, 180)}`,
       target: title,
       targetHref: href,
       entityType: "followup",

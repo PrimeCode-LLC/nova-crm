@@ -216,7 +216,7 @@ export const mockCampaigns: Campaign[] = [
 
 const labelDemoTs = isoDaysAgo(300);
 
-/** Demo workspace labels — assign via `labelIds` on leads, deals, accounts, contacts. */
+/** Demo workspace labels - assign via `labelIds` on leads, deals, accounts, contacts. */
 export const mockCrmLabels: CrmLabel[] = [
   {
     id: "lbl-demo-1",
@@ -595,7 +595,7 @@ function demoScriptItem(
   };
 }
 
-/** Demo scripts library — never read from Firestore in demo mode. */
+/** Demo scripts library - never read from Firestore in demo mode. */
 export const mockScriptLibrary: ScriptLibraryItem[] = [
   demoScriptItem({
     id: "scr-demo-1",
@@ -702,7 +702,7 @@ export const mockScriptLibrary: ScriptLibraryItem[] = [
 const L1 = mockLeads[0]!;
 const L2 = mockLeads[1]!;
 
-/** Cross-team requests (review, email, etc.) — scoped in `workspace-dataset` per persona. */
+/** Cross-team requests (review, email, etc.) - scoped in `workspace-dataset` per persona. */
 export const mockLeadTasks: LeadTask[] = [
   {
     id: "lt-1",

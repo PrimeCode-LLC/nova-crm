@@ -287,7 +287,7 @@ Best practices:
 - X: punchy; threads only when the idea needs steps.
 - Prefer verified case-study proof from knowledge when pillar is proof.
 - Never invent client names, metrics, or logos not in knowledge.
-- Soft CTAs only — no hard sell spam.
+- Soft CTAs only - no hard sell spam.
 - Fill strategic gaps (missing pillars / outcomes), not empty calendar cells.`,
 };
 

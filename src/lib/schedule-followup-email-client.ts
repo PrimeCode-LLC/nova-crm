@@ -22,13 +22,13 @@ export type ScheduleFollowupEmailInput = {
   subject: string;
   /** Message body without signature/footer; trailers appended when flags are true. */
   body: string;
-  /** Default true — append mailbox.signature at queue time. */
+  /** Default true - append mailbox.signature at queue time. */
   includeSignature?: boolean;
   /**
    * Account-wide footer text (Settings → Email). Applied when includeFooter is true.
    */
   globalEmailFooter?: string;
-  /** Default true — append globalEmailFooter after the signature. */
+  /** Default true - append globalEmailFooter after the signature. */
   includeFooter?: boolean;
   scheduledAtIso: string;
   isDemo: boolean;

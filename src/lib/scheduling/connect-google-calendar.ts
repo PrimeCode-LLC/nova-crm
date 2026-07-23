@@ -102,7 +102,7 @@ export async function connectGoogleCalendarPopup(): Promise<{
   };
 }
 
-/** Server OAuth redirect — works with any Google account; supports refresh tokens. */
+/** Server OAuth redirect - works with any Google account; supports refresh tokens. */
 export function redirectToGoogleCalendarOAuth(): void {
   window.location.href = "/api/scheduling/oauth/google";
 }

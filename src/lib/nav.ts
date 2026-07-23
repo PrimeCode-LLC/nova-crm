@@ -55,7 +55,7 @@ export interface NavItem {
   adminFeature?: AdminFeatureKey;
   /** Visible if the user has any listed admin feature grant or role gate. */
   adminFeatures?: AdminFeatureKey[];
-  /** Only used for items under the Configuration section — drives sidebar clusters. */
+  /** Only used for items under the Configuration section - drives sidebar clusters. */
   adminCluster?: AdminNavClusterId;
 }
 

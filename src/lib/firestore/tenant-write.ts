@@ -10,7 +10,7 @@ import { FieldValue } from "firebase-admin/firestore";
  *   await ref.update(stampForUpdate(payload, uid));
  *
  * Stamping at write time is the *only* layer that prevents a buggy client
- * from leaking data across tenants — the Firestore rules check `organizationId`
+ * from leaking data across tenants - the Firestore rules check `organizationId`
  * matches the user's claim, but they can't *invent* the field for you.
  */
 export function stampForCreate<T extends Record<string, unknown>>(

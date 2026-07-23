@@ -416,9 +416,9 @@ function DraftForm({ draft }: { draft: ProspectDraft }) {
                   : saveState === "unsaved"
                     ? "Unsaved changes"
                     : saveState === "conflict"
-                      ? "Revision conflict — reload the latest version"
+                      ? "Revision conflict - reload the latest version"
                     : saveState === "error"
-                      ? "Autosave failed — use Save draft to retry"
+                      ? "Autosave failed - use Save draft to retry"
                       : `Saved ${new Date(lastSavedAt).toLocaleTimeString([], {
                           hour: "numeric",
                           minute: "2-digit",

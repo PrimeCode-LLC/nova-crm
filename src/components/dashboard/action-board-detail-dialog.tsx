@@ -329,7 +329,7 @@ export function ActionBoardDetailDialog({
             <div className="min-w-0 space-y-1">
               <DialogTitle className="text-base">Action board</DialogTitle>
               <DialogDescription className="text-xs sm:text-sm">
-                Full queue — {totalFocus} item{totalFocus === 1 ? "" : "s"} needing attention
+                Full queue - {totalFocus} item{totalFocus === 1 ? "" : "s"} needing attention
               </DialogDescription>
             </div>
             <div className="flex flex-wrap gap-1.5">

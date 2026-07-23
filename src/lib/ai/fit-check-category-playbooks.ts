@@ -1,6 +1,6 @@
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 
-/** Small category playbooks — indexed once per category; avoids duplicating the global website crawl. */
+/** Small category playbooks - indexed once per category; avoids duplicating the global website crawl. */
 export function fitCheckCategoryPlaybook(
   category: OpportunitySourceType,
 ): { title: string; content: string } {

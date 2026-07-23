@@ -44,9 +44,9 @@ The product is multi-tenant SaaS. See `docs/SAAS-ARCHITECTURE.md` for the full r
 
 **Three signup branches** (`POST /api/auth/session`):
 
-1. **`/signup?invite=<token>`** — joins an existing org. The token resolves to an `organizations/{orgId}/invites/{inviteId}` doc; on accept, a `members/{uid}` doc is written and the invite is marked `accepted`.
-2. **Email matches a `pendingOwnerEmail`** — when an operator pre-seats an org from `/platform/organizations/new`, the first signup with that email auto-claims the workspace as `owner`.
-3. **Plain `/signup` with a company name** — bootstraps a personal org, the signer becomes `owner` (legacy CRM `roleId` set to `director`, `isSuperAdmin: true`).
+1. **`/signup?invite=<token>`** - joins an existing org. The token resolves to an `organizations/{orgId}/invites/{inviteId}` doc; on accept, a `members/{uid}` doc is written and the invite is marked `accepted`.
+2. **Email matches a `pendingOwnerEmail`** - when an operator pre-seats an org from `/platform/organizations/new`, the first signup with that email auto-claims the workspace as `owner`.
+3. **Plain `/signup` with a company name** - bootstraps a personal org, the signer becomes `owner` (legacy CRM `roleId` set to `director`, `isSuperAdmin: true`).
 
 After any branch, the server stamps Firebase **custom claims** (`organizationId`, `orgRole`, `platformAdmin`) and the client forces an ID-token refresh + re-exchange so the session cookie carries the new claims. `firestore.rules` reads claims first and falls back to the user doc, so freshly-signed-up users have working access on the very first request.
 
@@ -56,8 +56,8 @@ After any branch, the server stamps Firebase **custom claims** (`organizationId`
 
 ## Firestore & rules
 
-- Rules file: `firestore.rules` — enforces tenant isolation. Every CRM doc must declare `organizationId == caller's org`. Server (Admin SDK) bypasses rules.
-- Indexes: `firestore.indexes.json` — pre-declares the composite indexes that tenant-filtered queries will hit.
+- Rules file: `firestore.rules` - enforces tenant isolation. Every CRM doc must declare `organizationId == caller's org`. Server (Admin SDK) bypasses rules.
+- Indexes: `firestore.indexes.json` - pre-declares the composite indexes that tenant-filtered queries will hit.
 - Deploy: `npm run firebase:deploy:rules` and `firebase deploy --only firestore:indexes`
 
 Collections used in rules:
@@ -68,9 +68,9 @@ Collections used in rules:
 
 ## Org management
 
-- **`/admin/team`** — owner / admin invite teammates, change roles, disable members. Talks to `/api/org/members` and `/api/org/invites`.
-- **`/admin/users`** — legacy demo view of the org chart (mock data). Linked from /admin/team.
-- **`/platform`** — operator console (gated by `platformAdmins` collection or `PLATFORM_ADMIN_EMAILS`). Create / edit organizations, manage other operators, run the legacy-user migration once after deploy.
+- **`/admin/team`** - owner / admin invite teammates, change roles, disable members. Talks to `/api/org/members` and `/api/org/invites`.
+- **`/admin/users`** - legacy demo view of the org chart (mock data). Linked from /admin/team.
+- **`/platform`** - operator console (gated by `platformAdmins` collection or `PLATFORM_ADMIN_EMAILS`). Create / edit organizations, manage other operators, run the legacy-user migration once after deploy.
 
 ## Website → CRM webhook
 
@@ -97,7 +97,7 @@ Writes a tenant-stamped doc to **`ingestQueue`** via Admin SDK (clients cannot w
 - **Admin → Scrapers** (`/admin/scrapers`): manage rss.app feed URLs, seed ~46 default feeds from the legacy n8n workflow, run feeds manually.
 - **Intake pool** (`/intake`): team browses new posts (7-day retention), promotes to **prospect** (open queue or assign to self), or dismisses.
 - Promoted prospects use the existing **Claim** flow on `/prospects` when left in the open queue.
-- Scheduled ingest: set `CRON_SECRET` on **App Hosting** and **Cloud Functions**, deploy functions (`runDueScrapers` every 15 minutes → `GET /api/cron/scrapers/run`). Per-feed interval and **Enabled** are stored in Firestore — disabled feeds are skipped. (`vercel.json` crons apply only on Vercel.)
+- Scheduled ingest: set `CRON_SECRET` on **App Hosting** and **Cloud Functions**, deploy functions (`runDueScrapers` every 15 minutes → `GET /api/cron/scrapers/run`). Per-feed interval and **Enabled** are stored in Firestore - disabled feeds are skipped. (`vercel.json` crons apply only on Vercel.)
 
 Deploy Firestore indexes after pulling: `npm run firebase:deploy:rules` (rules + indexes).
 

@@ -106,7 +106,7 @@ export const INSTANTLY_TIMEZONES = [
 
 const ALLOWED = new Set<string>(INSTANTLY_TIMEZONES);
 
-/** Default for new campaigns (US Eastern — on Instantly's allow list). */
+/** Default for new campaigns (US Eastern - on Instantly's allow list). */
 export const DEFAULT_INSTANTLY_TIMEZONE = "America/Detroit";
 
 const ALIASES: Record<string, string> = {

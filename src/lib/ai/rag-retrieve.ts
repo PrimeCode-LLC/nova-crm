@@ -72,7 +72,7 @@ export function ragHybridScore(semantic: number, keyword: number): number {
  * single library when exactly one is requested; library/section allow-lists are
  * post-filtered on the returned neighbours.
  *
- * Returns `null` (never throws) when vector search is unavailable — the vector
+ * Returns `null` (never throws) when vector search is unavailable - the vector
  * index has not been deployed yet, or the chunks have not been re-indexed to
  * native vectors. Callers should fall back to the in-app cosine scan.
  */

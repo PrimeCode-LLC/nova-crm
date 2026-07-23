@@ -26,7 +26,7 @@ export type TeamCommandRow = {
   emailsSent: number;
   replies: number;
   replyRate: number;
-  /** Open failed / needs_retry deliveries (not window-scoped — current state). */
+  /** Open failed / needs_retry deliveries (not window-scoped - current state). */
   failed: number;
   // Follow-ups
   followupsCompleted: number;
@@ -103,7 +103,7 @@ function computeWindowMetrics(
     const qualityWeighted = scored.reduce((s, l) => s + (l.qualityScore ?? 0) / 100, 0);
     const strategyAttributed = myProspects.filter((l) => Boolean(l.strategyId)).length;
 
-    // Open sales leads only — lost/won are terminal and already surface under Won
+    // Open sales leads only - lost/won are terminal and already surface under Won
     // (or shouldn't inflate "Leads" when the Leads page hides them as closed).
     const salesLeadsAdded = leads.filter(
       (l) =>
@@ -193,7 +193,7 @@ function computeWindowMetrics(
 
 /**
  * Per-lens raw score. Quality is baked into lead-gen (unqualified volume earns
- * almost nothing), replies dominate outreach, and closes dominate closing — so
+ * almost nothing), replies dominate outreach, and closes dominate closing - so
  * ranking rewards effectiveness rather than raw volume.
  */
 function lensRawScores(m: RawMetrics): LensRaw {
@@ -234,10 +234,10 @@ function buildBottleneck(m: RawMetrics, threshold: number): string | null {
   const avg = m.qualityScored > 0 ? m.qualitySum / m.qualityScored : null;
   if (m.prospectsAdded >= 20 && avg !== null && avg < threshold * 0.6) {
     const below = Math.max(0, m.prospectsAdded - m.qualifiedProspects);
-    return `High volume, low quality — ${below} prospects below outreach threshold`;
+    return `High volume, low quality - ${below} prospects below outreach threshold`;
   }
   if (m.emailsSent >= 20 && m.replies === 0) {
-    return `${m.emailsSent} sent, 0 replies — messaging not landing`;
+    return `${m.emailsSent} sent, 0 replies - messaging not landing`;
   }
   return null;
 }
@@ -245,7 +245,7 @@ function buildBottleneck(m: RawMetrics, threshold: number): string | null {
 /**
  * Team Command rows: quality-aware per-person performance across lenses, with
  * team-normalized composite scores and period-over-period momentum deltas.
- * Every metric is derived from real records — nothing is manually entered.
+ * Every metric is derived from real records - nothing is manually entered.
  */
 export function buildTeamCommandRows(input: {
   users: readonly User[];

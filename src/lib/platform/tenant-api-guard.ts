@@ -20,7 +20,7 @@ export type TenantGuardResult =
   | { ok: false; response: NextResponse };
 
 /**
- * Guard for tenant-scoped APIs — requires a session with an `organizationId`
+ * Guard for tenant-scoped APIs - requires a session with an `organizationId`
  * and (optionally) a minimum org role.
  *
  * Falls back to a Firestore membership lookup if claims are missing/stale,
