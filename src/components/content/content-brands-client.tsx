@@ -46,15 +46,21 @@ import {
   CONTENT_FORMAT_LABELS,
   CONTENT_OUTCOME_LABELS,
   CONTENT_PLATFORM_LABELS,
+  CONTENT_RESPONSIBILITY_KEYS,
+  CONTENT_RESPONSIBILITY_LABELS,
   CONTENT_STRATEGY_LABELS,
   type ContentBrand,
   type ContentBrandKind,
   type ContentFormat,
   type ContentPlatform,
   type ContentPrimaryOutcome,
+  type ContentResponsibilityKey,
   type ContentStrategyStyle,
 } from "@/lib/content-calendar/types";
 import { CONTENT_STRATEGY_PACKS } from "@/lib/content-calendar/strategy-packs";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import type { OrganizationMember } from "@/lib/types";
+import { UserChip } from "@/components/common/user-chip";
 
 const ALL_PLATFORMS = Object.keys(CONTENT_PLATFORM_LABELS) as ContentPlatform[];
 const ALL_KINDS = Object.keys(CONTENT_BRAND_KIND_LABELS) as ContentBrandKind[];
@@ -72,6 +78,11 @@ const FORM_STEPS = [
     id: "voice",
     label: "Voice",
     description: "Audience, positioning, and how it should sound.",
+  },
+  {
+    id: "team",
+    label: "Team",
+    description: "Who plans, writes, designs, posts, and captures.",
   },
   {
     id: "knowledge",
@@ -102,6 +113,7 @@ type BrandFormState = {
   approvalRequired: boolean;
   weeklyPublishTarget: string;
   knowledgeLibraryIds: string[];
+  responsibilities: Partial<Record<ContentResponsibilityKey, string>>;
 };
 
 const EMPTY_FORM: BrandFormState = {
@@ -122,6 +134,7 @@ const EMPTY_FORM: BrandFormState = {
   approvalRequired: true,
   weeklyPublishTarget: "5",
   knowledgeLibraryIds: [],
+  responsibilities: {},
 };
 
 function formFromBrand(brand: ContentBrand): BrandFormState {
@@ -143,6 +156,7 @@ function formFromBrand(brand: ContentBrand): BrandFormState {
     approvalRequired: brand.approvalRequired,
     weeklyPublishTarget: String(brand.cadence.weeklyPublishTarget ?? 5),
     knowledgeLibraryIds: [...brand.knowledgeLibraryIds],
+    responsibilities: { ...(brand.responsibilities ?? {}) },
   };
 }
 
@@ -173,6 +187,7 @@ function defaultsForKind(kind: ContentBrandKind): Pick<
 
 export function ContentBrandsClient() {
   const navAccess = useNavAccessContext();
+  const ws = useWorkspace();
   const data = useContentCalendarData();
   const permissionSubject = React.useMemo(
     () => ({
@@ -197,6 +212,7 @@ export function ContentBrandsClient() {
   const [brandToDelete, setBrandToDelete] = React.useState<ContentBrand | null>(null);
   const [libraries, setLibraries] = React.useState<LibraryOption[]>([]);
   const [libQuery, setLibQuery] = React.useState("");
+  const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
 
   const isEditing = Boolean(editingBrand);
   const stepIndex = FORM_STEPS.findIndex((s) => s.id === formStep);
@@ -222,6 +238,35 @@ export function ContentBrandsClient() {
       }
     })();
   }, []);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as { members?: OrganizationMember[] };
+        const list = (json.members ?? [])
+          .filter((m) => m.status === "active")
+          .map((m) => ({
+            uid: m.uid,
+            label: m.displayName?.trim() || m.email?.trim() || m.uid,
+          }));
+        if (!cancelled) setMembers(list);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMembers(
+            ws.users.map((u) => ({
+              uid: u.id,
+              label: u.displayName?.trim() || u.email?.trim() || u.id,
+            })),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ws.users]);
 
   const filteredLibraries = React.useMemo(() => {
     const q = libQuery.trim().toLowerCase();
@@ -337,6 +382,7 @@ export function ContentBrandsClient() {
         approvalRequired: form.approvalRequired,
         knowledgeLibraryIds: form.knowledgeLibraryIds,
         weeklyPublishTarget,
+        responsibilities: form.responsibilities,
       };
 
       if (editingBrand) {
@@ -450,6 +496,19 @@ export function ContentBrandsClient() {
                     ? brand.knowledgeLibraryIds.map(libraryName).join(", ")
                     : "Org default (Fit Check global)"}
                 </div>
+                {brand.responsibilities &&
+                Object.values(brand.responsibilities).some((id) => Boolean(id?.trim())) ? (
+                  <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
+                    {(Object.entries(brand.responsibilities) as [ContentResponsibilityKey, string][])
+                      .filter(([, uid]) => Boolean(uid?.trim()))
+                      .map(([key, uid]) => (
+                        <span key={key} className="inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5">
+                          {CONTENT_RESPONSIBILITY_LABELS[key]}
+                          <UserChip userId={uid} size="xs" />
+                        </span>
+                      ))}
+                  </div>
+                ) : null}
                 {(canEdit || canDelete) && (
                   <div className="flex flex-wrap gap-2 pt-1">
                     {canEdit && (
@@ -828,6 +887,56 @@ export function ContentBrandsClient() {
                         placeholder="Accounts or creators to learn from"
                       />
                     </div>
+                  </div>
+                </div>
+              ) : null}
+
+              {formStep === "team" ? (
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Assign people to each role for this brand. Leave empty to use the brand owner.
+                    One person can hold every slot, or split across the team.
+                  </p>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {CONTENT_RESPONSIBILITY_KEYS.map((key) => {
+                      const value = form.responsibilities[key] ?? "";
+                      return (
+                        <div key={key} className="space-y-2">
+                          <Label>{CONTENT_RESPONSIBILITY_LABELS[key]}</Label>
+                          <Select
+                            value={value || "__owner__"}
+                            onValueChange={(v) => {
+                              setForm((prev) => {
+                                const next = { ...prev.responsibilities };
+                                if (!v || v === "__owner__") delete next[key];
+                                else next[key] = v;
+                                return { ...prev, responsibilities: next };
+                              });
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue placeholder="Brand owner (default)">
+                                {value ? (
+                                  <span className="flex items-center gap-2 truncate">
+                                    <UserChip userId={value} size="sm" />
+                                  </span>
+                                ) : (
+                                  "Brand owner (default)"
+                                )}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__owner__">Brand owner (default)</SelectItem>
+                              {members.map((m) => (
+                                <SelectItem key={m.uid} value={m.uid}>
+                                  {m.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               ) : null}

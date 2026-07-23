@@ -14,7 +14,7 @@ import { ActionBoardPanel } from "@/components/dashboard/action-board-panel";
 import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { TeamCommand } from "@/components/dashboard/team-command";
 import { StrategyScoreboard } from "@/components/dashboard/strategy-scoreboard";
-import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
+import { DashboardNeedsAttentionWithContent } from "@/components/dashboard/dashboard-needs-attention-with-content";
 import {
   WallSceneCarousel,
   type WallScene,
@@ -182,13 +182,14 @@ export function OwnerOpsBoard({
     // Scene 1 - Priorities: what needs a decision or action right now.
     const nowWidgets = [
       widgets.needsAttention ? (
-        <DashboardNeedsAttention
+        <DashboardNeedsAttentionWithContent
           key="needs"
           leads={leads}
           followups={followups}
           plans={plans}
           tasks={tasks}
           currentUserId={currentUserId}
+          contentScope="team"
           wall
           className="min-h-0 flex-1"
         />
@@ -469,12 +470,13 @@ export function OwnerOpsBoard({
                 />
               ) : null}
               {widgets.needsAttention ? (
-                <DashboardNeedsAttention
+                <DashboardNeedsAttentionWithContent
                   leads={leads}
                   followups={followups}
                   plans={plans}
                   tasks={tasks}
                   currentUserId={currentUserId}
+                  contentScope="team"
                 />
               ) : null}
               {showInboxPerformance ? (

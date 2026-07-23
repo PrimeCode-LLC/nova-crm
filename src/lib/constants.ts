@@ -89,6 +89,10 @@ export const ROLES: Record<SystemRoleId, { label: string; description: string }>
     label: "Prospecting & data",
     description: "Adds top-of-funnel prospects; sees rows they sourced or own until handoff",
   },
+  content_team: {
+    label: "Content team",
+    description: "Content calendar, brands, and captures — no sales pipeline access",
+  },
 };
 
 /** Label for a CRM role id (system preset or custom id string). */

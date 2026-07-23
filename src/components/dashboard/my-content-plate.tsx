@@ -1,0 +1,186 @@
+"use client";
+
+import * as React from "react";
+import Link from "next/link";
+import { Clapperboard, ArrowRight } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
+  CONTENT_CHECKLIST_STEP_LABELS,
+  CONTENT_OPEN_STATUSES,
+  resolveBrandResponsibility,
+  type ContentBrand,
+  type ContentCapture,
+  type ContentItem,
+} from "@/lib/content-calendar/types";
+import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
+import { fmtRelative } from "@/lib/format";
+
+const CAPTURE_IDLE_DAYS = 7;
+
+type PlateRow = {
+  id: string;
+  title: string;
+  stepLabel: string;
+  href: string;
+  dueAt?: string;
+  overdue: boolean;
+};
+
+function buildMyContentRows(items: readonly ContentItem[], currentUserId: string, now: number): PlateRow[] {
+  const rows: PlateRow[] = [];
+  for (const item of items) {
+    if (!CONTENT_OPEN_STATUSES.includes(item.status)) continue;
+    const checklist = item.checklist ?? [];
+    if (checklist.length === 0) {
+      if (item.assigneeUserId !== currentUserId && item.ownerUserId !== currentUserId) continue;
+      const due = item.dueAt ? new Date(item.dueAt).getTime() : Number.NaN;
+      const overdue = Number.isFinite(due) && due < now;
+      if (!overdue) continue;
+      rows.push({
+        id: item.id,
+        title: item.title,
+        stepLabel: "Content",
+        href: `/content/${item.id}`,
+        dueAt: item.dueAt,
+        overdue: true,
+      });
+      continue;
+    }
+    for (const step of checklist) {
+      if (step.status !== "pending") continue;
+      if (step.assigneeUserId !== currentUserId) continue;
+      const dueRaw = step.dueAt || item.dueAt;
+      const due = dueRaw ? new Date(dueRaw).getTime() : Number.NaN;
+      rows.push({
+        id: `${item.id}-${step.key}`,
+        title: item.title,
+        stepLabel: CONTENT_CHECKLIST_STEP_LABELS[step.key],
+        href: `/content/${item.id}`,
+        dueAt: dueRaw,
+        overdue: Number.isFinite(due) && due < now,
+      });
+    }
+  }
+  return rows.sort((a, b) => {
+    if (a.overdue !== b.overdue) return a.overdue ? -1 : 1;
+    const at = a.dueAt ? new Date(a.dueAt).getTime() : Number.POSITIVE_INFINITY;
+    const bt = b.dueAt ? new Date(b.dueAt).getTime() : Number.POSITIVE_INFINITY;
+    return at - bt;
+  });
+}
+
+function idleCaptureBrandNames(
+  brands: ContentBrand[],
+  captures: ContentCapture[],
+  currentUserId: string,
+  now: number,
+): string[] {
+  const cutoff = now - CAPTURE_IDLE_DAYS * 86_400_000;
+  return brands
+    .filter((brand) => {
+      if (!brand.active) return false;
+      const capturer = resolveBrandResponsibility(brand, "capturer");
+      if (!capturer || capturer !== currentUserId) return false;
+      const latest = captures
+        .filter((c) => c.brandId === brand.id)
+        .reduce((max, c) => Math.max(max, new Date(c.createdAt).getTime() || 0), 0);
+      return latest === 0 || latest < cutoff;
+    })
+    .map((b) => b.name);
+}
+
+/** Personal content checklist plate for dashboard. */
+export function MyContentPlate({
+  currentUserId,
+  className,
+  limit = 6,
+}: {
+  currentUserId: string;
+  className?: string;
+  limit?: number;
+}) {
+  const { items, brands, captures, loading } = useContentCalendarData();
+  const [now] = React.useState(() => Date.now());
+  const rows = React.useMemo(
+    () => buildMyContentRows(items, currentUserId, now).slice(0, limit),
+    [items, currentUserId, now, limit],
+  );
+  const total = React.useMemo(
+    () => buildMyContentRows(items, currentUserId, now).length,
+    [items, currentUserId, now],
+  );
+  const idleCaptures = React.useMemo(
+    () => idleCaptureBrandNames(brands, captures, currentUserId, now),
+    [brands, captures, currentUserId, now],
+  );
+
+  return (
+    <Card className={cn("min-h-0 shrink-0", className)}>
+      <CardHeader className="pb-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <CardTitle className="text-base flex items-center gap-2">
+              <Clapperboard className="h-4 w-4" aria-hidden />
+              My content
+            </CardTitle>
+            <CardDescription className="mt-1">
+              Checklist steps assigned to you across brands.
+            </CardDescription>
+          </div>
+          {total > 0 ? <Badge variant="secondary">{total}</Badge> : null}
+        </div>
+      </CardHeader>
+      <CardContent className="pt-0 space-y-3">
+        {idleCaptures.length > 0 ? (
+          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
+            Capture duty idle ({CAPTURE_IDLE_DAYS}d+): {idleCaptures.join(", ")}.{" "}
+            <Link href="/content/capture" className="underline underline-offset-2">
+              Capture now
+            </Link>
+          </p>
+        ) : null}
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : rows.length === 0 ? (
+          <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+            No content steps on your plate.
+          </p>
+        ) : (
+          <ul className="divide-y rounded-md border">
+            {rows.map((row) => (
+              <li key={row.id}>
+                <Link
+                  href={row.href}
+                  className="flex items-center gap-3 px-3 py-2.5 transition-colors hover:bg-muted/40"
+                >
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-xs font-medium">
+                      {row.stepLabel} · {row.title}
+                    </span>
+                    {row.dueAt ? (
+                      <span
+                        className={cn(
+                          "block truncate text-xs",
+                          row.overdue ? "text-amber-600" : "text-muted-foreground",
+                        )}
+                      >
+                        {row.overdue ? "Overdue" : "Due"} {fmtRelative(row.dueAt)}
+                      </span>
+                    ) : null}
+                  </span>
+                  <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                </Link>
+              </li>
+            ))}
+          </ul>
+        )}
+        <Link href="/content" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+          Open calendar
+        </Link>
+      </CardContent>
+    </Card>
+  );
+}

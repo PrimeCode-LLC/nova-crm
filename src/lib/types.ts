@@ -14,7 +14,9 @@ export type SystemRoleId =
   | "salesperson"
   /** @deprecated Prefer `prospecting`; kept for existing Firestore `roleId` values. */
   | "data_scraper"
-  | "prospecting";
+  | "prospecting"
+  /** Content calendar team: dashboard + content only. */
+  | "content_team";
 
 /**
  * CRM workspace role document id.

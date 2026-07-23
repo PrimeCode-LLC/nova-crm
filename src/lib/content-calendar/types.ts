@@ -76,6 +76,36 @@ export type ContentPlanStatus = "draft" | "approved" | "generating" | "completed
 
 export type ContentCaptureStatus = "draft" | "normalized" | "indexed" | "failed";
 
+/** Brand-level people slots (who does what for this brand). */
+export type ContentResponsibilityKey =
+  | "planner"
+  | "writer"
+  | "designer"
+  | "poster"
+  | "capturer"
+  | "approver";
+
+/** Parallel work steps on a content item. */
+export type ContentChecklistStepKey = "write" | "graphics" | "approve" | "publish";
+
+export type ContentChecklistStepStatus = "pending" | "done" | "skipped";
+
+export type ContentChecklistStep = {
+  key: ContentChecklistStepKey;
+  status: ContentChecklistStepStatus;
+  assigneeUserId: string;
+  dueAt?: string;
+  completedAt?: string;
+  completedById?: string;
+};
+
+export type ContentAssetLink = {
+  url: string;
+  label?: string;
+  addedById: string;
+  addedAt: string;
+};
+
 export interface ContentCadence {
   /** Target posts per week per platform. */
   postsPerWeek: Partial<Record<ContentPlatform, number>>;
@@ -126,6 +156,8 @@ export interface ContentBrand {
   };
   ownerUserId: string;
   defaultOwnerUserId?: string;
+  /** People responsible for each content ops slot (empty = fall back to owner). */
+  responsibilities?: Partial<Record<ContentResponsibilityKey, string>>;
   active: boolean;
   createdAt: string;
   updatedAt: string;
@@ -167,6 +199,10 @@ export interface ContentItem {
   blockerNote?: string;
   assigneeUserId: string;
   ownerUserId: string;
+  /** Parallel checklist; when present, drives dashboard “my content” work. */
+  checklist?: ContentChecklistStep[];
+  /** Designer-pasted asset URLs (Drive, Figma, etc.). */
+  assetLinks?: ContentAssetLink[];
   planId?: string;
   captureId?: string;
   completedAt?: string;
@@ -303,6 +339,128 @@ export const CONTENT_CTA_LABELS: Record<ContentCtaType, string> = {
   start_trial: "Start trial",
   none: "No CTA",
 };
+
+export const CONTENT_RESPONSIBILITY_LABELS: Record<ContentResponsibilityKey, string> = {
+  planner: "Planner",
+  writer: "Writer",
+  designer: "Designer",
+  poster: "Poster",
+  capturer: "Capturer",
+  approver: "Approver",
+};
+
+export const CONTENT_CHECKLIST_STEP_LABELS: Record<ContentChecklistStepKey, string> = {
+  write: "Write copy",
+  graphics: "Add graphics",
+  approve: "Approve",
+  publish: "Publish",
+};
+
+export const CONTENT_RESPONSIBILITY_KEYS = Object.keys(
+  CONTENT_RESPONSIBILITY_LABELS,
+) as ContentResponsibilityKey[];
+
+/** Formats that need a graphics checklist step. */
+export const CONTENT_GRAPHICS_FORMATS: ContentFormat[] = [
+  "graphic_post",
+  "carousel",
+  "short_video",
+];
+
+export function formatNeedsGraphics(format: ContentFormat | undefined): boolean {
+  return Boolean(format && CONTENT_GRAPHICS_FORMATS.includes(format));
+}
+
+/** Resolve brand slot → userId, falling back to brand owner. */
+export function resolveBrandResponsibility(
+  brand: Pick<ContentBrand, "ownerUserId" | "defaultOwnerUserId" | "responsibilities">,
+  key: ContentResponsibilityKey,
+): string {
+  const fromSlot = brand.responsibilities?.[key]?.trim();
+  if (fromSlot) return fromSlot;
+  const owner = brand.ownerUserId?.trim() || brand.defaultOwnerUserId?.trim();
+  return owner || "";
+}
+
+export function firstPendingChecklistAssignee(
+  checklist: ContentChecklistStep[] | undefined,
+  fallbackUserId: string,
+): string {
+  const pending = checklist?.find((s) => s.status === "pending");
+  return pending?.assigneeUserId?.trim() || fallbackUserId;
+}
+
+export function buildContentChecklist(input: {
+  brand: Pick<
+    ContentBrand,
+    "ownerUserId" | "defaultOwnerUserId" | "responsibilities" | "approvalRequired"
+  >;
+  format?: ContentFormat;
+  dueAt: string;
+  fallbackUserId: string;
+}): ContentChecklistStep[] {
+  const { brand, format, dueAt, fallbackUserId } = input;
+  const resolve = (key: ContentResponsibilityKey) =>
+    resolveBrandResponsibility(brand, key) || fallbackUserId;
+
+  const steps: ContentChecklistStep[] = [
+    {
+      key: "write",
+      status: "pending",
+      assigneeUserId: resolve("writer"),
+      dueAt,
+    },
+  ];
+
+  if (formatNeedsGraphics(format)) {
+    steps.push({
+      key: "graphics",
+      status: "pending",
+      assigneeUserId: resolve("designer"),
+      dueAt,
+    });
+  }
+
+  if (brand.approvalRequired) {
+    steps.push({
+      key: "approve",
+      status: "pending",
+      assigneeUserId: resolve("approver"),
+      dueAt,
+    });
+  }
+
+  steps.push({
+    key: "publish",
+    status: "pending",
+    assigneeUserId: resolve("poster"),
+    dueAt,
+  });
+
+  return steps;
+}
+
+/** Derive a sensible item status after checklist mutations. */
+export function statusFromChecklist(
+  checklist: ContentChecklistStep[],
+  current: ContentItemStatus,
+): ContentItemStatus {
+  if (CONTENT_DONE_STATUSES.includes(current)) return current;
+  const pending = checklist.filter((s) => s.status === "pending");
+  if (pending.length === 0) {
+    const publish = checklist.find((s) => s.key === "publish");
+    if (publish?.status === "done") return "published";
+    return "approved";
+  }
+  if (pending.some((s) => s.key === "approve")) return "review";
+  if (pending.some((s) => s.key === "write" || s.key === "graphics")) return "draft";
+  if (pending.some((s) => s.key === "publish")) return "scheduled";
+  return current;
+}
+
+export function isChecklistStepOpen(step: ContentChecklistStep): boolean {
+  return step.status === "pending";
+}
 
 /** @deprecated Prefer CONTENT_OUTCOME_LABELS */
 export const CONTENT_GOAL_LABELS = CONTENT_OUTCOME_LABELS;

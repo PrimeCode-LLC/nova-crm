@@ -4,13 +4,14 @@ import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
 
-/** Loads content calendar items and forwards overdue posts into Needs attention. */
+/** Loads content calendar items and forwards checklist / overdue posts into Needs attention. */
 export function DashboardNeedsAttentionWithContent({
   leads,
   followups,
   plans,
   tasks,
   currentUserId,
+  contentScope = "mine",
   wall,
   className,
 }: {
@@ -19,6 +20,7 @@ export function DashboardNeedsAttentionWithContent({
   plans: readonly FollowupPlan[];
   tasks: readonly LeadTask[];
   currentUserId: string;
+  contentScope?: "mine" | "team";
   wall?: boolean;
   className?: string;
 }) {
@@ -30,6 +32,7 @@ export function DashboardNeedsAttentionWithContent({
       plans={plans}
       tasks={tasks}
       contentItems={contentItems}
+      contentScope={contentScope}
       currentUserId={currentUserId}
       wall={wall}
       className={className}

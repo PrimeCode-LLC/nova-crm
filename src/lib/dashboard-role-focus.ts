@@ -5,6 +5,11 @@ export function isFrontlineDashboardRole(role: Role | undefined): boolean {
   return role === "salesperson" || role === "data_scraper" || role === "prospecting";
 }
 
+/** Content ops roles: personal content plate above sales KPIs. */
+export function isContentOpsDashboardRole(role: Role | undefined): boolean {
+  return role === "content_team";
+}
+
 /** Show a second bucket of teammates’ open follow-ups (workspace is already hierarchy-scoped). */
 export function showTeamFollowupsOnDashboard(role: Role | undefined): boolean {
   return role === "director" || role === "manager" || role === "team_lead";
@@ -23,6 +28,8 @@ export function getDashboardOverviewDescription(role: Role | undefined): string 
     case "data_scraper":
     case "prospecting":
       return "Route and push prospects, clear handoff work, then track replies on your intake.";
+    case "content_team":
+      return "Your content plate: drafts, graphics, approvals, and posts due — then the calendar.";
     default:
       return "Live pipeline state, team performance, and funnel diagnostics.";
   }
@@ -41,6 +48,8 @@ export function getDashboardRoleFocusLine(role: Role | undefined): string {
     case "data_scraper":
     case "prospecting":
       return "Clear prospects that need routing, push ready ones to sales, then review replies on handoffs.";
+    case "content_team":
+      return "Clear checklist steps assigned to you, paste asset links when designing, then publish on schedule.";
     default:
       return "Use filters to slice by channel or owner when you need a narrower view.";
   }

@@ -24,6 +24,31 @@ import { cn } from "@/lib/utils";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import { fmtRelative } from "@/lib/format";
+import {
+  resolveBrandResponsibility,
+  type ContentBrand,
+} from "@/lib/content-calendar/types";
+import { UserChip } from "@/components/common/user-chip";
+
+const CAPTURE_IDLE_DAYS = 7;
+
+function capturerIdleBrands(
+  brands: ContentBrand[],
+  captures: { brandId?: string; createdAt: string }[],
+  currentUserId: string,
+  now: number,
+): ContentBrand[] {
+  const cutoff = now - CAPTURE_IDLE_DAYS * 86_400_000;
+  return brands.filter((brand) => {
+    if (!brand.active) return false;
+    const capturer = resolveBrandResponsibility(brand, "capturer");
+    if (!capturer || capturer !== currentUserId) return false;
+    const latest = captures
+      .filter((c) => c.brandId === brand.id)
+      .reduce((max, c) => Math.max(max, new Date(c.createdAt).getTime() || 0), 0);
+    return latest === 0 || latest < cutoff;
+  });
+}
 
 export function ContentCaptureClient() {
   const navAccess = useNavAccessContext();
@@ -52,6 +77,15 @@ export function ContentCaptureClient() {
   React.useEffect(() => {
     if (!brandId && data.brands[0]) setBrandId(data.brands[0].id);
   }, [data.brands, brandId]);
+
+  const selectedBrand = data.brands.find((b) => b.id === brandId);
+  const capturerId = selectedBrand
+    ? resolveBrandResponsibility(selectedBrand, "capturer")
+    : "";
+  const idleBrands = React.useMemo(
+    () => capturerIdleBrands(data.brands, data.captures, data.currentUserId, Date.now()),
+    [data.brands, data.captures, data.currentUserId],
+  );
 
   async function submit() {
     if (!canCreate) return;
@@ -110,6 +144,13 @@ export function ContentCaptureClient() {
         }
       />
       <PageBody>
+        {idleBrands.length > 0 ? (
+          <div className="mb-4 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
+            You are the capturer for{" "}
+            {idleBrands.map((b) => b.name).join(", ")} and there have been no
+            captures in the last {CAPTURE_IDLE_DAYS} days.
+          </div>
+        ) : null}
         <div className="grid gap-6 lg:grid-cols-2">
           <Card>
             <CardHeader>
@@ -135,6 +176,11 @@ export function ContentCaptureClient() {
                     ))}
                   </SelectContent>
                 </Select>
+                {capturerId ? (
+                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                    Capturer for this brand: <UserChip userId={capturerId} size="xs" />
+                  </p>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label>Problem</Label>

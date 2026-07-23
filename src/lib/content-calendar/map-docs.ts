@@ -18,6 +18,11 @@ import type {
   ContentFormat,
   ContentPrimaryOutcome,
   ContentStrategyStyle,
+  ContentResponsibilityKey,
+  ContentChecklistStep,
+  ContentChecklistStepKey,
+  ContentChecklistStepStatus,
+  ContentAssetLink,
 } from "@/lib/content-calendar/types";
 import {
   normalizeBrandKind,
@@ -108,10 +113,36 @@ export function mapContentBrand(id: string, data: Record<string, unknown>): Cont
       : undefined,
     ownerUserId: str(data.ownerUserId),
     defaultOwnerUserId: str(data.defaultOwnerUserId) || undefined,
+    responsibilities: mapResponsibilities(data.responsibilities),
     active: bool(data.active, true),
     createdAt: str(data.createdAt),
     updatedAt: str(data.updatedAt),
   };
+}
+
+function mapResponsibilities(
+  raw: unknown,
+): Partial<Record<ContentResponsibilityKey, string>> | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const keys: ContentResponsibilityKey[] = [
+    "planner",
+    "writer",
+    "designer",
+    "poster",
+    "capturer",
+    "approver",
+  ];
+  const out: Partial<Record<ContentResponsibilityKey, string>> = {};
+  let any = false;
+  for (const key of keys) {
+    const v = str(o[key]).trim();
+    if (v) {
+      out[key] = v;
+      any = true;
+    }
+  }
+  return any ? out : undefined;
 }
 
 export function mapContentItem(id: string, data: Record<string, unknown>): ContentItem {
@@ -162,12 +193,53 @@ export function mapContentItem(id: string, data: Record<string, unknown>): Conte
     blockerNote: str(data.blockerNote) || undefined,
     assigneeUserId: str(data.assigneeUserId),
     ownerUserId: str(data.ownerUserId),
+    checklist: mapChecklist(data.checklist),
+    assetLinks: mapAssetLinks(data.assetLinks),
     planId: str(data.planId) || undefined,
     captureId: str(data.captureId) || undefined,
     completedAt: str(data.completedAt) || undefined,
     createdAt: str(data.createdAt),
     updatedAt: str(data.updatedAt),
   };
+}
+
+function mapChecklist(raw: unknown): ContentChecklistStep[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const steps: ContentChecklistStep[] = [];
+  for (const row of raw) {
+    const r = (row ?? {}) as Record<string, unknown>;
+    const key = str(r.key) as ContentChecklistStepKey;
+    if (key !== "write" && key !== "graphics" && key !== "approve" && key !== "publish") continue;
+    const statusRaw = str(r.status, "pending") as ContentChecklistStepStatus;
+    const status: ContentChecklistStepStatus =
+      statusRaw === "done" || statusRaw === "skipped" ? statusRaw : "pending";
+    steps.push({
+      key,
+      status,
+      assigneeUserId: str(r.assigneeUserId),
+      dueAt: str(r.dueAt) || undefined,
+      completedAt: str(r.completedAt) || undefined,
+      completedById: str(r.completedById) || undefined,
+    });
+  }
+  return steps.length ? steps : undefined;
+}
+
+function mapAssetLinks(raw: unknown): ContentAssetLink[] | undefined {
+  if (!Array.isArray(raw) || raw.length === 0) return undefined;
+  const links: ContentAssetLink[] = [];
+  for (const row of raw) {
+    const r = (row ?? {}) as Record<string, unknown>;
+    const url = str(r.url).trim();
+    if (!url) continue;
+    links.push({
+      url,
+      label: str(r.label).trim() || undefined,
+      addedById: str(r.addedById),
+      addedAt: str(r.addedAt),
+    });
+  }
+  return links.length ? links : undefined;
 }
 
 export function mapContentCapture(id: string, data: Record<string, unknown>): ContentCapture {

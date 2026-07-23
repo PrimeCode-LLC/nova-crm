@@ -39,6 +39,7 @@ import { can, canAction } from "@/lib/permissions/can";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { DashboardNeedsAttentionWithContent } from "@/components/dashboard/dashboard-needs-attention-with-content";
+import { MyContentPlate } from "@/components/dashboard/my-content-plate";
 import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
 import { ChannelFunnelsSettings } from "@/components/dashboard/channel-funnels-settings";
 import { DashboardSettingsSheet } from "@/components/dashboard/dashboard-settings-sheet";
@@ -891,6 +892,10 @@ export default function DashboardPage() {
 
             {w.replyReviews ? <DashboardReplyReviews leads={scopedLeads} /> : null}
 
+            {!opsLayout && can(permissionSubject, "content_calendar", "view") ? (
+              <MyContentPlate currentUserId={currentUserId} />
+            ) : null}
+
             {!opsLayout && !frontlineLayout && w.needsAttention ? (
               <DashboardNeedsAttentionWithContent
                 leads={scopedLeads}
@@ -898,6 +903,7 @@ export default function DashboardPage() {
                 plans={workflowPlans}
                 tasks={workflowTasks}
                 currentUserId={currentUserId}
+                contentScope="mine"
               />
             ) : null}
             {!frontlineLayout && w.aiBrief ? (

@@ -9,6 +9,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { cn } from "@/lib/utils";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
 import {
+  CONTENT_CHECKLIST_STEP_LABELS,
   CONTENT_OPEN_STATUSES,
   type ContentItem,
 } from "@/lib/content-calendar/types";
@@ -61,6 +62,7 @@ export function DashboardNeedsAttention({
   plans,
   tasks,
   contentItems,
+  contentScope = "mine",
   currentUserId,
   wall,
   className,
@@ -69,8 +71,10 @@ export function DashboardNeedsAttention({
   followups: readonly Followup[];
   plans: readonly FollowupPlan[];
   tasks: readonly LeadTask[];
-  /** Optional overdue content calendar posts for the current user. */
+  /** Optional content calendar posts (checklist + overdue). */
   contentItems?: readonly ContentItem[];
+  /** `mine` = assignee steps for current user; `team` = all open content work (owner/wall). */
+  contentScope?: "mine" | "team";
   currentUserId: string;
   wall?: boolean;
   className?: string;
@@ -84,7 +88,34 @@ export function DashboardNeedsAttention({
 
   for (const content of contentItems ?? []) {
     if (!CONTENT_OPEN_STATUSES.includes(content.status)) continue;
-    if (content.assigneeUserId !== currentUserId && content.ownerUserId !== currentUserId) continue;
+
+    const checklist = content.checklist ?? [];
+    if (checklist.length > 0) {
+      for (const step of checklist) {
+        if (step.status !== "pending") continue;
+        if (contentScope === "mine" && step.assigneeUserId !== currentUserId) continue;
+        const due = timestamp(step.dueAt || content.dueAt, now);
+        const overdue = due < now;
+        items.push({
+          id: `content-step-${content.id}-${step.key}`,
+          label: `${CONTENT_CHECKLIST_STEP_LABELS[step.key]} · ${content.title}`,
+          detail: content.angle.slice(0, 120),
+          href: `/content/${content.id}`,
+          time: due,
+          severity: overdue ? "warning" : "info",
+          icon: Clapperboard,
+          ownerId: step.assigneeUserId || content.assigneeUserId || content.ownerUserId,
+        });
+      }
+      continue;
+    }
+
+    // Legacy items without checklist: overdue assignee/owner only (or team overdue).
+    if (contentScope === "mine") {
+      if (content.assigneeUserId !== currentUserId && content.ownerUserId !== currentUserId) {
+        continue;
+      }
+    }
     const due = timestamp(content.dueAt, Number.POSITIVE_INFINITY);
     if (due >= now) continue;
     items.push({

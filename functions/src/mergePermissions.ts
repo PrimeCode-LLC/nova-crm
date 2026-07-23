@@ -6,7 +6,8 @@ export type Role =
   | "team_lead"
   | "salesperson"
   | "data_scraper"
-  | "prospecting";
+  | "prospecting"
+  | "content_team";
 
 export type ResourceKey =
   | "leads"
@@ -77,6 +78,7 @@ const ROLE_DEFAULT_SCOPE: Record<
     contacts: "own",
     activities: "own",
   },
+  content_team: {},
 };
 
 const SCOPE_RANK: Record<ScopeKey, number> = {

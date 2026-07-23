@@ -296,6 +296,28 @@ function prospectingModules(): Record<ModuleKey, ModulePermission> {
   });
 }
 
+/** Locked-down content ops: dashboard + calendar + notifications only. */
+function contentTeamModules(): Record<ModuleKey, ModulePermission> {
+  return allModules((key) => {
+    if (key === "settings_self") {
+      return modulePermission({ view: true, edit: true, scope: "own" });
+    }
+    if (key === "dashboard" || key === "inbox" || key === "notifications") {
+      return modulePermission({ view: true, create: false, edit: false, delete: false, scope: "own" });
+    }
+    if (key === "content_calendar") {
+      return modulePermission({
+        view: true,
+        create: true,
+        edit: true,
+        delete: false,
+        scope: "own",
+      });
+    }
+    return emptyModulePermission();
+  });
+}
+
 export type SystemRolePreset = Omit<
   WorkspaceRoleDoc,
   "createdAt" | "updatedAt" | "createdByUid" | "updatedByUid"
@@ -354,6 +376,16 @@ export const SYSTEM_ROLE_PRESETS: Record<
     isActive: true,
     modules: prospectingModules(),
     actions: actionsOn(PROSPECTING_ACTIONS),
+  },
+  content_team: {
+    id: "content_team",
+    name: ROLES.content_team.label,
+    description: ROLES.content_team.description,
+    kind: "system",
+    systemKey: "content_team",
+    isActive: true,
+    modules: contentTeamModules(),
+    actions: {},
   },
 };
 

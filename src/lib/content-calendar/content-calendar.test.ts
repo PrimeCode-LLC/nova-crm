@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeContentConsistency } from "@/lib/content-calendar/consistency";
-import { isContentItemOverdue, type ContentItem } from "@/lib/content-calendar/types";
+import { isContentItemOverdue, buildContentChecklist, type ContentItem } from "@/lib/content-calendar/types";
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import { can } from "@/lib/permissions/can";
 
@@ -91,5 +91,46 @@ describe("content calendar", () => {
     expect(can({ roleId: "director", isSuperAdmin: false }, "content_calendar", "delete")).toBe(
       true,
     );
+  });
+
+  it("content_team can use content calendar but not leads", () => {
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "content_calendar", "view")).toBe(
+      true,
+    );
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "content_calendar", "edit")).toBe(
+      true,
+    );
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "dashboard", "view")).toBe(true);
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "leads", "view")).toBe(false);
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "prospects", "view")).toBe(false);
+  });
+
+  it("builds checklist with graphics only for graphic formats", () => {
+    const brand = {
+      ownerUserId: "owner",
+      responsibilities: {
+        writer: "w1",
+        designer: "d1",
+        poster: "p1",
+        approver: "a1",
+      },
+      approvalRequired: true,
+    };
+    const withGraphics = buildContentChecklist({
+      brand,
+      format: "carousel",
+      dueAt: "2026-07-20T10:00:00.000Z",
+      fallbackUserId: "fallback",
+    });
+    expect(withGraphics.map((s) => s.key)).toEqual(["write", "graphics", "approve", "publish"]);
+    expect(withGraphics.find((s) => s.key === "graphics")?.assigneeUserId).toBe("d1");
+
+    const textOnly = buildContentChecklist({
+      brand: { ...brand, approvalRequired: false },
+      format: "text_post",
+      dueAt: "2026-07-20T10:00:00.000Z",
+      fallbackUserId: "fallback",
+    });
+    expect(textOnly.map((s) => s.key)).toEqual(["write", "publish"]);
   });
 });

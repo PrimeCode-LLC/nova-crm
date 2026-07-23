@@ -35,6 +35,9 @@ import {
   CONTENT_FORMAT_LABELS,
   CONTENT_PILLAR_LABELS,
   CONTENT_PLATFORM_LABELS,
+  buildContentChecklist,
+  firstPendingChecklistAssignee,
+  resolveBrandResponsibility,
 } from "@/lib/content-calendar/types";
 
 type PlanSuggestResponse = {
@@ -175,12 +178,22 @@ export function ContentFillDaysDialog({
           continue;
         }
 
+        const checklist = buildContentChecklist({
+          brand,
+          format: slot.format,
+          dueAt: slot.publishAt,
+          fallbackUserId: currentUserId,
+        });
+        const ownerUserId =
+          resolveBrandResponsibility(brand, "planner") || brand.ownerUserId || currentUserId;
+        const assigneeUserId = firstPendingChecklistAssignee(checklist, currentUserId);
+
         const item = await createItem({
           brandId: brand.id,
           pillarKey: slot.pillarKey,
           publishAt: slot.publishAt,
           dueAt: slot.publishAt,
-          status: brand.approvalRequired ? "review" : "approved",
+          status: brand.approvalRequired ? "review" : "draft",
           title: slot.title,
           angle: slot.angle,
           rationale: slot.rationale,
@@ -197,8 +210,9 @@ export function ContentFillDaysDialog({
           ctaType: slot.ctaType,
           ragCitations: data.citations,
           verifiedFromKnowledge: Boolean(data.citations?.length),
-          assigneeUserId: currentUserId,
-          ownerUserId: currentUserId,
+          checklist,
+          assigneeUserId,
+          ownerUserId,
           planId: plan.id,
         });
 

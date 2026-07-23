@@ -160,6 +160,7 @@ export function useContentCalendarData() {
       approvalRequired?: boolean;
       bannedPhrases?: string[];
       weeklyPublishTarget?: number;
+      responsibilities?: ContentBrand["responsibilities"];
     }) => {
       if (!organizationId) throw new Error("No organization");
       if (isDemo) {
@@ -206,6 +207,14 @@ export function useContentCalendarData() {
         knowledgeLibraryIds: input.knowledgeLibraryIds ?? [],
         ownerUserId: currentUserId,
         defaultOwnerUserId: currentUserId,
+        responsibilities: input.responsibilities ?? {
+          planner: currentUserId,
+          writer: currentUserId,
+          designer: currentUserId,
+          poster: currentUserId,
+          capturer: currentUserId,
+          approver: currentUserId,
+        },
         active: true,
         createdAt: now,
         updatedAt: now,

@@ -4,11 +4,12 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Copy, SkipForward } from "lucide-react";
+import { Check, Copy, ExternalLink, Plus, SkipForward, Trash2 } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,26 +20,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { UserChip } from "@/components/common/user-chip";
 import { can } from "@/lib/permissions/can";
 import { cn } from "@/lib/utils";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import {
+  CONTENT_CHECKLIST_STEP_LABELS,
   CONTENT_PILLAR_LABELS,
   CONTENT_PLATFORM_LABELS,
   CONTENT_STATUS_LABELS,
+  buildContentChecklist,
   contentVariantCharLimit,
+  firstPendingChecklistAssignee,
   isContentItemOverdue,
+  statusFromChecklist,
+  type ContentAssetLink,
+  type ContentChecklistStep,
+  type ContentChecklistStepKey,
+  type ContentChecklistStepStatus,
   type ContentItemStatus,
   type ContentPlatform,
 } from "@/lib/content-calendar/types";
 import { fmtDate } from "@/lib/format";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import type { OrganizationMember } from "@/lib/types";
 
 export function ContentItemDetailClient() {
   const params = useParams();
   const router = useRouter();
   const itemId = String(params.itemId ?? "");
   const navAccess = useNavAccessContext();
+  const ws = useWorkspace();
   const data = useContentCalendarData();
   const permissionSubject = React.useMemo(
     () => ({
@@ -56,6 +69,9 @@ export function ContentItemDetailClient() {
   const brand = data.brands.find((b) => b.id === item?.brandId);
 
   const [bodies, setBodies] = React.useState<Record<string, string>>({});
+  const [assetUrl, setAssetUrl] = React.useState("");
+  const [assetLabel, setAssetLabel] = React.useState("");
+  const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
 
   React.useEffect(() => {
     if (!item) return;
@@ -63,6 +79,47 @@ export function ContentItemDetailClient() {
     for (const v of item.variants) next[v.platform] = v.body;
     setBodies(next);
   }, [item]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
+      .then(async (res) => {
+        if (!res.ok || cancelled) return;
+        const json = (await res.json()) as { members?: OrganizationMember[] };
+        const list = (json.members ?? [])
+          .filter((m) => m.status === "active")
+          .map((m) => ({
+            uid: m.uid,
+            label: m.displayName?.trim() || m.email?.trim() || m.uid,
+          }));
+        if (!cancelled) setMembers(list);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setMembers(
+            ws.users.map((u) => ({
+              uid: u.id,
+              label: u.displayName?.trim() || u.email?.trim() || u.id,
+            })),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [ws.users]);
+
+  const checklist = React.useMemo(() => {
+    if (!item) return [] as ContentChecklistStep[];
+    if (item.checklist?.length) return item.checklist;
+    if (!brand) return [];
+    return buildContentChecklist({
+      brand,
+      format: item.format,
+      dueAt: item.dueAt,
+      fallbackUserId: item.assigneeUserId || data.currentUserId,
+    });
+  }, [item, brand, data.currentUserId]);
 
   if (data.loading) {
     return (
@@ -83,6 +140,91 @@ export function ContentItemDetailClient() {
         </PageBody>
       </AppPage>
     );
+  }
+
+  async function persistChecklist(nextChecklist: ContentChecklistStep[]) {
+    if (!canEdit || !item) return;
+    const status = statusFromChecklist(nextChecklist, item.status);
+    const assigneeUserId = firstPendingChecklistAssignee(
+      nextChecklist,
+      item.assigneeUserId || data.currentUserId,
+    );
+    const completedAt =
+      status === "published" || status === "skipped" || status === "repurpose"
+        ? new Date().toISOString()
+        : undefined;
+    await data.updateItem(item.id, {
+      checklist: nextChecklist,
+      assigneeUserId,
+      status,
+      completedAt,
+    });
+  }
+
+  async function setStepStatus(key: ContentChecklistStepKey, status: ContentChecklistStepStatus) {
+    if (!canEdit || !item) return;
+    const now = new Date().toISOString();
+    const next = checklist.map((step) =>
+      step.key === key
+        ? {
+            ...step,
+            status,
+            completedAt: status === "pending" ? undefined : now,
+            completedById: status === "pending" ? undefined : data.currentUserId,
+          }
+        : step,
+    );
+    await persistChecklist(next);
+    toast.success(
+      status === "done"
+        ? "Step completed"
+        : status === "skipped"
+          ? "Step skipped"
+          : "Step reopened",
+    );
+  }
+
+  async function reassignStep(key: ContentChecklistStepKey, assigneeUserId: string) {
+    if (!canEdit || !item) return;
+    const next = checklist.map((step) =>
+      step.key === key ? { ...step, assigneeUserId } : step,
+    );
+    await persistChecklist(next);
+    toast.success("Assignee updated");
+  }
+
+  async function addAssetLink() {
+    if (!canEdit || !item) return;
+    const url = assetUrl.trim();
+    if (!url) {
+      toast.error("Paste a graphics URL");
+      return;
+    }
+    try {
+      // Validate URL shape before saving.
+      void new URL(url);
+    } catch {
+      toast.error("Enter a valid URL");
+      return;
+    }
+    const link: ContentAssetLink = {
+      url,
+      label: assetLabel.trim() || undefined,
+      addedById: data.currentUserId,
+      addedAt: new Date().toISOString(),
+    };
+    const assetLinks = [...(item.assetLinks ?? []), link];
+    await data.updateItem(item.id, { assetLinks });
+    setAssetUrl("");
+    setAssetLabel("");
+    toast.success("Asset link added");
+  }
+
+  async function removeAssetLink(index: number) {
+    if (!canEdit || !item) return;
+    const assetLinks = (item.assetLinks ?? []).filter((_, i) => i !== index);
+    await data.updateItem(item.id, { assetLinks });
+    toast.success("Link removed");
   }
 
   async function saveBodies() {
@@ -190,6 +332,153 @@ export function ContentItemDetailClient() {
 
         <Card>
           <CardHeader className="pb-2">
+            <CardTitle className="text-base">Checklist</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {checklist.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No checklist steps yet.</p>
+            ) : (
+              checklist.map((step) => (
+                <div
+                  key={step.key}
+                  className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                >
+                  <Badge
+                    variant={
+                      step.status === "done"
+                        ? "secondary"
+                        : step.status === "skipped"
+                          ? "outline"
+                          : "default"
+                    }
+                  >
+                    {CONTENT_CHECKLIST_STEP_LABELS[step.key]}
+                  </Badge>
+                  <span className="text-xs text-muted-foreground capitalize">{step.status}</span>
+                  <div className="min-w-0 flex-1">
+                    {canEdit ? (
+                      <Select
+                        value={step.assigneeUserId}
+                        onValueChange={(v) => {
+                          if (v) void reassignStep(step.key, v);
+                        }}
+                      >
+                        <SelectTrigger className="h-8 w-[180px]">
+                          <SelectValue>
+                            <UserChip userId={step.assigneeUserId} size="sm" />
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          {members.map((m) => (
+                            <SelectItem key={m.uid} value={m.uid}>
+                              {m.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    ) : (
+                      <UserChip userId={step.assigneeUserId} size="sm" />
+                    )}
+                  </div>
+                  {canEdit && step.status === "pending" && (
+                    <>
+                      <Button
+                        size="sm"
+                        type="button"
+                        variant="outline"
+                        onClick={() => void setStepStatus(step.key, "done")}
+                      >
+                        Done
+                      </Button>
+                      <Button
+                        size="sm"
+                        type="button"
+                        variant="ghost"
+                        onClick={() => void setStepStatus(step.key, "skipped")}
+                      >
+                        Skip
+                      </Button>
+                    </>
+                  )}
+                  {canEdit && step.status !== "pending" && (
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void setStepStatus(step.key, "pending")}
+                    >
+                      Reopen
+                    </Button>
+                  )}
+                </div>
+              ))
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Graphics / assets</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {(item.assetLinks ?? []).length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                Designers can paste Drive, Figma, or CDN links here.
+              </p>
+            ) : (
+              <ul className="space-y-2">
+                {(item.assetLinks ?? []).map((link, index) => (
+                  <li
+                    key={`${link.url}-${index}`}
+                    className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                  >
+                    <a
+                      href={link.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-w-0 flex-1 truncate text-primary hover:underline"
+                    >
+                      {link.label || link.url}
+                    </a>
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                    {canEdit && (
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        type="button"
+                        onClick={() => void removeAssetLink(index)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+            {canEdit && (
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Input
+                  value={assetUrl}
+                  onChange={(e) => setAssetUrl(e.target.value)}
+                  placeholder="https://…"
+                  className="flex-1"
+                />
+                <Input
+                  value={assetLabel}
+                  onChange={(e) => setAssetLabel(e.target.value)}
+                  placeholder="Label (optional)"
+                  className="sm:w-40"
+                />
+                <Button type="button" size="sm" onClick={() => void addAssetLink()}>
+                  <Plus className="h-3.5 w-3.5" /> Add link
+                </Button>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Angle</CardTitle>
           </CardHeader>
           <CardContent className="text-sm space-y-2">
@@ -253,9 +542,7 @@ export function ContentItemDetailClient() {
             <Button type="button" onClick={() => void saveBodies()}>
               Save drafts
             </Button>
-            <Select
-              onValueChange={(v) => void repurpose(v as ContentPlatform)}
-            >
+            <Select onValueChange={(v) => void repurpose(v as ContentPlatform)}>
               <SelectTrigger className="w-[200px]">
                 <SelectValue placeholder="Repurpose to…" />
               </SelectTrigger>
