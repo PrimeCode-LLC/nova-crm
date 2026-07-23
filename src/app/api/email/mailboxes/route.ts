@@ -78,24 +78,28 @@ export async function GET(req: Request) {
     }
   }
 
+  const includeUsage = new URL(req.url).searchParams.get("includeUsage") === "1";
+
   const dayKey = utcSendDayKey();
   const sendUsageByMailboxId: Record<string, { dayKey: string; used: number; limit: number | null }> = {};
-  await Promise.all(
-    mailboxes.map(async (mb) => {
-      const ownerUid = mb.dataOwnerUid?.trim() || dataOwnerUid;
-      const used = await getMailboxSendCountForDayServer({
-        organizationId,
-        uid: ownerUid,
-        mailboxId: mb.id,
-        dayKey,
-      });
-      sendUsageByMailboxId[mb.id] = {
-        dayKey,
-        used,
-        limit: mb.dailySendLimit,
-      };
-    }),
-  );
+  if (includeUsage) {
+    await Promise.all(
+      mailboxes.map(async (mb) => {
+        const ownerUid = mb.dataOwnerUid?.trim() || dataOwnerUid;
+        const used = await getMailboxSendCountForDayServer({
+          organizationId,
+          uid: ownerUid,
+          mailboxId: mb.id,
+          dayKey,
+        });
+        sendUsageByMailboxId[mb.id] = {
+          dayKey,
+          used,
+          limit: mb.dailySendLimit,
+        };
+      }),
+    );
+  }
 
   return NextResponse.json({
     ok: true,

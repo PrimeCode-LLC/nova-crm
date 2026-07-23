@@ -122,65 +122,70 @@ export async function buildOrgMailboxUtilizationServer(input: {
   const pendingToDayKey = addUtcDayKeys(todayKey, 6);
 
   const rows: MailboxUtilizationRow[] = [];
+  const MEMBER_CONCURRENCY = 3;
 
-  await Promise.all(
-    users.map(async (user) => {
-      const mailboxes = await listLiteMailboxesForMember({
-        organizationId: input.organizationId,
-        uid: user.id,
-      });
-      if (mailboxes.length === 0) return;
+  async function buildForUser(user: { id: string }) {
+    const mailboxes = await listLiteMailboxesForMember({
+      organizationId: input.organizationId,
+      uid: user.id,
+    });
+    if (mailboxes.length === 0) return;
 
-      await Promise.all(
-        mailboxes.map(async (mb) => {
-          const [{ byDay, total: sentWeek }, pendingByDay] = await Promise.all([
-            sumSendStatsForDays({
-              organizationId: input.organizationId,
-              uid: user.id,
-              mailboxId: mb.id,
-              dayKeys: weekDayKeys,
-            }),
-            countPendingScheduledByUtcDayServer({
-              organizationId: input.organizationId,
-              uid: user.id,
-              mailboxId: mb.id,
-              fromDayKey: todayKey,
-              toDayKey: pendingToDayKey,
-            }),
-          ]);
+    await Promise.all(
+      mailboxes.map(async (mb) => {
+        const [{ byDay, total: sentWeek }, pendingByDay] = await Promise.all([
+          sumSendStatsForDays({
+            organizationId: input.organizationId,
+            uid: user.id,
+            mailboxId: mb.id,
+            dayKeys: weekDayKeys,
+          }),
+          countPendingScheduledByUtcDayServer({
+            organizationId: input.organizationId,
+            uid: user.id,
+            mailboxId: mb.id,
+            fromDayKey: todayKey,
+            toDayKey: pendingToDayKey,
+          }),
+        ]);
 
-          const sentToday =
-            byDay[todayKey] ??
-            (await getMailboxSendCountForDayServer({
-              organizationId: input.organizationId,
-              uid: user.id,
-              mailboxId: mb.id,
-              dayKey: todayKey,
-            }));
+        const sentToday =
+          byDay[todayKey] ??
+          (await getMailboxSendCountForDayServer({
+            organizationId: input.organizationId,
+            uid: user.id,
+            mailboxId: mb.id,
+            dayKey: todayKey,
+          }));
 
-          const pendingToday = pendingByDay[todayKey] ?? 0;
-          let pendingWeek = 0;
-          for (const v of Object.values(pendingByDay)) pendingWeek += v;
+        const pendingToday = pendingByDay[todayKey] ?? 0;
+        let pendingWeek = 0;
+        for (const v of Object.values(pendingByDay)) pendingWeek += v;
 
-          rows.push(
-            buildMailboxUtilizationRow({
-              mailboxId: mb.id,
-              ownerUid: mb.ownerUid,
-              label: mb.label,
-              emailAddress: mb.emailAddress,
-              enabled: mb.enabled,
-              dailySendLimit: mb.dailySendLimit,
-              assignedUserIds: mb.assignedUserIds,
-              sentToday,
-              sentWeek,
-              pendingToday,
-              pendingWeek,
-            }),
-          );
-        }),
-      );
-    }),
-  );
+        rows.push(
+          buildMailboxUtilizationRow({
+            mailboxId: mb.id,
+            ownerUid: mb.ownerUid,
+            label: mb.label,
+            emailAddress: mb.emailAddress,
+            enabled: mb.enabled,
+            dailySendLimit: mb.dailySendLimit,
+            assignedUserIds: mb.assignedUserIds,
+            sentToday,
+            sentWeek,
+            pendingToday,
+            pendingWeek,
+          }),
+        );
+      }),
+    );
+  }
+
+  // Cap parallelism so utilization does not starve /api/email/mailboxes on a busy Firestore.
+  for (let i = 0; i < users.length; i += MEMBER_CONCURRENCY) {
+    const batch = users.slice(i, i + MEMBER_CONCURRENCY);
+    await Promise.all(batch.map((user) => buildForUser(user)));
+  }
 
   rows.sort((a, b) => a.label.localeCompare(b.label));
   return rows;

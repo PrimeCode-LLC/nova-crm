@@ -6,6 +6,7 @@ import {
   DEFAULT_DASHBOARD_WIDGETS,
   defaultDashboardPreferences,
   loadDashboardPreferences,
+  parseDashboardPreferences,
   saveDashboardPreferences,
   type ChannelFunnelsVisibility,
   type DashboardPreferences,
@@ -25,10 +26,16 @@ export function useDashboardPreferences(userId: string) {
     setHydrated(true);
   }, [userId]);
 
+  // Keep in-memory prefs shape current across HMR / schema additions (e.g. new visibility maps).
+  const safePrefs = React.useMemo(() => parseDashboardPreferences(prefs), [prefs]);
+
   const commit = React.useCallback(
     (updater: DashboardPreferences | ((prev: DashboardPreferences) => DashboardPreferences)) => {
       setPrefs((prev) => {
-        const next = typeof updater === "function" ? updater(prev) : updater;
+        const base = parseDashboardPreferences(prev);
+        const next = parseDashboardPreferences(
+          typeof updater === "function" ? updater(base) : updater,
+        );
         saveDashboardPreferences(userId, next);
         return next;
       });
@@ -157,7 +164,7 @@ export function useDashboardPreferences(userId: string) {
   }, [commit]);
 
   return {
-    prefs,
+    prefs: safePrefs,
     hydrated,
     setViewMode,
     setPreviewRole,

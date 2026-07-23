@@ -264,15 +264,16 @@ export async function listMailboxesForMemberServer(input: {
   const root = memberRoot(input.organizationId, input.uid);
   if (!root) return [];
   const snap = await root.collection("emailMailboxes").get();
-  const out: EmailMailboxSettings[] = [];
-  for (const doc of snap.docs) {
-    const secrets = await getMailboxSecretsServer({
-      organizationId: input.organizationId,
-      uid: input.uid,
-      mailboxId: doc.id,
-    });
-    out.push(firestoreToMailbox(doc.id, doc.data(), secrets));
-  }
+  const out = await Promise.all(
+    snap.docs.map(async (doc) => {
+      const secrets = await getMailboxSecretsServer({
+        organizationId: input.organizationId,
+        uid: input.uid,
+        mailboxId: doc.id,
+      });
+      return firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, secrets);
+    }),
+  );
   out.sort((a, b) => a.label.localeCompare(b.label));
   return out;
 }
@@ -296,33 +297,30 @@ export async function listMailboxesAssignedToViewerServer(input: {
   viewerUid: string;
 }): Promise<EmailMailboxSettings[]> {
   const users = await listOrgUsersServer(input.organizationId);
-  const out: EmailMailboxSettings[] = [];
-  for (const u of users) {
-    if (!u.id || u.id === input.viewerUid) continue;
-    const root = memberRoot(input.organizationId, u.id);
-    if (!root) continue;
-    try {
-      const snap = await root
-        .collection("emailMailboxes")
-        .where("assignedUserIds", "array-contains", input.viewerUid)
-        .get();
-      for (const doc of snap.docs) {
-        const secrets = await getMailboxSecretsServer({
-          organizationId: input.organizationId,
-          uid: u.id,
-          mailboxId: doc.id,
-        });
-        out.push(
-          firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, secrets, {
+  const others = users.filter((u) => u.id && u.id !== input.viewerUid);
+  const chunks = await Promise.all(
+    others.map(async (u) => {
+      const root = memberRoot(input.organizationId, u.id);
+      if (!root) return [] as EmailMailboxSettings[];
+      try {
+        const snap = await root
+          .collection("emailMailboxes")
+          .where("assignedUserIds", "array-contains", input.viewerUid)
+          .get();
+        // Assigned mailboxes are read-only for the viewer — skip secret vault reads.
+        return snap.docs.map((doc) =>
+          firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, null, {
             dataOwnerUid: u.id,
             stripSecrets: true,
           }),
         );
+      } catch {
+        // Older profiles without the indexable field — skip.
+        return [] as EmailMailboxSettings[];
       }
-    } catch {
-      // Older profiles without the indexable field — skip.
-    }
-  }
+    }),
+  );
+  const out = chunks.flat();
   out.sort((a, b) => a.label.localeCompare(b.label));
   return out;
 }

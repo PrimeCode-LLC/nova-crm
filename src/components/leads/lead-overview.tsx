@@ -15,7 +15,7 @@ import {
 } from "@/lib/constants";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, ChevronDown, Pencil } from "lucide-react";
+import { AlertTriangle, ChevronDown, MailWarning, Pencil } from "lucide-react";
 import { UserChip } from "@/components/common/user-chip";
 import type { LeadEditSection } from "@/components/leads/edit-lead-dialog";
 import { LeadSourceButton } from "@/components/leads/lead-source-button";
@@ -29,6 +29,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
+import { contactHasBouncedEmail } from "@/lib/email/contact-email-change";
 import { LeadIntentQualityCard } from "@/components/leads/lead-intent-quality-card";
 import type {
   BuyerPersona,
@@ -105,6 +106,7 @@ export function LeadOverview({
   outreachProfileFieldLabel,
   onEditSection,
   onEditRecord,
+  onUpdateEmail,
 }: {
   lead: Lead;
   account?: Account;
@@ -120,10 +122,12 @@ export function LeadOverview({
   outreachProfileFieldLabel?: string;
   onEditSection?: (section: Exclude<LeadEditSection, "all">) => void;
   onEditRecord?: (section: "contact" | "company") => void;
+  onUpdateEmail?: () => void;
 }) {
   const ws = useWorkspace();
   const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
   const canEdit = ws.canEditLead(lead);
+  const emailBounced = contactHasBouncedEmail(contact);
   const emailResponseCtx = useLeadEmailResponseContext();
   const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
@@ -163,9 +167,27 @@ export function LeadOverview({
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-sm">Contact record</CardTitle>
-          <EditCardAction
-            onClick={canEdit && contact && onEditRecord ? () => onEditRecord("contact") : undefined}
-          />
+          {(canEdit && contact && (onUpdateEmail || onEditRecord)) ? (
+            <CardAction className="flex items-center gap-1">
+              {onUpdateEmail ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={emailBounced ? "default" : "ghost"}
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={onUpdateEmail}
+                >
+                  {emailBounced ? <MailWarning className="h-3.5 w-3.5" /> : null}
+                  {emailBounced ? "Update email" : "Change email"}
+                </Button>
+              ) : null}
+              {onEditRecord ? (
+                <Button type="button" variant="ghost" size="sm" onClick={() => onEditRecord("contact")}>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Button>
+              ) : null}
+            </CardAction>
+          ) : null}
         </CardHeader>
         <CardContent className="pt-0">
           <dl className="divide-y">
@@ -175,8 +197,26 @@ export function LeadOverview({
             <Field label="Company email">{contact?.email || lead.contactEmail || "-"}</Field>
             <Field label="Personal email">{contact?.personalEmail || "-"}</Field>
             <Field label="Email status">
-              {contact?.emailVerificationStatus ||
-                (contact?.emailVerified || lead.emailVerified ? "Verified" : "Not verified")}
+              {emailBounced ? (
+                <span className="inline-flex items-center gap-1.5 text-destructive">
+                  <MailWarning className="h-3.5 w-3.5" />
+                  bounced
+                  {canEdit && onUpdateEmail ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="ml-1 h-6 px-2 text-[11px]"
+                      onClick={onUpdateEmail}
+                    >
+                      Fix
+                    </Button>
+                  ) : null}
+                </span>
+              ) : (
+                contact?.emailVerificationStatus ||
+                (contact?.emailVerified || lead.emailVerified ? "Verified" : "Not verified")
+              )}
             </Field>
             <Field label="Phone">{contact?.phone || "-"}</Field>
             <Field label="LinkedIn">

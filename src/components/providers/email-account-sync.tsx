@@ -8,6 +8,9 @@ import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import { appendMailDataOwnerParam } from "@/lib/email/mail-data-owner-query";
 import type { MailFlagId } from "@/lib/email/mail-flags";
 
+/** Fail open so Settings/Inbox are not stuck on "Loading…" forever when Firestore is slow. */
+const MAILBOXES_FETCH_TIMEOUT_MS = 90_000;
+
 /**
  * Loads saved SMTP/IMAP mailboxes from Firestore after login (live workspace).
  * Demo mode keeps the in-browser template only (no API writes).
@@ -44,10 +47,17 @@ export function EmailAccountSync() {
     if (!sessionHydrated || !currentUserId) return;
 
     let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(() => controller.abort(), MAILBOXES_FETCH_TIMEOUT_MS);
+
     void (async () => {
       try {
         const url = appendMailDataOwnerParam("/api/email/mailboxes", mailViewAsUid, currentUserId);
-        const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
+        const res = await fetch(url, {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: controller.signal,
+        });
         const data = (await res.json()) as {
           ok?: boolean;
           mailboxes?: EmailMailboxSettings[];
@@ -113,11 +123,15 @@ export function EmailAccountSync() {
           setEmailServerSyncEnabled(false);
           setEmailServerHydrated(true);
         }
+      } finally {
+        window.clearTimeout(timeoutId);
       }
     })();
 
     return () => {
       cancelled = true;
+      controller.abort();
+      window.clearTimeout(timeoutId);
     };
   }, [
     isDemo,

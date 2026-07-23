@@ -576,7 +576,7 @@ export function EmailInboxSettingsCard() {
   React.useEffect(() => {
     if (isDemo || !emailServerHydrated || !emailServerSyncEnabled) return;
     let cancelled = false;
-    void fetch("/api/email/mailboxes", { credentials: "same-origin", cache: "no-store" })
+    void fetch("/api/email/mailboxes?includeUsage=1", { credentials: "same-origin", cache: "no-store" })
       .then(async (res) => {
         if (!res.ok || cancelled) return;
         const data = (await res.json()) as {

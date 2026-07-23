@@ -146,16 +146,14 @@ export function MailboxUtilizationPanel({
     [rows],
   );
 
+  const mailboxVisibility = prefs.mailboxUtilizationVisible ?? {};
+
   const visibleRows = React.useMemo(
     () =>
       rows.filter((row) =>
-        isMailboxUtilizationVisible(
-          prefs.mailboxUtilizationVisible,
-          row.ownerUid,
-          row.mailboxId,
-        ),
+        isMailboxUtilizationVisible(mailboxVisibility, row.ownerUid, row.mailboxId),
       ),
-    [rows, prefs.mailboxUtilizationVisible],
+    [rows, mailboxVisibility],
   );
 
   const summary = React.useMemo(
@@ -194,7 +192,7 @@ export function MailboxUtilizationPanel({
               <div className="flex shrink-0 items-center gap-0.5">
                 <MailboxUtilizationSettings
                   mailboxes={settingsOptions}
-                  visible={prefs.mailboxUtilizationVisible}
+                  visible={mailboxVisibility}
                   onChange={setMailboxUtilizationVisible}
                   onShowAll={() => setAllMailboxUtilizationVisible(allKeys, true)}
                   onHideAll={() => setAllMailboxUtilizationVisible(allKeys, false)}

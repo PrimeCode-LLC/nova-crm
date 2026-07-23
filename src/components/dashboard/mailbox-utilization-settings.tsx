@@ -34,7 +34,7 @@ export function MailboxUtilizationSettings({
   onHideAll,
 }: {
   mailboxes: MailboxUtilizationSettingsOption[];
-  visible: MailboxUtilizationVisibility;
+  visible: MailboxUtilizationVisibility | null | undefined;
   onChange: (ownerUid: string, mailboxId: string, enabled: boolean) => void;
   onShowAll: () => void;
   onHideAll: () => void;

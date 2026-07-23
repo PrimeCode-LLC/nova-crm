@@ -21,6 +21,7 @@ import {
   Copy,
   ShieldAlert,
   ListTodo,
+  MailWarning,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -56,6 +57,8 @@ import { LeadTouchpoints } from "@/components/leads/lead-touchpoints";
 import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
 import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-banner";
+import { LeadContactEmailActionBanner } from "@/components/leads/lead-contact-email-action-banner";
+import { UpdateContactEmailDialog } from "@/components/leads/update-contact-email-dialog";
 import { LeadSchedulingPanel } from "@/components/scheduling/lead-scheduling-panel";
 import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
@@ -63,6 +66,14 @@ import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import {
+  buildEmailChangeTimelineEvents,
+  contactHasBouncedEmail,
+  contactPatchClearingBounce,
+  diffContactEmailChanges,
+  openBounceReviewTasksForLead,
+} from "@/lib/email/contact-email-change";
+import { findSuggestedNewEmailFromMessages } from "@/lib/email/extract-suggested-new-email";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -150,6 +161,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const [prospectFieldsSection, setProspectFieldsSection] = React.useState<
     "all" | "company" | "contact" | null
   >(null);
+  const [updateEmailOpen, setUpdateEmailOpen] = React.useState(false);
+  const [updateEmailReason, setUpdateEmailReason] = React.useState<"bounce" | "suggested" | "manual">(
+    "manual",
+  );
+  const [updateEmailSuggested, setUpdateEmailSuggested] = React.useState<string | undefined>();
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
@@ -230,27 +246,42 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const relatedEmailAddress = lead
     ? ws.getContactById(lead.contactId)?.email || lead.contactEmail || ""
     : "";
+  const relatedPersonalEmail = lead
+    ? ws.getContactById(lead.contactId)?.personalEmail || ""
+    : "";
   const relatedEmails = React.useMemo(() => {
     if (!lead) return [];
-    const own = relatedEmailAddress.toLowerCase();
+    const known = new Set(
+      [relatedEmailAddress, relatedPersonalEmail]
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean),
+    );
     const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
     for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
       for (const m of messages) {
         const mid = `${mailboxId}:in:${m.id}`;
         const manual = linkedLeadByMessageId[mid] === lead.id;
-        const auto = Boolean(own) && extractEmailAddresses(m.from, m.to, m.cc).has(own);
+        const addrs = extractEmailAddresses(m.from, m.to, m.cc);
+        const auto = [...known].some((e) => addrs.has(e));
         if (!manual && !auto) continue;
         rows.push({ id: mid, subject: m.subject, at: m.date, from: m.from, to: m.to, body: m.bodyText });
       }
     }
     for (const m of sent) {
       const manual = linkedLeadByMessageId[m.id] === lead.id;
-      const auto = Boolean(own) && extractEmailAddresses(m.from, m.to, m.cc).has(own);
+      const addrs = extractEmailAddresses(m.from, m.to, m.cc);
+      const auto = [...known].some((e) => addrs.has(e));
       if (!manual && !auto) continue;
       rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
     }
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
-  }, [inboundByMailbox, linkedLeadByMessageId, lead, relatedEmailAddress, sent]);
+  }, [inboundByMailbox, linkedLeadByMessageId, lead, relatedEmailAddress, relatedPersonalEmail, sent]);
+
+  const suggestedNewEmail = React.useMemo(() => {
+    if (!lead) return null;
+    const known = [relatedEmailAddress, relatedPersonalEmail].filter(Boolean);
+    return findSuggestedNewEmailFromMessages(relatedEmails, known);
+  }, [lead, relatedEmailAddress, relatedPersonalEmail, relatedEmails]);
 
   const relatedEmailThreads = React.useMemo(() => {
     const normalizeSubject = (subject: string) =>
@@ -401,8 +432,23 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const deal = ws.deals.find((d) => d.leadId === lead.id);
   const primaryEmail = contact?.email || lead.contactEmail;
   const primaryPhone = contact?.phone;
+  const emailBounced = contactHasBouncedEmail(contact);
+  const openBounceTasks = React.useMemo(
+    () => openBounceReviewTasksForLead(leadTasksForTab, lead.id),
+    [leadTasksForTab, lead.id],
+  );
+  const needsEmailFix = emailBounced || openBounceTasks.length > 0;
   const openFollowupCount = followups.filter((f) => !f.completedAt).length;
   const openTaskCount = leadTasksForTab.filter((t) => !t.completedAt).length;
+
+  function openUpdateEmail(opts: {
+    reason: "bounce" | "suggested" | "manual";
+    suggestedEmail?: string;
+  }) {
+    setUpdateEmailReason(opts.reason);
+    setUpdateEmailSuggested(opts.suggestedEmail);
+    setUpdateEmailOpen(true);
+  }
   const campaign = ws.getCampaignById(lead.campaignId);
   const profile = ws.getProfileById(lead.profileId);
   const needsOutreachProfile = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(lead.channel);
@@ -757,7 +803,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <p className="mt-1 truncate text-sm font-medium">
                     {lead.doNotContact
                       ? "Review do-not-contact status before outreach"
-                      : lead.nextAction || "Add a next action to keep this record moving"}
+                      : needsEmailFix
+                        ? "Update bounced email so outreach can continue"
+                        : suggestedNewEmail
+                          ? `Apply suggested email: ${suggestedNewEmail}`
+                          : lead.nextAction || "Add a next action to keep this record moving"}
                   </p>
                   {!lead.doNotContact && (primaryEmail || primaryPhone) ? (
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -765,6 +815,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                         <a href={`mailto:${primaryEmail}`} className="inline-flex items-center gap-1 hover:text-primary">
                           <Mail className="h-3 w-3" />
                           {primaryEmail}
+                          {emailBounced ? (
+                            <span className="inline-flex items-center gap-0.5 text-destructive">
+                              <MailWarning className="h-3 w-3" />
+                              bounced
+                            </span>
+                          ) : null}
                         </a>
                       ) : null}
                       {primaryPhone ? (
@@ -773,6 +829,22 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                           {primaryPhone}
                         </a>
                       ) : null}
+                    </div>
+                  ) : null}
+                  {canEditLead && contact && (needsEmailFix || suggestedNewEmail) ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={() =>
+                          openUpdateEmail({
+                            reason: needsEmailFix ? "bounce" : "suggested",
+                            suggestedEmail: suggestedNewEmail ?? undefined,
+                          })
+                        }
+                      >
+                        {needsEmailFix ? "Update bounced email" : "Use suggested email"}
+                      </Button>
                     </div>
                   ) : null}
                 </div>
@@ -843,6 +915,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
 
               <div className="mt-4">
                 <div className="mb-4 space-y-3">
+                  <LeadContactEmailActionBanner
+                    contact={contact}
+                    suggestedEmail={suggestedNewEmail}
+                    canEdit={canEditLead && Boolean(contact)}
+                    onUpdateEmail={openUpdateEmail}
+                  />
                   <LeadReplyReviewBanner lead={lead} />
                   {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
                     <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
@@ -869,6 +947,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     outreachProfileFieldLabel={needsOutreachProfile ? outreachProfileFieldLabel(lead.channel) : undefined}
                     onEditSection={setEditingSection}
                     onEditRecord={setProspectFieldsSection}
+                    onUpdateEmail={
+                      contact
+                        ? () =>
+                            openUpdateEmail({
+                              reason: needsEmailFix ? "bounce" : suggestedNewEmail ? "suggested" : "manual",
+                              suggestedEmail: suggestedNewEmail ?? undefined,
+                            })
+                        : undefined
+                    }
                   />
                 </TabsContent>
                 <TabsContent value="timeline">
@@ -942,14 +1029,38 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Contact</CardTitle>
+                {canEditLead && contact ? (
+                  <CardAction>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant={emailBounced ? "default" : "ghost"}
+                      className="h-7 gap-1 px-2 text-xs"
+                      onClick={() =>
+                        openUpdateEmail({
+                          reason: needsEmailFix ? "bounce" : suggestedNewEmail ? "suggested" : "manual",
+                          suggestedEmail: suggestedNewEmail ?? undefined,
+                        })
+                      }
+                    >
+                      {emailBounced ? <MailWarning className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                      {emailBounced ? "Fix email" : "Change email"}
+                    </Button>
+                  </CardAction>
+                ) : null}
               </CardHeader>
               <CardContent className="pt-0 space-y-2 text-sm">
                 {primaryEmail && (
                   <div className="flex items-center gap-2">
-                    <Mail className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                    <Mail className={cn("h-3.5 w-3.5 shrink-0", emailBounced ? "text-destructive" : "text-muted-foreground")} />
                     <a href={`mailto:${primaryEmail}`} className="min-w-0 flex-1 truncate hover:text-primary">
                       {primaryEmail}
                     </a>
+                    {emailBounced ? (
+                      <Badge variant="outline" className="shrink-0 border-destructive/40 text-[10px] text-destructive">
+                        bounced
+                      </Badge>
+                    ) : null}
                     <Button
                       type="button"
                       variant="ghost"
@@ -1269,19 +1380,50 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           contact={contact}
           section={prospectFieldsSection ?? "all"}
           onSave={({ accountPatch, contactPatch, leadPatch }) => {
+            const clearedContactPatch = contactPatchClearingBounce(contact, contactPatch);
+            const emailChanges = diffContactEmailChanges(contact, clearedContactPatch);
+            const nextLeadPatch = { ...leadPatch };
+            if (clearedContactPatch.emailVerified !== undefined) {
+              nextLeadPatch.emailVerified = clearedContactPatch.emailVerified;
+            }
+
             if (Object.keys(accountPatch).length > 0) {
               ws.patchAccount(account.id, accountPatch);
             }
-            if (Object.keys(contactPatch).length > 0) {
-              ws.patchContact(contact.id, contactPatch);
+            if (Object.keys(clearedContactPatch).length > 0) {
+              ws.patchContact(contact.id, clearedContactPatch);
             }
-            if (Object.keys(leadPatch).length > 0) {
-              ws.patchLead(lead.id, leadPatch);
+            if (Object.keys(nextLeadPatch).length > 0) {
+              ws.patchLead(lead.id, nextLeadPatch);
             }
             ws.bumpLeadActivity(lead.id);
+
+            for (const event of buildEmailChangeTimelineEvents({
+              leadId: lead.id,
+              actorId: ws.currentUserId,
+              changes: emailChanges,
+            })) {
+              ws.addTimelineEvent(event);
+            }
+
+            if (emailChanges.length > 0) {
+              for (const task of openBounceReviewTasksForLead(ws.leadTasks, lead.id)) {
+                ws.setLeadTaskCompleted(task.id, true);
+              }
+            }
           }}
         />
       )}
+      {contact ? (
+        <UpdateContactEmailDialog
+          open={updateEmailOpen}
+          onOpenChange={setUpdateEmailOpen}
+          lead={lead}
+          contact={contact}
+          suggestedEmail={updateEmailSuggested}
+          reason={updateEmailReason}
+        />
+      ) : null}
     </>
   );
 }

@@ -171,11 +171,11 @@ export function mailboxUtilizationPrefsKey(ownerUid: string, mailboxId: string):
 
 /** Missing key → visible. Explicit false hides the mailbox. */
 export function isMailboxUtilizationVisible(
-  visible: MailboxUtilizationVisibility,
+  visible: MailboxUtilizationVisibility | null | undefined,
   ownerUid: string,
   mailboxId: string,
 ): boolean {
-  return visible[mailboxUtilizationPrefsKey(ownerUid, mailboxId)] !== false;
+  return visible?.[mailboxUtilizationPrefsKey(ownerUid, mailboxId)] !== false;
 }
 
 export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = defaultDashboardPreferences();
