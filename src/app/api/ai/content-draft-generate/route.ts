@@ -12,18 +12,30 @@ import {
   retrieveContentKnowledgeServer,
 } from "@/lib/ai/content-knowledge-server";
 import { getContentStrategyPack } from "@/lib/content-calendar/strategy-packs";
+import { scrubAiTellPunctuation } from "@/lib/content-calendar/schedule";
 import { contentVariantCharLimit } from "@/lib/content-calendar/types";
 import type { Role } from "@/lib/types";
 
 const PLATFORMS = ["linkedin", "x", "instagram", "reddit"] as const;
+// Keep in sync with content-plan-suggest + ContentPillarKey / ContentCtaType.
 const PILLARS = [
   "proof_case_study",
   "operator_lesson",
   "opinion_take",
   "soft_cta",
   "personal_journey",
+  "product_education",
+  "culture",
 ] as const;
-const CTAS = ["book_fit_check", "reply_with_niche", "soft_dm", "share_lesson", "none"] as const;
+const CTAS = [
+  "book_fit_check",
+  "reply_with_niche",
+  "soft_dm",
+  "share_lesson",
+  "book_demo",
+  "start_trial",
+  "none",
+] as const;
 
 const bodySchema = z.object({
   brandId: z.string().min(1),
@@ -126,9 +138,9 @@ export async function POST(req: Request) {
       },
     });
 
-    let body = result.body.trim();
+    let body = scrubAiTellPunctuation(result.body.trim());
     if (body.length > charLimit + 40) {
-      body = body.slice(0, charLimit - 1) + "…";
+      body = body.slice(0, charLimit - 1) + "...";
     }
 
     const citations =
@@ -140,7 +152,7 @@ export async function POST(req: Request) {
           }));
 
     return NextResponse.json({
-      hook: result.hook,
+      hook: scrubAiTellPunctuation(result.hook),
       body,
       citations,
     });

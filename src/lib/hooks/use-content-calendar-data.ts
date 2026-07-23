@@ -160,6 +160,7 @@ export function useContentCalendarData() {
       approvalRequired?: boolean;
       bannedPhrases?: string[];
       weeklyPublishTarget?: number;
+      preferredWeekdays?: number[];
       responsibilities?: ContentBrand["responsibilities"];
     }) => {
       if (!organizationId) throw new Error("No organization");
@@ -203,6 +204,9 @@ export function useContentCalendarData() {
           ...defaults.cadence,
           weeklyPublishTarget:
             input.weeklyPublishTarget ?? defaults.cadence.weeklyPublishTarget,
+          preferredWeekdays: input.preferredWeekdays?.length
+            ? input.preferredWeekdays
+            : defaults.cadence.preferredWeekdays,
         },
         knowledgeLibraryIds: input.knowledgeLibraryIds ?? [],
         ownerUserId: currentUserId,

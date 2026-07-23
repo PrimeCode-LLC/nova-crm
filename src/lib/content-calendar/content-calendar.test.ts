@@ -134,3 +134,40 @@ describe("content calendar", () => {
     expect(textOnly.map((s) => s.key)).toEqual(["write", "publish"]);
   });
 });
+
+describe("content schedule", () => {
+  it("skips weekends when preferred weekdays are Mon-Thu", async () => {
+    const { buildContentScheduleSlots, scrubAiTellPunctuation } = await import(
+      "@/lib/content-calendar/schedule"
+    );
+    const slots = buildContentScheduleSlots({
+      // Fri Jul 24 2026 → window through Thu Jul 30
+      startDate: "2026-07-24",
+      dayCount: 7,
+      platforms: ["linkedin", "instagram"],
+      cadence: {
+        postsPerWeek: { linkedin: 3, instagram: 2 },
+        preferredWeekdays: [1, 2, 3, 4],
+        weeklyPublishTarget: 5,
+      },
+    });
+    expect(slots.length).toBeGreaterThan(0);
+    for (const slot of slots) {
+      const day = new Date(slot.publishAt).getDay();
+      expect([1, 2, 3, 4]).toContain(day);
+    }
+    const byDay = new Map<string, string[]>();
+    for (const slot of slots) {
+      const key = slot.publishAt.slice(0, 10);
+      byDay.set(key, [...(byDay.get(key) ?? []), slot.platform]);
+    }
+    // Multi-platform days should be possible when cadence asks for more posts than days.
+    const multi = [...byDay.values()].some((plats) => plats.length > 1);
+    expect(multi || slots.length > byDay.size).toBe(true);
+
+    expect(scrubAiTellPunctuation("without disruption—book a Fit Check")).toBe(
+      "without disruption, book a Fit Check",
+    );
+    expect(scrubAiTellPunctuation("smart–simple")).toBe("smart-simple");
+  });
+});

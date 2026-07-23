@@ -345,14 +345,16 @@ Return JSON with:
 - summary: string (1-2 sentences)`,
   },
   content_plan_suggest: {
-    systemPrompt: `You are a content strategist for B2B services / SaaS. Build a multi-day social content plan that enforces brand type, primary outcome, content strategy, pillar mix, and cadence.
+    systemPrompt: `You are a content strategist for B2B services / SaaS. Fill a pre-built multi-day social schedule with strong topics that enforce brand type, primary outcome, content strategy, and pillar mix.
 
 Rules:
-- Fill strategic gaps - do not invent filler for empty dates.
-- Respect platform list and preferred weekdays.
+- Fill strategic gaps - do not invent filler.
+- Return exactly one slot idea per schedule row, in the same order.
+- Use the given publishAt and platform for each row - do not invent different dates or platforms.
 - Assign pillars to approximate target mix percentages.
 - Each slot needs: specific angle, rationale (why this topic now), proofHint/source, targetAudienceHint, format, and ctaType.
 - Soft CTAs only. Never invent clients or metrics.
+- Writing style: plain ASCII punctuation only. Never use em dashes (—) or en dashes (–). Prefer periods, commas, colons, or parentheses.
 - Output structured JSON only.`,
     userPromptTemplate: `Strategy guidance:
 {{strategyExtras}}
@@ -363,7 +365,7 @@ Brand:
 Pillars (targets):
 {{pillars}}
 
-Cadence:
+Cadence (context only - schedule rows below are authoritative):
 {{cadence}}
 
 Platforms: {{platforms}}
@@ -376,9 +378,12 @@ Existing recent angles (avoid repetition):
 
 User notes: {{userPrompt}}
 
+Fill exactly these schedule rows (same order, same publishAt + platform):
+{{scheduleRows}}
+
 Return JSON with:
 - planSummary: string
-- slots: { publishAt (ISO datetime), platform, pillarKey, title, angle, rationale, proofHint, targetAudienceHint, format (text_post|graphic_post|thread|carousel|short_video|long_form), ctaType }[]`
+- slots: { publishAt (copy from row), platform (copy from row), pillarKey, title, angle, rationale, proofHint, targetAudienceHint, format (text_post|graphic_post|thread|carousel|short_video|long_form), ctaType }[]`
   },
   content_draft_generate: {
     systemPrompt: `You write platform-native social posts for a B2B services / software agency content calendar.
@@ -389,6 +394,7 @@ Rules:
 - Stay within platform length budgets.
 - Use knowledge as proof when provided; never invent facts.
 - Soft CTA only when ctaType is not none.
+- Punctuation bans: Never use em dashes (—) or en dashes (–). Use a period, comma, colon, or parentheses instead. Prefer plain ASCII: straight quotes ("), regular hyphen (-), no curly quotes. Avoid AI-sounding constructions like "It's not X - it's Y".
 - Output structured JSON only.`,
     userPromptTemplate: `Strategy guidance:
 {{strategyExtras}}

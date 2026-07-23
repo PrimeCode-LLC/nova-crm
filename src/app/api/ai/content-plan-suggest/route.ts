@@ -12,6 +12,10 @@ import {
   retrieveContentKnowledgeServer,
 } from "@/lib/ai/content-knowledge-server";
 import { getContentStrategyPack } from "@/lib/content-calendar/strategy-packs";
+import {
+  buildContentScheduleSlots,
+  scrubAiTellPunctuation,
+} from "@/lib/content-calendar/schedule";
 import type { ContentPlan, ContentPlanSlot } from "@/lib/content-calendar/types";
 import type { Role } from "@/lib/types";
 
@@ -58,11 +62,13 @@ const slotSchema = z.object({
   pillarKey: z.enum(PILLARS),
   title: z.string().min(1).max(200),
   angle: z.string().min(1).max(800),
-  proofHint: z.string().max(500).optional().default(""),
+  // OpenAI structured output requires every property to be in `required`
+  // (optional Zod fields are rejected with invalid_json_schema).
+  proofHint: z.string().max(500),
   ctaType: z.enum(CTAS),
-  rationale: z.string().max(500).optional().default(""),
-  format: z.enum(FORMATS).optional().default("text_post"),
-  targetAudienceHint: z.string().max(300).optional().default(""),
+  rationale: z.string().max(500),
+  format: z.enum(FORMATS),
+  targetAudienceHint: z.string().max(300),
 });
 
 const planSchema = z.object({
@@ -116,6 +122,14 @@ export async function POST(req: Request) {
   const brand = await getContentBrandServer(orgId, parsed.data.brandId);
   if (!brand) return NextResponse.json({ error: "Brand not found" }, { status: 404 });
 
+  const platforms = parsed.data.platforms.filter((p) => brand.platforms.includes(p));
+  if (platforms.length === 0) {
+    return NextResponse.json(
+      { error: "Select at least one platform that this brand supports." },
+      { status: 400 },
+    );
+  }
+
   const pack = getContentStrategyPack(brand.strategyPackId);
   const startDate = parsed.data.startDate || defaultStartDate();
   const featureCfg = settings.features.content_plan_suggest;
@@ -133,6 +147,29 @@ export async function POST(req: Request) {
   const end = new Date(startDate);
   end.setDate(end.getDate() + parsed.data.dayCount - 1);
 
+  const schedule = buildContentScheduleSlots({
+    startDate,
+    dayCount: parsed.data.dayCount,
+    platforms,
+    cadence: brand.cadence,
+  });
+  if (schedule.length === 0) {
+    return NextResponse.json(
+      {
+        error:
+          "No publish days in this window for the brand's preferred weekdays. Widen the range or adjust cadence weekdays.",
+      },
+      { status: 400 },
+    );
+  }
+
+  const scheduleRows = schedule
+    .map(
+      (s, i) =>
+        `${i + 1}. publishAt=${s.publishAt} platform=${s.platform}`,
+    )
+    .join("\n");
+
   try {
     const result = await runAiStructuredFeature({
       organizationId: orgId,
@@ -148,31 +185,47 @@ export async function POST(req: Request) {
           .map((p) => `${p.key}: ${p.targetPercent}%`)
           .join(", "),
         cadence: JSON.stringify(brand.cadence),
-        platforms: parsed.data.platforms.join(", "),
+        platforms: platforms.join(", "),
         dayCount: String(parsed.data.dayCount),
         startDate,
+        scheduleRows,
         recentAngles: (parsed.data.recentAngles ?? []).join("\n") || "none",
         ragBlock,
-        userPrompt: parsed.data.userPrompt ?? "",
+        userPrompt: [
+          parsed.data.userPrompt?.trim(),
+          `Authoritative schedule (fill in this order; keep publishAt + platform):\n${scheduleRows}`,
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
         strategyExtras: pack.promptSystemExtras,
       },
     });
 
     const now = new Date().toISOString();
-    const slots: ContentPlanSlot[] = result.slots.map((s) => ({
-      id: newId("slot"),
-      publishAt: s.publishAt,
-      platform: s.platform,
-      pillarKey: s.pillarKey,
-      title: s.title,
-      angle: s.angle,
-      proofHint: s.proofHint,
-      ctaType: s.ctaType,
-      rationale: s.rationale,
-      format: s.format,
-      targetAudienceHint: s.targetAudienceHint,
-      approved: true,
-    }));
+    const ideaCount = Math.min(result.slots.length, schedule.length);
+    const slots: ContentPlanSlot[] = [];
+    for (let i = 0; i < ideaCount; i++) {
+      const s = result.slots[i]!;
+      const sched = schedule[i]!;
+      slots.push({
+        id: newId("slot"),
+        publishAt: sched.publishAt,
+        platform: sched.platform,
+        pillarKey: s.pillarKey,
+        title: scrubAiTellPunctuation(s.title),
+        angle: scrubAiTellPunctuation(s.angle),
+        proofHint: scrubAiTellPunctuation(s.proofHint),
+        ctaType: s.ctaType,
+        rationale: scrubAiTellPunctuation(s.rationale),
+        format: s.format,
+        targetAudienceHint: scrubAiTellPunctuation(s.targetAudienceHint),
+        approved: true,
+      });
+    }
+
+    if (slots.length === 0) {
+      return NextResponse.json({ error: "AI returned no usable plan slots." }, { status: 502 });
+    }
 
     const plan: ContentPlan = {
       id: newId("cplan"),
@@ -181,9 +234,9 @@ export async function POST(req: Request) {
       startDate,
       endDate: end.toISOString().slice(0, 10),
       dayCount: parsed.data.dayCount,
-      platforms: parsed.data.platforms,
+      platforms,
       status: "draft",
-      planSummary: result.planSummary,
+      planSummary: scrubAiTellPunctuation(result.planSummary),
       slots,
       createdById: uid,
       createdAt: now,

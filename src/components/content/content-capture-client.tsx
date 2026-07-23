@@ -165,7 +165,9 @@ export function ContentCaptureClient() {
                   onValueChange={(v) => setBrandId(!v || v === "none" ? "" : v)}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Brand" />
+                    <SelectValue placeholder="Brand">
+                      {brandId ? selectedBrand?.name : "Org default library"}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Org default library</SelectItem>

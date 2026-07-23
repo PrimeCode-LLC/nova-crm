@@ -112,9 +112,20 @@ type BrandFormState = {
   defaultFormats: ContentFormat[];
   approvalRequired: boolean;
   weeklyPublishTarget: string;
+  preferredWeekdays: number[];
   knowledgeLibraryIds: string[];
   responsibilities: Partial<Record<ContentResponsibilityKey, string>>;
 };
+
+const WEEKDAY_OPTIONS: { value: number; label: string }[] = [
+  { value: 1, label: "Mon" },
+  { value: 2, label: "Tue" },
+  { value: 3, label: "Wed" },
+  { value: 4, label: "Thu" },
+  { value: 5, label: "Fri" },
+  { value: 6, label: "Sat" },
+  { value: 0, label: "Sun" },
+];
 
 const EMPTY_FORM: BrandFormState = {
   name: "",
@@ -133,6 +144,7 @@ const EMPTY_FORM: BrandFormState = {
   defaultFormats: ["text_post", "graphic_post"],
   approvalRequired: true,
   weeklyPublishTarget: "5",
+  preferredWeekdays: [1, 2, 3, 4],
   knowledgeLibraryIds: [],
   responsibilities: {},
 };
@@ -155,6 +167,9 @@ function formFromBrand(brand: ContentBrand): BrandFormState {
     defaultFormats: brand.defaultFormats.length ? [...brand.defaultFormats] : ["text_post"],
     approvalRequired: brand.approvalRequired,
     weeklyPublishTarget: String(brand.cadence.weeklyPublishTarget ?? 5),
+    preferredWeekdays: brand.cadence.preferredWeekdays?.length
+      ? [...brand.cadence.preferredWeekdays]
+      : [1, 2, 3, 4],
     knowledgeLibraryIds: [...brand.knowledgeLibraryIds],
     responsibilities: { ...(brand.responsibilities ?? {}) },
   };
@@ -392,6 +407,9 @@ export function ContentBrandsClient() {
           cadence: {
             ...editingBrand.cadence,
             weeklyPublishTarget,
+            preferredWeekdays: form.preferredWeekdays.length
+              ? form.preferredWeekdays
+              : [1, 2, 3, 4],
           },
         });
       } else {
@@ -400,6 +418,7 @@ export function ContentBrandsClient() {
           positioning: form.positioning.trim() || undefined,
           voiceRules: form.voiceRules.trim() || undefined,
           strategyPackId: "b2b_agency_v1",
+          preferredWeekdays: form.preferredWeekdays,
         });
       }
       closeForm();
@@ -798,18 +817,55 @@ export function ContentBrandsClient() {
                         }
                       />
                     </div>
-                    <div className="flex items-end pb-1">
-                      <label className="flex items-center gap-2 text-sm">
-                        <Checkbox
-                          checked={form.approvalRequired}
-                          onCheckedChange={(c) =>
-                            setForm((prev) => ({ ...prev, approvalRequired: c === true }))
-                          }
-                        />
-                        Approval required before publish
-                      </label>
+                    <div className="space-y-2">
+                      <Label>Preferred publish days</Label>
+                      <div className="flex flex-wrap gap-1.5">
+                        {WEEKDAY_OPTIONS.map((day) => {
+                          const on = form.preferredWeekdays.includes(day.value);
+                          return (
+                            <button
+                              key={day.value}
+                              type="button"
+                              onClick={() =>
+                                setForm((prev) => {
+                                  const next = on
+                                    ? prev.preferredWeekdays.filter((d) => d !== day.value)
+                                    : [...prev.preferredWeekdays, day.value].sort((a, b) => {
+                                        const order = [1, 2, 3, 4, 5, 6, 0];
+                                        return order.indexOf(a) - order.indexOf(b);
+                                      });
+                                  return {
+                                    ...prev,
+                                    preferredWeekdays: next.length ? next : [1, 2, 3, 4],
+                                  };
+                                })
+                              }
+                              className={cn(
+                                "rounded-lg border px-2.5 py-1 text-xs transition-colors",
+                                on
+                                  ? "border-primary bg-primary/10 text-foreground"
+                                  : "border-border text-muted-foreground hover:bg-muted/50",
+                              )}
+                            >
+                              {day.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Plan generation skips days that are not selected.
+                      </p>
                     </div>
                   </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={form.approvalRequired}
+                      onCheckedChange={(c) =>
+                        setForm((prev) => ({ ...prev, approvalRequired: c === true }))
+                      }
+                    />
+                    Approval required before publish
+                  </label>
                 </div>
               ) : null}
 

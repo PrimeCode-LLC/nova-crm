@@ -207,7 +207,9 @@ export function ContentCalendarClient() {
               <Filter className="h-4 w-4 text-muted-foreground" />
               <Select value={brandId} onValueChange={(v) => setBrandId(v ?? "all")}>
                 <SelectTrigger className="w-[200px]">
-                  <SelectValue placeholder="Brand" />
+                  <SelectValue placeholder="Brand">
+                    {brandId === "all" ? "All brands" : selectedBrand?.name}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All brands</SelectItem>
@@ -220,7 +222,11 @@ export function ContentCalendarClient() {
               </Select>
               <Select value={platform} onValueChange={(v) => setPlatform(v ?? "all")}>
                 <SelectTrigger className="w-[160px]">
-                  <SelectValue placeholder="Platform" />
+                  <SelectValue placeholder="Platform">
+                    {platform === "all"
+                      ? "All platforms"
+                      : CONTENT_PLATFORM_LABELS[platform as ContentPlatform]}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All platforms</SelectItem>
@@ -236,7 +242,9 @@ export function ContentCalendarClient() {
                 onValueChange={(v) => setViewMode(v as "week" | "month")}
               >
                 <SelectTrigger className="w-[120px]">
-                  <SelectValue />
+                  <SelectValue>
+                    {viewMode === "week" ? "Week" : "Month"}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="week">Week</SelectItem>
