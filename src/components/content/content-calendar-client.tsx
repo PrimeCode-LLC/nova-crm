@@ -99,7 +99,7 @@ export function ContentCalendarClient() {
 
   const [brandId, setBrandId] = React.useState<string>("all");
   const [platform, setPlatform] = React.useState<string>("all");
-  const [viewMode, setViewMode] = React.useState<"week" | "month">("week");
+  const [viewMode, setViewMode] = React.useState<"week" | "month">("month");
   const [anchor, setAnchor] = React.useState(() => new Date());
   const [fillOpen, setFillOpen] = React.useState(false);
 

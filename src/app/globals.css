@@ -71,7 +71,7 @@
   --accent: oklch(0.955 0.025 265);
   --accent-foreground: oklch(0.32 0.14 265);     /* ~7:1 vs accent bg, AA */
   --destructive: oklch(0.52 0.23 28);            /* ~5.0:1 vs white, AA */
-  --success: oklch(0.5 0.16 160);                /* ~4.6:1 vs white, AA */
+  --success: oklch(0.48 0.16 145);               /* emerald, ~5.0:1 vs white, AA */
   --warning: oklch(0.55 0.17 60);                /* shifted toward amber, ~4.5:1, AA */
   --info: oklch(0.52 0.18 230);                  /* ~5.0:1 vs white, AA */
   --border: oklch(0.9 0.005 265);
@@ -110,7 +110,7 @@
   --accent: oklch(0.25 0.04 265);
   --accent-foreground: oklch(0.85 0.12 265);
   --destructive: oklch(0.68 0.22 22);
-  --success: oklch(0.72 0.18 160);
+  --success: oklch(0.7 0.19 145);                /* emerald — clearer green than mint */
   --warning: oklch(0.8 0.17 75);
   --info: oklch(0.7 0.16 230);
   --border: oklch(1 0 0 / 8%);

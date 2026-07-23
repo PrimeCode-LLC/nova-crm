@@ -86,7 +86,7 @@ export function FollowupScheduleChart({
                   fontSize: 12,
                 }}
               />
-              <Bar dataKey="completed" name="Done" stackId="a" fill="var(--chart-3)" isAnimationActive={!compact} />
+              <Bar dataKey="completed" name="Done" stackId="a" fill="var(--success)" isAnimationActive={!compact} />
               <Bar dataKey="scheduled" name="Scheduled" stackId="a" fill="var(--chart-1)" isAnimationActive={!compact} />
               <Bar dataKey="overdue" name="Overdue" stackId="a" fill="var(--destructive)" isAnimationActive={!compact} />
             </BarChart>
@@ -94,7 +94,7 @@ export function FollowupScheduleChart({
         </div>
         <div className="mt-2 flex shrink-0 flex-wrap gap-x-4 gap-y-1 pb-0.5 text-[11px] leading-none text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-3)" }} />{" "}
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--success)" }} />{" "}
             Done
           </span>
           <span className="flex items-center gap-1.5">

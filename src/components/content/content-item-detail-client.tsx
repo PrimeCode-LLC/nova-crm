@@ -690,26 +690,35 @@ export function ContentItemDetailClient() {
             <Card key={platform}>
               <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
                 <CardTitle className="text-base">{CONTENT_PLATFORM_LABELS[platform]}</CardTitle>
-                <div className="flex gap-2">
-                  <span
-                    className={
-                      body.length > limit ? "text-xs text-destructive" : "text-xs text-muted-foreground"
-                    }
-                  >
-                    {body.length}/{limit}
-                  </span>
-                  <Button size="sm" variant="outline" type="button" onClick={() => void copy(platform)}>
-                    <Copy className="h-3.5 w-3.5" /> Copy
-                  </Button>
-                </div>
+                <span
+                  className={
+                    body.length > limit ? "text-xs text-destructive" : "text-xs text-muted-foreground"
+                  }
+                >
+                  {body.length}/{limit}
+                </span>
               </CardHeader>
               <CardContent>
-                <Textarea
-                  value={body}
-                  disabled={!canEdit}
-                  rows={8}
-                  onChange={(e) => setBodies((prev) => ({ ...prev, [platform]: e.target.value }))}
-                />
+                <div className="relative">
+                  <Textarea
+                    value={body}
+                    disabled={!canEdit}
+                    rows={8}
+                    className="pr-10"
+                    onChange={(e) => setBodies((prev) => ({ ...prev, [platform]: e.target.value }))}
+                  />
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="absolute right-1.5 top-1.5 h-7 w-7 text-muted-foreground hover:text-foreground"
+                    title="Copy"
+                    aria-label="Copy"
+                    onClick={() => void copy(platform)}
+                  >
+                    <Copy className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           );
