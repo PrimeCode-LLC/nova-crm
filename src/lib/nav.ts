@@ -30,6 +30,7 @@ import {
   Crosshair,
   BookOpen,
   UserCircle2,
+  Clapperboard,
   type LucideIcon,
 } from "lucide-react";
 
@@ -92,6 +93,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/followups", label: "Followups", icon: CalendarClock },
       { href: "/scheduling", label: "Scheduling", icon: CalendarDays },
       { href: "/tasks", label: "Tasks", icon: ListTodo },
+      { href: "/content", label: "Content", icon: Clapperboard },
       { href: "/scripts", label: "Scripts", icon: FileCode2 },
       {
         href: "/outreach",

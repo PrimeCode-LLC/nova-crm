@@ -2,12 +2,16 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, MailWarning, MessageSquareReply, Timer, ListTodo } from "lucide-react";
+import { AlertTriangle, ArrowRight, Clapperboard, MailWarning, MessageSquareReply, Timer, ListTodo } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { UserChip } from "@/components/common/user-chip";
 import { cn } from "@/lib/utils";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
+import {
+  CONTENT_OPEN_STATUSES,
+  type ContentItem,
+} from "@/lib/content-calendar/types";
 import { contactFirstName, leadEntityLabel } from "@/lib/leads/lead-display-label";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 
@@ -56,6 +60,7 @@ export function DashboardNeedsAttention({
   followups,
   plans,
   tasks,
+  contentItems,
   currentUserId,
   wall,
   className,
@@ -64,6 +69,8 @@ export function DashboardNeedsAttention({
   followups: readonly Followup[];
   plans: readonly FollowupPlan[];
   tasks: readonly LeadTask[];
+  /** Optional overdue content calendar posts for the current user. */
+  contentItems?: readonly ContentItem[];
   currentUserId: string;
   wall?: boolean;
   className?: string;
@@ -74,6 +81,23 @@ export function DashboardNeedsAttention({
   const leadLabel = (leadId: string | undefined) => leadEntityLabel(leadFor(leadId));
 
   const items: AttentionItem[] = [];
+
+  for (const content of contentItems ?? []) {
+    if (!CONTENT_OPEN_STATUSES.includes(content.status)) continue;
+    if (content.assigneeUserId !== currentUserId && content.ownerUserId !== currentUserId) continue;
+    const due = timestamp(content.dueAt, Number.POSITIVE_INFINITY);
+    if (due >= now) continue;
+    items.push({
+      id: `content-${content.id}`,
+      label: `Overdue content · ${content.title}`,
+      detail: content.angle.slice(0, 120),
+      href: `/content/${content.id}`,
+      time: due,
+      severity: "warning",
+      icon: Clapperboard,
+      ownerId: content.assigneeUserId || content.ownerUserId,
+    });
+  }
 
   for (const lead of leads) {
     if (!hasPendingReplyReview(lead)) continue;

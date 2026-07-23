@@ -319,6 +319,99 @@ Reply in plain language (markdown ok). Do not output JSON.`,
     systemPrompt: `Indexing task, not used for generation.`,
     userPromptTemplate: `{{content}}`,
   },
+  content_capture_normalize: {
+    systemPrompt: `You turn messy delivery notes into a clean, public-safe case study / lesson document for a B2B services or software agency knowledge base.
+
+Rules:
+- Structure markdown with: Title, Context, Problem, Solution, Outcome, Lessons, Tags.
+- Prefer concrete language. Do not invent metrics, client names, or logos.
+- If publicSafe is false, strip or generalize confidential details and note what was redacted.
+- Output structured JSON only.`,
+    userPromptTemplate: `Brand context:
+{{brandContext}}
+
+publicSafe: {{publicSafe}}
+
+Raw notes:
+Problem: {{problem}}
+Solution: {{solution}}
+Outcome: {{outcome}}
+Extra notes: {{notes}}
+
+Return JSON with:
+- title: string
+- markdown: string (full case study / lesson)
+- tags: string[]
+- summary: string (1-2 sentences)`,
+  },
+  content_plan_suggest: {
+    systemPrompt: `You are a content strategist for B2B services / SaaS. Build a multi-day social content plan that enforces brand type, primary outcome, content strategy, pillar mix, and cadence.
+
+Rules:
+- Fill strategic gaps — do not invent filler for empty dates.
+- Respect platform list and preferred weekdays.
+- Assign pillars to approximate target mix percentages.
+- Each slot needs: specific angle, rationale (why this topic now), proofHint/source, targetAudienceHint, format, and ctaType.
+- Soft CTAs only. Never invent clients or metrics.
+- Output structured JSON only.`,
+    userPromptTemplate: `Strategy guidance:
+{{strategyExtras}}
+
+Brand:
+{{brandContext}}
+
+Pillars (targets):
+{{pillars}}
+
+Cadence:
+{{cadence}}
+
+Platforms: {{platforms}}
+Day count: {{dayCount}}
+Start date (ISO date): {{startDate}}
+Existing recent angles (avoid repetition):
+{{recentAngles}}
+
+{{ragBlock}}
+
+User notes: {{userPrompt}}
+
+Return JSON with:
+- planSummary: string
+- slots: { publishAt (ISO datetime), platform, pillarKey, title, angle, rationale, proofHint, targetAudienceHint, format (text_post|thread|carousel|short_video|long_form), ctaType }[]`,
+  },
+  content_draft_generate: {
+    systemPrompt: `You write platform-native social posts for a B2B services / software agency content calendar.
+
+Rules:
+- Match brand voice, banned phrases, and goal.
+- One idea. Strong first-line hook.
+- Stay within platform length budgets.
+- Use knowledge as proof when provided; never invent facts.
+- Soft CTA only when ctaType is not none.
+- Output structured JSON only.`,
+    userPromptTemplate: `Strategy guidance:
+{{strategyExtras}}
+
+Brand:
+{{brandContext}}
+
+Slot:
+platform: {{platform}}
+pillar: {{pillarKey}}
+title: {{title}}
+angle: {{angle}}
+proofHint: {{proofHint}}
+ctaType: {{ctaType}}
+charLimit: {{charLimit}}
+
+{{ragBlock}}
+
+Return JSON with:
+- hook: string
+- body: string
+- citations: { title: string, excerpt: string }[]`,
+  },
 };
 
 export function buildRagInstructionBlock(mode: AiRagMode, chunks: { title: string; content: string }[]): string {

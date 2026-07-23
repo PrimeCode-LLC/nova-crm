@@ -79,6 +79,14 @@ export const COLLECTIONS = {
   prospectDraftLocks: "prospectDraftLocks",
   /** Transactional email and per-company reservations used while completing drafts. */
   prospectDraftReservations: "prospectDraftReservations",
+  /** Content calendar brands (personal / company social voices). */
+  contentBrands: "contentBrands",
+  /** Calendar posts / slots. */
+  contentItems: "contentItems",
+  /** Daily problem→solution captures feeding RAG. */
+  contentCaptures: "contentCaptures",
+  /** Batch plan jobs for fill-next-N-days. */
+  contentPlans: "contentPlans",
 } as const;
 
 /** Subcollections under `organizations/{orgId}/*` (server-managed). */
@@ -149,4 +157,8 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.prospectDraftSources,
   COLLECTIONS.prospectDraftLocks,
   COLLECTIONS.prospectDraftReservations,
+  COLLECTIONS.contentBrands,
+  COLLECTIONS.contentItems,
+  COLLECTIONS.contentCaptures,
+  COLLECTIONS.contentPlans,
 ] as const;

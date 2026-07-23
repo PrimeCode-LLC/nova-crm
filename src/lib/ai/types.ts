@@ -13,6 +13,9 @@ export type AiFeatureKey =
   | "prospect_draft_extract"
   | "opportunity_fit"
   | "opportunity_fit_discuss"
+  | "content_capture_normalize"
+  | "content_plan_suggest"
+  | "content_draft_generate"
   | "rag_index";
 
 export type AiRagMode = "strict" | "reference" | "open";
@@ -21,7 +24,8 @@ export type AiLibraryScope =
   | { type: "org" }
   | { type: "channel"; channelKey: string }
   | { type: "profile"; profileId: string }
-  | { type: "campaign"; campaignId: string };
+  | { type: "campaign"; campaignId: string }
+  | { type: "content_brand"; brandId: string };
 
 export interface AiFeatureConfig {
   enabled: boolean;
@@ -170,6 +174,18 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
       ragMode: "strict",
     },
     opportunity_fit_discuss: {
+      enabled: true,
+      ragMode: "reference",
+    },
+    content_capture_normalize: {
+      enabled: true,
+      ragMode: "open",
+    },
+    content_plan_suggest: {
+      enabled: true,
+      ragMode: "reference",
+    },
+    content_draft_generate: {
       enabled: true,
       ragMode: "reference",
     },

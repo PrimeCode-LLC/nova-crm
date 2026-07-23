@@ -39,12 +39,13 @@ function cosineSimilarity(a: number[], b: number[]): number {
 
 function libraryMatchesScope(
   scope: AiLibraryScope,
-  filter: { channel?: string; profileId?: string; campaignId?: string },
+  filter: { channel?: string; profileId?: string; campaignId?: string; brandId?: string },
 ): boolean {
   if (scope.type === "org") return true;
   if (scope.type === "channel" && filter.channel) return scope.channelKey === filter.channel;
   if (scope.type === "profile" && filter.profileId) return scope.profileId === filter.profileId;
   if (scope.type === "campaign" && filter.campaignId) return scope.campaignId === filter.campaignId;
+  if (scope.type === "content_brand" && filter.brandId) return scope.brandId === filter.brandId;
   return false;
 }
 
@@ -159,7 +160,7 @@ export async function retrieveRagChunksServer(input: {
    * non-Fit-Check libraries are unaffected).
    */
   sections?: string[];
-  scope?: { channel?: string; profileId?: string; campaignId?: string };
+  scope?: { channel?: string; profileId?: string; campaignId?: string; brandId?: string };
   topK?: number;
   queryEmbedding?: number[];
 }): Promise<RagChunkHit[]> {

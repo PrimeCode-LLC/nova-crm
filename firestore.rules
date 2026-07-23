@@ -428,6 +428,35 @@ service cloud.firestore {
       allow delete: if signedIn() && inCallerOrg(resource.data);
     }
 
+    // Content calendar (brands, items, captures, plans) — tenant-scoped like buyerPersonas.
+    match /contentBrands/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /contentItems/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /contentCaptures/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /contentPlans/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
     match /prospectingStrategies/{id} {
       allow read: if tenantReadable();
       allow create: if signedIn() && isCreatingInOwnOrg();

@@ -103,8 +103,15 @@ export async function ensureOrgRolesSeeded(
 
   const snap = await col.get();
   const existing = new Map<string, WorkspaceRoleDoc>();
+  const rawModuleKeysByRole = new Map<string, Set<string>>();
   for (const doc of snap.docs) {
-    existing.set(doc.id, parseWorkspaceRoleDoc(doc.id, doc.data() as Record<string, unknown>));
+    const data = doc.data() as Record<string, unknown>;
+    existing.set(doc.id, parseWorkspaceRoleDoc(doc.id, data));
+    const rawModules =
+      data.modules && typeof data.modules === "object"
+        ? (data.modules as Record<string, unknown>)
+        : {};
+    rawModuleKeysByRole.set(doc.id, new Set(Object.keys(rawModules)));
   }
 
   const batch = col.firestore.batch();
@@ -119,7 +126,11 @@ export async function ensureOrgRolesSeeded(
       existing.set(key, doc);
       writes += 1;
     } else if (current.kind === "system") {
-      const merged = mergeCatalogAdditions(current, SYSTEM_ROLE_PRESETS[key]);
+      const merged = mergeCatalogAdditions(
+        current,
+        SYSTEM_ROLE_PRESETS[key],
+        rawModuleKeysByRole.get(key),
+      );
       const changed =
         JSON.stringify(merged.modules) !== JSON.stringify(current.modules) ||
         JSON.stringify(merged.actions) !== JSON.stringify(current.actions);

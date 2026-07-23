@@ -35,7 +35,16 @@ const createSchema = z.object({
   sourceType: z.enum(["markdown", "script", "upload"]).default("markdown"),
   sourceRef: z.string().optional(),
   knowledgeSection: z
-    .enum(["icp", "services", "pricing", "case_studies", "playbook", "website", "other"])
+    .enum([
+      "icp",
+      "services",
+      "pricing",
+      "case_studies",
+      "playbook",
+      "website",
+      "content_voice",
+      "other",
+    ])
     .optional(),
   indexNow: z.boolean().optional(),
 });

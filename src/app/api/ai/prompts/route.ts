@@ -9,8 +9,15 @@ import { recordAudit } from "@/lib/firestore/audit";
 const FEATURE_KEYS = [
   "dashboard_brief",
   "lead_analyze",
+  "intent_suggest",
   "followup_suggest",
   "email_reply",
+  "prospect_draft_extract",
+  "opportunity_fit",
+  "opportunity_fit_discuss",
+  "content_capture_normalize",
+  "content_plan_suggest",
+  "content_draft_generate",
   "rag_index",
 ] as const;
 

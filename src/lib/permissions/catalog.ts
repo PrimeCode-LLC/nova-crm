@@ -29,6 +29,7 @@ export type ModuleKey =
   | "followups"
   | "scheduling"
   | "tasks"
+  | "content_calendar"
   | "scripts"
   | "email_outreach"
   | "inbox"
@@ -151,6 +152,12 @@ export const MODULE_META: Record<ModuleKey, ModuleMeta> = {
     description: "Lead tasks",
     cluster: "workspace",
     href: "/tasks",
+  },
+  content_calendar: {
+    label: "Content",
+    description: "Social content calendar, brands, and captures",
+    cluster: "workspace",
+    href: "/content",
   },
   scripts: {
     label: "Scripts",

@@ -38,7 +38,7 @@ import {
 import { can, canAction } from "@/lib/permissions/can";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { roleAtLeast } from "@/lib/platform/org-role";
-import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
+import { DashboardNeedsAttentionWithContent } from "@/components/dashboard/dashboard-needs-attention-with-content";
 import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
 import { ChannelFunnelsSettings } from "@/components/dashboard/channel-funnels-settings";
 import { DashboardSettingsSheet } from "@/components/dashboard/dashboard-settings-sheet";
@@ -892,7 +892,7 @@ export default function DashboardPage() {
             {w.replyReviews ? <DashboardReplyReviews leads={scopedLeads} /> : null}
 
             {!opsLayout && !frontlineLayout && w.needsAttention ? (
-              <DashboardNeedsAttention
+              <DashboardNeedsAttentionWithContent
                 leads={scopedLeads}
                 followups={workflowFollowups}
                 plans={workflowPlans}

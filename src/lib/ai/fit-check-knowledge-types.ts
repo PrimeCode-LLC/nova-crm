@@ -16,6 +16,7 @@ export const KNOWLEDGE_SECTIONS = [
   "case_studies",
   "playbook",
   "website",
+  "content_voice",
   "other",
 ] as const;
 
@@ -28,6 +29,7 @@ export const KNOWLEDGE_SECTION_LABELS: Record<KnowledgeSection, string> = {
   case_studies: "Case studies & proof",
   playbook: "Category playbook",
   website: "Website page",
+  content_voice: "Content voice & brand",
   other: "Other",
 };
 

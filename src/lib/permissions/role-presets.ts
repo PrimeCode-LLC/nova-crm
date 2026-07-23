@@ -390,14 +390,21 @@ export const SYSTEM_ROLE_IDS = Object.keys(SYSTEM_ROLE_PRESETS) as Exclude<
   "data_scraper"
 >[];
 
-/** Additive merge: fill missing module/action keys from preset without overwriting custom values. */
+/**
+ * Additive merge: fill module/action keys that were never stored on the role doc.
+ * Pass `rawModuleKeys` from the Firestore document so empty placeholders created by
+ * parseWorkspaceRoleDoc for brand-new catalog keys still get preset defaults.
+ */
 export function mergeCatalogAdditions(
   existing: WorkspaceRoleDoc,
   preset: SystemRolePreset,
+  rawModuleKeys?: Iterable<string>,
 ): WorkspaceRoleDoc {
+  const known = rawModuleKeys ? new Set(rawModuleKeys) : null;
   const modules = { ...existing.modules };
   for (const key of MODULE_KEYS) {
-    if (!modules[key]) {
+    const missingFromRaw = known ? !known.has(key) : !modules[key];
+    if (missingFromRaw) {
       modules[key] = preset.modules[key] ?? emptyModulePermission();
     }
   }
