@@ -7,14 +7,18 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserChip } from "@/components/common/user-chip";
 import { MailboxUtilizationDialog } from "@/components/dashboard/mailbox-utilization-dialog";
+import { MailboxUtilizationSettings } from "@/components/dashboard/mailbox-utilization-settings";
 import { useMailboxUtilization } from "@/hooks/use-mailbox-utilization";
+import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
 import {
   MAILBOX_UTILIZATION_STATUS_LABEL,
   pickNeedsAttentionRows,
   pickWellUtilizedRows,
+  summarizeMailboxUtilization,
   type MailboxUtilizationRow,
   type MailboxUtilizationStatus,
 } from "@/lib/email/mailbox-utilization";
+import { isMailboxUtilizationVisible } from "@/lib/dashboard-preferences";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -120,14 +124,58 @@ export function MailboxUtilizationPanel({
   className?: string;
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
-  const { rows, summary, loading, error } = useMailboxUtilization({
+  const { rows, loading, error } = useMailboxUtilization({
     enabled: true,
     isDemo,
     currentUserId,
   });
+  const {
+    prefs,
+    setMailboxUtilizationVisible,
+    setAllMailboxUtilizationVisible,
+  } = useDashboardPreferences(currentUserId || "anon");
 
-  const needs = React.useMemo(() => pickNeedsAttentionRows(rows, wall ? 6 : 3), [rows, wall]);
-  const best = React.useMemo(() => pickWellUtilizedRows(rows, wall ? 6 : 3), [rows, wall]);
+  const settingsOptions = React.useMemo(
+    () =>
+      rows.map((row) => ({
+        ownerUid: row.ownerUid,
+        mailboxId: row.mailboxId,
+        label: row.label,
+        emailAddress: row.emailAddress,
+      })),
+    [rows],
+  );
+
+  const visibleRows = React.useMemo(
+    () =>
+      rows.filter((row) =>
+        isMailboxUtilizationVisible(
+          prefs.mailboxUtilizationVisible,
+          row.ownerUid,
+          row.mailboxId,
+        ),
+      ),
+    [rows, prefs.mailboxUtilizationVisible],
+  );
+
+  const summary = React.useMemo(
+    () => (visibleRows.length ? summarizeMailboxUtilization(visibleRows) : null),
+    [visibleRows],
+  );
+
+  const needs = React.useMemo(
+    () => pickNeedsAttentionRows(visibleRows, wall ? 6 : 3),
+    [visibleRows, wall],
+  );
+  const best = React.useMemo(
+    () => pickWellUtilizedRows(visibleRows, wall ? 6 : 3),
+    [visibleRows, wall],
+  );
+
+  const allKeys = React.useMemo(
+    () => rows.map((row) => ({ ownerUid: row.ownerUid, mailboxId: row.mailboxId })),
+    [rows],
+  );
 
   return (
     <>
@@ -143,17 +191,26 @@ export function MailboxUtilizationPanel({
               </CardDescription>
             </div>
             {!wall ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-                onClick={() => setDetailOpen(true)}
-                aria-label="Open full inbox utilization"
-                title="Open full inbox utilization"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </Button>
+              <div className="flex shrink-0 items-center gap-0.5">
+                <MailboxUtilizationSettings
+                  mailboxes={settingsOptions}
+                  visible={prefs.mailboxUtilizationVisible}
+                  onChange={setMailboxUtilizationVisible}
+                  onShowAll={() => setAllMailboxUtilizationVisible(allKeys, true)}
+                  onHideAll={() => setAllMailboxUtilizationVisible(allKeys, false)}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  className="text-muted-foreground hover:text-foreground"
+                  onClick={() => setDetailOpen(true)}
+                  aria-label="Open full inbox utilization"
+                  title="Open full inbox utilization"
+                >
+                  <Maximize2 className="h-3.5 w-3.5" />
+                </Button>
+              </div>
             ) : null}
           </div>
           {summary && !loading ? (
@@ -189,6 +246,10 @@ export function MailboxUtilizationPanel({
             <p className="py-6 text-center text-xs text-muted-foreground">
               No mailboxes yet. Connect inboxes in Settings → Email.
             </p>
+          ) : visibleRows.length === 0 ? (
+            <p className="py-6 text-center text-xs text-muted-foreground">
+              All inboxes are hidden. Use settings to show some again.
+            </p>
           ) : (
             <div className="grid gap-5 sm:grid-cols-2">
               <Column title="Needs attention" empty="All inboxes look healthy" wall={wall}>
@@ -210,7 +271,7 @@ export function MailboxUtilizationPanel({
         <MailboxUtilizationDialog
           open={detailOpen}
           onOpenChange={setDetailOpen}
-          rows={rows}
+          rows={visibleRows}
           summary={summary}
         />
       ) : null}

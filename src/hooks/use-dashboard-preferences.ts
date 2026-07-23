@@ -12,6 +12,7 @@ import {
   type DashboardViewMode,
   type DashboardWidgetKey,
   type DashboardWidgets,
+  mailboxUtilizationPrefsKey,
 } from "@/lib/dashboard-preferences";
 import type { ChannelKey, Role } from "@/lib/types";
 
@@ -125,6 +126,32 @@ export function useDashboardPreferences(userId: string) {
     [commit],
   );
 
+  const setMailboxUtilizationVisible = React.useCallback(
+    (ownerUid: string, mailboxId: string, enabled: boolean) => {
+      commit((prev) => ({
+        ...prev,
+        mailboxUtilizationVisible: {
+          ...prev.mailboxUtilizationVisible,
+          [mailboxUtilizationPrefsKey(ownerUid, mailboxId)]: enabled,
+        },
+      }));
+    },
+    [commit],
+  );
+
+  const setAllMailboxUtilizationVisible = React.useCallback(
+    (keys: { ownerUid: string; mailboxId: string }[], enabled: boolean) => {
+      commit((prev) => {
+        const mailboxUtilizationVisible = { ...prev.mailboxUtilizationVisible };
+        for (const { ownerUid, mailboxId } of keys) {
+          mailboxUtilizationVisible[mailboxUtilizationPrefsKey(ownerUid, mailboxId)] = enabled;
+        }
+        return { ...prev, mailboxUtilizationVisible };
+      });
+    },
+    [commit],
+  );
+
   const reset = React.useCallback(() => {
     commit(defaultDashboardPreferences());
   }, [commit]);
@@ -141,6 +168,8 @@ export function useDashboardPreferences(userId: string) {
     setAllChannelFunnelsVisible,
     setStrategyScoreboardVisible,
     setAllStrategyScoreboardVisible,
+    setMailboxUtilizationVisible,
+    setAllMailboxUtilizationVisible,
     reset,
   };
 }

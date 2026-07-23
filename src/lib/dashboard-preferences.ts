@@ -39,6 +39,12 @@ export type ChannelFunnelsVisibility = Record<ChannelKey, boolean>;
  */
 export type StrategyScoreboardVisibility = Record<string, boolean>;
 
+/**
+ * Per-mailbox visibility on Inbox utilization.
+ * Missing ids default to visible (true).
+ */
+export type MailboxUtilizationVisibility = Record<string, boolean>;
+
 export type DashboardPreferences = {
   viewMode: DashboardViewMode;
   /** When set (owners only), layout follows this CRM role instead of the real viewer. */
@@ -48,6 +54,11 @@ export type DashboardPreferences = {
   channelFunnelsVisible: ChannelFunnelsVisibility;
   /** Which published strategies appear on the Strategy scoreboard. */
   strategyScoreboardVisible: StrategyScoreboardVisibility;
+  /**
+   * Which mailboxes appear on Inbox utilization.
+   * Keys are `${ownerUid}:${mailboxId}`. Missing ids default to visible.
+   */
+  mailboxUtilizationVisible: MailboxUtilizationVisibility;
 };
 
 export const DASHBOARD_VIEW_MODE_OPTIONS: {
@@ -142,6 +153,7 @@ export function defaultDashboardPreferences(): DashboardPreferences {
     widgets: { ...DEFAULT_DASHBOARD_WIDGETS },
     channelFunnelsVisible: { ...DEFAULT_CHANNEL_FUNNELS_VISIBLE },
     strategyScoreboardVisible: {},
+    mailboxUtilizationVisible: {},
   };
 }
 
@@ -151,6 +163,19 @@ export function isStrategyScoreboardVisible(
   strategyId: string,
 ): boolean {
   return visible[strategyId] !== false;
+}
+
+export function mailboxUtilizationPrefsKey(ownerUid: string, mailboxId: string): string {
+  return `${ownerUid}:${mailboxId}`;
+}
+
+/** Missing key → visible. Explicit false hides the mailbox. */
+export function isMailboxUtilizationVisible(
+  visible: MailboxUtilizationVisibility,
+  ownerUid: string,
+  mailboxId: string,
+): boolean {
+  return visible[mailboxUtilizationPrefsKey(ownerUid, mailboxId)] !== false;
 }
 
 export const DEFAULT_DASHBOARD_PREFERENCES: DashboardPreferences = defaultDashboardPreferences();
@@ -210,6 +235,12 @@ export function parseDashboardPreferences(raw: unknown): DashboardPreferences {
       if (typeof v === "boolean") strategyScoreboardVisible[id] = v;
     }
   }
+  const mailboxUtilizationVisible: MailboxUtilizationVisibility = {};
+  if (o.mailboxUtilizationVisible && typeof o.mailboxUtilizationVisible === "object") {
+    for (const [id, v] of Object.entries(o.mailboxUtilizationVisible)) {
+      if (typeof v === "boolean") mailboxUtilizationVisible[id] = v;
+    }
+  }
 
   return {
     viewMode,
@@ -217,6 +248,7 @@ export function parseDashboardPreferences(raw: unknown): DashboardPreferences {
     widgets,
     channelFunnelsVisible: parseChannelFunnelsVisible(o.channelFunnelsVisible),
     strategyScoreboardVisible,
+    mailboxUtilizationVisible,
   };
 }
 
