@@ -4,6 +4,7 @@ import { isContentItemOverdue, buildContentChecklist, type ContentCaptureRequire
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import { can } from "@/lib/permissions/can";
 import {
+  captureDutyBannerCopy,
   isBehindCaptureCadence,
   isCapturerIdle,
   normalizeCapturePolicy,
@@ -284,5 +285,55 @@ describe("capture policy", () => {
         nowMs,
       }),
     ).toBe(false);
+  });
+
+  it("builds personal capture duty banner copy", () => {
+    expect(captureDutyBannerCopy([])).toBeNull();
+    const behind = captureDutyBannerCopy([
+      {
+        brand: { name: "Hannan Khan" },
+        progress: {
+          policy: normalizeCapturePolicy({ capturesPerWeek: 2, idleDays: 7 }),
+          weekCount: 0,
+          target: 2,
+          behindCadence: true,
+          idle: false,
+          lastCaptureAt: "2026-07-20T00:00:00.000Z",
+          daysSinceLast: 3,
+        },
+      },
+    ]);
+    expect(behind?.headline).toContain("Hannan Khan");
+    expect(behind?.headline).toMatch(/pending this week/i);
+    expect(behind?.detail).toContain("0/2");
+
+    const multi = captureDutyBannerCopy([
+      {
+        brand: { name: "Brand A" },
+        progress: {
+          policy: normalizeCapturePolicy({ capturesPerWeek: 1 }),
+          weekCount: 0,
+          target: 1,
+          behindCadence: true,
+          idle: false,
+          lastCaptureAt: null,
+          daysSinceLast: null,
+        },
+      },
+      {
+        brand: { name: "Brand B" },
+        progress: {
+          policy: normalizeCapturePolicy({ capturesPerWeek: 0, idleDays: 7 }),
+          weekCount: 0,
+          target: 0,
+          behindCadence: false,
+          idle: true,
+          lastCaptureAt: null,
+          daysSinceLast: null,
+        },
+      },
+    ]);
+    expect(multi?.headline).toMatch(/weekly capture is pending/i);
+    expect(multi?.detail).toContain("Brand A and Brand B");
   });
 });

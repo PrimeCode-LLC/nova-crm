@@ -10,15 +10,10 @@ import { cn } from "@/lib/utils";
 import {
   CONTENT_CHECKLIST_STEP_LABELS,
   CONTENT_OPEN_STATUSES,
-  resolveBrandResponsibility,
-  type ContentBrand,
-  type ContentCapture,
   type ContentItem,
 } from "@/lib/content-calendar/types";
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import { fmtRelative } from "@/lib/format";
-
-const CAPTURE_IDLE_DAYS = 7;
 
 type PlateRow = {
   id: string;
@@ -72,26 +67,6 @@ function buildMyContentRows(items: readonly ContentItem[], currentUserId: string
   });
 }
 
-function idleCaptureBrandNames(
-  brands: ContentBrand[],
-  captures: ContentCapture[],
-  currentUserId: string,
-  now: number,
-): string[] {
-  const cutoff = now - CAPTURE_IDLE_DAYS * 86_400_000;
-  return brands
-    .filter((brand) => {
-      if (!brand.active) return false;
-      const capturer = resolveBrandResponsibility(brand, "capturer");
-      if (!capturer || capturer !== currentUserId) return false;
-      const latest = captures
-        .filter((c) => c.brandId === brand.id)
-        .reduce((max, c) => Math.max(max, new Date(c.createdAt).getTime() || 0), 0);
-      return latest === 0 || latest < cutoff;
-    })
-    .map((b) => b.name);
-}
-
 /** Personal content checklist plate for dashboard. */
 export function MyContentPlate({
   currentUserId,
@@ -102,7 +77,7 @@ export function MyContentPlate({
   className?: string;
   limit?: number;
 }) {
-  const { items, brands, captures, loading } = useContentCalendarData();
+  const { items, loading } = useContentCalendarData();
   const [now] = React.useState(() => Date.now());
   const rows = React.useMemo(
     () => buildMyContentRows(items, currentUserId, now).slice(0, limit),
@@ -111,10 +86,6 @@ export function MyContentPlate({
   const total = React.useMemo(
     () => buildMyContentRows(items, currentUserId, now).length,
     [items, currentUserId, now],
-  );
-  const idleCaptures = React.useMemo(
-    () => idleCaptureBrandNames(brands, captures, currentUserId, now),
-    [brands, captures, currentUserId, now],
   );
 
   return (
@@ -134,14 +105,6 @@ export function MyContentPlate({
         </div>
       </CardHeader>
       <CardContent className="pt-0 space-y-3">
-        {idleCaptures.length > 0 ? (
-          <p className="rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs">
-            Capture duty idle ({CAPTURE_IDLE_DAYS}d+): {idleCaptures.join(", ")}.{" "}
-            <Link href="/content/capture" className="underline underline-offset-2">
-              Capture now
-            </Link>
-          </p>
-        ) : null}
         {loading ? (
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : rows.length === 0 ? (

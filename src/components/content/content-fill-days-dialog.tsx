@@ -4,7 +4,14 @@ import * as React from "react";
 import { toast } from "sonner";
 import { addDays, differenceInCalendarDays, format, startOfDay } from "date-fns";
 import type { DateRange } from "react-day-picker";
-import { Calendar as CalendarIcon, CheckCircle2, Loader2, Sparkles } from "lucide-react";
+import {
+  Calendar as CalendarIcon,
+  CheckCircle2,
+  ChevronLeft,
+  ChevronRight,
+  Loader2,
+  Sparkles,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -47,6 +54,51 @@ import {
   resolveBrandResponsibility,
 } from "@/lib/content-calendar/types";
 import { scrubAiTellPunctuation } from "@/lib/content-calendar/schedule";
+
+function PlanSlotDetailField({
+  label,
+  children,
+}: {
+  label: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-1.5">
+      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+        {label}
+      </dt>
+      <dd className="text-sm leading-relaxed text-foreground">{children}</dd>
+    </div>
+  );
+}
+
+function PlanSlotBadges({ slot }: { slot: ContentPlanSlot }) {
+  const done = Boolean(slot.contentItemId);
+  return (
+    <div className="flex flex-wrap gap-1">
+      <Badge variant="outline" className="font-normal">
+        {formatSlotWhen(slot.publishAt)}
+      </Badge>
+      <Badge variant="secondary" className="font-normal">
+        {CONTENT_PLATFORM_LABELS[slot.platform]}
+      </Badge>
+      <Badge variant="secondary" className="font-normal">
+        {CONTENT_PILLAR_LABELS[slot.pillarKey] ?? slot.pillarKey}
+      </Badge>
+      {slot.format ? (
+        <Badge variant="outline" className="font-normal">
+          {CONTENT_FORMAT_LABELS[slot.format] ?? slot.format}
+        </Badge>
+      ) : null}
+      {slot.ctaType && slot.ctaType !== "none" ? (
+        <Badge variant="outline" className="font-normal">
+          {CONTENT_CTA_LABELS[slot.ctaType] ?? slot.ctaType}
+        </Badge>
+      ) : null}
+      {done ? <Badge className="font-normal">Drafted</Badge> : null}
+    </div>
+  );
+}
 
 type PlanSuggestResponse = {
   plan: ContentPlan;
@@ -117,6 +169,7 @@ export function ContentFillDaysDialog({
     slotId: string;
     title: string;
   } | null>(null);
+  const [detailSlotId, setDetailSlotId] = React.useState<string | null>(null);
 
   // Reset only on closed→open. Parent re-renders after savePlan with a new brands
   // array reference; depending on brands here used to wipe the review step.
@@ -131,6 +184,7 @@ export function ContentFillDaysDialog({
       setUserPrompt("");
       setBusy(false);
       setDraftProgress(null);
+      setDetailSlotId(null);
     }
     wasOpen.current = open;
   }, [open, initialBrandId, brands]);
@@ -150,6 +204,10 @@ export function ContentFillDaysDialog({
   const draftedCount = plan?.slots.filter((s) => s.contentItemId).length ?? 0;
   const pendingDraftCount =
     plan?.slots.filter((s) => s.approved && !s.contentItemId).length ?? 0;
+  const detailSlot =
+    plan && detailSlotId ? (plan.slots.find((s) => s.id === detailSlotId) ?? null) : null;
+  const detailSlotIndex =
+    plan && detailSlot ? plan.slots.findIndex((s) => s.id === detailSlot.id) : -1;
 
   function toastApiError(error: unknown, fallback: string) {
     if (typeof error === "string" && error.trim()) {
@@ -215,6 +273,7 @@ export function ContentFillDaysDialog({
         return;
       }
       setPlan(data.plan);
+      setDetailSlotId(null);
       setStep("plan");
       await savePlan(data.plan, true);
     } catch {
@@ -255,6 +314,7 @@ export function ContentFillDaysDialog({
       return;
     }
     setBusy(true);
+    setDetailSlotId(null);
     setStep("drafting");
     let createdCount = 0;
     let failedCount = 0;
@@ -431,11 +491,19 @@ export function ContentFillDaysDialog({
               ? `Draft ${draftProgress.current} of ${draftProgress.total}: ${draftProgress.title}`
               : "Turning approved topics into calendar-ready posts…",
           }
-        : {
-            title: "Review plan",
-            description:
-              "Uncheck anything you don’t want. Then generate drafts for the selected topics.",
-          };
+        : detailSlot
+          ? {
+              title: "Topic details",
+              description:
+                detailSlotIndex >= 0
+                  ? `Topic ${detailSlotIndex + 1} of ${plan?.slots.length ?? 0}. Review everything before generating drafts.`
+                  : "Review everything before generating drafts.",
+            }
+          : {
+              title: "Review plan",
+              description:
+                "Open a topic to review full details. Uncheck anything you don’t want, then generate drafts.",
+            };
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -576,177 +644,220 @@ export function ContentFillDaysDialog({
 
           {(step === "plan" || step === "drafting") && plan && (
             <div className="space-y-4">
-              <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
-                <p className="text-sm leading-relaxed">{plan.planSummary}</p>
-                <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
-                  <span>
-                    {plan.slots.length} topic{plan.slots.length === 1 ? "" : "s"}
-                  </span>
-                  <span aria-hidden>·</span>
-                  <span>
-                    {plan.startDate} → {plan.endDate}
-                  </span>
-                  {brand ? (
-                    <>
-                      <span aria-hidden>·</span>
-                      <span>{brand.name}</span>
-                    </>
+              {detailSlot && step === "plan" ? (
+                <div className="space-y-4">
+                  <div className="space-y-3">
+                    <h3 className="text-base font-medium leading-snug">{detailSlot.title}</h3>
+                    <PlanSlotBadges slot={detailSlot} />
+                  </div>
+
+                  <dl className="space-y-4 rounded-lg border bg-card p-4">
+                    <PlanSlotDetailField label="Angle">{detailSlot.angle}</PlanSlotDetailField>
+                    {detailSlot.rationale ? (
+                      <PlanSlotDetailField label="Why this topic">
+                        {detailSlot.rationale}
+                      </PlanSlotDetailField>
+                    ) : null}
+                    {detailSlot.proofHint ? (
+                      <PlanSlotDetailField label="Source / proof">
+                        {detailSlot.proofHint}
+                      </PlanSlotDetailField>
+                    ) : null}
+                    {detailSlot.targetAudienceHint ? (
+                      <PlanSlotDetailField label="Audience">
+                        {detailSlot.targetAudienceHint}
+                      </PlanSlotDetailField>
+                    ) : null}
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <PlanSlotDetailField label="Platform">
+                        {CONTENT_PLATFORM_LABELS[detailSlot.platform]}
+                      </PlanSlotDetailField>
+                      <PlanSlotDetailField label="Publish">
+                        {formatSlotWhen(detailSlot.publishAt)}
+                      </PlanSlotDetailField>
+                      <PlanSlotDetailField label="Pillar">
+                        {CONTENT_PILLAR_LABELS[detailSlot.pillarKey] ?? detailSlot.pillarKey}
+                      </PlanSlotDetailField>
+                      <PlanSlotDetailField label="Format">
+                        {detailSlot.format
+                          ? (CONTENT_FORMAT_LABELS[detailSlot.format] ?? detailSlot.format)
+                          : "Not set"}
+                      </PlanSlotDetailField>
+                      <PlanSlotDetailField label="Call to action">
+                        {CONTENT_CTA_LABELS[detailSlot.ctaType] ?? detailSlot.ctaType}
+                      </PlanSlotDetailField>
+                      <PlanSlotDetailField label="Status">
+                        {detailSlot.contentItemId
+                          ? "Draft already created"
+                          : detailSlot.approved
+                            ? "Included in generation"
+                            : "Excluded from generation"}
+                      </PlanSlotDetailField>
+                    </div>
+                  </dl>
+
+                  {!detailSlot.contentItemId ? (
+                    <label className="flex cursor-pointer items-start gap-3 rounded-lg border px-3 py-3 text-sm">
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={detailSlot.approved}
+                        onCheckedChange={(c) => toggleSlot(detailSlot.id, c === true)}
+                        disabled={busy}
+                      />
+                      <span className="min-w-0">
+                        <span className="font-medium">Include in draft generation</span>
+                        <span className="mt-0.5 block text-xs text-muted-foreground">
+                          Uncheck to skip this topic when you generate drafts.
+                        </span>
+                      </span>
+                    </label>
                   ) : null}
                 </div>
-              </div>
-
-              {step === "drafting" && draftProgress ? (
-                <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
-                  <div className="flex items-center justify-between gap-2 text-sm">
-                    <span className="flex items-center gap-2 font-medium">
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                      Writing drafts
-                    </span>
-                    <span className="tabular-nums text-muted-foreground">
-                      {draftProgress.current}/{draftProgress.total}
-                    </span>
-                  </div>
-                  <div className="h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className="h-full rounded-full bg-primary transition-[width] duration-300"
-                      style={{
-                        width: `${Math.round(
-                          (draftProgress.current / Math.max(draftProgress.total, 1)) * 100,
-                        )}%`,
-                      }}
-                    />
-                  </div>
-                  <p className="truncate text-xs text-muted-foreground">{draftProgress.title}</p>
-                </div>
               ) : (
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm text-muted-foreground">
-                    <span className="font-medium text-foreground">{approvedCount}</span> of{" "}
-                    {plan.slots.length} selected
-                    {draftedCount > 0 ? (
-                      <span className="ml-1">
-                        · {draftedCount} already drafted
+                <>
+                  <div className="rounded-lg border bg-muted/30 px-3 py-2.5">
+                    <p className="text-sm leading-relaxed">{plan.planSummary}</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5 text-xs text-muted-foreground">
+                      <span>
+                        {plan.slots.length} topic{plan.slots.length === 1 ? "" : "s"}
                       </span>
-                    ) : null}
-                  </p>
-                  <div className="flex gap-1">
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      disabled={busy}
-                      onClick={() => approveAll(true)}
-                    >
-                      Select all
-                    </Button>
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="ghost"
-                      disabled={busy}
-                      onClick={() => approveAll(false)}
-                    >
-                      Deselect all
-                    </Button>
+                      <span aria-hidden>·</span>
+                      <span>
+                        {plan.startDate} → {plan.endDate}
+                      </span>
+                      {brand ? (
+                        <>
+                          <span aria-hidden>·</span>
+                          <span>{brand.name}</span>
+                        </>
+                      ) : null}
+                    </div>
                   </div>
-                </div>
-              )}
 
-              <div className="space-y-2">
-                {plan.slots.map((slot) => {
-                  const done = Boolean(slot.contentItemId);
-                  const active =
-                    step === "drafting" &&
-                    draftProgress?.slotId === slot.id &&
-                    !done &&
-                    slot.approved;
-
-                  return (
-                    <label
-                      key={slot.id}
-                      className={cn(
-                        "flex gap-3 rounded-lg border p-3 text-sm transition-colors",
-                        busy ? "cursor-default" : "cursor-pointer",
-                        slot.approved
-                          ? "border-border bg-card"
-                          : "border-transparent bg-muted/20 opacity-60",
-                        active && "border-primary/40 ring-1 ring-primary/20",
-                        done && "border-emerald-500/30 bg-emerald-500/5 opacity-100",
-                      )}
-                    >
-                      <div className="pt-0.5">
-                        {done ? (
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500" aria-label="Drafted" />
-                        ) : (
-                          <Checkbox
-                            checked={slot.approved}
-                            onCheckedChange={(c) => toggleSlot(slot.id, c === true)}
-                            disabled={busy}
-                          />
-                        )}
+                  {step === "drafting" && draftProgress ? (
+                    <div className="space-y-2 rounded-lg border border-primary/20 bg-primary/5 px-3 py-3">
+                      <div className="flex items-center justify-between gap-2 text-sm">
+                        <span className="flex items-center gap-2 font-medium">
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Writing drafts
+                        </span>
+                        <span className="tabular-nums text-muted-foreground">
+                          {draftProgress.current}/{draftProgress.total}
+                        </span>
                       </div>
-                      <div className="min-w-0 flex-1 space-y-1.5">
-                        <div className="font-medium leading-snug">{slot.title}</div>
-                        <div className="flex flex-wrap gap-1">
-                          <Badge variant="outline" className="font-normal">
-                            {formatSlotWhen(slot.publishAt)}
-                          </Badge>
-                          <Badge variant="secondary" className="font-normal">
-                            {CONTENT_PLATFORM_LABELS[slot.platform]}
-                          </Badge>
-                          <Badge variant="secondary" className="font-normal">
-                            {CONTENT_PILLAR_LABELS[slot.pillarKey] ?? slot.pillarKey}
-                          </Badge>
-                          {slot.format ? (
-                            <Badge variant="outline" className="font-normal">
-                              {CONTENT_FORMAT_LABELS[slot.format] ?? slot.format}
-                            </Badge>
-                          ) : null}
-                          {slot.ctaType && slot.ctaType !== "none" ? (
-                            <Badge variant="outline" className="font-normal">
-                              {CONTENT_CTA_LABELS[slot.ctaType] ?? slot.ctaType}
-                            </Badge>
-                          ) : null}
-                          {done ? (
-                            <Badge className="font-normal">Drafted</Badge>
-                          ) : null}
+                      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                        <div
+                          className="h-full rounded-full bg-primary transition-[width] duration-300"
+                          style={{
+                            width: `${Math.round(
+                              (draftProgress.current / Math.max(draftProgress.total, 1)) * 100,
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {draftProgress.title}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-sm text-muted-foreground">
+                        <span className="font-medium text-foreground">{approvedCount}</span> of{" "}
+                        {plan.slots.length} selected
+                        {draftedCount > 0 ? (
+                          <span className="ml-1">· {draftedCount} already drafted</span>
+                        ) : null}
+                      </p>
+                      <div className="flex gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={busy}
+                          onClick={() => approveAll(true)}
+                        >
+                          Select all
+                        </Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          disabled={busy}
+                          onClick={() => approveAll(false)}
+                        >
+                          Deselect all
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="space-y-2">
+                    {plan.slots.map((slot) => {
+                      const done = Boolean(slot.contentItemId);
+                      const active =
+                        step === "drafting" &&
+                        draftProgress?.slotId === slot.id &&
+                        !done &&
+                        slot.approved;
+
+                      return (
+                        <div
+                          key={slot.id}
+                          className={cn(
+                            "flex gap-3 rounded-lg border p-3 text-sm transition-colors",
+                            slot.approved
+                              ? "border-border bg-card"
+                              : "border-transparent bg-muted/20 opacity-60",
+                            active && "border-primary/40 ring-1 ring-primary/20",
+                            done && "border-emerald-500/30 bg-emerald-500/5 opacity-100",
+                          )}
+                        >
+                          <div className="pt-0.5">
+                            {done ? (
+                              <CheckCircle2
+                                className="h-4 w-4 text-emerald-500"
+                                aria-label="Drafted"
+                              />
+                            ) : (
+                              <Checkbox
+                                checked={slot.approved}
+                                onCheckedChange={(c) => toggleSlot(slot.id, c === true)}
+                                disabled={busy}
+                                aria-label={`Include ${slot.title}`}
+                              />
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            disabled={busy || step === "drafting"}
+                            onClick={() => setDetailSlotId(slot.id)}
+                            className={cn(
+                              "min-w-0 flex-1 space-y-1.5 text-left outline-none",
+                              step === "plan" && !busy
+                                ? "cursor-pointer rounded-md focus-visible:ring-2 focus-visible:ring-ring"
+                                : "cursor-default",
+                            )}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="font-medium leading-snug">{slot.title}</div>
+                              {step === "plan" && !busy ? (
+                                <ChevronRight
+                                  className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+                                  aria-hidden
+                                />
+                              ) : null}
+                            </div>
+                            <PlanSlotBadges slot={slot} />
+                            <p className="line-clamp-2 text-xs leading-relaxed text-muted-foreground">
+                              {slot.angle}
+                            </p>
+                          </button>
                         </div>
-                        <p className="text-xs leading-relaxed text-muted-foreground">
-                          {slot.angle}
-                        </p>
-                        {(slot.rationale || slot.proofHint || slot.targetAudienceHint) && (
-                          <dl className="grid gap-1 text-[11px] text-muted-foreground/90">
-                            {slot.rationale ? (
-                              <div>
-                                <dt className="inline font-medium text-muted-foreground">
-                                  Why:{" "}
-                                </dt>
-                                <dd className="inline">{slot.rationale}</dd>
-                              </div>
-                            ) : null}
-                            {slot.proofHint ? (
-                              <div>
-                                <dt className="inline font-medium text-muted-foreground">
-                                  Source:{" "}
-                                </dt>
-                                <dd className="inline">{slot.proofHint}</dd>
-                              </div>
-                            ) : null}
-                            {slot.targetAudienceHint ? (
-                              <div>
-                                <dt className="inline font-medium text-muted-foreground">
-                                  Audience:{" "}
-                                </dt>
-                                <dd className="inline">{slot.targetAudienceHint}</dd>
-                              </div>
-                            ) : null}
-                          </dl>
-                        )}
-                      </div>
-                    </label>
-                  );
-                })}
-              </div>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           )}
         </div>
@@ -766,6 +877,54 @@ export function ContentFillDaysDialog({
                 {busy ? "Generating plan…" : "Generate plan"}
               </Button>
             </>
+          ) : detailSlot && step === "plan" ? (
+            <>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={busy}
+                onClick={() => setDetailSlotId(null)}
+              >
+                <ChevronLeft className="h-4 w-4" />
+                Back to plan
+              </Button>
+              <div className="flex gap-2">
+                {detailSlotIndex > 0 ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => {
+                      const prev = plan?.slots[detailSlotIndex - 1];
+                      if (prev) setDetailSlotId(prev.id);
+                    }}
+                  >
+                    Previous
+                  </Button>
+                ) : null}
+                {plan && detailSlotIndex >= 0 && detailSlotIndex < plan.slots.length - 1 ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={busy}
+                    onClick={() => {
+                      const next = plan.slots[detailSlotIndex + 1];
+                      if (next) setDetailSlotId(next.id);
+                    }}
+                  >
+                    Next topic
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => setDetailSlotId(null)}
+                  >
+                    Done reviewing
+                  </Button>
+                )}
+              </div>
+            </>
           ) : (
             <>
               <Button
@@ -773,6 +932,7 @@ export function ContentFillDaysDialog({
                 variant="outline"
                 disabled={busy}
                 onClick={() => {
+                  setDetailSlotId(null);
                   setStep("setup");
                   setDraftProgress(null);
                 }}

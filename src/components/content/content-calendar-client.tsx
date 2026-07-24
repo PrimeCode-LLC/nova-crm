@@ -28,7 +28,7 @@ import {
 import { can } from "@/lib/permissions/can";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
-import { brandsNeedingCaptureAttention } from "@/lib/content-calendar/capture-policy";
+import { CaptureDutyBanner } from "@/components/content/capture-duty-banner";
 import { computeContentConsistency } from "@/lib/content-calendar/consistency";
 import {
   CONTENT_FORMAT_LABELS,
@@ -125,17 +125,6 @@ export function ContentCalendarClient() {
     now,
   });
 
-  const captureAttention = React.useMemo(
-    () =>
-      brandsNeedingCaptureAttention({
-        brands: data.brands,
-        captures: data.captures,
-        currentUserId: data.currentUserId,
-        nowMs: now.getTime(),
-      }),
-    [data.brands, data.captures, data.currentUserId, now],
-  );
-
   const days = daysInView(anchor, viewMode);
 
   if (!canView) {
@@ -215,15 +204,7 @@ export function ContentCalendarClient() {
           </div>
         ) : (
           <>
-            {captureAttention.length > 0 ? (
-              <div className="mb-3 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-sm">
-                Capture needs attention for{" "}
-                {captureAttention.map((a) => a.brand.name).join(", ")}.{" "}
-                <Link href="/content/capture" className="underline underline-offset-2">
-                  Open Capture
-                </Link>
-              </div>
-            ) : null}
+            <CaptureDutyBanner className="mb-3" compact />
             <div className="flex flex-wrap items-center gap-2">
               <Filter className="h-4 w-4 text-muted-foreground" />
               <Select value={brandId} onValueChange={(v) => setBrandId(v ?? "all")}>

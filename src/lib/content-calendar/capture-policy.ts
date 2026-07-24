@@ -230,6 +230,48 @@ export function brandsNeedingCaptureAttention(input: {
   return out;
 }
 
+/** Short copy for dashboard / calendar banners when the current user owes capture. */
+export function captureDutyBannerCopy(
+  attention: Array<{ brand: Pick<ContentBrand, "name">; progress: CaptureProgress }>,
+): { headline: string; detail: string } | null {
+  if (attention.length === 0) return null;
+
+  const names = attention.map((a) => a.brand.name);
+  const brandList =
+    names.length === 1
+      ? names[0]!
+      : names.length === 2
+        ? `${names[0]} and ${names[1]}`
+        : `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+
+  if (attention.length === 1) {
+    const { brand, progress } = attention[0]!;
+    if (progress.behindCadence && progress.target > 0) {
+      return {
+        headline: `Your capture for ${brand.name} is pending this week`,
+        detail: `${progress.weekCount}/${progress.target} done — add proof now so content stays on schedule.`,
+      };
+    }
+    if (progress.idle) {
+      return {
+        headline: `Your capture for ${brand.name} needs attention`,
+        detail:
+          progress.daysSinceLast == null
+            ? "No captures yet. Log this week's proof so the calendar stays fed."
+            : `Idle ${progress.daysSinceLast}+ days. Capture now to keep the pipeline moving.`,
+      };
+    }
+  }
+
+  const anyBehind = attention.some((a) => a.progress.behindCadence && a.progress.target > 0);
+  return {
+    headline: anyBehind
+      ? "Your weekly capture is pending"
+      : "Your capture duty needs attention",
+    detail: `Open for ${brandList}. Capture proof now.`,
+  };
+}
+
 /** Whether cron should notify the capturer today. */
 export function shouldRemindCapturer(input: {
   brand: Pick<ContentBrand, "id" | "capturePolicy" | "active">;

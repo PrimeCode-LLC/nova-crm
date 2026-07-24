@@ -42,6 +42,7 @@ import { roleAtLeast } from "@/lib/platform/org-role";
 import { DashboardNeedsAttentionWithContent } from "@/components/dashboard/dashboard-needs-attention-with-content";
 import { ContentOpsBoard } from "@/components/dashboard/content-ops-board";
 import { MyContentPlate } from "@/components/dashboard/my-content-plate";
+import { CaptureDutyBanner } from "@/components/content/capture-duty-banner";
 import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
 import { ChannelFunnelsSettings } from "@/components/dashboard/channel-funnels-settings";
 import { DashboardSettingsSheet } from "@/components/dashboard/dashboard-settings-sheet";
@@ -689,6 +690,9 @@ export default function DashboardPage() {
                 </p>
               </div>
             )}
+            {can(permissionSubject, "content_calendar", "view") ? (
+              <CaptureDutyBanner />
+            ) : null}
             {contentLayout ? (
               <ContentOpsBoard currentUserId={currentUserId} />
             ) : (
