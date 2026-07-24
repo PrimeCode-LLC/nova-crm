@@ -94,6 +94,7 @@ export type LeadEditSection =
   | "labels"
   | "intake"
   | "research"
+  | "personalization"
   | "qualification"
   | "routing"
   | "nextAction";
@@ -129,6 +130,11 @@ export function EditLeadDialog({
   const [hiringSignals, setHiringSignals] = React.useState("");
   const [psLine, setPsLine] = React.useState("");
   const [toolsUsedStr, setToolsUsedStr] = React.useState("");
+
+  const [persTrigger, setPersTrigger] = React.useState("");
+  const [persLikelyImpact, setPersLikelyImpact] = React.useState("");
+  const [persRelevantService, setPersRelevantService] = React.useState("");
+  const [persSuggestedAngle, setPersSuggestedAngle] = React.useState("");
 
   const [doNotContact, setDoNotContact] = React.useState(false);
   const [pushToInstantly, setPushToInstantly] = React.useState<PushStatus | UnsetToken>(UNSET);
@@ -184,6 +190,11 @@ export function EditLeadDialog({
       setHiringSignals(lead.hiringSignals ?? "");
       setPsLine(lead.psLine ?? "");
       setToolsUsedStr(toolsUsedToString(lead.toolsUsed));
+
+      setPersTrigger(lead.personalizationNote?.trigger ?? "");
+      setPersLikelyImpact(lead.personalizationNote?.likelyImpact ?? "");
+      setPersRelevantService(lead.personalizationNote?.relevantService ?? "");
+      setPersSuggestedAngle(lead.personalizationNote?.suggestedAngle ?? "");
 
       setDoNotContact(!!lead.doNotContact);
       setPushToInstantly(lead.pushToInstantly ?? UNSET);
@@ -281,6 +292,17 @@ export function EditLeadDialog({
       patch.toolsUsed = parseToolsUsed(toolsUsedStr);
     }
 
+    if (section === "all" || section === "personalization") {
+      const note = {
+        trigger: persTrigger.trim(),
+        likelyImpact: persLikelyImpact.trim(),
+        relevantService: persRelevantService.trim(),
+        suggestedAngle: persSuggestedAngle.trim(),
+      };
+      const hasAny = Object.values(note).some(Boolean);
+      patch.personalizationNote = hasAny ? note : undefined;
+    }
+
     if (editsRouting) {
       patch.channel = channel;
       patch.profileId = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(channel)
@@ -319,13 +341,15 @@ export function EditLeadDialog({
         ? "Edit intake & ownership"
         : section === "research"
           ? "Edit research & personalization"
-          : section === "qualification"
-            ? "Edit qualification"
-            : section === "routing"
-              ? "Edit campaign routing"
-              : section === "nextAction"
-                ? "Edit next action"
-                : "Edit lead";
+          : section === "personalization"
+            ? "Edit structured personalization"
+            : section === "qualification"
+              ? "Edit qualification"
+              : section === "routing"
+                ? "Edit campaign routing"
+                : section === "nextAction"
+                  ? "Edit next action"
+                  : "Edit lead";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -488,6 +512,58 @@ export function EditLeadDialog({
                   value={toolsUsedStr}
                   onChange={(e) => setToolsUsedStr(e.target.value)}
                   placeholder="Comma-separated, e.g. Salesforce, HubSpot"
+                />
+              </div>
+            </section>}
+
+            {section === "all" && <Separator />}
+
+            {(section === "all" || section === "personalization") && <section className="space-y-3">
+              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                Structured personalization
+              </p>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-pers-trigger">Trigger</Label>
+                <Textarea
+                  id="edit-pers-trigger"
+                  value={persTrigger}
+                  onChange={(e) => setPersTrigger(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                  placeholder="What recently happened?"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-pers-impact">Likely impact</Label>
+                <Textarea
+                  id="edit-pers-impact"
+                  value={persLikelyImpact}
+                  onChange={(e) => setPersLikelyImpact(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                  placeholder="What need does this create?"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-pers-service">Relevant service</Label>
+                <Textarea
+                  id="edit-pers-service"
+                  value={persRelevantService}
+                  onChange={(e) => setPersRelevantService(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                  placeholder="Which capability addresses it?"
+                />
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="edit-pers-angle">Suggested angle</Label>
+                <Textarea
+                  id="edit-pers-angle"
+                  value={persSuggestedAngle}
+                  onChange={(e) => setPersSuggestedAngle(e.target.value)}
+                  rows={2}
+                  className="resize-none"
+                  placeholder="How should outreach lead?"
                 />
               </div>
             </section>}

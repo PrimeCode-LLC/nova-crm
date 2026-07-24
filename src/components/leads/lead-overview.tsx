@@ -493,9 +493,22 @@ export function LeadOverview({
               </dl>
 
               <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Structured personalization
-            </p>
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Structured personalization
+              </p>
+              {canEdit && onEditSection ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-2 text-xs"
+                  onClick={() => onEditSection("personalization")}
+                >
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </Button>
+              ) : null}
+            </div>
             <dl className="divide-y rounded-md border px-3">
               <Field label="Trigger">{lead.personalizationNote?.trigger || "-"}</Field>
               <Field label="Likely impact">{lead.personalizationNote?.likelyImpact || "-"}</Field>
