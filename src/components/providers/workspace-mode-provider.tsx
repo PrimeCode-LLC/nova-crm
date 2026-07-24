@@ -205,6 +205,13 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
       actorId: string;
       openFollowupIds: string[];
     }) => Promise<void>;
+    /** Resume a bounce/reply-paused plan and clear pausedAt on listed followups. */
+    resumeFollowupPlan: (input: {
+      planId: string;
+      leadId: string;
+      openFollowupIds: string[];
+      actorId?: string;
+    }) => Promise<void>;
     supersedeFollowupPlan: (oldPlanId: string, newPlanId: string) => void;
     addLeadTask: (t: LeadTask) => void;
     setLeadTaskCompleted: (id: string, completed: boolean) => void;
@@ -969,6 +976,95 @@ export function WorkspaceModeProvider({
       });
     },
     [mode, userDoc?.organizationId, leadOwnerIdForFirestore],
+  );
+
+  const resumeFollowupPlan = React.useCallback(
+    async (input: {
+      planId: string;
+      leadId: string;
+      openFollowupIds: string[];
+      actorId?: string;
+    }) => {
+      const iso = new Date().toISOString();
+      const actorId = input.actorId ?? fbUser?.uid ?? "";
+      const writeFs =
+        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+      const orgId = userDoc?.organizationId;
+      const planPatch: Partial<FollowupPlan> = {
+        status: "active",
+        pausedAt: undefined,
+        pausedReason: undefined,
+        replyMessageId: undefined,
+      };
+      if (writeFs && orgId) {
+        try {
+          const db = getFirebaseDb();
+          await persistFollowupPlanPatch(db, input.planId, {
+            status: "active",
+            pausedAt: null,
+            pausedReason: null,
+            replyMessageId: null,
+          });
+          for (const fid of input.openFollowupIds) {
+            await persistFollowupSetPaused(db, fid, false);
+          }
+          const te: TimelineEvent = {
+            id: newLocalId("te"),
+            leadId: input.leadId,
+            type: "followup_plan_resumed",
+            actorId,
+            summary: "Follow-up plan resumed after email fix",
+            payload: { planId: input.planId, openFollowupIds: input.openFollowupIds },
+            createdAt: iso,
+          };
+          await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          toast.error("Could not resume follow-up plan", { description: msg });
+          throw e;
+        }
+      }
+      setSessionV2((s) => {
+        const paused = { ...s.followups.paused };
+        for (const fid of input.openFollowupIds) {
+          paused[fid] = null;
+        }
+        const patches = {
+          ...s.followupPlans.patches,
+          [input.planId]: {
+            ...(s.followupPlans.patches[input.planId] ?? {}),
+            ...planPatch,
+          },
+        };
+        const extras = s.followupPlans.extras.map((p) =>
+          p.id === input.planId
+            ? {
+                ...p,
+                status: "active" as const,
+                pausedAt: undefined,
+                pausedReason: undefined,
+                replyMessageId: undefined,
+              }
+            : p,
+        );
+        const te: TimelineEvent = {
+          id: newLocalId("te"),
+          leadId: input.leadId,
+          type: "followup_plan_resumed",
+          actorId,
+          summary: "Follow-up plan resumed after email fix",
+          payload: { planId: input.planId, openFollowupIds: input.openFollowupIds },
+          createdAt: iso,
+        };
+        return {
+          ...s,
+          followupPlans: { ...s.followupPlans, patches, extras },
+          followups: { ...s.followups, paused },
+          timelineAdded: mode === "live" ? s.timelineAdded : [...s.timelineAdded, te],
+        };
+      });
+    },
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, fbUser?.uid],
   );
 
   const supersedeFollowupPlan = React.useCallback(
@@ -2327,6 +2423,7 @@ export function WorkspaceModeProvider({
       removeFollowup,
       updateFollowup,
       pauseFollowupPlanForReply,
+      resumeFollowupPlan,
       supersedeFollowupPlan,
       addLeadTask,
       setLeadTaskCompleted,
@@ -2398,6 +2495,7 @@ export function WorkspaceModeProvider({
     removeFollowup,
     updateFollowup,
     pauseFollowupPlanForReply,
+    resumeFollowupPlan,
     supersedeFollowupPlan,
     addLeadTask,
     setLeadTaskCompleted,

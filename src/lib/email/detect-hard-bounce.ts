@@ -172,3 +172,7 @@ export function bounceEventDocId(mailboxId: string, inboundMessageId: string): s
 
 export const BOUNCE_REVIEW_TASK_TITLE = "Find valid email (bounced)";
 export const BOUNCE_PAUSE_REASON = "Email bounced - invalid address";
+export const LINKEDIN_SEQUENCE_TASK_TITLE = "Build LinkedIn sequence (email exhausted)";
+export const BOUNCE_FAILOVER_PAUSE_REASON = "Email bounced - failed over to personal email";
+export const EMAIL_EXHAUSTED_PAUSE_REASON =
+  "Email bounced twice - switch channel or fix address";

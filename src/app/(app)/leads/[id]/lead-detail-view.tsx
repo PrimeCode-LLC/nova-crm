@@ -59,6 +59,17 @@ import { LeadFollowups } from "@/components/leads/lead-followups";
 import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-banner";
 import { LeadContactEmailActionBanner } from "@/components/leads/lead-contact-email-action-banner";
 import { UpdateContactEmailDialog } from "@/components/leads/update-contact-email-dialog";
+import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
+import { rerouteFollowupSequenceClient } from "@/lib/email/reroute-followup-sequence-client";
+import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
+import {
+  getPausedFollowupPlanForLead,
+  mergeFollowupPlans,
+} from "@/lib/followup-plans";
+import {
+  getActiveMailbox,
+} from "@/stores/email-account-store";
+import { SuggestFollowupsDialog } from "@/components/ai/suggest-followups-dialog";
 import { LeadSchedulingPanel } from "@/components/scheduling/lead-scheduling-panel";
 import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
@@ -166,6 +177,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     "manual",
   );
   const [updateEmailSuggested, setUpdateEmailSuggested] = React.useState<string | undefined>();
+  const [linkedinSuggestOpen, setLinkedinSuggestOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
@@ -394,6 +406,25 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     [leadTasksForTab, lead?.id],
   );
 
+  const followupsForLead = React.useMemo(
+    () => (lead ? followups.filter((f) => f.leadId === lead.id) : followups),
+    [followups, lead?.id],
+  );
+  const followupPlansMerged = React.useMemo(
+    () => mergeFollowupPlans(ws.followupPlans, followupsForLead),
+    [ws.followupPlans, followupsForLead],
+  );
+  const pausedBouncePlan = React.useMemo(
+    () => (lead ? getPausedFollowupPlanForLead(followupPlansMerged, lead.id) : undefined),
+    [followupPlansMerged, lead?.id],
+  );
+
+  const addScheduled = useEmailAccountStore((s) => s.addScheduled);
+  const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const mailboxes = useEmailAccountStore((s) => s.mailboxes);
+  const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
+  const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
+
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
@@ -440,9 +471,53 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const primaryEmail = companyEmail || personalEmail;
   const primaryPhone = contact?.phone;
   const emailBounced = contactHasBouncedEmail(contact);
-  const needsEmailFix = emailBounced || openBounceTasks.length > 0;
+  /** Blocking fix needed: no personal fallback, or an open bounce review task. */
+  const needsEmailFix =
+    (emailBounced && !personalEmail) || openBounceTasks.length > 0;
+  const hasLinkedIn = leadHasLinkedIn(lead, contact);
+  const suggestLinkedIn = Boolean(lead.suggestLinkedInSequence) && hasLinkedIn;
+  const canResumeSequence = Boolean(
+    pausedBouncePlan &&
+      (pausedBouncePlan.pausedReason?.includes("bounced") ||
+        pausedBouncePlan.pausedReason?.includes("twice")),
+  );
   const openFollowupCount = followups.filter((f) => !f.completedAt).length;
   const openTaskCount = leadTasksForTab.filter((t) => !t.completedAt).length;
+
+  async function handleResumeSequence(to: string) {
+    if (!pausedBouncePlan || !lead) {
+      throw new Error("No paused sequence to resume");
+    }
+    const mailbox = getActiveMailbox({ mailboxes, activeMailboxId });
+    const result = await rerouteFollowupSequenceClient({
+      leadId: lead.id,
+      to,
+      mailbox,
+      plan: pausedBouncePlan,
+      followups,
+      isDemo: ws.isDemo,
+      globalEmailFooter,
+      addDemoScheduled: (row) => addScheduled(row),
+      cancelSchedule: async (scheduledEmailId) => {
+        const cancel = await cancelScheduledEmailClient({
+          scheduledEmailId,
+          isDemo: ws.isDemo,
+          cancelDemo: cancelScheduled,
+        });
+        return !("error" in cancel);
+      },
+      updateFollowupDueAt: (followupId, dueAt) => {
+        ws.updateFollowup(followupId, { dueAt });
+      },
+      setFollowupEmailSchedule: (followupId, schedule) => {
+        ws.setFollowupEmailSchedule(followupId, schedule);
+      },
+      resumePlan: async (input) => {
+        await ws.resumeFollowupPlan(input);
+      },
+    });
+    if (!result.ok) throw new Error(result.error);
+  }
 
   function openUpdateEmail(opts: {
     reason: "bounce" | "suggested" | "manual";
@@ -931,6 +1006,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     suggestedEmail={suggestedNewEmail}
                     canEdit={canEditLead && Boolean(contact)}
                     onUpdateEmail={openUpdateEmail}
+                    suggestLinkedInSequence={suggestLinkedIn}
+                    hasLinkedIn={hasLinkedIn}
+                    onBuildLinkedInSequence={() => setLinkedinSuggestOpen(true)}
                   />
                   <LeadReplyReviewBanner lead={lead} />
                   {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
@@ -983,6 +1061,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     followups={followups}
                     lead={lead}
                     aiContext={followupAiContext}
+                    onFixEmailAndResume={
+                      canEditLead && contact
+                        ? () =>
+                            openUpdateEmail({
+                              reason: "bounce",
+                              suggestedEmail: suggestedNewEmail ?? undefined,
+                            })
+                        : undefined
+                    }
                   />
                 </TabsContent>
                 <TabsContent value="tasks">
@@ -1449,6 +1536,34 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           contact={contact}
           suggestedEmail={updateEmailSuggested}
           reason={updateEmailReason}
+          canResumeSequence={canResumeSequence}
+          onResumeSequence={canResumeSequence ? handleResumeSequence : undefined}
+        />
+      ) : null}
+      {followupAiContext ? (
+        <SuggestFollowupsDialog
+          open={linkedinSuggestOpen}
+          onOpenChange={setLinkedinSuggestOpen}
+          lead={lead}
+          aiContext={followupAiContext}
+          isDemo={ws.isDemo}
+          currentUserId={ws.currentUserId}
+          followupPlans={followupPlansMerged}
+          regenerateFromPlan={pausedBouncePlan}
+          initialChannel="linkedin_outbound"
+          initialUserPrompt="Email outreach exhausted after hard bounces. Build a LinkedIn outbound sequence (connection request + follow-up messages) using the LinkedIn profile on this lead."
+          onCreatePlanWithFollowups={(plan, batch) => {
+            if (pausedBouncePlan) {
+              ws.supersedeFollowupPlan(pausedBouncePlan.id, plan.id);
+            }
+            ws.createFollowupPlanWithFollowups(plan, batch);
+            ws.patchLead(lead.id, { suggestLinkedInSequence: false });
+            for (const task of openBounceReviewTasksForLead(ws.leadTasks, lead.id)) {
+              ws.setLeadTaskCompleted(task.id, true);
+            }
+            setLinkedinSuggestOpen(false);
+            toast.success("LinkedIn sequence created");
+          }}
         />
       ) : null}
     </>

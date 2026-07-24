@@ -1,4 +1,4 @@
-import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
+import { BOUNCE_REVIEW_TASK_TITLE, LINKEDIN_SEQUENCE_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
 import { leadSnapshotPatchFromAccountContact } from "@/lib/lead-graph-snapshots";
 import type { Contact, Lead, LeadTask, TimelineEvent } from "@/lib/types";
 
@@ -22,7 +22,10 @@ function display(email: string | undefined | null): string {
 
 export function isBounceReviewTask(task: LeadTask): boolean {
   if (task.source === "email_bounce") return true;
-  return task.taskType === "review" && task.title === BOUNCE_REVIEW_TASK_TITLE;
+  return (
+    task.taskType === "review" &&
+    (task.title === BOUNCE_REVIEW_TASK_TITLE || task.title === LINKEDIN_SEQUENCE_TASK_TITLE)
+  );
 }
 
 export function contactHasBouncedEmail(contact: Contact | undefined | null): boolean {

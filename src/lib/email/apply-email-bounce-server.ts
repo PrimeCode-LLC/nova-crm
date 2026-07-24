@@ -8,9 +8,18 @@ import { cancelScheduledEmailServer } from "@/lib/email/scheduled-emails-server"
 import {
   BOUNCE_PAUSE_REASON,
   BOUNCE_REVIEW_TASK_TITLE,
+  EMAIL_EXHAUSTED_PAUSE_REASON,
+  LINKEDIN_SEQUENCE_TASK_TITLE,
   bounceEventDocId,
   type BounceKind,
 } from "@/lib/email/detect-hard-bounce";
+import {
+  resolveBounceRecoveryAction,
+  resolveFailoverToEmail,
+  resolveLeadLinkedIn,
+  type BounceRecoveryAction,
+} from "@/lib/email/bounce-recovery";
+import { rerouteFollowupSequenceServer } from "@/lib/email/reroute-followup-sequence-server";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 
 export type ApplyEmailBounceInput = {
@@ -39,8 +48,20 @@ export type ApplyEmailBounceResult =
       taskId?: string;
       planPaused?: boolean;
       cancelledScheduled?: number;
+      recoveryAction?: BounceRecoveryAction;
+      failoverTo?: string;
+      reroutedCount?: number;
     }
   | { ok: false; error: string; status?: number };
+
+type MatchedLead = {
+  leadId: string;
+  contactId: string;
+  ownerId: string;
+  companyName?: string;
+  contactName?: string;
+  followupId?: string;
+};
 
 function bounceEventsRef(orgId: string, uid: string) {
   const db = getAdminDb();
@@ -56,7 +77,7 @@ function bounceEventsRef(orgId: string, uid: string) {
 async function findLeadByFailedRecipient(
   organizationId: string,
   emails: string[],
-): Promise<{ leadId: string; contactId: string; ownerId: string; companyName?: string; contactName?: string } | null> {
+): Promise<MatchedLead | null> {
   const db = getAdminDb();
   if (!db || emails.length === 0) return null;
 
@@ -130,7 +151,7 @@ async function findLeadByFailedRecipient(
 async function findLeadByOriginalMessageId(
   organizationId: string,
   originalMessageId: string,
-): Promise<{ leadId: string; contactId: string; ownerId: string; followupId?: string; companyName?: string; contactName?: string } | null> {
+): Promise<MatchedLead | null> {
   const db = getAdminDb();
   if (!db) return null;
   const mid = normalizeMessageId(originalMessageId);
@@ -167,9 +188,127 @@ async function findLeadByOriginalMessageId(
   };
 }
 
+async function pauseActivePlan(input: {
+  organizationId: string;
+  actorUid: string;
+  dataOwnerUid: string;
+  leadId: string;
+  ownerId: string;
+  mailboxId: string;
+  inboundMessageId: string;
+  now: string;
+  pauseReason: string;
+}): Promise<{ planPaused: boolean; cancelledScheduled: number; planId?: string }> {
+  const db = getAdminDb();
+  if (!db) return { planPaused: false, cancelledScheduled: 0 };
+
+  let planPaused = false;
+  let cancelledScheduled = 0;
+  let planId: string | undefined;
+
+  const plansSnap = await db
+    .collection(COLLECTIONS.followupPlans)
+    .where("organizationId", "==", input.organizationId)
+    .where("leadId", "==", input.leadId)
+    .where("status", "==", "active")
+    .limit(5)
+    .get();
+
+  const planDocs = [...plansSnap.docs].sort((a, b) => {
+    const ac = String(a.data().createdAt ?? "");
+    const bc = String(b.data().createdAt ?? "");
+    return bc.localeCompare(ac);
+  });
+  const planDoc = planDocs[0];
+
+  if (planDoc) {
+    planId = planDoc.id;
+    const openSnap = await db
+      .collection(COLLECTIONS.followups)
+      .where("organizationId", "==", input.organizationId)
+      .where("planId", "==", planDoc.id)
+      .limit(50)
+      .get();
+
+    const openIds: string[] = [];
+    for (const d of openSnap.docs) {
+      const data = d.data();
+      if (data.completedAt || data.pausedAt) continue;
+      openIds.push(d.id);
+      await d.ref.update(
+        stampForUpdate(
+          {
+            pausedAt: input.now,
+          },
+          input.actorUid,
+        ),
+      );
+    }
+
+    await planDoc.ref.update(
+      stampForUpdate(
+        {
+          status: "paused",
+          pausedAt: input.now,
+          pausedReason: input.pauseReason,
+          replyMessageId: `${input.mailboxId}:in:${input.inboundMessageId}`,
+        },
+        input.actorUid,
+      ),
+    );
+    planPaused = true;
+
+    const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, input.ownerId);
+    await db.collection(COLLECTIONS.timelineEvents).add(
+      stampForCreate(
+        input.organizationId,
+        stripUndefined({
+          leadId: input.leadId,
+          leadOwnerId: input.ownerId,
+          leadOwnerManagerIds,
+          type: "followup_plan_paused",
+          actorId: input.actorUid,
+          summary: `Follow-up plan paused: ${input.pauseReason}`,
+          payload: {
+            planId: planDoc.id,
+            bounceMessageId: `${input.mailboxId}:in:${input.inboundMessageId}`,
+            openFollowupIds: openIds,
+          },
+          createdAt: input.now,
+        }),
+        input.actorUid,
+      ),
+    );
+  }
+
+  const scheduledSnap = await db
+    .collection(COLLECTIONS.followups)
+    .where("organizationId", "==", input.organizationId)
+    .where("leadId", "==", input.leadId)
+    .limit(50)
+    .get();
+
+  for (const d of scheduledSnap.docs) {
+    const data = d.data();
+    if (data.completedAt) continue;
+    const sid =
+      typeof data.scheduledEmailId === "string" ? data.scheduledEmailId.trim() : "";
+    if (!sid) continue;
+    const cancel = await cancelScheduledEmailServer({
+      organizationId: input.organizationId,
+      uid: input.dataOwnerUid,
+      id: sid,
+      reason: input.pauseReason,
+    });
+    if ("ok" in cancel && cancel.ok) cancelledScheduled += 1;
+  }
+
+  return { planPaused, cancelledScheduled, planId };
+}
+
 /**
- * Idempotently apply a hard bounce: mark contact bounced, create review task,
- * pause active follow-up plan, cancel pending scheduled sends, timeline event.
+ * Idempotently apply a hard bounce: mark contact bounced, recover via
+ * personal-email failover / pause+fix / LinkedIn pivot, timeline event.
  */
 export async function applyEmailBounceServer(
   input: ApplyEmailBounceInput,
@@ -195,7 +334,6 @@ export async function applyEmailBounceServer(
       (typeof existingData.leadId === "string" || typeof existingData.contactId === "string") &&
       existingData.unmatched !== true,
   );
-  // Allow retry when a prior pass recorded an unmatched / empty-body attempt.
   if (existingMatched) {
     return {
       ok: true,
@@ -203,6 +341,10 @@ export async function applyEmailBounceServer(
       leadId: typeof existingData?.leadId === "string" ? existingData.leadId : undefined,
       contactId: typeof existingData?.contactId === "string" ? existingData.contactId : undefined,
       taskId: typeof existingData?.taskId === "string" ? existingData.taskId : undefined,
+      recoveryAction:
+        typeof existingData?.recoveryAction === "string"
+          ? (existingData.recoveryAction as BounceRecoveryAction)
+          : undefined,
     };
   }
 
@@ -219,7 +361,6 @@ export async function applyEmailBounceServer(
   const reason = (input.reason?.trim() || "Permanent delivery failure").slice(0, 300);
   const now = new Date().toISOString();
 
-  // Incomplete parse (body not synced yet) - do not write a blocking ledger entry.
   if (
     input.bounceKind === "hard" &&
     failedRecipients.length === 0 &&
@@ -232,7 +373,6 @@ export async function applyEmailBounceServer(
     };
   }
 
-  // Soft bounces: record ledger only - do not mark contact bounced or create review tasks.
   if (input.bounceKind === "soft") {
     await eventRef.set(
       stampForCreate(
@@ -269,7 +409,7 @@ export async function applyEmailBounceServer(
             ownerId: String(data.ownerId ?? ""),
             companyName: typeof data.companyName === "string" ? data.companyName : undefined,
             contactName: typeof data.contactName === "string" ? data.contactName : undefined,
-          };
+          } satisfies MatchedLead;
         })()
       : null) ??
     (await findLeadByFailedRecipient(input.organizationId, failedRecipients)) ??
@@ -278,7 +418,6 @@ export async function applyEmailBounceServer(
       : null);
 
   if (!matched || (!matched.leadId && !matched.contactId)) {
-    // Keep unmatched as mergeable/retryable - do not permanently lock the bounce key.
     await eventRef.set(
       stampForCreate(
         input.organizationId,
@@ -305,6 +444,56 @@ export async function applyEmailBounceServer(
   const leadId = matched.leadId?.trim() || "";
   const ownerId = matched.ownerId?.trim() || input.actorUid;
 
+  let companyEmail: string | undefined;
+  let personalEmail: string | undefined;
+  let linkedin: string | undefined;
+  if (contactId) {
+    const contactSnap = await db.collection(COLLECTIONS.contacts).doc(contactId).get();
+    if (contactSnap.exists) {
+      const c = contactSnap.data()!;
+      companyEmail = typeof c.email === "string" ? c.email : undefined;
+      personalEmail = typeof c.personalEmail === "string" ? c.personalEmail : undefined;
+      linkedin = typeof c.linkedin === "string" ? c.linkedin : undefined;
+    }
+  }
+
+  let priorBounceCount = 0;
+  let leadContactLinkedIn: string | undefined;
+  if (leadId) {
+    const leadSnap = await db.collection(COLLECTIONS.leads).doc(leadId).get();
+    if (leadSnap.exists) {
+      const l = leadSnap.data()!;
+      priorBounceCount = Number(l.emailHardBounceCount ?? 0) || 0;
+      leadContactLinkedIn =
+        typeof l.contactLinkedIn === "string" ? l.contactLinkedIn : undefined;
+      if (!companyEmail && typeof l.contactEmail === "string") {
+        companyEmail = l.contactEmail;
+      }
+    }
+  }
+
+  const bounceCountAfter = priorBounceCount + 1;
+  const linkedInUrl = resolveLeadLinkedIn(
+    { contactLinkedIn: leadContactLinkedIn },
+    { linkedin },
+  );
+
+  let recoveryAction = resolveBounceRecoveryAction({
+    bounceCountAfter,
+    companyEmail,
+    personalEmail,
+    failedRecipients,
+    linkedin: linkedInUrl,
+  });
+
+  const failoverTo =
+    recoveryAction === "failover_personal"
+      ? resolveFailoverToEmail({ email: companyEmail, personalEmail })
+      : null;
+  if (recoveryAction === "failover_personal" && !failoverTo) {
+    recoveryAction = "pause_fix_email";
+  }
+
   if (contactId) {
     await db
       .collection(COLLECTIONS.contacts)
@@ -322,30 +511,38 @@ export async function applyEmailBounceServer(
   }
 
   if (leadId) {
+    const leadPatch: Record<string, unknown> = {
+      emailVerified: false,
+      emailHardBounceCount: bounceCountAfter,
+    };
+    if (recoveryAction === "pause_linkedin" || recoveryAction === "pause_find_email") {
+      leadPatch.suggestLinkedInSequence = recoveryAction === "pause_linkedin";
+    }
     await db
       .collection(COLLECTIONS.leads)
       .doc(leadId)
-      .update(
-        stampForUpdate(
-          {
-            emailVerified: false,
-          },
-          input.actorUid,
-        ),
-      );
+      .update(stampForUpdate(leadPatch, input.actorUid));
   }
 
   let taskId: string | undefined;
-  if (leadId) {
+  let planPaused = false;
+  let cancelledScheduled = 0;
+  let reroutedCount = 0;
+  let matchedFollowupId =
+    matched && "followupId" in matched
+      ? (matched as MatchedLead).followupId
+      : undefined;
+
+  const createReviewTask = async (title: string, description: string) => {
+    if (!leadId) return;
     taskId = `lt-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
-    const failedList = failedRecipients.join(", ") || "unknown address";
     await db.collection(COLLECTIONS.leadTasks).doc(taskId).set(
       stampForCreate(
         input.organizationId,
         stripUndefined({
           leadId,
-          title: BOUNCE_REVIEW_TASK_TITLE,
-          description: `Hard bounce for ${failedList}. Reason: ${reason}. Find a valid email and resume outreach.`,
+          title,
+          description,
           taskType: "review",
           visibility: "on_lead",
           assigneeId: ownerId,
@@ -358,67 +555,21 @@ export async function applyEmailBounceServer(
         input.actorUid,
       ),
     );
-  }
+  };
 
-  let planPaused = false;
-  let cancelledScheduled = 0;
-  let matchedFollowupId =
-    matched && "followupId" in matched
-      ? (matched as { followupId?: string }).followupId
-      : undefined;
-
-  if (leadId) {
-    const plansSnap = await db
-      .collection(COLLECTIONS.followupPlans)
-      .where("organizationId", "==", input.organizationId)
-      .where("leadId", "==", leadId)
-      .where("status", "==", "active")
-      .limit(5)
-      .get();
-
-    const planDocs = [...plansSnap.docs].sort((a, b) => {
-      const ac = String(a.data().createdAt ?? "");
-      const bc = String(b.data().createdAt ?? "");
-      return bc.localeCompare(ac);
+  if (leadId && recoveryAction === "failover_personal" && failoverTo) {
+    const reroute = await rerouteFollowupSequenceServer({
+      organizationId: input.organizationId,
+      actorUid: input.actorUid,
+      dataOwnerUid: input.dataOwnerUid,
+      leadId,
+      to: failoverTo,
+      mailboxId,
+      reason: `Hard bounce failover to ${failoverTo}`,
     });
-    const planDoc = planDocs[0];
-
-    if (planDoc) {
-      const openSnap = await db
-        .collection(COLLECTIONS.followups)
-        .where("organizationId", "==", input.organizationId)
-        .where("planId", "==", planDoc.id)
-        .limit(50)
-        .get();
-
-      const openIds: string[] = [];
-      for (const d of openSnap.docs) {
-        const data = d.data();
-        if (data.completedAt || data.pausedAt) continue;
-        openIds.push(d.id);
-        await d.ref.update(
-          stampForUpdate(
-            {
-              pausedAt: now,
-            },
-            input.actorUid,
-          ),
-        );
-      }
-
-      await planDoc.ref.update(
-        stampForUpdate(
-          {
-            status: "paused",
-            pausedAt: now,
-            pausedReason: BOUNCE_PAUSE_REASON,
-            replyMessageId: `${mailboxId}:in:${inboundMessageId}`,
-          },
-          input.actorUid,
-        ),
-      );
-      planPaused = true;
-
+    if (reroute.ok) {
+      cancelledScheduled = reroute.cancelledScheduled;
+      reroutedCount = reroute.reroutedCount;
       const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, ownerId);
       await db.collection(COLLECTIONS.timelineEvents).add(
         stampForCreate(
@@ -427,73 +578,93 @@ export async function applyEmailBounceServer(
             leadId,
             leadOwnerId: ownerId,
             leadOwnerManagerIds,
-            type: "followup_plan_paused",
+            type: "followup_plan_resumed",
             actorId: input.actorUid,
-            summary: `Follow-up plan paused: ${BOUNCE_PAUSE_REASON}`,
+            summary: `Sequence auto-failed over to personal email (${failoverTo})`,
             payload: {
-              planId: planDoc.id,
+              planId: reroute.planId,
+              to: failoverTo,
+              reroutedCount,
               bounceMessageId: `${mailboxId}:in:${inboundMessageId}`,
-              openFollowupIds: openIds,
             },
             createdAt: now,
           }),
           input.actorUid,
         ),
       );
+    } else {
+      // Fall back to pause + fix-email if queue/mailbox fails.
+      recoveryAction = "pause_fix_email";
     }
+  }
 
-    // Cancel pending scheduled emails for this lead's open followups
-    const scheduledSnap = await db
-      .collection(COLLECTIONS.followups)
-      .where("organizationId", "==", input.organizationId)
-      .where("leadId", "==", leadId)
-      .limit(50)
-      .get();
+  if (leadId && recoveryAction !== "failover_personal") {
+    const pauseReason =
+      recoveryAction === "pause_linkedin" || recoveryAction === "pause_find_email"
+        ? EMAIL_EXHAUSTED_PAUSE_REASON
+        : BOUNCE_PAUSE_REASON;
+    const paused = await pauseActivePlan({
+      organizationId: input.organizationId,
+      actorUid: input.actorUid,
+      dataOwnerUid: input.dataOwnerUid,
+      leadId,
+      ownerId,
+      mailboxId,
+      inboundMessageId,
+      now,
+      pauseReason,
+    });
+    planPaused = paused.planPaused;
+    cancelledScheduled = paused.cancelledScheduled;
 
-    for (const d of scheduledSnap.docs) {
-      const data = d.data();
-      if (data.completedAt) continue;
-      const sid =
-        typeof data.scheduledEmailId === "string" ? data.scheduledEmailId.trim() : "";
-      if (!sid) continue;
-      const cancel = await cancelScheduledEmailServer({
-        organizationId: input.organizationId,
-        uid: input.dataOwnerUid,
-        id: sid,
-        reason: BOUNCE_PAUSE_REASON,
-      });
-      if ("ok" in cancel && cancel.ok) cancelledScheduled += 1;
+    const failedList = failedRecipients.join(", ") || "unknown address";
+    if (recoveryAction === "pause_linkedin") {
+      await createReviewTask(
+        LINKEDIN_SEQUENCE_TASK_TITLE,
+        `Email bounced twice (${failedList}). Reason: ${reason}. LinkedIn profile available — build a LinkedIn sequence to continue outreach.`,
+      );
+    } else if (recoveryAction === "pause_find_email") {
+      await createReviewTask(
+        BOUNCE_REVIEW_TASK_TITLE,
+        `Email bounced twice (${failedList}). Reason: ${reason}. No LinkedIn URL on file — find a valid email or add LinkedIn to continue.`,
+      );
+    } else {
+      await createReviewTask(
+        BOUNCE_REVIEW_TASK_TITLE,
+        `Hard bounce for ${failedList}. Reason: ${reason}. Fix the email and resume the sequence (same copy) or regenerate.`,
+      );
     }
+  }
 
-    // Mark matching sent followup as failed when Message-ID matches
-    if (originalMessageId) {
-      if (!matchedFollowupId) {
-        const byMid = await db
-          .collection(COLLECTIONS.followups)
-          .where("organizationId", "==", input.organizationId)
-          .where("sentMessageId", "==", originalMessageId)
-          .limit(3)
-          .get();
-        matchedFollowupId = byMid.docs[0]?.id;
-      }
-      if (matchedFollowupId) {
-        await db
-          .collection(COLLECTIONS.followups)
-          .doc(matchedFollowupId)
-          .update(
-            stampForUpdate(
-              {
-                deliveryStatus: "failed",
-                failedAt: now,
-                deliveryError: `Hard bounce: ${reason}`.slice(0, 500),
-                nextRetryAt: FieldValue.delete(),
-              },
-              input.actorUid,
-            ),
-          );
-      }
+  if (leadId && originalMessageId) {
+    if (!matchedFollowupId) {
+      const byMid = await db
+        .collection(COLLECTIONS.followups)
+        .where("organizationId", "==", input.organizationId)
+        .where("sentMessageId", "==", originalMessageId)
+        .limit(3)
+        .get();
+      matchedFollowupId = byMid.docs[0]?.id;
     }
+    if (matchedFollowupId) {
+      await db
+        .collection(COLLECTIONS.followups)
+        .doc(matchedFollowupId)
+        .update(
+          stampForUpdate(
+            {
+              deliveryStatus: "failed",
+              failedAt: now,
+              deliveryError: `Hard bounce: ${reason}`.slice(0, 500),
+              nextRetryAt: FieldValue.delete(),
+            },
+            input.actorUid,
+          ),
+        );
+    }
+  }
 
+  if (leadId) {
     const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, ownerId);
     await db.collection(COLLECTIONS.timelineEvents).add(
       stampForCreate(
@@ -512,6 +683,9 @@ export async function applyEmailBounceServer(
             mailboxId,
             inboundMessageId,
             taskId,
+            recoveryAction,
+            failoverTo: failoverTo || undefined,
+            bounceCountAfter,
           },
           createdAt: now,
         }),
@@ -529,8 +703,12 @@ export async function applyEmailBounceServer(
             leadOwnerManagerIds,
             type: "lead_task_created",
             actorId: input.actorUid,
-            summary: `Created task: ${BOUNCE_REVIEW_TASK_TITLE}`,
-            payload: { taskId, assigneeId: ownerId, source: "email_bounce" },
+            summary: `Created task: ${
+              recoveryAction === "pause_linkedin"
+                ? LINKEDIN_SEQUENCE_TASK_TITLE
+                : BOUNCE_REVIEW_TASK_TITLE
+            }`,
+            payload: { taskId, assigneeId: ownerId, source: "email_bounce", recoveryAction },
             createdAt: now,
           }),
           input.actorUid,
@@ -557,6 +735,10 @@ export async function applyEmailBounceServer(
         taskId,
         planPaused,
         cancelledScheduled,
+        recoveryAction,
+        failoverTo: failoverTo || undefined,
+        reroutedCount: reroutedCount || undefined,
+        bounceCountAfter,
         unmatched: false,
       }),
       input.actorUid,
@@ -571,5 +753,8 @@ export async function applyEmailBounceServer(
     taskId,
     planPaused,
     cancelledScheduled,
+    recoveryAction,
+    failoverTo: failoverTo || undefined,
+    reroutedCount: reroutedCount || undefined,
   };
 }

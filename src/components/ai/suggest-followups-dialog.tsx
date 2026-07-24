@@ -125,6 +125,10 @@ export function SuggestFollowupsDialog({
   regenerateFromPlan,
   followupPlans = [],
   initialSequenceMode = "full",
+  /** Prefill channel (e.g. linkedin_outbound after email exhausted). */
+  initialChannel,
+  /** Prefill user prompt when opening for a specific recovery path. */
+  initialUserPrompt,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -137,6 +141,8 @@ export function SuggestFollowupsDialog({
   regenerateFromPlan?: FollowupPlan;
   followupPlans?: FollowupPlan[];
   initialSequenceMode?: FollowupSequenceMode;
+  initialChannel?: ChannelKey;
+  initialUserPrompt?: string;
 }) {
   const channelOptions = useChannelOptions();
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
@@ -159,17 +165,27 @@ export function SuggestFollowupsDialog({
         (regenerateFromPlan ? "continue" : initialSequenceMode),
     );
     setUserPrompt(
-      regenerateFromPlan
-        ? `Regenerate after lead reply. Prior plan: ${regenerateFromPlan.planSummary}. ${regenerateFromPlan.pausedReason ?? ""}`.trim()
-        : "",
+      initialUserPrompt?.trim()
+        ? initialUserPrompt.trim()
+        : regenerateFromPlan
+          ? `Regenerate after lead reply. Prior plan: ${regenerateFromPlan.planSummary}. ${regenerateFromPlan.pausedReason ?? ""}`.trim()
+          : "",
     );
     setError(null);
     setPlanSummary("");
     setItems([]);
-    setLeadChannel(lead.channel);
+    setLeadChannel(initialChannel ?? lead.channel);
     setScriptId(regenerateFromPlan?.sourceScriptId ?? "");
     setSelectedScript(null);
-  }, [open, lead.id, lead.channel, regenerateFromPlan, initialSequenceMode]);
+  }, [
+    open,
+    lead.id,
+    lead.channel,
+    regenerateFromPlan,
+    initialSequenceMode,
+    initialChannel,
+    initialUserPrompt,
+  ]);
 
   function demoContextPayload(): LeadAiContextInput | undefined {
     if (!isDemo) return undefined;

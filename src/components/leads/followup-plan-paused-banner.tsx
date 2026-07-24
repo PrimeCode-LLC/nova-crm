@@ -1,20 +1,36 @@
 "use client";
 
+import { AlertCircle, Link2, Mail, Sparkles } from "lucide-react";
 import Link from "next/link";
-import { AlertCircle, Mail, Sparkles } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { FollowupPlan } from "@/lib/types";
+import { BOUNCE_PAUSE_REASON, EMAIL_EXHAUSTED_PAUSE_REASON } from "@/lib/email/detect-hard-bounce";
 import { fmtRelative } from "@/lib/format";
 
 export function FollowupPlanPausedBanner({
   plan,
   onRegenerate,
   onDismiss,
+  onFixEmailAndResume,
+  onBuildLinkedInSequence,
+  hasLinkedIn = false,
 }: {
   plan: FollowupPlan;
   onRegenerate: () => void;
   onDismiss?: () => void;
+  /** Bounce pause: fix email + reschedule same copy. */
+  onFixEmailAndResume?: () => void;
+  /** 2nd bounce with LinkedIn URL. */
+  onBuildLinkedInSequence?: () => void;
+  hasLinkedIn?: boolean;
 }) {
+  const reason = plan.pausedReason ?? "";
+  const isBouncePause =
+    reason.includes("bounced") ||
+    reason === BOUNCE_PAUSE_REASON ||
+    reason === EMAIL_EXHAUSTED_PAUSE_REASON;
+  const isEmailExhausted = reason === EMAIL_EXHAUSTED_PAUSE_REASON || reason.includes("twice");
+
   return (
     <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 space-y-2">
       <div className="flex items-start gap-2">
@@ -31,7 +47,24 @@ export function FollowupPlanPausedBanner({
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pl-6">
-        <Button type="button" size="sm" onClick={onRegenerate}>
+        {isBouncePause && onFixEmailAndResume ? (
+          <Button type="button" size="sm" onClick={onFixEmailAndResume}>
+            <Mail className="h-3.5 w-3.5" />
+            Fix email & resume
+          </Button>
+        ) : null}
+        {isEmailExhausted && hasLinkedIn && onBuildLinkedInSequence ? (
+          <Button type="button" size="sm" variant="secondary" onClick={onBuildLinkedInSequence}>
+            <Link2 className="h-3.5 w-3.5" />
+            Build LinkedIn sequence
+          </Button>
+        ) : null}
+        <Button
+          type="button"
+          size="sm"
+          variant={isBouncePause ? "outline" : "default"}
+          onClick={onRegenerate}
+        >
           <Sparkles className="h-3.5 w-3.5" />
           Regenerate follow-ups
         </Button>

@@ -425,15 +425,22 @@ export function LeadFollowups({
   followups,
   lead,
   aiContext,
+  onFixEmailAndResume,
 }: {
   followups: Followup[];
   lead: Lead;
   aiContext?: LeadFollowupAiContext;
+  /** Opens the fix-email dialog with resume sequence (parent owns the dialog). */
+  onFixEmailAndResume?: () => void;
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<Followup | null>(null);
   const [suggestOpen, setSuggestOpen] = React.useState(false);
   const [regeneratePlan, setRegeneratePlan] = React.useState<FollowupPlan | undefined>();
+  const [suggestChannel, setSuggestChannel] = React.useState<
+    import("@/lib/types").ChannelKey | undefined
+  >();
+  const [suggestPrompt, setSuggestPrompt] = React.useState<string | undefined>();
   const [dismissedPlanId, setDismissedPlanId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
   const [scheduleTarget, setScheduleTarget] = React.useState<Followup | null>(null);
@@ -453,12 +460,19 @@ export function LeadFollowups({
     clearFollowupEmailSchedule,
     removeFollowup,
     updateFollowup,
+    patchLead,
     currentUserId,
     leads,
     users,
     isDemo,
     followupPlans,
+    getContactById,
   } = useWorkspace();
+
+  const contact = getContactById(lead.contactId);
+  const hasLinkedIn = Boolean(
+    (contact?.linkedin ?? lead.contactLinkedIn ?? "").trim(),
+  );
 
   const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
@@ -633,11 +647,27 @@ export function LeadFollowups({
     }
     createFollowupPlanWithFollowups(plan, batch);
     setRegeneratePlan(undefined);
+    setSuggestChannel(undefined);
+    setSuggestPrompt(undefined);
     setDismissedPlanId(null);
+    if (lead.suggestLinkedInSequence) {
+      patchLead(lead.id, { suggestLinkedInSequence: false });
+    }
   }
 
   function openSuggest(regenerate?: FollowupPlan) {
     setRegeneratePlan(regenerate);
+    setSuggestChannel(undefined);
+    setSuggestPrompt(undefined);
+    setSuggestOpen(true);
+  }
+
+  function openLinkedInSuggest() {
+    setRegeneratePlan(pausedPlan);
+    setSuggestChannel("linkedin_outbound");
+    setSuggestPrompt(
+      "Email outreach exhausted after hard bounces. Build a LinkedIn outbound sequence (connection request + follow-up messages) using the LinkedIn profile on this lead.",
+    );
     setSuggestOpen(true);
   }
 
@@ -726,6 +756,11 @@ export function LeadFollowups({
           plan={pausedPlan}
           onRegenerate={() => openSuggest(pausedPlan)}
           onDismiss={() => setDismissedPlanId(pausedPlan.id)}
+          onFixEmailAndResume={onFixEmailAndResume}
+          onBuildLinkedInSequence={
+            hasLinkedIn || lead.suggestLinkedInSequence ? openLinkedInSuggest : undefined
+          }
+          hasLinkedIn={hasLinkedIn || Boolean(lead.suggestLinkedInSequence)}
         />
       ) : null}
       <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -780,7 +815,11 @@ export function LeadFollowups({
         open={suggestOpen}
         onOpenChange={(o) => {
           setSuggestOpen(o);
-          if (!o) setRegeneratePlan(undefined);
+          if (!o) {
+            setRegeneratePlan(undefined);
+            setSuggestChannel(undefined);
+            setSuggestPrompt(undefined);
+          }
         }}
         lead={lead}
         aiContext={contextForAi}
@@ -788,6 +827,8 @@ export function LeadFollowups({
         currentUserId={currentUserId}
         followupPlans={plans}
         regenerateFromPlan={regeneratePlan}
+        initialChannel={suggestChannel}
+        initialUserPrompt={suggestPrompt}
         onCreatePlanWithFollowups={handleCreatePlan}
       />
 

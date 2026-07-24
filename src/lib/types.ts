@@ -584,6 +584,16 @@ export interface Lead {
   deeplyPersonalized?: boolean;
   /** Denormalized from contact at create - used for daily verified-email targets. */
   emailVerified?: boolean;
+  /**
+   * Hard email bounce count for this lead (company → personal failover, then LinkedIn pivot).
+   * Incremented by bounce apply; used to stop email reroutes after 2 failures.
+   */
+  emailHardBounceCount?: number;
+  /**
+   * When true, email outreach is exhausted — UI should offer building a LinkedIn sequence
+   * when a LinkedIn URL exists on the contact/lead.
+   */
+  suggestLinkedInSequence?: boolean;
 
   // Activity metrics
   firstContactAt?: ISODate;
@@ -816,6 +826,8 @@ export type TimelineEventType =
   | "followup_created"
   | "followup_completed"
   | "followup_plan_paused"
+  | "followup_plan_resumed"
+  | "followup_sequence_rerouted"
   | "lead_task_created"
   | "lead_task_completed"
   | "deal_created"

@@ -36,6 +36,9 @@ export function UpdateContactEmailDialog({
   contact,
   suggestedEmail,
   reason = "manual",
+  /** When true (bounce + paused plan), offer one-click resume with same copy. */
+  canResumeSequence = false,
+  onResumeSequence,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -44,22 +47,28 @@ export function UpdateContactEmailDialog({
   /** Prefill when an auto-reply suggested a replacement address. */
   suggestedEmail?: string;
   reason?: "bounce" | "suggested" | "manual";
+  canResumeSequence?: boolean;
+  /** Called after email save when user opts to resume; receives the new To address. */
+  onResumeSequence?: (to: string) => Promise<void>;
 }) {
   const ws = useWorkspace();
   const [field, setField] = React.useState<ContactEmailField>("email");
   const [nextEmail, setNextEmail] = React.useState("");
+  const [resumeSequence, setResumeSequence] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
 
   React.useEffect(() => {
     if (!open) return;
     setField("email");
     setNextEmail(suggestedEmail?.trim() || "");
-  }, [open, suggestedEmail, contact.id]);
+    setResumeSequence(canResumeSequence);
+  }, [open, suggestedEmail, contact.id, canResumeSequence]);
 
   const currentValue = field === "email" ? contact.email : contact.personalEmail;
   const bounced = contact.emailVerificationStatus === "bounced";
+  const showResume = reason === "bounce" && canResumeSequence && Boolean(onResumeSequence);
 
-  function handleSave(e: React.FormEvent) {
+  async function handleSave(e: React.FormEvent) {
     e.preventDefault();
     const trimmed = nextEmail.trim();
     if (!trimmed || !trimmed.includes("@")) {
@@ -84,9 +93,14 @@ export function UpdateContactEmailDialog({
         return;
       }
 
+      const nextLeadPatch: Partial<Lead> = {
+        ...leadPatch,
+        suggestLinkedInSequence: false,
+      };
+
       ws.patchContact(contact.id, contactPatch);
-      if (Object.keys(leadPatch).length > 0) {
-        ws.patchLead(lead.id, leadPatch);
+      if (Object.keys(nextLeadPatch).length > 0) {
+        ws.patchLead(lead.id, nextLeadPatch);
       }
       ws.bumpLeadActivity(lead.id);
 
@@ -102,14 +116,26 @@ export function UpdateContactEmailDialog({
         ws.setLeadTaskCompleted(task.id, true);
       }
 
-      toast.success(
-        reason === "bounce"
-          ? "Bounced email replaced"
-          : reason === "suggested"
-            ? "Contact email updated from reply"
-            : "Contact email updated",
-        { description: changes.map((c) => `${c.from} → ${c.to}`).join(" · ") },
-      );
+      if (showResume && resumeSequence && onResumeSequence) {
+        try {
+          await onResumeSequence(trimmed);
+          toast.success("Email fixed and sequence resumed", {
+            description: changes.map((c) => `${c.from} → ${c.to}`).join(" · "),
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : "Could not reschedule sequence";
+          toast.error("Email updated, but sequence resume failed", { description: msg });
+        }
+      } else {
+        toast.success(
+          reason === "bounce"
+            ? "Bounced email replaced"
+            : reason === "suggested"
+              ? "Contact email updated from reply"
+              : "Contact email updated",
+          { description: changes.map((c) => `${c.from} → ${c.to}`).join(" · ") },
+        );
+      }
       onOpenChange(false);
     } finally {
       setBusy(false);
@@ -119,18 +145,22 @@ export function UpdateContactEmailDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-md" showCloseButton>
-        <form onSubmit={handleSave}>
+        <form onSubmit={(e) => void handleSave(e)}>
           <DialogHeader>
             <DialogTitle>
               {reason === "bounce"
-                ? "Update bounced email"
+                ? showResume
+                  ? "Fix email & resume sequence"
+                  : "Update bounced email"
                 : reason === "suggested"
                   ? "Use suggested email"
                   : "Update contact email"}
             </DialogTitle>
             <DialogDescription>
               {reason === "bounce"
-                ? "Replace the bounced address so outreach can resume. The change is logged on the timeline."
+                ? showResume
+                  ? "Replace the bounced address and reschedule remaining steps with the same copy — no AI regenerate needed."
+                  : "Replace the bounced address so outreach can resume. The change is logged on the timeline."
                 : reason === "suggested"
                   ? "Apply the address from their reply. Old → new is logged on the timeline."
                   : "Change the company or personal email. Old → new is logged on the timeline."}
@@ -182,6 +212,24 @@ export function UpdateContactEmailDialog({
                 <p className="text-[11px] text-muted-foreground">Current: {currentValue}</p>
               ) : null}
             </div>
+
+            {showResume ? (
+              <label className="flex items-start gap-2 rounded-md border px-3 py-2 text-xs leading-relaxed cursor-pointer">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={resumeSequence}
+                  onChange={(e) => setResumeSequence(e.target.checked)}
+                />
+                <span>
+                  <span className="font-medium text-foreground">Resume sequence with same copy</span>
+                  <span className="block text-muted-foreground mt-0.5">
+                    Recompute dates (Day 0 → +3 → +5 → +7 business days) and re-queue remaining
+                    emails to this address. Uncheck to only update the contact.
+                  </span>
+                </span>
+              </label>
+            ) : null}
           </div>
 
           <DialogFooter>
@@ -189,7 +237,7 @@ export function UpdateContactEmailDialog({
               Cancel
             </Button>
             <Button type="submit" disabled={busy}>
-              Save email
+              {showResume && resumeSequence ? "Save & resume" : "Save email"}
             </Button>
           </DialogFooter>
         </form>

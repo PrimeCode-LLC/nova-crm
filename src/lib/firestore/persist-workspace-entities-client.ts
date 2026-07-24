@@ -140,19 +140,28 @@ export async function persistFollowupPlanCreate(
 export async function persistFollowupPlanPatch(
   db: Firestore,
   planId: string,
-  patch: Partial<
-    Pick<
-      import("@/lib/types").FollowupPlan,
-      "status" | "pausedAt" | "pausedReason" | "replyMessageId" | "supersededByPlanId" | "planSummary" | "completedAt"
-    >
-  >,
+  patch: Partial<{
+    status: import("@/lib/types").FollowupPlan["status"];
+    planSummary: string;
+    supersededByPlanId: string;
+    completedAt: string;
+    /** Pass `null` to clear. */
+    pausedAt: string | null;
+    /** Pass `null` to clear. */
+    pausedReason: string | null;
+    /** Pass `null` to clear. */
+    replyMessageId: string | null;
+  }>,
 ): Promise<void> {
   const data: Record<string, unknown> = { updatedAt: serverTimestamp() };
   if (patch.status !== undefined) data.status = patch.status;
   if (patch.planSummary !== undefined) data.planSummary = patch.planSummary;
-  if (patch.pausedAt !== undefined) data.pausedAt = patch.pausedAt;
-  if (patch.pausedReason !== undefined) data.pausedReason = patch.pausedReason;
-  if (patch.replyMessageId !== undefined) data.replyMessageId = patch.replyMessageId;
+  if (patch.pausedAt === null) data.pausedAt = deleteField();
+  else if (patch.pausedAt !== undefined) data.pausedAt = patch.pausedAt;
+  if (patch.pausedReason === null) data.pausedReason = deleteField();
+  else if (patch.pausedReason !== undefined) data.pausedReason = patch.pausedReason;
+  if (patch.replyMessageId === null) data.replyMessageId = deleteField();
+  else if (patch.replyMessageId !== undefined) data.replyMessageId = patch.replyMessageId;
   if (patch.supersededByPlanId !== undefined) data.supersededByPlanId = patch.supersededByPlanId;
   if (patch.completedAt !== undefined) data.completedAt = patch.completedAt;
   await updateDoc(doc(db, COLLECTIONS.followupPlans, planId), data);
