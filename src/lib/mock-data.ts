@@ -128,6 +128,17 @@ export const mockUsers: User[] = [
     status: "active",
     createdAt: isoDaysAgo(380),
   },
+  {
+    id: "u-content-01",
+    email: "priya.nair@nova.co",
+    displayName: "Priya Nair",
+    roleId: "content_team",
+    departmentId: "d-content",
+    managerId: "u-director",
+    title: "Content ops",
+    status: "active",
+    createdAt: isoDaysAgo(90),
+  },
 ];
 
 export const CURRENT_USER_ID = "u-director";
@@ -138,6 +149,7 @@ export const mockDepartments: Department[] = [
   { id: "d-upwork", name: "Upwork Team", description: "Proposal writers + closers" },
   { id: "d-inbound", name: "Inbound", description: "Website leads + 1:1 followups" },
   { id: "d-data", name: "Data & Research", description: "Scrapers + enrichment" },
+  { id: "d-content", name: "Content", description: "Brand calendar, captures, and publishing" },
 ];
 
 // ───────────────────────── Permission Overrides ─────────────────────────

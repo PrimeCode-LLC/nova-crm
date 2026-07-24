@@ -27,6 +27,8 @@ import type {
   ContentPrimaryOutcome,
   ContentStrategyStyle,
 } from "@/lib/content-calendar/types";
+import { buildDemoContentCalendar } from "@/lib/demo-content-calendar";
+import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import {
   persistContentBrandCreate,
   persistContentBrandDelete,
@@ -54,7 +56,7 @@ function newId(prefix: string) {
  */
 export function useContentCalendarData() {
   const ws = useWorkspace();
-  const organizationId = ws.organizationId;
+  const organizationId = ws.organizationId || (ws.isDemo ? DEMO_WORKSPACE_ORG_ID : undefined);
   const isDemo = ws.isDemo;
   const currentUserId = ws.currentUserId;
 
@@ -73,7 +75,19 @@ export function useContentCalendarData() {
     let cancelled = false;
 
     async function load() {
-      if (isDemo || !organizationId || !isFirebaseWebConfigured()) {
+      if (isDemo) {
+        if (!cancelled) {
+          const seed = buildDemoContentCalendar();
+          setBrands(seed.brands);
+          setItems(seed.items);
+          setCaptures(seed.captures);
+          setPlans(seed.plans);
+          setLoading(false);
+        }
+        return;
+      }
+
+      if (!organizationId || !isFirebaseWebConfigured()) {
         if (!cancelled) {
           setBrands([]);
           setItems([]);
@@ -166,8 +180,62 @@ export function useContentCalendarData() {
     }) => {
       if (!organizationId) throw new Error("No organization");
       if (isDemo) {
-        toast.message("Demo mode - brands are not persisted");
-        return null;
+        const defaults = buildBrandDefaultsFromPack({
+          kind: input.kind,
+          name: input.name,
+          primaryOutcome: input.primaryOutcome,
+          contentStrategy: input.contentStrategy,
+          platforms: input.platforms,
+          strategyPackId: input.strategyPackId,
+        });
+        const now = new Date().toISOString();
+        const brand: ContentBrand = {
+          id: newId("cbrand"),
+          organizationId,
+          name: input.name.trim(),
+          kind: input.kind,
+          ...defaults,
+          goal: defaults.primaryOutcome,
+          positioning: input.positioning?.trim() || defaults.positioning,
+          voiceRules: input.voiceRules?.trim() || defaults.voiceRules,
+          targetAudience: input.targetAudience?.trim() || defaults.targetAudience,
+          offersToPromote: input.offersToPromote?.trim() || defaults.offersToPromote,
+          topicsToAvoid: input.topicsToAvoid ?? defaults.topicsToAvoid,
+          referenceCreators: input.referenceCreators?.trim() || defaults.referenceCreators,
+          proofSources: input.proofSources?.trim() || "",
+          preferredCtas: input.preferredCtas?.trim() || "",
+          defaultFormats: input.defaultFormats?.length
+            ? input.defaultFormats
+            : defaults.defaultFormats,
+          approvalRequired: input.approvalRequired ?? defaults.approvalRequired,
+          bannedPhrases: input.bannedPhrases?.length ? input.bannedPhrases : defaults.bannedPhrases,
+          cadence: {
+            ...defaults.cadence,
+            weeklyPublishTarget:
+              input.weeklyPublishTarget ?? defaults.cadence.weeklyPublishTarget,
+            preferredWeekdays: input.preferredWeekdays?.length
+              ? input.preferredWeekdays
+              : defaults.cadence.preferredWeekdays,
+          },
+          knowledgeLibraryIds: input.knowledgeLibraryIds ?? [],
+          ownerUserId: currentUserId,
+          defaultOwnerUserId: currentUserId,
+          responsibilities: input.responsibilities ?? {
+            planner: currentUserId,
+            writer: currentUserId,
+            designer: currentUserId,
+            poster: currentUserId,
+            capturer: currentUserId,
+            approver: currentUserId,
+          },
+          capturePolicy: input.capturePolicy,
+          active: true,
+          createdAt: now,
+          updatedAt: now,
+        };
+        setBrands((prev) => [...prev.filter((b) => b.id !== brand.id), brand]);
+        toast.message("Demo mode - brand saved locally only");
+        return brand;
       }
       const db = getFirebaseDb();
       if (!db) throw new Error("Database unavailable");
@@ -235,13 +303,16 @@ export function useContentCalendarData() {
 
   const updateBrand = React.useCallback(
     async (brandId: string, patch: Partial<ContentBrand>) => {
+      const updatedAt = new Date().toISOString();
       if (isDemo) {
+        setBrands((prev) =>
+          prev.map((b) => (b.id === brandId ? { ...b, ...patch, updatedAt } : b)),
+        );
         toast.message("Demo mode - not persisted");
         return;
       }
       const db = getFirebaseDb();
       if (!db) throw new Error("Database unavailable");
-      const updatedAt = new Date().toISOString();
       await persistContentBrandUpdate(db, brandId, { ...patch, updatedAt });
       setBrands((prev) =>
         prev.map((b) => (b.id === brandId ? { ...b, ...patch, updatedAt } : b)),
@@ -253,7 +324,11 @@ export function useContentCalendarData() {
 
   const deleteBrand = React.useCallback(
     async (brandId: string) => {
-      if (isDemo) return;
+      if (isDemo) {
+        setBrands((prev) => prev.filter((b) => b.id !== brandId));
+        toast.message("Demo mode - not persisted");
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentBrandDelete(db, brandId);
@@ -265,17 +340,22 @@ export function useContentCalendarData() {
 
   const updateItemStatus = React.useCallback(
     async (itemId: string, status: ContentItemStatus) => {
-      if (isDemo) {
-        toast.message("Demo mode - not persisted");
-        return;
-      }
-      const db = getFirebaseDb();
-      if (!db) throw new Error("Database unavailable");
       const completedAt =
         status === "published" || status === "skipped" || status === "repurpose"
           ? new Date().toISOString()
           : undefined;
       const updatedAt = new Date().toISOString();
+      if (isDemo) {
+        setItems((prev) =>
+          prev.map((i) =>
+            i.id === itemId ? { ...i, status, completedAt, updatedAt } : i,
+          ),
+        );
+        toast.message("Demo mode - not persisted");
+        return;
+      }
+      const db = getFirebaseDb();
+      if (!db) throw new Error("Database unavailable");
       await persistContentItemUpdate(db, itemId, {
         status,
         completedAt,
@@ -292,10 +372,15 @@ export function useContentCalendarData() {
 
   const updateItem = React.useCallback(
     async (itemId: string, patch: Partial<ContentItem>) => {
-      if (isDemo) return;
+      const updatedAt = new Date().toISOString();
+      if (isDemo) {
+        setItems((prev) =>
+          prev.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt } : i)),
+        );
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) throw new Error("Database unavailable");
-      const updatedAt = new Date().toISOString();
       await persistContentItemUpdate(db, itemId, { ...patch, updatedAt });
       setItems((prev) =>
         prev.map((i) => (i.id === itemId ? { ...i, ...patch, updatedAt } : i)),
@@ -306,9 +391,7 @@ export function useContentCalendarData() {
 
   const createItem = React.useCallback(
     async (item: Omit<ContentItem, "id" | "organizationId" | "createdAt" | "updatedAt">) => {
-      if (!organizationId || isDemo) return null;
-      const db = getFirebaseDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!organizationId) return null;
       const now = new Date().toISOString();
       const full: ContentItem = {
         ...item,
@@ -317,6 +400,13 @@ export function useContentCalendarData() {
         createdAt: now,
         updatedAt: now,
       };
+      if (isDemo) {
+        setItems((prev) => [...prev, full]);
+        toast.message("Demo mode - not persisted");
+        return full;
+      }
+      const db = getFirebaseDb();
+      if (!db) throw new Error("Database unavailable");
       await persistContentItemCreate(db, organizationId, full);
       setItems((prev) => [...prev, full]);
       return full;
@@ -326,7 +416,10 @@ export function useContentCalendarData() {
 
   const deleteItem = React.useCallback(
     async (itemId: string) => {
-      if (isDemo) return;
+      if (isDemo) {
+        setItems((prev) => prev.filter((i) => i.id !== itemId));
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) return;
       await persistContentItemDelete(db, itemId);
@@ -342,9 +435,7 @@ export function useContentCalendarData() {
         "id" | "organizationId" | "createdAt" | "updatedAt" | "createdById" | "status"
       >,
     ) => {
-      if (!organizationId || isDemo) return null;
-      const db = getFirebaseDb();
-      if (!db) throw new Error("Database unavailable");
+      if (!organizationId) return null;
       const now = new Date().toISOString();
       const capture: ContentCapture = {
         ...input,
@@ -355,6 +446,13 @@ export function useContentCalendarData() {
         createdAt: now,
         updatedAt: now,
       };
+      if (isDemo) {
+        setCaptures((prev) => [capture, ...prev]);
+        toast.message("Demo mode - not persisted");
+        return capture;
+      }
+      const db = getFirebaseDb();
+      if (!db) throw new Error("Database unavailable");
       await persistContentCaptureCreate(db, organizationId, capture);
       setCaptures((prev) => [capture, ...prev]);
       return capture;
@@ -364,10 +462,15 @@ export function useContentCalendarData() {
 
   const updateCapture = React.useCallback(
     async (captureId: string, patch: Partial<ContentCapture>) => {
-      if (isDemo) return;
+      const updatedAt = new Date().toISOString();
+      if (isDemo) {
+        setCaptures((prev) =>
+          prev.map((c) => (c.id === captureId ? { ...c, ...patch, updatedAt } : c)),
+        );
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) return;
-      const updatedAt = new Date().toISOString();
       await persistContentCaptureUpdate(db, captureId, { ...patch, updatedAt });
       setCaptures((prev) =>
         prev.map((c) => (c.id === captureId ? { ...c, ...patch, updatedAt } : c)),
@@ -378,7 +481,15 @@ export function useContentCalendarData() {
 
   const savePlan = React.useCallback(
     async (plan: ContentPlan, isNew: boolean) => {
-      if (!organizationId || isDemo) return;
+      if (!organizationId) return;
+      if (isDemo) {
+        setPlans((prev) => {
+          const without = prev.filter((p) => p.id !== plan.id);
+          return [...without, plan];
+        });
+        toast.message("Demo mode - not persisted");
+        return;
+      }
       const db = getFirebaseDb();
       if (!db) return;
       if (isNew) await persistContentPlanCreate(db, organizationId, plan);

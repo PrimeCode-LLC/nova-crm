@@ -8,6 +8,8 @@ const WORKSPACE_ROLE_RANK: Record<string, number> = {
   salesperson: 10,
   data_scraper: 10,
   prospecting: 10,
+  /** Below sales roles so legacy minWorkspaceRole gates never open pipeline for content. */
+  content_team: 5,
 };
 
 export function workspaceRoleMeetsMin(roleId: Role | undefined, min: Role): boolean {

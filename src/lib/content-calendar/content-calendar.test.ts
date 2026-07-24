@@ -112,6 +112,12 @@ describe("content calendar", () => {
     expect(can({ roleId: "content_team", isSuperAdmin: false }, "prospects", "view")).toBe(false);
   });
 
+  it("content_team can access inbox and settings but not team chat", () => {
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "inbox", "view")).toBe(true);
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "settings_self", "view")).toBe(true);
+    expect(can({ roleId: "content_team", isSuperAdmin: false }, "team_chat", "view")).toBe(false);
+  });
+
   it("builds checklist with graphics only for graphic formats", () => {
     const brand = {
       ownerUserId: "owner",

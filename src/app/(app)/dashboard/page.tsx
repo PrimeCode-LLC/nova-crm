@@ -31,6 +31,7 @@ import {
 } from "@/lib/dashboard-role-focus";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import {
+  resolveContentLayout,
   resolveEffectiveDashboardRole,
   resolveFrontlineLayout,
   resolveOpsLayout,
@@ -39,6 +40,7 @@ import { can, canAction } from "@/lib/permissions/can";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { DashboardNeedsAttentionWithContent } from "@/components/dashboard/dashboard-needs-attention-with-content";
+import { ContentOpsBoard } from "@/components/dashboard/content-ops-board";
 import { MyContentPlate } from "@/components/dashboard/my-content-plate";
 import { DashboardReplyReviews } from "@/components/dashboard/dashboard-reply-reviews";
 import { ChannelFunnelsSettings } from "@/components/dashboard/channel-funnels-settings";
@@ -340,6 +342,7 @@ export default function DashboardPage() {
   } = useDashboardPreferences(currentUserId || "anon");
 
   const effectiveRole = resolveEffectiveDashboardRole(viewer?.roleId, prefs);
+  const contentLayout = resolveContentLayout(effectiveRole, prefs);
   const frontlineLayout = resolveFrontlineLayout(effectiveRole, prefs);
   const opsLayout = resolveOpsLayout(canCustomizeLayout, effectiveRole, prefs);
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
@@ -503,6 +506,8 @@ export default function DashboardPage() {
                 onReset={reset}
               />
             ) : null}
+            {!contentLayout ? (
+              <>
             <Select
               value={timeRange}
               onValueChange={(v) => {
@@ -582,6 +587,8 @@ export default function DashboardPage() {
               >
                 <Download className="h-3.5 w-3.5 mr-1.5" /> Export
               </Button>
+            ) : null}
+              </>
             ) : null}          </>
         }
       />
@@ -637,7 +644,7 @@ export default function DashboardPage() {
       <PageBody>
         {workspaceLoading ? (
           <WorkspacePageSkeleton />
-        ) : !isDemo && leads.length === 0 ? (
+        ) : !isDemo && leads.length === 0 && !contentLayout ? (
           <div className="py-8">
             <WorkspaceEmptyHint
               title="Your workspace is empty"
@@ -652,7 +659,15 @@ export default function DashboardPage() {
                 <span className="font-medium text-foreground">
                   {prefs.previewRole
                     ? `Previewing as ${roleLabel(prefs.previewRole)}`
-                    : `View: ${prefs.viewMode === "ops" ? "Owner command board" : prefs.viewMode === "classic" ? "Pipeline classic" : "Employee board"}`}
+                    : `View: ${
+                        prefs.viewMode === "ops"
+                          ? "Owner command board"
+                          : prefs.viewMode === "classic"
+                            ? "Pipeline classic"
+                            : prefs.viewMode === "content"
+                              ? "Content board"
+                              : "Employee board"
+                      }`}
                 </span>
                 <span className="text-muted-foreground">Layout only - data access is unchanged.</span>
                 <button
@@ -674,6 +689,10 @@ export default function DashboardPage() {
                 </p>
               </div>
             )}
+            {contentLayout ? (
+              <ContentOpsBoard currentUserId={currentUserId} />
+            ) : (
+              <>
             {(channelScope.length > 0 || ownerScope !== "all-owners") && (
               <p className="text-xs text-muted-foreground mb-2">
                 {channelScope.length > 0 && (
@@ -1054,6 +1073,8 @@ export default function DashboardPage() {
                 </div>
               </section>
             ) : null}
+              </>
+            )}
           </>
         )}
       </PageBody>

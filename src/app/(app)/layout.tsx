@@ -13,6 +13,7 @@ import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-pro
 import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-provider";
 import { DeferredAppSync } from "@/components/providers/deferred-app-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
+import { ModuleRouteGate } from "@/components/permissions/module-route-gate";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
 import { DEMO_PERSONA_COOKIE, parseDemoPersonaId } from "@/lib/demo-persona";
 
@@ -63,7 +64,9 @@ export default async function AppLayout({
             <SidebarInset>
               <AppTopbar />
               <WorkspaceStatusBanner />
-              <div className="flex h-0 min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+              <div className="flex h-0 min-h-0 flex-1 flex-col overflow-hidden">
+                <ModuleRouteGate>{children}</ModuleRouteGate>
+              </div>
             </SidebarInset>
           </SidebarProvider>
         </QuickAddLauncherProvider>

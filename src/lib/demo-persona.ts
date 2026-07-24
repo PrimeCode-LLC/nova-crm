@@ -63,6 +63,12 @@ export const DEMO_ROLE_PRESETS: DemoRolePreset[] = [
     subtitle: "Website forms and 1:1 followups.",
     permissionHint: "Inbox form notifications; inbound slice of dashboard.",
   },
+  {
+    userId: "u-content-01",
+    title: "Content ops",
+    subtitle: "Calendar, brands, captures — no sales pipeline.",
+    permissionHint: "Dashboard is content-only; Leads/Pipeline stay hidden.",
+  },
 ];
 
 export function parseDemoPersonaId(value: string | undefined): string {

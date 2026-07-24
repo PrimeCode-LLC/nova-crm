@@ -38,6 +38,7 @@ const PREVIEW_ROLES: Role[] = [
   "team_lead",
   "salesperson",
   "prospecting",
+  "content_team",
 ];
 
 const VIEW_OPTIONS = DASHBOARD_VIEW_MODE_OPTIONS.map((o) => ({ key: o.key, label: o.label }));

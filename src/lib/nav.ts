@@ -276,8 +276,8 @@ export function canAccessNavItem(item: NavItem, ctx: NavAccessContext): boolean 
     return featureKeys.some((key) => userHasAdminFeature(subject, key, ctx.orgRole));
   }
   if (ctx.isSuperAdmin) return true;
-  // Honor Roles catalog module toggles (e.g. Intake pool) once computed permissions are loaded.
-  if (ctx.roleSnapshot && MODULE_BY_HREF[item.href]) {
+  // Honor Roles catalog (live snapshot or system preset) for module hrefs — including demo personas.
+  if (MODULE_BY_HREF[item.href]) {
     return canAccessHref(subject, item.href);
   }
   if (!item.minWorkspaceRole) return true;

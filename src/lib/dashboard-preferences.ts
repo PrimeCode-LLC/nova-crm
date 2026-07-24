@@ -1,8 +1,9 @@
 import { CHANNEL_LIST } from "@/lib/constants";
 import type { ChannelKey, Role } from "@/lib/types";
+import { isContentOpsDashboardRole, isFrontlineDashboardRole } from "@/lib/dashboard-role-focus";
 
 /** Layout presets an owner can pick or preview. */
-export type DashboardViewMode = "auto" | "ops" | "classic" | "frontline";
+export type DashboardViewMode = "auto" | "ops" | "classic" | "frontline" | "content";
 
 export type DashboardWidgetKey =
   | "pulse"
@@ -85,6 +86,11 @@ export const DASHBOARD_VIEW_MODE_OPTIONS: {
     key: "frontline",
     label: "Employee board",
     description: "How sales / prospecting roles experience the overview.",
+  },
+  {
+    key: "content",
+    label: "Content board",
+    description: "Checklist plate and calendar home — no sales pipeline widgets.",
   },
 ];
 
@@ -193,7 +199,8 @@ function isRole(value: unknown): value is Role {
     value === "team_lead" ||
     value === "salesperson" ||
     value === "data_scraper" ||
-    value === "prospecting"
+    value === "prospecting" ||
+    value === "content_team"
   );
 }
 
@@ -213,7 +220,11 @@ export function parseDashboardPreferences(raw: unknown): DashboardPreferences {
   }
   const o = raw as Partial<DashboardPreferences>;
   const viewMode =
-    o.viewMode === "ops" || o.viewMode === "classic" || o.viewMode === "frontline" || o.viewMode === "auto"
+    o.viewMode === "ops" ||
+    o.viewMode === "classic" ||
+    o.viewMode === "frontline" ||
+    o.viewMode === "content" ||
+    o.viewMode === "auto"
       ? o.viewMode
       : "auto";
   const previewRole =
@@ -280,6 +291,7 @@ export function resolveEffectiveDashboardRole(
 ): Role | undefined {
   if (prefs.previewRole) return prefs.previewRole;
   if (prefs.viewMode === "frontline") return realRole && isFrontlineLike(realRole) ? realRole : "salesperson";
+  if (prefs.viewMode === "content") return realRole === "content_team" ? realRole : "content_team";
   if (prefs.viewMode === "ops" || prefs.viewMode === "classic") {
     return realRole ?? "director";
   }
@@ -287,7 +299,7 @@ export function resolveEffectiveDashboardRole(
 }
 
 function isFrontlineLike(role: Role): boolean {
-  return role === "salesperson" || role === "data_scraper" || role === "prospecting";
+  return isFrontlineDashboardRole(role);
 }
 
 /** Whether to render the owner ops command board for this preference + role. */
@@ -297,7 +309,13 @@ export function resolveOpsLayout(
   prefs: DashboardPreferences,
 ): boolean {
   if (prefs.viewMode === "ops") return true;
-  if (prefs.viewMode === "classic" || prefs.viewMode === "frontline") return false;
+  if (
+    prefs.viewMode === "classic" ||
+    prefs.viewMode === "frontline" ||
+    prefs.viewMode === "content"
+  ) {
+    return false;
+  }
   if (prefs.previewRole) {
     return (
       prefs.previewRole === "director" ||
@@ -305,6 +323,7 @@ export function resolveOpsLayout(
       prefs.previewRole === "team_lead"
     );
   }
+  if (isContentOpsDashboardRole(effectiveRole)) return false;
   return realCanOps;
 }
 
@@ -313,10 +332,28 @@ export function resolveFrontlineLayout(
   prefs: DashboardPreferences,
 ): boolean {
   if (prefs.viewMode === "frontline") return true;
-  if (prefs.viewMode === "ops" || prefs.viewMode === "classic") return false;
-  return (
-    effectiveRole === "salesperson" ||
-    effectiveRole === "data_scraper" ||
-    effectiveRole === "prospecting"
-  );
+  if (
+    prefs.viewMode === "ops" ||
+    prefs.viewMode === "classic" ||
+    prefs.viewMode === "content"
+  ) {
+    return false;
+  }
+  return isFrontlineDashboardRole(effectiveRole);
+}
+
+/** Content-ops home: checklist plate + calendar, no sales KPIs. */
+export function resolveContentLayout(
+  effectiveRole: Role | undefined,
+  prefs: DashboardPreferences,
+): boolean {
+  if (prefs.viewMode === "content") return true;
+  if (
+    prefs.viewMode === "ops" ||
+    prefs.viewMode === "classic" ||
+    prefs.viewMode === "frontline"
+  ) {
+    return false;
+  }
+  return isContentOpsDashboardRole(effectiveRole);
 }
