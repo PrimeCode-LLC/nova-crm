@@ -194,6 +194,19 @@ export interface ContentVariant {
   body: string;
   hook?: string;
   format?: ContentFormat;
+  /** Platform-appropriate tags, already capped to the platform's limit. */
+  hashtags?: string[];
+  /**
+   * Link or extra context to post as the first comment/reply. Used where an
+   * in-body URL suppresses reach (LinkedIn, X).
+   */
+  firstComment?: string;
+  /** Ordered standalone parts: thread posts on X, slides on a carousel. */
+  segments?: string[];
+  /** Alt text for the attached graphic. Feeds platform search and screen readers. */
+  altText?: string;
+  /** Reddit post title, which ranks separately from the body. */
+  postTitle?: string;
 }
 
 export interface ContentRagCitation {
@@ -535,7 +548,16 @@ export function isContentItemOverdue(item: ContentItem, now = new Date()): boole
   return Number.isFinite(due) && due < now.getTime();
 }
 
-export function contentVariantCharLimit(platform: ContentPlatform): number {
+/**
+ * Hard platform ceiling. This is a validation bound, not a writing target.
+ * Use contentBodyCharTarget from platform-playbooks for what to aim at.
+ */
+export function contentVariantCharLimit(
+  platform: ContentPlatform,
+  format?: ContentFormat,
+): number {
+  // A single long-form X post (Premium) is not bound by the 280 reply limit.
+  if (platform === "x" && format === "long_form") return 25_000;
   switch (platform) {
     case "x":
       return 280;

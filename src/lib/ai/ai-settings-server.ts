@@ -6,7 +6,7 @@ import {
   type AiPromptTemplate,
   type OrganizationAiSettings,
 } from "@/lib/ai/types";
-import { AI_PROMPT_DEFAULTS } from "@/lib/ai/prompt-defaults";
+import { AI_PROMPT_DEFAULTS, promptTemplateIsCurrent } from "@/lib/ai/prompt-defaults";
 import { mergeFitCheckKnowledgeConfig } from "@/lib/ai/fit-check-knowledge-types";
 import { getAiProviderKeyFlagsServer } from "@/lib/ai/ai-secrets-server";
 import type { Role } from "@/lib/types";
@@ -132,10 +132,22 @@ export async function getAiPromptServer(
     };
   }
   const data = snap.data() as AiPromptTemplate;
+  const storedTemplate = data.userPromptTemplate ?? defaults.userPromptTemplate;
+  // A saved override from before a placeholder was introduced would drop the
+  // context the route now depends on, so fall back to the current default pair.
+  if (!promptTemplateIsCurrent(featureKey, storedTemplate)) {
+    return {
+      featureKey,
+      systemPrompt: defaults.systemPrompt,
+      userPromptTemplate: defaults.userPromptTemplate,
+      version: data.version ?? 1,
+      updatedAt: data.updatedAt,
+    };
+  }
   return {
     featureKey,
     systemPrompt: data.systemPrompt ?? defaults.systemPrompt,
-    userPromptTemplate: data.userPromptTemplate ?? defaults.userPromptTemplate,
+    userPromptTemplate: storedTemplate,
     version: data.version ?? 1,
     updatedAt: data.updatedAt,
   };

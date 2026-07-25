@@ -38,6 +38,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type {
   ContentBrand,
+  ContentFormat,
   ContentItem,
   ContentPlan,
   ContentPlanSlot,
@@ -53,7 +54,7 @@ import {
   formatNeedsGraphics,
   resolveBrandResponsibility,
 } from "@/lib/content-calendar/types";
-import { scrubAiTellPunctuation } from "@/lib/content-calendar/schedule";
+import { scrubAiTellPunctuation, scrubPostBody } from "@/lib/content-calendar/schedule";
 
 function PlanSlotDetailField({
   label,
@@ -353,12 +354,20 @@ export function ContentFillDaysDialog({
             angle: slot.angle,
             proofHint: slot.proofHint,
             ctaType: slot.ctaType,
+            format,
+            audienceHint: slot.targetAudienceHint,
           }),
         });
         const data = (await res.json()) as {
           error?: unknown;
           hook?: string;
           body?: string;
+          format?: ContentFormat;
+          hashtags?: string[];
+          firstComment?: string;
+          segments?: string[];
+          altText?: string;
+          postTitle?: string;
           citations?: { title: string; excerpt: string }[];
         };
         if (!res.ok) {
@@ -368,9 +377,13 @@ export function ContentFillDaysDialog({
           continue;
         }
 
+        // The route may downgrade a format the platform cannot publish
+        // (an X carousel), so everything downstream uses the resolved one.
+        const resolvedFormat = data.format ?? format;
+
         const checklist = buildContentChecklist({
           brand,
-          format,
+          format: resolvedFormat,
           dueAt: slot.publishAt,
           fallbackUserId: currentUserId,
         });
@@ -379,7 +392,7 @@ export function ContentFillDaysDialog({
         const assigneeUserId = firstPendingChecklistAssignee(checklist, currentUserId);
 
         let designInstructions: string | undefined;
-        if (formatNeedsGraphics(format)) {
+        if (formatNeedsGraphics(resolvedFormat)) {
           try {
             const briefRes = await fetch("/api/ai/content-graphics-brief", {
               method: "POST",
@@ -388,7 +401,7 @@ export function ContentFillDaysDialog({
               body: JSON.stringify({
                 brandId: brand.id,
                 platform: slot.platform,
-                format,
+                format: resolvedFormat,
                 pillarKey: slot.pillarKey,
                 title: slot.title,
                 angle: slot.angle,
@@ -407,7 +420,7 @@ export function ContentFillDaysDialog({
           }
         }
 
-        const cleanBody = scrubAiTellPunctuation(data.body || slot.angle);
+        const cleanBody = scrubPostBody(data.body || slot.angle, slot.platform);
         const cleanHook = data.hook ? scrubAiTellPunctuation(data.hook) : data.hook;
 
         const item = await createItem({
@@ -419,14 +432,19 @@ export function ContentFillDaysDialog({
           title: slot.title,
           angle: slot.angle,
           rationale: slot.rationale,
-          format,
+          format: resolvedFormat,
           platforms: [slot.platform],
           variants: [
             {
               platform: slot.platform,
               body: cleanBody,
               hook: cleanHook,
-              format,
+              format: resolvedFormat,
+              hashtags: data.hashtags?.length ? data.hashtags : undefined,
+              firstComment: data.firstComment || undefined,
+              segments: data.segments?.length ? data.segments : undefined,
+              altText: data.altText || undefined,
+              postTitle: data.postTitle || undefined,
             },
           ],
           ctaType: slot.ctaType,
@@ -444,7 +462,7 @@ export function ContentFillDaysDialog({
 
         updatedSlots.push({
           ...slot,
-          format,
+          format: resolvedFormat,
           contentItemId: item?.id,
         });
       }

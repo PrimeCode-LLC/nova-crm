@@ -3,6 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAiPromptServer, upsertAiPromptServer } from "@/lib/ai/ai-settings-server";
+import { REQUIRED_PROMPT_VARS } from "@/lib/ai/prompt-defaults";
 import type { AiFeatureKey } from "@/lib/ai/types";
 import { recordAudit } from "@/lib/firestore/audit";
 
@@ -61,6 +62,22 @@ export async function PATCH(req: Request) {
   const parsed = patchSchema.safeParse(json);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  // Content prompts carry their platform rules through placeholders. Saving a
+  // template without them would silently strip that context at generation time.
+  const missing = (REQUIRED_PROMPT_VARS[parsed.data.featureKey] ?? []).filter(
+    (name) => !parsed.data.userPromptTemplate.includes(`{{${name}}}`),
+  );
+  if (missing.length > 0) {
+    return NextResponse.json(
+      {
+        error: `This prompt must keep ${missing
+          .map((n) => `{{${n}}}`)
+          .join(", ")} in the user template, otherwise platform rules are dropped.`,
+      },
+      { status: 400 },
+    );
   }
 
   const result = await upsertAiPromptServer(g.ctx.session.organizationId, parsed.data);

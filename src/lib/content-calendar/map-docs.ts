@@ -171,11 +171,18 @@ export function mapContentItem(id: string, data: Record<string, unknown>): Conte
   const variantsRaw = Array.isArray(data.variants) ? data.variants : [];
   const variants: ContentVariant[] = variantsRaw.map((v) => {
     const row = (v ?? {}) as Record<string, unknown>;
+    const hashtags = strArr(row.hashtags);
+    const segments = strArr(row.segments);
     return {
       platform: str(row.platform, "linkedin") as ContentPlatform,
       body: str(row.body),
       hook: str(row.hook) || undefined,
       format: (str(row.format) as ContentFormat) || undefined,
+      hashtags: hashtags.length ? hashtags : undefined,
+      firstComment: str(row.firstComment) || undefined,
+      segments: segments.length ? segments : undefined,
+      altText: str(row.altText) || undefined,
+      postTitle: str(row.postTitle) || undefined,
     };
   });
 

@@ -203,6 +203,259 @@ describe("content schedule", () => {
   });
 });
 
+describe("platform playbooks", () => {
+  it("keeps every platform to a format it can actually publish", async () => {
+    const { coerceFormatForPlatform } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    expect(coerceFormatForPlatform("x", "carousel")).toBe("thread");
+    expect(coerceFormatForPlatform("linkedin", "thread")).toBe("text_post");
+    expect(coerceFormatForPlatform("instagram", "text_post")).toBe("graphic_post");
+    expect(coerceFormatForPlatform("reddit", "carousel")).toBe("long_form");
+    // Viable formats pass through untouched.
+    expect(coerceFormatForPlatform("linkedin", "carousel")).toBe("carousel");
+    expect(coerceFormatForPlatform("instagram", "short_video")).toBe("short_video");
+  });
+
+  it("targets a length range rather than the platform ceiling", async () => {
+    const { contentBodyCharTarget } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    const { contentVariantCharLimit } = await import("@/lib/content-calendar/types");
+    const linkedin = contentBodyCharTarget("linkedin", "text_post");
+    expect(linkedin.min).toBeGreaterThan(0);
+    expect(linkedin.max).toBeLessThan(contentVariantCharLimit("linkedin"));
+    // A caption supporting a visual is shorter than a standalone post.
+    expect(contentBodyCharTarget("linkedin", "carousel").max).toBeLessThan(linkedin.max);
+    // Long-form X is not bound by the 280 reply limit.
+    expect(contentVariantCharLimit("x", "long_form")).toBeGreaterThan(280);
+    expect(contentVariantCharLimit("x", "text_post")).toBe(280);
+  });
+
+  it("only asks for segments on formats written as ordered parts", async () => {
+    const { formatUsesSegments, segmentCountTarget } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    expect(formatUsesSegments("x", "thread")).toBe(true);
+    expect(formatUsesSegments("instagram", "carousel")).toBe(true);
+    expect(formatUsesSegments("linkedin", "text_post")).toBe(false);
+    expect(segmentCountTarget("x", "thread")).toEqual({ min: 4, max: 8 });
+    expect(segmentCountTarget("linkedin", "text_post")).toBeNull();
+  });
+
+  it("treats the first-comment link move as reliable only where it still works", async () => {
+    const { getContentPlatformPlaybook } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    // Both suppress in-body links, but only X's first-reply workaround holds.
+    expect(getContentPlatformPlaybook("x").linkPolicy).toMatchObject({
+      bodyCostsReach: true,
+      firstComment: "reliable",
+    });
+    expect(getContentPlatformPlaybook("linkedin").linkPolicy).toMatchObject({
+      bodyCostsReach: true,
+      firstComment: "contested",
+    });
+    expect(getContentPlatformPlaybook("reddit").linkPolicy.bodyCostsReach).toBe(false);
+  });
+
+  it("keeps a Reel caption inside the visible window", async () => {
+    const { contentBodyCharTarget } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    // Long Reel captions measurably reach less, unlike carousel captions.
+    expect(contentBodyCharTarget("instagram", "short_video").max).toBeLessThanOrEqual(125);
+    expect(contentBodyCharTarget("instagram", "carousel").max).toBeGreaterThan(125);
+  });
+
+  it("holds the LinkedIn hook to the mobile fold, not the desktop one", async () => {
+    const { getContentPlatformPlaybook } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    expect(getContentPlatformPlaybook("linkedin").previewChars).toBe(140);
+  });
+
+  it("injects platform-specific rules into the draft prompt", async () => {
+    const { formatPlatformPlaybookForPrompt } = await import(
+      "@/lib/content-calendar/platform-playbooks"
+    );
+    const instagram = formatPlatformPlaybookForPrompt("instagram", "carousel");
+    expect(instagram).toContain("PLATFORM: instagram");
+    expect(instagram).toContain("Hashtags: 3 to 5");
+    const reddit = formatPlatformPlaybookForPrompt("reddit", "long_form");
+    expect(reddit).toContain("Hashtags: none");
+    expect(reddit).toMatch(/Markdown: supported/);
+    expect(formatPlatformPlaybookForPrompt("linkedin", "text_post")).toMatch(
+      /Markdown: NOT rendered/,
+    );
+  });
+});
+
+describe("content prompt templates", () => {
+  it("ships defaults that carry the platform rules", async () => {
+    const { AI_PROMPT_DEFAULTS, promptTemplateIsCurrent } = await import(
+      "@/lib/ai/prompt-defaults"
+    );
+    expect(
+      promptTemplateIsCurrent(
+        "content_draft_generate",
+        AI_PROMPT_DEFAULTS.content_draft_generate.userPromptTemplate,
+      ),
+    ).toBe(true);
+    expect(
+      promptTemplateIsCurrent(
+        "content_plan_suggest",
+        AI_PROMPT_DEFAULTS.content_plan_suggest.userPromptTemplate,
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects a stale override that would drop the playbook", async () => {
+    const { promptTemplateIsCurrent } = await import("@/lib/ai/prompt-defaults");
+    // The pre-2026 template: platform name only, no playbook or length target.
+    const stale = "platform: {{platform}}\nangle: {{angle}}\ncharLimit: {{charLimit}}";
+    expect(promptTemplateIsCurrent("content_draft_generate", stale)).toBe(false);
+    // Features without required placeholders are unaffected.
+    expect(promptTemplateIsCurrent("email_reply", "anything")).toBe(true);
+  });
+});
+
+describe("post body scrubbing", () => {
+  it("preserves paragraph rhythm and lists that platforms render as text", async () => {
+    const { scrubPostBody } = await import("@/lib/content-calendar/schedule");
+    const input = "Dispatch was manual.\n\nThree things changed:\n* RFID scans\n* One dashboard";
+    const out = scrubPostBody(input, "linkedin");
+    expect(out).toBe(
+      "Dispatch was manual.\n\nThree things changed:\n- RFID scans\n- One dashboard",
+    );
+  });
+
+  it("still strips markdown that LinkedIn would show literally", async () => {
+    const { scrubPostBody } = await import("@/lib/content-calendar/schedule");
+    const out = scrubPostBody("**Myth 1:** keep it simple\nRead [this](https://x.com) next", "x");
+    expect(out).toBe("Myth 1: keep it simple\nRead this next");
+  });
+
+  it("keeps native markdown on Reddit", async () => {
+    const { scrubPostBody } = await import("@/lib/content-calendar/schedule");
+    const input = "## What we tried\n\n- Swapped the scanner\n- **Kept** the old WMS";
+    expect(scrubPostBody(input, "reddit")).toBe(input);
+  });
+
+  it("normalizes em dashes on every platform", async () => {
+    const { scrubPostBody } = await import("@/lib/content-calendar/schedule");
+    expect(scrubPostBody("no downtime—we shipped", "reddit")).toBe("no downtime, we shipped");
+    expect(scrubPostBody("no downtime—we shipped", "linkedin")).toBe("no downtime, we shipped");
+  });
+
+  it("trims an over-long body at a sentence boundary", async () => {
+    const { clampPostBody } = await import("@/lib/content-calendar/schedule");
+    const text = "First sentence here. Second sentence here. Third runs past the limit.";
+    const out = clampPostBody(text, 45);
+    expect(out).toBe("First sentence here. Second sentence here.");
+    expect(clampPostBody("short", 100)).toBe("short");
+  });
+});
+
+describe("post lint", () => {
+  it("enforces Instagram's five hashtag cap and Reddit's zero", async () => {
+    const { lintContentVariant } = await import("@/lib/content-calendar/post-lint");
+    const body = "a".repeat(500);
+    const overCap = lintContentVariant({
+      platform: "instagram",
+      format: "graphic_post",
+      body,
+      hashtags: ["a", "b", "c", "d", "e", "f"],
+    });
+    expect(overCap.findings.some((f) => f.code === "too_many_hashtags")).toBe(true);
+
+    const onReddit = lintContentVariant({
+      platform: "reddit",
+      format: "long_form",
+      body: "b".repeat(1000),
+      hashtags: ["logistics"],
+    });
+    expect(onReddit.findings.some((f) => f.code === "hashtags_not_allowed")).toBe(true);
+  });
+
+  it("flags an in-body link where it suppresses reach", async () => {
+    const { lintContentVariant } = await import("@/lib/content-calendar/post-lint");
+    const linkedin = lintContentVariant({
+      platform: "linkedin",
+      format: "text_post",
+      body: `${"a".repeat(1000)}\n\nRead more at https://example.com/case-study`,
+    });
+    expect(linkedin.findings.some((f) => f.code === "link_in_body")).toBe(true);
+
+    // Reddit allows links in the body.
+    const reddit = lintContentVariant({
+      platform: "reddit",
+      format: "long_form",
+      body: `${"a".repeat(1000)}\n\nWriteup: https://example.com/x`,
+    });
+    expect(reddit.findings.some((f) => f.code === "link_in_body")).toBe(false);
+  });
+
+  it("catches the AI constructions platforms demote", async () => {
+    const { lintContentVariant } = await import("@/lib/content-calendar/post-lint");
+    const pad = "a".repeat(900);
+    const rhetorical = lintContentVariant({
+      platform: "linkedin",
+      format: "text_post",
+      body: `${pad}\n\nThe outcome? A staggering 70% reduction in status calls.`,
+    });
+    const codes = rhetorical.findings.map((f) => f.message).join(" | ");
+    expect(codes).toContain("rhetorical question fragment");
+    expect(codes).toContain("staggering");
+
+    const notXButY = lintContentVariant({
+      platform: "linkedin",
+      format: "text_post",
+      body: `${pad}\n\nIt's not a tracking problem, it's a trust problem.`,
+    });
+    expect(notXButY.findings.some((f) => f.code === "ai_tell")).toBe(true);
+    expect(notXButY.score).toBeLessThan(100);
+  });
+
+  it("checks thread segments against the 280 character limit", async () => {
+    const { lintContentVariant } = await import("@/lib/content-calendar/post-lint");
+    const result = lintContentVariant({
+      platform: "x",
+      format: "thread",
+      body: "Manual dispatch cost a 40-truck 3PL two hours a day. Here is what moved it.",
+      segments: ["short one", "b".repeat(300), "third", "fourth"],
+    });
+    expect(result.findings.some((f) => f.code === "segment_too_long")).toBe(true);
+  });
+
+  it("passes a clean platform-native post", async () => {
+    const { lintContentVariant } = await import("@/lib/content-calendar/post-lint");
+    const body = [
+      "A 40-truck 3PL was fielding about 60 driver status calls a day, and every one of them landed on the same two dispatchers.",
+      "",
+      "They were rekeying ETAs into a spreadsheet that nobody downstream trusted, so sales called the drivers directly to double check. That is how you end up with two sources of truth and no way to tell which one is wrong.",
+      "",
+      "We put RFID reads on the dock doors and pushed them straight into one board that dispatch, sales, and the client portal all read from. No new hardware on the trucks, because the yard was the actual bottleneck.",
+      "",
+      "Status calls dropped hard. The spreadsheet did not survive, which nobody missed.",
+      "",
+      "The part I would do differently: we spent three weeks on a reader placement plan before anyone walked the yard at shift change. Half of it was wrong. A single afternoon of watching how trailers actually move would have saved that.",
+      "",
+      "This only works when the yard is where the visibility gap is. If your drivers are dark for six hours between stops, dock scans will not tell you anything useful.",
+      "",
+      "What is still manual in your dispatch flow?",
+    ].join("\n");
+    const result = lintContentVariant({
+      platform: "linkedin",
+      format: "text_post",
+      body,
+    });
+    expect(body.length).toBeGreaterThanOrEqual(900);
+    expect(body.length).toBeLessThanOrEqual(1900);
+    expect(result.findings.filter((f) => f.severity === "error")).toEqual([]);
+  });
+});
+
 describe("capture policy", () => {
   const brandBase = {
     id: "b1",

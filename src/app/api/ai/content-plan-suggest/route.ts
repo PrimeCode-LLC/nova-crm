@@ -16,6 +16,10 @@ import {
   buildContentScheduleSlots,
   scrubAiTellPunctuation,
 } from "@/lib/content-calendar/schedule";
+import {
+  coerceFormatForPlatform,
+  formatPlatformFitForPrompt,
+} from "@/lib/content-calendar/platform-playbooks";
 import type { ContentPlan, ContentPlanSlot } from "@/lib/content-calendar/types";
 import type { Role } from "@/lib/types";
 
@@ -184,6 +188,7 @@ export async function POST(req: Request) {
       schema: planSchema,
       promptVars: {
         brandContext: formatBrandContextForPrompt(brand),
+        platformFit: formatPlatformFitForPrompt(platforms),
         pillars: brand.pillars
           .filter((p) => p.enabled)
           .map((p) => `${p.key}: ${p.targetPercent}%`)
@@ -221,7 +226,8 @@ export async function POST(req: Request) {
         proofHint: scrubAiTellPunctuation(s.proofHint),
         ctaType: s.ctaType,
         rationale: scrubAiTellPunctuation(s.rationale),
-        format: s.format,
+        // Guard against a plan asking for a format the platform cannot publish.
+        format: coerceFormatForPlatform(sched.platform, s.format),
         targetAudienceHint: scrubAiTellPunctuation(s.targetAudienceHint),
         approved: true,
       });

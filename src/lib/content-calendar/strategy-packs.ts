@@ -279,16 +279,21 @@ export const B2B_AGENCY_STRATEGY_PACK: ContentStrategyPack = {
       offersToPromote: "Fit Check, discovery call, or case-study walkthrough.",
     };
   },
-  promptSystemExtras: `Industry: B2B services / SaaS.
-Best practices:
-- Hook in the first line (problem, contrast, or concrete number).
-- One idea per post; platform-native length and formatting.
-- LinkedIn: short paragraphs, scannable, professional but human.
-- X: punchy; threads only when the idea needs steps.
-- Prefer verified case-study proof from knowledge when pillar is proof.
-- Never invent client names, metrics, or logos not in knowledge.
-- Soft CTAs only - no hard sell spam.
-- Fill strategic gaps (missing pillars / outcomes), not empty calendar cells.`,
+  // Strategy-level only. Platform mechanics live in platform-playbooks.ts and are
+  // injected separately, so nothing here should restate per-platform rules.
+  promptSystemExtras: `Industry: B2B services / SaaS. The buyer is technical or operationally accountable, has been pitched by many agencies, and discounts claims without mechanism.
+
+What earns trust with this audience:
+- Show the mechanism, not the outcome alone. How the integration actually worked matters more than the percentage it improved.
+- Name the constraint you worked inside: legacy system, no downtime window, small team, tight budget, compliance requirement.
+- Quantify only what the knowledge base supports. An unsourced number reads as marketing and costs more credibility than it buys.
+- Scope the claim honestly ("for a 40-truck fleet with manual dispatch"). Overreach is the fastest way to lose a technical reader.
+- Say who this is not for. Disqualifying is the strongest authority signal in B2B.
+
+What to avoid:
+- Vendor-neutral "digital transformation" language that any competitor could publish.
+- Case studies with no failure, tradeoff, or cost mentioned.
+- Selling before proving. The offer comes after the reader has learned something usable.`,
 };
 
 export const CONTENT_STRATEGY_PACKS: Record<string, ContentStrategyPack> = {

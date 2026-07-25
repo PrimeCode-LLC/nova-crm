@@ -4,7 +4,17 @@ import * as React from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
-import { Check, Copy, ExternalLink, Plus, SkipForward, Sparkles, Trash2 } from "lucide-react";
+import {
+  AlertTriangle,
+  Check,
+  Copy,
+  ExternalLink,
+  Info,
+  Plus,
+  SkipForward,
+  Sparkles,
+  Trash2,
+} from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -42,13 +52,334 @@ import {
   type ContentChecklistStep,
   type ContentChecklistStepKey,
   type ContentChecklistStepStatus,
+  type ContentFormat,
   type ContentItemStatus,
   type ContentPlatform,
+  type ContentVariant,
 } from "@/lib/content-calendar/types";
 import { fmtDate } from "@/lib/format";
-import { scrubAiTellPunctuation } from "@/lib/content-calendar/schedule";
+import { scrubAiTellPunctuation, scrubPostBody } from "@/lib/content-calendar/schedule";
+import {
+  contentBodyCharTarget,
+  formatUsesSegments,
+  getContentPlatformPlaybook,
+  segmentCountTarget,
+} from "@/lib/content-calendar/platform-playbooks";
+import { contentLintSummary, lintContentVariant } from "@/lib/content-calendar/post-lint";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { OrganizationMember } from "@/lib/types";
+
+/** Editable shape of one platform variant, with hashtags as raw text. */
+type VariantDraft = {
+  body: string;
+  hashtags: string;
+  firstComment: string;
+  altText: string;
+  postTitle: string;
+  segments: string[];
+};
+
+function hashtagsToText(tags: string[] | undefined): string {
+  return (tags ?? []).map((t) => `#${t}`).join(" ");
+}
+
+function parseHashtags(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(/[\s,]+/)) {
+    const tag = raw.replace(/[^\p{L}\p{N}_]/gu, "");
+    if (!tag) continue;
+    const key = tag.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(tag);
+  }
+  return out;
+}
+
+function variantToDraft(variant: ContentVariant | undefined): VariantDraft {
+  return {
+    body: variant ? scrubPostBody(variant.body, variant.platform) : "",
+    hashtags: hashtagsToText(variant?.hashtags),
+    firstComment: variant?.firstComment ?? "",
+    altText: variant?.altText ?? "",
+    postTitle: variant?.postTitle ?? "",
+    segments: variant?.segments ?? [],
+  };
+}
+
+/** Unsaved editor state for one content item. */
+type ItemEdits = {
+  drafts: Partial<Record<ContentPlatform, VariantDraft>>;
+  /** null means "no local edit yet", so the saved brief shows through. */
+  design: string | null;
+};
+
+/** Body plus hashtags, i.e. exactly what gets pasted into the platform. */
+function draftToPostText(draft: VariantDraft, platform: ContentPlatform): string {
+  const body = scrubPostBody(draft.body, platform);
+  const tags = parseHashtags(draft.hashtags);
+  if (tags.length === 0) return body;
+  return `${body}\n\n${tags.map((t) => `#${t}`).join(" ")}`;
+}
+
+function PlatformDraftCard({
+  platform,
+  format,
+  draft,
+  canEdit,
+  bannedPhrases,
+  onChange,
+  onCopy,
+}: {
+  platform: ContentPlatform;
+  format?: ContentFormat;
+  draft: VariantDraft;
+  canEdit: boolean;
+  bannedPhrases: string[];
+  onChange: (patch: Partial<VariantDraft>) => void;
+  onCopy: () => void;
+}) {
+  const playbook = getContentPlatformPlaybook(platform);
+  const target = contentBodyCharTarget(platform, format);
+  const limit = contentVariantCharLimit(platform, format);
+  const tags = parseHashtags(draft.hashtags);
+  const usesSegments = formatUsesSegments(platform, format);
+  const segmentTarget = segmentCountTarget(platform, format);
+
+  const lint = lintContentVariant({
+    platform,
+    format,
+    body: draft.body,
+    hashtags: tags,
+    segments: draft.segments,
+    bannedPhrases,
+  });
+
+  const len = draft.body.length;
+  const lengthTone =
+    len > limit
+      ? "text-destructive"
+      : len < target.min || len > target.max
+        ? "text-amber-500"
+        : "text-emerald-500";
+
+  const errors = lint.findings.filter((f) => f.severity === "error");
+
+  return (
+    <Card>
+      <CardHeader className="pb-2 flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+        <div className="flex flex-wrap items-center gap-2">
+          <CardTitle className="text-base">{CONTENT_PLATFORM_LABELS[platform]}</CardTitle>
+          {format ? (
+            <Badge variant="outline" className="font-normal">
+              {CONTENT_FORMAT_LABELS[format]}
+            </Badge>
+          ) : null}
+          <Badge
+            variant={errors.length > 0 ? "destructive" : lint.findings.length > 0 ? "secondary" : "outline"}
+            className="font-normal"
+          >
+            {contentLintSummary(lint)}
+          </Badge>
+        </div>
+        <span className={cn("text-xs tabular-nums", lengthTone)}>
+          {len} / {target.min}-{target.max} chars
+        </span>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="relative">
+          <Textarea
+            value={draft.body}
+            disabled={!canEdit}
+            rows={usesSegments ? 5 : 10}
+            className="pr-10 leading-relaxed"
+            onChange={(e) => onChange({ body: e.target.value })}
+          />
+          <Button
+            type="button"
+            size="icon"
+            variant="ghost"
+            className="absolute right-1.5 top-1.5 h-7 w-7 text-muted-foreground hover:text-foreground"
+            title="Copy post with hashtags"
+            aria-label="Copy post with hashtags"
+            onClick={onCopy}
+          >
+            <Copy className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          First ~{playbook.previewChars} characters show before {CONTENT_PLATFORM_LABELS[platform]}{" "}
+          truncates.
+        </p>
+
+        {usesSegments && segmentTarget ? (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <Label className="text-sm">
+                {format === "thread" ? "Thread posts" : "Slides"}{" "}
+                <span className="font-normal text-muted-foreground">
+                  ({draft.segments.length} of {segmentTarget.min}-{segmentTarget.max})
+                </span>
+              </Label>
+              {canEdit ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => onChange({ segments: [...draft.segments, ""] })}
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add
+                </Button>
+              ) : null}
+            </div>
+            {draft.segments.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                None yet. Regenerate the draft or add parts manually.
+              </p>
+            ) : (
+              draft.segments.map((segment, index) => (
+                <div key={index} className="flex items-start gap-2">
+                  <span className="mt-2 w-6 shrink-0 text-xs tabular-nums text-muted-foreground">
+                    {index + 1}.
+                  </span>
+                  <Textarea
+                    value={segment}
+                    disabled={!canEdit}
+                    rows={2}
+                    className="flex-1 text-sm"
+                    onChange={(e) => {
+                      const next = [...draft.segments];
+                      next[index] = e.target.value;
+                      onChange({ segments: next });
+                    }}
+                  />
+                  <div className="mt-2 flex shrink-0 items-center gap-1">
+                    {format === "thread" ? (
+                      <span
+                        className={cn(
+                          "text-xs tabular-nums",
+                          segment.length > 280 ? "text-destructive" : "text-muted-foreground",
+                        )}
+                      >
+                        {segment.length}/280
+                      </span>
+                    ) : null}
+                    {canEdit ? (
+                      <Button
+                        type="button"
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7"
+                        aria-label={`Remove part ${index + 1}`}
+                        onClick={() =>
+                          onChange({ segments: draft.segments.filter((_, i) => i !== index) })
+                        }
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        ) : null}
+
+        {platform === "reddit" ? (
+          <div className="space-y-1.5">
+            <Label className="text-sm">Post title</Label>
+            <Input
+              value={draft.postTitle}
+              disabled={!canEdit}
+              placeholder="Specific, non-clickbait title the subreddit would click"
+              onChange={(e) => onChange({ postTitle: e.target.value })}
+            />
+          </div>
+        ) : null}
+
+        {playbook.hashtags.max > 0 ? (
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm">Hashtags</Label>
+              <span
+                className={cn(
+                  "text-xs tabular-nums",
+                  tags.length > playbook.hashtags.max
+                    ? "text-destructive"
+                    : tags.length < playbook.hashtags.min
+                      ? "text-amber-500"
+                      : "text-muted-foreground",
+                )}
+              >
+                {tags.length} / {playbook.hashtags.min}-{playbook.hashtags.max}
+              </span>
+            </div>
+            <Input
+              value={draft.hashtags}
+              disabled={!canEdit}
+              placeholder={
+                platform === "instagram"
+                  ? "#supplychainops #warehouseautomation #3pl"
+                  : "Optional, specific topics only"
+              }
+              onChange={(e) => onChange({ hashtags: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">{playbook.hashtagStyle}</p>
+          </div>
+        ) : null}
+
+        {playbook.linkPolicy.firstComment !== "not_applicable" ? (
+          <div className="space-y-1.5">
+            <Label className="text-sm">First comment</Label>
+            <Textarea
+              value={draft.firstComment}
+              disabled={!canEdit}
+              rows={2}
+              placeholder={
+                playbook.linkPolicy.firstComment === "reliable"
+                  ? "Links go here, not in the body"
+                  : "Only if the click matters more than reach"
+              }
+              className="text-sm"
+              onChange={(e) => onChange({ firstComment: e.target.value })}
+            />
+            <p className="text-xs text-muted-foreground">{playbook.linkPolicy.guidance}</p>
+          </div>
+        ) : null}
+
+        {formatNeedsGraphics(format) ? (
+          <div className="space-y-1.5">
+            <Label className="text-sm">Alt text</Label>
+            <Input
+              value={draft.altText}
+              disabled={!canEdit}
+              placeholder="Describe the graphic. Feeds platform search and screen readers."
+              onChange={(e) => onChange({ altText: e.target.value })}
+            />
+          </div>
+        ) : null}
+
+        {lint.findings.length > 0 ? (
+          <ul className="space-y-1.5 rounded-md border bg-muted/30 px-3 py-2.5">
+            {lint.findings.map((finding, index) => (
+              <li key={`${finding.code}-${index}`} className="flex gap-2 text-xs leading-relaxed">
+                {finding.severity === "error" ? (
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
+                ) : (
+                  <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-500" />
+                )}
+                <span className={finding.severity === "error" ? "text-foreground" : "text-muted-foreground"}>
+                  {finding.message}
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+}
 
 export function ContentItemDetailClient() {
   const params = useParams();
@@ -72,20 +403,36 @@ export function ContentItemDetailClient() {
   const item = data.items.find((i) => i.id === itemId);
   const brand = data.brands.find((b) => b.id === item?.brandId);
 
-  const [bodies, setBodies] = React.useState<Record<string, string>>({});
+  // Unsaved edits are tagged with the revision they were made against, so a
+  // server-side change to the item discards them instead of silently overwriting.
+  const revisionKey = item ? `${item.id}:${item.updatedAt}` : "";
+  const [edits, setEdits] = React.useState<ItemEdits & { key: string }>({
+    key: "",
+    drafts: {},
+    design: null,
+  });
   const [assetUrl, setAssetUrl] = React.useState("");
   const [assetLabel, setAssetLabel] = React.useState("");
-  const [designDraft, setDesignDraft] = React.useState("");
   const [briefBusy, setBriefBusy] = React.useState(false);
+  const [repurposeBusy, setRepurposeBusy] = React.useState<ContentPlatform | null>(null);
   const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
 
-  React.useEffect(() => {
-    if (!item) return;
-    const next: Record<string, string> = {};
-    for (const v of item.variants) next[v.platform] = scrubAiTellPunctuation(v.body);
-    setBodies(next);
-    setDesignDraft(scrubAiTellPunctuation(item.designInstructions ?? ""));
-  }, [item]);
+  const current = edits.key === revisionKey ? edits : null;
+  const drafts = current?.drafts ?? {};
+  const designDraft =
+    current?.design ?? scrubAiTellPunctuation(item?.designInstructions ?? "");
+
+  function updateEdits(apply: (prev: ItemEdits) => ItemEdits) {
+    setEdits((prev) => {
+      const base: ItemEdits =
+        prev.key === revisionKey ? prev : { drafts: {}, design: null };
+      return { key: revisionKey, ...apply(base) };
+    });
+  }
+
+  function setDesignDraft(next: string) {
+    updateEdits((prev) => ({ ...prev, design: next }));
+  }
 
   React.useEffect(() => {
     let cancelled = false;
@@ -284,7 +631,7 @@ export function ContentItemDetailClient() {
           angle: item.angle,
           ctaType: item.ctaType,
           hook: variant?.hook,
-          body: bodies[platform] || variant?.body || item.angle,
+          body: drafts[platform]?.body || variant?.body || item.angle,
         }),
       });
       const json = (await res.json()) as { error?: unknown; designInstructions?: string };
@@ -305,21 +652,42 @@ export function ContentItemDetailClient() {
 
   async function saveBodies() {
     if (!canEdit || !item) return;
-    const cleaned: Record<string, string> = {};
-    const variants = item.platforms.map((p) => {
-      const body = scrubAiTellPunctuation(
-        bodies[p] ?? item.variants.find((v) => v.platform === p)?.body ?? "",
-      );
-      cleaned[p] = body;
+    const cleaned: Partial<Record<ContentPlatform, VariantDraft>> = {};
+    const variants: ContentVariant[] = item.platforms.map((p) => {
       const prev = item.variants.find((v) => v.platform === p);
+      const draft = drafts[p] ?? variantToDraft(prev);
+      const platformFormat = prev?.format ?? item.format;
+      const body = scrubPostBody(draft.body, p);
+      const hashtags = parseHashtags(draft.hashtags).slice(
+        0,
+        getContentPlatformPlaybook(p).hashtags.max,
+      );
+      const segments = formatUsesSegments(p, platformFormat)
+        ? draft.segments.map((s) => scrubPostBody(s, p)).filter(Boolean)
+        : [];
+
+      cleaned[p] = {
+        body,
+        hashtags: hashtagsToText(hashtags),
+        firstComment: draft.firstComment.trim(),
+        altText: draft.altText.trim(),
+        postTitle: draft.postTitle.trim(),
+        segments,
+      };
+
       return {
         platform: p,
         body,
         hook: prev?.hook ? scrubAiTellPunctuation(prev.hook) : prev?.hook,
         format: prev?.format,
+        hashtags: hashtags.length ? hashtags : undefined,
+        firstComment: draft.firstComment.trim() || undefined,
+        segments: segments.length ? segments : undefined,
+        altText: draft.altText.trim() || undefined,
+        postTitle: p === "reddit" ? draft.postTitle.trim() || undefined : undefined,
       };
     });
-    setBodies(cleaned);
+    updateEdits((prev) => ({ ...prev, drafts: cleaned }));
     await data.updateItem(item.id, {
       variants,
       status: item.status === "idea" || item.status === "research" ? "draft" : item.status,
@@ -335,18 +703,15 @@ export function ContentItemDetailClient() {
 
   async function copy(platform: ContentPlatform) {
     if (!item) return;
-    const raw = bodies[platform] || item.variants.find((v) => v.platform === platform)?.body || "";
-    const text = scrubAiTellPunctuation(raw);
+    const draft = drafts[platform] ?? variantToDraft(item.variants.find((v) => v.platform === platform));
+    const text = draftToPostText(draft, platform);
     if (!text) {
       toast.message("Nothing to copy");
       return;
     }
     try {
       await navigator.clipboard.writeText(text);
-      if (text !== raw) {
-        setBodies((prev) => ({ ...prev, [platform]: text }));
-      }
-      toast.success("Copied");
+      toast.success(draft.hashtags.trim() ? "Copied with hashtags" : "Copied");
     } catch {
       toast.error("Could not copy");
     }
@@ -358,36 +723,67 @@ export function ContentItemDetailClient() {
       toast.message("Already has this platform");
       return;
     }
-    const res = await fetch("/api/ai/content-draft-generate", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      credentials: "same-origin",
-      body: JSON.stringify({
-        brandId: brand.id,
-        platform,
-        pillarKey: item.pillarKey,
-        title: item.title,
-        angle: item.angle,
-        proofHint: item.ragCitations?.[0]?.title ?? item.angle,
-        ctaType: item.ctaType,
-      }),
-    });
-    const json = (await res.json()) as { error?: string; body?: string; hook?: string };
-    if (!res.ok) {
-      toast.error(json.error || "Repurpose failed");
-      return;
+    // Adapt the approved post rather than rewriting from the angle, so the
+    // repurposed version keeps the same argument and proof.
+    const source = item.platforms[0];
+    const sourceBody = source
+      ? (drafts[source]?.body || item.variants.find((v) => v.platform === source)?.body || "")
+      : "";
+
+    setRepurposeBusy(platform);
+    try {
+      const res = await fetch("/api/ai/content-draft-generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({
+          brandId: brand.id,
+          platform,
+          pillarKey: item.pillarKey,
+          title: item.title,
+          angle: item.angle,
+          proofHint: item.ragCitations?.[0]?.title ?? item.angle,
+          ctaType: item.ctaType,
+          format: item.format,
+          sourcePlatform: sourceBody ? source : undefined,
+          sourceBody: sourceBody || undefined,
+        }),
+      });
+      const json = (await res.json()) as {
+        error?: string;
+        body?: string;
+        hook?: string;
+        format?: ContentFormat;
+        hashtags?: string[];
+        firstComment?: string;
+        segments?: string[];
+        altText?: string;
+        postTitle?: string;
+      };
+      if (!res.ok) {
+        toast.error(json.error || "Repurpose failed");
+        return;
+      }
+      const platforms = [...item.platforms, platform];
+      const variants: ContentVariant[] = [
+        ...item.variants,
+        {
+          platform,
+          body: scrubPostBody(json.body || item.angle, platform),
+          hook: json.hook ? scrubAiTellPunctuation(json.hook) : undefined,
+          format: json.format,
+          hashtags: json.hashtags?.length ? json.hashtags : undefined,
+          firstComment: json.firstComment || undefined,
+          segments: json.segments?.length ? json.segments : undefined,
+          altText: json.altText || undefined,
+          postTitle: json.postTitle || undefined,
+        },
+      ];
+      await data.updateItem(item.id, { platforms, variants });
+      toast.success(`Added ${CONTENT_PLATFORM_LABELS[platform]}`);
+    } finally {
+      setRepurposeBusy(null);
     }
-    const platforms = [...item.platforms, platform];
-    const variants = [
-      ...item.variants,
-      {
-        platform,
-        body: scrubAiTellPunctuation(json.body || item.angle),
-        hook: json.hook ? scrubAiTellPunctuation(json.hook) : json.hook,
-      },
-    ];
-    await data.updateItem(item.id, { platforms, variants });
-    toast.success(`Added ${CONTENT_PLATFORM_LABELS[platform]}`);
   }
 
   const overdue = isContentItemOverdue(item);
@@ -684,43 +1080,28 @@ export function ContentItemDetailClient() {
         </Card>
 
         {item.platforms.map((platform) => {
-          const body = bodies[platform] ?? "";
-          const limit = contentVariantCharLimit(platform);
+          const variant = item.variants.find((v) => v.platform === platform);
+          const draft = drafts[platform] ?? variantToDraft(variant);
+          const platformFormat = variant?.format ?? item.format;
           return (
-            <Card key={platform}>
-              <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
-                <CardTitle className="text-base">{CONTENT_PLATFORM_LABELS[platform]}</CardTitle>
-                <span
-                  className={
-                    body.length > limit ? "text-xs text-destructive" : "text-xs text-muted-foreground"
-                  }
-                >
-                  {body.length}/{limit}
-                </span>
-              </CardHeader>
-              <CardContent>
-                <div className="relative">
-                  <Textarea
-                    value={body}
-                    disabled={!canEdit}
-                    rows={8}
-                    className="pr-10"
-                    onChange={(e) => setBodies((prev) => ({ ...prev, [platform]: e.target.value }))}
-                  />
-                  <Button
-                    type="button"
-                    size="icon"
-                    variant="ghost"
-                    className="absolute right-1.5 top-1.5 h-7 w-7 text-muted-foreground hover:text-foreground"
-                    title="Copy"
-                    aria-label="Copy"
-                    onClick={() => void copy(platform)}
-                  >
-                    <Copy className="h-3.5 w-3.5" />
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
+            <PlatformDraftCard
+              key={platform}
+              platform={platform}
+              format={platformFormat}
+              draft={draft}
+              canEdit={canEdit}
+              bannedPhrases={brand?.bannedPhrases ?? []}
+              onChange={(patch) =>
+                updateEdits((prev) => ({
+                  ...prev,
+                  drafts: {
+                    ...prev.drafts,
+                    [platform]: { ...(prev.drafts[platform] ?? draft), ...patch },
+                  },
+                }))
+              }
+              onCopy={() => void copy(platform)}
+            />
           );
         })}
 
@@ -729,9 +1110,18 @@ export function ContentItemDetailClient() {
             <Button type="button" onClick={() => void saveBodies()}>
               Save drafts
             </Button>
-            <Select onValueChange={(v) => void repurpose(v as ContentPlatform)}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Repurpose to…" />
+            <Select
+              disabled={repurposeBusy !== null}
+              onValueChange={(v) => void repurpose(v as ContentPlatform)}
+            >
+              <SelectTrigger className="w-[220px]">
+                <SelectValue
+                  placeholder={
+                    repurposeBusy
+                      ? `Adapting for ${CONTENT_PLATFORM_LABELS[repurposeBusy]}…`
+                      : "Adapt for another platform…"
+                  }
+                />
               </SelectTrigger>
               <SelectContent>
                 {(Object.keys(CONTENT_PLATFORM_LABELS) as ContentPlatform[])
