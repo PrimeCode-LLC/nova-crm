@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeContentConsistency } from "@/lib/content-calendar/consistency";
-import { isContentItemOverdue, buildContentChecklist, type ContentCaptureRequiredField, type ContentItem } from "@/lib/content-calendar/types";
+import { isContentItemOverdue, buildContentChecklist, applyManualStatusToChecklist, type ContentCaptureRequiredField, type ContentItem } from "@/lib/content-calendar/types";
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import { can } from "@/lib/permissions/can";
 import {
@@ -146,6 +146,43 @@ describe("content calendar", () => {
       fallbackUserId: "fallback",
     });
     expect(textOnly.map((s) => s.key)).toEqual(["write", "publish"]);
+  });
+
+  it("keeps checklist in sync when status is set manually", () => {
+    const open = buildContentChecklist({
+      brand: {
+        ownerUserId: "owner",
+        responsibilities: { writer: "w1", poster: "p1", approver: "a1" },
+        approvalRequired: true,
+      },
+      format: "text_post",
+      dueAt: "2026-07-20T10:00:00.000Z",
+      fallbackUserId: "fallback",
+    });
+
+    const published = applyManualStatusToChecklist(open, "published", "u1", "2026-07-20T12:00:00.000Z");
+    expect(published.every((s) => s.status === "done")).toBe(true);
+
+    const skipped = applyManualStatusToChecklist(open, "skipped", "u1", "2026-07-20T12:00:00.000Z");
+    expect(skipped.every((s) => s.status === "skipped")).toBe(true);
+
+    const halfDone = open.map((s) =>
+      s.key === "write" ? { ...s, status: "done" as const, completedAt: "2026-07-19T00:00:00.000Z" } : s,
+    );
+    const scheduled = applyManualStatusToChecklist(
+      halfDone,
+      "scheduled",
+      "u1",
+      "2026-07-20T12:00:00.000Z",
+    );
+    expect(scheduled.find((s) => s.key === "write")?.status).toBe("done");
+    expect(scheduled.find((s) => s.key === "approve")?.status).toBe("done");
+    expect(scheduled.find((s) => s.key === "publish")?.status).toBe("pending");
+
+    const review = applyManualStatusToChecklist(published, "review", "u1", "2026-07-20T13:00:00.000Z");
+    expect(review.find((s) => s.key === "write")?.status).toBe("done");
+    expect(review.find((s) => s.key === "approve")?.status).toBe("pending");
+    expect(review.find((s) => s.key === "publish")?.status).toBe("pending");
   });
 
   it("suggests designer canvas sizes by platform and format", async () => {

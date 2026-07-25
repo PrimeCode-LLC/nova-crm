@@ -404,6 +404,12 @@ export function ContentCalendarClient() {
                           )}
                         >
                           <div className="font-medium line-clamp-2">{item.title}</div>
+                          <div className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
+                            {fmtDate(item.publishAt, "h:mm a")}
+                            {item.platforms[0]
+                              ? ` · ${CONTENT_PLATFORM_LABELS[item.platforms[0]]}`
+                              : ""}
+                          </div>
                           <div className="text-muted-foreground mt-0.5 flex flex-wrap gap-1">
                             <Badge variant="outline" className="h-4 px-1 text-[9px]">
                               {CONTENT_STATUS_LABELS[item.status]}
@@ -487,7 +493,7 @@ function ItemRow({
         </Link>
         <div className="text-[11px] text-muted-foreground">
           {brandName ? `${brandName} · ` : ""}
-          {fmtDate(item.publishAt)} · {CONTENT_PILLAR_LABELS[item.pillarKey]}
+          {fmtDate(item.publishAt, "MMM d · h:mm a")} · {CONTENT_PILLAR_LABELS[item.pillarKey]}
         </div>
       </div>
       <div className="flex shrink-0 gap-1">

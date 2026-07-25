@@ -6,14 +6,20 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "sonner";
 import {
   AlertTriangle,
+  CalendarClock,
   Check,
+  CheckCircle2,
+  Circle,
+  Clock,
   Copy,
   ExternalLink,
   Info,
+  MapPin,
   Plus,
   SkipForward,
   Sparkles,
   Trash2,
+  Loader2,
 } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
@@ -57,7 +63,7 @@ import {
   type ContentPlatform,
   type ContentVariant,
 } from "@/lib/content-calendar/types";
-import { fmtDate } from "@/lib/format";
+import { fmtDate, fmtRelative } from "@/lib/format";
 import { scrubAiTellPunctuation, scrubPostBody } from "@/lib/content-calendar/schedule";
 import {
   contentBodyCharTarget,
@@ -123,22 +129,38 @@ function draftToPostText(draft: VariantDraft, platform: ContentPlatform): string
   return `${body}\n\n${tags.map((t) => `#${t}`).join(" ")}`;
 }
 
+/** Full local schedule line: "Mon, Jul 27 · 10:00 AM". */
+function formatPublishWhen(iso: string): string {
+  return fmtDate(iso, "EEE, MMM d · h:mm a");
+}
+
+function scheduleTimingLabel(iso: string, overdue: boolean): string {
+  const when = formatPublishWhen(iso);
+  const relative = fmtRelative(iso);
+  if (overdue) return `${when} · overdue (${relative})`;
+  return `${when} · ${relative}`;
+}
+
 function PlatformDraftCard({
   platform,
   format,
   draft,
   canEdit,
   bannedPhrases,
+  publishAt,
   onChange,
   onCopy,
+  onCopyFirstComment,
 }: {
   platform: ContentPlatform;
   format?: ContentFormat;
   draft: VariantDraft;
   canEdit: boolean;
   bannedPhrases: string[];
+  publishAt?: string;
   onChange: (patch: Partial<VariantDraft>) => void;
   onCopy: () => void;
+  onCopyFirstComment?: () => void;
 }) {
   const playbook = getContentPlatformPlaybook(platform);
   const target = contentBodyCharTarget(platform, format);
@@ -167,7 +189,7 @@ function PlatformDraftCard({
   const errors = lint.findings.filter((f) => f.severity === "error");
 
   return (
-    <Card>
+    <Card id={`platform-draft-${platform}`}>
       <CardHeader className="pb-2 flex-row flex-wrap items-center justify-between gap-2 space-y-0">
         <div className="flex flex-wrap items-center gap-2">
           <CardTitle className="text-base">{CONTENT_PLATFORM_LABELS[platform]}</CardTitle>
@@ -183,11 +205,28 @@ function PlatformDraftCard({
             {contentLintSummary(lint)}
           </Badge>
         </div>
-        <span className={cn("text-xs tabular-nums", lengthTone)}>
-          {len} / {target.min}-{target.max} chars
-        </span>
+        <div className="flex flex-wrap items-center gap-3">
+          {publishAt ? (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+              Schedule {formatPublishWhen(publishAt)}
+            </span>
+          ) : null}
+          <span className={cn("text-xs tabular-nums", lengthTone)}>
+            {len} / {target.min}-{target.max} chars
+          </span>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
+        {publishAt ? (
+          <p className="rounded-md border border-dashed bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+            Copy the draft below, then schedule it on {CONTENT_PLATFORM_LABELS[platform]} for{" "}
+            <span className="font-medium text-foreground">{formatPublishWhen(publishAt)}</span>
+            {draft.firstComment.trim()
+              ? ". Put the first comment / link in your own reply right after posting."
+              : "."}
+          </p>
+        ) : null}
         <div className="relative">
           <Textarea
             value={draft.body}
@@ -331,7 +370,20 @@ function PlatformDraftCard({
 
         {playbook.linkPolicy.firstComment !== "not_applicable" ? (
           <div className="space-y-1.5">
-            <Label className="text-sm">First comment</Label>
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-sm">First comment</Label>
+              {draft.firstComment.trim() && onCopyFirstComment ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  onClick={onCopyFirstComment}
+                >
+                  <Copy className="h-3.5 w-3.5" /> Copy
+                </Button>
+              ) : null}
+            </div>
             <Textarea
               value={draft.firstComment}
               disabled={!canEdit}
@@ -415,6 +467,7 @@ export function ContentItemDetailClient() {
   const [assetLabel, setAssetLabel] = React.useState("");
   const [briefBusy, setBriefBusy] = React.useState(false);
   const [repurposeBusy, setRepurposeBusy] = React.useState<ContentPlatform | null>(null);
+  const [adaptSource, setAdaptSource] = React.useState<ContentPlatform | null>(null);
   const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
 
   const current = edits.key === revisionKey ? edits : null;
@@ -723,12 +776,23 @@ export function ContentItemDetailClient() {
       toast.message("Already has this platform");
       return;
     }
-    // Adapt the approved post rather than rewriting from the angle, so the
-    // repurposed version keeps the same argument and proof.
-    const source = item.platforms[0];
+    // Prefer an explicit source, else the first platform that already has copy.
+    const source =
+      (adaptSource && item.platforms.includes(adaptSource) ? adaptSource : null) ||
+      item.platforms.find((p) => {
+        const body =
+          drafts[p]?.body || item.variants.find((v) => v.platform === p)?.body || "";
+        return Boolean(body.trim());
+      }) ||
+      item.platforms[0];
     const sourceBody = source
-      ? (drafts[source]?.body || item.variants.find((v) => v.platform === source)?.body || "")
+      ? (drafts[source]?.body || item.variants.find((v) => v.platform === source)?.body || "").trim()
       : "";
+
+    if (!sourceBody) {
+      toast.error("Write and save a draft first — adapt rebuilds from that copy");
+      return;
+    }
 
     setRepurposeBusy(platform);
     try {
@@ -745,8 +809,8 @@ export function ContentItemDetailClient() {
           proofHint: item.ragCitations?.[0]?.title ?? item.angle,
           ctaType: item.ctaType,
           format: item.format,
-          sourcePlatform: sourceBody ? source : undefined,
-          sourceBody: sourceBody || undefined,
+          sourcePlatform: source,
+          sourceBody,
         }),
       });
       const json = (await res.json()) as {
@@ -761,7 +825,7 @@ export function ContentItemDetailClient() {
         postTitle?: string;
       };
       if (!res.ok) {
-        toast.error(json.error || "Repurpose failed");
+        toast.error(json.error || "Could not adapt this draft");
         return;
       }
       const platforms = [...item.platforms, platform];
@@ -780,19 +844,335 @@ export function ContentItemDetailClient() {
         },
       ];
       await data.updateItem(item.id, { platforms, variants });
-      toast.success(`Added ${CONTENT_PLATFORM_LABELS[platform]}`);
+      toast.success(
+        `Adapted ${CONTENT_PLATFORM_LABELS[source]} → ${CONTENT_PLATFORM_LABELS[platform]}`,
+      );
+      // Let the new draft card paint, then scroll it into view.
+      requestAnimationFrame(() => {
+        document
+          .getElementById(`platform-draft-${platform}`)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
     } finally {
       setRepurposeBusy(null);
     }
   }
 
+  async function copyFirstComment(platform: ContentPlatform) {
+    if (!item) return;
+    const draft =
+      drafts[platform] ?? variantToDraft(item.variants.find((v) => v.platform === platform));
+    const text = draft.firstComment.trim();
+    if (!text) {
+      toast.message("No first comment yet");
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success("First comment copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
+
   const overdue = isContentItemOverdue(item);
+  const publishWhen = formatPublishWhen(item.publishAt);
+  const publishTiming = scheduleTimingLabel(item.publishAt, overdue);
+  const needsGraphics =
+    formatNeedsGraphics(item.format) ||
+    Boolean(designDraft.trim()) ||
+    (item.assetLinks?.length ?? 0) > 0;
+  const nextPendingStep = checklist.find((s) => s.status === "pending");
+  const publishStepPending = nextPendingStep?.key === "publish";
+  const posterFocused =
+    item.status === "scheduled" ||
+    item.status === "approved" ||
+    publishStepPending ||
+    (item.status !== "published" &&
+      checklist.length > 0 &&
+      checklist.every((s) => s.key === "publish" || s.status !== "pending"));
+  const yourTurn =
+    Boolean(nextPendingStep) && nextPendingStep?.assigneeUserId === data.currentUserId;
+  const draftsDirty = item.platforms.some((platform) => {
+    if (!(platform in drafts)) return false;
+    const saved = variantToDraft(item.variants.find((v) => v.platform === platform));
+    const draft = drafts[platform]!;
+    return (
+      draft.body !== saved.body ||
+      draft.hashtags !== saved.hashtags ||
+      draft.firstComment !== saved.firstComment ||
+      draft.altText !== saved.altText ||
+      draft.postTitle !== saved.postTitle ||
+      draft.segments.join("\u0001") !== saved.segments.join("\u0001")
+    );
+  });
+  const markPublishedPrimary =
+    item.status === "scheduled" || item.status === "approved" || publishStepPending;
+  const availableAdaptTargets = (
+    Object.keys(CONTENT_PLATFORM_LABELS) as ContentPlatform[]
+  ).filter((p) => !item.platforms.includes(p));
+  const adaptSourcePlatform =
+    (adaptSource && item.platforms.includes(adaptSource) ? adaptSource : null) ||
+    item.platforms.find((p) => {
+      const body =
+        drafts[p]?.body || item.variants.find((v) => v.platform === p)?.body || "";
+      return Boolean(body.trim());
+    }) ||
+    item.platforms[0];
+  const adaptSourceReady = Boolean(
+    adaptSourcePlatform &&
+      (
+        drafts[adaptSourcePlatform]?.body ||
+        item.variants.find((v) => v.platform === adaptSourcePlatform)?.body ||
+        ""
+      ).trim(),
+  );
+
+  const scheduleCard = (
+    <Card className={cn(overdue && "border-destructive/50")}>
+      <CardHeader className="pb-2">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <CalendarClock className="h-4 w-4 shrink-0 text-muted-foreground" />
+          When to schedule
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-3 sm:grid-cols-3">
+          <div className="rounded-md border bg-muted/20 px-3 py-2.5">
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              When
+            </div>
+            <p className={cn("text-sm font-medium", overdue && "text-destructive")}>
+              {publishWhen}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {overdue ? `Overdue · ${fmtRelative(item.publishAt)}` : fmtRelative(item.publishAt)}
+            </p>
+          </div>
+          <div className="rounded-md border bg-muted/20 px-3 py-2.5">
+            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5" />
+              Where
+            </div>
+            <p className="text-sm font-medium">
+              {item.platforms.map((p) => CONTENT_PLATFORM_LABELS[p]).join(" · ")}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {item.format ? CONTENT_FORMAT_LABELS[item.format] : "Format not set"}
+              {brand?.name ? ` · ${brand.name}` : ""}
+            </p>
+          </div>
+          <div className="rounded-md border bg-muted/20 px-3 py-2.5">
+            <div className="mb-1 text-xs font-medium text-muted-foreground">What</div>
+            <p className="line-clamp-2 text-sm font-medium">{item.title}</p>
+            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.angle}</p>
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-muted-foreground">Posting steps</p>
+          <ul className="space-y-1.5">
+            {item.platforms.map((platform) => {
+              const draft =
+                drafts[platform] ??
+                variantToDraft(item.variants.find((v) => v.platform === platform));
+              const ready = Boolean(draft.body.trim());
+              return (
+                <li
+                  key={platform}
+                  className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                >
+                  <Badge variant="outline" className="font-normal">
+                    {CONTENT_PLATFORM_LABELS[platform]}
+                  </Badge>
+                  <span className="min-w-0 flex-1 text-xs text-muted-foreground">
+                    {ready
+                      ? `Copy draft → schedule for ${publishWhen}`
+                      : "Draft still empty — finish Write copy first"}
+                    {draft.firstComment.trim()
+                      ? " · then paste first comment as your reply"
+                      : ""}
+                  </span>
+                  {canEdit && ready ? (
+                    <div className="flex flex-wrap gap-1">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void copy(platform)}
+                      >
+                        <Copy className="h-3.5 w-3.5" /> Copy post
+                      </Button>
+                      {draft.firstComment.trim() ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => void copyFirstComment(platform)}
+                        >
+                          <Copy className="h-3.5 w-3.5" /> Comment
+                        </Button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+
+        {publishStepPending && item.status !== "published" ? (
+          <p className="text-xs text-muted-foreground">
+            After you schedule or publish on the platform
+            {item.platforms.length > 1 ? "s" : ""}, mark the Publish checklist step done (or use Mark
+            published above).
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
+  );
+
+  const checklistCard = (
+    <Card>
+      <CardHeader className="pb-2 flex-row flex-wrap items-center justify-between gap-2 space-y-0">
+        <CardTitle className="text-base">Checklist</CardTitle>
+        {nextPendingStep ? (
+          <Badge variant={yourTurn ? "default" : "secondary"} className="font-normal">
+            {yourTurn ? "Your turn · " : "Next · "}
+            {CONTENT_CHECKLIST_STEP_LABELS[nextPendingStep.key]}
+          </Badge>
+        ) : (
+          <Badge variant="outline" className="font-normal">
+            All steps done
+          </Badge>
+        )}
+      </CardHeader>
+      <CardContent className="space-y-2">
+        {checklist.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No checklist steps yet.</p>
+        ) : (
+          checklist.map((step) => {
+            const isNext = nextPendingStep?.key === step.key;
+            const isYours = isNext && step.assigneeUserId === data.currentUserId;
+            return (
+              <div
+                key={step.key}
+                className={cn(
+                  "flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm",
+                  isNext && "border-primary/40 bg-primary/5",
+                  step.status === "done" && "opacity-70",
+                )}
+              >
+                {step.status === "done" ? (
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-500" />
+                ) : step.status === "skipped" ? (
+                  <SkipForward className="h-4 w-4 shrink-0 text-muted-foreground" />
+                ) : (
+                  <Circle
+                    className={cn(
+                      "h-4 w-4 shrink-0",
+                      isNext ? "text-primary" : "text-muted-foreground",
+                    )}
+                  />
+                )}
+                <span
+                  className={cn(
+                    "font-medium",
+                    step.status === "done" && "line-through text-muted-foreground",
+                  )}
+                >
+                  {CONTENT_CHECKLIST_STEP_LABELS[step.key]}
+                </span>
+                {isYours ? (
+                  <Badge variant="default" className="h-5 px-1.5 text-[10px] font-normal">
+                    You
+                  </Badge>
+                ) : null}
+                <span className="text-xs capitalize text-muted-foreground">{step.status}</span>
+                {step.key === "publish" ? (
+                  <span
+                    className={cn(
+                      "inline-flex items-center gap-1 text-xs",
+                      overdue ? "text-destructive" : "text-muted-foreground",
+                    )}
+                  >
+                    <CalendarClock className="h-3.5 w-3.5 shrink-0" />
+                    {publishTiming}
+                  </span>
+                ) : step.dueAt ? (
+                  <span className="text-xs text-muted-foreground">
+                    Due {fmtDate(step.dueAt, "MMM d")}
+                  </span>
+                ) : null}
+                <div className="min-w-0 flex-1">
+                  {canEdit ? (
+                    <Select
+                      value={step.assigneeUserId}
+                      onValueChange={(v) => {
+                        if (v) void reassignStep(step.key, v);
+                      }}
+                    >
+                      <SelectTrigger className="h-8 w-[180px]">
+                        <SelectValue>
+                          <UserChip userId={step.assigneeUserId} size="sm" />
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        {members.map((m) => (
+                          <SelectItem key={m.uid} value={m.uid}>
+                            {m.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <UserChip userId={step.assigneeUserId} size="sm" />
+                  )}
+                </div>
+                {canEdit && step.status === "pending" && (
+                  <>
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant={isNext ? "default" : "outline"}
+                      onClick={() => void setStepStatus(step.key, "done")}
+                    >
+                      Done
+                    </Button>
+                    <Button
+                      size="sm"
+                      type="button"
+                      variant="ghost"
+                      onClick={() => void setStepStatus(step.key, "skipped")}
+                    >
+                      Skip
+                    </Button>
+                  </>
+                )}
+                {canEdit && step.status !== "pending" && (
+                  <Button
+                    size="sm"
+                    type="button"
+                    variant="ghost"
+                    onClick={() => void setStepStatus(step.key, "pending")}
+                  >
+                    Reopen
+                  </Button>
+                )}
+              </div>
+            );
+          })
+        )}
+      </CardContent>
+    </Card>
+  );
 
   return (
     <AppPage>
       <PageHeader
         title={item.title}
-        description={`${brand?.name ?? "Brand"} · ${fmtDate(item.publishAt)} · ${CONTENT_PILLAR_LABELS[item.pillarKey]}`}
+        description={`${brand?.name ?? "Brand"} · ${publishWhen} · ${CONTENT_PILLAR_LABELS[item.pillarKey]}`}
         actions={
           <>
             <Link href="/content" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
@@ -800,10 +1180,20 @@ export function ContentItemDetailClient() {
             </Link>
             {canEdit && item.status !== "published" && (
               <>
-                <Button size="sm" type="button" onClick={() => void setStatus("published")}>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant={markPublishedPrimary ? "default" : "outline"}
+                  onClick={() => void setStatus("published")}
+                >
                   <Check className="h-3.5 w-3.5" /> Mark published
                 </Button>
-                <Button size="sm" variant="outline" type="button" onClick={() => void setStatus("skipped")}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  type="button"
+                  onClick={() => void setStatus("skipped")}
+                >
                   <SkipForward className="h-3.5 w-3.5" /> Skip
                 </Button>
               </>
@@ -812,11 +1202,32 @@ export function ContentItemDetailClient() {
         }
       />
       <PageBody>
-        <div className="flex flex-wrap gap-2">
-          <Badge variant={overdue ? "destructive" : "secondary"}>
-            {CONTENT_STATUS_LABELS[item.status]}
-            {overdue ? " · overdue" : ""}
-          </Badge>
+        <div className="flex flex-wrap items-center gap-2">
+          {canEdit ? (
+            <Select
+              value={item.status}
+              onValueChange={(v) => void setStatus(v as ContentItemStatus)}
+            >
+              <SelectTrigger className="h-8 w-[150px]" aria-label="Content status">
+                <SelectValue>{CONTENT_STATUS_LABELS[item.status]}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {(Object.keys(CONTENT_STATUS_LABELS) as ContentItemStatus[]).map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {CONTENT_STATUS_LABELS[s]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Badge variant={overdue ? "destructive" : "secondary"}>
+              {CONTENT_STATUS_LABELS[item.status]}
+            </Badge>
+          )}
+          {overdue ? <Badge variant="destructive">Overdue</Badge> : null}
+          {item.format ? (
+            <Badge variant="outline">{CONTENT_FORMAT_LABELS[item.format]}</Badge>
+          ) : null}
           {item.platforms.map((p) => (
             <Badge key={p} variant="outline">
               {CONTENT_PLATFORM_LABELS[p]}
@@ -824,258 +1235,26 @@ export function ContentItemDetailClient() {
           ))}
         </div>
 
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-base">Checklist</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-2">
-            {checklist.length === 0 ? (
-              <p className="text-sm text-muted-foreground">No checklist steps yet.</p>
-            ) : (
-              checklist.map((step) => (
-                <div
-                  key={step.key}
-                  className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm"
-                >
-                  <Badge
-                    variant={
-                      step.status === "done"
-                        ? "secondary"
-                        : step.status === "skipped"
-                          ? "outline"
-                          : "default"
-                    }
-                  >
-                    {CONTENT_CHECKLIST_STEP_LABELS[step.key]}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground capitalize">{step.status}</span>
-                  <div className="min-w-0 flex-1">
-                    {canEdit ? (
-                      <Select
-                        value={step.assigneeUserId}
-                        onValueChange={(v) => {
-                          if (v) void reassignStep(step.key, v);
-                        }}
-                      >
-                        <SelectTrigger className="h-8 w-[180px]">
-                          <SelectValue>
-                            <UserChip userId={step.assigneeUserId} size="sm" />
-                          </SelectValue>
-                        </SelectTrigger>
-                        <SelectContent>
-                          {members.map((m) => (
-                            <SelectItem key={m.uid} value={m.uid}>
-                              {m.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    ) : (
-                      <UserChip userId={step.assigneeUserId} size="sm" />
-                    )}
-                  </div>
-                  {canEdit && step.status === "pending" && (
-                    <>
-                      <Button
-                        size="sm"
-                        type="button"
-                        variant="outline"
-                        onClick={() => void setStepStatus(step.key, "done")}
-                      >
-                        Done
-                      </Button>
-                      <Button
-                        size="sm"
-                        type="button"
-                        variant="ghost"
-                        onClick={() => void setStepStatus(step.key, "skipped")}
-                      >
-                        Skip
-                      </Button>
-                    </>
-                  )}
-                  {canEdit && step.status !== "pending" && (
-                    <Button
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                      onClick={() => void setStepStatus(step.key, "pending")}
-                    >
-                      Reopen
-                    </Button>
-                  )}
-                </div>
-              ))
-            )}
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
-            <CardTitle className="text-base">Graphics / assets</CardTitle>
-            {item.format && formatNeedsGraphics(item.format) ? (
-              <Badge variant="secondary" className="font-normal">
-                {CONTENT_FORMAT_LABELS[item.format]}
-              </Badge>
-            ) : null}
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {(formatNeedsGraphics(item.format) || designDraft.trim()) && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <Label className="text-sm">Design brief</Label>
-                    {item.platforms[0] && item.format && formatNeedsGraphics(item.format) ? (
-                      <p className="text-xs text-muted-foreground">
-                        Suggested size:{" "}
-                        {contentGraphicsSizeHint(item.platforms[0], item.format)}
-                      </p>
-                    ) : null}
-                  </div>
-                  <div className="flex flex-wrap gap-2">
-                    {designDraft.trim() ? (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void copyDesignBrief()}
-                      >
-                        <Copy className="h-3.5 w-3.5" /> Copy
-                      </Button>
-                    ) : null}
-                    {canEdit && formatNeedsGraphics(item.format) && (
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        disabled={briefBusy}
-                        onClick={() => void generateDesignBrief()}
-                      >
-                        <Sparkles className="h-3.5 w-3.5" />
-                        {briefBusy
-                          ? "Generating…"
-                          : designDraft.trim()
-                            ? "Regenerate"
-                            : "Generate brief"}
-                      </Button>
-                    )}
-                  </div>
-                </div>
-                {canEdit ? (
-                  <>
-                    <Textarea
-                      value={designDraft}
-                      onChange={(e) => setDesignDraft(e.target.value)}
-                      rows={7}
-                      placeholder={`Short designer brief, e.g.\nPlatform / format / size: Instagram · Graphic · 1080×1080\nOn-graphic headline: …\nMust show: …\nTone: …\nAvoid: …`}
-                      className="font-mono text-xs leading-relaxed"
-                    />
-                    <div className="flex justify-end">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="secondary"
-                        onClick={() => void saveDesignInstructions()}
-                        disabled={designDraft.trim() === (item.designInstructions ?? "").trim()}
-                      >
-                        Save brief
-                      </Button>
-                    </div>
-                  </>
-                ) : designDraft.trim() ? (
-                  <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs leading-relaxed">
-                    {designDraft}
-                  </pre>
-                ) : (
-                  <p className="text-sm text-muted-foreground">No design brief yet.</p>
-                )}
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <Label className="text-sm">Asset links</Label>
-              {(item.assetLinks ?? []).length === 0 ? (
-                <p className="text-sm text-muted-foreground">
-                  Designers can paste Drive, Figma, or CDN links here.
-                </p>
-              ) : (
-                <ul className="space-y-2">
-                  {(item.assetLinks ?? []).map((link, index) => (
-                    <li
-                      key={`${link.url}-${index}`}
-                      className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
-                    >
-                      <a
-                        href={link.url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="min-w-0 flex-1 truncate text-primary hover:underline"
-                      >
-                        {link.label || link.url}
-                      </a>
-                      <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                      {canEdit && (
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          type="button"
-                          onClick={() => void removeAssetLink(index)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-              )}
-              {canEdit && (
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <Input
-                    value={assetUrl}
-                    onChange={(e) => setAssetUrl(e.target.value)}
-                    placeholder="https://…"
-                    className="flex-1"
-                  />
-                  <Input
-                    value={assetLabel}
-                    onChange={(e) => setAssetLabel(e.target.value)}
-                    placeholder="Label (optional)"
-                    className="sm:w-40"
-                  />
-                  <Button type="button" size="sm" onClick={() => void addAssetLink()}>
-                    <Plus className="h-3.5 w-3.5" /> Add link
-                  </Button>
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
+        {posterFocused ? (
+          <>
+            {scheduleCard}
+            {checklistCard}
+          </>
+        ) : (
+          <>
+            {checklistCard}
+          </>
+        )}
 
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-base">Angle</CardTitle>
           </CardHeader>
-          <CardContent className="text-sm space-y-2">
+          <CardContent className="text-sm">
             <p>{item.angle}</p>
-            <div className="flex items-center gap-2">
-              <Label className="text-xs text-muted-foreground">Status</Label>
-              <Select
-                value={item.status}
-                disabled={!canEdit}
-                onValueChange={(v) => void setStatus(v as ContentItemStatus)}
-              >
-                <SelectTrigger className="w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {(Object.keys(CONTENT_STATUS_LABELS) as ContentItemStatus[]).map((s) => (
-                    <SelectItem key={s} value={s}>
-                      {CONTENT_STATUS_LABELS[s]}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            {item.rationale ? (
+              <p className="mt-2 text-xs text-muted-foreground">{item.rationale}</p>
+            ) : null}
           </CardContent>
         </Card>
 
@@ -1091,6 +1270,7 @@ export function ContentItemDetailClient() {
               draft={draft}
               canEdit={canEdit}
               bannedPhrases={brand?.bannedPhrases ?? []}
+              publishAt={item.publishAt}
               onChange={(patch) =>
                 updateEdits((prev) => ({
                   ...prev,
@@ -1101,66 +1281,288 @@ export function ContentItemDetailClient() {
                 }))
               }
               onCopy={() => void copy(platform)}
+              onCopyFirstComment={() => void copyFirstComment(platform)}
             />
           );
         })}
 
         {canEdit && (
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={() => void saveBodies()}>
-              Save drafts
-            </Button>
-            <Select
-              disabled={repurposeBusy !== null}
-              onValueChange={(v) => void repurpose(v as ContentPlatform)}
-            >
-              <SelectTrigger className="w-[220px]">
-                <SelectValue
-                  placeholder={
-                    repurposeBusy
-                      ? `Adapting for ${CONTENT_PLATFORM_LABELS[repurposeBusy]}…`
-                      : "Adapt for another platform…"
-                  }
-                />
-              </SelectTrigger>
-              <SelectContent>
-                {(Object.keys(CONTENT_PLATFORM_LABELS) as ContentPlatform[])
-                  .filter((p) => !item.platforms.includes(p))
-                  .map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {CONTENT_PLATFORM_LABELS[p]}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
+          <div className="sticky bottom-0 z-10 -mx-1 flex flex-wrap items-center gap-2 rounded-lg border bg-background/95 px-3 py-2.5 backdrop-blur supports-backdrop-filter:bg-background/80">
             <Button
               type="button"
-              variant="destructive"
-              size="sm"
-              onClick={() => {
-                void data.deleteItem(item.id).then(() => router.push("/content"));
-              }}
+              disabled={!draftsDirty}
+              onClick={() => void saveBodies()}
             >
-              Delete
+              Save drafts
             </Button>
+            {draftsDirty ? (
+              <span className="text-xs text-amber-500">Unsaved changes</span>
+            ) : (
+              <span className="text-xs text-muted-foreground">All drafts saved</span>
+            )}
           </div>
         )}
+
+        {canEdit && availableAdaptTargets.length > 0 ? (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Sparkles className="h-4 w-4 shrink-0 text-muted-foreground" />
+                Adapt for another platform
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                AI rebuilds this idea natively for a new channel — same claim and proof, different
+                hook, length, and structure. It is not a line-by-line rewrite.
+              </p>
+              {item.platforms.length > 1 ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">From</Label>
+                  <Select
+                    value={adaptSourcePlatform}
+                    disabled={repurposeBusy !== null}
+                    onValueChange={(v) => {
+                      if (v) setAdaptSource(v as ContentPlatform);
+                    }}
+                  >
+                    <SelectTrigger className="h-8 w-[160px]">
+                      <SelectValue>
+                        {adaptSourcePlatform
+                          ? CONTENT_PLATFORM_LABELS[adaptSourcePlatform]
+                          : "Pick source"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {item.platforms.map((p) => (
+                        <SelectItem key={p} value={p}>
+                          {CONTENT_PLATFORM_LABELS[p]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : adaptSourcePlatform ? (
+                <p className="text-xs text-muted-foreground">
+                  Source: {CONTENT_PLATFORM_LABELS[adaptSourcePlatform]} draft
+                  {!adaptSourceReady ? " (write copy first)" : ""}
+                </p>
+              ) : null}
+              <div className="flex flex-wrap gap-2">
+                {availableAdaptTargets.map((p) => (
+                  <Button
+                    key={p}
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={repurposeBusy !== null || !adaptSourceReady}
+                    onClick={() => void repurpose(p)}
+                  >
+                    {repurposeBusy === p ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Sparkles className="h-3.5 w-3.5" />
+                    )}
+                    {repurposeBusy === p
+                      ? `Adapting for ${CONTENT_PLATFORM_LABELS[p]}…`
+                      : CONTENT_PLATFORM_LABELS[p]}
+                  </Button>
+                ))}
+              </div>
+              {!adaptSourceReady ? (
+                <p className="text-xs text-amber-500">
+                  Add draft copy on the source platform before adapting.
+                </p>
+              ) : null}
+            </CardContent>
+          </Card>
+        ) : null}
+
+        {!posterFocused ? scheduleCard : null}
+
+        {needsGraphics ? (
+          <Card>
+            <CardHeader className="pb-2 flex-row items-center justify-between space-y-0">
+              <CardTitle className="text-base">Graphics / assets</CardTitle>
+              {item.format && formatNeedsGraphics(item.format) ? (
+                <Badge variant="secondary" className="font-normal">
+                  {CONTENT_FORMAT_LABELS[item.format]}
+                </Badge>
+              ) : null}
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {(formatNeedsGraphics(item.format) || designDraft.trim()) && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <Label className="text-sm">Design brief</Label>
+                      {item.platforms[0] && item.format && formatNeedsGraphics(item.format) ? (
+                        <p className="text-xs text-muted-foreground">
+                          Suggested size:{" "}
+                          {contentGraphicsSizeHint(item.platforms[0], item.format)}
+                        </p>
+                      ) : null}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {designDraft.trim() ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void copyDesignBrief()}
+                        >
+                          <Copy className="h-3.5 w-3.5" /> Copy
+                        </Button>
+                      ) : null}
+                      {canEdit && formatNeedsGraphics(item.format) && (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          disabled={briefBusy}
+                          onClick={() => void generateDesignBrief()}
+                        >
+                          <Sparkles className="h-3.5 w-3.5" />
+                          {briefBusy
+                            ? "Generating…"
+                            : designDraft.trim()
+                              ? "Regenerate"
+                              : "Generate brief"}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                  {canEdit ? (
+                    <>
+                      <Textarea
+                        value={designDraft}
+                        onChange={(e) => setDesignDraft(e.target.value)}
+                        rows={7}
+                        placeholder={`Short designer brief, e.g.\nPlatform / format / size: Instagram · Graphic · 1080×1080\nOn-graphic headline: …\nMust show: …\nTone: …\nAvoid: …`}
+                        className="font-mono text-xs leading-relaxed"
+                      />
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="secondary"
+                          onClick={() => void saveDesignInstructions()}
+                          disabled={
+                            designDraft.trim() === (item.designInstructions ?? "").trim()
+                          }
+                        >
+                          Save brief
+                        </Button>
+                      </div>
+                    </>
+                  ) : designDraft.trim() ? (
+                    <pre className="whitespace-pre-wrap rounded-md border bg-muted/30 px-3 py-2 font-mono text-xs leading-relaxed">
+                      {designDraft}
+                    </pre>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No design brief yet.</p>
+                  )}
+                </div>
+              )}
+
+              <div className="space-y-3">
+                <Label className="text-sm">Asset links</Label>
+                {(item.assetLinks ?? []).length === 0 ? (
+                  <p className="text-sm text-muted-foreground">
+                    Designers can paste Drive, Figma, or CDN links here.
+                  </p>
+                ) : (
+                  <ul className="space-y-2">
+                    {(item.assetLinks ?? []).map((link, index) => (
+                      <li
+                        key={`${link.url}-${index}`}
+                        className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm"
+                      >
+                        <a
+                          href={link.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="min-w-0 flex-1 truncate text-primary hover:underline"
+                        >
+                          {link.label || link.url}
+                        </a>
+                        <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        {canEdit && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            type="button"
+                            onClick={() => void removeAssetLink(index)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {canEdit && (
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <Input
+                      value={assetUrl}
+                      onChange={(e) => setAssetUrl(e.target.value)}
+                      placeholder="https://…"
+                      className="flex-1"
+                    />
+                    <Input
+                      value={assetLabel}
+                      onChange={(e) => setAssetLabel(e.target.value)}
+                      placeholder="Label (optional)"
+                      className="sm:w-40"
+                    />
+                    <Button type="button" size="sm" onClick={() => void addAssetLink()}>
+                      <Plus className="h-3.5 w-3.5" /> Add link
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
 
         {item.ragCitations && item.ragCitations.length > 0 && (
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-base">RAG citations</CardTitle>
+              <CardTitle className="text-base">Sources</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm">
               {item.ragCitations.map((c, i) => (
                 <div key={i} className="rounded-md border px-3 py-2">
                   <div className="font-medium">{c.title}</div>
-                  <div className="text-muted-foreground text-xs mt-1">{c.excerpt}</div>
+                  <div className="mt-1 text-xs text-muted-foreground">{c.excerpt}</div>
                 </div>
               ))}
             </CardContent>
           </Card>
         )}
+
+        {canEdit ? (
+          <div className="flex justify-end border-t pt-4">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="text-destructive hover:text-destructive"
+              onClick={() => {
+                if (
+                  !window.confirm(
+                    "Delete this content item? This cannot be undone.",
+                  )
+                ) {
+                  return;
+                }
+                void data.deleteItem(item.id).then(() => router.push("/content"));
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete item
+            </Button>
+          </div>
+        ) : null}
       </PageBody>
     </AppPage>
   );

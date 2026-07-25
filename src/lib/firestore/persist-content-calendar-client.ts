@@ -1,5 +1,6 @@
 import {
   deleteDoc,
+  deleteField,
   doc,
   serverTimestamp,
   setDoc,
@@ -56,13 +57,16 @@ export async function persistContentItemCreate(
 export async function persistContentItemUpdate(
   db: Firestore,
   itemId: string,
-  patch: Partial<ContentItem>,
+  patch: Partial<ContentItem> & { completedAt?: string | null },
 ): Promise<void> {
-  const { id: _id, organizationId: _org, createdAt: _c, ...rest } = patch;
-  await updateDoc(doc(db, COLLECTIONS.contentItems, itemId), {
+  const { id: _id, organizationId: _org, createdAt: _c, completedAt, ...rest } = patch;
+  const payload: Record<string, unknown> = {
     ...stripUndefined(rest as Record<string, unknown>),
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (completedAt === null) payload.completedAt = deleteField();
+  else if (completedAt !== undefined) payload.completedAt = completedAt;
+  await updateDoc(doc(db, COLLECTIONS.contentItems, itemId), payload);
 }
 
 export async function persistContentItemDelete(db: Firestore, itemId: string): Promise<void> {

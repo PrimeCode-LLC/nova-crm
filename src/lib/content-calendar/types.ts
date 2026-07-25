@@ -522,6 +522,76 @@ export function statusFromChecklist(
   return current;
 }
 
+/**
+ * Keep checklist in sync when status is set manually (dropdown / Mark published).
+ * Without this, the badge can say Published while Publish is still Pending.
+ */
+export function applyManualStatusToChecklist(
+  checklist: ContentChecklistStep[],
+  status: ContentItemStatus,
+  userId: string,
+  now = new Date().toISOString(),
+): ContentChecklistStep[] {
+  if (checklist.length === 0) return checklist;
+
+  const closePending = (stepStatus: ContentChecklistStepStatus) =>
+    checklist.map((step) =>
+      step.status === "pending"
+        ? {
+            ...step,
+            status: stepStatus,
+            completedAt: now,
+            completedById: userId,
+          }
+        : step,
+    );
+
+  if (status === "skipped") return closePending("skipped");
+  if (status === "published" || status === "repurpose") return closePending("done");
+
+  const reopen = (step: ContentChecklistStep): ContentChecklistStep => ({
+    ...step,
+    status: "pending",
+    completedAt: undefined,
+    completedById: undefined,
+  });
+
+  const completeIfPending = (step: ContentChecklistStep): ContentChecklistStep =>
+    step.status === "pending"
+      ? { ...step, status: "done", completedAt: now, completedById: userId }
+      : step;
+
+  if (status === "scheduled") {
+    return checklist.map((step) =>
+      step.key === "publish" ? reopen(step) : completeIfPending(step),
+    );
+  }
+
+  if (status === "review") {
+    return checklist.map((step) => {
+      if (step.key === "write" || step.key === "graphics") return completeIfPending(step);
+      return reopen(step);
+    });
+  }
+
+  if (status === "approved") {
+    return checklist.map((step) =>
+      step.key === "publish" ? reopen(step) : completeIfPending(step),
+    );
+  }
+
+  if (
+    status === "draft" ||
+    status === "idea" ||
+    status === "research" ||
+    status === "fact_check"
+  ) {
+    return checklist.map(reopen);
+  }
+
+  return checklist;
+}
+
 export function isChecklistStepOpen(step: ContentChecklistStep): boolean {
   return step.status === "pending";
 }

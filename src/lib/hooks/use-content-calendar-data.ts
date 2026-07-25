@@ -27,6 +27,10 @@ import type {
   ContentPrimaryOutcome,
   ContentStrategyStyle,
 } from "@/lib/content-calendar/types";
+import {
+  applyManualStatusToChecklist,
+  CONTENT_DONE_STATUSES,
+} from "@/lib/content-calendar/types";
 import { buildDemoContentCalendar } from "@/lib/demo-content-calendar";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import {
@@ -338,19 +342,30 @@ export function useContentCalendarData() {
     [isDemo],
   );
 
+  const itemsRef = React.useRef(items);
+  itemsRef.current = items;
+
   const updateItemStatus = React.useCallback(
     async (itemId: string, status: ContentItemStatus) => {
-      const completedAt =
-        status === "published" || status === "skipped" || status === "repurpose"
-          ? new Date().toISOString()
-          : undefined;
       const updatedAt = new Date().toISOString();
+      const actorId = currentUserId || "unknown";
+      const isDone = CONTENT_DONE_STATUSES.includes(status);
+      const completedAt = isDone ? updatedAt : null;
+      const current = itemsRef.current.find((i) => i.id === itemId);
+      const checklist = current?.checklist?.length
+        ? applyManualStatusToChecklist(current.checklist, status, actorId, updatedAt)
+        : current?.checklist;
+
+      const applyLocal = (item: ContentItem): ContentItem => ({
+        ...item,
+        status,
+        updatedAt,
+        completedAt: completedAt ?? undefined,
+        ...(checklist ? { checklist } : {}),
+      });
+
       if (isDemo) {
-        setItems((prev) =>
-          prev.map((i) =>
-            i.id === itemId ? { ...i, status, completedAt, updatedAt } : i,
-          ),
-        );
+        setItems((prev) => prev.map((i) => (i.id === itemId ? applyLocal(i) : i)));
         toast.message("Demo mode - not persisted");
         return;
       }
@@ -360,14 +375,11 @@ export function useContentCalendarData() {
         status,
         completedAt,
         updatedAt,
+        ...(checklist ? { checklist } : {}),
       });
-      setItems((prev) =>
-        prev.map((i) =>
-          i.id === itemId ? { ...i, status, completedAt, updatedAt } : i,
-        ),
-      );
+      setItems((prev) => prev.map((i) => (i.id === itemId ? applyLocal(i) : i)));
     },
-    [isDemo],
+    [isDemo, currentUserId],
   );
 
   const updateItem = React.useCallback(
