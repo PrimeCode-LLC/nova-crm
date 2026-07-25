@@ -159,7 +159,7 @@ export function UpdateContactEmailDialog({
             <DialogDescription>
               {reason === "bounce"
                 ? showResume
-                  ? "Replace the bounced address and reschedule remaining steps with the same copy — no AI regenerate needed."
+                  ? "Replace the bounced address and reschedule remaining steps with the same copy. No AI regenerate needed."
                   : "Replace the bounced address so outreach can resume. The change is logged on the timeline."
                 : reason === "suggested"
                   ? "Apply the address from their reply. Old → new is logged on the timeline."

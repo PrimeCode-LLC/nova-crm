@@ -12,7 +12,7 @@ import type { ModuleKey } from "@/lib/permissions/catalog";
 
 /**
  * Blocks deep-links to modules the viewer cannot access (content_team → /leads, etc.).
- * Uses the same module catalog as nav — works in demo via system role presets.
+ * Uses the same module catalog as nav. Works in demo via system role presets.
  */
 export function ModuleRouteGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();

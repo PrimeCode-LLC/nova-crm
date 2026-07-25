@@ -36,7 +36,7 @@ export function LeadContactEmailActionBanner({
           <div className="min-w-0 flex-1 space-y-1">
             <p className="text-sm font-medium">Email channel exhausted</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
-              Two hard bounces on this lead. A LinkedIn profile is on file — build a LinkedIn
+              Two hard bounces on this lead. A LinkedIn profile is on file. Build a LinkedIn
               sequence to continue outreach (review copy before sending).
             </p>
           </div>
@@ -78,7 +78,7 @@ export function LeadContactEmailActionBanner({
             <p className="text-sm font-medium">Email bounced</p>
             <p className="text-xs leading-relaxed text-muted-foreground">
               {hasPersonal
-                ? `${contact?.email ?? "Company email"} bounced. Outreach can continue on personal (${contact?.personalEmail}) — or replace the company address.`
+                ? `${contact?.email ?? "Company email"} bounced. Outreach can continue on personal (${contact?.personalEmail}), or replace the company address.`
                 : contact?.email
                   ? `${contact.email} is marked bounced. Replace it with a valid address to resume the sequence with the same copy.`
                   : "This contact’s email bounced. Add a valid address to continue outreach."}

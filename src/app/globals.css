@@ -110,7 +110,7 @@
   --accent: oklch(0.25 0.04 265);
   --accent-foreground: oklch(0.85 0.12 265);
   --destructive: oklch(0.68 0.22 22);
-  --success: oklch(0.7 0.19 145);                /* emerald — clearer green than mint */
+  --success: oklch(0.7 0.19 145);                /* emerald: clearer green than mint */
   --warning: oklch(0.8 0.17 75);
   --info: oklch(0.7 0.16 230);
   --border: oklch(1 0 0 / 8%);

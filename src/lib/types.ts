@@ -590,7 +590,7 @@ export interface Lead {
    */
   emailHardBounceCount?: number;
   /**
-   * When true, email outreach is exhausted — UI should offer building a LinkedIn sequence
+   * When true, email outreach is exhausted. UI should offer building a LinkedIn sequence
    * when a LinkedIn URL exists on the contact/lead.
    */
   suggestLinkedInSequence?: boolean;

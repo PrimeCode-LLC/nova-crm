@@ -58,7 +58,7 @@ export type RerouteFollowupSequenceServerResult =
 
 /**
  * Resume (if paused) a follow-up plan, recompute due dates with the standard cadence,
- * and re-queue remaining unsent steps to a new To — without regenerating copy.
+ * and re-queue remaining unsent steps to a new To, without regenerating copy.
  */
 export async function rerouteFollowupSequenceServer(
   input: RerouteFollowupSequenceServerInput,

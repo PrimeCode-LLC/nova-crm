@@ -66,7 +66,7 @@ export const DEMO_ROLE_PRESETS: DemoRolePreset[] = [
   {
     userId: "u-content-01",
     title: "Content ops",
-    subtitle: "Calendar, brands, captures — no sales pipeline.",
+    subtitle: "Calendar, brands, captures. No sales pipeline.",
     permissionHint: "Dashboard is content-only; Leads/Pipeline stay hidden.",
   },
 ];

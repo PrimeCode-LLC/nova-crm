@@ -29,7 +29,7 @@ export function getDashboardOverviewDescription(role: Role | undefined): string 
     case "prospecting":
       return "Route and push prospects, clear handoff work, then track replies on your intake.";
     case "content_team":
-      return "Your content plate: drafts, graphics, approvals, and posts due — then the calendar.";
+      return "Your content plate: drafts, graphics, approvals, and posts due. Then the calendar.";
     default:
       return "Live pipeline state, team performance, and funnel diagnostics.";
   }

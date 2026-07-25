@@ -91,7 +91,7 @@ export const ROLES: Record<SystemRoleId, { label: string; description: string }>
   },
   content_team: {
     label: "Content team",
-    description: "Content calendar, brands, and captures — no sales pipeline access",
+    description: "Content calendar, brands, and captures. No sales pipeline access",
   },
 };
 

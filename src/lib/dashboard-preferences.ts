@@ -90,7 +90,7 @@ export const DASHBOARD_VIEW_MODE_OPTIONS: {
   {
     key: "content",
     label: "Content board",
-    description: "Checklist plate and calendar home — no sales pipeline widgets.",
+    description: "Checklist plate and calendar home. No sales pipeline widgets.",
   },
 ];
 

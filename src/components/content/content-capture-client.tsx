@@ -179,7 +179,7 @@ export function ContentCaptureClient() {
                     ? "no captures yet"
                     : `idle ${p.daysSinceLast}+ days (limit ${p.policy.idleDays})`
                   : null}
-                {" — "}
+                {" · "}
                 <button
                   type="button"
                   className="underline underline-offset-2"

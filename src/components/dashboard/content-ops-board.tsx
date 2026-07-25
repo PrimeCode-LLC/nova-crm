@@ -69,7 +69,7 @@ function contentOpsMetrics(items: readonly ContentItem[], currentUserId: string,
   return { myOpenSteps, scheduledThisWeek, publishedThisWeek };
 }
 
-/** Content-team dashboard: personal plate + calendar pulse — no sales widgets. */
+/** Content-team dashboard: personal plate + calendar pulse. No sales widgets. */
 export function ContentOpsBoard({
   currentUserId,
 }: {

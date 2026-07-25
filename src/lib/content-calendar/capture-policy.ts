@@ -249,7 +249,7 @@ export function captureDutyBannerCopy(
     if (progress.behindCadence && progress.target > 0) {
       return {
         headline: `Your capture for ${brand.name} is pending this week`,
-        detail: `${progress.weekCount}/${progress.target} done — add proof now so content stays on schedule.`,
+        detail: `${progress.weekCount}/${progress.target} done. Add proof now so content stays on schedule.`,
       };
     }
     if (progress.idle) {

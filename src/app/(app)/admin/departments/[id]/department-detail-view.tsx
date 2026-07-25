@@ -389,7 +389,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
                 Modules open
               </p>
               <p className="mt-1 text-2xl font-semibold tabular-nums">
-                {defaultRoleId ? enabledModules.length : "—"}
+                {defaultRoleId ? enabledModules.length : "-"}
               </p>
             </CardContent>
           </Card>
@@ -471,7 +471,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
                     {selectedRoleMeta.label}
                     {selectedRoleMeta.description ? (
                       <span className="ml-1.5 font-normal text-muted-foreground">
-                        — {selectedRoleMeta.description}
+                        - {selectedRoleMeta.description}
                       </span>
                     ) : null}
                   </p>
@@ -507,7 +507,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
                   </ul>
                 )}
                 <p className="text-[11px] text-muted-foreground">
-                  Everything else stays hidden for people on this role — the rest of the
+                  Everything else stays hidden for people on this role. The rest of the
                   product stays clean for other teams.
                 </p>
               </div>

@@ -621,12 +621,12 @@ export async function applyEmailBounceServer(
     if (recoveryAction === "pause_linkedin") {
       await createReviewTask(
         LINKEDIN_SEQUENCE_TASK_TITLE,
-        `Email bounced twice (${failedList}). Reason: ${reason}. LinkedIn profile available — build a LinkedIn sequence to continue outreach.`,
+        `Email bounced twice (${failedList}). Reason: ${reason}. LinkedIn profile available. Build a LinkedIn sequence to continue outreach.`,
       );
     } else if (recoveryAction === "pause_find_email") {
       await createReviewTask(
         BOUNCE_REVIEW_TASK_TITLE,
-        `Email bounced twice (${failedList}). Reason: ${reason}. No LinkedIn URL on file — find a valid email or add LinkedIn to continue.`,
+        `Email bounced twice (${failedList}). Reason: ${reason}. No LinkedIn URL on file. Find a valid email or add LinkedIn to continue.`,
       );
     } else {
       await createReviewTask(

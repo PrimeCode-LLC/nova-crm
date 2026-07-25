@@ -950,7 +950,7 @@ export function ContentFillDaysDialog({
                   : pendingDraftCount > 0
                     ? `Generate ${pendingDraftCount} draft${pendingDraftCount === 1 ? "" : "s"}`
                     : draftedCount > 0
-                      ? "Done — close"
+                      ? "Done. Close"
                       : "Generate drafts"}
               </Button>
             </>
