@@ -33,6 +33,7 @@ import {
   normalizePrimaryOutcome,
 } from "@/lib/content-calendar/types";
 import { normalizeCapturePolicy } from "@/lib/content-calendar/capture-policy";
+import { normalizeCaptureType } from "@/lib/content-calendar/capture-types";
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : fallback;
@@ -277,6 +278,7 @@ export function mapContentCapture(id: string, data: Record<string, unknown>): Co
     id,
     organizationId: str(data.organizationId),
     brandId: str(data.brandId) || undefined,
+    captureType: normalizeCaptureType(data.captureType),
     problem: str(data.problem),
     solution: str(data.solution),
     outcome: str(data.outcome) || undefined,

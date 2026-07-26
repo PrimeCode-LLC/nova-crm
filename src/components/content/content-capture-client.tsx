@@ -45,14 +45,24 @@ import { fmtRelative } from "@/lib/format";
 import {
   resolveBrandResponsibility,
   type ContentCapture,
+  type ContentCaptureRequiredField,
+  type ContentCaptureType,
 } from "@/lib/content-calendar/types";
 import {
-  CAPTURE_REQUIRED_FIELD_LABELS,
   brandCapturePolicy,
   brandsNeedingCaptureAttention,
   getCaptureProgress,
   validateCaptureFields,
 } from "@/lib/content-calendar/capture-policy";
+import {
+  CAPTURE_TYPE_FIELDS,
+  CONTENT_CAPTURE_TYPES,
+  CONTENT_CAPTURE_TYPE_HINTS,
+  CONTENT_CAPTURE_TYPE_LABELS,
+  captureDisplayTitle,
+  captureFieldLabel,
+  normalizeCaptureType,
+} from "@/lib/content-calendar/capture-types";
 import {
   loadCapturePrefs,
   rememberCaptureLibrary,
@@ -113,6 +123,7 @@ export function ContentCaptureClient() {
 
   const [libraryId, setLibraryId] = React.useState("");
   const [brandId, setBrandId] = React.useState("");
+  const [captureType, setCaptureType] = React.useState<ContentCaptureType>("win");
   const [problem, setProblem] = React.useState("");
   const [solution, setSolution] = React.useState("");
   const [outcome, setOutcome] = React.useState("");
@@ -126,6 +137,7 @@ export function ContentCaptureClient() {
   const [editTarget, setEditTarget] = React.useState<ContentCapture | null>(null);
   const [editLibraryId, setEditLibraryId] = React.useState("");
   const [editBrandId, setEditBrandId] = React.useState("");
+  const [editCaptureType, setEditCaptureType] = React.useState<ContentCaptureType>("win");
   const [editProblem, setEditProblem] = React.useState("");
   const [editSolution, setEditSolution] = React.useState("");
   const [editOutcome, setEditOutcome] = React.useState("");
@@ -328,7 +340,7 @@ export function ContentCaptureClient() {
     });
     if (!check.ok) {
       toast.error(
-        `Required: ${check.missing.map((f) => CAPTURE_REQUIRED_FIELD_LABELS[f]).join(", ")}`,
+        `Required: ${check.missing.map((f) => captureFieldLabel(captureType, f)).join(", ")}`,
       );
       return;
     }
@@ -338,6 +350,7 @@ export function ContentCaptureClient() {
       const capture = await data.createCapture({
         libraryId,
         brandId: effectiveBrandId || undefined,
+        captureType,
         problem: problem.trim(),
         solution: solution.trim(),
         outcome: outcome.trim() || undefined,
@@ -421,6 +434,7 @@ export function ContentCaptureClient() {
     setEditTarget(capture);
     setEditLibraryId(capture.libraryId || libraryId || "");
     setEditBrandId(capture.brandId || "");
+    setEditCaptureType(normalizeCaptureType(capture.captureType));
     setEditProblem(capture.problem);
     setEditSolution(capture.solution);
     setEditOutcome(capture.outcome || "");
@@ -447,7 +461,7 @@ export function ContentCaptureClient() {
     });
     if (!check.ok) {
       toast.error(
-        `Required: ${check.missing.map((f) => CAPTURE_REQUIRED_FIELD_LABELS[f]).join(", ")}`,
+        `Required: ${check.missing.map((f) => captureFieldLabel(editCaptureType, f)).join(", ")}`,
       );
       return;
     }
@@ -457,6 +471,7 @@ export function ContentCaptureClient() {
       const effectiveEditBrandId = CAPTURE_BRAND_ENABLED ? editBrandId : editTarget.brandId || "";
       const patch: Parameters<typeof data.updateCapture>[1] = {
         libraryId: editLibraryId,
+        captureType: editCaptureType,
         problem: editProblem.trim(),
         solution: editSolution.trim(),
         outcome: editOutcome.trim() || undefined,
@@ -503,11 +518,11 @@ export function ContentCaptureClient() {
     }
   }
 
-  function fieldRequired(field: keyof typeof CAPTURE_REQUIRED_FIELD_LABELS): boolean {
+  function fieldRequired(field: ContentCaptureRequiredField): boolean {
     return policy.requiredFields.includes(field);
   }
 
-  function editFieldRequired(field: keyof typeof CAPTURE_REQUIRED_FIELD_LABELS): boolean {
+  function editFieldRequired(field: ContentCaptureRequiredField): boolean {
     return editPolicy.requiredFields.includes(field);
   }
 
@@ -515,7 +530,7 @@ export function ContentCaptureClient() {
     <AppPage>
       <PageHeader
         title="Capture"
-        description="Turn today’s problem → solution into a knowledge case study for posts, email sequences, and Fit Check."
+        description="Feed product knowledge, wins, ICP notes, and voice into your knowledgebases — AI structures and indexes them for posts, sequences, and Fit Check."
         actions={
           <Link href="/content" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             Calendar
@@ -558,10 +573,36 @@ export function ContentCaptureClient() {
             <CardHeader>
               <CardTitle className="text-base">New capture</CardTitle>
               <CardDescription>
-                ~60 seconds. AI structures it and indexes into the selected knowledgebase.
+                ~60 seconds. Pick a type, jot the note, AI indexes into the selected knowledgebase.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>What are you capturing?</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {CONTENT_CAPTURE_TYPES.map((type) => {
+                    const selected = captureType === type;
+                    return (
+                      <button
+                        key={type}
+                        type="button"
+                        className={cn(
+                          "rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors",
+                          selected
+                            ? "border-primary bg-primary text-primary-foreground"
+                            : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                        )}
+                        onClick={() => setCaptureType(type)}
+                      >
+                        {CONTENT_CAPTURE_TYPE_LABELS[type]}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {CONTENT_CAPTURE_TYPE_HINTS[captureType]}
+                </p>
+              </div>
               <div className="space-y-2">
                 <Label>
                   Knowledgebase <span className="text-destructive">*</span>
@@ -611,6 +652,11 @@ export function ContentCaptureClient() {
                       : ""}
                   </p>
                 )}
+                {selectedLibrary?.description?.trim() ? (
+                  <p className="text-xs text-muted-foreground border-l-2 border-muted pl-2">
+                    {selectedLibrary.description.trim()}
+                  </p>
+                ) : null}
               </div>
               {CAPTURE_BRAND_ENABLED ? (
                 <div className="space-y-2">
@@ -682,59 +728,41 @@ export function ContentCaptureClient() {
                   ) : null}
                 </div>
               ) : null}
-              <div className="space-y-2">
-                <Label>
-                  Problem
-                  {fieldRequired("problem") ? (
-                    <span className="text-destructive"> *</span>
-                  ) : null}
-                </Label>
-                <Textarea
-                  value={problem}
-                  onChange={(e) => setProblem(e.target.value)}
-                  rows={3}
-                  placeholder="What went wrong or what the client needed…"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>
-                  Solution
-                  {fieldRequired("solution") ? (
-                    <span className="text-destructive"> *</span>
-                  ) : null}
-                </Label>
-                <Textarea
-                  value={solution}
-                  onChange={(e) => setSolution(e.target.value)}
-                  rows={3}
-                  placeholder="What you did…"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>
-                  Outcome
-                  {fieldRequired("outcome") ? (
-                    <span className="text-destructive"> *</span>
-                  ) : (
-                    " (optional)"
-                  )}
-                </Label>
-                <Textarea
-                  value={outcome}
-                  onChange={(e) => setOutcome(e.target.value)}
-                  rows={2}
-                  placeholder="Result, metric, or lesson…"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>
-                  Extra notes
-                  {fieldRequired("notes") ? (
-                    <span className="text-destructive"> *</span>
-                  ) : null}
-                </Label>
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-              </div>
+              {CAPTURE_TYPE_FIELDS[captureType].map((field) => {
+                const value =
+                  field.key === "problem"
+                    ? problem
+                    : field.key === "solution"
+                      ? solution
+                      : field.key === "outcome"
+                        ? outcome
+                        : notes;
+                const setValue =
+                  field.key === "problem"
+                    ? setProblem
+                    : field.key === "solution"
+                      ? setSolution
+                      : field.key === "outcome"
+                        ? setOutcome
+                        : setNotes;
+                const required = fieldRequired(field.key);
+                const showOptional = Boolean(field.optional) && !required;
+                return (
+                  <div key={field.key} className="space-y-2">
+                    <Label>
+                      {field.label}
+                      {required ? <span className="text-destructive"> *</span> : null}
+                      {showOptional ? " (optional)" : null}
+                    </Label>
+                    <Textarea
+                      value={value}
+                      onChange={(e) => setValue(e.target.value)}
+                      rows={field.rows}
+                      placeholder={field.placeholder}
+                    />
+                  </div>
+                );
+              })}
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox checked={publicSafe} onCheckedChange={(c) => setPublicSafe(c === true)} />
                 Public-safe (ok to use in posts)
@@ -790,7 +818,7 @@ export function ContentCaptureClient() {
                             className="font-medium line-clamp-1 text-left hover:underline underline-offset-2"
                             onClick={() => setViewTarget(c)}
                           >
-                            {c.normalizedTitle || c.problem.slice(0, 80)}
+                            {captureDisplayTitle(c)}
                           </button>
                           <Badge
                             variant={
@@ -806,6 +834,7 @@ export function ContentCaptureClient() {
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {fmtRelative(c.createdAt)}
+                          {` · ${CONTENT_CAPTURE_TYPE_LABELS[normalizeCaptureType(c.captureType)]}`}
                           {c.libraryId ? ` · ${libraryName(c.libraryId)}` : ""}
                           {c.publicSafe ? " · public-safe" : " · internal"}
                           {c.queueForPosts ? " · queued" : ""}
@@ -885,7 +914,7 @@ export function ContentCaptureClient() {
         <DialogContent className="flex max-h-[85vh] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
           <DialogHeader className="shrink-0 border-b px-6 py-4 text-left">
             <DialogTitle className="pr-8 leading-snug">
-              {viewTarget?.normalizedTitle || viewTarget?.problem.slice(0, 120) || "Capture"}
+              {viewTarget ? captureDisplayTitle(viewTarget) : "Capture"}
             </DialogTitle>
             <DialogDescription className="flex flex-wrap items-center gap-2 pt-1">
               {viewTarget ? (
@@ -901,6 +930,10 @@ export function ContentCaptureClient() {
                   >
                     {viewTarget.status}
                   </Badge>
+                  <span>
+                    {CONTENT_CAPTURE_TYPE_LABELS[normalizeCaptureType(viewTarget.captureType)]}
+                  </span>
+                  <span>·</span>
                   <span>{fmtRelative(viewTarget.createdAt)}</span>
                   <span>·</span>
                   <span>{viewTarget.publicSafe ? "public-safe" : "internal"}</span>
@@ -936,10 +969,13 @@ export function ContentCaptureClient() {
                     </p>
                   </div>
                 ) : null}
-                <CaptureFieldBlock label="Problem" value={viewTarget.problem} />
-                <CaptureFieldBlock label="Solution" value={viewTarget.solution} />
-                <CaptureFieldBlock label="Outcome" value={viewTarget.outcome} />
-                <CaptureFieldBlock label="Extra notes" value={viewTarget.notes} />
+                {CAPTURE_TYPE_FIELDS[normalizeCaptureType(viewTarget.captureType)].map((field) => (
+                  <CaptureFieldBlock
+                    key={field.key}
+                    label={field.label}
+                    value={viewTarget[field.key]}
+                  />
+                ))}
                 {viewTarget.status === "failed" && viewTarget.errorMessage ? (
                   <CaptureFieldBlock label="Error" value={viewTarget.errorMessage} />
                 ) : null}
@@ -1025,63 +1061,68 @@ export function ContentCaptureClient() {
                   </div>
                 ) : null}
                 <div className="space-y-2">
-                  <Label>
-                    Problem
-                    {editFieldRequired("problem") ? (
-                      <span className="text-destructive"> *</span>
-                    ) : null}
-                  </Label>
-                  <Textarea
-                    value={editProblem}
-                    onChange={(e) => setEditProblem(e.target.value)}
-                    rows={3}
-                    disabled={Boolean(actionId)}
-                  />
+                  <Label>What are you capturing?</Label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {CONTENT_CAPTURE_TYPES.map((type) => {
+                      const selected = editCaptureType === type;
+                      return (
+                        <button
+                          key={type}
+                          type="button"
+                          disabled={Boolean(actionId)}
+                          className={cn(
+                            "rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50",
+                            selected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground",
+                          )}
+                          onClick={() => setEditCaptureType(type)}
+                        >
+                          {CONTENT_CAPTURE_TYPE_LABELS[type]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    {CONTENT_CAPTURE_TYPE_HINTS[editCaptureType]}
+                  </p>
                 </div>
-                <div className="space-y-2">
-                  <Label>
-                    Solution
-                    {editFieldRequired("solution") ? (
-                      <span className="text-destructive"> *</span>
-                    ) : null}
-                  </Label>
-                  <Textarea
-                    value={editSolution}
-                    onChange={(e) => setEditSolution(e.target.value)}
-                    rows={3}
-                    disabled={Boolean(actionId)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>
-                    Outcome
-                    {editFieldRequired("outcome") ? (
-                      <span className="text-destructive"> *</span>
-                    ) : (
-                      " (optional)"
-                    )}
-                  </Label>
-                  <Textarea
-                    value={editOutcome}
-                    onChange={(e) => setEditOutcome(e.target.value)}
-                    rows={2}
-                    disabled={Boolean(actionId)}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>
-                    Extra notes
-                    {editFieldRequired("notes") ? (
-                      <span className="text-destructive"> *</span>
-                    ) : null}
-                  </Label>
-                  <Textarea
-                    value={editNotes}
-                    onChange={(e) => setEditNotes(e.target.value)}
-                    rows={2}
-                    disabled={Boolean(actionId)}
-                  />
-                </div>
+                {CAPTURE_TYPE_FIELDS[editCaptureType].map((field) => {
+                  const value =
+                    field.key === "problem"
+                      ? editProblem
+                      : field.key === "solution"
+                        ? editSolution
+                        : field.key === "outcome"
+                          ? editOutcome
+                          : editNotes;
+                  const setValue =
+                    field.key === "problem"
+                      ? setEditProblem
+                      : field.key === "solution"
+                        ? setEditSolution
+                        : field.key === "outcome"
+                          ? setEditOutcome
+                          : setEditNotes;
+                  const required = editFieldRequired(field.key);
+                  const showOptional = Boolean(field.optional) && !required;
+                  return (
+                    <div key={field.key} className="space-y-2">
+                      <Label>
+                        {field.label}
+                        {required ? <span className="text-destructive"> *</span> : null}
+                        {showOptional ? " (optional)" : null}
+                      </Label>
+                      <Textarea
+                        value={value}
+                        onChange={(e) => setValue(e.target.value)}
+                        rows={field.rows}
+                        placeholder={field.placeholder}
+                        disabled={Boolean(actionId)}
+                      />
+                    </div>
+                  );
+                })}
                 <label className="flex items-center gap-2 text-sm">
                   <Checkbox
                     checked={editPublicSafe}

@@ -9,6 +9,8 @@ export type RagChunkHit = {
   score: number;
   libraryId: string;
   documentId: string;
+  /** Present when denormalized on the chunk or copied from the parent document. */
+  knowledgeSection?: string;
 };
 
 /**
@@ -131,6 +133,8 @@ async function retrieveRagChunksByVectorSearch(input: {
       }
       const distance = Number(data.__vectorDistance ?? 1);
       const documentId = chunkSnap.ref.parent.parent?.id ?? "";
+      const knowledgeSection =
+        typeof data.knowledgeSection === "string" ? data.knowledgeSection : undefined;
       hits.push({
         title: String(data.title ?? "chunk"),
         content: String(data.content ?? ""),
@@ -138,6 +142,7 @@ async function retrieveRagChunksByVectorSearch(input: {
         score: 1 - distance,
         libraryId,
         documentId,
+        knowledgeSection,
       });
     }
 
@@ -211,9 +216,9 @@ export async function retrieveRagChunksServer(input: {
       .get();
 
     for (const docSnap of docsSnap.docs) {
+      const docSection = docSnap.data().knowledgeSection as string | undefined;
       if (sections) {
-        const section = docSnap.data().knowledgeSection as string | undefined;
-        if (section && !sections.has(section)) continue;
+        if (docSection && !sections.has(docSection)) continue;
       }
       const chunksSnap = await docSnap.ref.collection("chunks").limit(200).get();
       for (const chunkSnap of chunksSnap.docs) {
@@ -229,12 +234,15 @@ export async function retrieveRagChunksServer(input: {
             kw,
           );
         }
+        const chunkSection =
+          typeof data.knowledgeSection === "string" ? data.knowledgeSection : docSection;
         hits.push({
           title,
           content,
           score,
           libraryId: libDoc.id,
           documentId: docSnap.id,
+          knowledgeSection: chunkSection,
         });
       }
     }

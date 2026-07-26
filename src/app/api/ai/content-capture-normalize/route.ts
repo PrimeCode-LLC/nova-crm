@@ -12,8 +12,18 @@ import {
   ensureContentBrandLibraryServer,
   formatBrandContextForPrompt,
   getContentBrandServer,
+  getContentKnowledgePackContextServer,
 } from "@/lib/ai/content-knowledge-server";
 import { getFitCheckKnowledgeConfigServer } from "@/lib/ai/fit-check-knowledge";
+import { libraryAllowsFeature } from "@/lib/ai/knowledge-library-ui";
+import type { AiLibraryAllowedFeature } from "@/lib/ai/types";
+import {
+  captureTypeMarkdownKind,
+  captureTypeStructureGuidance,
+  formatCaptureFieldsForPrompt,
+  knowledgeSectionForCapture,
+  normalizeCaptureType,
+} from "@/lib/content-calendar/capture-types";
 import type { Role } from "@/lib/types";
 
 const bodySchema = z.object({
@@ -68,6 +78,15 @@ export async function POST(req: Request) {
   const capture = captureSnap.data()!;
   const brandId = typeof capture.brandId === "string" ? capture.brandId : undefined;
   const brand = brandId ? await getContentBrandServer(orgId, brandId) : null;
+  const captureLibraryId =
+    typeof capture.libraryId === "string" ? capture.libraryId.trim() : "";
+  const captureType = normalizeCaptureType(capture.captureType);
+  const publicSafe = Boolean(capture.publicSafe);
+  const knowledgePackContext = await getContentKnowledgePackContextServer({
+    organizationId: orgId,
+    brand,
+    libraryIds: captureLibraryId ? [captureLibraryId] : undefined,
+  });
 
   try {
     const result = await runAiStructuredFeature({
@@ -79,11 +98,17 @@ export async function POST(req: Request) {
       schema: normalizeSchema,
       promptVars: {
         brandContext: brand ? formatBrandContextForPrompt(brand) : "No brand selected - company knowledge base.",
-        publicSafe: String(Boolean(capture.publicSafe)),
-        problem: String(capture.problem ?? ""),
-        solution: String(capture.solution ?? ""),
-        outcome: String(capture.outcome ?? ""),
-        notes: String(capture.notes ?? ""),
+        knowledgePackContext,
+        captureType,
+        structureGuidance: captureTypeStructureGuidance(captureType),
+        markdownKind: captureTypeMarkdownKind(captureType),
+        publicSafe: String(publicSafe),
+        fieldBlock: formatCaptureFieldsForPrompt(captureType, {
+          problem: String(capture.problem ?? ""),
+          solution: String(capture.solution ?? ""),
+          outcome: String(capture.outcome ?? ""),
+          notes: String(capture.notes ?? ""),
+        }),
       },
     });
 
@@ -92,8 +117,7 @@ export async function POST(req: Request) {
       .doc(orgId)
       .collection(ORG_SUBCOLLECTIONS.aiLibraries);
 
-    const requestedLibraryId =
-      typeof capture.libraryId === "string" ? capture.libraryId.trim() : "";
+    const requestedLibraryId = captureLibraryId;
     let libraryId: string | undefined = requestedLibraryId || undefined;
 
     if (libraryId) {
@@ -108,6 +132,33 @@ export async function POST(req: Request) {
         });
         return NextResponse.json(
           { error: "Selected knowledge library was not found." },
+          { status: 409 },
+        );
+      }
+      const libData = libSnap.data() ?? {};
+      if (
+        !libraryAllowsFeature(
+          {
+            name: typeof libData.name === "string" ? libData.name : undefined,
+            libraryKind: typeof libData.libraryKind === "string" ? libData.libraryKind : undefined,
+            scope: libData.scope as { type?: string; brandId?: string } | undefined,
+            allowedFeatures: Array.isArray(libData.allowedFeatures)
+              ? (libData.allowedFeatures as AiLibraryAllowedFeature[])
+              : undefined,
+          },
+          "content",
+        )
+      ) {
+        await captureRef.update({
+          status: "failed",
+          errorMessage:
+            "Selected knowledge library is not allowed for Content. Pick a Content-enabled library.",
+          normalizedTitle: result.title,
+          normalizedMarkdown: result.markdown,
+          updatedAt: new Date().toISOString(),
+        });
+        return NextResponse.json(
+          { error: "Selected knowledge library is not allowed for Content." },
           { status: 409 },
         );
       }
@@ -138,8 +189,9 @@ export async function POST(req: Request) {
       );
     }
 
-    // When attributed to a brand, link the target library so drafts/plans can retrieve it.
-    if (brand && !brand.knowledgeLibraryIds?.includes(libraryId)) {
+    // When attributed to a brand, link Content-allowed libraries so drafts/plans can retrieve them.
+    // (Non-content libs are rejected above when explicitly selected.)
+    if (brand && libraryId && !brand.knowledgeLibraryIds?.includes(libraryId)) {
       await db
         .collection(COLLECTIONS.contentBrands)
         .doc(brand.id)
@@ -168,7 +220,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const section = capture.publicSafe ? "case_studies" : "other";
+    const section = knowledgeSectionForCapture(captureType, publicSafe);
     await docRef.set(
       {
         libraryId,
@@ -178,7 +230,8 @@ export async function POST(req: Request) {
         sourceRef: `contentCapture:${parsed.data.captureId}`,
         knowledgeSection: section,
         organizationId: orgId,
-        publicSafe: Boolean(capture.publicSafe),
+        publicSafe,
+        captureType,
         updatedAt: now,
         ...(isNewDoc ? { createdAt: now, chunkCount: 0 } : {}),
       },

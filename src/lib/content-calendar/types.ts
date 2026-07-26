@@ -76,6 +76,9 @@ export type ContentPlanStatus = "draft" | "approved" | "generating" | "completed
 
 export type ContentCaptureStatus = "draft" | "normalized" | "indexed" | "failed";
 
+/** What kind of knowledge a Capture note feeds into the library. */
+export type ContentCaptureType = "win" | "feature" | "icp" | "voice";
+
 /** Brand-level people slots (who does what for this brand). */
 export type ContentResponsibilityKey =
   | "planner"
@@ -259,6 +262,11 @@ export interface ContentCapture {
    * Knowledge ownership lives on libraryId — brands consume via knowledgeLibraryIds.
    */
   brandId?: string;
+  /**
+   * What kind of knowledge this note is. Defaults to `win` for legacy rows.
+   * Storage fields stay problem/solution/outcome/notes; UI labels adapt per type.
+   */
+  captureType?: ContentCaptureType;
   problem: string;
   solution: string;
   outcome?: string;

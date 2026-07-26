@@ -143,7 +143,7 @@ export async function POST(req: Request) {
   const featureCfg = settings.features.content_plan_suggest;
   const ragMode = featureCfg?.ragMode ?? "reference";
 
-  const { ragBlock } = await retrieveContentKnowledgeServer({
+  const { ragBlock, knowledgePackContext } = await retrieveContentKnowledgeServer({
     organizationId: orgId,
     brand,
     query: `${brand.positioning} ${parsed.data.userPrompt ?? ""} case study lessons`,
@@ -225,6 +225,7 @@ export async function POST(req: Request) {
       schema: planSchema,
       promptVars: {
         brandContext: formatBrandContextForPrompt(brand),
+        knowledgePackContext,
         platformFit: formatPlatformFitForPrompt(platforms),
         pillars: brand.pillars
           .filter((p) => p.enabled)

@@ -122,7 +122,7 @@ export async function POST(req: Request) {
     parsed.data.pillarKey,
   ].join(" ");
 
-  const { ragBlock } = await retrieveContentKnowledgeServer({
+  const { ragBlock, knowledgePackContext } = await retrieveContentKnowledgeServer({
     organizationId: orgId,
     brand,
     query,
@@ -141,6 +141,7 @@ export async function POST(req: Request) {
       schema: briefSchema,
       promptVars: {
         brandContext: formatBrandContextForPrompt(brand),
+        knowledgePackContext,
         platform,
         format,
         sizeHint,

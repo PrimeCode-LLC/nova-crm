@@ -13,12 +13,21 @@ import {
   type ContentBrand,
 } from "@/lib/content-calendar/types";
 
-/** Proof + voice sections used for content generation. */
+/** Proof + voice sections used for public-safe content generation. */
 export const CONTENT_KNOWLEDGE_SECTIONS: KnowledgeSection[] = [
   "case_studies",
   "services",
   "icp",
   "content_voice",
+];
+
+/**
+ * Same as {@link CONTENT_KNOWLEDGE_SECTIONS} plus Capture `other` (non-public) docs
+ * so brand-linked libraries with internal captures still contribute to generation.
+ */
+export const CONTENT_KNOWLEDGE_SECTIONS_WITH_INTERNAL: KnowledgeSection[] = [
+  ...CONTENT_KNOWLEDGE_SECTIONS,
+  "other",
 ];
 
 export async function getContentBrandServer(
@@ -68,7 +77,7 @@ export async function ensureContentBrandLibraryServer(input: {
   await ref.set({
     organizationId: input.organizationId,
     name: `Content · ${input.brandName}`,
-    description: "Case studies and voice docs for content calendar",
+    description: `Brand pack for ${input.brandName}: case studies, voice, and proof used by the content calendar.`,
     scope: { type: "content_brand", brandId: input.brandId },
     libraryKind: "content_brand",
     allowedFeatures: ["content"],
@@ -80,6 +89,112 @@ export async function ensureContentBrandLibraryServer(input: {
   return ref.id;
 }
 
+function filterPublicSafeChunks(chunks: RagChunkHit[], publicSafeOnly: boolean): RagChunkHit[] {
+  if (!publicSafeOnly) return chunks;
+  return chunks.filter((c) => {
+    const lower = c.content.toLowerCase();
+    if (lower.includes("internal only") || lower.includes("not for public")) return false;
+    return true;
+  });
+}
+
+/** Label internal Capture chunks so the model uses them for angle, not as public proof. */
+export function formatContentRagChunkForPrompt(
+  chunk: RagChunkHit,
+  publicSafeOnly: boolean,
+): { title: string; content: string } {
+  if (publicSafeOnly && chunk.knowledgeSection === "other") {
+    return {
+      title: `${chunk.title} (internal context — do not quote as public proof)`,
+      content: chunk.content,
+    };
+  }
+  return { title: chunk.title, content: chunk.content };
+}
+
+export type ContentKnowledgeLibraryIntro = {
+  id: string;
+  name: string;
+  description?: string;
+};
+
+/** Orientation block: what each linked knowledge pack is for (not proof). */
+export function formatKnowledgeLibrariesForPrompt(
+  libraries: ContentKnowledgeLibraryIntro[],
+): string {
+  if (libraries.length === 0) {
+    return "No knowledge packs linked.";
+  }
+  return libraries
+    .map((lib) => {
+      const intro = lib.description?.trim();
+      return intro
+        ? `- ${lib.name}: ${intro}`
+        : `- ${lib.name}: (no intro set — treat as a generic knowledge pack)`;
+    })
+    .join("\n");
+}
+
+/**
+ * Resolve which libraries a content brand (or capture target) should orient against.
+ * Prefer explicit ids, then brand links, then company global.
+ */
+export async function resolveContentKnowledgeLibraryIdsServer(input: {
+  organizationId: string;
+  brand?: ContentBrand | null;
+  libraryIds?: string[];
+}): Promise<string[]> {
+  const explicit = input.libraryIds?.map((id) => id.trim()).filter(Boolean) ?? [];
+  if (explicit.length > 0) return [...new Set(explicit)];
+
+  const brandIds = input.brand?.knowledgeLibraryIds?.filter(Boolean) ?? [];
+  if (brandIds.length > 0) return [...new Set(brandIds)];
+
+  const knowledge = await getFitCheckKnowledgeConfigServer(input.organizationId);
+  return knowledge.globalLibraryId ? [knowledge.globalLibraryId] : [];
+}
+
+export async function getContentKnowledgeLibraryIntrosServer(input: {
+  organizationId: string;
+  brand?: ContentBrand | null;
+  libraryIds?: string[];
+}): Promise<ContentKnowledgeLibraryIntro[]> {
+  const db = getAdminDb();
+  if (!db) return [];
+
+  const libraryIds = await resolveContentKnowledgeLibraryIdsServer(input);
+  if (libraryIds.length === 0) return [];
+
+  const libsCol = db
+    .collection(COLLECTIONS.organizations)
+    .doc(input.organizationId)
+    .collection(ORG_SUBCOLLECTIONS.aiLibraries);
+
+  const snaps = await Promise.all(libraryIds.map((id) => libsCol.doc(id).get()));
+  const out: ContentKnowledgeLibraryIntro[] = [];
+  for (const snap of snaps) {
+    if (!snap.exists) continue;
+    const data = snap.data() ?? {};
+    const name =
+      typeof data.name === "string" && data.name.trim() ? data.name.trim() : snap.id;
+    const description =
+      typeof data.description === "string" && data.description.trim()
+        ? data.description.trim()
+        : undefined;
+    out.push({ id: snap.id, name, description });
+  }
+  return out;
+}
+
+export async function getContentKnowledgePackContextServer(input: {
+  organizationId: string;
+  brand?: ContentBrand | null;
+  libraryIds?: string[];
+}): Promise<string> {
+  const intros = await getContentKnowledgeLibraryIntrosServer(input);
+  return formatKnowledgeLibrariesForPrompt(intros);
+}
+
 export async function retrieveContentKnowledgeServer(input: {
   organizationId: string;
   brand: ContentBrand;
@@ -87,44 +202,72 @@ export async function retrieveContentKnowledgeServer(input: {
   ragMode: AiRagMode;
   publicSafeOnly?: boolean;
   topK?: number;
-}): Promise<{ chunks: RagChunkHit[]; ragBlock: string }> {
+}): Promise<{
+  chunks: RagChunkHit[];
+  ragBlock: string;
+  knowledgePackContext: string;
+}> {
   const queryEmbedding = await embedFitCheckQueryServer(input.organizationId, input.query);
+  const topK = input.topK ?? 6;
+  const publicSafeOnly = input.publicSafeOnly !== false;
+  const sections = CONTENT_KNOWLEDGE_SECTIONS_WITH_INTERNAL;
 
-  let libraryIds = input.brand.knowledgeLibraryIds?.filter(Boolean);
-  if (!libraryIds?.length) {
-    const knowledge = await getFitCheckKnowledgeConfigServer(input.organizationId);
-    if (knowledge.globalLibraryId) {
-      libraryIds = [knowledge.globalLibraryId];
-    }
+  const brandLibraryIds = input.brand.knowledgeLibraryIds?.filter(Boolean) ?? [];
+  const knowledge = await getFitCheckKnowledgeConfigServer(input.organizationId);
+  const companyLibraryId = knowledge.globalLibraryId;
+
+  let libraryIds = brandLibraryIds.length
+    ? brandLibraryIds
+    : companyLibraryId
+      ? [companyLibraryId]
+      : undefined;
+
+  const [chunks, knowledgePackContext] = await Promise.all([
+    retrieveRagChunksServer({
+      organizationId: input.organizationId,
+      query: input.query,
+      libraryIds,
+      sections,
+      scope: { brandId: input.brand.id },
+      topK,
+      queryEmbedding,
+    }),
+    getContentKnowledgePackContextServer({
+      organizationId: input.organizationId,
+      brand: input.brand,
+      libraryIds,
+    }),
+  ]);
+
+  let workingChunks = chunks;
+  let filtered = filterPublicSafeChunks(workingChunks, publicSafeOnly);
+
+  // Explicit brand links replace Company — but empty/unindexed Topic libs should not
+  // starve drafts. Fall back to Company when brand libs yield nothing usable.
+  if (
+    filtered.length === 0 &&
+    brandLibraryIds.length > 0 &&
+    companyLibraryId &&
+    !brandLibraryIds.includes(companyLibraryId)
+  ) {
+    workingChunks = await retrieveRagChunksServer({
+      organizationId: input.organizationId,
+      query: input.query,
+      libraryIds: [companyLibraryId],
+      sections,
+      scope: { brandId: input.brand.id },
+      topK,
+      queryEmbedding,
+    });
+    filtered = filterPublicSafeChunks(workingChunks, publicSafeOnly);
   }
-
-  const chunks = await retrieveRagChunksServer({
-    organizationId: input.organizationId,
-    query: input.query,
-    libraryIds,
-    sections: CONTENT_KNOWLEDGE_SECTIONS,
-    scope: { brandId: input.brand.id },
-    topK: input.topK ?? 6,
-    queryEmbedding,
-  });
-
-  // publicSafeOnly: prefer case_studies/services; content_voice always ok
-  const filtered =
-    input.publicSafeOnly === false
-      ? chunks
-      : chunks.filter((c) => {
-          // Heuristic: skip chunks that look internal-only when we lack metadata
-          const lower = c.content.toLowerCase();
-          if (lower.includes("internal only") || lower.includes("not for public")) return false;
-          return true;
-        });
 
   const ragBlock = buildRagInstructionBlock(
     input.ragMode,
-    filtered.map((c) => ({ title: c.title, content: c.content })),
+    filtered.map((c) => formatContentRagChunkForPrompt(c, publicSafeOnly)),
   );
 
-  return { chunks: filtered, ragBlock };
+  return { chunks: filtered, ragBlock, knowledgePackContext };
 }
 
 export function formatBrandContextForPrompt(brand: ContentBrand): string {

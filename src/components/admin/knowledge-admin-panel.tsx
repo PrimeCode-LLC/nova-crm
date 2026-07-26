@@ -135,6 +135,7 @@ export function KnowledgeAdminPanel({
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [fitConsumerOpen, setFitConsumerOpen] = React.useState(false);
   const [newLibName, setNewLibName] = React.useState("");
+  const [newLibDescription, setNewLibDescription] = React.useState("");
   const [newLibType, setNewLibType] = React.useState<KnowledgeLibraryUiType>("topic");
   const [newLibBrandId, setNewLibBrandId] = React.useState("");
   const [newLibFitCategory, setNewLibFitCategory] = React.useState<OpportunitySourceType | "">(
@@ -348,6 +349,9 @@ export function KnowledgeAdminPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           name: newLibName.trim(),
+          ...(newLibDescription.trim()
+            ? { description: newLibDescription.trim() }
+            : {}),
           libraryType: newLibType,
           ...(newLibType === "brand" ? { brandId: newLibBrandId } : {}),
           ...(newLibType === "channel" ? { fitCategory: newLibFitCategory } : {}),
@@ -369,6 +373,7 @@ export function KnowledgeAdminPanel({
       }
       toast.success("Library created");
       setNewLibName("");
+      setNewLibDescription("");
       setNewLibType("topic");
       setNewLibBrandId("");
       onLibrariesChange?.();
@@ -882,8 +887,8 @@ export function KnowledgeAdminPanel({
             <Library className="h-4 w-4" /> All libraries
           </CardTitle>
           <CardDescription className="text-xs">
-            Shared knowledge packs. Edit a library to set name, description, and which features may
-            use it — then link on Brands (Content) or outreach profiles.
+            Shared knowledge packs. Edit a library to set name, intro (what it is for), and which
+            features may use it — then link on Brands (Content) or outreach profiles.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
@@ -891,32 +896,40 @@ export function KnowledgeAdminPanel({
             {libraries.map((l) => {
               const type = resolveKnowledgeLibraryType(l);
               const deletable = canDeleteLibrary(l);
+              const intro = l.description?.trim();
               return (
-                <li key={l.id} className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    className={cn(
-                      "text-left min-w-0 flex-1 truncate hover:underline",
-                      selectedLib === l.id && "font-semibold",
-                    )}
-                    onClick={() => setSelectedLib(l.id)}
-                  >
-                    {displayKnowledgeLibraryName(l)}
-                  </button>
+                <li key={l.id} className="flex items-start gap-1.5">
+                  <div className="min-w-0 flex-1">
+                    <button
+                      type="button"
+                      className={cn(
+                        "text-left w-full truncate hover:underline",
+                        selectedLib === l.id && "font-semibold",
+                      )}
+                      onClick={() => setSelectedLib(l.id)}
+                    >
+                      {displayKnowledgeLibraryName(l)}
+                    </button>
+                    {intro ? (
+                      <p className="text-[10px] text-muted-foreground line-clamp-2 mt-0.5">
+                        {intro}
+                      </p>
+                    ) : null}
+                  </div>
                   <Badge
                     variant={knowledgeTypeBadgeVariant(type)}
-                    className="text-[9px] shrink-0"
+                    className="text-[9px] shrink-0 mt-0.5"
                   >
                     {KNOWLEDGE_TYPE_LABELS[type]}
                   </Badge>
-                  <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
+                  <span className="text-[10px] text-muted-foreground tabular-nums shrink-0 mt-0.5">
                     {l.documentCount ?? 0} docs
                   </span>
                   <Button
                     type="button"
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-1.5 text-[10px]"
+                    className="h-6 px-1.5 text-[10px] shrink-0 mt-0.5"
                     title="Edit library"
                     onClick={() => openEditLibrary(l)}
                   >
@@ -926,7 +939,7 @@ export function KnowledgeAdminPanel({
                     type="button"
                     size="sm"
                     variant="ghost"
-                    className="h-6 px-1.5 text-[10px] text-destructive disabled:opacity-40"
+                    className="h-6 px-1.5 text-[10px] text-destructive disabled:opacity-40 shrink-0 mt-0.5"
                     title={
                       deletable
                         ? "Delete library"
@@ -941,7 +954,7 @@ export function KnowledgeAdminPanel({
                     type="button"
                     size="sm"
                     variant="outline"
-                    className="h-6 px-2 text-[10px]"
+                    className="h-6 px-2 text-[10px] shrink-0 mt-0.5"
                     title="View library documents"
                     onClick={() => openLibraryView(l)}
                   >
@@ -961,10 +974,26 @@ export function KnowledgeAdminPanel({
                 </Label>
                 <Input
                   id="new-lib-name"
-                  placeholder="e.g. Product, Services, Case studies…"
+                  placeholder="e.g. Nova, Services, Stellix Soft…"
                   value={newLibName}
                   onChange={(e) => setNewLibName(e.target.value)}
                 />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="new-lib-intro" className="text-xs">
+                  Library intro
+                </Label>
+                <Textarea
+                  id="new-lib-intro"
+                  className="min-h-[64px]"
+                  value={newLibDescription}
+                  onChange={(e) => setNewLibDescription(e.target.value)}
+                  placeholder="e.g. Nova is Stellix Soft’s sales CRM — built for us and future clients. It solves pipeline, outreach, and knowledge-backed selling."
+                  maxLength={500}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  2–4 sentences on what this pack is for. Content calendar AI uses it as orientation.
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs">Type</Label>
@@ -1299,7 +1328,7 @@ export function KnowledgeAdminPanel({
           <DialogHeader>
             <DialogTitle>Edit library</DialogTitle>
             <DialogDescription>
-              Type, name, description, and which product features may link this pack.
+              Type, name, intro (what this pack is for), and which product features may link it.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -1385,14 +1414,19 @@ export function KnowledgeAdminPanel({
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="edit-lib-desc">Description</Label>
+              <Label htmlFor="edit-lib-desc">Library intro</Label>
               <Textarea
                 id="edit-lib-desc"
-                className="min-h-[72px]"
+                className="min-h-[96px]"
                 value={editDescription}
                 onChange={(e) => setEditDescription(e.target.value)}
-                placeholder="Optional…"
+                placeholder="e.g. Nova is Stellix Soft’s sales CRM — built for us and future clients. It solves pipeline, outreach, and knowledge-backed selling."
+                maxLength={500}
               />
+              <p className="text-[11px] text-muted-foreground">
+                Short purpose for this pack (product, service, company, or topic). Content calendar
+                AI reads this before retrieved documents.
+              </p>
             </div>
             <div className="space-y-2">
               <Label>Allowed features</Label>

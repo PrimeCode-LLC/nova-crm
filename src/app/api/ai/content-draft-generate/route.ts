@@ -166,7 +166,7 @@ export async function POST(req: Request) {
     parsed.data.pillarKey,
   ].join(" ");
 
-  const { ragBlock, chunks } = await retrieveContentKnowledgeServer({
+  const { ragBlock, chunks, knowledgePackContext } = await retrieveContentKnowledgeServer({
     organizationId: orgId,
     brand,
     query,
@@ -195,6 +195,7 @@ export async function POST(req: Request) {
       schema: draftSchema,
       promptVars: {
         brandContext: formatBrandContextForPrompt(brand),
+        knowledgePackContext,
         playbook: formatPlatformPlaybookForPrompt(platform, format),
         platform,
         format,
