@@ -157,22 +157,29 @@ export async function POST(req: Request) {
     .where("organizationId", "==", orgId)
     .limit(80)
     .get();
+  const brandLibraryIds = new Set(brand.knowledgeLibraryIds?.filter(Boolean) ?? []);
   const queuedCaptures = queuedSnap.docs
     .map((d) => {
       const row = d.data();
       return {
         id: d.id,
         brandId: typeof row.brandId === "string" ? row.brandId : "",
+        libraryId: typeof row.libraryId === "string" ? row.libraryId : "",
         status: String(row.status ?? ""),
         queueForPosts: Boolean(row.queueForPosts),
         title: String(row.normalizedTitle || row.problem || d.id).slice(0, 120),
         summary: String(row.outcome || row.solution || "").slice(0, 200),
       };
     })
-    .filter(
-      (c) => c.brandId === brand.id && c.queueForPosts && c.status === "indexed",
-    )
-    .slice(0, 12);  const queuedBlock =
+    .filter((c) => {
+      if (!c.queueForPosts || c.status !== "indexed") return false;
+      if (c.brandId === brand.id) return true;
+      // Shared knowledgebases linked to this brand (capture may omit brandId).
+      if (c.libraryId && brandLibraryIds.has(c.libraryId)) return true;
+      return false;
+    })
+    .slice(0, 12);
+  const queuedBlock =
     queuedCaptures.length === 0
       ? ""
       : [

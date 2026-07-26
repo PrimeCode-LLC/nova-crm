@@ -87,22 +87,37 @@ export async function POST(req: Request) {
       },
     });
 
-    let libraryId: string | undefined;
-    if (brand) {
+    const libsCol = db
+      .collection(COLLECTIONS.organizations)
+      .doc(orgId)
+      .collection(ORG_SUBCOLLECTIONS.aiLibraries);
+
+    const requestedLibraryId =
+      typeof capture.libraryId === "string" ? capture.libraryId.trim() : "";
+    let libraryId: string | undefined = requestedLibraryId || undefined;
+
+    if (libraryId) {
+      const libSnap = await libsCol.doc(libraryId).get();
+      if (!libSnap.exists) {
+        await captureRef.update({
+          status: "failed",
+          errorMessage: "Selected knowledge library was not found.",
+          normalizedTitle: result.title,
+          normalizedMarkdown: result.markdown,
+          updatedAt: new Date().toISOString(),
+        });
+        return NextResponse.json(
+          { error: "Selected knowledge library was not found." },
+          { status: 409 },
+        );
+      }
+    } else if (brand) {
+      // Legacy captures without libraryId: keep brand-scoped fallback.
       libraryId = await ensureContentBrandLibraryServer({
         organizationId: orgId,
         brandId: brand.id,
         brandName: brand.name,
       });
-      if (!brand.knowledgeLibraryIds?.includes(libraryId)) {
-        await db
-          .collection(COLLECTIONS.contentBrands)
-          .doc(brand.id)
-          .update({
-            knowledgeLibraryIds: FieldValue.arrayUnion(libraryId),
-            updatedAt: new Date().toISOString(),
-          });
-      }
     } else {
       const knowledge = await getFitCheckKnowledgeConfigServer(orgId);
       libraryId = knowledge.globalLibraryId;
@@ -111,7 +126,8 @@ export async function POST(req: Request) {
     if (!libraryId) {
       await captureRef.update({
         status: "failed",
-        errorMessage: "No knowledge library available. Link a library on the brand or seed Fit Check knowledge.",
+        errorMessage:
+          "No knowledge library selected. Pick a knowledgebase on Capture, or seed Fit Check knowledge.",
         normalizedTitle: result.title,
         normalizedMarkdown: result.markdown,
         updatedAt: new Date().toISOString(),
@@ -120,6 +136,17 @@ export async function POST(req: Request) {
         { error: "No knowledge library available to index into." },
         { status: 409 },
       );
+    }
+
+    // When attributed to a brand, link the target library so drafts/plans can retrieve it.
+    if (brand && !brand.knowledgeLibraryIds?.includes(libraryId)) {
+      await db
+        .collection(COLLECTIONS.contentBrands)
+        .doc(brand.id)
+        .update({
+          knowledgeLibraryIds: FieldValue.arrayUnion(libraryId),
+          updatedAt: new Date().toISOString(),
+        });
     }
 
     const now = new Date().toISOString();

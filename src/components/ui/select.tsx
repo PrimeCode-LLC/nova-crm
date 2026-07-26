@@ -6,7 +6,20 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+/**
+ * Base UI treats `value={undefined}` as uncontrolled. Callers often write
+ * `value={x || undefined}` for empty optional selects, then set `x` later —
+ * which flips uncontrolled → controlled and logs a console error overlay.
+ * When `value` is present on props, coerce `undefined` to `null` (Base UI's
+ * empty selection) so the select stays controlled for its lifetime.
+ */
+function Select(props: SelectPrimitive.Root.Props) {
+  if (Object.prototype.hasOwnProperty.call(props, "value")) {
+    const { value, ...rest } = props
+    return <SelectPrimitive.Root {...rest} value={value ?? null} />
+  }
+  return <SelectPrimitive.Root {...props} />
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

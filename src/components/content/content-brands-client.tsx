@@ -1209,8 +1209,8 @@ export function ContentBrandsClient() {
                     <div className="max-h-44 overflow-y-auto rounded-md border p-2 space-y-1">
                       {filteredLibraries.length === 0 ? (
                         <p className="px-1 py-2 text-xs text-muted-foreground">
-                          No libraries found. Seed knowledge under AI &amp; knowledge, or leave
-                          empty for the org default.
+                          No libraries found. Create topic libraries under AI &amp; knowledge,
+                          then link them here (and target them from Capture).
                         </p>
                       ) : (
                         filteredLibraries.map((l) => (

@@ -52,7 +52,20 @@ import {
   getCaptureProgress,
   validateCaptureFields,
 } from "@/lib/content-calendar/capture-policy";
+import {
+  loadCapturePrefs,
+  rememberCaptureLibrary,
+  sortLibrariesForCapturePerson,
+  type ContentCapturePrefs,
+} from "@/lib/content-calendar/capture-prefs";
 import { UserChip } from "@/components/common/user-chip";
+
+type CaptureLibraryOption = {
+  id: string;
+  name: string;
+  description?: string;
+  documentCount: number;
+};
 
 function CaptureFieldBlock({ label, value }: { label: string; value?: string }) {
   if (!value?.trim()) return null;
@@ -92,6 +105,7 @@ export function ContentCaptureClient() {
   const canDeleteCapture =
     canCreate || can(permissionSubject, "content_calendar", "delete");
 
+  const [libraryId, setLibraryId] = React.useState("");
   const [brandId, setBrandId] = React.useState("");
   const [problem, setProblem] = React.useState("");
   const [solution, setSolution] = React.useState("");
@@ -103,12 +117,110 @@ export function ContentCaptureClient() {
   const [actionId, setActionId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ContentCapture | null>(null);
   const [viewTarget, setViewTarget] = React.useState<ContentCapture | null>(null);
+  const [libraries, setLibraries] = React.useState<CaptureLibraryOption[]>([]);
+  const [librariesLoading, setLibrariesLoading] = React.useState(true);
+  const [prefs, setPrefs] = React.useState<ContentCapturePrefs>({ preferredLibraryIds: [] });
 
   React.useEffect(() => {
-    if (!brandId && data.brands[0]) setBrandId(data.brands[0].id);
-  }, [data.brands, brandId]);
+    setPrefs(loadCapturePrefs(data.organizationId, data.currentUserId));
+  }, [data.organizationId, data.currentUserId]);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      setLibrariesLoading(true);
+      if (data.isDemo) {
+        if (!cancelled) {
+          setLibraries([
+            {
+              id: "lib-demo-ops",
+              name: "Ops / delivery",
+              description: "Operational lessons and process proof",
+              documentCount: 2,
+            },
+            {
+              id: "lib-demo-founder",
+              name: "Founder / daily life",
+              description: "Personal and hiring narratives",
+              documentCount: 1,
+            },
+            {
+              id: "lib-demo-product",
+              name: "Product / Nova",
+              description: "Product delivery case studies",
+              documentCount: 0,
+            },
+          ]);
+          setLibrariesLoading(false);
+        }
+        return;
+      }
+      try {
+        const res = await fetch("/api/ai/content-capture/libraries", {
+          credentials: "same-origin",
+        });
+        if (!res.ok) {
+          if (!cancelled) setLibraries([]);
+          return;
+        }
+        const json = (await res.json()) as {
+          libraries?: {
+            id: string;
+            name?: string;
+            description?: string;
+            documentCount?: number;
+          }[];
+        };
+        if (cancelled) return;
+        setLibraries(
+          (json.libraries ?? []).map((l) => ({
+            id: l.id,
+            name: l.name?.trim() || l.id,
+            description: l.description,
+            documentCount: Number(l.documentCount ?? 0) || 0,
+          })),
+        );
+      } catch {
+        if (!cancelled) setLibraries([]);
+      } finally {
+        if (!cancelled) setLibrariesLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [data.isDemo]);
 
   const selectedBrand = data.brands.find((b) => b.id === brandId);
+  const sortedLibraries = React.useMemo(
+    () =>
+      sortLibrariesForCapturePerson(
+        libraries,
+        prefs,
+        selectedBrand?.knowledgeLibraryIds,
+      ),
+    [libraries, prefs, selectedBrand?.knowledgeLibraryIds],
+  );
+
+  React.useEffect(() => {
+    if (libraryId || sortedLibraries.length === 0) return;
+    const preferred =
+      (prefs.lastLibraryId &&
+        sortedLibraries.find((l) => l.id === prefs.lastLibraryId)?.id) ||
+      prefs.preferredLibraryIds.find((id) => sortedLibraries.some((l) => l.id === id)) ||
+      sortedLibraries[0]?.id;
+    if (preferred) setLibraryId(preferred);
+  }, [libraryId, sortedLibraries, prefs.lastLibraryId, prefs.preferredLibraryIds]);
+
+  const selectedLibrary = libraries.find((l) => l.id === libraryId);
+  const brandsUsingLibrary = React.useMemo(
+    () =>
+      libraryId
+        ? data.brands.filter((b) => b.knowledgeLibraryIds?.includes(libraryId))
+        : [],
+    [data.brands, libraryId],
+  );
+
   const capturerId = selectedBrand
     ? resolveBrandResponsibility(selectedBrand, "capturer")
     : "";
@@ -133,6 +245,17 @@ export function ContentCaptureClient() {
       }),
     [data.brands, data.captures, data.currentUserId],
   );
+
+  function focusBrandCapture(brand: (typeof data.brands)[number]) {
+    setBrandId(brand.id);
+    const linked = brand.knowledgeLibraryIds?.find((id) =>
+      libraries.some((l) => l.id === id),
+    );
+    if (linked) setLibraryId(linked);
+  }
+
+  const libraryName = (id?: string) =>
+    (id && libraries.find((l) => l.id === id)?.name) || id || "";
 
   async function runNormalize(captureId: string): Promise<NormalizeResponse | null> {
     const res = await fetch("/api/ai/content-capture-normalize", {
@@ -161,6 +284,14 @@ export function ContentCaptureClient() {
 
   async function submit() {
     if (!canCreate) return;
+    if (!libraryId) {
+      toast.error("Select a knowledgebase to index into.");
+      return;
+    }
+    if (queueForPosts && !brandId) {
+      toast.error("Pick a brand to flag this for an upcoming content plan.");
+      return;
+    }
     const check = validateCaptureFields(policy, {
       problem,
       solution,
@@ -176,22 +307,25 @@ export function ContentCaptureClient() {
     setBusy(true);
     try {
       const capture = await data.createCapture({
+        libraryId,
         brandId: brandId || undefined,
         problem: problem.trim(),
         solution: solution.trim(),
         outcome: outcome.trim() || undefined,
         notes: notes.trim() || undefined,
         publicSafe,
-        queueForPosts,
+        queueForPosts: queueForPosts && Boolean(brandId),
       });
       if (!capture) {
         toast.error("Could not save capture");
         return;
       }
+      setPrefs(rememberCaptureLibrary(data.organizationId, data.currentUserId, libraryId));
       if (data.isDemo) {
         await data.updateCapture(capture.id, {
           status: "indexed",
           normalizedTitle: capture.problem.slice(0, 80),
+          libraryId,
         });
         toast.message("Demo mode - capture saved locally only");
         setProblem("");
@@ -219,6 +353,13 @@ export function ContentCaptureClient() {
   async function retryCapture(capture: ContentCapture) {
     setActionId(capture.id);
     try {
+      if (!capture.libraryId) {
+        if (!libraryId) {
+          toast.error("Select a knowledgebase, then retry index.");
+          return;
+        }
+        await data.updateCapture(capture.id, { libraryId });
+      }
       const json = await runNormalize(capture.id);
       if (json) {
         toast.success(json.title ? `Indexed: ${json.title}` : "Capture indexed");
@@ -283,7 +424,7 @@ export function ContentCaptureClient() {
                 <button
                   type="button"
                   className="underline underline-offset-2"
-                  onClick={() => setBrandId(brand.id)}
+                  onClick={() => focusBrandCapture(brand)}
                 >
                   Capture now
                 </button>
@@ -295,22 +436,81 @@ export function ContentCaptureClient() {
           <Card>
             <CardHeader>
               <CardTitle className="text-base">New capture</CardTitle>
-              <CardDescription>~60 seconds. AI structures it and indexes to knowledge.</CardDescription>
+              <CardDescription>
+                ~60 seconds. AI structures it and indexes into the selected knowledgebase.
+              </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label>
+                  Knowledgebase <span className="text-destructive">*</span>
+                </Label>
+                <Select
+                  value={libraryId || null}
+                  onValueChange={(v) => {
+                    if (v) setLibraryId(v);
+                  }}
+                  disabled={librariesLoading || sortedLibraries.length === 0}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={librariesLoading ? "Loading…" : "Select knowledgebase"}>
+                      {selectedLibrary?.name ??
+                        (librariesLoading ? "Loading…" : "Select knowledgebase")}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {sortedLibraries.map((l) => {
+                      const isPreferred =
+                        prefs.lastLibraryId === l.id ||
+                        prefs.preferredLibraryIds.includes(l.id);
+                      return (
+                        <SelectItem key={l.id} value={l.id}>
+                          {l.name}
+                          {isPreferred ? " · yours" : ""}
+                          {l.documentCount > 0 ? ` (${l.documentCount})` : ""}
+                        </SelectItem>
+                      );
+                    })}
+                  </SelectContent>
+                </Select>
+                {!librariesLoading && sortedLibraries.length === 0 ? (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    No knowledge libraries yet. Create topic libraries under AI &amp; knowledge
+                    (or link them on a brand).
+                  </p>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Indexes once into this library. Brands that link it can reuse the proof.
+                    {brandsUsingLibrary.length > 0
+                      ? ` Used by: ${brandsUsingLibrary.map((b) => b.name).join(", ")}.`
+                      : ""}
+                  </p>
+                )}
+              </div>
               <div className="space-y-2">
                 <Label>Brand (optional)</Label>
                 <Select
                   value={brandId || "none"}
-                  onValueChange={(v) => setBrandId(!v || v === "none" ? "" : v)}
+                  onValueChange={(v) => {
+                    const next = !v || v === "none" ? "" : v;
+                    setBrandId(next);
+                    if (!next && queueForPosts) setQueueForPosts(false);
+                    if (next) {
+                      const brand = data.brands.find((b) => b.id === next);
+                      const linked = brand?.knowledgeLibraryIds?.find((id) =>
+                        libraries.some((l) => l.id === id),
+                      );
+                      if (linked && !libraryId) setLibraryId(linked);
+                    }
+                  }}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Brand">
-                      {brandId ? selectedBrand?.name : "Org default library"}
+                      {brandId ? selectedBrand?.name : "None — knowledge only"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="none">Org default library</SelectItem>
+                    <SelectItem value="none">None — knowledge only</SelectItem>
                     {data.brands.map((b) => (
                       <SelectItem key={b.id} value={b.id}>
                         {b.name}
@@ -413,11 +613,21 @@ export function ContentCaptureClient() {
               <label className="flex items-center gap-2 text-sm">
                 <Checkbox
                   checked={queueForPosts}
+                  disabled={!brandId}
                   onCheckedChange={(c) => setQueueForPosts(c === true)}
                 />
                 Flag for upcoming content plan
               </label>
-              <Button type="button" onClick={() => void submit()} disabled={busy || !canCreate}>
+              {!brandId ? (
+                <p className="text-xs text-muted-foreground -mt-2">
+                  Select a brand to queue this capture for plan suggestions.
+                </p>
+              ) : null}
+              <Button
+                type="button"
+                onClick={() => void submit()}
+                disabled={busy || !canCreate || !libraryId || librariesLoading}
+              >
                 {busy && <Loader2 className="h-4 w-4 animate-spin" />}
                 Capture &amp; index
               </Button>
@@ -463,6 +673,7 @@ export function ContentCaptureClient() {
                         </div>
                         <div className="text-xs text-muted-foreground mt-1">
                           {fmtRelative(c.createdAt)}
+                          {c.libraryId ? ` · ${libraryName(c.libraryId)}` : ""}
                           {c.publicSafe ? " · public-safe" : " · internal"}
                           {c.queueForPosts ? " · queued" : ""}
                         </div>
@@ -561,6 +772,14 @@ export function ContentCaptureClient() {
           {viewTarget ? (
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4">
               <div className="space-y-5 pb-2">
+                {viewTarget.libraryId ? (
+                  <div className="space-y-1.5">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      Knowledgebase
+                    </p>
+                    <p className="text-sm">{libraryName(viewTarget.libraryId)}</p>
+                  </div>
+                ) : null}
                 {viewTarget.brandId ? (
                   <div className="space-y-1.5">
                     <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">

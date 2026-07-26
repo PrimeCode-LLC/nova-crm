@@ -254,6 +254,10 @@ export interface ContentItem {
 export interface ContentCapture {
   id: string;
   organizationId: string;
+  /**
+   * Optional publishing brand for voice, cadence, and plan-queue.
+   * Knowledge ownership lives on libraryId — brands consume via knowledgeLibraryIds.
+   */
   brandId?: string;
   problem: string;
   solution: string;
@@ -264,7 +268,9 @@ export interface ContentCapture {
   normalizedTitle?: string;
   normalizedMarkdown?: string;
   knowledgeDocumentId?: string;
+  /** Target knowledge library to index into (required for new captures). */
   libraryId?: string;
+  /** Prefer this capture as proof when generating a content plan for the brand. */
   queueForPosts?: boolean;
   createdById: string;
   createdAt: string;
