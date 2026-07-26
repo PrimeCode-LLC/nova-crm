@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Loader2, Eye, RotateCcw, Trash2 } from "lucide-react";
+import { Loader2, Eye, Pencil, RotateCcw, Trash2 } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -33,6 +33,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -59,6 +60,9 @@ import {
   type ContentCapturePrefs,
 } from "@/lib/content-calendar/capture-prefs";
 import { UserChip } from "@/components/common/user-chip";
+
+/** Flip to true when brand attribution / plan-queue is needed again on Capture. */
+const CAPTURE_BRAND_ENABLED = false;
 
 type CaptureLibraryOption = {
   id: string;
@@ -101,7 +105,9 @@ export function ContentCaptureClient() {
     [navAccess],
   );
   const canCreate = can(permissionSubject, "content_calendar", "create");
-  // Capturers usually have create but not module delete — still need to remove bad captures.
+  // Capturers usually have create but not module edit/delete — still need to fix/remove captures.
+  const canEditCapture =
+    canCreate || can(permissionSubject, "content_calendar", "edit");
   const canDeleteCapture =
     canCreate || can(permissionSubject, "content_calendar", "delete");
 
@@ -117,6 +123,15 @@ export function ContentCaptureClient() {
   const [actionId, setActionId] = React.useState<string | null>(null);
   const [deleteTarget, setDeleteTarget] = React.useState<ContentCapture | null>(null);
   const [viewTarget, setViewTarget] = React.useState<ContentCapture | null>(null);
+  const [editTarget, setEditTarget] = React.useState<ContentCapture | null>(null);
+  const [editLibraryId, setEditLibraryId] = React.useState("");
+  const [editBrandId, setEditBrandId] = React.useState("");
+  const [editProblem, setEditProblem] = React.useState("");
+  const [editSolution, setEditSolution] = React.useState("");
+  const [editOutcome, setEditOutcome] = React.useState("");
+  const [editNotes, setEditNotes] = React.useState("");
+  const [editPublicSafe, setEditPublicSafe] = React.useState(true);
+  const [editQueueForPosts, setEditQueueForPosts] = React.useState(false);
   const [libraries, setLibraries] = React.useState<CaptureLibraryOption[]>([]);
   const [librariesLoading, setLibrariesLoading] = React.useState(true);
   const [prefs, setPrefs] = React.useState<ContentCapturePrefs>({ preferredLibraryIds: [] });
@@ -192,6 +207,7 @@ export function ContentCaptureClient() {
   }, [data.isDemo]);
 
   const selectedBrand = data.brands.find((b) => b.id === brandId);
+  const editSelectedBrand = data.brands.find((b) => b.id === editBrandId);
   const sortedLibraries = React.useMemo(
     () =>
       sortLibrariesForCapturePerson(
@@ -200,6 +216,15 @@ export function ContentCaptureClient() {
         selectedBrand?.knowledgeLibraryIds,
       ),
     [libraries, prefs, selectedBrand?.knowledgeLibraryIds],
+  );
+  const editSortedLibraries = React.useMemo(
+    () =>
+      sortLibrariesForCapturePerson(
+        libraries,
+        prefs,
+        editSelectedBrand?.knowledgeLibraryIds,
+      ),
+    [libraries, prefs, editSelectedBrand?.knowledgeLibraryIds],
   );
 
   React.useEffect(() => {
@@ -226,6 +251,9 @@ export function ContentCaptureClient() {
     : "";
   const policy = selectedBrand
     ? brandCapturePolicy(selectedBrand)
+    : brandCapturePolicy({});
+  const editPolicy = editSelectedBrand
+    ? brandCapturePolicy(editSelectedBrand)
     : brandCapturePolicy({});
   const progress = selectedBrand
     ? getCaptureProgress({
@@ -288,7 +316,7 @@ export function ContentCaptureClient() {
       toast.error("Select a knowledgebase to index into.");
       return;
     }
-    if (queueForPosts && !brandId) {
+    if (CAPTURE_BRAND_ENABLED && queueForPosts && !brandId) {
       toast.error("Pick a brand to flag this for an upcoming content plan.");
       return;
     }
@@ -306,15 +334,16 @@ export function ContentCaptureClient() {
     }
     setBusy(true);
     try {
+      const effectiveBrandId = CAPTURE_BRAND_ENABLED ? brandId : "";
       const capture = await data.createCapture({
         libraryId,
-        brandId: brandId || undefined,
+        brandId: effectiveBrandId || undefined,
         problem: problem.trim(),
         solution: solution.trim(),
         outcome: outcome.trim() || undefined,
         notes: notes.trim() || undefined,
         publicSafe,
-        queueForPosts: queueForPosts && Boolean(brandId),
+        queueForPosts: CAPTURE_BRAND_ENABLED && queueForPosts && Boolean(effectiveBrandId),
       });
       if (!capture) {
         toast.error("Could not save capture");
@@ -340,8 +369,8 @@ export function ContentCaptureClient() {
       const libLabel =
         libraries.find((l) => l.id === (json.libraryId ?? libraryId))?.name ??
         "knowledge library";
-      const brandLabel = brandId
-        ? data.brands.find((b) => b.id === brandId)?.name
+      const brandLabel = effectiveBrandId
+        ? data.brands.find((b) => b.id === effectiveBrandId)?.name
         : undefined;
       toast.success(json.title ? `Indexed: ${json.title}` : "Captured and indexed", {
         description: brandLabel
@@ -387,6 +416,78 @@ export function ContentCaptureClient() {
     }
   }
 
+  function openEdit(capture: ContentCapture) {
+    setViewTarget(null);
+    setEditTarget(capture);
+    setEditLibraryId(capture.libraryId || libraryId || "");
+    setEditBrandId(capture.brandId || "");
+    setEditProblem(capture.problem);
+    setEditSolution(capture.solution);
+    setEditOutcome(capture.outcome || "");
+    setEditNotes(capture.notes || "");
+    setEditPublicSafe(capture.publicSafe);
+    setEditQueueForPosts(Boolean(capture.queueForPosts));
+  }
+
+  async function saveEdit() {
+    if (!editTarget || !canEditCapture) return;
+    if (!editLibraryId) {
+      toast.error("Select a knowledgebase to index into.");
+      return;
+    }
+    if (CAPTURE_BRAND_ENABLED && editQueueForPosts && !editBrandId) {
+      toast.error("Pick a brand to flag this for an upcoming content plan.");
+      return;
+    }
+    const check = validateCaptureFields(editPolicy, {
+      problem: editProblem,
+      solution: editSolution,
+      outcome: editOutcome,
+      notes: editNotes,
+    });
+    if (!check.ok) {
+      toast.error(
+        `Required: ${check.missing.map((f) => CAPTURE_REQUIRED_FIELD_LABELS[f]).join(", ")}`,
+      );
+      return;
+    }
+    const id = editTarget.id;
+    setActionId(id);
+    try {
+      const effectiveEditBrandId = CAPTURE_BRAND_ENABLED ? editBrandId : editTarget.brandId || "";
+      const patch: Parameters<typeof data.updateCapture>[1] = {
+        libraryId: editLibraryId,
+        problem: editProblem.trim(),
+        solution: editSolution.trim(),
+        outcome: editOutcome.trim() || undefined,
+        notes: editNotes.trim() || undefined,
+        publicSafe: editPublicSafe,
+        queueForPosts: CAPTURE_BRAND_ENABLED && editQueueForPosts && Boolean(effectiveEditBrandId),
+      };
+      if (CAPTURE_BRAND_ENABLED && effectiveEditBrandId) patch.brandId = effectiveEditBrandId;
+      await data.updateCapture(id, patch);
+      setPrefs(rememberCaptureLibrary(data.organizationId, data.currentUserId, editLibraryId));
+      if (data.isDemo) {
+        await data.updateCapture(id, {
+          status: "indexed",
+          normalizedTitle: editProblem.trim().slice(0, 80),
+          libraryId: editLibraryId,
+        });
+        toast.message("Demo mode - capture updated locally only");
+        setEditTarget(null);
+        return;
+      }
+      const json = await runNormalize(id);
+      if (!json) return;
+      toast.success(json.title ? `Updated: ${json.title}` : "Capture updated and re-indexed");
+      setEditTarget(null);
+    } catch {
+      toast.error("Update failed");
+    } finally {
+      setActionId(null);
+    }
+  }
+
   async function confirmDelete() {
     if (!deleteTarget) return;
     const id = deleteTarget.id;
@@ -404,6 +505,10 @@ export function ContentCaptureClient() {
 
   function fieldRequired(field: keyof typeof CAPTURE_REQUIRED_FIELD_LABELS): boolean {
     return policy.requiredFields.includes(field);
+  }
+
+  function editFieldRequired(field: keyof typeof CAPTURE_REQUIRED_FIELD_LABELS): boolean {
+    return editPolicy.requiredFields.includes(field);
   }
 
   return (
@@ -507,72 +612,76 @@ export function ContentCaptureClient() {
                   </p>
                 )}
               </div>
-              <div className="space-y-2">
-                <Label>Brand (optional)</Label>
-                <Select
-                  value={brandId || "none"}
-                  onValueChange={(v) => {
-                    const next = !v || v === "none" ? "" : v;
-                    setBrandId(next);
-                    if (!next && queueForPosts) setQueueForPosts(false);
-                    if (next) {
-                      const brand = data.brands.find((b) => b.id === next);
-                      const linked = brand?.knowledgeLibraryIds?.find((id) =>
-                        libraries.some((l) => l.id === id),
-                      );
-                      if (linked && !libraryId) setLibraryId(linked);
-                    }
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Brand">
-                      {brandId ? selectedBrand?.name : "None — knowledge only"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">None — knowledge only</SelectItem>
-                    {data.brands.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {capturerId ? (
-                  <p className="flex items-center gap-2 text-xs text-muted-foreground">
-                    Capturer for this brand: <UserChip userId={capturerId} size="xs" />
-                  </p>
-                ) : null}
-                {selectedBrand && progress ? (
-                  <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground space-y-1">
-                    {progress.target > 0 ? (
-                      <p>
-                        This week:{" "}
-                        <span
-                          className={cn(
-                            "font-medium",
-                            progress.behindCadence ? "text-amber-600 dark:text-amber-400" : "text-foreground",
-                          )}
-                        >
-                          {progress.weekCount}/{progress.target}
-                        </span>{" "}
-                        indexed captures
-                      </p>
-                    ) : (
-                      <p>No weekly capture quota set for this brand.</p>
-                    )}
-                    <p>
-                      Idle after {progress.policy.idleDays} days
-                      {progress.policy.remindersEnabled ? " · reminders on" : " · reminders off"}
+              {CAPTURE_BRAND_ENABLED ? (
+                <div className="space-y-2">
+                  <Label>Brand (optional)</Label>
+                  <Select
+                    value={brandId || "none"}
+                    onValueChange={(v) => {
+                      const next = !v || v === "none" ? "" : v;
+                      setBrandId(next);
+                      if (!next && queueForPosts) setQueueForPosts(false);
+                      if (next) {
+                        const brand = data.brands.find((b) => b.id === next);
+                        const linked = brand?.knowledgeLibraryIds?.find((id) =>
+                          libraries.some((l) => l.id === id),
+                        );
+                        if (linked && !libraryId) setLibraryId(linked);
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Brand">
+                        {brandId ? selectedBrand?.name : "None — knowledge only"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">None — knowledge only</SelectItem>
+                      {data.brands.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {capturerId ? (
+                    <p className="flex items-center gap-2 text-xs text-muted-foreground">
+                      Capturer for this brand: <UserChip userId={capturerId} size="xs" />
                     </p>
-                    {progress.policy.requirementsNotes ? (
-                      <p className="text-foreground/90 pt-1">
-                        {progress.policy.requirementsNotes}
+                  ) : null}
+                  {selectedBrand && progress ? (
+                    <div className="rounded-md border px-3 py-2 text-xs text-muted-foreground space-y-1">
+                      {progress.target > 0 ? (
+                        <p>
+                          This week:{" "}
+                          <span
+                            className={cn(
+                              "font-medium",
+                              progress.behindCadence
+                                ? "text-amber-600 dark:text-amber-400"
+                                : "text-foreground",
+                            )}
+                          >
+                            {progress.weekCount}/{progress.target}
+                          </span>{" "}
+                          indexed captures
+                        </p>
+                      ) : (
+                        <p>No weekly capture quota set for this brand.</p>
+                      )}
+                      <p>
+                        Idle after {progress.policy.idleDays} days
+                        {progress.policy.remindersEnabled ? " · reminders on" : " · reminders off"}
                       </p>
-                    ) : null}
-                  </div>
-                ) : null}
-              </div>
+                      {progress.policy.requirementsNotes ? (
+                        <p className="text-foreground/90 pt-1">
+                          {progress.policy.requirementsNotes}
+                        </p>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label>
                   Problem
@@ -630,18 +739,22 @@ export function ContentCaptureClient() {
                 <Checkbox checked={publicSafe} onCheckedChange={(c) => setPublicSafe(c === true)} />
                 Public-safe (ok to use in posts)
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={queueForPosts}
-                  disabled={!brandId}
-                  onCheckedChange={(c) => setQueueForPosts(c === true)}
-                />
-                Flag for upcoming content plan
-              </label>
-              {!brandId ? (
-                <p className="text-xs text-muted-foreground -mt-2">
-                  Select a brand to queue this capture for plan suggestions.
-                </p>
+              {CAPTURE_BRAND_ENABLED ? (
+                <>
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={queueForPosts}
+                      disabled={!brandId}
+                      onCheckedChange={(c) => setQueueForPosts(c === true)}
+                    />
+                    Flag for upcoming content plan
+                  </label>
+                  {!brandId ? (
+                    <p className="text-xs text-muted-foreground -mt-2">
+                      Select a brand to queue this capture for plan suggestions.
+                    </p>
+                  ) : null}
+                </>
               ) : null}
               <Button
                 type="button"
@@ -713,6 +826,18 @@ export function ContentCaptureClient() {
                             <Eye className="h-3.5 w-3.5" />
                             View
                           </Button>
+                          {canEditCapture ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              disabled={acting || busy}
+                              onClick={() => openEdit(c)}
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                              Edit
+                            </Button>
+                          ) : null}
                           {canRetry && canCreate ? (
                             <Button
                               type="button"
@@ -825,6 +950,179 @@ export function ContentCaptureClient() {
               </div>
             </div>
           ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(editTarget)}
+        onOpenChange={(open) => {
+          if (!open && !actionId) setEditTarget(null);
+        }}
+      >
+        <DialogContent className="flex max-h-[85vh] max-w-lg flex-col gap-0 overflow-hidden p-0 sm:max-w-lg">
+          <DialogHeader className="shrink-0 border-b px-6 py-4 text-left">
+            <DialogTitle>Edit capture</DialogTitle>
+            <DialogDescription>
+              Updates the capture and re-indexes the linked knowledge document.
+            </DialogDescription>
+          </DialogHeader>
+          {editTarget ? (
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-4">
+              <div className="space-y-4 pb-2">
+                <div className="space-y-2">
+                  <Label>
+                    Knowledgebase <span className="text-destructive">*</span>
+                  </Label>
+                  <Select
+                    value={editLibraryId || null}
+                    onValueChange={(v) => {
+                      if (v) setEditLibraryId(v);
+                    }}
+                    disabled={Boolean(actionId) || librariesLoading || editSortedLibraries.length === 0}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder={librariesLoading ? "Loading…" : "Select knowledgebase"}>
+                        {libraries.find((l) => l.id === editLibraryId)?.name ??
+                          (librariesLoading ? "Loading…" : "Select knowledgebase")}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {editSortedLibraries.map((l) => (
+                        <SelectItem key={l.id} value={l.id}>
+                          {l.name}
+                          {l.documentCount > 0 ? ` (${l.documentCount})` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                {CAPTURE_BRAND_ENABLED ? (
+                  <div className="space-y-2">
+                    <Label>Brand (optional)</Label>
+                    <Select
+                      value={editBrandId || "none"}
+                      disabled={Boolean(actionId)}
+                      onValueChange={(v) => {
+                        const next = !v || v === "none" ? "" : v;
+                        setEditBrandId(next);
+                        if (!next && editQueueForPosts) setEditQueueForPosts(false);
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Brand">
+                          {editBrandId ? editSelectedBrand?.name : "None — knowledge only"}
+                        </SelectValue>
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">None — knowledge only</SelectItem>
+                        {data.brands.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+                <div className="space-y-2">
+                  <Label>
+                    Problem
+                    {editFieldRequired("problem") ? (
+                      <span className="text-destructive"> *</span>
+                    ) : null}
+                  </Label>
+                  <Textarea
+                    value={editProblem}
+                    onChange={(e) => setEditProblem(e.target.value)}
+                    rows={3}
+                    disabled={Boolean(actionId)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>
+                    Solution
+                    {editFieldRequired("solution") ? (
+                      <span className="text-destructive"> *</span>
+                    ) : null}
+                  </Label>
+                  <Textarea
+                    value={editSolution}
+                    onChange={(e) => setEditSolution(e.target.value)}
+                    rows={3}
+                    disabled={Boolean(actionId)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>
+                    Outcome
+                    {editFieldRequired("outcome") ? (
+                      <span className="text-destructive"> *</span>
+                    ) : (
+                      " (optional)"
+                    )}
+                  </Label>
+                  <Textarea
+                    value={editOutcome}
+                    onChange={(e) => setEditOutcome(e.target.value)}
+                    rows={2}
+                    disabled={Boolean(actionId)}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>
+                    Extra notes
+                    {editFieldRequired("notes") ? (
+                      <span className="text-destructive"> *</span>
+                    ) : null}
+                  </Label>
+                  <Textarea
+                    value={editNotes}
+                    onChange={(e) => setEditNotes(e.target.value)}
+                    rows={2}
+                    disabled={Boolean(actionId)}
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={editPublicSafe}
+                    disabled={Boolean(actionId)}
+                    onCheckedChange={(c) => setEditPublicSafe(c === true)}
+                  />
+                  Public-safe (ok to use in posts)
+                </label>
+                {CAPTURE_BRAND_ENABLED ? (
+                  <label className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={editQueueForPosts}
+                      disabled={Boolean(actionId) || !editBrandId}
+                      onCheckedChange={(c) => setEditQueueForPosts(c === true)}
+                    />
+                    Flag for upcoming content plan
+                  </label>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+          <DialogFooter className="mx-0 mb-0 shrink-0 gap-2 rounded-none border-t bg-transparent px-6 py-4">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={Boolean(actionId)}
+              onClick={() => setEditTarget(null)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={Boolean(actionId) || !editLibraryId || librariesLoading}
+              onClick={() => void saveEdit()}
+            >
+              {actionId === editTarget?.id ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : null}
+              Save &amp; re-index
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

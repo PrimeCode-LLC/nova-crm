@@ -141,6 +141,13 @@ export function AiAdminClient() {
   } | null>(null);
   const [libraries, setLibraries] = React.useState<LibraryRow[]>([]);
 
+  const reloadLibraries = React.useCallback(async () => {
+    const lRes = await fetch("/api/ai/rag/libraries", { credentials: "same-origin" });
+    if (!lRes.ok) return;
+    const l = await lRes.json();
+    setLibraries(l.libraries ?? []);
+  }, []);
+
   const load = React.useCallback(async () => {
     setLoading(true);
     try {
@@ -302,7 +309,7 @@ export function AiAdminClient() {
                 mode="overview"
                 aiEnabled={settings?.enabled ?? false}
                 libraries={libraries}
-                onLibrariesChange={() => void load()}
+                onLibrariesChange={() => void reloadLibraries()}
                 onSeeded={() => void load()}
               />
             </TabsContent>
@@ -312,7 +319,7 @@ export function AiAdminClient() {
                 mode="libraries"
                 aiEnabled={settings?.enabled ?? false}
                 libraries={libraries}
-                onLibrariesChange={() => void load()}
+                onLibrariesChange={() => void reloadLibraries()}
                 onSeeded={() => void load()}
               />
             </TabsContent>

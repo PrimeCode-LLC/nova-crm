@@ -135,6 +135,12 @@ export function KnowledgeAdminPanel({
   const [advancedOpen, setAdvancedOpen] = React.useState(false);
   const [fitConsumerOpen, setFitConsumerOpen] = React.useState(false);
   const [newLibName, setNewLibName] = React.useState("");
+  const [newLibType, setNewLibType] = React.useState<KnowledgeLibraryUiType>("topic");
+  const [newLibBrandId, setNewLibBrandId] = React.useState("");
+  const [newLibFitCategory, setNewLibFitCategory] = React.useState<OpportunitySourceType | "">(
+    OPPORTUNITY_SOURCE_TYPES[0] ?? "",
+  );
+  const [creatingLib, setCreatingLib] = React.useState(false);
   const [docTitle, setDocTitle] = React.useState("");
   const [docContent, setDocContent] = React.useState("");
   const [selectedLib, setSelectedLib] = React.useState("");
@@ -178,16 +184,19 @@ export function KnowledgeAdminPanel({
   }, [loadFit]);
 
   React.useEffect(() => {
-    if (externalLibraries) {
-      setLibraries(externalLibraries);
-      if (externalLibraries[0] && !selectedLib) {
-        setSelectedLib(externalLibraries[0].id);
-      }
-    }
-  }, [externalLibraries, selectedLib]);
+    if (!externalLibraries) return;
+    setLibraries(externalLibraries);
+  }, [externalLibraries]);
 
   React.useEffect(() => {
-    if (!editLib || !ws.organizationId || !isFirebaseWebConfigured()) return;
+    if (!selectedLib && libraries[0]) {
+      setSelectedLib(libraries[0].id);
+    }
+  }, [libraries, selectedLib]);
+
+  React.useEffect(() => {
+    const needBrands = Boolean(editLib) || newLibType === "brand";
+    if (!needBrands || !ws.organizationId || !isFirebaseWebConfigured()) return;
     let cancelled = false;
     void (async () => {
       const db = getFirebaseDb();
@@ -215,7 +224,7 @@ export function KnowledgeAdminPanel({
     return () => {
       cancelled = true;
     };
-  }, [editLib, ws.organizationId]);
+  }, [editLib, newLibType, ws.organizationId]);
 
   async function saveConfig(patch: {
     globalEnabled?: boolean;
@@ -309,23 +318,63 @@ export function KnowledgeAdminPanel({
     }
 
     toast.success("Channel pack deleted");
+    setLibraries((prev) => prev.filter((l) => l.id !== libraryId));
     await loadFit();
     onLibrariesChange?.();
   }
 
+  function openLibraryView(lib: LibraryRow) {
+    setSelectedLib(lib.id);
+    setDocSheet({
+      libraryId: lib.id,
+      label: displayKnowledgeLibraryName(lib),
+    });
+  }
+
   async function createLibrary() {
     if (!newLibName.trim()) return;
-    const res = await fetch("/api/ai/rag/libraries", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name: newLibName.trim(), scope: { type: "org" } }),
-    });
-    if (!res.ok) toast.error("Could not create library");
-    else {
-      toast.success("Topic library created");
+    if (newLibType === "brand" && !newLibBrandId) {
+      toast.error("Pick a brand for this brand pack");
+      return;
+    }
+    if (newLibType === "channel" && !newLibFitCategory) {
+      toast.error("Pick a channel for this channel pack");
+      return;
+    }
+    setCreatingLib(true);
+    try {
+      const res = await fetch("/api/ai/rag/libraries", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newLibName.trim(),
+          libraryType: newLibType,
+          ...(newLibType === "brand" ? { brandId: newLibBrandId } : {}),
+          ...(newLibType === "channel" ? { fitCategory: newLibFitCategory } : {}),
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(
+          typeof data.error === "string"
+            ? data.error
+            : data.error?.formErrors?.[0] ?? "Could not create library",
+        );
+        return;
+      }
+      const created = data.library as LibraryRow | undefined;
+      if (created?.id) {
+        setLibraries((prev) => [...prev, created]);
+        setSelectedLib(created.id);
+      }
+      toast.success("Library created");
       setNewLibName("");
+      setNewLibType("topic");
+      setNewLibBrandId("");
       onLibrariesChange?.();
       await loadFit();
+    } finally {
+      setCreatingLib(false);
     }
   }
 
@@ -400,6 +449,11 @@ export function KnowledgeAdminPanel({
         toast.error(err);
         return;
       }
+      const data = await res.json().catch(() => ({}));
+      const updated = data.library as LibraryRow | undefined;
+      if (updated?.id) {
+        setLibraries((prev) => prev.map((l) => (l.id === updated.id ? { ...l, ...updated } : l)));
+      }
       toast.success("Library updated");
       setEditLib(null);
       onLibrariesChange?.();
@@ -411,9 +465,10 @@ export function KnowledgeAdminPanel({
 
   async function confirmDeleteLibrary() {
     if (!deleteLib) return;
+    const removedId = deleteLib.id;
     setDeletingLib(true);
     try {
-      const res = await fetch(`/api/ai/rag/libraries/${encodeURIComponent(deleteLib.id)}`, {
+      const res = await fetch(`/api/ai/rag/libraries/${encodeURIComponent(removedId)}`, {
         method: "DELETE",
         credentials: "same-origin",
       });
@@ -422,9 +477,10 @@ export function KnowledgeAdminPanel({
         toast.error(typeof data.error === "string" ? data.error : "Could not delete library");
         return;
       }
-      toast.success("Library deleted");
-      if (selectedLib === deleteLib.id) setSelectedLib("");
+      setLibraries((prev) => prev.filter((l) => l.id !== removedId));
+      if (selectedLib === removedId) setSelectedLib("");
       setDeleteLib(null);
+      toast.success("Library deleted");
       onLibrariesChange?.();
       await loadFit();
     } finally {
@@ -884,28 +940,108 @@ export function KnowledgeAdminPanel({
                   <Button
                     type="button"
                     size="sm"
-                    variant="ghost"
-                    className="h-6 px-1.5 text-[10px]"
-                    onClick={() =>
-                      setDocSheet({
-                        libraryId: l.id,
-                        label: displayKnowledgeLibraryName(l),
-                      })
-                    }
+                    variant="outline"
+                    className="h-6 px-2 text-[10px]"
+                    title="View library documents"
+                    onClick={() => openLibraryView(l)}
                   >
-                    Docs
+                    <FileText className="h-3 w-3 mr-1" />
+                    View
                   </Button>
                 </li>
               );
             })}
           </ul>
-          <div className="flex gap-2">
-            <Input
-              placeholder="New topic library name"
-              value={newLibName}
-              onChange={(e) => setNewLibName(e.target.value)}
-            />
-            <Button type="button" onClick={() => void createLibrary()}>
+          <div className="space-y-2 rounded-md border p-3">
+            <p className="text-xs font-medium">Add library</p>
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label htmlFor="new-lib-name" className="text-xs">
+                  Name
+                </Label>
+                <Input
+                  id="new-lib-name"
+                  placeholder="e.g. Product, Services, Case studies…"
+                  value={newLibName}
+                  onChange={(e) => setNewLibName(e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs">Type</Label>
+                <Select
+                  value={newLibType}
+                  onValueChange={(v) => {
+                    if (v) setNewLibType(v as KnowledgeLibraryUiType);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(Object.keys(KNOWLEDGE_TYPE_LABELS) as KnowledgeLibraryUiType[]).map((t) => (
+                      <SelectItem key={t} value={t}>
+                        {KNOWLEDGE_TYPE_LABELS[t]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {newLibType === "brand" ? (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Brand</Label>
+                  <Select
+                    value={newLibBrandId || undefined}
+                    onValueChange={(v) => {
+                      if (v) setNewLibBrandId(v);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select brand…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {brandOptions.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+              {newLibType === "channel" ? (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Channel</Label>
+                  <Select
+                    value={newLibFitCategory || undefined}
+                    onValueChange={(v) => {
+                      if (v) setNewLibFitCategory(v as OpportunitySourceType);
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select channel…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {OPPORTUNITY_SOURCE_TYPES.map((cat) => (
+                        <SelectItem key={cat} value={cat}>
+                          {OPPORTUNITY_SOURCE_LABELS[cat]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              Use <strong className="font-medium text-foreground">Topic</strong> for custom packs
+              like Product or Services. Company is the org default (one). Channel and Brand pack need
+              a channel or brand.
+            </p>
+            <Button
+              type="button"
+              disabled={creatingLib || !newLibName.trim()}
+              onClick={() => void createLibrary()}
+            >
+              {creatingLib ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
               Add
             </Button>
           </div>
