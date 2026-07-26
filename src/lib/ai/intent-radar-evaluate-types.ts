@@ -48,7 +48,11 @@ export const intentRadarProjectStageLabels: Record<
   unknown: "Unknown",
 };
 
-/** Structured AI evaluation for Intent Radar after lexical scan. */
+/**
+ * Structured AI evaluation for Intent Radar after lexical scan.
+ * OpenAI structured output requires every object property in `required`
+ * (Zod `.optional()` / `.default()` are rejected with invalid_json_schema).
+ */
 export const intentRadarEvaluateResultSchema = z.object({
   signalReviews: z.array(
     z.object({
@@ -59,20 +63,16 @@ export const intentRadarEvaluateResultSchema = z.object({
       reason: z.string(),
     }),
   ),
-  /** Prefer model-provided scores; normalize fills from fitScore when omitted (legacy prompts). */
-  scores: z
-    .object({
-      themeFit: z.number().min(0).max(100),
-      buyingIntent: z.number().min(0).max(100),
-      icpDeliverability: z.number().min(0).max(100),
-      /** Optional from the model; server always recomputes and overwrites. */
-      combined: z.number().min(0).max(100).optional(),
-    })
-    .optional(),
-  pageType: intentRadarPageTypeSchema.default("other"),
-  projectStage: intentRadarProjectStageSchema.default("unknown"),
-  nextSteps: z.array(z.string().min(1).max(280)).max(4).default([]),
-  watchOuts: z.array(z.string().min(1).max(280)).max(3).default([]),
+  /** Server recomputes `combined` and overwrites fitScore/verdict from these three. */
+  scores: z.object({
+    themeFit: z.number().min(0).max(100),
+    buyingIntent: z.number().min(0).max(100),
+    icpDeliverability: z.number().min(0).max(100),
+  }),
+  pageType: intentRadarPageTypeSchema,
+  projectStage: intentRadarProjectStageSchema,
+  nextSteps: z.array(z.string().min(1).max(280)).max(4),
+  watchOuts: z.array(z.string().min(1).max(280)).max(3),
   verdict: z.enum(["pursue", "maybe", "pass"]),
   /** Alias of scores.combined after normalization; keep for existing UI. */
   fitScore: z.number().min(0).max(100),
@@ -163,13 +163,12 @@ export function defaultFitLabel(verdict: "pursue" | "maybe" | "pass"): string {
 export function normalizeIntentRadarEvaluateResult(
   result: z.infer<typeof intentRadarEvaluateResultSchema>,
 ): IntentRadarEvaluateResult {
-  const fitFallback = clampScore(result.fitScore);
-  let themeFit = clampScore(result.scores?.themeFit ?? fitFallback);
-  let buyingIntent = clampScore(result.scores?.buyingIntent ?? fitFallback);
-  let icpDeliverability = clampScore(result.scores?.icpDeliverability ?? fitFallback);
+  let themeFit = clampScore(result.scores.themeFit);
+  let buyingIntent = clampScore(result.scores.buyingIntent);
+  let icpDeliverability = clampScore(result.scores.icpDeliverability);
 
-  const pageType = result.pageType ?? "other";
-  const projectStage = result.projectStage ?? "unknown";
+  const pageType = result.pageType;
+  const projectStage = result.projectStage;
 
   if (pageType === "case_study" && projectStage === "completed") {
     buyingIntent = Math.min(buyingIntent, COMPLETED_CASE_STUDY_BUYING_INTENT_CAP);
@@ -187,11 +186,11 @@ export function normalizeIntentRadarEvaluateResult(
   };
 
   const verdict = verdictFromCombinedScore(scores.combined);
-  const nextSteps = (result.nextSteps ?? [])
+  const nextSteps = result.nextSteps
     .map((step) => step.trim())
     .filter(Boolean)
     .slice(0, 4);
-  const watchOuts = (result.watchOuts ?? [])
+  const watchOuts = result.watchOuts
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 3);

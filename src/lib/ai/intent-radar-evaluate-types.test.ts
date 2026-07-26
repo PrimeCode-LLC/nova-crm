@@ -148,18 +148,20 @@ describe("normalizeIntentRadarEvaluateResult", () => {
     assert.equal(normalized.fitScore, normalized.scores.combined);
   });
 
-  it("fills scores from fitScore when legacy payload omits them", () => {
+  it("fills a default next step when the model returns none", () => {
     const normalized = normalizeIntentRadarEvaluateResult(
       baseResult({
-        scores: undefined,
+        scores: {
+          themeFit: 64,
+          buyingIntent: 64,
+          icpDeliverability: 64,
+        },
         fitScore: 64,
-        nextSteps: undefined as unknown as string[],
-        watchOuts: undefined as unknown as string[],
+        nextSteps: [],
+        watchOuts: [],
       }),
     );
     assert.equal(normalized.scores.themeFit, 64);
-    assert.equal(normalized.scores.buyingIntent, 64);
-    assert.equal(normalized.scores.icpDeliverability, 64);
     assert.equal(normalized.fitScore, normalized.scores.combined);
     assert.ok(normalized.nextSteps.length >= 1);
   });

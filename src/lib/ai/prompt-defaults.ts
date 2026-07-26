@@ -319,7 +319,7 @@ Page text:
 
 Return JSON with:
 - signalReviews: one item per matched signal with signalId, label, decision ("confirm"|"reject"|"uncertain"), polarity ("positive_intent"|"negative_or_noise"|"neutral"), reason
-- scores: { themeFit, buyingIntent, icpDeliverability } each 0-100 integers (combined optional; server recomputes)
+- scores: { themeFit, buyingIntent, icpDeliverability } each 0-100 integers (required; server recomputes combined)
 - pageType: "case_study" | "job_post" | "rfp" | "news" | "vendor_page" | "other"
 - projectStage: "planned" | "in_progress" | "completed" | "unknown"
 - nextSteps: string[] (2-4 plain-text actions)
