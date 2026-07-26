@@ -12,8 +12,13 @@ import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
  * which flips uncontrolled → controlled and logs a console error overlay.
  * When `value` is present on props, coerce `undefined` to `null` (Base UI's
  * empty selection) so the select stays controlled for its lifetime.
+ *
+ * Keep the Value/Multiple generics so `onValueChange` stays contextually typed
+ * (a non-generic wrapper makes callback params implicit `any` under strict).
  */
-function Select(props: SelectPrimitive.Root.Props) {
+function Select<Value, Multiple extends boolean | undefined = false>(
+  props: SelectPrimitive.Root.Props<Value, Multiple>
+) {
   if (Object.prototype.hasOwnProperty.call(props, "value")) {
     const { value, ...rest } = props
     return <SelectPrimitive.Root {...rest} value={value ?? null} />

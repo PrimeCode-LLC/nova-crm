@@ -28,7 +28,17 @@ export function CaptureDutyBanner({
   compact?: boolean;
 }) {
   const pathname = usePathname();
-  const permissionSubject = useNavAccessContext();
+  const navAccess = useNavAccessContext();
+  const permissionSubject = React.useMemo(
+    () => ({
+      roleId: navAccess.roleId ?? "salesperson",
+      isSuperAdmin: Boolean(navAccess.isSuperAdmin),
+      featureGrants: navAccess.featureGrants,
+      orgRole: navAccess.orgRole,
+      roleSnapshot: navAccess.roleSnapshot,
+    }),
+    [navAccess],
+  );
   const { brands, captures, currentUserId, loading } = useContentCalendarData();
   const [nowMs] = React.useState(() => Date.now());
   const [dismissedKey, setDismissedKey] = React.useState<string | null>(null);

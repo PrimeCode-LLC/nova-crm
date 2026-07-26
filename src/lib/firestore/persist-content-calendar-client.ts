@@ -57,7 +57,7 @@ export async function persistContentItemCreate(
 export async function persistContentItemUpdate(
   db: Firestore,
   itemId: string,
-  patch: Partial<ContentItem> & { completedAt?: string | null },
+  patch: Omit<Partial<ContentItem>, "completedAt"> & { completedAt?: string | null },
 ): Promise<void> {
   const { id: _id, organizationId: _org, createdAt: _c, completedAt, ...rest } = patch;
   const payload: Record<string, unknown> = {
@@ -87,7 +87,7 @@ export async function persistContentCaptureCreate(
 export async function persistContentCaptureUpdate(
   db: Firestore,
   captureId: string,
-  patch: Partial<ContentCapture> & { errorMessage?: string | null },
+  patch: Omit<Partial<ContentCapture>, "errorMessage"> & { errorMessage?: string | null },
 ): Promise<void> {
   const { id: _id, organizationId: _org, createdAt: _c, errorMessage, ...rest } = patch;
   const payload: Record<string, unknown> = {

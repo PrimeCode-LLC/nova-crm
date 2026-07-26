@@ -44,7 +44,7 @@ export function demoIntentRadarEvaluateResult(input: {
         : 72;
   const icpDeliverability = confirmed === 0 ? 40 : confirmed === 1 ? 55 : 68;
 
-  const raw: IntentRadarEvaluateResult = {
+  return normalizeIntentRadarEvaluateResult({
     signalReviews,
     scores: {
       themeFit,
@@ -104,7 +104,5 @@ export function demoIntentRadarEvaluateResult(input: {
       estimatedEffort: "medium",
     },
     ragCitations: [],
-  };
-
-  return normalizeIntentRadarEvaluateResult(raw);
+  });
 }

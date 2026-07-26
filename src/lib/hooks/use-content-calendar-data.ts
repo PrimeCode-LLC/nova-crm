@@ -475,7 +475,7 @@ export function useContentCalendarData() {
   const updateCapture = React.useCallback(
     async (
       captureId: string,
-      patch: Partial<ContentCapture> & { errorMessage?: string | null },
+      patch: Omit<Partial<ContentCapture>, "errorMessage"> & { errorMessage?: string | null },
     ) => {
       const updatedAt = new Date().toISOString();
       const applyLocal = (prev: ContentCapture[]) =>

@@ -1,17 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "vitest";
+import type { z } from "zod";
 import {
   COMPLETED_CASE_STUDY_BUYING_INTENT_CAP,
   computeAdjustedIntentScore,
   computeCombinedFitScore,
+  intentRadarEvaluateResultSchema,
   normalizeIntentRadarEvaluateResult,
   verdictFromCombinedScore,
-  type IntentRadarEvaluateResult,
 } from "@/lib/ai/intent-radar-evaluate-types";
 
+type IntentRadarEvaluateRaw = z.infer<typeof intentRadarEvaluateResultSchema>;
+
 function baseResult(
-  overrides: Partial<IntentRadarEvaluateResult> = {},
-): IntentRadarEvaluateResult {
+  overrides: Partial<IntentRadarEvaluateRaw> = {},
+): IntentRadarEvaluateRaw {
   return {
     signalReviews: [],
     scores: {

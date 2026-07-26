@@ -6,6 +6,7 @@ import {
   captureReminderMessage,
   getCaptureProgress,
   shouldRemindCapturer,
+  type CaptureTimestamp,
 } from "@/lib/content-calendar/capture-policy";
 import { resolveBrandResponsibility } from "@/lib/content-calendar/types";
 import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
@@ -35,10 +36,7 @@ export async function processContentCaptureRemindersServer(now = new Date()): Pr
   let remindersSent = 0;
   let skipped = 0;
 
-  const capturesByOrg = new Map<
-    string,
-    { brandId?: string; createdAt: string; status?: string }[]
-  >();
+  const capturesByOrg = new Map<string, CaptureTimestamp[]>();
 
   async function capturesForOrg(organizationId: string) {
     const cached = capturesByOrg.get(organizationId);
@@ -47,7 +45,7 @@ export async function processContentCaptureRemindersServer(now = new Date()): Pr
       .collection(COLLECTIONS.contentCaptures)
       .where("organizationId", "==", organizationId)
       .get();
-    const list = snap.docs.map((d) => {
+    const list: CaptureTimestamp[] = snap.docs.map((d) => {
       const c = mapContentCapture(d.id, d.data() as Record<string, unknown>);
       return { brandId: c.brandId, createdAt: c.createdAt, status: c.status };
     });
