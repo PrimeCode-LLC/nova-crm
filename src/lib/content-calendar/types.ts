@@ -124,7 +124,7 @@ export type ContentCaptureRequiredField =
 
 /**
  * Brand-level rules for continuous proof capture.
- * Distinct from checklist “Write copy” (post drafting).
+ * Distinct from checklist “Review copy” (post drafting / AI draft sign-off).
  */
 export interface ContentCapturePolicy {
   /** Target captures in a rolling 7-day window. 0 = no weekly target. */
@@ -286,6 +286,8 @@ export interface ContentPlanSlot {
   targetAudienceHint?: string;
   approved: boolean;
   contentItemId?: string;
+  /** Linked capture used as proof for this slot (when known). */
+  captureId?: string;
 }
 
 export interface ContentPlan {
@@ -391,7 +393,7 @@ export const CONTENT_RESPONSIBILITY_LABELS: Record<ContentResponsibilityKey, str
 };
 
 export const CONTENT_CHECKLIST_STEP_LABELS: Record<ContentChecklistStepKey, string> = {
-  write: "Write copy",
+  write: "Review copy",
   graphics: "Add graphics",
   approve: "Approve",
   publish: "Publish",
@@ -594,6 +596,134 @@ export function applyManualStatusToChecklist(
 
 export function isChecklistStepOpen(step: ContentChecklistStep): boolean {
   return step.status === "pending";
+}
+
+/**
+ * Calendar / plate cue: whose work is next.
+ * Derived from checklist when present; falls back to coarse status.
+ */
+export type ContentNextAction =
+  | "needs_copy"
+  | "ready_for_graphics"
+  | "needs_approval"
+  | "ready_to_post"
+  | "posted"
+  | "skipped"
+  | "in_progress";
+
+export const CONTENT_NEXT_ACTION_LABELS: Record<ContentNextAction, string> = {
+  needs_copy: "Review copy",
+  ready_for_graphics: "Ready for graphics",
+  needs_approval: "Needs approval",
+  ready_to_post: "Ready to post",
+  posted: "Posted",
+  skipped: "Skipped",
+  in_progress: "In progress",
+};
+
+/** Workboard filters for the content calendar. */
+export type ContentWorkFilter =
+  | "all"
+  | "my_turn"
+  | "ready_for_graphics"
+  | "ready_to_post";
+
+export const CONTENT_WORK_FILTER_LABELS: Record<ContentWorkFilter, string> = {
+  all: "All items",
+  my_turn: "My turn",
+  ready_for_graphics: "Ready for graphics",
+  ready_to_post: "Ready to post",
+};
+
+export function getContentNextAction(
+  item: Pick<ContentItem, "status" | "checklist">,
+): ContentNextAction {
+  if (item.status === "published" || item.status === "repurpose") return "posted";
+  if (item.status === "skipped") return "skipped";
+
+  const checklist = item.checklist ?? [];
+  const pending = checklist.find((s) => s.status === "pending");
+  if (pending) {
+    switch (pending.key) {
+      case "write":
+        return "needs_copy";
+      case "graphics":
+        return "ready_for_graphics";
+      case "approve":
+        return "needs_approval";
+      case "publish":
+        return "ready_to_post";
+    }
+  }
+
+  if (checklist.length > 0) {
+    const publish = checklist.find((s) => s.key === "publish");
+    if (publish?.status === "done") return "posted";
+    return "ready_to_post";
+  }
+
+  switch (item.status) {
+    case "approved":
+    case "scheduled":
+      return "ready_to_post";
+    case "review":
+    case "fact_check":
+      return "needs_approval";
+    case "idea":
+    case "research":
+    case "draft":
+      return "needs_copy";
+    default:
+      return "in_progress";
+  }
+}
+
+export function isContentItemMyTurn(
+  item: Pick<ContentItem, "status" | "checklist" | "assigneeUserId" | "ownerUserId">,
+  userId: string,
+): boolean {
+  if (!userId) return false;
+  if (CONTENT_DONE_STATUSES.includes(item.status)) return false;
+  const checklist = item.checklist ?? [];
+  if (checklist.length === 0) {
+    return item.assigneeUserId === userId || item.ownerUserId === userId;
+  }
+  const next = checklist.find((s) => s.status === "pending");
+  return Boolean(next && next.assigneeUserId === userId);
+}
+
+export function matchesContentWorkFilter(
+  item: Pick<ContentItem, "status" | "checklist" | "assigneeUserId" | "ownerUserId">,
+  filter: ContentWorkFilter,
+  userId: string,
+): boolean {
+  if (filter === "all") return true;
+  if (filter === "my_turn") return isContentItemMyTurn(item, userId);
+  const action = getContentNextAction(item);
+  if (filter === "ready_for_graphics") return action === "ready_for_graphics";
+  if (filter === "ready_to_post") return action === "ready_to_post";
+  return true;
+}
+
+/** Tailwind classes for next-action badge outline color. */
+export function contentNextActionBadgeClass(action: ContentNextAction): string {
+  switch (action) {
+    case "needs_copy":
+      return "border-sky-500/40 text-sky-700 dark:text-sky-400";
+    case "ready_for_graphics":
+      return "border-violet-500/40 text-violet-700 dark:text-violet-400";
+    case "needs_approval":
+      return "border-amber-500/40 text-amber-700 dark:text-amber-400";
+    case "ready_to_post":
+      return "border-emerald-500/40 text-emerald-700 dark:text-emerald-400";
+    case "posted":
+      return "border-border text-muted-foreground";
+    case "skipped":
+      return "border-border text-muted-foreground";
+    case "in_progress":
+    default:
+      return "border-border text-foreground";
+  }
 }
 
 /** @deprecated Prefer CONTENT_OUTCOME_LABELS */

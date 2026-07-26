@@ -37,7 +37,7 @@ export async function processContentCaptureRemindersServer(now = new Date()): Pr
 
   const capturesByOrg = new Map<
     string,
-    { brandId?: string; createdAt: string }[]
+    { brandId?: string; createdAt: string; status?: string }[]
   >();
 
   async function capturesForOrg(organizationId: string) {
@@ -49,7 +49,7 @@ export async function processContentCaptureRemindersServer(now = new Date()): Pr
       .get();
     const list = snap.docs.map((d) => {
       const c = mapContentCapture(d.id, d.data() as Record<string, unknown>);
-      return { brandId: c.brandId, createdAt: c.createdAt };
+      return { brandId: c.brandId, createdAt: c.createdAt, status: c.status };
     });
     capturesByOrg.set(organizationId, list);
     return list;

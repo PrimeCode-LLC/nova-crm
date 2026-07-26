@@ -313,6 +313,7 @@ export function mapContentPlan(id: string, data: Record<string, unknown>): Conte
       targetAudienceHint: str(row.targetAudienceHint) || undefined,
       approved: bool(row.approved, false),
       contentItemId: str(row.contentItemId) || undefined,
+      captureId: str(row.captureId) || undefined,
     };
   });
 

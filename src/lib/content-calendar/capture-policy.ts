@@ -1,8 +1,8 @@
 import type {
   ContentBrand,
-  ContentCapture,
   ContentCapturePolicy,
   ContentCaptureRequiredField,
+  ContentCaptureStatus,
 } from "@/lib/content-calendar/types";
 import { resolveBrandResponsibility } from "@/lib/content-calendar/types";
 
@@ -100,7 +100,21 @@ export function validateCaptureFields(
   return { ok: true };
 }
 
-export type CaptureTimestamp = { brandId?: string; createdAt: string };
+export type CaptureTimestamp = {
+  brandId?: string;
+  createdAt: string;
+  /** When set, only `indexed` counts toward quota / idle. */
+  status?: ContentCaptureStatus;
+};
+
+/** Successful indexed captures only — drafts/failed do not satisfy quota or reset idle. */
+export function countsTowardCaptureProgress(capture: CaptureTimestamp): boolean {
+  return capture.status === "indexed";
+}
+
+function progressCaptures(captures: CaptureTimestamp[]): CaptureTimestamp[] {
+  return captures.filter(countsTowardCaptureProgress);
+}
 
 export function capturesForBrandInWindow(
   captures: CaptureTimestamp[],
@@ -109,7 +123,7 @@ export function capturesForBrandInWindow(
   windowMs: number = WEEK_MS,
 ): CaptureTimestamp[] {
   const cutoff = nowMs - windowMs;
-  return captures.filter((c) => {
+  return progressCaptures(captures).filter((c) => {
     if (c.brandId !== brandId) return false;
     const t = new Date(c.createdAt).getTime();
     return Number.isFinite(t) && t >= cutoff;
@@ -120,7 +134,7 @@ export function latestCaptureAtMs(
   captures: CaptureTimestamp[],
   brandId: string,
 ): number {
-  return captures
+  return progressCaptures(captures)
     .filter((c) => c.brandId === brandId)
     .reduce((max, c) => Math.max(max, new Date(c.createdAt).getTime() || 0), 0);
 }

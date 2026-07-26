@@ -53,6 +53,7 @@ import {
   firstPendingChecklistAssignee,
   formatNeedsGraphics,
   resolveBrandResponsibility,
+  statusFromChecklist,
 } from "@/lib/content-calendar/types";
 import { scrubAiTellPunctuation, scrubPostBody } from "@/lib/content-calendar/schedule";
 
@@ -428,7 +429,7 @@ export function ContentFillDaysDialog({
           pillarKey: slot.pillarKey,
           publishAt: slot.publishAt,
           dueAt: slot.publishAt,
-          status: brand.approvalRequired ? "review" : "draft",
+          status: statusFromChecklist(checklist, "draft"),
           title: slot.title,
           angle: slot.angle,
           rationale: slot.rationale,
@@ -455,6 +456,7 @@ export function ContentFillDaysDialog({
           assigneeUserId,
           ownerUserId,
           planId: plan.id,
+          captureId: slot.captureId,
         });
 
         if (item?.id) createdCount += 1;

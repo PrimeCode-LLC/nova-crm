@@ -1054,7 +1054,7 @@ export function ContentBrandsClient() {
                     <div>
                       <h3 className="text-sm font-medium">Capture requirements</h3>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Enforce what the Capturer must feed continuously. Separate from Write copy
+                        Enforce what the Capturer must feed continuously. Separate from Review copy
                         on calendar items.
                       </p>
                     </div>

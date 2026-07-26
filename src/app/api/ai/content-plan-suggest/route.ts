@@ -152,6 +152,36 @@ export async function POST(req: Request) {
     topK: 8,
   });
 
+  const queuedSnap = await db
+    .collection(COLLECTIONS.contentCaptures)
+    .where("organizationId", "==", orgId)
+    .limit(80)
+    .get();
+  const queuedCaptures = queuedSnap.docs
+    .map((d) => {
+      const row = d.data();
+      return {
+        id: d.id,
+        brandId: typeof row.brandId === "string" ? row.brandId : "",
+        status: String(row.status ?? ""),
+        queueForPosts: Boolean(row.queueForPosts),
+        title: String(row.normalizedTitle || row.problem || d.id).slice(0, 120),
+        summary: String(row.outcome || row.solution || "").slice(0, 200),
+      };
+    })
+    .filter(
+      (c) => c.brandId === brand.id && c.queueForPosts && c.status === "indexed",
+    )
+    .slice(0, 12);  const queuedBlock =
+    queuedCaptures.length === 0
+      ? ""
+      : [
+          "Queued captures flagged for upcoming posts (prefer these as proofHint when relevant; cite as capture:<id>):",
+          ...queuedCaptures.map(
+            (c) => `- capture:${c.id} | ${c.title}${c.summary ? ` — ${c.summary}` : ""}`,
+          ),
+        ].join("\n");
+
   const end = new Date(startDate);
   end.setDate(end.getDate() + parsed.data.dayCount - 1);
 
@@ -199,9 +229,12 @@ export async function POST(req: Request) {
         startDate,
         scheduleRows,
         recentAngles: (parsed.data.recentAngles ?? []).join("\n") || "none",
-        ragBlock,
+        ragBlock: [ragBlock, queuedBlock].filter(Boolean).join("\n\n"),
         userPrompt: [
           parsed.data.userPrompt?.trim(),
+          queuedBlock
+            ? "Prefer queued captures above when assigning proofHint; include capture:<id> in proofHint when you use one."
+            : null,
           `Authoritative schedule (fill in this order; keep publishAt + platform):\n${scheduleRows}`,
         ]
           .filter(Boolean)
@@ -212,10 +245,20 @@ export async function POST(req: Request) {
 
     const now = new Date().toISOString();
     const ideaCount = Math.min(result.slots.length, schedule.length);
+    const captureIdByHint = (proofHint: string): string | undefined => {
+      const explicit = proofHint.match(/capture:([a-zA-Z0-9_-]+)/);
+      if (explicit?.[1] && queuedCaptures.some((c) => c.id === explicit[1])) {
+        return explicit[1];
+      }
+      const lower = proofHint.toLowerCase();
+      const byTitle = queuedCaptures.find((c) => lower.includes(c.title.toLowerCase().slice(0, 40)));
+      return byTitle?.id;
+    };
     const slots: ContentPlanSlot[] = [];
     for (let i = 0; i < ideaCount; i++) {
       const s = result.slots[i]!;
       const sched = schedule[i]!;
+      const proofHint = scrubAiTellPunctuation(s.proofHint);
       slots.push({
         id: newId("slot"),
         publishAt: sched.publishAt,
@@ -223,13 +266,14 @@ export async function POST(req: Request) {
         pillarKey: s.pillarKey,
         title: scrubAiTellPunctuation(s.title),
         angle: scrubAiTellPunctuation(s.angle),
-        proofHint: scrubAiTellPunctuation(s.proofHint),
+        proofHint,
         ctaType: s.ctaType,
         rationale: scrubAiTellPunctuation(s.rationale),
         // Guard against a plan asking for a format the platform cannot publish.
         format: coerceFormatForPlatform(sched.platform, s.format),
         targetAudienceHint: scrubAiTellPunctuation(s.targetAudienceHint),
         approved: true,
+        captureId: captureIdByHint(proofHint),
       });
     }
 

@@ -989,7 +989,7 @@ export function ContentItemDetailClient() {
                   <span className="min-w-0 flex-1 text-xs text-muted-foreground">
                     {ready
                       ? `Copy draft → schedule for ${publishWhen}`
-                      : "Draft still empty — finish Write copy first"}
+                      : "Draft still empty — finish Review copy first"}
                     {draft.firstComment.trim()
                       ? " · then paste first comment as your reply"
                       : ""}
@@ -1345,7 +1345,7 @@ export function ContentItemDetailClient() {
               ) : adaptSourcePlatform ? (
                 <p className="text-xs text-muted-foreground">
                   Source: {CONTENT_PLATFORM_LABELS[adaptSourcePlatform]} draft
-                  {!adaptSourceReady ? " (write copy first)" : ""}
+                  {!adaptSourceReady ? " (review copy first)" : ""}
                 </p>
               ) : null}
               <div className="flex flex-wrap gap-2">

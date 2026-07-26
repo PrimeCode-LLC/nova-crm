@@ -87,13 +87,26 @@ export async function persistContentCaptureCreate(
 export async function persistContentCaptureUpdate(
   db: Firestore,
   captureId: string,
-  patch: Partial<ContentCapture>,
+  patch: Partial<ContentCapture> & { errorMessage?: string | null },
 ): Promise<void> {
-  const { id: _id, organizationId: _org, createdAt: _c, ...rest } = patch;
-  await updateDoc(doc(db, COLLECTIONS.contentCaptures, captureId), {
+  const { id: _id, organizationId: _org, createdAt: _c, errorMessage, ...rest } = patch;
+  const payload: Record<string, unknown> = {
     ...stripUndefined(rest as Record<string, unknown>),
     updatedAt: serverTimestamp(),
-  });
+  };
+  if (errorMessage === null) {
+    payload.errorMessage = deleteField();
+  } else if (typeof errorMessage === "string") {
+    payload.errorMessage = errorMessage;
+  }
+  await updateDoc(doc(db, COLLECTIONS.contentCaptures, captureId), payload);
+}
+
+export async function persistContentCaptureDelete(
+  db: Firestore,
+  captureId: string,
+): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.contentCaptures, captureId));
 }
 
 export async function persistContentPlanCreate(

@@ -32,13 +32,19 @@ import { CaptureDutyBanner } from "@/components/content/capture-duty-banner";
 import { computeContentConsistency } from "@/lib/content-calendar/consistency";
 import {
   CONTENT_FORMAT_LABELS,
+  CONTENT_NEXT_ACTION_LABELS,
   CONTENT_PILLAR_LABELS,
   CONTENT_PLATFORM_LABELS,
-  CONTENT_STATUS_LABELS,
+  CONTENT_WORK_FILTER_LABELS,
+  contentNextActionBadgeClass,
+  getContentNextAction,
+  isContentItemMyTurn,
   isContentItemOverdue,
+  matchesContentWorkFilter,
   type ContentItem,
   type ContentPlatform,
   type ContentItemStatus,
+  type ContentWorkFilter,
 } from "@/lib/content-calendar/types";
 import { cn } from "@/lib/utils";
 import { fmtDate } from "@/lib/format";
@@ -99,6 +105,7 @@ export function ContentCalendarClient() {
 
   const [brandId, setBrandId] = React.useState<string>("all");
   const [platform, setPlatform] = React.useState<string>("all");
+  const [workFilter, setWorkFilter] = React.useState<ContentWorkFilter>("all");
   const [viewMode, setViewMode] = React.useState<"week" | "month">("month");
   const [anchor, setAnchor] = React.useState(() => new Date());
   const [fillOpen, setFillOpen] = React.useState(false);
@@ -113,8 +120,13 @@ export function ContentCalendarClient() {
     if (platform !== "all") {
       list = list.filter((i) => i.platforms.includes(platform as ContentPlatform));
     }
+    if (workFilter !== "all") {
+      list = list.filter((i) =>
+        matchesContentWorkFilter(i, workFilter, data.currentUserId),
+      );
+    }
     return list;
-  }, [data.items, brandId, platform]);
+  }, [data.items, brandId, platform, workFilter, data.currentUserId]);
 
   const now = React.useMemo(() => new Date(), []);
   const overdue = scopedItems.filter((i) => isContentItemOverdue(i, now));
@@ -235,6 +247,23 @@ export function ContentCalendarClient() {
                   {(Object.keys(CONTENT_PLATFORM_LABELS) as ContentPlatform[]).map((p) => (
                     <SelectItem key={p} value={p}>
                       {CONTENT_PLATFORM_LABELS[p]}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
+                value={workFilter}
+                onValueChange={(v) => setWorkFilter((v as ContentWorkFilter) ?? "all")}
+              >
+                <SelectTrigger className="w-[180px]">
+                  <SelectValue placeholder="Work">
+                    {CONTENT_WORK_FILTER_LABELS[workFilter]}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  {(Object.keys(CONTENT_WORK_FILTER_LABELS) as ContentWorkFilter[]).map((key) => (
+                    <SelectItem key={key} value={key}>
+                      {CONTENT_WORK_FILTER_LABELS[key]}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -394,41 +423,64 @@ export function ContentCalendarClient() {
                       })}
                     </div>
                     <div className="space-y-1.5">
-                      {dayItems.map((item) => (
-                        <Link
-                          key={item.id}
-                          href={`/content/${item.id}`}
-                          className={cn(
-                            "block rounded-md border bg-background px-2 py-1.5 text-xs hover:bg-muted/50",
-                            isContentItemOverdue(item, now) && "border-destructive/50",
-                          )}
-                        >
-                          <div className="font-medium line-clamp-2">{item.title}</div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
-                            {fmtDate(item.publishAt, "h:mm a")}
-                            {item.platforms[0]
-                              ? ` · ${CONTENT_PLATFORM_LABELS[item.platforms[0]]}`
-                              : ""}
-                          </div>
-                          <div className="text-muted-foreground mt-0.5 flex flex-wrap gap-1">
-                            <Badge variant="outline" className="h-4 px-1 text-[9px]">
-                              {CONTENT_STATUS_LABELS[item.status]}
-                            </Badge>
-                            {item.platforms.slice(0, 2).map((p) => (
-                              <span key={p}>{CONTENT_PLATFORM_LABELS[p]}</span>
-                            ))}
-                            {item.format ? (
-                              <span>{CONTENT_FORMAT_LABELS[item.format]}</span>
-                            ) : null}
-                            {item.verifiedFromKnowledge || (item.ragCitations?.length ?? 0) > 0 ? (
-                              <span className="text-emerald-700 dark:text-emerald-400">Verified</span>
-                            ) : null}
-                          </div>
-                          <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
-                            {CONTENT_PILLAR_LABELS[item.pillarKey] ?? item.pillarKey}
-                          </div>
-                        </Link>
-                      ))}
+                      {dayItems.map((item) => {
+                        const nextAction = getContentNextAction(item);
+                        const myTurn = isContentItemMyTurn(item, data.currentUserId);
+                        const grounded =
+                          item.verifiedFromKnowledge || (item.ragCitations?.length ?? 0) > 0;
+                        return (
+                          <Link
+                            key={item.id}
+                            href={`/content/${item.id}`}
+                            className={cn(
+                              "block rounded-md border bg-background px-2 py-1.5 text-xs hover:bg-muted/50",
+                              isContentItemOverdue(item, now) && "border-destructive/50",
+                              myTurn &&
+                                workFilter === "all" &&
+                                !isContentItemOverdue(item, now) &&
+                                "border-primary/40 bg-primary/[0.03]",
+                            )}
+                          >
+                            <div className="font-medium line-clamp-2">{item.title}</div>
+                            <div className="text-[10px] text-muted-foreground mt-0.5 tabular-nums">
+                              {fmtDate(item.publishAt, "h:mm a")}
+                              {item.platforms[0]
+                                ? ` · ${CONTENT_PLATFORM_LABELS[item.platforms[0]]}`
+                                : ""}
+                            </div>
+                            <div className="mt-0.5 flex flex-wrap items-center gap-1">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "h-4 px-1 text-[9px]",
+                                  contentNextActionBadgeClass(nextAction),
+                                )}
+                              >
+                                {CONTENT_NEXT_ACTION_LABELS[nextAction]}
+                              </Badge>
+                              {myTurn ? (
+                                <span className="text-[9px] font-medium text-primary">Your turn</span>
+                              ) : null}
+                              {item.format ? (
+                                <span className="text-[10px] text-muted-foreground">
+                                  {CONTENT_FORMAT_LABELS[item.format]}
+                                </span>
+                              ) : null}
+                              {grounded ? (
+                                <span
+                                  className="text-[9px] text-muted-foreground"
+                                  title="Draft grounded in knowledge library"
+                                >
+                                  KB
+                                </span>
+                              ) : null}
+                            </div>
+                            <div className="text-[10px] text-muted-foreground mt-0.5 line-clamp-1">
+                              {CONTENT_PILLAR_LABELS[item.pillarKey] ?? item.pillarKey}
+                            </div>
+                          </Link>
+                        );
+                      })}
                     </div>
                   </div>
                 );
@@ -485,15 +537,24 @@ function ItemRow({
   onStatus: (item: ContentItem, status: ContentItemStatus) => void;
 }) {
   const primary = item.platforms[0] ?? "linkedin";
+  const nextAction = getContentNextAction(item);
   return (
     <div className="flex items-start justify-between gap-2 rounded-md border px-2 py-1.5">
       <div className="min-w-0">
         <Link href={`/content/${item.id}`} className="text-sm font-medium hover:underline">
           {item.title}
         </Link>
-        <div className="text-[11px] text-muted-foreground">
-          {brandName ? `${brandName} · ` : ""}
-          {fmtDate(item.publishAt, "MMM d · h:mm a")} · {CONTENT_PILLAR_LABELS[item.pillarKey]}
+        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+          <Badge
+            variant="outline"
+            className={cn("h-4 px-1 text-[9px]", contentNextActionBadgeClass(nextAction))}
+          >
+            {CONTENT_NEXT_ACTION_LABELS[nextAction]}
+          </Badge>
+          <span>
+            {brandName ? `${brandName} · ` : ""}
+            {fmtDate(item.publishAt, "MMM d · h:mm a")} · {CONTENT_PILLAR_LABELS[item.pillarKey]}
+          </span>
         </div>
       </div>
       <div className="flex shrink-0 gap-1">

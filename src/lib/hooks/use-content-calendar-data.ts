@@ -473,20 +473,49 @@ export function useContentCalendarData() {
   );
 
   const updateCapture = React.useCallback(
-    async (captureId: string, patch: Partial<ContentCapture>) => {
+    async (
+      captureId: string,
+      patch: Partial<ContentCapture> & { errorMessage?: string | null },
+    ) => {
       const updatedAt = new Date().toISOString();
+      const applyLocal = (prev: ContentCapture[]) =>
+        prev.map((c) => {
+          if (c.id !== captureId) return c;
+          const next: ContentCapture = { ...c, ...patch, updatedAt, errorMessage: c.errorMessage };
+          if (patch.errorMessage === null) delete next.errorMessage;
+          else if (typeof patch.errorMessage === "string") next.errorMessage = patch.errorMessage;
+          return next;
+        });
       if (isDemo) {
-        setCaptures((prev) =>
-          prev.map((c) => (c.id === captureId ? { ...c, ...patch, updatedAt } : c)),
-        );
+        setCaptures(applyLocal);
         return;
       }
       const db = getFirebaseDb();
       if (!db) return;
       await persistContentCaptureUpdate(db, captureId, { ...patch, updatedAt });
-      setCaptures((prev) =>
-        prev.map((c) => (c.id === captureId ? { ...c, ...patch, updatedAt } : c)),
-      );
+      setCaptures(applyLocal);
+    },
+    [isDemo],
+  );
+
+  const deleteCapture = React.useCallback(
+    async (captureId: string) => {
+      if (isDemo) {
+        setCaptures((prev) => prev.filter((c) => c.id !== captureId));
+        toast.message("Demo mode - not persisted");
+        return true;
+      }
+      const res = await fetch(`/api/ai/content-capture/${encodeURIComponent(captureId)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      if (!res.ok) {
+        const json = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(json.error || "Could not delete capture");
+        return false;
+      }
+      setCaptures((prev) => prev.filter((c) => c.id !== captureId));
+      return true;
     },
     [isDemo],
   );
@@ -533,6 +562,7 @@ export function useContentCalendarData() {
     deleteItem,
     createCapture,
     updateCapture,
+    deleteCapture,
     savePlan,
   };
 }

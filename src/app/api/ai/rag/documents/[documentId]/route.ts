@@ -1,11 +1,10 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
-import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import { indexAiDocumentServer } from "@/lib/ai/rag-indexer";
+import { deleteAiDocumentServer } from "@/lib/ai/delete-ai-document-server";
 import { KNOWLEDGE_SECTIONS } from "@/lib/ai/fit-check-knowledge-types";
 
 const patchSchema = z.object({
@@ -114,32 +113,12 @@ export async function DELETE(_req: Request, ctx: RouteCtx) {
   const snap = await ref.get();
   if (!snap.exists) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const data = snap.data()!;
-  const libraryId = String(data.libraryId ?? "");
-  const prevChunks = (data.chunkCount as number | undefined) ?? 0;
-
-  const chunks = await ref.collection("chunks").get();
-  const batch = db.batch();
-  for (const c of chunks.docs) batch.delete(c.ref);
-  batch.delete(ref);
-
-  if (libraryId) {
-    const libRef = db
-      .collection(COLLECTIONS.organizations)
-      .doc(orgId)
-      .collection(ORG_SUBCOLLECTIONS.aiLibraries)
-      .doc(libraryId);
-    batch.set(
-      libRef,
-      {
-        documentCount: FieldValue.increment(-1),
-        chunkCount: FieldValue.increment(-prevChunks),
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true },
-    );
+  const deleted = await deleteAiDocumentServer({
+    organizationId: orgId,
+    documentId,
+  });
+  if ("error" in deleted) {
+    return NextResponse.json({ error: deleted.error }, { status: 503 });
   }
-
-  await batch.commit();
   return NextResponse.json({ ok: true });
 }

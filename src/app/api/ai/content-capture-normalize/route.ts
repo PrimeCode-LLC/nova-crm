@@ -123,26 +123,40 @@ export async function POST(req: Request) {
     }
 
     const now = new Date().toISOString();
-    const docRef = db
+    const docs = db
       .collection(COLLECTIONS.organizations)
       .doc(orgId)
-      .collection(ORG_SUBCOLLECTIONS.aiDocuments)
-      .doc();
+      .collection(ORG_SUBCOLLECTIONS.aiDocuments);
+
+    // Reuse prior knowledge doc on retry so we don't orphan partial indexes.
+    const priorId =
+      typeof capture.knowledgeDocumentId === "string" ? capture.knowledgeDocumentId : "";
+    let docRef = priorId ? docs.doc(priorId) : docs.doc();
+    let isNewDoc = !priorId;
+    if (priorId) {
+      const existing = await docRef.get();
+      if (!existing.exists) {
+        docRef = docs.doc();
+        isNewDoc = true;
+      }
+    }
 
     const section = capture.publicSafe ? "case_studies" : "other";
-    await docRef.set({
-      libraryId,
-      title: result.title,
-      content: result.markdown,
-      sourceType: "markdown",
-      sourceRef: `contentCapture:${parsed.data.captureId}`,
-      knowledgeSection: section,
-      chunkCount: 0,
-      organizationId: orgId,
-      publicSafe: Boolean(capture.publicSafe),
-      createdAt: now,
-      updatedAt: now,
-    });
+    await docRef.set(
+      {
+        libraryId,
+        title: result.title,
+        content: result.markdown,
+        sourceType: "markdown",
+        sourceRef: `contentCapture:${parsed.data.captureId}`,
+        knowledgeSection: section,
+        organizationId: orgId,
+        publicSafe: Boolean(capture.publicSafe),
+        updatedAt: now,
+        ...(isNewDoc ? { createdAt: now, chunkCount: 0 } : {}),
+      },
+      { merge: true },
+    );
 
     const indexed = await indexAiDocumentServer({
       organizationId: orgId,
@@ -180,6 +194,9 @@ export async function POST(req: Request) {
       documentId: docRef.id,
       libraryId,
       chunkCount: indexed.chunkCount,
+      status: "indexed" as const,
+      normalizedTitle: result.title,
+      normalizedMarkdown: result.markdown,
     });
   } catch (e) {
     await captureRef.update({

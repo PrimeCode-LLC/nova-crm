@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { computeContentConsistency } from "@/lib/content-calendar/consistency";
-import { isContentItemOverdue, buildContentChecklist, applyManualStatusToChecklist, type ContentCaptureRequiredField, type ContentItem } from "@/lib/content-calendar/types";
+import { isContentItemOverdue, buildContentChecklist, applyManualStatusToChecklist, getContentNextAction, isContentItemMyTurn, matchesContentWorkFilter, type ContentCaptureRequiredField, type ContentItem } from "@/lib/content-calendar/types";
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import { can } from "@/lib/permissions/can";
 import {
@@ -146,6 +146,67 @@ describe("content calendar", () => {
       fallbackUserId: "fallback",
     });
     expect(textOnly.map((s) => s.key)).toEqual(["write", "publish"]);
+  });
+
+  it("derives next-action cues from checklist for calendar scanning", () => {
+    const brand = {
+      ownerUserId: "owner",
+      responsibilities: {
+        writer: "w1",
+        designer: "d1",
+        poster: "p1",
+        approver: "a1",
+      },
+      approvalRequired: true,
+    };
+    const checklist = buildContentChecklist({
+      brand,
+      format: "carousel",
+      dueAt: "2026-07-20T10:00:00.000Z",
+      fallbackUserId: "fallback",
+    });
+
+    const base = {
+      status: "draft" as const,
+      assigneeUserId: "w1",
+      ownerUserId: "owner",
+    };
+
+    expect(getContentNextAction({ ...base, checklist })).toBe("needs_copy");
+    expect(isContentItemMyTurn({ ...base, checklist }, "w1")).toBe(true);
+    expect(isContentItemMyTurn({ ...base, checklist }, "d1")).toBe(false);
+
+    const afterWrite = checklist.map((s) =>
+      s.key === "write" ? { ...s, status: "done" as const } : s,
+    );
+    expect(getContentNextAction({ ...base, checklist: afterWrite })).toBe("ready_for_graphics");
+    expect(matchesContentWorkFilter({ ...base, checklist: afterWrite }, "ready_for_graphics", "d1")).toBe(
+      true,
+    );
+    expect(isContentItemMyTurn({ ...base, checklist: afterWrite }, "d1")).toBe(true);
+
+    const afterGraphics = afterWrite.map((s) =>
+      s.key === "graphics" ? { ...s, status: "done" as const } : s,
+    );
+    expect(getContentNextAction({ ...base, status: "review", checklist: afterGraphics })).toBe(
+      "needs_approval",
+    );
+
+    const afterApprove = afterGraphics.map((s) =>
+      s.key === "approve" ? { ...s, status: "done" as const } : s,
+    );
+    expect(getContentNextAction({ ...base, status: "scheduled", checklist: afterApprove })).toBe(
+      "ready_to_post",
+    );
+    expect(matchesContentWorkFilter({ ...base, checklist: afterApprove }, "ready_to_post", "p1")).toBe(
+      true,
+    );
+    expect(isContentItemMyTurn({ ...base, checklist: afterApprove }, "p1")).toBe(true);
+
+    expect(getContentNextAction({ status: "published", checklist: afterApprove })).toBe("posted");
+    expect(getContentNextAction({ status: "approved", checklist: undefined })).toBe("ready_to_post");
+    expect(matchesContentWorkFilter({ ...base, checklist }, "my_turn", "w1")).toBe(true);
+    expect(matchesContentWorkFilter({ ...base, checklist }, "my_turn", "p1")).toBe(false);
   });
 
   it("keeps checklist in sync when status is set manually", () => {
@@ -553,6 +614,7 @@ describe("capture policy", () => {
       {
         brandId: "b1",
         createdAt: "2026-07-20T10:00:00.000Z",
+        status: "indexed" as const,
       },
     ];
     expect(isBehindCaptureCadence({ brand, captures, nowMs })).toBe(true);
@@ -574,6 +636,42 @@ describe("capture policy", () => {
         captures,
         nowMs,
       }),
+    ).toBe(false);
+  });
+
+  it("ignores draft and failed captures for quota and idle", () => {
+    const nowMs = new Date("2026-07-23T12:00:00.000Z").getTime();
+    const brand = {
+      ...brandBase,
+      capturePolicy: {
+        capturesPerWeek: 1,
+        idleDays: 7,
+        requiredFields: ["problem", "solution"] as ContentCaptureRequiredField[],
+        remindersEnabled: true,
+      },
+    };
+    const failedOnly = [
+      {
+        brandId: "b1",
+        createdAt: "2026-07-22T10:00:00.000Z",
+        status: "failed" as const,
+      },
+    ];
+    expect(isBehindCaptureCadence({ brand, captures: failedOnly, nowMs })).toBe(true);
+    expect(
+      isCapturerIdle({ brand, captures: failedOnly, capturerUserId: "cap1", nowMs }),
+    ).toBe(true);
+
+    const indexed = [
+      {
+        brandId: "b1",
+        createdAt: "2026-07-22T10:00:00.000Z",
+        status: "indexed" as const,
+      },
+    ];
+    expect(isBehindCaptureCadence({ brand, captures: indexed, nowMs })).toBe(false);
+    expect(
+      isCapturerIdle({ brand, captures: indexed, capturerUserId: "cap1", nowMs }),
     ).toBe(false);
   });
 
