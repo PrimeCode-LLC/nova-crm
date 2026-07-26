@@ -10,6 +10,28 @@ import "./styles.css";
 
 type WorkerResponse<T> = { ok: true; value: T } | { ok: false; error: string };
 
+const PAGE_TYPE_LABELS: Record<
+  "case_study" | "job_post" | "rfp" | "news" | "vendor_page" | "other",
+  string
+> = {
+  case_study: "Case study / award",
+  job_post: "Job posting",
+  rfp: "RFP / partner search",
+  news: "News / announcement",
+  vendor_page: "Vendor / product page",
+  other: "Other",
+};
+
+const PROJECT_STAGE_LABELS: Record<
+  "planned" | "in_progress" | "completed" | "unknown",
+  string
+> = {
+  planned: "Planned",
+  in_progress: "In progress",
+  completed: "Completed",
+  unknown: "Unknown",
+};
+
 async function send<T>(request: WorkerRequest): Promise<T> {
   const response = (await chrome.runtime.sendMessage(request)) as WorkerResponse<T>;
   if (!response.ok) throw new Error(response.error);
@@ -617,8 +639,8 @@ function IntentRadarPanel() {
               {!result.aiEvaluation ? (
                 <>
                   <p className="muted">
-                    Keyword matches can be wrong without context. AI reviews each signal against the
-                    page and your knowledge base, then scores whether this is worth pursuing.
+                    Keyword matches can be wrong without context. AI reviews each signal, scores theme
+                    fit / buying intent / ICP deliverability, then suggests next steps as text.
                   </p>
                   <button
                     className="button primary"
@@ -649,7 +671,54 @@ function IntentRadarPanel() {
                       Adjusted intent {result.aiEvaluation.adjustedIntentScore}/100
                     </span>
                   </div>
+                  {result.aiEvaluation.result.scores ? (
+                    <div className="score-breakdown" aria-label="Fit score breakdown">
+                      <div>
+                        <span>Theme</span>
+                        <strong>{result.aiEvaluation.result.scores.themeFit}</strong>
+                      </div>
+                      <div>
+                        <span>Intent</span>
+                        <strong>{result.aiEvaluation.result.scores.buyingIntent}</strong>
+                      </div>
+                      <div>
+                        <span>ICP</span>
+                        <strong>{result.aiEvaluation.result.scores.icpDeliverability}</strong>
+                      </div>
+                      <div className="combined">
+                        <span>Combined</span>
+                        <strong>{result.aiEvaluation.result.scores.combined}</strong>
+                      </div>
+                    </div>
+                  ) : null}
+                  {result.aiEvaluation.result.pageType &&
+                  result.aiEvaluation.result.projectStage ? (
+                    <p className="muted page-type-line">
+                      {PAGE_TYPE_LABELS[result.aiEvaluation.result.pageType]} ·{" "}
+                      {PROJECT_STAGE_LABELS[result.aiEvaluation.result.projectStage]}
+                    </p>
+                  ) : null}
                   <p>{result.aiEvaluation.result.summary}</p>
+                  {result.aiEvaluation.result.nextSteps?.length ? (
+                    <>
+                      <p className="eyebrow">Suggested next steps</p>
+                      <ul className="gap-list next-steps-list">
+                        {result.aiEvaluation.result.nextSteps.map((step) => (
+                          <li key={step}>{step}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  {result.aiEvaluation.result.watchOuts?.length ? (
+                    <>
+                      <p className="eyebrow">Watch-outs</p>
+                      <ul className="gap-list watch-outs-list">
+                        {result.aiEvaluation.result.watchOuts.map((item) => (
+                          <li key={item}>{item}</li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
                   <p className="muted">
                     Confirmed {result.aiEvaluation.confirmedCount} · Rejected{" "}
                     {result.aiEvaluation.rejectedCount} · Uncertain{" "}

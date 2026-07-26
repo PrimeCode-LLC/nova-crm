@@ -1,4 +1,7 @@
-import type { IntentRadarEvaluateResult } from "@/lib/ai/intent-radar-evaluate-types";
+import {
+  normalizeIntentRadarEvaluateResult,
+  type IntentRadarEvaluateResult,
+} from "@/lib/ai/intent-radar-evaluate-types";
 
 export function demoIntentRadarEvaluateResult(input: {
   title: string;
@@ -28,20 +31,50 @@ export function demoIntentRadarEvaluateResult(input: {
   });
 
   const confirmed = signalReviews.filter((item) => item.decision === "confirm").length;
-  const fitScore = confirmed === 0 ? 28 : confirmed === 1 ? 52 : 74;
-  const verdict = fitScore >= 72 ? "pursue" : fitScore >= 45 ? "maybe" : "pass";
+  const looksCompletedCaseStudy =
+    /award|case study|wins|implementation|rollout completed/i.test(input.title);
 
-  return {
+  const themeFit = confirmed === 0 ? 35 : confirmed === 1 ? 62 : 84;
+  const buyingIntent = looksCompletedCaseStudy
+    ? 28
+    : confirmed === 0
+      ? 20
+      : confirmed === 1
+        ? 48
+        : 72;
+  const icpDeliverability = confirmed === 0 ? 40 : confirmed === 1 ? 55 : 68;
+
+  const raw: IntentRadarEvaluateResult = {
     signalReviews,
-    verdict,
-    fitScore,
-    fitLabel:
-      verdict === "pursue"
-        ? "Strong alignment"
-        : verdict === "maybe"
-          ? "Partial fit"
-          : "Poor fit",
-    summary: `Demo AI evaluation for “${input.title}”. Confirmed ${confirmed} of ${input.signals.length} lexical signals after context review. Live mode uses your Fit Check knowledge base.`,
+    scores: {
+      themeFit,
+      buyingIntent,
+      icpDeliverability,
+    },
+    pageType: looksCompletedCaseStudy ? "case_study" : "other",
+    projectStage: looksCompletedCaseStudy ? "completed" : "unknown",
+    nextSteps: looksCompletedCaseStudy
+      ? [
+          "Save as research/intel, not a hot pursue lead.",
+          "Capture any named stakeholders for later research.",
+          "Hunt lookalike companies still earlier in rollout.",
+        ]
+      : [
+          "Confirm buyer and timing before outreach.",
+          "Cross-check ICP fit against knowledge base gaps.",
+        ],
+    watchOuts: looksCompletedCaseStudy
+      ? [
+          "Retrospective award/case study — not an open buying signal.",
+          "Incumbent vendor may already own the core project.",
+        ]
+      : ["Lexical matches can over-count without budget or timeline proof."],
+    verdict: "maybe",
+    fitScore: 0,
+    fitLabel: looksCompletedCaseStudy ? "Theme match, weak buying intent" : "Partial fit",
+    summary: looksCompletedCaseStudy
+      ? `Demo AI evaluation for “${input.title}”. Strong theme language, but the page reads like a completed case study/award — use for lookalike research, not hot outreach.`
+      : `Demo AI evaluation for “${input.title}”. Confirmed ${confirmed} of ${input.signals.length} lexical signals after context review. Live mode uses your Fit Check knowledge base.`,
     strongMatches:
       confirmed > 0
         ? [
@@ -53,23 +86,25 @@ export function demoIntentRadarEvaluateResult(input: {
         : [],
     gaps: [
       {
-        point: "Lexical matches can over-count without context; confirm buyer and budget before outreach",
+        point:
+          "Lexical matches can over-count without context; confirm buyer and budget before outreach",
         severity: "minor",
         gapKind: "info_missing",
       },
     ],
     pursueRecommendation: {
-      shouldPursue: verdict !== "pass",
-      headline:
-        verdict === "pursue"
+      shouldPursue: true,
+      headline: looksCompletedCaseStudy
+        ? "Use for lookalike prospecting"
+        : confirmed > 1
           ? "Worth a qualified outreach"
-          : verdict === "maybe"
-            ? "Needs more research"
-            : "Skip for now",
+          : "Needs more research",
       reasoning:
         "Demo mode only. Configure AI keys and Fit Check libraries for live knowledge-grounded scoring.",
       estimatedEffort: "medium",
     },
     ragCitations: [],
   };
+
+  return normalizeIntentRadarEvaluateResult(raw);
 }

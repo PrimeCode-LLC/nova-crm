@@ -67,6 +67,16 @@ export type IntentRadarAiEvaluation = {
       polarity: "positive_intent" | "negative_or_noise" | "neutral";
       reason: string;
     }[];
+    scores?: {
+      themeFit: number;
+      buyingIntent: number;
+      icpDeliverability: number;
+      combined: number;
+    };
+    pageType?: "case_study" | "job_post" | "rfp" | "news" | "vendor_page" | "other";
+    projectStage?: "planned" | "in_progress" | "completed" | "unknown";
+    nextSteps?: string[];
+    watchOuts?: string[];
     verdict: "pursue" | "maybe" | "pass";
     fitScore: number;
     fitLabel: string;

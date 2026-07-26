@@ -260,7 +260,7 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     operation: "action",
     tableName: "intentRadar",
     message: (m) =>
-      `Intent Radar AI evaluate (${String(m.verdict ?? "")} · ${String(m.fitScore ?? "")})`,
+      `Intent Radar AI evaluate (${String(m.verdict ?? "")} · combined ${String(m.combined ?? m.fitScore ?? "")}${m.pageType ? ` · ${String(m.pageType)}` : ""})`,
   },
   "feature.lead_analyze": {
     operation: "action",

@@ -16,6 +16,7 @@ import { demoIntentRadarEvaluateResult } from "@/lib/ai/demo-intent-radar-evalua
 import {
   computeAdjustedIntentScore,
   intentRadarEvaluateResultSchema,
+  normalizeIntentRadarEvaluateResult,
   type IntentRadarEvaluatePayload,
 } from "@/lib/ai/intent-radar-evaluate-types";
 import type { Role } from "@/lib/types";
@@ -195,6 +196,8 @@ export async function POST(req: Request) {
     });
   }
 
+  result = normalizeIntentRadarEvaluateResult(result);
+
   const adjusted = computeAdjustedIntentScore(parsed.data.matchedSignals, result.signalReviews);
   const payload: IntentRadarEvaluatePayload = {
     evaluatedAt: new Date().toISOString(),
@@ -213,6 +216,12 @@ export async function POST(req: Request) {
       lexicalScore: parsed.data.lexicalScore,
       adjustedIntentScore: payload.adjustedIntentScore,
       fitScore: result.fitScore,
+      themeFit: result.scores.themeFit,
+      buyingIntent: result.scores.buyingIntent,
+      icpDeliverability: result.scores.icpDeliverability,
+      combined: result.scores.combined,
+      pageType: result.pageType,
+      projectStage: result.projectStage,
       verdict: result.verdict,
       demo: useDemo,
     },

@@ -288,10 +288,17 @@ Return JSON with:
 Critical rules:
 - Read surrounding context. Reject keyword hits that are negative, historical, or unrelated (e.g. "lost investment" is NOT a funding intent signal; "TV Series" is not Series A funding).
 - Confirm only signals that show real, current buying / demand / project intent.
+- Score THREE dimensions separately (do not collapse them into one number):
+  1) themeFit: how well page themes match our ICP/services (keywords/topics).
+  2) buyingIntent: open/current demand to buy or start a project NOW. Retrospective awards, completed rollouts, and vendor marketing case studies score LOW even if themes match.
+  3) icpDeliverability: whether we can realistically sell and deliver (buyer type, stack, industry, commercial fit vs knowledge base).
+- If pageType is case_study (including award posts) and projectStage is completed, keep buyingIntent at or below 35 unless the page clearly states a next open initiative or RFP.
+- Theme match alone must NOT produce a pursue recommendation. Prefer lookalike / research guidance when intent is historical.
 - Score fit using the knowledge base in strict mode. Be honest about mismatches.
 - Gaps describe the OPPORTUNITY or page, not missing items from our company profile unless the KB proves we cannot deliver.
-- Align verdict with fitScore: pursue ≥72, maybe 45–71, pass <45 unless blockers force pass.
+- Set fitScore to a rough overall guess; the server recomputes combined from the three scores and realigns verdict (pursue ≥72, maybe 45–71, pass <45).
 - Review EVERY provided signal id exactly once in signalReviews.
+- nextSteps: 2-4 concrete text actions for a sales rep (no button labels). watchOuts: 0-3 blunt risks (e.g. incumbent named, no open RFP).
 
 Output structured JSON only.`,
     userPromptTemplate: `Evaluate this Intent Radar page scan.
@@ -312,13 +319,19 @@ Page text:
 
 Return JSON with:
 - signalReviews: one item per matched signal with signalId, label, decision ("confirm"|"reject"|"uncertain"), polarity ("positive_intent"|"negative_or_noise"|"neutral"), reason
+- scores: { themeFit, buyingIntent, icpDeliverability } each 0-100 integers (combined optional; server recomputes)
+- pageType: "case_study" | "job_post" | "rfp" | "news" | "vendor_page" | "other"
+- projectStage: "planned" | "in_progress" | "completed" | "unknown"
+- nextSteps: string[] (2-4 plain-text actions)
+- watchOuts: string[] (0-3 risks / false-positive warnings)
 - verdict: "pursue" | "maybe" | "pass"
-- fitScore: 0-100 integer (knowledge-grounded worth chasing, NOT a copy of lexical score)
+- fitScore: 0-100 integer (rough overall; server overwrites with weighted combined)
 - fitLabel: short plain-English label
 - summary: 2-3 sentences for a sales rep
 - strongMatches: { point, sourceTitle }[] (0-6; sourceTitle = KB doc title or "")
 - gaps: { point, severity: "blocker"|"minor", gapKind: "opportunity"|"company_capability"|"commercial"|"info_missing" }[] (1-8)
 - pursueRecommendation: { shouldPursue, headline, reasoning, estimatedEffort: "low"|"medium"|"high" }
+  - For completed case studies/awards, headline should steer toward research/lookalikes, not "pursue their finished project"
 - ragCitations: { title, excerpt }[] (from knowledge chunks used; empty if none)`,
   },
   opportunity_fit_discuss: {

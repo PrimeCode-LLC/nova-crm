@@ -592,6 +592,55 @@ kbd {
   color: #e4e4e7;
 }
 
+.score-breakdown {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.score-breakdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 6px;
+  border-radius: 8px;
+  background: rgb(39 39 42 / 70%);
+  border: 1px solid rgb(63 63 70 / 80%);
+  text-align: center;
+}
+
+.score-breakdown span {
+  color: #a1a1aa;
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+
+.score-breakdown strong {
+  color: #f4f4f5;
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-breakdown > div.combined {
+  border-color: rgb(113 113 122 / 90%);
+  background: rgb(24 24 27 / 90%);
+}
+
+.page-type-line {
+  margin-top: 8px !important;
+}
+
+.next-steps-list,
+.watch-outs-list {
+  margin-top: 4px;
+}
+
+.watch-outs-list {
+  color: #fca5a5;
+}
+
 .pill.maybe {
   color: #fde68a;
   background: rgb(161 98 7 / 22%);
