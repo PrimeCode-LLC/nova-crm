@@ -1,5 +1,6 @@
 import type { KnowledgeSection } from "@/lib/ai/fit-check-knowledge-types";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
+import type { AiLibraryAllowedFeature } from "@/lib/ai/types";
 
 export type LinkableKnowledgeDocument = {
   id: string;
@@ -17,6 +18,7 @@ export type LinkableKnowledgeLibrary = {
   libraryKind?: string;
   fitCategory?: OpportunitySourceType;
   fitCategoryLabel?: string;
+  allowedFeatures: AiLibraryAllowedFeature[];
   documentCount: number;
   chunkCount: number;
   documents: LinkableKnowledgeDocument[];

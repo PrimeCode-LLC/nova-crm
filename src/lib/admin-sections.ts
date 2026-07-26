@@ -18,9 +18,27 @@ export interface AdminSubSection {
 
 export const ADMIN_SUBSECTIONS: Record<string, AdminSubSection[]> = {
   "/admin/ai": [
+    {
+      tab: "overview",
+      label: "Overview",
+      keywords: ["knowledge", "rag", "libraries", "hub", "status"],
+    },
+    {
+      tab: "libraries",
+      label: "Libraries",
+      keywords: ["rag", "documents", "company", "channel", "topic", "knowledge", "features"],
+    },
+    {
+      tab: "brands",
+      label: "Brands",
+      keywords: ["content", "voice", "calendar", "capture", "knowledge"],
+    },
     { tab: "setup", label: "Setup", keywords: ["provider", "api key", "enable"] },
-    { tab: "prompts", label: "Prompts", keywords: ["system prompt", "tone"] },
-    { tab: "knowledge", label: "Knowledge", keywords: ["rag", "library", "documents"] },
+    {
+      tab: "prompts",
+      label: "Prompts",
+      keywords: ["system prompt", "tone", "content", "outreach"],
+    },
     { tab: "usage", label: "Usage", keywords: ["tokens", "cost", "requests"] },
   ],
   "/admin/people": [

@@ -127,7 +127,7 @@ export async function POST(req: Request) {
       await captureRef.update({
         status: "failed",
         errorMessage:
-          "No knowledge library selected. Pick a knowledgebase on Capture, or seed Fit Check knowledge.",
+          "No knowledge library selected. Pick a knowledgebase on Capture, or seed Company knowledge under AI & knowledge.",
         normalizedTitle: result.title,
         normalizedMarkdown: result.markdown,
         updatedAt: new Date().toISOString(),

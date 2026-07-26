@@ -100,7 +100,7 @@ export function demoIntentRadarEvaluateResult(input: {
           ? "Worth a qualified outreach"
           : "Needs more research",
       reasoning:
-        "Demo mode only. Configure AI keys and Fit Check libraries for live knowledge-grounded scoring.",
+        "Demo mode only. Configure AI keys and org knowledge libraries for live knowledge-grounded scoring.",
       estimatedEffort: "medium",
     },
     ragCitations: [],

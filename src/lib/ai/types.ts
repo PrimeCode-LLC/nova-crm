@@ -65,6 +65,17 @@ export interface AiPromptTemplate {
   updatedAt?: string;
 }
 
+/**
+ * Product surfaces that may retrieve from a knowledge library.
+ * Brands (Content) and outreach profiles pick among libraries that allow each surface.
+ */
+export type AiLibraryAllowedFeature =
+  | "content"
+  | "outreach"
+  | "fit_check"
+  | "intent_radar"
+  | "lead_ai";
+
 export interface AiKnowledgeLibrary {
   id: string;
   organizationId: string;
@@ -82,6 +93,11 @@ export interface AiKnowledgeLibrary {
   fitCategory?: string;
   seedSourceUrl?: string;
   lastSeededAt?: string;
+  /**
+   * Which product surfaces may link / retrieve this library.
+   * When omitted, defaults are inferred from library type (company / channel / brand pack / topic).
+   */
+  allowedFeatures?: AiLibraryAllowedFeature[];
 }
 
 export interface AiKnowledgeDocument {

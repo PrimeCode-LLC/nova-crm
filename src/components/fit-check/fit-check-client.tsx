@@ -399,11 +399,11 @@ export function FitCheckClient() {
                     selectedProfile.knowledgeLibraryIds.length === 0 &&
                     selectedProfile.knowledgeDocumentIds.length === 0 ? (
                       <p className="text-xs text-amber-600 dark:text-amber-400">
-                        Link knowledge libraries or documents (e.g. MERN Stack) in{" "}
+                        Link knowledge libraries or documents on this profile in{" "}
                         <Link href="/admin/profiles" className="underline">
-                          Admin → Profiles
-                        </Link>
-                        .
+                          Configuration → Profiles
+                        </Link>{" "}
+                        (same org knowledge Content and sequences use).
                       </p>
                     ) : null}
                   </>
@@ -438,10 +438,10 @@ export function FitCheckClient() {
               </Button>
 
               <p className="text-xs text-muted-foreground">
-                Each persona uses its own knowledge libraries. Shared libraries (e.g. one MERN doc)
-                can be linked to multiple profiles in{" "}
+                Each persona links org knowledge libraries (Company, topic, or channel packs). The
+                same corpus powers Content and email sequences — configure links in{" "}
                 <Link href="/admin/profiles" className="underline underline-offset-2">
-                  Admin → Profiles
+                  Configuration → Profiles
                 </Link>
                 .
               </p>

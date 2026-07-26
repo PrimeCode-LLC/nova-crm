@@ -469,9 +469,9 @@ export function ContentCalendarClient() {
                               {grounded ? (
                                 <span
                                   className="text-[9px] text-muted-foreground"
-                                  title="Draft grounded in knowledge library"
+                                  title="Draft grounded in org knowledge libraries"
                                 >
-                                  KB
+                                  Knowledge
                                 </span>
                               ) : null}
                             </div>

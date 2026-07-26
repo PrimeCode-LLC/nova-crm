@@ -36,7 +36,7 @@ export type AdminFeatureMeta = {
 export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
   ai_knowledge: {
     label: "AI & knowledge",
-    description: "AI settings, prompts, and knowledge libraries",
+    description: "Org knowledge base, providers, prompts, and usage — shared by Content, Outreach, and Fit Check",
     cluster: "programs",
     minWorkspaceRole: "director",
     minOrgRole: "admin",

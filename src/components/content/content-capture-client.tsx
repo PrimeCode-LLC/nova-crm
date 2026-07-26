@@ -337,7 +337,23 @@ export function ContentCaptureClient() {
       }
       const json = await runNormalize(capture.id);
       if (!json) return;
-      toast.success(json.title ? `Indexed: ${json.title}` : "Captured and indexed");
+      const libLabel =
+        libraries.find((l) => l.id === (json.libraryId ?? libraryId))?.name ??
+        "knowledge library";
+      const brandLabel = brandId
+        ? data.brands.find((b) => b.id === brandId)?.name
+        : undefined;
+      toast.success(json.title ? `Indexed: ${json.title}` : "Captured and indexed", {
+        description: brandLabel
+          ? `Saved to ${libLabel} · used by ${brandLabel}`
+          : `Saved to ${libLabel}`,
+        action: {
+          label: "View knowledge",
+          onClick: () => {
+            window.location.href = "/admin/ai?tab=libraries";
+          },
+        },
+      });
       setProblem("");
       setSolution("");
       setOutcome("");
@@ -394,7 +410,7 @@ export function ContentCaptureClient() {
     <AppPage>
       <PageHeader
         title="Capture"
-        description="Turn today’s problem → solution into a RAG case study for future posts, emails, and Fit Check."
+        description="Turn today’s problem → solution into a knowledge case study for posts, email sequences, and Fit Check."
         actions={
           <Link href="/content" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
             Calendar
@@ -475,12 +491,16 @@ export function ContentCaptureClient() {
                 </Select>
                 {!librariesLoading && sortedLibraries.length === 0 ? (
                   <p className="text-xs text-amber-600 dark:text-amber-400">
-                    No knowledge libraries yet. Create topic libraries under AI &amp; knowledge
+                    No knowledge libraries yet. Create them under{" "}
+                    <Link href="/admin/ai?tab=libraries" className="underline">
+                      AI &amp; knowledge → Libraries
+                    </Link>{" "}
                     (or link them on a brand).
                   </p>
                 ) : (
                   <p className="text-xs text-muted-foreground">
-                    Indexes once into this library. Brands that link it can reuse the proof.
+                    Indexes into this org library. Content, email sequences, and Fit Check can
+                    retrieve it when linked.
                     {brandsUsingLibrary.length > 0
                       ? ` Used by: ${brandsUsingLibrary.map((b) => b.name).join(", ")}.`
                       : ""}

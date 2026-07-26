@@ -16,6 +16,7 @@ import {
 import { OPPORTUNITY_SOURCE_TYPES, OPPORTUNITY_SOURCE_LABELS } from "@/lib/ai/opportunity-fit-types";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 import type { AiKnowledgeLibrary, AiLibraryScope } from "@/lib/ai/types";
+import { defaultAllowedFeaturesForLibraryType } from "@/lib/ai/knowledge-library-ui";
 import {
   crawlStellixSoftSite,
   pageToKnowledgeDocument,
@@ -23,8 +24,8 @@ import {
   STELLIXSOFT_SITE_ORIGIN,
 } from "@/lib/ai/stellixsoft-site-crawler";
 
-export const FIT_CHECK_GLOBAL_LIBRARY_NAME = "Sales knowledge, Global (company)";
-export const FIT_CHECK_CATEGORY_LIBRARY_PREFIX = "Sales knowledge, ";
+export const FIT_CHECK_GLOBAL_LIBRARY_NAME = "Company knowledge";
+export const FIT_CHECK_CATEGORY_LIBRARY_PREFIX = "Channel · ";
 
 export type SeedFitCheckLibraryResult = {
   globalLibraryId: string;
@@ -87,7 +88,13 @@ async function findLibrary(
       if (!snap.empty) return snap.docs[0]!.id;
     }
     const all = await col.get();
-    const byName = all.docs.find((d) => d.data().name === FIT_CHECK_GLOBAL_LIBRARY_NAME);
+    const byName = all.docs.find((d) => {
+      const name = String(d.data().name ?? "");
+      return (
+        name === FIT_CHECK_GLOBAL_LIBRARY_NAME ||
+        /^Sales knowledge,\s*Global/i.test(name)
+      );
+    });
     return byName?.id ?? null;
   }
 
@@ -135,6 +142,13 @@ async function ensureLibrary(
     .collection(ORG_SUBCOLLECTIONS.aiLibraries)
     .doc();
 
+  const isCompany =
+    input.libraryKind === FIT_CHECK_LIBRARY_KIND_GLOBAL ||
+    input.libraryKind === FIT_CHECK_LIBRARY_KIND_LEGACY;
+  const allowedFeatures = isCompany
+    ? defaultAllowedFeaturesForLibraryType("company")
+    : defaultAllowedFeaturesForLibraryType("channel");
+
   const lib: AiKnowledgeLibrary = {
     id: ref.id,
     organizationId,
@@ -146,6 +160,7 @@ async function ensureLibrary(
     createdAt: now,
     updatedAt: now,
     libraryKind: input.libraryKind,
+    allowedFeatures,
     ...(input.fitCategory ? { fitCategory: input.fitCategory } : {}),
     ...(!input.fitCategory ? { seedSourceUrl: STELLIXSOFT_SITE_ORIGIN } : {}),
   };

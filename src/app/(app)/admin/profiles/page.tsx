@@ -205,7 +205,7 @@ export default function AdminProfilesPage() {
     <>
       <PageHeader
         title="Profiles"
-        description="Outreach personas per channel. Assign Fit Check categories and knowledge libraries so each stack (MERN, .NET, etc.) gets the right answers."
+        description="Outreach personas per channel. Link org knowledge libraries (and optional Fit Check categories) so each stack gets the right proof for sequences and scoring."
         actions={
           <Button size="sm" onClick={() => setNewOpen(true)}>
             <Plus className="h-3.5 w-3.5" /> New profile

@@ -38,6 +38,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { Textarea } from "@/components/ui/textarea";
+import Link from "next/link";
 import {
   Select,
   SelectContent,
@@ -812,7 +813,12 @@ function SettingsPage() {
               <CardHeader>
                 <CardTitle className="text-sm">Personal AI preferences</CardTitle>
                 <CardDescription className="text-xs">
-                  Tone and instructions appended to org prompts. API keys are configured in Admin → AI & knowledge.
+                  Tone and instructions appended to org prompts. Org API keys and the shared
+                  knowledge base are managed in{" "}
+                  <Link href="/admin/ai?tab=overview" className="underline">
+                    Configuration → AI &amp; knowledge
+                  </Link>
+                  .
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">

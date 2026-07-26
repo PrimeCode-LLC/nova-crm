@@ -59,9 +59,10 @@ export function ProfileKnowledgePicker({
     void (async () => {
       setLoading(true);
       try {
-        const res = await fetch("/api/ai/fit-check/linkable-libraries", {
-          credentials: "same-origin",
-        });
+        const res = await fetch(
+          "/api/ai/fit-check/linkable-libraries?for=fit_check,outreach,intent_radar,lead_ai",
+          { credentials: "same-origin" },
+        );
         if (!res.ok) return;
         const data = (await res.json()) as { groups?: LinkableKnowledgeGroup[] };
         const g = data.groups ?? [];
@@ -161,9 +162,15 @@ export function ProfileKnowledgePicker({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between gap-2">
-        <Label className="text-xs">Knowledge libraries & documents</Label>
+        <div className="min-w-0">
+          <Label className="text-xs">Knowledge libraries & documents</Label>
+          <p className="text-[10px] text-muted-foreground mt-0.5">
+            Shared org corpus — used for outreach sequences, replies, and Fit Check when this
+            profile is selected.
+          </p>
+        </div>
         {selectedCount > 0 ? (
-          <span className="text-[10px] text-muted-foreground tabular-nums">
+          <span className="text-[10px] text-muted-foreground tabular-nums shrink-0">
             {selectedCount} selected
           </span>
         ) : null}
@@ -184,7 +191,11 @@ export function ProfileKnowledgePicker({
         </p>
       ) : groups.length === 0 ? (
         <p className="text-xs text-muted-foreground py-2">
-          No knowledge found. Add libraries under Admin → AI → Knowledge.
+          No knowledge found. Add libraries under{" "}
+          <a href="/admin/ai?tab=libraries" className="underline">
+            AI &amp; knowledge → Libraries
+          </a>
+          .
         </p>
       ) : (
         <ScrollArea className="h-[min(280px,40vh)] rounded-md border bg-background/50">

@@ -67,6 +67,7 @@ import {
 import { CONTENT_STRATEGY_PACKS } from "@/lib/content-calendar/strategy-packs";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { OrganizationMember } from "@/lib/types";
+import { displayKnowledgeLibraryName, libraryAllowsFeature } from "@/lib/ai/knowledge-library-ui";
 import { UserChip } from "@/components/common/user-chip";
 import { Switch } from "@/components/ui/switch";
 
@@ -101,7 +102,16 @@ const FORM_STEPS = [
 
 type FormStepId = (typeof FORM_STEPS)[number]["id"];
 
-type LibraryOption = { id: string; name: string };
+type LibraryOption = {
+  id: string;
+  name: string;
+  libraryKind?: string;
+  fitCategory?: string;
+  scope?: { type?: string; brandId?: string };
+  allowedFeatures?: string[];
+  documentCount?: number;
+  chunkCount?: number;
+};
 
 type BrandFormState = {
   name: string;
@@ -264,12 +274,27 @@ export function ContentBrandsClient() {
         const res = await fetch("/api/ai/rag/libraries", { credentials: "same-origin" });
         if (!res.ok) return;
         const json = (await res.json()) as {
-          libraries?: { id: string; name?: string }[];
+          libraries?: {
+            id: string;
+            name?: string;
+            libraryKind?: string;
+            fitCategory?: string;
+            scope?: { type?: string; brandId?: string };
+            allowedFeatures?: string[];
+            documentCount?: number;
+            chunkCount?: number;
+          }[];
         };
         setLibraries(
           (json.libraries ?? []).map((l) => ({
             id: l.id,
             name: l.name?.trim() || l.id,
+            libraryKind: l.libraryKind,
+            fitCategory: l.fitCategory,
+            scope: l.scope,
+            allowedFeatures: l.allowedFeatures,
+            documentCount: l.documentCount,
+            chunkCount: l.chunkCount,
           })),
         );
       } catch {
@@ -308,10 +333,14 @@ export function ContentBrandsClient() {
   }, [ws.users]);
 
   const filteredLibraries = React.useMemo(() => {
+    const contentLibs = libraries.filter((l) => libraryAllowsFeature(l, "content"));
     const q = libQuery.trim().toLowerCase();
-    if (!q) return libraries;
-    return libraries.filter(
-      (l) => l.name.toLowerCase().includes(q) || l.id.toLowerCase().includes(q),
+    if (!q) return contentLibs;
+    return contentLibs.filter(
+      (l) =>
+        l.name.toLowerCase().includes(q) ||
+        l.id.toLowerCase().includes(q) ||
+        displayKnowledgeLibraryName(l).toLowerCase().includes(q),
     );
   }, [libraries, libQuery]);
 
@@ -480,13 +509,16 @@ export function ContentBrandsClient() {
     }
   }
 
-  const libraryName = (id: string) => libraries.find((l) => l.id === id)?.name ?? id;
+  const libraryName = (id: string) => {
+    const lib = libraries.find((l) => l.id === id);
+    return lib ? displayKnowledgeLibraryName(lib) : id;
+  };
 
   return (
     <AppPage>
       <PageHeader
         title="Content brands"
-        description="Separate brand type, outcome, and strategy - with voice, pillars, proof sources, and cadence."
+        description="Voice, pillars, proof, and knowledge links — brands consume the shared org knowledge base for drafts and plans."
         actions={
           <>
             <Link
@@ -541,11 +573,53 @@ export function ContentBrandsClient() {
                     .map((p) => `${p.name} ${p.targetPercent}%`)
                     .join(" · ")}
                 </div>
-                <div className="text-xs text-muted-foreground">
-                  Knowledge:{" "}
-                  {brand.knowledgeLibraryIds.length
-                    ? brand.knowledgeLibraryIds.map(libraryName).join(", ")
-                    : "Org default (Fit Check global)"}
+                <div className="rounded-md border bg-muted/20 px-3 py-2 space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-medium">Knowledge</p>
+                    <div className="flex flex-wrap gap-1">
+                      <Link
+                        href="/admin/ai?tab=libraries"
+                        className="text-[10px] text-primary underline-offset-2 hover:underline"
+                      >
+                        Manage libraries
+                      </Link>
+                      <span className="text-[10px] text-muted-foreground">·</span>
+                      <Link
+                        href="/content/capture"
+                        className="text-[10px] text-primary underline-offset-2 hover:underline"
+                      >
+                        Capture into brand
+                      </Link>
+                    </div>
+                  </div>
+                  {brand.knowledgeLibraryIds.length ? (
+                    <ul className="space-y-1">
+                      {brand.knowledgeLibraryIds.map((id) => {
+                        const lib = libraries.find((l) => l.id === id);
+                        return (
+                          <li
+                            key={id}
+                            className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground"
+                          >
+                            <span className="text-foreground">{libraryName(id)}</span>
+                            {lib ? (
+                              <span className="tabular-nums">
+                                {lib.documentCount ?? 0} docs
+                                {typeof lib.chunkCount === "number"
+                                  ? ` · ${lib.chunkCount} chunks`
+                                  : ""}
+                              </span>
+                            ) : null}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">
+                      Using org default (Company knowledge). Link Brand or Topic libraries in Edit
+                      for Content drafts and Capture.
+                    </p>
+                  )}
                 </div>
                 {(() => {
                   const cap = brandCapturePolicy(brand);
@@ -1199,7 +1273,12 @@ export function ContentBrandsClient() {
                   <div className="space-y-2">
                     <Label>Knowledge sources</Label>
                     <p className="text-xs text-muted-foreground">
-                      Leave empty to use the org default (Fit Check global).
+                      Leave empty to use Company knowledge. Only libraries allowed for Content are
+                      listed — manage allowlists under{" "}
+                      <Link href="/admin/ai?tab=libraries" className="underline">
+                        AI &amp; knowledge → Libraries
+                      </Link>
+                      .
                     </p>
                     <Input
                       value={libQuery}
@@ -1209,8 +1288,11 @@ export function ContentBrandsClient() {
                     <div className="max-h-44 overflow-y-auto rounded-md border p-2 space-y-1">
                       {filteredLibraries.length === 0 ? (
                         <p className="px-1 py-2 text-xs text-muted-foreground">
-                          No libraries found. Create topic libraries under AI &amp; knowledge,
-                          then link them here (and target them from Capture).
+                          No libraries found. Create topic libraries under{" "}
+                          <Link href="/admin/ai?tab=libraries" className="underline">
+                            AI &amp; knowledge → Libraries
+                          </Link>
+                          , then link them here (and target them from Capture).
                         </p>
                       ) : (
                         filteredLibraries.map((l) => (

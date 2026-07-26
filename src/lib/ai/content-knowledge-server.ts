@@ -71,6 +71,7 @@ export async function ensureContentBrandLibraryServer(input: {
     description: "Case studies and voice docs for content calendar",
     scope: { type: "content_brand", brandId: input.brandId },
     libraryKind: "content_brand",
+    allowedFeatures: ["content"],
     documentCount: 0,
     chunkCount: 0,
     createdAt: now,
