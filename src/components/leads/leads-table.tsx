@@ -61,7 +61,9 @@ import {
   Plus,
   Trash2,
   Tag,
+  CalendarClock,
   Mail,
+  Sparkles,
   UserCog,
   XCircle,
 } from "lucide-react";
@@ -98,6 +100,8 @@ import {
 import { ReassignLeadsDialog } from "@/components/leads/reassign-leads-dialog";
 import { LeadCampaignBadge } from "@/components/leads/lead-campaign-badge";
 import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
+import { BulkBuildSequencesDialog } from "@/components/leads/bulk-build-sequences-dialog";
+import { BulkScheduleSequencesDialog } from "@/components/leads/bulk-schedule-sequences-dialog";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { buildInboxSyncedLeadIds } from "@/lib/email/lead-inbox-sync";
@@ -417,6 +421,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [reassignOpen, setReassignOpen] = React.useState(false);
   const [campaignDialogOpen, setCampaignDialogOpen] = React.useState(false);
   const [campaignLeadIds, setCampaignLeadIds] = React.useState<string[]>([]);
+  const [bulkBuildOpen, setBulkBuildOpen] = React.useState(false);
+  const [bulkBuildLeadIds, setBulkBuildLeadIds] = React.useState<string[]>([]);
+  const [bulkScheduleOpen, setBulkScheduleOpen] = React.useState(false);
+  const [bulkScheduleLeadIds, setBulkScheduleLeadIds] = React.useState<string[]>([]);
   const [prospectAssignedToMe, setProspectAssignedToMe] = React.useState(false);
   const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
 
@@ -1214,6 +1222,24 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         leadIds={campaignLeadIds}
         onSuccess={() => setRowSelection({})}
       />
+      <BulkBuildSequencesDialog
+        open={bulkBuildOpen}
+        onOpenChange={(o) => {
+          setBulkBuildOpen(o);
+          if (!o) setBulkBuildLeadIds([]);
+        }}
+        leadIds={bulkBuildLeadIds}
+        onComplete={() => setRowSelection({})}
+      />
+      <BulkScheduleSequencesDialog
+        open={bulkScheduleOpen}
+        onOpenChange={(o) => {
+          setBulkScheduleOpen(o);
+          if (!o) setBulkScheduleLeadIds([]);
+        }}
+        leadIds={bulkScheduleLeadIds}
+        onComplete={() => setRowSelection({})}
+      />
       <AlertDialog
         open={archiveOpen}
         onOpenChange={(o) => {
@@ -1715,6 +1741,32 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             }}
           >
             <Mail className="h-3.5 w-3.5" /> Add to campaign
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              if (!ids.length) return;
+              setBulkBuildLeadIds(ids);
+              setBulkBuildOpen(true);
+            }}
+          >
+            <Sparkles className="h-3.5 w-3.5" /> Build sequences
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              if (!ids.length) return;
+              setBulkScheduleLeadIds(ids);
+              setBulkScheduleOpen(true);
+            }}
+          >
+            <CalendarClock className="h-3.5 w-3.5" /> Schedule sequences
           </Button>
           <Button
             variant="outline"

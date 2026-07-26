@@ -1,0 +1,264 @@
+import type { EmailMailboxSettings, ScheduledEmail } from "@/lib/email-account-types";
+import {
+  autoFixScheduleDates,
+  buildDemoMailboxDayLoads,
+  fetchMailboxScheduleLoad,
+  utcDayKeyFromDate,
+  type MailboxDayLoadClient,
+  type MailboxScheduleLoadResponse,
+} from "@/lib/email/mailbox-schedule-capacity";
+
+export type MailboxCapacityState = {
+  mailboxId: string;
+  limit: number | null;
+  byDay: Record<string, MailboxDayLoadClient>;
+};
+
+export type AssignableScheduleStep = {
+  id: string;
+  scheduledAt: string;
+  included: boolean;
+};
+
+function cloneByDay(
+  byDay: Record<string, MailboxDayLoadClient>,
+): Record<string, MailboxDayLoadClient> {
+  const out: Record<string, MailboxDayLoadClient> = {};
+  for (const [key, row] of Object.entries(byDay)) {
+    out[key] = { ...row };
+  }
+  return out;
+}
+
+export function cloneMailboxCapacityStates(
+  states: readonly MailboxCapacityState[],
+): MailboxCapacityState[] {
+  return states.map((s) => ({
+    mailboxId: s.mailboxId,
+    limit: s.limit,
+    byDay: cloneByDay(s.byDay),
+  }));
+}
+
+export function capacityStateFromLoad(
+  load: MailboxScheduleLoadResponse,
+): MailboxCapacityState {
+  return {
+    mailboxId: load.mailboxId,
+    limit: load.limit,
+    byDay: cloneByDay(load.byDay),
+  };
+}
+
+/** Remaining slots on a UTC day (null = unlimited). */
+export function remainingOnDay(
+  state: MailboxCapacityState,
+  dayKey: string,
+): number | null {
+  if (state.limit == null) return null;
+  const row = state.byDay[dayKey];
+  if (row?.remaining != null) return row.remaining;
+  return Math.max(0, state.limit - (row?.booked ?? 0));
+}
+
+/** Total booked (sent+pending) across the horizon — used for unlimited / tie-break. */
+export function totalBooked(state: MailboxCapacityState): number {
+  let sum = 0;
+  for (const row of Object.values(state.byDay)) {
+    sum += row.booked;
+  }
+  return sum;
+}
+
+/**
+ * Pick one mailbox for a prospect sequence.
+ * Prefers most remaining capacity on the first-email UTC day; ties break by
+ * round-robin among equals, then lowest total booked.
+ */
+export function pickMailboxForProspect(input: {
+  states: readonly MailboxCapacityState[];
+  preferredDayKey: string;
+  roundRobinIndex: number;
+}): { state: MailboxCapacityState; index: number } | null {
+  const { states, preferredDayKey, roundRobinIndex } = input;
+  if (states.length === 0) return null;
+
+  const allUnlimited = states.every((s) => s.limit == null);
+  if (allUnlimited) {
+    const ranked = states
+      .map((state, index) => ({ state, index, booked: totalBooked(state) }))
+      .sort((a, b) => a.booked - b.booked || a.index - b.index);
+    const minBooked = ranked[0]!.booked;
+    const ties = ranked.filter((r) => r.booked === minBooked);
+    const pick = ties[roundRobinIndex % ties.length]!;
+    return { state: pick.state, index: pick.index };
+  }
+
+  const scored = states.map((state, index) => {
+    const rem = remainingOnDay(state, preferredDayKey);
+    const score = rem == null ? Number.POSITIVE_INFINITY : rem;
+    return { state, index, score, booked: totalBooked(state) };
+  });
+
+  scored.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.booked !== b.booked) return a.booked - b.booked;
+    return a.index - b.index;
+  });
+
+  const bestScore = scored[0]!.score;
+  const ties = scored.filter((r) => r.score === bestScore);
+  const pick = ties[roundRobinIndex % ties.length]!;
+  return { state: pick.state, index: pick.index };
+}
+
+/** Decrement remaining / bump booked for placed steps on a mailbox capacity state. */
+export function consumeCapacityForSteps(
+  state: MailboxCapacityState,
+  steps: readonly AssignableScheduleStep[],
+): MailboxCapacityState {
+  const byDay = cloneByDay(state.byDay);
+  const limit = state.limit;
+
+  for (const step of steps) {
+    if (!step.included || !step.scheduledAt) continue;
+    const dayKey = utcDayKeyFromDate(step.scheduledAt);
+    if (!dayKey) continue;
+    const prev = byDay[dayKey] ?? {
+      dayKey,
+      sent: 0,
+      pending: 0,
+      booked: 0,
+      limit,
+      remaining: limit == null ? null : limit,
+    };
+    const booked = prev.booked + 1;
+    const pending = prev.pending + 1;
+    byDay[dayKey] = {
+      ...prev,
+      booked,
+      pending,
+      remaining: limit == null ? null : Math.max(0, limit - booked),
+    };
+  }
+
+  return { mailboxId: state.mailboxId, limit, byDay };
+}
+
+export type AssignProspectScheduleResult =
+  | {
+      ok: true;
+      mailboxId: string;
+      steps: AssignableScheduleStep[];
+      nextStates: MailboxCapacityState[];
+      nextRoundRobinIndex: number;
+    }
+  | {
+      ok: false;
+      error: string;
+      unresolvedIds: string[];
+      nextStates: MailboxCapacityState[];
+      nextRoundRobinIndex: number;
+    };
+
+/**
+ * Choose a mailbox, auto-fix step dates to fit daily limits, and update
+ * in-memory capacity so later prospects see this booking.
+ */
+export function assignProspectSchedule(input: {
+  states: readonly MailboxCapacityState[];
+  steps: readonly AssignableScheduleStep[];
+  roundRobinIndex: number;
+  horizonDays?: number;
+}): AssignProspectScheduleResult {
+  const states = cloneMailboxCapacityStates(input.states);
+  const included = input.steps.filter((s) => s.included && s.scheduledAt);
+  if (included.length === 0) {
+    return {
+      ok: false,
+      error: "No steps to schedule",
+      unresolvedIds: [],
+      nextStates: states,
+      nextRoundRobinIndex: input.roundRobinIndex,
+    };
+  }
+
+  const preferredDayKey = utcDayKeyFromDate(included[0]!.scheduledAt);
+  const picked = pickMailboxForProspect({
+    states,
+    preferredDayKey: preferredDayKey || utcDayKeyFromDate(new Date()),
+    roundRobinIndex: input.roundRobinIndex,
+  });
+  if (!picked) {
+    return {
+      ok: false,
+      error: "No mailboxes selected",
+      unresolvedIds: included.map((s) => s.id),
+      nextStates: states,
+      nextRoundRobinIndex: input.roundRobinIndex,
+    };
+  }
+
+  const fixed = autoFixScheduleDates(
+    input.steps.map((s) => ({ ...s })),
+    picked.state.byDay,
+    picked.state.limit,
+    input.horizonDays ?? 60,
+  );
+
+  if (fixed.unresolvedIds.length > 0) {
+    return {
+      ok: false,
+      error: "Could not fit every step within the capacity horizon",
+      unresolvedIds: fixed.unresolvedIds,
+      nextStates: states,
+      nextRoundRobinIndex: input.roundRobinIndex + 1,
+    };
+  }
+
+  const nextStates = states.map((s, i) =>
+    i === picked.index ? consumeCapacityForSteps(s, fixed.steps) : s,
+  );
+
+  return {
+    ok: true,
+    mailboxId: picked.state.mailboxId,
+    steps: fixed.steps,
+    nextStates,
+    nextRoundRobinIndex: input.roundRobinIndex + 1,
+  };
+}
+
+export async function loadMailboxCapacityStates(input: {
+  mailboxes: EmailMailboxSettings[];
+  isDemo: boolean;
+  scheduled: ScheduledEmail[];
+  horizonDays?: number;
+}): Promise<
+  | { ok: true; states: MailboxCapacityState[] }
+  | { ok: false; error: string }
+> {
+  const states: MailboxCapacityState[] = [];
+  for (const mb of input.mailboxes) {
+    if (input.isDemo) {
+      const demo = buildDemoMailboxDayLoads({
+        scheduled: input.scheduled,
+        mailboxId: mb.id,
+        dailySendLimit: mb.dailySendLimit,
+        horizonDays: input.horizonDays,
+      });
+      states.push(capacityStateFromLoad(demo));
+      continue;
+    }
+    const result = await fetchMailboxScheduleLoad({
+      mailboxId: mb.id,
+      dataOwnerUid: mb.dataOwnerUid,
+      horizonDays: input.horizonDays,
+    });
+    if (!result.ok) {
+      return { ok: false, error: result.error };
+    }
+    states.push(capacityStateFromLoad(result));
+  }
+  return { ok: true, states };
+}
