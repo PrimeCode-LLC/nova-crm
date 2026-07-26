@@ -216,6 +216,12 @@ function extractVisiblePage(mode: "page" | "selection"): ExtractedPage {
     document.querySelector<HTMLMetaElement>('meta[name="description"]')?.content ??
     document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.content ??
     "";
+  // Layout-independent extraction: same URL must yield the same corpus on every
+  // rescan. Do not use getBoundingClientRect / innerText — content-visibility:auto
+  // and below-fold lazy sections report 0×0 / empty until scrolled, which made
+  // Intent Radar scores jump (e.g. 30 → 100) on the same page.
+  const SKIP_ANCESTOR =
+    "nav, header, footer, script, style, noscript, template, svg, [hidden], [aria-hidden='true']";
   const selectors = [
     "main p",
     "main li",
@@ -236,31 +242,43 @@ function extractVisiblePage(mode: "page" | "selection"): ExtractedPage {
   const blocks: { id: string; text: string }[] = [];
   const elements = Array.from(document.querySelectorAll<HTMLElement>(selectors.join(",")));
   for (const element of elements) {
-    if (blocks.length >= 250) break;
+    if (blocks.length >= 400) break;
+    if (element.closest(SKIP_ANCESTOR)) continue;
     const style = getComputedStyle(element);
-    const rect = element.getBoundingClientRect();
-    if (
-      style.display === "none" ||
-      style.visibility === "hidden" ||
-      rect.width === 0 ||
-      rect.height === 0
-    ) {
-      continue;
-    }
-    const text = (element.innerText || element.textContent || "").replace(/\s+/g, " ").trim();
+    if (style.display === "none" || style.visibility === "hidden") continue;
+    // textContent (not innerText) includes off-screen / content-visibility content.
+    const text = (element.textContent || "").replace(/\s+/g, " ").trim();
     if (text.length < 20 || seen.has(text)) continue;
     seen.add(text);
     const id = `b${blocks.length}`;
     element.dataset.novaRadarBlockId = id;
     blocks.push({ id, text });
   }
-  const fallbackText = (document.body?.innerText ?? "").replace(/\s+/g, " ").trim();
-  const text =
+  const fallbackParts: string[] = [];
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+    acceptNode(node) {
+      const parent = (node as Text).parentElement;
+      if (!parent) return NodeFilter.FILTER_REJECT;
+      if (parent.closest(SKIP_ANCESTOR)) return NodeFilter.FILTER_REJECT;
+      const style = getComputedStyle(parent);
+      if (style.display === "none" || style.visibility === "hidden") {
+        return NodeFilter.FILTER_REJECT;
+      }
+      return NodeFilter.FILTER_ACCEPT;
+    },
+  });
+  let current: Node | null;
+  while ((current = walker.nextNode())) {
+    const value = (current.textContent || "").replace(/\s+/g, " ").trim();
+    if (value) fallbackParts.push(value);
+  }
+  const fallbackText = fallbackParts.join(" ").replace(/\s+/g, " ").trim();
+  const structured = blocks.map((block) => block.text).join("\n");
+  const corpus =
     mode === "selection" && selection
-      ? selection.slice(0, 40000)
-      : blocks.length
-        ? blocks.map((block) => block.text).join("\n").slice(0, 40000)
-        : fallbackText.slice(0, 40000);
+      ? selection
+      : [description, structured || fallbackText].filter(Boolean).join("\n");
+  const text = corpus.slice(0, 40000);
   return {
     url: location.href,
     canonicalUrl: canonical,

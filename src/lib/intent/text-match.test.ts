@@ -47,13 +47,9 @@ describe("keywordMatchesCorpus", () => {
     assert.equal(matches(corpus, "dedicated development team"), false);
   });
 
-  it("suppresses lone weak anchors (foil protection)", () => {
-    // 'failures' here is incidental; a lone weak reliability anchor must not fire.
-    const corpus = "Our product helps teams resolve system failures.";
-    assert.equal(matches(corpus, "frequent application downtime"), false);
-    // But a real reliability + scalability pain (two anchors) still matches.
-    const real = "Frequent production outages and severe latency performance problems.";
-    assert.equal(matches(real, "application scalability problem"), false); // no anchor in keyword
-    assert.equal(matches(real, "reliability improvement program"), false); // lone weak anchor
+  it("does not treat TV Series as a funding signal", () => {
+    const corpus = "Our Platform as featured on Bloomberg's The Advancements TV Series.";
+    assert.equal(matches(corpus, "series a funding"), false);
+    assert.equal(matches("Company closed a series a funding round last spring.", "series a funding"), true);
   });
 });
