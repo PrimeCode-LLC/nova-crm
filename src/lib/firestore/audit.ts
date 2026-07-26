@@ -57,6 +57,7 @@ export type AuditEvent =
   | "instantly.webhook_reply"
   | "feature.page_view"
   | "feature.fit_check"
+  | "feature.intent_radar_evaluate"
   | "feature.lead_analyze"
   | "feature.intent_suggest"
   | "feature.followup_suggest"

@@ -51,6 +51,7 @@ const FEATURES: { key: AiFeatureKey; label: string }[] = [
   { key: "email_reply", label: "Email reply" },
   { key: "opportunity_fit", label: "Opportunity fit check" },
   { key: "opportunity_fit_discuss", label: "Fit check, discuss" },
+  { key: "intent_radar_evaluate", label: "Intent Radar AI evaluate" },
   { key: "content_capture_normalize", label: "Content capture normalize" },
   { key: "content_plan_suggest", label: "Content plan suggest" },
   { key: "content_draft_generate", label: "Content draft generate" },

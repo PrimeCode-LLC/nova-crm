@@ -49,6 +49,42 @@ export type ScanResult = {
   page: ExtractedPage;
   quality: QualityScoreResult;
   strategies: AssignedStrategyMatch[];
+  aiEvaluation?: IntentRadarAiEvaluation;
+};
+
+export type IntentRadarAiEvaluation = {
+  evaluatedAt: string;
+  lexicalScore: number;
+  adjustedIntentScore: number;
+  confirmedCount: number;
+  rejectedCount: number;
+  uncertainCount: number;
+  result: {
+    signalReviews: {
+      signalId: string;
+      label: string;
+      decision: "confirm" | "reject" | "uncertain";
+      polarity: "positive_intent" | "negative_or_noise" | "neutral";
+      reason: string;
+    }[];
+    verdict: "pursue" | "maybe" | "pass";
+    fitScore: number;
+    fitLabel: string;
+    summary: string;
+    strongMatches: { point: string; sourceTitle: string }[];
+    gaps: {
+      point: string;
+      severity: "blocker" | "minor";
+      gapKind: "opportunity" | "company_capability" | "commercial" | "info_missing";
+    }[];
+    pursueRecommendation: {
+      shouldPursue: boolean;
+      headline: string;
+      reasoning: string;
+      estimatedEffort: "low" | "medium" | "high";
+    };
+    ragCitations: { title: string; excerpt: string }[];
+  };
 };
 
 export type ExtensionState = {
@@ -96,7 +132,8 @@ export type WorkerRequest =
   | { type: "login" }
   | { type: "logout" }
   | { type: "refresh" }
-  | { type: "scan"; mode?: "page" | "selection" }
+  | { type: "scan"; mode?: "page" | "selection"; selectionText?: string }
+  | { type: "ai-evaluate" }
   | {
       type: "save";
       action: "intake" | "draft" | "attach";

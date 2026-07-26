@@ -13,6 +13,7 @@ export type AiFeatureKey =
   | "prospect_draft_extract"
   | "opportunity_fit"
   | "opportunity_fit_discuss"
+  | "intent_radar_evaluate"
   | "content_capture_normalize"
   | "content_plan_suggest"
   | "content_draft_generate"
@@ -177,6 +178,10 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
     opportunity_fit_discuss: {
       enabled: true,
       ragMode: "reference",
+    },
+    intent_radar_evaluate: {
+      enabled: true,
+      ragMode: "strict",
     },
     content_capture_normalize: {
       enabled: true,

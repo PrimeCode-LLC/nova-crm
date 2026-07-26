@@ -16,25 +16,6 @@ async function send<T>(request: WorkerRequest): Promise<T> {
   return response.value;
 }
 
-async function ensureCurrentPagePermission(): Promise<void> {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab?.url || !/^https?:/.test(tab.url)) {
-    throw new Error("Open a normal web page before scanning.");
-  }
-  const url = new URL(tab.url);
-  const originPattern = `${url.origin}/*`;
-  const alreadyAllowed = await chrome.permissions.contains({
-    origins: [originPattern],
-  });
-  if (alreadyAllowed) return;
-  const allowed = await chrome.permissions.request({
-    origins: [originPattern],
-  });
-  if (!allowed) {
-    throw new Error(`Allow access to ${url.hostname} to scan this page.`);
-  }
-}
-
 function ScoreRing({ score }: { score: number }) {
   return (
     <div className="score-ring" style={{ "--score": `${score * 3.6}deg` } as React.CSSProperties}>
@@ -210,18 +191,18 @@ function IntentRadarPanel() {
     } else {
       setError("");
       setNotice("");
-      if (request.type === "scan") setSaveFeedback(null);
+      if (request.type === "scan" || request.type === "ai-evaluate") {
+        setSaveFeedback(null);
+      }
     }
     try {
-      if (request.type === "scan") {
-        await ensureCurrentPagePermission();
-      }
       const value = await send<unknown>(request);
       if (
         request.type === "login" ||
         request.type === "logout" ||
         request.type === "refresh" ||
-        request.type === "scan"
+        request.type === "scan" ||
+        request.type === "ai-evaluate"
       ) {
         setState(value as ExtensionState);
       } else {
@@ -484,6 +465,10 @@ function IntentRadarPanel() {
         >
           {busy === "selection" ? "Scanning…" : "Scan selected text"}
         </button>
+        <p className="muted scan-hint">
+          For selected text: highlight on the page first (last selection is kept if the panel
+          clears it). Or right-click → Scan selection with Nova Intent Radar.
+        </p>
       </section>
 
       {error ? <p role="alert" className="alert error">{error}</p> : null}
@@ -611,6 +596,101 @@ function IntentRadarPanel() {
                   <li key={note}>{note}</li>
                 ))}
               </ul>
+            </section>
+          ) : null}
+
+          {result.quality.score > 0 ? (
+            <section className="card ai-evaluate-card">
+              <div className="section-heading">
+                <div>
+                  <p className="eyebrow">AI context check</p>
+                  <h2>
+                    {result.aiEvaluation
+                      ? result.aiEvaluation.result.pursueRecommendation.headline
+                      : "Evaluate with AI"}
+                  </h2>
+                </div>
+                {result.aiEvaluation ? (
+                  <strong className="strategy-score">{result.aiEvaluation.result.fitScore}%</strong>
+                ) : null}
+              </div>
+              {!result.aiEvaluation ? (
+                <>
+                  <p className="muted">
+                    Keyword matches can be wrong without context. AI reviews each signal against the
+                    page and your knowledge base, then scores whether this is worth pursuing.
+                  </p>
+                  <button
+                    className="button primary"
+                    disabled={Boolean(busy)}
+                    onClick={() =>
+                      act("ai-evaluate", { type: "ai-evaluate" }, "AI evaluation complete")
+                    }
+                  >
+                    {busy === "ai-evaluate" ? "Evaluating…" : "Evaluate with AI"}
+                  </button>
+                </>
+              ) : (
+                <>
+                  <div className="meta-row">
+                    <span
+                      className={`pill ${
+                        result.aiEvaluation.result.verdict === "pursue"
+                          ? "ready"
+                          : result.aiEvaluation.result.verdict === "maybe"
+                            ? "maybe"
+                            : ""
+                      }`}
+                    >
+                      {result.aiEvaluation.result.verdict}
+                    </span>
+                    <span>{result.aiEvaluation.result.fitLabel}</span>
+                    <span>
+                      Adjusted intent {result.aiEvaluation.adjustedIntentScore}/100
+                    </span>
+                  </div>
+                  <p>{result.aiEvaluation.result.summary}</p>
+                  <p className="muted">
+                    Confirmed {result.aiEvaluation.confirmedCount} · Rejected{" "}
+                    {result.aiEvaluation.rejectedCount} · Uncertain{" "}
+                    {result.aiEvaluation.uncertainCount} (lexical was{" "}
+                    {result.aiEvaluation.lexicalScore}/100)
+                  </p>
+                  <div className="signal-list">
+                    {result.aiEvaluation.result.signalReviews.map((review) => (
+                      <article key={review.signalId} className="signal">
+                        <div>
+                          <strong>{review.label}</strong>
+                          <span>{review.reason}</span>
+                        </div>
+                        <b className={`ai-decision ${review.decision}`}>{review.decision}</b>
+                      </article>
+                    ))}
+                  </div>
+                  {result.aiEvaluation.result.gaps.length ? (
+                    <>
+                      <p className="eyebrow">AI gaps</p>
+                      <ul className="gap-list">
+                        {result.aiEvaluation.result.gaps.map((gap) => (
+                          <li key={gap.point}>
+                            {gap.point}
+                            {gap.severity === "blocker" ? " (blocker)" : ""}
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  ) : null}
+                  <button
+                    className="link-button"
+                    disabled={Boolean(busy)}
+                    onClick={() =>
+                      act("ai-evaluate", { type: "ai-evaluate" }, "AI evaluation refreshed")
+                    }
+                  >
+                    {busy === "ai-evaluate" ? "Re-evaluating…" : "Re-run AI evaluate"}
+                  </button>
+                </>
+              )}
             </section>
           ) : null}
 

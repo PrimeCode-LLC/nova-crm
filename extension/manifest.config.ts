@@ -27,8 +27,7 @@ export default defineManifest(({ mode }) => {
       "contextMenus",
       "alarms",
     ],
-    host_permissions: [`${novaOrigin}/*`],
-    optional_host_permissions: ["http://*/*", "https://*/*"],
+    host_permissions: [`${novaOrigin}/*`, "http://*/*", "https://*/*"],
     externally_connectable: {
       matches: [`${novaOrigin}/*`],
     },
@@ -47,6 +46,16 @@ export default defineManifest(({ mode }) => {
     side_panel: {
       default_path: "sidepanel.html",
     },
+    content_scripts: [
+      {
+        // Capture text selection before the side panel steals focus.
+        // Skip the Nova app itself (login / CRM) — nothing useful to scan there.
+        matches: ["http://*/*", "https://*/*"],
+        exclude_matches: [`${novaOrigin}/*`],
+        js: ["src/selection-capture.ts"],
+        run_at: "document_idle",
+      },
+    ],
     commands: {
       "scan-current-page": {
         suggested_key: {

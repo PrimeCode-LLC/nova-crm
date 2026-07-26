@@ -208,14 +208,65 @@ async function refreshBootstrap(force = false): Promise<BootstrapPayload> {
   return body;
 }
 
-function extractVisiblePage(mode: "page" | "selection"): ExtractedPage {
-  const selection = window.getSelection()?.toString().trim() ?? "";
+/**
+ * IMPORTANT: functions passed to chrome.scripting.executeScript({ func }) are
+ * stringified and run in the page with NO closure. Do not reference outer-scope
+ * bindings (consts, imports, helpers) — the bundler will keep free variables and
+ * the injected script will throw / return nothing.
+ */
+
+/** Keeps the last non-empty selection so side-panel clicks still have text to scan. */
+function ensureSelectionCapture(): void {
+  const attr = "data-nova-radar-selection";
+  const root = document.documentElement;
+  if (root.dataset.novaRadarSelectionCapture === "1") return;
+  root.dataset.novaRadarSelectionCapture = "1";
+  const persist = () => {
+    const value = window.getSelection()?.toString().trim() ?? "";
+    if (value.length >= 20) {
+      root.setAttribute(attr, value.slice(0, 40000));
+    }
+  };
+  document.addEventListener("selectionchange", persist, { passive: true });
+  document.addEventListener("mouseup", persist, { passive: true });
+  persist();
+}
+
+function extractVisiblePage(
+  mode: "page" | "selection",
+  selectionOverride?: string | null,
+): ExtractedPage {
+  const attr = "data-nova-radar-selection";
+  const liveSelection = window.getSelection()?.toString().trim() ?? "";
+  const cachedSelection = document.documentElement.getAttribute(attr)?.trim() ?? "";
+  const selection = (selectionOverride?.trim() || liveSelection || cachedSelection).trim();
   const canonical =
     document.querySelector<HTMLLinkElement>('link[rel="canonical"]')?.href ?? location.href;
   const description =
     document.querySelector<HTMLMetaElement>('meta[name="description"]')?.content ??
     document.querySelector<HTMLMetaElement>('meta[property="og:description"]')?.content ??
     "";
+
+  if (mode === "selection") {
+    if (selection.length < 20) {
+      throw new Error(
+        "Select at least a short paragraph on the page, then click Scan selected text (or use the right-click menu).",
+      );
+    }
+    // Score only the selection; keep a single evidence block for highlights/matching.
+    const blocks = [{ id: "b0", text: selection.slice(0, 40000) }];
+    return {
+      url: location.href,
+      canonicalUrl: canonical,
+      title: document.title,
+      description,
+      domain: location.hostname.replace(/^www\./, ""),
+      text: selection.slice(0, 40000),
+      selectedText: selection.slice(0, 40000),
+      blocks,
+    };
+  }
+
   // Layout-independent extraction: same URL must yield the same corpus on every
   // rescan. Do not use getBoundingClientRect / innerText — content-visibility:auto
   // and below-fold lazy sections report 0×0 / empty until scrolled, which made
@@ -255,29 +306,34 @@ function extractVisiblePage(mode: "page" | "selection"): ExtractedPage {
     blocks.push({ id, text });
   }
   const fallbackParts: string[] = [];
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
-    acceptNode(node) {
-      const parent = (node as Text).parentElement;
-      if (!parent) return NodeFilter.FILTER_REJECT;
-      if (parent.closest(SKIP_ANCESTOR)) return NodeFilter.FILTER_REJECT;
-      const style = getComputedStyle(parent);
-      if (style.display === "none" || style.visibility === "hidden") {
-        return NodeFilter.FILTER_REJECT;
-      }
-      return NodeFilter.FILTER_ACCEPT;
-    },
-  });
-  let current: Node | null;
-  while ((current = walker.nextNode())) {
-    const value = (current.textContent || "").replace(/\s+/g, " ").trim();
-    if (value) fallbackParts.push(value);
+  if (document.body) {
+    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      acceptNode(node) {
+        const parent = (node as Text).parentElement;
+        if (!parent) return NodeFilter.FILTER_REJECT;
+        if (parent.closest(SKIP_ANCESTOR)) return NodeFilter.FILTER_REJECT;
+        const style = getComputedStyle(parent);
+        if (style.display === "none" || style.visibility === "hidden") {
+          return NodeFilter.FILTER_REJECT;
+        }
+        return NodeFilter.FILTER_ACCEPT;
+      },
+    });
+    let current: Node | null;
+    while ((current = walker.nextNode())) {
+      const value = (current.textContent || "").replace(/\s+/g, " ").trim();
+      if (value) fallbackParts.push(value);
+    }
   }
   const fallbackText = fallbackParts.join(" ").replace(/\s+/g, " ").trim();
   const structured = blocks.map((block) => block.text).join("\n");
-  const corpus =
-    mode === "selection" && selection
-      ? selection
-      : [description, structured || fallbackText].filter(Boolean).join("\n");
+  // Last resort: raw body text when structured selectors / walker filter everything out.
+  const rawBody = (document.body?.innerText || document.body?.textContent || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const corpus = [description, structured || fallbackText || rawBody]
+    .filter(Boolean)
+    .join("\n");
   const text = corpus.slice(0, 40000);
   return {
     url: location.href,
@@ -362,26 +418,57 @@ async function currentTab(): Promise<chrome.tabs.Tab> {
   if (!tab?.id || !tab.url || !/^https?:/.test(tab.url)) {
     throw new Error("Open a normal web page before scanning.");
   }
+  const novaOrigin = new URL(NOVA_BASE_URL).origin;
+  if (tab.url.startsWith(novaOrigin)) {
+    throw new Error("Switch to a company page, article, or job post — then scan.");
+  }
   return tab;
 }
 
-async function scan(mode: "page" | "selection" = "page"): Promise<ScanResult> {
+async function scan(
+  mode: "page" | "selection" = "page",
+  selectionOverride?: string,
+): Promise<ScanResult> {
   await ensureAccess();
   const bootstrap =
     (await storageGet<BootstrapPayload>(BOOTSTRAP_KEY)) ?? (await refreshBootstrap(true));
   const tab = await currentTab();
-  const [{ result: page }] = await chrome.scripting.executeScript({
-    target: { tabId: tab.id! },
-    func: extractVisiblePage,
-    args: [mode],
-  });
+  // Cache selection before the side panel steals focus on later clicks.
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: ensureSelectionCapture,
+    });
+  } catch {
+    // Non-fatal: page scan still works; selection scan may need a page reload.
+  }
+  let page: ExtractedPage | undefined;
+  try {
+    const [injection] = await chrome.scripting.executeScript({
+      target: { tabId: tab.id! },
+      func: extractVisiblePage,
+      args: [mode, selectionOverride ?? null],
+    });
+    page = injection?.result;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(
+      message.includes("Cannot access")
+        ? "Chrome blocked access to this page. Reload the tab, then try Scan again."
+        : `Could not read this page (${message}). Reload the tab and try again.`,
+    );
+  }
   if (!page?.text || page.text.length < 20) {
-    throw new Error("Not enough visible page text to evaluate.");
+    throw new Error(
+      mode === "selection"
+        ? "Select at least a short paragraph on the page, then try Scan selected text again."
+        : "Not enough visible page text to evaluate.",
+    );
   }
   const quality = computeQualityScoreCore(
     {
       triggerEvent: page.title,
-      recentNews: page.description,
+      recentNews: mode === "selection" ? undefined : page.description,
       notes: page.text,
       touches: 0,
     },
@@ -409,7 +496,7 @@ async function scan(mode: "page" | "selection" = "page"): Promise<ScanResult> {
   const evidence = quality.matchedSignals
     .map((signal) => signal.evidence)
     .filter((item): item is MatchEvidence => Boolean(item));
-  if (evidence.length) {
+  if (evidence.length && mode === "page") {
     await chrome.scripting.executeScript({
       target: { tabId: tab.id! },
       func: applyHighlights,
@@ -418,6 +505,56 @@ async function scan(mode: "page" | "selection" = "page"): Promise<ScanResult> {
   }
   await broadcastState();
   return result;
+}
+
+async function aiEvaluate(): Promise<ScanResult> {
+  await ensureAccess();
+  const result = await storageGet<ScanResult>(RESULT_KEY);
+  if (!result) throw new Error("Scan a page before evaluating with AI.");
+  if (result.quality.score <= 0) {
+    throw new Error("AI evaluate is available when the lexical score is greater than zero.");
+  }
+  const matchedSignals = result.quality.matchedSignals.filter(
+    (signal) => signal.category !== "engagement" && signal.points > 0,
+  );
+  if (!matchedSignals.length) {
+    throw new Error("No intent signals to evaluate. Rescan the page first.");
+  }
+  const topStrategy = result.strategies.find((item) => !item.disqualified) ?? result.strategies[0];
+  const response = await api("/api/extension/ai-evaluate", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      page: {
+        url: result.page.canonicalUrl || result.page.url,
+        title: result.page.title,
+        text: result.page.text,
+        domain: result.page.domain,
+      },
+      lexicalScore: result.quality.score,
+      matchedSignals: matchedSignals.map((signal) => ({
+        signalId: signal.signalId,
+        label: signal.label,
+        points: signal.points,
+        reason: signal.reason,
+        evidenceExcerpt: signal.evidence?.excerpt,
+      })),
+      strategyName: topStrategy?.strategyName,
+      opportunityLabel: result.quality.primaryOpportunity?.label,
+    }),
+  });
+  const body = (await response.json()) as {
+    error?: unknown;
+    evaluation?: ScanResult["aiEvaluation"];
+  };
+  if (!response.ok) {
+    throw new Error(apiErrorMessage(body.error, "Could not evaluate with AI."));
+  }
+  if (!body.evaluation) throw new Error("AI evaluate returned an empty result.");
+  const next: ScanResult = { ...result, aiEvaluation: body.evaluation };
+  await chrome.storage.local.set({ [RESULT_KEY]: next });
+  await broadcastState();
+  return next;
 }
 
 async function clearHighlights(): Promise<void> {
@@ -627,7 +764,7 @@ chrome.runtime.onMessageExternal.addListener(
 chrome.contextMenus.onClicked.addListener((info, tab) => {
   if (info.menuItemId !== "nova-scan-selection" || !tab?.windowId) return;
   void chrome.sidePanel.open({ windowId: tab.windowId });
-  void scan("selection").catch(async (error) => {
+  void scan("selection", info.selectionText).catch(async (error) => {
     await chrome.storage.local.set({ novaIntentRadarError: String(error) });
     await broadcastState();
   });
@@ -664,7 +801,10 @@ chrome.runtime.onMessage.addListener(
           await refreshBootstrap(true);
           return getState();
         case "scan":
-          await scan(request.mode);
+          await scan(request.mode, request.selectionText);
+          return getState();
+        case "ai-evaluate":
+          await aiEvaluate();
           return getState();
         case "save":
           return saveFinding(

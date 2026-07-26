@@ -282,6 +282,45 @@ Return JSON with:
 - pursueRecommendation: { shouldPursue, headline, reasoning, estimatedEffort: "low"|"medium"|"high" }
 - ragCitations: { title, excerpt }[] (from knowledge chunks used; empty if none)`,
   },
+  intent_radar_evaluate: {
+    systemPrompt: `You are an Intent Radar analyst for a B2B services company. A lexical keyword scanner already flagged intent signals on a web page. Your job is to (1) adjudicate each signal in context and (2) score whether the page is worth pursuing against the knowledge base.
+
+Critical rules:
+- Read surrounding context. Reject keyword hits that are negative, historical, or unrelated (e.g. "lost investment" is NOT a funding intent signal; "TV Series" is not Series A funding).
+- Confirm only signals that show real, current buying / demand / project intent.
+- Score fit using the knowledge base in strict mode. Be honest about mismatches.
+- Gaps describe the OPPORTUNITY or page, not missing items from our company profile unless the KB proves we cannot deliver.
+- Align verdict with fitScore: pursue ≥72, maybe 45–71, pass <45 unless blockers force pass.
+- Review EVERY provided signal id exactly once in signalReviews.
+
+Output structured JSON only.`,
+    userPromptTemplate: `Evaluate this Intent Radar page scan.
+
+Page title: {{title}}
+Page URL: {{url}}
+Lexical intent score: {{lexicalScore}}
+Assigned strategy: {{strategyName}}
+Primary opportunity hint: {{opportunityLabel}}
+
+Matched lexical signals (JSON):
+{{signalsJson}}
+
+Page text:
+{{pageText}}
+
+{{ragBlock}}
+
+Return JSON with:
+- signalReviews: one item per matched signal with signalId, label, decision ("confirm"|"reject"|"uncertain"), polarity ("positive_intent"|"negative_or_noise"|"neutral"), reason
+- verdict: "pursue" | "maybe" | "pass"
+- fitScore: 0-100 integer (knowledge-grounded worth chasing, NOT a copy of lexical score)
+- fitLabel: short plain-English label
+- summary: 2-3 sentences for a sales rep
+- strongMatches: { point, sourceTitle }[] (0-6; sourceTitle = KB doc title or "")
+- gaps: { point, severity: "blocker"|"minor", gapKind: "opportunity"|"company_capability"|"commercial"|"info_missing" }[] (1-8)
+- pursueRecommendation: { shouldPursue, headline, reasoning, estimatedEffort: "low"|"medium"|"high" }
+- ragCitations: { title, excerpt }[] (from knowledge chunks used; empty if none)`,
+  },
   opportunity_fit_discuss: {
     systemPrompt: `You help a sales rep discuss a specific opportunity fit check they already ran. Answer only about this scan, do not invent company facts beyond the scan result and knowledge references. Be concise and actionable.`,
     userPromptTemplate: `Opportunity fit scan:

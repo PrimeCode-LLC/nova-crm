@@ -256,6 +256,12 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     tableName: "opportunityScans",
     message: (m) => `Fit Check run (${String(m.title ?? m.scanId ?? "")})`,
   },
+  "feature.intent_radar_evaluate": {
+    operation: "action",
+    tableName: "intentRadar",
+    message: (m) =>
+      `Intent Radar AI evaluate (${String(m.verdict ?? "")} · ${String(m.fitScore ?? "")})`,
+  },
   "feature.lead_analyze": {
     operation: "action",
     tableName: "leads",

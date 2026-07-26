@@ -16,6 +16,7 @@ const FEATURE_KEYS = [
   "prospect_draft_extract",
   "opportunity_fit",
   "opportunity_fit_discuss",
+  "intent_radar_evaluate",
   "content_capture_normalize",
   "content_plan_suggest",
   "content_draft_generate",

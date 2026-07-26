@@ -167,6 +167,13 @@ h2 {
   margin-bottom: 14px;
 }
 
+.scan-hint {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .button {
   min-height: 36px;
   padding: 8px 12px;
@@ -571,6 +578,42 @@ kbd {
   color: #d4d4d8;
   font-size: 10px;
   line-height: 1.6;
+}
+
+.ai-evaluate-card .button.primary {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.ai-evaluate-card > p {
+  margin-top: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #e4e4e7;
+}
+
+.pill.maybe {
+  color: #fde68a;
+  background: rgb(161 98 7 / 22%);
+  border-color: rgb(161 98 7 / 35%);
+}
+
+.ai-decision {
+  text-transform: uppercase;
+  font-size: 10px !important;
+  letter-spacing: 0.04em;
+}
+
+.ai-decision.confirm {
+  color: #86efac;
+}
+
+.ai-decision.reject {
+  color: #fca5a5;
+}
+
+.ai-decision.uncertain {
+  color: #fde68a;
 }
 
 .save-actions .button-grid {
