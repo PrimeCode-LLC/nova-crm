@@ -4,6 +4,7 @@ import * as React from "react";
 import { Bar, BarChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useChartSize } from "@/hooks/use-chart-size";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildFollowupScheduleByDay } from "@/lib/dashboard-ops-analytics";
 import { cn } from "@/lib/utils";
 import type { Followup } from "@/lib/types";
@@ -12,13 +13,20 @@ export function FollowupScheduleChart({
   followups,
   compact,
   fill,
+  timeZone: timeZoneProp,
 }: {
   followups: Followup[];
   compact?: boolean;
   /** Grow to fill the parent's height instead of a fixed chart height. */
   fill?: boolean;
+  timeZone?: string;
 }) {
-  const data = React.useMemo(() => buildFollowupScheduleByDay({ followups }), [followups]);
+  const orgTimeZone = useOrgTimezone();
+  const timeZone = timeZoneProp ?? orgTimeZone;
+  const data = React.useMemo(
+    () => buildFollowupScheduleByDay({ followups, timeZone }),
+    [followups, timeZone],
+  );
   const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });
   const monthLabel = new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" });
   const totals = React.useMemo(

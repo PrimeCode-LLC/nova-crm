@@ -80,6 +80,7 @@ export default function DashboardWallPage() {
     organizationId,
     addOrgActivityEvent,
     demoPersonaId,
+    organizationTimezone,
   } = useWorkspace();
 
   const viewer = currentUserId ? getUserById(currentUserId) : undefined;
@@ -273,8 +274,9 @@ export default function DashboardWallPage() {
         contacts,
         currentUserId,
         range,
+        timeZone: organizationTimezone,
       }),
-    [leads, followups, followupPlans, leadTasks, contacts, currentUserId],
+    [leads, followups, followupPlans, leadTasks, contacts, currentUserId, organizationTimezone],
   );
 
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;

@@ -27,9 +27,13 @@ const TRIAL_DAYS = 14;
 function settingsForFirestore(s: OrganizationSettings): Record<string, string> {
   const out: Record<string, string> = {};
   if (s.billingEmail?.trim()) out.billingEmail = s.billingEmail.trim();
+  if (s.timezone?.trim()) out.timezone = s.timezone.trim();
   if (s.operatorNotes?.trim()) out.operatorNotes = s.operatorNotes.trim();
   if (s.inboundWebhookSecret?.trim()) {
     out.inboundWebhookSecret = s.inboundWebhookSecret.trim();
+  }
+  if (s.instantlyWebhookSecret?.trim()) {
+    out.instantlyWebhookSecret = s.instantlyWebhookSecret.trim();
   }
   return out;
 }
@@ -118,11 +122,16 @@ function docToOrg(id: string, data: DocumentData): Organization {
   const settings: OrganizationSettings = {
     billingEmail:
       typeof raw.billingEmail === "string" ? raw.billingEmail : undefined,
+    timezone: typeof raw.timezone === "string" ? raw.timezone : undefined,
     operatorNotes:
       typeof raw.operatorNotes === "string" ? raw.operatorNotes : undefined,
     inboundWebhookSecret:
       typeof raw.inboundWebhookSecret === "string"
         ? raw.inboundWebhookSecret
+        : undefined,
+    instantlyWebhookSecret:
+      typeof raw.instantlyWebhookSecret === "string"
+        ? raw.instantlyWebhookSecret
         : undefined,
   };
   const channelAdminRaw = data.channelAdmin;
@@ -173,6 +182,7 @@ function docToOrg(id: string, data: DocumentData): Organization {
 export function sanitizeOrganizationForApi(org: Organization): Organization {
   const safeSettings: OrganizationSettings = { ...org.settings };
   delete safeSettings.inboundWebhookSecret;
+  delete safeSettings.instantlyWebhookSecret;
   const { openJoinTokenHash: _h, channelAdmin: _ca, ...rest } = org;
   return {
     ...rest,

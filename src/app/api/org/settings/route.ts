@@ -6,6 +6,7 @@ import {
   updateOrganizationServer,
 } from "@/lib/platform/organizations-server";
 import { recordAudit } from "@/lib/firestore/audit";
+import { isValidIanaTimezone } from "@/lib/org-timezone";
 
 const patchSchema = z
   .object({
@@ -15,6 +16,8 @@ const patchSchema = z
         billingEmail: z
           .union([z.string().email().max(254), z.literal("")])
           .optional(),
+        /** IANA timezone, or "" to clear (fall back to browser). */
+        timezone: z.string().max(80).optional(),
       })
       .strict()
       .optional(),
@@ -24,11 +27,21 @@ const patchSchema = z
     const hasName = val.name !== undefined;
     const hasBilling =
       val.settings !== undefined && val.settings.billingEmail !== undefined;
-    if (!hasName && !hasBilling) {
+    const hasTimezone =
+      val.settings !== undefined && val.settings.timezone !== undefined;
+    if (!hasName && !hasBilling && !hasTimezone) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "Provide name and/or settings.billingEmail",
+        message: "Provide name and/or settings.billingEmail and/or settings.timezone",
         path: [],
+      });
+    }
+    const tz = val.settings?.timezone;
+    if (tz !== undefined && tz.trim() !== "" && !isValidIanaTimezone(tz)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Invalid IANA timezone",
+        path: ["settings", "timezone"],
       });
     }
   });
@@ -65,12 +78,26 @@ export async function PATCH(req: Request) {
     patch.name = body.name;
   }
 
+  const settingsPatch: {
+    billingEmail?: string;
+    timezone?: string;
+  } = {};
+  let touchedSettings = false;
+
   if (body.settings?.billingEmail !== undefined) {
-    const nextBilling =
-      body.settings.billingEmail === "" ? undefined : body.settings.billingEmail;
+    settingsPatch.billingEmail =
+      body.settings.billingEmail === "" ? "" : body.settings.billingEmail;
+    touchedSettings = true;
+  }
+  if (body.settings?.timezone !== undefined) {
+    settingsPatch.timezone = body.settings.timezone.trim();
+    touchedSettings = true;
+  }
+
+  if (touchedSettings) {
     patch.settings = {
       ...org.settings,
-      billingEmail: nextBilling,
+      ...settingsPatch,
     };
   }
 
@@ -87,6 +114,7 @@ export async function PATCH(req: Request) {
       fields: [
         ...(body.name !== undefined ? ["name"] : []),
         ...(body.settings?.billingEmail !== undefined ? ["settings.billingEmail"] : []),
+        ...(body.settings?.timezone !== undefined ? ["settings.timezone"] : []),
       ],
     },
   });

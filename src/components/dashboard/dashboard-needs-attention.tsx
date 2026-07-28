@@ -15,6 +15,8 @@ import {
 } from "@/lib/content-calendar/types";
 import { contactFirstName, leadEntityLabel } from "@/lib/leads/lead-display-label";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
+import { isFollowupOverdue } from "@/lib/followup-open-status";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 
 type AttentionItem = {
   id: string;
@@ -80,6 +82,7 @@ export function DashboardNeedsAttention({
   className?: string;
 }) {
   const [now] = React.useState(() => Date.now());
+  const timeZone = useOrgTimezone();
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
   const leadFor = (leadId: string | undefined) => (leadId ? leadById.get(leadId) : undefined);
   const leadLabel = (leadId: string | undefined) => leadEntityLabel(leadFor(leadId));
@@ -178,7 +181,7 @@ export function DashboardNeedsAttention({
       continue;
     }
     const due = timestamp(followup.dueAt, Number.POSITIVE_INFINITY);
-    if (due < now) {
+    if (isFollowupOverdue(followup, { now: new Date(now), timeZone })) {
       items.push({
         id: `followup-${followup.id}`,
         label: `Overdue follow-up · ${leadLabel(followup.leadId)}`,

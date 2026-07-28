@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { UserChip } from "@/components/common/user-chip";
 import { CHANNELS } from "@/lib/constants";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildActionBoard } from "@/lib/dashboard-ops-analytics";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -305,9 +306,10 @@ export function ActionBoardDetailDialog({
   meetings: Meeting[];
   leads?: readonly Lead[];
 }) {
+  const timeZone = useOrgTimezone();
   const board = React.useMemo(
-    () => buildActionBoard({ tasks, followups, meetings, limit: null }),
-    [tasks, followups, meetings],
+    () => buildActionBoard({ tasks, followups, meetings, limit: null, timeZone }),
+    [tasks, followups, meetings, timeZone],
   );
   const leadById = React.useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
 

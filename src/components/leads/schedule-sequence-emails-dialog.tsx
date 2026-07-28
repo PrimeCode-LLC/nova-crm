@@ -16,7 +16,8 @@ import {
   scheduleFollowupEmailClient,
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
-import { formatBrowserTimezoneLabel } from "@/lib/scheduling/timezone-options";
+import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
 import {
   autoFixScheduleDates,
@@ -124,7 +125,8 @@ export function ScheduleSequenceEmailsDialog({
     );
   }, [mailboxOptions, mailboxId, mailboxes, activeMailboxId]);
 
-  const timezoneLabel = formatBrowserTimezoneLabel();
+  const timezone = useOrgTimezone();
+  const timezoneLabel = formatTimezoneDisplayLabel(timezone);
 
   const schedulable = React.useMemo(
     () =>
@@ -147,13 +149,13 @@ export function ScheduleSequenceEmailsDialog({
         followupId: f.id,
         title: f.title,
         subject: f.emailSubject?.trim() || f.title,
-        scheduledAt: defaultScheduleDatetimeLocal(f.dueAt),
+        scheduledAt: defaultScheduleDatetimeLocal(f.dueAt, timezone),
         body: f.messageBody ?? "",
         included: true,
       })),
     );
     setSubmitting(false);
-  }, [open, recipientOptions, mailboxOptions, activeMailboxId, schedulable]);
+  }, [open, recipientOptions, mailboxOptions, activeMailboxId, schedulable, timezone]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {
@@ -286,7 +288,7 @@ export function ScheduleSequenceEmailsDialog({
           includeSignature,
           globalEmailFooter,
           includeFooter,
-          scheduledAtIso: new Date(step.scheduledAt).toISOString(),
+          scheduledAtIso: isoFromDatetimeLocalInZone(step.scheduledAt, timezone),
           isDemo,
           addDemoScheduled: addScheduled,
         });

@@ -5,6 +5,7 @@ import {
 } from "@/lib/dashboard-analytics";
 import { CHANNEL_LIST } from "@/lib/constants";
 import { isLeadOrProspect } from "@/lib/email/lead-response-time";
+import { isFollowupActionable, isFollowupOverdue } from "@/lib/followup-open-status";
 import { IDLE_LEAD_THRESHOLD_DAYS } from "@/lib/lead-idle";
 import type { ChannelKey, Deal, Followup, Lead, LeadPriority, LeadTask, User } from "@/lib/types";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
@@ -56,14 +57,15 @@ export function buildDashboardWatchCandidates(input: {
   leadTasks: LeadTask[];
 }): DashboardWatchCandidate[] {
   const leadById = new Map(input.leads.map((l) => [l.id, l]));
-  const now = Date.now();
+  const nowDate = new Date();
+  const now = nowDate.getTime();
   const candidates: DashboardWatchCandidate[] = [];
 
-  const openFollowups = input.followups.filter((f) => !f.completedAt);
+  const openFollowups = input.followups.filter((f) => isFollowupActionable(f));
   for (const f of openFollowups) {
     if (f.leadId && !leadById.has(f.leadId)) continue;
     const lead = f.leadId ? leadById.get(f.leadId) : undefined;
-    const overdue = new Date(f.dueAt).getTime() < now;
+    const overdue = isFollowupOverdue(f, nowDate);
     const daysOverdue = overdue
       ? Math.floor((now - new Date(f.dueAt).getTime()) / (24 * 60 * 60 * 1000))
       : 0;
@@ -195,7 +197,7 @@ export function buildDashboardAiContext(input: {
 
   const openFollowups = followups.filter((f) => !f.completedAt);
   const overdueFollowups = openFollowups
-    .filter((f) => new Date(f.dueAt).getTime() < Date.now())
+    .filter((f) => isFollowupOverdue(f))
     .sort((a, b) => new Date(a.dueAt).getTime() - new Date(b.dueAt).getTime())
     .slice(0, 12)
     .map((f) => {

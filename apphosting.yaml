@@ -12,6 +12,11 @@ env:
     availability:
       - BUILD
       - RUNTIME
+  # Fixed unpacked/store ID for Nova Intent Radar (team zip + future store builds).
+  - variable: NOVA_EXTENSION_IDS
+    value: kiggclhehjjlembdafbpkjeindbhbemk
+    availability:
+      - RUNTIME
 runConfig:
   # Keep one instance warm so the first requests after deploy (/, favicon, RSC) are not rejected with HTTP 429 while scaling from zero.
   minInstances: 1

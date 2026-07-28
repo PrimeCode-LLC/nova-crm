@@ -1,6 +1,13 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
+import { isFollowupActionable, isFollowupOverdue } from "@/lib/followup-open-status";
+import {
+  resolveOrgTimezone,
+  startOfZonedDay,
+  zonedDayKey,
+  zonedWallTimeToUtc,
+} from "@/lib/org-timezone";
 import { canAction, type PermissionSubject } from "@/lib/permissions/can";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
@@ -84,17 +91,8 @@ function validTime(iso: string | undefined): number | undefined {
   return Number.isFinite(value) ? value : undefined;
 }
 
-function startOfLocalDay(d: Date): Date {
-  const x = new Date(d);
-  x.setHours(0, 0, 0, 0);
-  return x;
-}
-
-function dayKey(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function dayKey(d: Date, timeZone?: string): string {
+  return zonedDayKey(d, resolveOrgTimezone(timeZone));
 }
 
 function hourLabel(h: number): string {
@@ -130,18 +128,21 @@ export function collectEmailBounceTimes(input: {
   }
   if (fromTimeline.length > 0) return fromTimeline;
 
-  const times: number[] = [];
+  // Prefer a single source so contact + bounce-review task pairs do not double-count
+  // (matches KPI Math.max(contacts, tasks) semantics).
+  const fromContacts: number[] = [];
   for (const contact of input.contacts ?? []) {
     if (contact.emailVerificationStatus !== "bounced") continue;
     const t = validTime(contact.emailBouncedAt);
-    if (t !== undefined) times.push(t);
+    if (t !== undefined) fromContacts.push(t);
   }
+  const fromTasks: number[] = [];
   for (const task of input.tasks ?? []) {
     if (!isBounceReviewTask(task)) continue;
     const t = validTime(task.createdAt);
-    if (t !== undefined) times.push(t);
+    if (t !== undefined) fromTasks.push(t);
   }
-  return times;
+  return fromContacts.length >= fromTasks.length ? fromContacts : fromTasks;
 }
 
 /** Owner / manager ops board vs frontline personal dashboard. */
@@ -180,8 +181,10 @@ export function buildEmailVolumeSeries(input: {
   contacts?: readonly Contact[];
   tasks?: readonly LeadTask[];
   timelineByLead?: Record<string, readonly TimelineEvent[]>;
+  timeZone?: string;
 }): EmailVolumePoint[] {
   const now = input.now ?? new Date();
+  const zone = resolveOrgTimezone(input.timeZone);
   const sent = input.followups.filter((f) => f.deliveryStatus === "sent" && validTime(f.sentAt) !== undefined);
   const replies = input.leads.filter((l) => validTime(l.lastReplyAt) !== undefined);
   const bounceTimes = collectEmailBounceTimes({
@@ -191,15 +194,14 @@ export function buildEmailVolumeSeries(input: {
   });
 
   if (input.period === "today") {
-    const start = startOfLocalDay(now);
+    const todayKey = zonedDayKey(now, zone);
     const points: EmailVolumePoint[] = [];
     for (let h = 0; h < 24; h++) {
-      const bucketStart = new Date(start);
-      bucketStart.setHours(h, 0, 0, 0);
-      const bucketEnd = new Date(start);
-      bucketEnd.setHours(h + 1, 0, 0, 0);
-      const bs = bucketStart.getTime();
-      const be = bucketEnd.getTime();
+      const bs = zonedWallTimeToUtc(todayKey, h, 0, 0, 0, zone).getTime();
+      const be =
+        h === 23
+          ? zonedWallTimeToUtc(todayKey, 23, 59, 59, 999, zone).getTime() + 1
+          : zonedWallTimeToUtc(todayKey, h + 1, 0, 0, 0, zone).getTime();
       points.push({
         key: `${h}`,
         label: hourLabel(h),
@@ -220,16 +222,20 @@ export function buildEmailVolumeSeries(input: {
   const days = input.period === "week" ? 7 : 30;
   const points: EmailVolumePoint[] = [];
   for (let i = days - 1; i >= 0; i--) {
-    const d = new Date(now);
-    d.setDate(d.getDate() - i);
-    const key = dayKey(d);
-    const next = new Date(d);
-    next.setDate(next.getDate() + 1);
-    const bs = startOfLocalDay(d).getTime();
-    const be = startOfLocalDay(next).getTime();
+    const anchor = new Date(now.getTime() - i * 86_400_000);
+    const key = dayKey(anchor, zone);
+    const nextAnchor = new Date(anchor.getTime() + 86_400_000);
+    const nextKey = dayKey(nextAnchor, zone);
+    const bs = startOfZonedDay(anchor, zone).getTime();
+    const be = startOfZonedDay(nextAnchor, zone).getTime();
+    // Prefer label from the zoned calendar day (handles DST edge cases better than local).
+    const labelDate = zonedWallTimeToUtc(key, 12, 0, 0, 0, zone);
     points.push({
       key,
-      label: input.period === "week" ? d.toLocaleDateString(undefined, { weekday: "short" }) : String(d.getDate()),
+      label:
+        input.period === "week"
+          ? labelDate.toLocaleDateString("en-US", { weekday: "short", timeZone: zone })
+          : String(Number(key.slice(8, 10))),
       sent: sent.filter((f) => {
         const t = validTime(f.sentAt)!;
         return t >= bs && t < be;
@@ -240,6 +246,7 @@ export function buildEmailVolumeSeries(input: {
       }).length,
       bounces: countInWindow(bounceTimes, bs, be),
     });
+    void nextKey;
   }
   return points;
 }
@@ -248,17 +255,37 @@ export function buildEmailVolumeSeries(input: {
 export function buildFollowupScheduleByDay(input: {
   followups: readonly Followup[];
   now?: Date;
+  timeZone?: string;
 }): FollowupSchedulePoint[] {
   const now = input.now ?? new Date();
-  const year = now.getFullYear();
-  const month = now.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const nowMs = now.getTime();
+  const zone = resolveOrgTimezone(input.timeZone);
+  const parts = zonedDayKey(now, zone).split("-").map(Number);
+  const year = parts[0]!;
+  const month = parts[1]!; // 1-12
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const dayStartToday = startOfZonedDay(now, zone).getTime();
   const points: FollowupSchedulePoint[] = [];
 
   for (let day = 1; day <= daysInMonth; day++) {
-    const dayStart = new Date(year, month, day, 0, 0, 0, 0).getTime();
-    const dayEnd = new Date(year, month, day + 1, 0, 0, 0, 0).getTime();
+    const ymd = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayStart = zonedWallTimeToUtc(ymd, 0, 0, 0, 0, zone).getTime();
+    const nextDay = day === daysInMonth
+      ? zonedWallTimeToUtc(
+          `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, "0")}-01`,
+          0,
+          0,
+          0,
+          0,
+          zone,
+        ).getTime()
+      : zonedWallTimeToUtc(
+          `${year}-${String(month).padStart(2, "0")}-${String(day + 1).padStart(2, "0")}`,
+          0,
+          0,
+          0,
+          0,
+          zone,
+        ).getTime();
     let scheduled = 0;
     let overdue = 0;
     let completed = 0;
@@ -268,19 +295,20 @@ export function buildFollowupScheduleByDay(input: {
       const sent = validTime(f.sentAt);
       const done = validTime(f.completedAt);
 
-      if (f.deliveryStatus === "sent" && sent !== undefined && sent >= dayStart && sent < dayEnd) {
+      if (f.deliveryStatus === "sent" && sent !== undefined && sent >= dayStart && sent < nextDay) {
         completed += 1;
         continue;
       }
-      if (done !== undefined && done >= dayStart && done < dayEnd) {
+      if (done !== undefined && done >= dayStart && done < nextDay) {
         completed += 1;
         continue;
       }
 
-      if (f.completedAt || f.pausedAt) continue;
-      if (due === undefined || due < dayStart || due >= dayEnd) continue;
+      if (!isFollowupActionable(f)) continue;
+      if (due === undefined || due < dayStart || due >= nextDay) continue;
 
-      if (due < nowMs) overdue += 1;
+      // Calendar overdue (before zoned start of today) — matches Follow-ups page + KPI.
+      if (due < dayStartToday) overdue += 1;
       else scheduled += 1;
     }
 
@@ -534,6 +562,7 @@ export function buildActionBoard(input: {
   followups: readonly Followup[];
   meetings: readonly Meeting[];
   now?: Date;
+  timeZone?: string;
   /**
    * Cap per list bucket. Pass `null` for the expanded detail board (no cap).
    * Compact dashboard widget defaults to 8.
@@ -542,7 +571,8 @@ export function buildActionBoard(input: {
 }): ActionBoardBuckets {
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
-  const dayStart = startOfLocalDay(now).getTime();
+  const zone = resolveOrgTimezone(input.timeZone);
+  const dayStart = startOfZonedDay(now, zone).getTime();
   const dayEnd = dayStart + 86_400_000;
   const cap = input.limit === null ? undefined : (input.limit ?? 8);
   const take = <T,>(items: T[]) => (cap === undefined ? items : items.slice(0, cap));
@@ -570,11 +600,7 @@ export function buildActionBoard(input: {
 
   const overdueFollowups = take(
     input.followups
-      .filter((f) => {
-        if (f.completedAt || f.pausedAt || f.deliveryStatus === "sent") return false;
-        const due = validTime(f.dueAt);
-        return due !== undefined && due < nowMs;
-      })
+      .filter((f) => isFollowupOverdue(f, { now, timeZone: zone }))
       .sort((a, b) => (validTime(a.dueAt) ?? 0) - (validTime(b.dueAt) ?? 0)),
   );
 

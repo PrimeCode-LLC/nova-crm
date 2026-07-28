@@ -136,6 +136,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     setIntentPlaybook: (playbook: IntentPlaybook) => void;
     /** Display name for the signed-in tenant (from Firestore org). */
     organizationName: string;
+    /**
+     * Sticky org IANA timezone when set; empty/undefined means fall back to browser.
+     * Use `resolveOrgTimezone(organizationTimezone)` for the effective zone.
+     */
+    organizationTimezone?: string;
     /** Live mode: Firestore workspace listeners hit an error (partial data may be stale). */
     liveFirestoreError: Error | null;
     /** Live mode: listener for the signed-in user document failed. */
@@ -272,12 +277,15 @@ export function WorkspaceModeProvider({
   initialMode,
   initialDemoPersonaId,
   organizationName: organizationNameProp,
+  organizationTimezone: organizationTimezoneProp,
   children,
 }: {
   initialMode: WorkspaceMode;
   initialDemoPersonaId: string;
   /** Resolved on the server from the session’s organizationId; fallback label if missing. */
   organizationName?: string | null;
+  /** Optional sticky org IANA timezone from Organization.settings.timezone. */
+  organizationTimezone?: string | null;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -288,6 +296,7 @@ export function WorkspaceModeProvider({
 
   const organizationName =
     organizationNameProp?.trim() || "Workspace";
+  const organizationTimezone = organizationTimezoneProp?.trim() || undefined;
 
   const [intentPlaybook, setIntentPlaybookState] = React.useState<IntentPlaybook>(() =>
     defaultIntentPlaybook(),
@@ -2393,6 +2402,7 @@ export function WorkspaceModeProvider({
       demoPersonaId,
       organizationId: liveOrgId,
       organizationName,
+      organizationTimezone,
       intentPlaybook,
       setIntentPlaybook,
       liveFirestoreError: mode === "live" ? liveFs.error : null,
@@ -2462,6 +2472,7 @@ export function WorkspaceModeProvider({
     demoPersonaId,
     liveOrgId,
     organizationName,
+    organizationTimezone,
     intentPlaybook,
     setIntentPlaybook,
     liveFs.error,

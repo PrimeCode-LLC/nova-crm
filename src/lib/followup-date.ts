@@ -1,15 +1,26 @@
+import {
+  getBrowserTimezone,
+  isoFromDateInputInZone,
+  resolveOrgTimezone,
+  todayDateInputInZone,
+  zonedDayKey,
+} from "@/lib/org-timezone";
+
 /** Relative business-day gaps between consecutive sequence steps (Sat/Sun skipped). */
 export const SEQUENCE_BUSINESS_DAY_GAPS = [0, 3, 5, 7] as const;
 
-function formatDateInput(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+function formatDateInput(d: Date, timeZone?: string): string {
+  const zone = resolveOrgTimezone(timeZone);
+  return zonedDayKey(d, zone);
 }
 
-function startOfLocalDay(d: Date): Date {
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+function startOfCalendarDay(d: Date, timeZone?: string): Date {
+  const zone = resolveOrgTimezone(timeZone);
+  const key = zonedDayKey(d, zone);
+  // Use a Date at local interpretation of the ymd for business-day arithmetic
+  // (day-of-week stepping). Wall-clock storage still goes through isoFromDateInput.
+  const [y, m, day] = key.split("-").map(Number);
+  return new Date(y!, m! - 1, day!);
 }
 
 function isWeekend(d: Date): boolean {
@@ -19,7 +30,7 @@ function isWeekend(d: Date): boolean {
 
 /** Add N business days (Mon–Fri only). N=0 returns the same calendar day. */
 export function addBusinessDays(from: Date, businessDays: number): Date {
-  const d = startOfLocalDay(from);
+  const d = startOfCalendarDay(from);
   if (businessDays === 0) return d;
 
   const step = businessDays > 0 ? 1 : -1;
@@ -31,20 +42,26 @@ export function addBusinessDays(from: Date, businessDays: number): Date {
   return d;
 }
 
-export function isoFromDateInput(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+/**
+ * Noon in the given (or browser) timezone for a YYYY-MM-DD date input.
+ * Prefer passing the org timezone so due dates align across the team.
+ */
+export function isoFromDateInput(dateStr: string, timeZone?: string): string {
+  const zone = resolveOrgTimezone(timeZone);
+  return isoFromDateInputInZone(dateStr, zone);
 }
 
-export function todayDateInputValue(): string {
-  return formatDateInput(new Date());
+export function todayDateInputValue(timeZone?: string): string {
+  const zone = resolveOrgTimezone(timeZone);
+  return todayDateInputInZone(zone);
 }
 
 /** Calendar-day offset (legacy). Prefer business-day helpers for sequences. */
-export function dateInputFromOffsetDays(offsetDays: number): string {
-  const d = new Date();
+export function dateInputFromOffsetDays(offsetDays: number, timeZone?: string): string {
+  const zone = resolveOrgTimezone(timeZone);
+  const d = startOfCalendarDay(new Date(), zone);
   d.setDate(d.getDate() + offsetDays);
-  return formatDateInput(d);
+  return formatDateInput(d, zone);
 }
 
 /**
@@ -70,12 +87,15 @@ export function sequenceStepBusinessDayGap(
  */
 export function dateInputForSequenceStep(
   stepIndex: number,
-  options?: { includeInitial?: boolean; from?: Date },
+  options?: { includeInitial?: boolean; from?: Date; timeZone?: string },
 ): string {
   const includeInitial = options?.includeInitial ?? true;
-  let d = startOfLocalDay(options?.from ?? new Date());
+  const zone = resolveOrgTimezone(options?.timeZone);
+  let d = startOfCalendarDay(options?.from ?? new Date(), zone);
   for (let i = 0; i <= stepIndex; i++) {
     d = addBusinessDays(d, sequenceStepBusinessDayGap(i, includeInitial));
   }
-  return formatDateInput(d);
+  return formatDateInput(d, zone);
 }
+
+export { getBrowserTimezone };

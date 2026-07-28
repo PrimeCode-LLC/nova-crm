@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { UserChip } from "@/components/common/user-chip";
 import { ActionBoardDetailDialog } from "@/components/dashboard/action-board-detail-dialog";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildActionBoard } from "@/lib/dashboard-ops-analytics";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import { contactFirstName } from "@/lib/leads/lead-display-label";
@@ -113,9 +114,10 @@ export function ActionBoardPanel({
   description?: string;
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
+  const timeZone = useOrgTimezone();
   const board = React.useMemo(
-    () => buildActionBoard({ tasks, followups, meetings }),
-    [tasks, followups, meetings],
+    () => buildActionBoard({ tasks, followups, meetings, timeZone }),
+    [tasks, followups, meetings, timeZone],
   );
   const leadById = React.useMemo(() => new Map(leads.map((lead) => [lead.id, lead])), [leads]);
 

@@ -16,7 +16,10 @@ import {
   OWNER_SCOPE_PREFIX,
 } from "@/lib/owner-scope";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { isoFromDateInput, todayDateInputValue } from "@/lib/followup-date";
+import { zonedDayKey } from "@/lib/org-timezone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -40,24 +43,11 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
-function isoFromDateInput(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-function todayInputValue(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
 function defaultFollowupTitle(lead: Lead | undefined): string {
   return lead ? `Follow up with ${lead.contactName}` : "";
 }
 
-function localYmdFromIso(value: unknown): string {
+function ymdFromIso(value: unknown, timeZone: string): string {
   if (value == null || value === "") return "";
   const iso =
     typeof value === "string"
@@ -68,15 +58,12 @@ function localYmdFromIso(value: unknown): string {
   if (!iso.trim()) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return zonedDayKey(d, timeZone);
 }
 
-function leadMatchesActivityDate(lead: Lead, ymd: string): boolean {
+function leadMatchesActivityDate(lead: Lead, ymd: string, timeZone: string): boolean {
   if (!ymd) return true;
-  const rowYmd = localYmdFromIso(lead.lastActivityAt ?? lead.createdAt);
+  const rowYmd = ymdFromIso(lead.lastActivityAt ?? lead.createdAt, timeZone);
   return rowYmd === ymd;
 }
 
@@ -114,6 +101,7 @@ export function NewFollowupDialog({
   fixedLeadId?: string;
 }) {
   const { users, getUserById, getOwnerDisplayName, isDemo } = useWorkspace();
+  const timeZone = useOrgTimezone();
   const channelOptions = useChannelOptions();
   const isEdit = Boolean(editFollowup);
   const [leadId, setLeadId] = React.useState("");
@@ -122,7 +110,7 @@ export function NewFollowupDialog({
   const [messageBody, setMessageBody] = React.useState("");
   const [emailSubject, setEmailSubject] = React.useState("");
   const [channel, setChannel] = React.useState<FollowupChannel | "">("");
-  const [dueDate, setDueDate] = React.useState(todayInputValue());
+  const [dueDate, setDueDate] = React.useState(() => todayDateInputValue(timeZone));
   const [priority, setPriority] = React.useState<LeadPriority>("medium");
   const [leadOwnerScope, setLeadOwnerScope] = React.useState("all-owners");
   const [leadActivityDate, setLeadActivityDate] = React.useState("");
@@ -156,10 +144,10 @@ export function NewFollowupDialog({
   const filteredLeads = React.useMemo(() => {
     let rows = filterLeadsByOwnerScope(leads, leadOwnerScope, ownerScopeDeps);
     if (leadActivityDate) {
-      rows = rows.filter((l) => leadMatchesActivityDate(l, leadActivityDate));
+      rows = rows.filter((l) => leadMatchesActivityDate(l, leadActivityDate, timeZone));
     }
     return rows;
-  }, [leads, leadOwnerScope, leadActivityDate, ownerScopeDeps]);
+  }, [leads, leadOwnerScope, leadActivityDate, ownerScopeDeps, timeZone]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -171,7 +159,7 @@ export function NewFollowupDialog({
         setMessageBody(editFollowup.messageBody ?? "");
         setEmailSubject(editFollowup.emailSubject ?? "");
         setChannel(editFollowup.channel ?? "");
-        setDueDate(localYmdFromIso(editFollowup.dueAt) || todayInputValue());
+        setDueDate(ymdFromIso(editFollowup.dueAt, timeZone) || todayDateInputValue(timeZone));
         setPriority(editFollowup.priority);
         setLeadOwnerScope("all-owners");
         setLeadActivityDate("");
@@ -186,12 +174,12 @@ export function NewFollowupDialog({
       setMessageBody("");
       setEmailSubject("");
       setChannel("");
-      setDueDate(todayInputValue());
+      setDueDate(todayDateInputValue(timeZone));
       setPriority("medium");
       setLeadOwnerScope("all-owners");
       setLeadActivityDate("");
     });
-  }, [open, leads, fixedLeadId, editFollowup]);
+  }, [open, leads, fixedLeadId, editFollowup, timeZone]);
 
   React.useEffect(() => {
     if (!open || fixedLeadId || isEdit) return;
@@ -286,7 +274,7 @@ export function NewFollowupDialog({
         messageBody: messageBody.trim(),
         emailSubject: emailSubject.trim(),
         channel: channel || undefined,
-        dueAt: isoFromDateInput(dueDate),
+        dueAt: isoFromDateInput(dueDate, timeZone),
         priority,
         ownerId: editFollowup.ownerId,
       };
@@ -314,7 +302,7 @@ export function NewFollowupDialog({
       messageBody: messageBody.trim() || undefined,
       emailSubject: emailSubject.trim() || undefined,
       channel: channel || undefined,
-      dueAt: isoFromDateInput(dueDate),
+      dueAt: isoFromDateInput(dueDate, timeZone),
       ownerId: selectedLead.ownerId ?? currentUserId,
       priority,
       auto: false,

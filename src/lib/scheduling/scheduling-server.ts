@@ -6,6 +6,7 @@ import { slugifyOrganizationName } from "@/lib/platform/slug";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
 import { sendSystemEmail } from "@/lib/email/send-system-email";
+import { resolveOrgTimezone } from "@/lib/org-timezone";
 import {
   datesWithAvailability,
   generateSlotsForDate,
@@ -223,6 +224,10 @@ export async function getDefaultScheduleForHostServer(input: {
   organizationId: string;
   hostId: string;
 }): Promise<AvailabilitySchedule> {
+  const org = await getOrganizationServer(input.organizationId);
+  const seedTimezone = resolveOrgTimezone(org?.settings.timezone, {
+    fallback: DEFAULT_TIMEZONE,
+  });
   const db = getAdminDb();
   if (!db) {
     return {
@@ -231,7 +236,7 @@ export async function getDefaultScheduleForHostServer(input: {
       ownerUid: input.hostId,
       name: "Working hours (default)",
       isDefault: true,
-      timezone: DEFAULT_TIMEZONE,
+      timezone: seedTimezone,
       weekly: DEFAULT_WEEKLY_AVAILABILITY,
       minNoticeHours: 4,
       maxDaysAhead: 60,
@@ -254,7 +259,7 @@ export async function getDefaultScheduleForHostServer(input: {
     ownerUid: input.hostId,
     name: "Working hours (default)",
     isDefault: true,
-    timezone: DEFAULT_TIMEZONE,
+    timezone: seedTimezone,
     weekly: DEFAULT_WEEKLY_AVAILABILITY,
     minNoticeHours: 4,
     maxDaysAhead: 60,

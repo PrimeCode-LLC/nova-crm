@@ -11,7 +11,21 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { OrgMemberRole } from "@/lib/types";
+import {
+  buildTimezoneOptions,
+  formatTimezoneDisplayLabel,
+  getBrowserTimezone,
+} from "@/lib/scheduling/timezone-options";
+
+const BROWSER_TZ_VALUE = "__browser__";
 
 type OrganizationSettingsPayload = {
   id: string;
@@ -22,6 +36,8 @@ type OrganizationSettingsPayload = {
   maxUsers: number | null;
   primaryEmail: string | null;
   billingEmail: string;
+  /** Sticky IANA zone, or "" for browser fallback. */
+  timezone: string;
   updatedAt: string;
 } | null;
 
@@ -39,11 +55,18 @@ export function OrganizationSettingsClient({
   const [billingEmail, setBillingEmail] = React.useState(
     organization?.billingEmail ?? "",
   );
+  const [timezone, setTimezone] = React.useState(organization?.timezone ?? "");
   const [submitting, setSubmitting] = React.useState(false);
 
   const [joinConfigured, setJoinConfigured] = React.useState(false);
   const [joinUrl, setJoinUrl] = React.useState<string | null>(null);
   const [joinBusy, setJoinBusy] = React.useState(false);
+
+  const timezoneOptions = React.useMemo(
+    () => buildTimezoneOptions(timezone || undefined),
+    [timezone],
+  );
+  const browserTz = React.useMemo(() => getBrowserTimezone(), []);
 
   React.useEffect(() => {
     if (!canEdit || !organization) return;
@@ -67,6 +90,7 @@ export function OrganizationSettingsClient({
     if (!organization) return;
     setName(organization.name);
     setBillingEmail(organization.billingEmail);
+    setTimezone(organization.timezone);
   }, [organization?.id, organization?.updatedAt]);
 
   const seatLabel =
@@ -78,14 +102,26 @@ export function OrganizationSettingsClient({
     e.preventDefault();
     if (!organization || !canEdit) return;
 
-    const payload: { name?: string; settings?: { billingEmail: string } } = {};
+    const payload: {
+      name?: string;
+      settings?: { billingEmail?: string; timezone?: string };
+    } = {};
     if (name.trim() !== organization.name) {
       payload.name = name.trim();
     }
     const nextBilling = billingEmail.trim();
     const prevBilling = (organization.billingEmail ?? "").trim();
+    const nextTimezone = timezone.trim();
+    const prevTimezone = (organization.timezone ?? "").trim();
+    const settings: { billingEmail?: string; timezone?: string } = {};
     if (nextBilling !== prevBilling) {
-      payload.settings = { billingEmail: nextBilling };
+      settings.billingEmail = nextBilling;
+    }
+    if (nextTimezone !== prevTimezone) {
+      settings.timezone = nextTimezone;
+    }
+    if (Object.keys(settings).length > 0) {
+      payload.settings = settings;
     }
 
     if (Object.keys(payload).length === 0) {
@@ -220,8 +256,8 @@ export function OrganizationSettingsClient({
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Editable fields</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Workspace display name and where we send billing-related notices for this
-              organization.
+              Workspace display name, billing contact, and the timezone used for
+              follow-ups, dashboards, and email send times.
             </p>
           </CardHeader>
           <CardContent>
@@ -264,6 +300,37 @@ export function OrganizationSettingsClient({
                   <p className="text-xs text-muted-foreground">
                     Optional. Used for invoices and billing correspondence for this
                     workspace.
+                  </p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs" htmlFor="org-timezone">
+                    Workspace timezone
+                  </Label>
+                  <Select
+                    value={timezone.trim() ? timezone : BROWSER_TZ_VALUE}
+                    onValueChange={(v) =>
+                      setTimezone(v === BROWSER_TZ_VALUE || v == null ? "" : v)
+                    }
+                    disabled={!canEdit}
+                  >
+                    <SelectTrigger id="org-timezone" className="w-full">
+                      <SelectValue placeholder="Use browser timezone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={BROWSER_TZ_VALUE}>
+                        Use my browser timezone ({formatTimezoneDisplayLabel(browserTz)})
+                      </SelectItem>
+                      {timezoneOptions.map((tz) => (
+                        <SelectItem key={tz} value={tz}>
+                          {formatTimezoneDisplayLabel(tz)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    When set, everyone shares this zone for due dates, overdue, and
+                    scheduled sends (e.g. America/New York for EST teams). Leave on
+                    browser timezone if each person should use their device clock.
                   </p>
                 </div>
                 {canEdit && (

@@ -41,10 +41,13 @@ export default async function AppLayout({
   const initialDemoPersonaId = parseDemoPersonaId(jar.get(DEMO_PERSONA_COOKIE)?.value);
 
   let organizationName: string | undefined;
+  let organizationTimezone: string | undefined;
   if (session.organizationId) {
     try {
       const org = await getOrganizationServer(session.organizationId);
       if (org?.name?.trim()) organizationName = org.name.trim();
+      const tz = org?.settings.timezone?.trim();
+      if (tz) organizationTimezone = tz;
     } catch {
       /* ignore */
     }
@@ -55,6 +58,7 @@ export default async function AppLayout({
       initialMode={initialMode}
       initialDemoPersonaId={initialDemoPersonaId}
       organizationName={organizationName}
+      organizationTimezone={organizationTimezone}
     >
       <TeamChatUnreadProvider deferSubscriptions>
         <DeferredAppSync />

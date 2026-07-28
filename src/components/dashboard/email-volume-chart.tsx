@@ -5,6 +5,7 @@ import { Area, AreaChart, CartesianGrid, Tooltip, XAxis, YAxis } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useChartSize } from "@/hooks/use-chart-size";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   buildEmailVolumeSeries,
   emailVolumeTotals,
@@ -28,6 +29,7 @@ export function EmailVolumeChart({
   timelineByLead,
   compact,
   fill,
+  timeZone: timeZoneProp,
 }: {
   followups: Followup[];
   leads: Lead[];
@@ -37,7 +39,10 @@ export function EmailVolumeChart({
   compact?: boolean;
   /** Grow to fill the parent's height instead of a fixed chart height. */
   fill?: boolean;
+  timeZone?: string;
 }) {
+  const orgTimeZone = useOrgTimezone();
+  const timeZone = timeZoneProp ?? orgTimeZone;
   const [period, setPeriod] = React.useState<EmailVolumePeriod>("week");
   const data = React.useMemo(
     () =>
@@ -48,8 +53,9 @@ export function EmailVolumeChart({
         contacts,
         tasks,
         timelineByLead,
+        timeZone,
       }),
-    [followups, leads, period, contacts, tasks, timelineByLead],
+    [followups, leads, period, contacts, tasks, timelineByLead, timeZone],
   );
   const totals = React.useMemo(() => emailVolumeTotals(data), [data]);
   const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });

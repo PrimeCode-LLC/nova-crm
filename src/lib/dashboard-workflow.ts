@@ -1,5 +1,10 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { PIPELINE_STAGES } from "@/lib/constants";
+import {
+  isFollowupActionable,
+  isFollowupDueThroughToday,
+  isFollowupOverdue,
+} from "@/lib/followup-open-status";
 import type { Contact, Followup, FollowupPlan, Lead, LeadTask, PipelineStage } from "@/lib/types";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
@@ -78,20 +83,23 @@ export function computeDashboardWorkflowMetrics(input: {
   now?: Date;
   /** Optional contacts for bounce timestamp metrics. */
   contacts?: readonly Contact[];
+  /** IANA timezone for due/overdue calendar boundaries (org or browser). */
+  timeZone?: string;
 }): DashboardWorkflowMetrics {
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
-  const endOfToday = new Date(now);
-  endOfToday.setHours(23, 59, 59, 999);
   const start = getDashboardRangeStart(input.range, now).getTime();
+  const timeOpts = { now, timeZone: input.timeZone };
 
   const salesLeads = input.leads.filter(isSalesLead);
   const prospects = input.leads.filter((lead) => lead.intakeKind === "prospect");
-  const actionableFollowups = input.followups.filter((followup) => !followup.completedAt && !followup.pausedAt);
-  const dueFollowups = actionableFollowups.filter((followup) => {
-    const due = validTime(followup.dueAt);
-    return due !== undefined && due <= endOfToday.getTime();
-  });
+  // Queued / remaining sequence work: still open, not paused (may include scheduled).
+  const openUnpausedFollowups = input.followups.filter(
+    (followup) => !followup.completedAt && !followup.pausedAt,
+  );
+  const dueFollowups = input.followups.filter((followup) =>
+    isFollowupDueThroughToday(followup, timeOpts),
+  );
   const activePlanIds = new Set(
     input.plans.filter((plan) => plan.status === "active").map((plan) => plan.id),
   );
@@ -120,18 +128,17 @@ export function computeDashboardWorkflowMetrics(input: {
     prospectsNeedRouting: prospects.filter(prospectNeedsRouting).length,
     prospectsPushed: prospects.filter((lead) => Boolean(lead.linkedSalesLeadId)).length,
     followupsDue: dueFollowups.length,
-    overdueFollowups: dueFollowups.filter((followup) => {
-      const due = validTime(followup.dueAt);
-      return due !== undefined && due < nowMs;
-    }).length,
-    scheduledSteps: actionableFollowups.filter(
+    overdueFollowups: dueFollowups.filter((followup) =>
+      isFollowupOverdue(followup, timeOpts),
+    ).length,
+    scheduledSteps: openUnpausedFollowups.filter(
       (followup) => followup.deliveryStatus === "scheduled" || Boolean(followup.scheduledEmailId),
     ).length,
-    readyUnscheduledSteps: actionableFollowups.filter(
+    readyUnscheduledSteps: openUnpausedFollowups.filter(
       (followup) =>
+        isFollowupActionable(followup) &&
         Boolean(followup.messageBody?.trim()) &&
-        !followup.scheduledEmailId &&
-        followup.deliveryStatus !== "sent",
+        !followup.scheduledEmailId,
     ).length,
     sentInRange: input.followups.filter((followup) => {
       const sent = validTime(followup.sentAt);
@@ -146,7 +153,7 @@ export function computeDashboardWorkflowMetrics(input: {
     bouncedEmailsInRange,
     openBounceReviewTasks,
     activeSequences: activePlanIds.size,
-    remainingSequenceSteps: actionableFollowups.filter(
+    remainingSequenceSteps: openUnpausedFollowups.filter(
       (followup) => Boolean(followup.planId && activePlanIds.has(followup.planId)),
     ).length,
     pausedOnReply: input.plans.filter(

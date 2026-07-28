@@ -150,6 +150,7 @@ export default function DashboardPage() {
     orgActivityEvents,
     viewerOrgRole,
     contacts,
+    organizationTimezone,
   } = useWorkspace();
   const navAccess = useNavAccessContext();
   const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();  const emailResponseCtx = useLeadEmailResponseContext();
@@ -275,6 +276,7 @@ export default function DashboardPage() {
         contacts,
         currentUserId,
         range: timeRange as DashboardTimeRangeKey,
+        timeZone: organizationTimezone,
       }),
     [
       scopedLeads,
@@ -284,6 +286,7 @@ export default function DashboardPage() {
       contacts,
       currentUserId,
       timeRange,
+      organizationTimezone,
     ],
   );
   const avgResponseMin = React.useMemo(

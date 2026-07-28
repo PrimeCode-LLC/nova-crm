@@ -16,14 +16,8 @@ import {
   Users,
 } from "lucide-react";
 import {
-  endOfDay,
   endOfWeek,
   format,
-  isAfter,
-  isBefore,
-  isSameDay,
-  isWithinInterval,
-  startOfDay,
 } from "date-fns";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
@@ -42,6 +36,13 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead } from "@/lib/types";
 import { canMutateFollowup } from "@/lib/can-mutate-followup";
+import { isFollowupActionable } from "@/lib/followup-open-status";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import {
+  todayDateInputInZone,
+  zonedDayKey,
+  zonedWallTimeToUtc,
+} from "@/lib/org-timezone";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import {
@@ -78,39 +79,25 @@ const NewFollowupDialog = dynamic(
   { ssr: false },
 );
 
-function todayYmdLocal(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
-}
-
-function startOfLocalDayFromYmd(ymd: string): Date {
-  const parts = ymd.split("-").map((x) => Number(x));
-  const y = parts[0];
-  const mo = parts[1];
-  const da = parts[2];
-  if (!y || !mo || !da || Number.isNaN(y) || Number.isNaN(mo) || Number.isNaN(da)) {
-    return startOfDay(new Date());
-  }
-  return startOfDay(new Date(y, mo - 1, da));
-}
-
 /**
- * Buckets relative to a chosen calendar day (local TZ) and the ISO week containing that day (Mon–Sun).
- * Fixes “team due today” items being pushed into the wrong bucket by a rolling 24h window.
+ * Buckets relative to a chosen calendar day (org/browser TZ) and the ISO week
+ * containing that day (Mon–Sun).
  */
-function categorizeFollowupBucket(dueAt: string, anchorDay: Date): "overdue" | "today" | "thisWeek" | "later" {
+function categorizeFollowupBucket(
+  dueAt: string,
+  anchorYmd: string,
+  timeZone: string,
+): "overdue" | "today" | "thisWeek" | "later" {
   const due = new Date(dueAt);
   if (Number.isNaN(due.getTime())) return "later";
-  const dayStart = startOfDay(anchorDay);
-  const dayEnd = endOfDay(anchorDay);
-  const weekEnd = endOfWeek(anchorDay, { weekStartsOn: 1 });
+  const dueKey = zonedDayKey(due, timeZone);
+  if (dueKey < anchorYmd) return "overdue";
+  if (dueKey === anchorYmd) return "today";
 
-  if (isBefore(due, dayStart)) return "overdue";
-  if (isWithinInterval(due, { start: dayStart, end: dayEnd })) return "today";
-  if (isAfter(due, dayEnd) && !isAfter(due, weekEnd)) return "thisWeek";
+  const anchorNoon = zonedWallTimeToUtc(anchorYmd, 12, 0, 0, 0, timeZone);
+  const weekEnd = endOfWeek(anchorNoon, { weekStartsOn: 1 });
+  const weekEndKey = zonedDayKey(weekEnd, timeZone);
+  if (dueKey <= weekEndKey) return "thisWeek";
   return "later";
 }
 
@@ -119,6 +106,7 @@ type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
 export default function FollowupsPage() {
   const router = useRouter();
   const ws = useWorkspace();
+  const timeZone = useOrgTimezone();
   const {
     followups: allFollowups,
     isDemo,
@@ -138,7 +126,7 @@ export default function FollowupsPage() {
   const [bucketFilter, setBucketFilter] = React.useState<BucketFilter>("all");
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
-  const [viewDateYmd, setViewDateYmd] = React.useState(() => todayYmdLocal());
+  const [viewDateYmd, setViewDateYmd] = React.useState(() => todayDateInputInZone(timeZone));
 
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const viewer = users.find((u) => u.id === currentUserId);
@@ -172,8 +160,12 @@ export default function FollowupsPage() {
     [allFollowups, ownerScope, ownerScopeDeps],
   );
 
-  const anchorDay = React.useMemo(() => startOfLocalDayFromYmd(viewDateYmd), [viewDateYmd]);
-  const isViewToday = isSameDay(anchorDay, new Date());
+  const todayYmd = todayDateInputInZone(timeZone);
+  const anchorDay = React.useMemo(
+    () => zonedWallTimeToUtc(viewDateYmd, 12, 0, 0, 0, timeZone),
+    [viewDateYmd, timeZone],
+  );
+  const isViewToday = viewDateYmd === todayYmd;
   const dueAnchorBucketTitle = isViewToday ? "Due today" : `Due ${format(anchorDay, "MMM d")}`;
   const dueAnchorKpiLabel = isViewToday ? "Due today" : `Due ${format(anchorDay, "MMM d")}`;
 
@@ -188,13 +180,26 @@ export default function FollowupsPage() {
     [currentUserId, viewer, ws],
   );
 
-  const open = followups.filter((f) => !f.completedAt);
+  const open = followups.filter((f) => {
+    if (f.completedAt) return false;
+    // Keep delivery failures visible in the queue; other terminal states stay out of due buckets.
+    if (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry") return true;
+    return isFollowupActionable(f);
+  });
   const done = followups.filter((f) => f.completedAt);
 
-  const overdue = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "overdue");
-  const today = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "today");
-  const thisWeek = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "thisWeek");
-  const later = open.filter((f) => categorizeFollowupBucket(f.dueAt, anchorDay) === "later");
+  const overdue = open.filter(
+    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue",
+  );
+  const today = open.filter(
+    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today",
+  );
+  const thisWeek = open.filter(
+    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "thisWeek",
+  );
+  const later = open.filter(
+    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "later",
+  );
 
   function toggleBucket(next: BucketFilter) {
     setTab("open");
@@ -310,7 +315,7 @@ export default function FollowupsPage() {
                       type="button"
                       variant="link"
                       className="h-auto p-0 text-xs text-muted-foreground"
-                      onClick={() => setViewDateYmd(todayYmdLocal())}
+                      onClick={() => setViewDateYmd(todayYmd)}
                     >
                       Jump to today
                     </Button>
@@ -332,7 +337,7 @@ export default function FollowupsPage() {
                     type="date"
                     className="h-9 w-[11.5rem] bg-background"
                     value={viewDateYmd}
-                    onChange={(e) => setViewDateYmd(e.target.value || todayYmdLocal())}
+                    onChange={(e) => setViewDateYmd(e.target.value || todayYmd)}
                   />
                 </div>
                 <div className="grid min-w-0 gap-1.5 sm:min-w-[11rem]">

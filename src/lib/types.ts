@@ -140,6 +140,12 @@ export type SaaSPlanId = "free" | "pro" | "enterprise";
 
 export interface OrganizationSettings {
   billingEmail?: string;
+  /**
+   * Optional IANA workspace timezone (e.g. `America/New_York`).
+   * When set, calendar day boundaries and schedule pickers use this zone for the whole org.
+   * When unset, the app falls back to each user's browser timezone.
+   */
+  timezone?: string;
   /** Internal notes for operators (not shown to tenant users). */
   operatorNotes?: string;
   /** Per-tenant secret for `POST /api/integrations/webhook/lead` (never returned to browsers). */

@@ -4,6 +4,7 @@ import {
   appendMailboxSignature,
 } from "@/lib/email/append-mailbox-signature";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
+import { datetimeLocalInZone, resolveOrgTimezone } from "@/lib/org-timezone";
 import { isEmailAccountConfigured } from "@/stores/email-account-store";
 
 function escapeHtml(s: string) {
@@ -142,7 +143,10 @@ export async function scheduleFollowupEmailClient(
   }
 }
 
-export function toDatetimeLocalValue(d: Date): string {
+export function toDatetimeLocalValue(d: Date, timeZone?: string): string {
+  if (timeZone) {
+    return datetimeLocalInZone(d, resolveOrgTimezone(timeZone));
+  }
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
@@ -151,14 +155,14 @@ export function toDatetimeLocalValue(d: Date): string {
   return `${y}-${m}-${day}T${h}:${min}`;
 }
 
-export function defaultScheduleDatetimeLocal(preferIso?: string): string {
+export function defaultScheduleDatetimeLocal(preferIso?: string, timeZone?: string): string {
   const min = new Date(Date.now() + 60_000);
   if (preferIso) {
     const preferred = new Date(preferIso);
     if (!Number.isNaN(preferred.getTime()) && preferred.getTime() >= min.getTime()) {
-      return toDatetimeLocalValue(preferred);
+      return toDatetimeLocalValue(preferred, timeZone);
     }
   }
   const inOneHour = new Date(Date.now() + 60 * 60_000);
-  return toDatetimeLocalValue(inOneHour);
+  return toDatetimeLocalValue(inOneHour, timeZone);
 }

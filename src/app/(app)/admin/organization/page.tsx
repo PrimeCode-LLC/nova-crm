@@ -32,6 +32,7 @@ export default async function OrganizationSettingsPage() {
               maxUsers: org.maxUsers ?? null,
               primaryEmail: org.primaryEmail ?? null,
               billingEmail: org.settings.billingEmail ?? "",
+              timezone: org.settings.timezone ?? "",
               updatedAt: org.updatedAt,
             }
           : null
