@@ -29,6 +29,7 @@ import {
 } from "@/components/ui/breadcrumb";
 import { QuickAddButton } from "./app-sidebar";
 import { WorkspaceModeToggle } from "./workspace-mode-toggle";
+import { OrgTimezoneClock } from "./org-timezone-clock";
 import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -136,6 +137,7 @@ export function AppTopbar() {
         </Breadcrumb>
 
         <div className="ml-auto flex items-center gap-2">
+          <OrgTimezoneClock />
           <WorkspaceModeToggle />
           <Button
             variant="outline"
