@@ -212,32 +212,113 @@ export async function createScheduledEmailServer(input: {
   return { ok: true, id: ref.id };
 }
 
+async function resolveScheduledEmailDoc(input: {
+  organizationId: string;
+  uid: string;
+  id: string;
+  /** Extra member mailbox roots to try (e.g. followup owner). */
+  fallbackUids?: string[];
+}): Promise<
+  | { found: true; ref: DocumentReference; data: Record<string, unknown> }
+  | { found: false }
+  | { error: string }
+> {
+  const tried = new Set<string>();
+  const candidates = [input.uid, ...(input.fallbackUids ?? [])]
+    .map((u) => u.trim())
+    .filter(Boolean);
+
+  for (const memberUid of candidates) {
+    if (tried.has(memberUid)) continue;
+    tried.add(memberUid);
+    const ref = scheduledRef(input.organizationId, memberUid, input.id);
+    if (!ref) return { error: "Database not configured" };
+    const snap = await ref.get();
+    if (snap.exists) {
+      return { found: true, ref, data: snap.data() as Record<string, unknown> };
+    }
+  }
+  return { found: false };
+}
+
 export async function cancelScheduledEmailServer(input: {
   organizationId: string;
   uid: string;
   id: string;
   reason?: string;
+  /** Linked followup — used to try owner mailbox and to unlink orphans. */
+  followupId?: string;
+  /** Extra member mailbox roots to try when the doc is not under `uid`. */
+  fallbackUids?: string[];
 }): Promise<{ ok: true } | { error: string }> {
-  const ref = scheduledRef(input.organizationId, input.uid, input.id);
-  if (!ref) return { error: "Database not configured" };
+  const followupIdHint = input.followupId?.trim() || "";
+  const fallbackUids = [...(input.fallbackUids ?? [])];
 
-  const snap = await ref.get();
-  if (!snap.exists) return { error: "Scheduled email not found." };
-  const data = snap.data() as Record<string, unknown>;
-  if (String(data.status) !== "pending") {
-    return { error: "Only pending scheduled emails can be cancelled." };
+  if (followupIdHint) {
+    const db = getAdminDb();
+    if (db) {
+      try {
+        const fuSnap = await db.collection(COLLECTIONS.followups).doc(followupIdHint).get();
+        if (fuSnap.exists) {
+          const ownerId = String(
+            (fuSnap.data() as Record<string, unknown>).ownerId ?? "",
+          ).trim();
+          if (ownerId) fallbackUids.push(ownerId);
+        }
+      } catch {
+        /* ignore — cancel still proceeds */
+      }
+    }
   }
+
+  const resolved = await resolveScheduledEmailDoc({
+    organizationId: input.organizationId,
+    uid: input.uid,
+    id: input.id,
+    fallbackUids,
+  });
+  if ("error" in resolved) return { error: resolved.error };
 
   const now = new Date().toISOString();
   const reason = (input.reason?.trim() || "Cancelled by user").slice(0, 500);
+
+  // Orphan schedule link on the followup: queue doc already gone — unlink and succeed.
+  if (!resolved.found) {
+    if (followupIdHint) {
+      await updateFollowupDeliveryState(followupIdHint, {
+        deliveryStatus: "cancelled",
+        cancelledAt: now,
+        cancelReason: reason,
+        clearSchedule: true,
+      });
+    }
+    return { ok: true };
+  }
+
+  const { ref, data } = resolved;
+  const followupId =
+    (typeof data.followupId === "string" ? data.followupId.trim() : "") ||
+    followupIdHint;
+
+  // Already sent / cancelled / failed — clear any leftover followup link and succeed.
+  if (String(data.status) !== "pending") {
+    if (followupId) {
+      await updateFollowupDeliveryState(followupId, {
+        deliveryStatus: "cancelled",
+        cancelledAt: now,
+        cancelReason: reason,
+        clearSchedule: true,
+      });
+    }
+    return { ok: true };
+  }
+
   await ref.update({
     status: "cancelled",
     cancelledAt: now,
     cancelReason: reason,
     updatedAt: now,
   });
-  const followupId =
-    typeof data.followupId === "string" ? data.followupId.trim() : "";
   if (followupId) {
     await updateFollowupDeliveryState(followupId, {
       deliveryStatus: "cancelled",

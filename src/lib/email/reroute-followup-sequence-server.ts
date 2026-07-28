@@ -153,6 +153,7 @@ export async function rerouteFollowupSequenceServer(
       uid: input.dataOwnerUid,
       id: sid,
       reason: input.reason,
+      followupId: step.id,
     });
     if ("ok" in cancel && cancel.ok) cancelledScheduled += 1;
   }

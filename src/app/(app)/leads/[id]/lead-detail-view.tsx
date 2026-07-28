@@ -423,6 +423,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
+  const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
 
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
@@ -503,6 +504,10 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           scheduledEmailId,
           isDemo: ws.isDemo,
           cancelDemo: cancelScheduled,
+          followupId: followups.find((f) => f.scheduledEmailId === scheduledEmailId)?.id,
+          selfUid: ws.currentUserId,
+          mailViewAsUid,
+          activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
         });
         return !("error" in cancel);
       },

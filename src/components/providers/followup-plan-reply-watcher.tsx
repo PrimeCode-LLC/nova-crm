@@ -117,6 +117,8 @@ export function FollowupPlanReplyWatcher() {
             cancelDemo: cancelScheduled,
             clearSchedule: clearFollowupEmailSchedule,
             reason: "Lead replied by email",
+            selfUid: currentUserId,
+            activeMailboxDataOwnerUid: acct.dataOwnerUid,
           });
           if (errors.length > 0) {
             toast.error("Could not cancel all scheduled followup emails", {

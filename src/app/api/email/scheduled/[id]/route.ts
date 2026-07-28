@@ -18,8 +18,10 @@ export async function DELETE(req: Request, context: RouteContext) {
     return NextResponse.json({ ok: false, error: "Missing scheduled email id." }, { status: 400 });
   }
 
-  const forUser = new URL(req.url).searchParams.get("forUser");
-  const reason = new URL(req.url).searchParams.get("reason")?.trim() || undefined;
+  const url = new URL(req.url);
+  const forUser = url.searchParams.get("forUser");
+  const reason = url.searchParams.get("reason")?.trim() || undefined;
+  const followupId = url.searchParams.get("followupId")?.trim() || undefined;
   const resolved = await resolveMailboxDataOwnerUid({
     organizationId: g.ctx.session.organizationId,
     viewerUid: g.ctx.session.uid,
@@ -41,6 +43,7 @@ export async function DELETE(req: Request, context: RouteContext) {
     uid: resolved.dataOwnerUid,
     id: scheduledId,
     reason,
+    followupId,
   });
 
   if ("error" in result) {

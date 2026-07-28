@@ -44,7 +44,7 @@ import {
   zonedWallTimeToUtc,
 } from "@/lib/org-timezone";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
-import { useEmailAccountStore } from "@/stores/email-account-store";
+import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-store";
 import {
   buildWorkspaceOwnerPickerOptions,
   filterFollowupsByOwnerScope,
@@ -129,6 +129,10 @@ export default function FollowupsPage() {
   const [viewDateYmd, setViewDateYmd] = React.useState(() => todayDateInputInZone(timeZone));
 
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const mailboxes = useEmailAccountStore((s) => s.mailboxes);
+  const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
+  const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
+  const activeMailbox = getActiveMailbox({ mailboxes, activeMailboxId });
   const viewer = users.find((u) => u.id === currentUserId);
   const followupOwnerIds = React.useMemo(
     () => [...new Set(allFollowups.map((f) => f.ownerId).filter(Boolean))],
@@ -247,6 +251,10 @@ export default function FollowupsPage() {
         scheduledEmailId: target.scheduledEmailId,
         isDemo,
         cancelDemo: cancelScheduled,
+        followupId: target.id,
+        selfUid: currentUserId,
+        mailViewAsUid,
+        activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
       });
       if ("error" in result) {
         toast.error(result.error);
@@ -256,7 +264,16 @@ export default function FollowupsPage() {
     }
     removeFollowup(target.id);
     toast.success("Followup deleted");
-  }, [deleteTarget, removeFollowup, isDemo, cancelScheduled, clearFollowupEmailSchedule]);
+  }, [
+    deleteTarget,
+    removeFollowup,
+    isDemo,
+    cancelScheduled,
+    clearFollowupEmailSchedule,
+    currentUserId,
+    mailViewAsUid,
+    activeMailbox.dataOwnerUid,
+  ]);
 
   function handleUpdateFollowup(
     id: string,
@@ -275,6 +292,10 @@ export default function FollowupsPage() {
           scheduledEmailId: existing.scheduledEmailId!,
           isDemo,
           cancelDemo: cancelScheduled,
+          followupId: id,
+          selfUid: currentUserId,
+          mailViewAsUid,
+          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
         });
         if ("error" in result) {
           toast.error(result.error);

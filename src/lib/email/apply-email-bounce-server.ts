@@ -299,6 +299,7 @@ async function pauseActivePlan(input: {
       uid: input.dataOwnerUid,
       id: sid,
       reason: input.pauseReason,
+      followupId: d.id,
     });
     if ("ok" in cancel && cancel.ok) cancelledScheduled += 1;
   }

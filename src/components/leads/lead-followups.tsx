@@ -477,6 +477,10 @@ export function LeadFollowups({
 
   const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const mailboxes = useEmailAccountStore((s) => s.mailboxes);
+  const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
+  const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
+  const activeMailbox = getActiveMailbox({ mailboxes, activeMailboxId });
   const viewer = users.find((u) => u.id === currentUserId);
 
   const plans = React.useMemo(
@@ -606,6 +610,10 @@ export function LeadFollowups({
       scheduledEmailId: f.scheduledEmailId,
       isDemo,
       cancelDemo: cancelScheduled,
+      followupId: f.id,
+      selfUid: currentUserId,
+      mailViewAsUid,
+      activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
     });
     if ("error" in result) {
       toast.error(result.error);
@@ -693,6 +701,9 @@ export function LeadFollowups({
       const result = await retryScheduledEmailClient({
         scheduledEmailId: f.scheduledEmailId,
         isDemo,
+        selfUid: currentUserId,
+        mailViewAsUid,
+        activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
         retryDemo: (id) => {
           const row = scheduledEmails.find((s) => s.id === id);
           if (!row) return;

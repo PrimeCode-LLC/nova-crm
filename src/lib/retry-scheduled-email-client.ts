@@ -1,9 +1,17 @@
+import {
+  appendMailDataOwnerParam,
+  resolveMailApiForUserUid,
+} from "@/lib/email/mail-data-owner-query";
+
 /** Retry a failed / needs_retry scheduled email via the live API. */
 export async function retryScheduledEmailClient(input: {
   scheduledEmailId: string;
   isDemo: boolean;
   /** Demo: bump scheduledAt and clear error on the store row. */
   retryDemo?: (id: string) => void;
+  selfUid?: string;
+  mailViewAsUid?: string | null;
+  activeMailboxDataOwnerUid?: string | null;
 }): Promise<{ ok: true; scheduledAt?: string } | { error: string }> {
   const id = input.scheduledEmailId.trim();
   if (!id) return { error: "Missing scheduled email id." };
@@ -14,7 +22,18 @@ export async function retryScheduledEmailClient(input: {
   }
 
   try {
-    const res = await fetch(`/api/email/scheduled/${encodeURIComponent(id)}`, {
+    let path = `/api/email/scheduled/${encodeURIComponent(id)}`;
+    const selfUid = (input.selfUid ?? "").trim();
+    if (selfUid) {
+      const forUid = resolveMailApiForUserUid({
+        mailViewAsUid: input.mailViewAsUid,
+        activeMailboxDataOwnerUid: input.activeMailboxDataOwnerUid,
+        selfUid,
+      });
+      path = appendMailDataOwnerParam(path, forUid, selfUid);
+    }
+
+    const res = await fetch(path, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       credentials: "same-origin",
