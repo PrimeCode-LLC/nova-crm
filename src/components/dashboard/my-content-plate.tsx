@@ -70,10 +70,13 @@ function buildMyContentRows(items: readonly ContentItem[], currentUserId: string
 /** Personal content checklist plate for dashboard. */
 export function MyContentPlate({
   currentUserId,
+  subjectLabel,
   className,
   limit = 6,
 }: {
   currentUserId: string;
+  /** When set, headings refer to this teammate instead of "you" / "My". */
+  subjectLabel?: string;
   className?: string;
   limit?: number;
 }) {
@@ -87,6 +90,13 @@ export function MyContentPlate({
     () => buildMyContentRows(items, currentUserId, now).length,
     [items, currentUserId, now],
   );
+  const title = subjectLabel ? `${subjectLabel}'s content` : "My content";
+  const description = subjectLabel
+    ? `Checklist steps assigned to ${subjectLabel} across brands.`
+    : "Checklist steps assigned to you across brands.";
+  const emptyCopy = subjectLabel
+    ? `No content steps on ${subjectLabel}'s plate.`
+    : "No content steps on your plate.";
 
   return (
     <Card className={cn("min-h-0 shrink-0", className)}>
@@ -95,11 +105,9 @@ export function MyContentPlate({
           <div>
             <CardTitle className="text-base flex items-center gap-2">
               <Clapperboard className="h-4 w-4" aria-hidden />
-              My content
+              {title}
             </CardTitle>
-            <CardDescription className="mt-1">
-              Checklist steps assigned to you across brands.
-            </CardDescription>
+            <CardDescription className="mt-1">{description}</CardDescription>
           </div>
           {total > 0 ? <Badge variant="secondary">{total}</Badge> : null}
         </div>
@@ -109,7 +117,7 @@ export function MyContentPlate({
           <p className="text-sm text-muted-foreground">Loading…</p>
         ) : rows.length === 0 ? (
           <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-            No content steps on your plate.
+            {emptyCopy}
           </p>
         ) : (
           <ul className="divide-y rounded-md border">

@@ -378,6 +378,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     canEditLead,
     deleteLead,
     updateLeadStage,
+    activeOrgMemberIds,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const leadsChannelFilterOptions = useChannelOptions({ includeDisabled: true });
@@ -575,8 +576,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   );
 
   const personOwnerOptions = React.useMemo(
-    () => buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName),
-    [leads, users, getUserById, getOwnerDisplayName],
+    () =>
+      buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName, {
+        activeMemberIds: activeOrgMemberIds ?? undefined,
+      }),
+    [leads, users, getUserById, getOwnerDisplayName, activeOrgMemberIds],
   );
 
   const profileFilterOptions = React.useMemo(() => {

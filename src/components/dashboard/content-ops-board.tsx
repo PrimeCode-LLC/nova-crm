@@ -72,8 +72,11 @@ function contentOpsMetrics(items: readonly ContentItem[], currentUserId: string,
 /** Content-team dashboard: personal plate + calendar pulse. No sales widgets. */
 export function ContentOpsBoard({
   currentUserId,
+  subjectLabel,
 }: {
   currentUserId: string;
+  /** When set, plate copy refers to this teammate instead of "you". */
+  subjectLabel?: string;
 }) {
   const { brands, items, captures, loading } = useContentCalendarData();
   const [now] = React.useState(() => Date.now());
@@ -86,14 +89,17 @@ export function ContentOpsBoard({
     const t = new Date(c.createdAt).getTime();
     return Number.isFinite(t) && now - t < 7 * 86_400_000;
   }).length;
+  const plateHint = subjectLabel
+    ? `Checklist steps assigned to ${subjectLabel}`
+    : "Checklist steps assigned to you";
 
   return (
     <div className="space-y-4">
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard
-          label="On my plate"
+          label={subjectLabel ? "On their plate" : "On my plate"}
           value={loading ? "…" : metrics.myOpenSteps}
-          hint="Checklist steps assigned to you"
+          hint={plateHint}
           icon={Clapperboard}
           href="/content"
           tone={metrics.myOpenSteps > 0 ? "warn" : "default"}
@@ -124,7 +130,7 @@ export function ContentOpsBoard({
         />
       </div>
 
-      <MyContentPlate currentUserId={currentUserId} limit={10} />
+      <MyContentPlate currentUserId={currentUserId} subjectLabel={subjectLabel} limit={10} />
 
       <div className="flex flex-wrap gap-2">
         <Link href="/content" className={cn(buttonVariants({ variant: "default", size: "sm" }))}>

@@ -42,6 +42,11 @@ import {
   appendMailboxSignature,
 } from "@/lib/email/append-mailbox-signature";
 import {
+  loadLastUsedMailboxPrefs,
+  rememberLastUsedMailbox,
+  resolveDefaultScheduleMailboxId,
+} from "@/lib/email/last-used-mailbox-prefs";
+import {
   type ComposeAttachment,
   MAX_COMPOSE_ATTACHMENT_BYTES,
   MAX_COMPOSE_ATTACHMENTS,
@@ -530,8 +535,19 @@ export function LeadEmailsPanel({
       return;
     }
     confirmQualityOutreach(() => {
+      const prefs = loadLastUsedMailboxPrefs(
+        workspace.organizationId,
+        workspace.currentUserId,
+      );
+      const defaultId = resolveDefaultScheduleMailboxId({
+        mailboxIds: smtpMailboxes.map((item) => item.id),
+        lastUsedId: prefs.lastMailboxId,
+        activeMailboxId: activeMailbox.id,
+      });
       const mailbox = smtpMailboxes[0]
-        ? (smtpMailboxes.find((item) => item.id === activeMailbox.id) ?? smtpMailboxes[0])
+        ? (smtpMailboxes.find((item) => item.id === defaultId) ??
+          smtpMailboxes.find((item) => item.id === activeMailbox.id) ??
+          smtpMailboxes[0])
         : activeMailbox;
       if (!workspace.isDemo && !isEmailAccountConfigured(mailbox)) {
         toast.error("Configure SMTP in Settings → Email first.");
@@ -739,6 +755,11 @@ export function LeadEmailsPanel({
           cc: recipients.cc,
           body: outboundBody,
         });
+        rememberLastUsedMailbox(
+          workspace.organizationId,
+          workspace.currentUserId,
+          composeMailbox.id,
+        );
         toast.success("Message saved to Sent (demo)");
         resetComposer();
         return;
@@ -801,6 +822,11 @@ export function LeadEmailsPanel({
         messageId: data.messageId,
       });
       if (draftId) useEmailAccountStore.getState().deleteDraft(draftId);
+      rememberLastUsedMailbox(
+        workspace.organizationId,
+        workspace.currentUserId,
+        composeMailbox.id,
+      );
       toast.success("Message sent");
       resetComposer();
     } catch (error) {
@@ -872,6 +898,11 @@ export function LeadEmailsPanel({
         if (!response.ok || !data.ok) throw new Error(data.error || "Could not schedule email");
       }
       if (draftId) useEmailAccountStore.getState().deleteDraft(draftId);
+      rememberLastUsedMailbox(
+        workspace.organizationId,
+        workspace.currentUserId,
+        composeMailbox.id,
+      );
       toast.success("Email scheduled");
       resetComposer();
     } catch (error) {

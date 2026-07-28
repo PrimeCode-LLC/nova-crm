@@ -104,22 +104,43 @@ export function filterLeadTasksByOwnerScope(
   return [...tasks];
 }
 
+/**
+ * Whether a uid may appear in owner-filter pickers.
+ * Org membership (`activeMemberIds`) is authoritative for disabled teammates;
+ * CRM `users.status` still excludes inactive/pip when a profile exists.
+ */
+export function isSelectablePersonOwner(
+  id: string,
+  getUserById: (uid: string) => User | undefined,
+  activeMemberIds?: ReadonlySet<string>,
+): boolean {
+  const uid = id?.trim();
+  if (!uid) return false;
+  const u = getUserById(uid);
+  if (u && u.status !== "active") return false;
+  if (activeMemberIds) return activeMemberIds.has(uid);
+  return u?.status === "active";
+}
+
 export function buildPersonOwnerOptions(
   leads: readonly Lead[],
   users: readonly User[],
   getUserById: (id: string) => User | undefined,
   getOwnerDisplayName: (id: string) => string | undefined,
+  options?: { activeMemberIds?: ReadonlySet<string> },
 ): { id: string; label: string }[] {
+  const activeMemberIds = options?.activeMemberIds;
   const map = new Map<string, string>();
   for (const l of leads) {
     const id = l.ownerId?.trim();
     if (!id) continue;
+    if (!isSelectablePersonOwner(id, getUserById, activeMemberIds)) continue;
     const label =
       getUserById(id)?.displayName?.trim() || getOwnerDisplayName(id)?.trim() || "";
     if (label) map.set(id, label);
   }
   for (const u of users) {
-    if (u.status === "inactive") continue;
+    if (!isSelectablePersonOwner(u.id, getUserById, activeMemberIds)) continue;
     if (!map.has(u.id)) {
       map.set(
         u.id,

@@ -31,6 +31,11 @@ import {
   defaultContactRecipientEmail,
 } from "@/lib/email/contact-recipient-options";
 import {
+  loadLastUsedMailboxPrefs,
+  rememberLastUsedMailboxPool,
+  resolveDefaultScheduleMailboxPool,
+} from "@/lib/email/last-used-mailbox-prefs";
+import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
   openFollowupsForPlan,
@@ -91,6 +96,8 @@ export function BulkScheduleSequencesDialog({
     followupPlans,
     getContactById,
     setFollowupEmailSchedule,
+    currentUserId,
+    organizationId,
   } = useWorkspace();
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
@@ -174,10 +181,11 @@ export function BulkScheduleSequencesDialog({
     setIncludeFooter(true);
     setLoadError(null);
     setProgressIndex(0);
-    const defaults =
-      sendableMailboxes.length > 0
-        ? sendableMailboxes.map((m) => m.id)
-        : [];
+    const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+    const defaults = resolveDefaultScheduleMailboxPool({
+      mailboxIds: sendableMailboxes.map((m) => m.id),
+      lastPoolIds: prefs.lastMailboxPoolIds,
+    });
     setSelectedMailboxIds(defaults);
     setRows(
       leadIds.map((id) => {
@@ -189,7 +197,7 @@ export function BulkScheduleSequencesDialog({
         };
       }),
     );
-  }, [open, leadIds, leads, sendableMailboxes]);
+  }, [open, leadIds, leads, sendableMailboxes, organizationId, currentUserId]);
 
   function toggleMailbox(id: string, checked: boolean) {
     setSelectedMailboxIds((prev) => {
@@ -217,6 +225,11 @@ export function BulkScheduleSequencesDialog({
     setPhase("running");
     setProgressIndex(0);
     setLoadError(null);
+    rememberLastUsedMailboxPool(
+      organizationId,
+      currentUserId,
+      selected.map((m) => m.id),
+    );
 
     const loaded = await loadMailboxCapacityStates({
       mailboxes: selected,

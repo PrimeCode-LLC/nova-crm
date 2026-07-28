@@ -34,6 +34,11 @@ import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
 } from "@/lib/email/contact-recipient-options";
+import {
+  loadLastUsedMailboxPrefs,
+  rememberLastUsedMailbox,
+  resolveDefaultScheduleMailboxId,
+} from "@/lib/email/last-used-mailbox-prefs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -90,7 +95,7 @@ export function ScheduleSequenceEmailsDialog({
     schedule: { scheduledEmailId: string; emailScheduledAt: string },
   ) => void;
 }) {
-  const { isDemo, getContactById } = useWorkspace();
+  const { isDemo, getContactById, currentUserId, organizationId } = useWorkspace();
   const contact = getContactById(lead.contactId);
   const recipientOptions = React.useMemo(
     () => buildContactRecipientOptions(lead, contact),
@@ -138,8 +143,12 @@ export function ScheduleSequenceEmailsDialog({
 
   React.useEffect(() => {
     if (!open) return;
-    const defaultId =
-      mailboxOptions.find((mb) => mb.id === activeMailboxId)?.id ?? mailboxOptions[0]?.id ?? "";
+    const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+    const defaultId = resolveDefaultScheduleMailboxId({
+      mailboxIds: mailboxOptions.map((mb) => mb.id),
+      lastUsedId: prefs.lastMailboxId,
+      activeMailboxId,
+    });
     setMailboxId(defaultId);
     setTo(defaultContactRecipientEmail(recipientOptions));
     setIncludeSignature(true);
@@ -155,7 +164,16 @@ export function ScheduleSequenceEmailsDialog({
       })),
     );
     setSubmitting(false);
-  }, [open, recipientOptions, mailboxOptions, activeMailboxId, schedulable, timezone]);
+  }, [
+    open,
+    recipientOptions,
+    mailboxOptions,
+    activeMailboxId,
+    schedulable,
+    timezone,
+    organizationId,
+    currentUserId,
+  ]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {
@@ -303,6 +321,7 @@ export function ScheduleSequenceEmailsDialog({
         okCount += 1;
       }
       if (okCount > 0) {
+        rememberLastUsedMailbox(organizationId, currentUserId, account.id);
         toast.success(
           `Scheduled ${okCount} email${okCount === 1 ? "" : "s"}`,
           okCount < selected.length

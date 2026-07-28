@@ -27,6 +27,7 @@ import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 import {
   getDashboardOverviewDescription,
   getDashboardRoleFocusLine,
+  isContentOpsDashboardRole,
   showTeamFollowupsOnDashboard,
 } from "@/lib/dashboard-role-focus";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
@@ -151,6 +152,7 @@ export default function DashboardPage() {
     viewerOrgRole,
     contacts,
     organizationTimezone,
+    activeOrgMemberIds,
   } = useWorkspace();
   const navAccess = useNavAccessContext();
   const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();  const emailResponseCtx = useLeadEmailResponseContext();
@@ -171,8 +173,11 @@ export default function DashboardPage() {
   );
 
   const personOwnerOptions = React.useMemo(
-    () => buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName),
-    [leads, users, getUserById, getOwnerDisplayName],
+    () =>
+      buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName, {
+        activeMemberIds: activeOrgMemberIds ?? undefined,
+      }),
+    [leads, users, getUserById, getOwnerDisplayName, activeOrgMemberIds],
   );
 
   const ownerFilterTriggerLabel = React.useMemo(
@@ -358,9 +363,32 @@ export default function DashboardPage() {
   } = useDashboardPreferences(currentUserId || "anon");
 
   const effectiveRole = resolveEffectiveDashboardRole(viewer?.roleId, prefs);
-  const contentLayout = resolveContentLayout(effectiveRole, prefs);
-  const frontlineLayout = resolveFrontlineLayout(effectiveRole, prefs);
-  const opsLayout = resolveOpsLayout(canCustomizeLayout, effectiveRole, prefs);
+  const scopedOwnerId = ownerScope.startsWith(OWNER_SCOPE_PREFIX)
+    ? ownerScope.slice(OWNER_SCOPE_PREFIX.length)
+    : null;
+  const scopedOwner = scopedOwnerId ? getUserById(scopedOwnerId) : undefined;
+  /** Director/manager picking a content_team teammate should see that person's content board. */
+  const viewingTeammateContent =
+    prefs.viewMode === "auto" &&
+    !prefs.previewRole &&
+    Boolean(scopedOwner && isContentOpsDashboardRole(scopedOwner.roleId));
+  const contentLayout =
+    resolveContentLayout(effectiveRole, prefs) || viewingTeammateContent;
+  const frontlineLayout = viewingTeammateContent
+    ? false
+    : resolveFrontlineLayout(effectiveRole, prefs);
+  const opsLayout = viewingTeammateContent
+    ? false
+    : resolveOpsLayout(canCustomizeLayout, effectiveRole, prefs);
+  const contentBoardUserId = viewingTeammateContent && scopedOwnerId ? scopedOwnerId : currentUserId;
+  const contentBoardSubjectLabel = viewingTeammateContent
+    ? scopedOwner?.displayName?.trim() ||
+      (scopedOwnerId ? getOwnerDisplayName(scopedOwnerId)?.trim() : undefined) ||
+      ownerFilterTriggerLabel
+    : undefined;
+  const bannerRole = viewingTeammateContent ? ("content_team" as const) : (effectiveRole ?? viewer?.roleId);
+  /** Keep owner picker visible when drilling into a content teammate so you can leave that view. */
+  const showDashboardFilters = !contentLayout || viewingTeammateContent;
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;
   const w = prefs.widgets;
@@ -497,7 +525,7 @@ export default function DashboardPage() {
     <>
       <PageHeader
         title="Overview"
-        description={getDashboardOverviewDescription(effectiveRole ?? viewer?.roleId)}
+        description={getDashboardOverviewDescription(bannerRole)}
         actions={
           <>
             {canCustomizeLayout ? (
@@ -522,7 +550,7 @@ export default function DashboardPage() {
                 onReset={reset}
               />
             ) : null}
-            {!contentLayout ? (
+            {!showDashboardFilters ? null : (
               <>
             <Select
               value={timeRange}
@@ -585,6 +613,8 @@ export default function DashboardPage() {
                 )}
               </SelectContent>
             </Select>
+            {!viewingTeammateContent ? (
+              <>
             <Button variant="outline" size="sm" type="button" onClick={openFilterDialog} className="gap-1.5">
               <Filter className="h-3.5 w-3.5" /> Filter
               {channelScope.length > 0 && (
@@ -605,7 +635,9 @@ export default function DashboardPage() {
               </Button>
             ) : null}
               </>
-            ) : null}          </>
+            ) : null}
+              </>
+            )}          </>
         }
       />
 
@@ -698,10 +730,15 @@ export default function DashboardPage() {
             {viewer && (
               <div className="rounded-lg border border-border/80 bg-muted/15 px-4 py-3">
                 <p className="text-xs font-semibold text-foreground">
-                  {roleLabel(effectiveRole ?? viewer.roleId)} view
+                  {roleLabel(bannerRole)} view
+                  {viewingTeammateContent && contentBoardSubjectLabel
+                    ? ` · ${contentBoardSubjectLabel}`
+                    : null}
                 </p>
                 <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
-                  {getDashboardRoleFocusLine(effectiveRole ?? viewer.roleId)}
+                  {viewingTeammateContent
+                    ? `Showing ${contentBoardSubjectLabel ?? "this teammate"}'s content plate — the same board they see when signed in.`
+                    : getDashboardRoleFocusLine(bannerRole)}
                 </p>
               </div>
             )}
@@ -709,7 +746,10 @@ export default function DashboardPage() {
               <CaptureDutyBanner />
             ) : null}
             {contentLayout ? (
-              <ContentOpsBoard currentUserId={currentUserId} />
+              <ContentOpsBoard
+                currentUserId={contentBoardUserId}
+                subjectLabel={contentBoardSubjectLabel}
+              />
             ) : (
               <>
             {(channelScope.length > 0 || ownerScope !== "all-owners") && (

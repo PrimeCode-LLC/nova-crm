@@ -258,6 +258,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     bumpLeadActivity: (leadId: string) => void;
     /** Display name for CRM `ownerId` when the user exists in org members but not (yet) in Firestore `users`. */
     getOwnerDisplayName: (uid: string) => string | undefined;
+    /**
+     * Live org member uids with `status === "active"` (from `/api/org/members`).
+     * `null` while loading or when not in a live org — callers should fall back to CRM `users` status.
+     */
+    activeOrgMemberIds: ReadonlySet<string> | null;
     addCrmLabel: (label: CrmLabel) => void;
     updateCrmLabel: (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => void;
     removeCrmLabel: (id: string) => void;
@@ -438,10 +443,14 @@ export function WorkspaceModeProvider({
   }, []);
 
   const [orgMemberLabels, setOrgMemberLabels] = React.useState<Record<string, string>>({});
+  const [activeOrgMemberIds, setActiveOrgMemberIds] = React.useState<ReadonlySet<string> | null>(
+    null,
+  );
   const [delegatedMailboxHostIds, setDelegatedMailboxHostIds] = React.useState<string[]>([]);
   React.useEffect(() => {
     if (!liveOrgId) {
       setOrgMemberLabels({});
+      setActiveOrgMemberIds(null);
       return;
     }
     let cancelled = false;
@@ -451,17 +460,25 @@ export function WorkspaceModeProvider({
         const data = (await res.json()) as { members?: OrganizationMember[] };
         const members = data.members ?? [];
         const next: Record<string, string> = {};
+        const activeIds = new Set<string>();
         for (const m of members) {
           const label =
             m.displayName?.trim() ||
             (m.email.includes("@") ? m.email.split("@")[0] : m.email) ||
             m.uid;
           next[m.uid] = label;
+          if (m.status === "active") activeIds.add(m.uid);
         }
-        if (!cancelled) setOrgMemberLabels(next);
+        if (!cancelled) {
+          setOrgMemberLabels(next);
+          setActiveOrgMemberIds(activeIds);
+        }
       })
       .catch(() => {
-        if (!cancelled) setOrgMemberLabels({});
+        if (!cancelled) {
+          setOrgMemberLabels({});
+          setActiveOrgMemberIds(null);
+        }
       });
     return () => {
       cancelled = true;
@@ -2463,10 +2480,12 @@ export function WorkspaceModeProvider({
       isLeadPinned,
       bumpLeadActivity,
       getOwnerDisplayName,
+      activeOrgMemberIds,
     };
   }, [
     snapshot,
     orgMemberLabels,
+    activeOrgMemberIds,
     delegatedMailboxHostIds,
     mode,
     demoPersonaId,

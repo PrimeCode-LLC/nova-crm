@@ -33,6 +33,11 @@ import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
 } from "@/lib/email/contact-recipient-options";
+import {
+  loadLastUsedMailboxPrefs,
+  rememberLastUsedMailbox,
+  resolveDefaultScheduleMailboxId,
+} from "@/lib/email/last-used-mailbox-prefs";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -81,7 +86,7 @@ export function ScheduleFollowupEmailDialog({
     schedule: { scheduledEmailId: string; emailScheduledAt: string },
   ) => void;
 }) {
-  const { isDemo, getContactById } = useWorkspace();
+  const { isDemo, getContactById, currentUserId, organizationId } = useWorkspace();
   const contact = getContactById(lead.contactId);
   const recipientOptions = React.useMemo(
     () => buildContactRecipientOptions(lead, contact),
@@ -121,8 +126,12 @@ export function ScheduleFollowupEmailDialog({
 
   React.useEffect(() => {
     if (!open || !followup) return;
-    const defaultId =
-      mailboxOptions.find((mb) => mb.id === activeMailboxId)?.id ?? mailboxOptions[0]?.id ?? "";
+    const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+    const defaultId = resolveDefaultScheduleMailboxId({
+      mailboxIds: mailboxOptions.map((mb) => mb.id),
+      lastUsedId: prefs.lastMailboxId,
+      activeMailboxId,
+    });
     setMailboxId(defaultId);
     setTo(defaultContactRecipientEmail(recipientOptions));
     setSubject(followup.emailSubject?.trim() || followup.title || "");
@@ -131,7 +140,16 @@ export function ScheduleFollowupEmailDialog({
     setIncludeSignature(true);
     setIncludeFooter(true);
     setSubmitting(false);
-  }, [open, followup, recipientOptions, mailboxOptions, activeMailboxId, timezone]);
+  }, [
+    open,
+    followup,
+    recipientOptions,
+    mailboxOptions,
+    activeMailboxId,
+    timezone,
+    organizationId,
+    currentUserId,
+  ]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {
@@ -240,6 +258,7 @@ export function ScheduleFollowupEmailDialog({
         toast.error(result.error);
         return;
       }
+      rememberLastUsedMailbox(organizationId, currentUserId, account.id);
       onScheduled(followup.id, {
         scheduledEmailId: result.scheduledEmailId,
         emailScheduledAt: result.emailScheduledAt,
