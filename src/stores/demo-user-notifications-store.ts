@@ -41,20 +41,30 @@ export const useDemoUserNotifications = create<DemoUserNotificationsState>((set,
     };
     set({ items: [doc, ...get().items].slice(0, 80) });
   },
-  markRead: (id, read) =>
+  markRead: (id, read) => {
+    const row = get().items.find((n) => n.id === id);
+    if (!row) return;
+    const isRead = Boolean(row.readAt);
+    if (read === isRead) return;
     set({
       items: get().items.map((n) =>
         n.id === id ? { ...n, readAt: read ? new Date().toISOString() : null } : n,
       ),
-    }),
-  dismiss: (id) =>
+    });
+  },
+  dismiss: (id) => {
+    const row = get().items.find((n) => n.id === id);
+    if (!row || row.dismissedAt) return;
     set({
       items: get().items.map((n) =>
         n.id === id ? { ...n, dismissedAt: new Date().toISOString() } : n,
       ),
-    }),
+    });
+  },
   markAllRead: (ids) => {
     const setIds = new Set(ids);
+    const needsUpdate = get().items.some((n) => setIds.has(n.id) && !n.readAt);
+    if (!needsUpdate) return;
     const iso = new Date().toISOString();
     set({
       items: get().items.map((n) => (setIds.has(n.id) ? { ...n, readAt: iso } : n)),

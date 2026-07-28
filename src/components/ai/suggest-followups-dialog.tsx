@@ -32,6 +32,7 @@ import type {
   Followup,
   FollowupPlan,
   FollowupChannel,
+  FollowupChannelMix,
   FollowupSequenceMode,
   Lead,
   LeadPriority,
@@ -52,6 +53,12 @@ import { useChannelOptions } from "@/hooks/use-channel-options";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
+import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
+import {
+  channelMixLabel,
+  defaultFollowupChannelMix,
+  canAutoScheduleFollowupEmail,
+} from "@/lib/followup-plans";
 import { cn } from "@/lib/utils";
 import type { LeadAiContextInput } from "@/lib/ai/load-lead-ai-context-server";
 import { toast } from "sonner";
@@ -114,6 +121,28 @@ function showsEmailSubject(ch: FollowupChannel): boolean {
   );
 }
 
+const CHANNEL_MIX_OPTIONS: {
+  value: FollowupChannelMix;
+  title: string;
+  description: string;
+}[] = [
+  {
+    value: "email",
+    title: "Email only",
+    description: "All steps on email — ready to schedule and send.",
+  },
+  {
+    value: "linkedin",
+    title: "LinkedIn only",
+    description: "Copy-ready LinkedIn notes and connection touches.",
+  },
+  {
+    value: "multi_channel",
+    title: "Email + LinkedIn",
+    description: "One interleaved strategy: LI → email → LI → email.",
+  },
+];
+
 export function SuggestFollowupsDialog({
   open,
   onOpenChange,
@@ -145,9 +174,11 @@ export function SuggestFollowupsDialog({
   initialUserPrompt?: string;
 }) {
   const channelOptions = useChannelOptions();
+  const hasLinkedIn = leadHasLinkedIn(lead, aiContext.contact);
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
   const [sequenceMode, setSequenceMode] =
     React.useState<FollowupSequenceMode>(initialSequenceMode);
+  const [channelMix, setChannelMix] = React.useState<FollowupChannelMix>("email");
   const [userPrompt, setUserPrompt] = React.useState("");
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -163,6 +194,14 @@ export function SuggestFollowupsDialog({
     setSequenceMode(
       regenerateFromPlan?.sequenceMode ??
         (regenerateFromPlan ? "continue" : initialSequenceMode),
+    );
+    setChannelMix(
+      regenerateFromPlan?.channelMix ??
+        defaultFollowupChannelMix({
+          leadChannel: lead.channel,
+          hasLinkedIn,
+          initialChannel,
+        }),
     );
     setUserPrompt(
       initialUserPrompt?.trim()
@@ -185,6 +224,7 @@ export function SuggestFollowupsDialog({
     initialSequenceMode,
     initialChannel,
     initialUserPrompt,
+    hasLinkedIn,
   ]);
 
   function demoContextPayload(): LeadAiContextInput | undefined {
@@ -264,6 +304,7 @@ export function SuggestFollowupsDialog({
           leadId: lead.id,
           userPrompt: userPrompt.trim() || undefined,
           sequenceMode,
+          channelMix,
           scriptId: scriptId || undefined,
           regenerateContext: regenerateFromPlan
             ? `${regenerateFromPlan.pausedReason ?? "Lead replied"}. Prior: ${regenerateFromPlan.planSummary}`
@@ -282,7 +323,7 @@ export function SuggestFollowupsDialog({
       const data = await res.json();
       if (!res.ok) {
         if (isDemo) {
-          applyApiResult(demoFollowupSuggestions(lead, userPrompt, sequenceMode));
+          applyApiResult(demoFollowupSuggestions(lead, userPrompt, sequenceMode, channelMix));
           return;
         }
         setError(typeof data.error === "string" ? data.error : "Could not generate suggestions");
@@ -291,7 +332,7 @@ export function SuggestFollowupsDialog({
       applyApiResult(data);
     } catch {
       if (isDemo) {
-        applyApiResult(demoFollowupSuggestions(lead, userPrompt, sequenceMode));
+        applyApiResult(demoFollowupSuggestions(lead, userPrompt, sequenceMode, channelMix));
       } else {
         setError("Network error");
       }
@@ -323,6 +364,7 @@ export function SuggestFollowupsDialog({
       planSummary: planSummary.trim() || "Personalized sequence",
       kind: "sequence",
       sequenceMode,
+      channelMix,
       createdAt: new Date().toISOString(),
       supersededByPlanId: undefined,
       sourceScriptId: scriptId || undefined,
@@ -343,8 +385,17 @@ export function SuggestFollowupsDialog({
       auto: false,
     }));
     onCreatePlanWithFollowups(plan, created);
+    const emailCount = created.filter((f) =>
+      canAutoScheduleFollowupEmail(f, lead.channel),
+    ).length;
+    const remindCount = created.length - emailCount;
     toast.success(
       `Activated sequence · ${created.length} step${created.length === 1 ? "" : "s"}`,
+      remindCount > 0
+        ? {
+            description: `${emailCount} email${emailCount === 1 ? "" : "s"} can be scheduled · ${remindCount} LinkedIn/other as copy reminders`,
+          }
+        : undefined,
     );
     onOpenChange(false);
   }
@@ -360,7 +411,7 @@ export function SuggestFollowupsDialog({
           <DialogDescription className="text-xs">
             {regenerateFromPlan
               ? "Lead replied - draft a new cadence that reflects their message. Edit before activating."
-              : "AI proposes a personalized multi-step cadence. Edit, then activate. Email steps can be scheduled; other channels stay as copy-ready reminders."}
+              : "AI proposes a personalized multi-step cadence. Edit, then activate. Email steps can be scheduled; LinkedIn and other channels stay as copy-ready reminders."}
           </DialogDescription>
         </DialogHeader>
 
@@ -382,7 +433,7 @@ export function SuggestFollowupsDialog({
                   >
                     <p className="text-sm font-medium">Full outreach</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                      First touch through last email - complete autopilot sequence.
+                      First touch through last step - complete cadence.
                     </p>
                   </button>
                   <button
@@ -397,12 +448,40 @@ export function SuggestFollowupsDialog({
                   >
                     <p className="text-sm font-medium">Continue / follow-ups only</p>
                     <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                      Intro already sent - draft remaining touches starting from the next email.
+                      Intro already sent - draft remaining touches.
                     </p>
                   </button>
                 </div>
               </div>
             ) : null}
+            <div className="grid gap-2">
+              <Label className="text-xs">Channels</Label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {CHANNEL_MIX_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setChannelMix(opt.value)}
+                    className={cn(
+                      "rounded-md border px-3 py-2.5 text-left transition-colors",
+                      channelMix === opt.value
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/50",
+                    )}
+                  >
+                    <p className="text-sm font-medium">{opt.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                      {opt.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+              {(channelMix === "linkedin" || channelMix === "multi_channel") && !hasLinkedIn ? (
+                <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                  No LinkedIn URL on this lead — add one so reps can open the profile from reminders.
+                </p>
+              ) : null}
+            </div>
             <ScriptTemplatePicker
               key={`tpl-${open ? "1" : "0"}-${regenerateFromPlan?.id ?? "new"}-${sequenceMode}`}
               isDemo={isDemo}
@@ -423,7 +502,11 @@ export function SuggestFollowupsDialog({
                 id="followup-ai-prompt"
                 value={userPrompt}
                 onChange={(e) => setUserPrompt(e.target.value)}
-                placeholder='e.g. "Soft tone, 4 emails over 2 weeks" or "LinkedIn first, then email"'
+                placeholder={
+                  channelMix === "multi_channel"
+                    ? 'e.g. "Start with connection note, softer email CTA"'
+                    : 'e.g. "Soft tone, 4 emails over 2 weeks"'
+                }
                 rows={3}
                 className="resize-none text-sm"
                 maxLength={500}
@@ -463,6 +546,9 @@ export function SuggestFollowupsDialog({
               <span className="font-medium text-foreground">
                 {sequenceMode === "continue" ? "Continue / follow-ups only" : "Full outreach"}
               </span>
+              {" · "}
+              Channels:{" "}
+              <span className="font-medium text-foreground">{channelMixLabel(channelMix)}</span>
               . Due dates skip weekends
               {sequenceMode === "full"
                 ? ": Day 0, then +3 / +5 / +7 business days."

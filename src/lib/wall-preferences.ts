@@ -2,7 +2,7 @@
 
 export type WallProgressBarPosition = "top" | "bottom";
 
-export type WallSceneKey = "priorities" | "team" | "pipeline";
+export type WallSceneKey = "priorities" | "team" | "pipeline" | "content";
 
 export type WallScenes = Record<WallSceneKey, boolean>;
 
@@ -40,6 +40,11 @@ export const WALL_SCENE_META: {
     label: "Pipeline",
     description: "Strategy scoreboard and outreach charts.",
   },
+  {
+    key: "content",
+    label: "Content",
+    description: "Brand performance, checklist, scheduling, and capture queues.",
+  },
 ];
 
 export const WALL_DWELL_OPTIONS = [
@@ -66,6 +71,7 @@ export const DEFAULT_WALL_SCENES: WallScenes = {
   priorities: true,
   team: true,
   pipeline: true,
+  content: true,
 };
 
 export function defaultWallPreferences(): WallPreferences {

@@ -51,6 +51,7 @@ import {
   getPausedFollowupPlanForLead,
   mergeFollowupPlans,
   sequenceModeLabel,
+  channelMixLabel,
 } from "@/lib/followup-plans";
 import type { FollowupPlan } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -863,6 +864,11 @@ export function LeadFollowups({
                 <Badge variant="secondary" className="text-[10px]">
                   {sequenceModeLabel(activePlan.sequenceMode)}
                 </Badge>
+                {activePlan.channelMix ? (
+                  <Badge variant="outline" className="text-[10px]">
+                    {channelMixLabel(activePlan.channelMix)}
+                  </Badge>
+                ) : null}
                 <Badge variant="outline" className="text-[10px]">
                   {planOpen.length} step{planOpen.length === 1 ? "" : "s"}
                 </Badge>

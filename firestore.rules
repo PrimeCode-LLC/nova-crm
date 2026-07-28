@@ -306,6 +306,26 @@ service cloud.firestore {
         );
     }
 
+    /**
+     * Match `canMutateFollowup`: elevated roles, row owner, or lead owner may delete
+     * follow-ups / sequence plans (sales need to remove mistaken sequences).
+     */
+    function callerOwnsLead(leadId) {
+      return leadId is string
+        && leadId.size() > 0
+        && exists(/databases/$(database)/documents/leads/$(leadId))
+        && get(/databases/$(database)/documents/leads/$(leadId)).data.get('ownerId', '') == request.auth.uid
+        && get(/databases/$(database)/documents/leads/$(leadId)).data.get('organizationId', '') == callerOrgId();
+    }
+
+    function canDeleteFollowupOrPlan(data) {
+      return isOrgAtLeast('admin')
+        || userDoc().get('isSuperAdmin', false) == true
+        || userDoc().get('roleId', '') == 'director'
+        || ownsCrmDoc(data)
+        || callerOwnsLead(data.get('leadId', ''));
+    }
+
     match /leads/{id} {
       allow get: if tenantReadable() && canReadLead(resource.data);
       allow list: if tenantReadable() && canListLead(resource.data);
@@ -339,7 +359,9 @@ service cloud.firestore {
       allow update: if signedIn()
         && inCallerOrg(resource.data)
         && request.resource.data.organizationId == resource.data.organizationId;
-      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && canDeleteFollowupOrPlan(resource.data);
     }
 
     match /followupPlans/{id} {
@@ -349,7 +371,9 @@ service cloud.firestore {
       allow update: if signedIn()
         && inCallerOrg(resource.data)
         && request.resource.data.organizationId == resource.data.organizationId;
-      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && canDeleteFollowupOrPlan(resource.data);
     }
 
     match /leadTasks/{id} {

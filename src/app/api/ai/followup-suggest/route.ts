@@ -22,6 +22,7 @@ import { getScriptServer } from "@/lib/platform/script-library-server";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import type { ChannelKey, Role, ScriptLibraryItem } from "@/lib/types";
 import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
+import { buildChannelMixHint } from "@/lib/followup-plans";
 
 const CHANNEL_VALUES = [
   "cold_email",
@@ -81,6 +82,8 @@ const bodySchema = z.object({
   leadId: z.string().min(1),
   userPrompt: z.string().max(500).optional(),
   sequenceMode: z.enum(["full", "continue"]).optional(),
+  /** How to assign channels across steps: lead | email | linkedin | multi_channel. */
+  channelMix: z.enum(["lead", "email", "linkedin", "multi_channel"]).optional(),
   /** Optional Script library id - style guide only; omit to generate without a template. */
   scriptId: z.string().min(1).max(120).optional(),
   singleStep: z.boolean().optional(),
@@ -288,11 +291,15 @@ export async function POST(req: Request) {
 
   const userPrompt = parsed.data.userPrompt?.trim() || "(none, use lead context only)";
   const sequenceMode = parsed.data.sequenceMode ?? "full";
+  const channelMix = parsed.data.channelMix ?? "lead";
   const sequenceModeHint = parsed.data.singleStep
     ? "Regenerate exactly ONE replacement follow-up step. Preserve its purpose and position in the cadence, but rewrite the title, subject, notes, and message using current lead context. Return exactly one item."
     : sequenceMode === "continue"
-      ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+)."
-      : "Full personalized outreach from first touch through last email/touch.";
+      ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+ / LinkedIn bump)."
+      : "Full personalized outreach from first touch through last touch.";
+  const channelMixHint = buildChannelMixHint(channelMix);
+  // Also fold into roleGuidance so customized org prompts without {{channelMixHint}} still obey the mix.
+  const roleGuidanceWithMix = `${roleGuidance}\n${channelMixHint}`;
   const templateHint = selectedTemplate
     ? `Rep selected style template "${selectedTemplate.title}" (${selectedTemplate.category}). Match its tone, length, structure, and CTA style - rewrite for this lead; do not copy verbatim. Full text is in context.selectedTemplate.`
     : "(none - no style template selected; generate from lead context and instructions only)";
@@ -310,9 +317,11 @@ export async function POST(req: Request) {
         userPrompt,
         sequenceMode,
         sequenceModeHint,
+        channelMix,
+        channelMixHint,
         templateHint,
         regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
-        roleGuidance,
+        roleGuidance: roleGuidanceWithMix,
       },
       schema: parsed.data.singleStep ? singleStepSuggestSchema : suggestSchema,
       leadId: parsed.data.leadId,
@@ -325,6 +334,7 @@ export async function POST(req: Request) {
         leadId: parsed.data.leadId,
         itemCount: result.items.length,
         sequenceMode,
+        channelMix,
         singleStep: parsed.data.singleStep === true,
         scriptId: selectedTemplate?.id ?? null,
       },
@@ -333,6 +343,7 @@ export async function POST(req: Request) {
       ...normalizeSuggestResult(result),
       leadChannel: loaded.lead.channel as ChannelKey,
       sequenceMode,
+      channelMix,
     });
   } catch (e) {
     return aiErrorResponse(e);

@@ -20,15 +20,21 @@ import { ScriptTemplatePicker } from "@/components/ai/script-template-picker";
 import type { LeadFollowupAiContext } from "@/components/ai/suggest-followups-dialog";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
-import { getActiveFollowupPlanForLead } from "@/lib/followup-plans";
 import type {
   Followup,
   FollowupChannel,
+  FollowupChannelMix,
   FollowupPlan,
   FollowupSequenceMode,
   LeadPriority,
   ScriptLibraryItem,
 } from "@/lib/types";
+import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
+import {
+  channelMixLabel,
+  defaultFollowupChannelMix,
+  getActiveFollowupPlanForLead,
+} from "@/lib/followup-plans";
 
 type SuggestApiItem = {
   title: string;
@@ -63,6 +69,28 @@ function leadLabel(lead: { contactName?: string; companyName?: string; id: strin
   return name || company || lead.id;
 }
 
+const CHANNEL_MIX_OPTIONS: {
+  value: FollowupChannelMix;
+  title: string;
+  description: string;
+}[] = [
+  {
+    value: "email",
+    title: "Email only",
+    description: "All steps on email.",
+  },
+  {
+    value: "linkedin",
+    title: "LinkedIn only",
+    description: "Copy-ready LinkedIn touches.",
+  },
+  {
+    value: "multi_channel",
+    title: "Email + LinkedIn",
+    description: "Interleaved LI → email cadence.",
+  },
+];
+
 export function BulkBuildSequencesDialog({
   open,
   onOpenChange,
@@ -95,6 +123,7 @@ export function BulkBuildSequencesDialog({
 
   const [phase, setPhase] = React.useState<"setup" | "running" | "done">("setup");
   const [sequenceMode, setSequenceMode] = React.useState<FollowupSequenceMode>("full");
+  const [channelMix, setChannelMix] = React.useState<FollowupChannelMix>("multi_channel");
   const [userPrompt, setUserPrompt] = React.useState("");
   const [scriptId, setScriptId] = React.useState("");
   const [selectedScript, setSelectedScript] = React.useState<ScriptLibraryItem | null>(null);
@@ -107,6 +136,18 @@ export function BulkBuildSequencesDialog({
     cancelRef.current = false;
     setPhase("setup");
     setSequenceMode("full");
+    const first = leads.find((l) => l.id === leadIds[0]);
+    const hasLi = first
+      ? leadHasLinkedIn(first, getContactById(first.contactId))
+      : false;
+    setChannelMix(
+      first
+        ? defaultFollowupChannelMix({
+            leadChannel: first.channel,
+            hasLinkedIn: hasLi,
+          })
+        : "multi_channel",
+    );
     setUserPrompt("");
     setScriptId("");
     setSelectedScript(null);
@@ -121,7 +162,7 @@ export function BulkBuildSequencesDialog({
         };
       }),
     );
-  }, [open, leadIds, leads]);
+  }, [open, leadIds, leads, getContactById]);
 
   function buildAiContext(leadId: string): LeadFollowupAiContext | null {
     const lead = leads.find((l) => l.id === leadId);
@@ -149,6 +190,7 @@ export function BulkBuildSequencesDialog({
   async function generateForLead(
     leadId: string,
     mode: FollowupSequenceMode,
+    mix: FollowupChannelMix,
     prompt: string,
     tplId: string,
     script: ScriptLibraryItem | null,
@@ -197,6 +239,7 @@ export function BulkBuildSequencesDialog({
           leadId,
           userPrompt: prompt.trim() || undefined,
           sequenceMode: mode,
+          channelMix: mix,
           scriptId: tplId || undefined,
           followupPlans: leadPlans.map((p) => ({
             id: p.id,
@@ -211,7 +254,7 @@ export function BulkBuildSequencesDialog({
       const data = await res.json();
       if (!res.ok) {
         if (isDemo) {
-          const demo = demoFollowupSuggestions(lead, prompt, mode);
+          const demo = demoFollowupSuggestions(lead, prompt, mode, mix);
           return {
             ok: true,
             planSummary: demo.planSummary ?? "Personalized sequence",
@@ -230,7 +273,7 @@ export function BulkBuildSequencesDialog({
       };
     } catch {
       if (isDemo) {
-        const demo = demoFollowupSuggestions(lead, prompt, mode);
+        const demo = demoFollowupSuggestions(lead, prompt, mode, mix);
         return {
           ok: true,
           planSummary: demo.planSummary ?? "Personalized sequence",
@@ -244,6 +287,7 @@ export function BulkBuildSequencesDialog({
   function activatePlan(
     leadId: string,
     mode: FollowupSequenceMode,
+    mix: FollowupChannelMix,
     planSummary: string,
     items: SuggestApiItem[],
     tplId: string,
@@ -266,6 +310,7 @@ export function BulkBuildSequencesDialog({
       planSummary: planSummary.trim() || "Personalized sequence",
       kind: "sequence",
       sequenceMode: mode,
+      channelMix: mix,
       createdAt: new Date().toISOString(),
       supersededByPlanId: undefined,
       sourceScriptId: tplId || undefined,
@@ -292,6 +337,7 @@ export function BulkBuildSequencesDialog({
   async function runBatch() {
     cancelRef.current = false;
     const mode = sequenceMode;
+    const mix = channelMix;
     const prompt = userPrompt;
     const tplId = scriptId;
     const script = selectedScript;
@@ -332,14 +378,21 @@ export function BulkBuildSequencesDialog({
         continue;
       }
 
-      const generated = await generateForLead(leadId, mode, prompt, tplId, script);
+      const generated = await generateForLead(leadId, mode, mix, prompt, tplId, script);
       if (!generated.ok) {
         patchRow(leadId, { status: "failed", detail: generated.error });
         failed += 1;
         continue;
       }
 
-      const activated = activatePlan(leadId, mode, generated.planSummary, generated.items, tplId);
+      const activated = activatePlan(
+        leadId,
+        mode,
+        mix,
+        generated.planSummary,
+        generated.items,
+        tplId,
+      );
       if (!activated.ok) {
         patchRow(leadId, { status: "failed", detail: activated.error });
         failed += 1;
@@ -408,7 +461,7 @@ export function BulkBuildSequencesDialog({
                 >
                   <p className="text-sm font-medium">Full outreach</p>
                   <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
-                    First touch through last email.
+                    First touch through last step.
                   </p>
                 </button>
                 <button
@@ -427,6 +480,33 @@ export function BulkBuildSequencesDialog({
                   </p>
                 </button>
               </div>
+            </div>
+            <div className="grid gap-2">
+              <Label className="text-xs">Channels</Label>
+              <div className="grid gap-2 sm:grid-cols-3">
+                {CHANNEL_MIX_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => setChannelMix(opt.value)}
+                    className={cn(
+                      "rounded-md border px-3 py-2.5 text-left transition-colors",
+                      channelMix === opt.value
+                        ? "border-primary bg-primary/5"
+                        : "hover:bg-muted/50",
+                    )}
+                  >
+                    <p className="text-sm font-medium">{opt.title}</p>
+                    <p className="text-[11px] text-muted-foreground mt-0.5 leading-snug">
+                      {opt.description}
+                    </p>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-muted-foreground">
+                Selected: {channelMixLabel(channelMix)}. LinkedIn steps stay as copy reminders;
+                email steps can be scheduled later.
+              </p>
             </div>
             <ScriptTemplatePicker
               key={`bulk-tpl-${open ? "1" : "0"}-${sequenceMode}`}
@@ -447,7 +527,11 @@ export function BulkBuildSequencesDialog({
                 id="bulk-build-prompt"
                 value={userPrompt}
                 onChange={(e) => setUserPrompt(e.target.value)}
-                placeholder='e.g. "Soft tone, 4 emails over 2 weeks"'
+                placeholder={
+                  channelMix === "multi_channel"
+                    ? 'e.g. "LinkedIn first, softer email CTA"'
+                    : 'e.g. "Soft tone, 4 emails over 2 weeks"'
+                }
                 rows={3}
                 className="resize-none text-sm"
                 maxLength={500}

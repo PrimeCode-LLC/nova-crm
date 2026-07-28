@@ -132,6 +132,7 @@ export async function persistFollowupPlanCreate(
   if (plan.supersededByPlanId) data.supersededByPlanId = plan.supersededByPlanId;
   if (plan.kind) data.kind = plan.kind;
   if (plan.sequenceMode) data.sequenceMode = plan.sequenceMode;
+  if (plan.channelMix) data.channelMix = plan.channelMix;
   if (plan.completedAt) data.completedAt = plan.completedAt;
   if (plan.sourceScriptId) data.sourceScriptId = plan.sourceScriptId;
   await setDoc(doc(db, COLLECTIONS.followupPlans, plan.id), data);

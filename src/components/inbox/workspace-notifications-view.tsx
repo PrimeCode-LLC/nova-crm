@@ -90,29 +90,35 @@ export function WorkspaceNotificationsView() {
   const unreadCount = notifications.filter((n) => !n.read).length;
   const totalCount = notifications.length;
 
-  const selectNotification = React.useCallback(
-    (n: DemoNotification) => {
-      setSelected(n);
-      if (!n.read) markRead(n.id);
-    },
-    [markRead],
-  );
+  const selectNotification = React.useCallback((n: DemoNotification) => {
+    setSelected(n);
+  }, []);
 
+  // Keep selection pointed at the latest row from the list (read/unread flags update here).
   React.useEffect(() => {
     if (filtered.length === 0) {
       setSelected(null);
       return;
     }
     setSelected((prev) => {
-      if (prev && filtered.some((n) => n.id === prev.id)) return prev;
+      if (prev) {
+        const updated = filtered.find((n) => n.id === prev.id);
+        if (updated) return updated;
+      }
       return filtered[0] ?? null;
     });
   }, [filtered]);
 
+  // Mark unread selections as read once the live list still says unread.
+  // Depend on selected.id (not markRead identity) to avoid a setState render loop.
   React.useEffect(() => {
-    if (!selected || selected.read || forcedUnreadIds.includes(selected.id)) return;
+    if (!selected) return;
+    if (forcedUnreadIds.includes(selected.id)) return;
+    const live = notifications.find((n) => n.id === selected.id);
+    if (!live || live.read) return;
     markRead(selected.id);
-  }, [selected, forcedUnreadIds, markRead]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- markRead is unstable; live.read gates repeats
+  }, [selected?.id, notifications, forcedUnreadIds]);
 
   function markAllRead() {
     markAllReadHook(notifications.map((n) => n.id));

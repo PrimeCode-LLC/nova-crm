@@ -18,25 +18,42 @@ export const useInboxNotificationOverrides = create<InboxNotificationOverridesSt
       readIds: [],
       unreadIds: [],
       dismissedIds: [],
-      markRead: (id) =>
+      markRead: (id) => {
+        const { readIds, unreadIds } = get();
+        if (readIds.includes(id) && !unreadIds.includes(id)) return;
         set({
-          readIds: Array.from(new Set([...get().readIds, id])),
-          unreadIds: get().unreadIds.filter((x) => x !== id),
-        }),
-      markUnread: (id) =>
+          readIds: readIds.includes(id) ? readIds : [...readIds, id],
+          unreadIds: unreadIds.filter((x) => x !== id),
+        });
+      },
+      markUnread: (id) => {
+        const { readIds, unreadIds } = get();
+        if (unreadIds.includes(id) && !readIds.includes(id)) return;
         set({
-          unreadIds: Array.from(new Set([...get().unreadIds, id])),
-          readIds: get().readIds.filter((x) => x !== id),
-        }),
-      dismiss: (id) =>
+          unreadIds: unreadIds.includes(id) ? unreadIds : [...unreadIds, id],
+          readIds: readIds.filter((x) => x !== id),
+        });
+      },
+      dismiss: (id) => {
+        const { dismissedIds } = get();
+        if (dismissedIds.includes(id)) return;
         set({
-          dismissedIds: Array.from(new Set([...get().dismissedIds, id])),
-        }),
-      markAllRead: (ids) =>
-        set({
-          readIds: Array.from(new Set([...get().readIds, ...ids])),
-          unreadIds: get().unreadIds.filter((x) => !ids.includes(x)),
-        }),
+          dismissedIds: [...dismissedIds, id],
+        });
+      },
+      markAllRead: (ids) => {
+        const { readIds, unreadIds } = get();
+        const nextRead = Array.from(new Set([...readIds, ...ids]));
+        const nextUnread = unreadIds.filter((x) => !ids.includes(x));
+        if (
+          nextRead.length === readIds.length &&
+          nextRead.every((id) => readIds.includes(id)) &&
+          nextUnread.length === unreadIds.length
+        ) {
+          return;
+        }
+        set({ readIds: nextRead, unreadIds: nextUnread });
+      },
       reset: () => set({ readIds: [], unreadIds: [], dismissedIds: [] }),
     }),
     {

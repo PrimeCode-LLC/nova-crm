@@ -19,6 +19,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
 import { isoFromDateInput, todayDateInputValue } from "@/lib/followup-date";
+import { channelMixForFollowupChannel } from "@/lib/followup-plans";
 import { zonedDayKey } from "@/lib/org-timezone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -224,6 +225,8 @@ export function NewFollowupDialog({
           leadId: selectedLead.id,
           sequenceMode: "continue",
           singleStep: true,
+          // Keep the replacement on this step's own channel, not the lead's default.
+          channelMix: channelMixForFollowupChannel(channel || undefined, selectedLead.channel),
           userPrompt: "Rewrite this one follow-up step with fresh, personalized copy.",
           regenerateContext: currentStep,
           demoContext: isDemo ? { lead: selectedLead } : undefined,

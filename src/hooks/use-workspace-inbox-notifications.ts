@@ -160,9 +160,12 @@ export function useWorkspaceInboxNotifications() {
     [notifications],
   );
 
+  const notificationsRef = React.useRef(notifications);
+  notificationsRef.current = notifications;
+
   const markRead = React.useCallback(
     (id: string) => {
-      const row = notifications.find((n) => n.id === id);
+      const row = notificationsRef.current.find((n) => n.id === id);
       if (row?.durable) {
         if (isDemo) {
           demoMarkRead(id, true);
@@ -177,12 +180,12 @@ export function useWorkspaceInboxNotifications() {
       }
       markReadLocal(id);
     },
-    [notifications, isDemo, demoMarkRead, markReadLocal],
+    [isDemo, demoMarkRead, markReadLocal],
   );
 
   const markUnread = React.useCallback(
     (id: string) => {
-      const row = notifications.find((n) => n.id === id);
+      const row = notificationsRef.current.find((n) => n.id === id);
       if (row?.durable) {
         if (isDemo) {
           demoMarkRead(id, false);
@@ -197,12 +200,12 @@ export function useWorkspaceInboxNotifications() {
       }
       markUnreadLocal(id);
     },
-    [notifications, isDemo, demoMarkRead, markUnreadLocal],
+    [isDemo, demoMarkRead, markUnreadLocal],
   );
 
   const dismiss = React.useCallback(
     (id: string) => {
-      const row = notifications.find((n) => n.id === id);
+      const row = notificationsRef.current.find((n) => n.id === id);
       if (row?.durable) {
         if (isDemo) {
           demoDismiss(id);
@@ -217,12 +220,13 @@ export function useWorkspaceInboxNotifications() {
       }
       dismissLocal(id);
     },
-    [notifications, isDemo, demoDismiss, dismissLocal],
+    [isDemo, demoDismiss, dismissLocal],
   );
 
   const markAllRead = React.useCallback(
     (ids: string[]) => {
-      const durableIds = ids.filter((id) => notifications.find((n) => n.id === id)?.durable);
+      const rows = notificationsRef.current;
+      const durableIds = ids.filter((id) => rows.find((n) => n.id === id)?.durable);
       const derivedIds = ids.filter((id) => !durableIds.includes(id));
       if (derivedIds.length) markAllReadLocal(derivedIds);
       if (durableIds.length) {
@@ -235,7 +239,7 @@ export function useWorkspaceInboxNotifications() {
         }
       }
     },
-    [notifications, isDemo, demoMarkAllRead, markAllReadLocal],
+    [isDemo, demoMarkAllRead, markAllReadLocal],
   );
 
   return {

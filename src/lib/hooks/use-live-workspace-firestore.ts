@@ -297,6 +297,13 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
       raw.sequenceMode === "full" || raw.sequenceMode === "continue"
         ? raw.sequenceMode
         : undefined,
+    channelMix:
+      raw.channelMix === "lead" ||
+      raw.channelMix === "email" ||
+      raw.channelMix === "linkedin" ||
+      raw.channelMix === "multi_channel"
+        ? raw.channelMix
+        : undefined,
     pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
     pausedReason: typeof raw.pausedReason === "string" ? raw.pausedReason : undefined,
     replyMessageId: typeof raw.replyMessageId === "string" ? raw.replyMessageId : undefined,

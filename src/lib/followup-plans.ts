@@ -1,4 +1,11 @@
-import type { ChannelKey, Followup, FollowupChannel, FollowupPlan, Lead } from "@/lib/types";
+import type {
+  ChannelKey,
+  Followup,
+  FollowupChannel,
+  FollowupChannelMix,
+  FollowupPlan,
+  Lead,
+} from "@/lib/types";
 
 export function getActiveFollowupPlanForLead(
   plans: readonly FollowupPlan[],
@@ -7,6 +14,71 @@ export function getActiveFollowupPlanForLead(
   return plans
     .filter((p) => p.leadId === leadId && p.status === "active")
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+export function channelMixLabel(mix: FollowupChannelMix | undefined): string {
+  if (mix === "email") return "Email only";
+  if (mix === "linkedin") return "LinkedIn only";
+  if (mix === "multi_channel") return "Email + LinkedIn";
+  if (mix === "lead") return "Lead channel";
+  return "Channels";
+}
+
+/**
+ * LinkedIn caps a connection request note at 300 characters on every plan, so
+ * these are platform limits rather than style preferences.
+ */
+const LINKEDIN_LENGTH_RULES =
+  "LinkedIn length is a hard platform limit, not a style preference, and it overrides the role word targets: " +
+  "a connection request note must stay under 300 characters (aim 200-280) and must contain no link; " +
+  "a message sent after the invite is accepted must stay under 400 characters.";
+
+const LINKEDIN_CHANNEL_SEMANTICS =
+  "Channel semantics: linkedin_outbound means the prospect is not a first-degree connection yet, so the first LinkedIn touch is a connection request. " +
+  "linkedin_1to1 means context proves they are already a first-degree connection, so you may open with a direct message. " +
+  "Default to linkedin_outbound unless context establishes an existing connection.";
+
+const LINKEDIN_ACCEPTANCE_RULE =
+  "Any LinkedIn step after a connection request depends on that invite being accepted. Write it as if accepted, and state the dependency in description " +
+  "(for example \"only if the invite was accepted\") so the rep knows the step is contingent.";
+
+/** Prompt guidance injected into followup_suggest so channel assignment is explicit. */
+export function buildChannelMixHint(mix: FollowupChannelMix): string {
+  switch (mix) {
+    case "email":
+      return (
+        "Channel mix: email only. Use cold_email or personalized_email (or website_form if that is the lead channel). " +
+        "Do not use LinkedIn unless user instructions explicitly ask. Every step needs an emailSubject and follows the role word target."
+      );
+    case "linkedin":
+      return (
+        "Channel mix: LinkedIn only. " +
+        `${LINKEDIN_CHANNEL_SEMANTICS} ` +
+        `${LINKEDIN_LENGTH_RULES} ` +
+        "Leave emailSubject empty on every step and write peer-note copy with no email formatting. " +
+        `${LINKEDIN_ACCEPTANCE_RULE} ` +
+        "Do not use email channels unless user instructions explicitly ask."
+      );
+    case "multi_channel":
+      return (
+        "Channel mix: Email + LinkedIn as ONE interleaved strategy. Do NOT put every step on the same channel. " +
+        "Default full cadence: Step 1 linkedin_outbound connection request, Step 2 cold_email or personalized_email, " +
+        "Step 3 linkedin_outbound follow-up note on a new angle, Step 4 email breakup. " +
+        "Continue mode: alternate the remaining LinkedIn and email touches, starting with LinkedIn when possible. " +
+        `${LINKEDIN_CHANNEL_SEMANTICS} ` +
+        `${LINKEDIN_LENGTH_RULES} Email steps keep the normal role word target and require a subject. ` +
+        `${LINKEDIN_ACCEPTANCE_RULE} The email steps must stand on their own so the sequence still works if the invite is never accepted. ` +
+        "Cross-channel awareness: never restate an email in the LinkedIn note or the reverse. A LinkedIn step following an unanswered email may make at most one light " +
+        "reference to it; never list prior attempts or imply the prospect ignored you. " +
+        "LinkedIn steps use emailSubject \"\". Titles reflect the channel (for example \"LinkedIn 1 - Connect\", \"Email 1 - Intro\")."
+      );
+    case "lead":
+    default:
+      return (
+        "Channel mix: match the lead's primary channel (or \"other\"). Keep all steps on that channel unless user instructions ask to mix. " +
+        `If that channel is LinkedIn: ${LINKEDIN_LENGTH_RULES}`
+      );
+  }
 }
 
 /** Channels where we queue SMTP send; others stay copy + due-date reminders. */
@@ -40,6 +112,47 @@ export function sequenceModeLabel(mode: FollowupPlan["sequenceMode"]): string {
   if (mode === "continue") return "Continue";
   if (mode === "full") return "Full outreach";
   return "Sequence";
+}
+
+/**
+ * Mix that preserves one step's channel shape, so regenerating a LinkedIn step
+ * on an email lead does not come back as email copy.
+ */
+export function channelMixForFollowupChannel(
+  channel: FollowupChannel | undefined,
+  leadChannel: ChannelKey,
+): FollowupChannelMix {
+  const resolved = resolveFollowupChannel(channel, leadChannel);
+  if (resolved === "linkedin_outbound" || resolved === "linkedin_1to1") return "linkedin";
+  if (
+    resolved === "cold_email" ||
+    resolved === "personalized_email" ||
+    resolved === "website_form"
+  ) {
+    return "email";
+  }
+  return "lead";
+}
+
+export function defaultFollowupChannelMix(input: {
+  leadChannel: ChannelKey;
+  hasLinkedIn: boolean;
+  initialChannel?: ChannelKey;
+}): FollowupChannelMix {
+  const initial = input.initialChannel;
+  if (initial === "linkedin_outbound" || initial === "linkedin_1to1") return "linkedin";
+  if (input.hasLinkedIn) return "multi_channel";
+  if (
+    input.leadChannel === "cold_email" ||
+    input.leadChannel === "personalized_email" ||
+    input.leadChannel === "website_form"
+  ) {
+    return "email";
+  }
+  if (input.leadChannel === "linkedin_outbound" || input.leadChannel === "linkedin_1to1") {
+    return "linkedin";
+  }
+  return "lead";
 }
 
 export function getPausedFollowupPlanForLead(

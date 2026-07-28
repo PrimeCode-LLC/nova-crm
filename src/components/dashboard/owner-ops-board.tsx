@@ -15,6 +15,7 @@ import { PersonScorecard } from "@/components/dashboard/person-scorecard";
 import { TeamCommand } from "@/components/dashboard/team-command";
 import { StrategyScoreboard } from "@/components/dashboard/strategy-scoreboard";
 import { DashboardNeedsAttentionWithContent } from "@/components/dashboard/dashboard-needs-attention-with-content";
+import { ContentWallBoard } from "@/components/dashboard/content-wall-board";
 import {
   WallSceneCarousel,
   type WallScene,
@@ -332,12 +333,23 @@ export function OwnerOpsBoard({
       });
     }
 
+    // Scene 4 - Content: brand pulse + production / schedule / capture queues.
+    if (wallSettings.scenes.content) {
+      scenes.push({
+        id: "content",
+        label: "Content",
+        tagline: "Brands & content ops",
+        content: <ContentWallBoard className="h-full min-h-0 flex-1" />,
+      });
+    }
+
     return scenes;
   }, [
     wall,
     wallSettings.scenes.priorities,
     wallSettings.scenes.team,
     wallSettings.scenes.pipeline,
+    wallSettings.scenes.content,
     widgets,
     showInboxPerformance,
     showScorecard,

@@ -701,6 +701,8 @@ export type FollowupPlanStatus = "active" | "paused" | "superseded" | "completed
  * - `continue` - intro already sent; draft remaining touches only
  */
 export type FollowupSequenceMode = "full" | "continue";
+/** How AI should assign channels across sequence steps. */
+export type FollowupChannelMix = "lead" | "email" | "linkedin" | "multi_channel";
 export type FollowupDeliveryStatus =
   | "scheduled"
   | "sent"
@@ -722,6 +724,8 @@ export interface FollowupPlan {
   /** Multi-step cadence (vs one-off reminders). */
   kind?: "sequence";
   sequenceMode?: FollowupSequenceMode;
+  /** Channel strategy used when the sequence was generated. */
+  channelMix?: FollowupChannelMix;
   pausedAt?: ISODate;
   /** Human-readable reason (e.g. lead replied by email). */
   pausedReason?: string;

@@ -1,4 +1,10 @@
-import type { ChannelKey, FollowupChannel, FollowupSequenceMode, Lead } from "@/lib/types";
+import type {
+  ChannelKey,
+  FollowupChannel,
+  FollowupChannelMix,
+  FollowupSequenceMode,
+  Lead,
+} from "@/lib/types";
 import {
   buildFollowupPersonalizationProfile,
   type FollowupRoleFamily,
@@ -19,6 +25,7 @@ export type FollowupSuggestResponse = {
   }[];
   leadChannel: ChannelKey;
   sequenceMode: FollowupSequenceMode;
+  channelMix: FollowupChannelMix;
 };
 
 function isEmailishChannel(channel: ChannelKey): boolean {
@@ -125,18 +132,40 @@ const ROLE_COPY: Record<
   },
 };
 
+/** LinkedIn rejects connection notes over 300 characters; DMs stay short by convention. */
+const LINKEDIN_LIMITS = { connection_note: 300, message: 400 } as const;
+
+function clampLinkedInBody(body: string, kind: keyof typeof LINKEDIN_LIMITS): string {
+  const max = LINKEDIN_LIMITS[kind];
+  if (body.length <= max) return body;
+  const cut = body.slice(0, max - 1);
+  const lastSentence = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("? "));
+  return lastSentence > 80 ? cut.slice(0, lastSentence + 1) : `${cut.trimEnd()}…`;
+}
+
+function resolveMixChannels(
+  leadChannel: ChannelKey,
+  channelMix: FollowupChannelMix,
+): { emailChannel: FollowupChannel; linkedinChannel: FollowupChannel; emailish: boolean } {
+  const emailish = isEmailishChannel(leadChannel);
+  const emailChannel: FollowupChannel = emailish ? leadChannel : "personalized_email";
+  const linkedinChannel: FollowupChannel =
+    leadChannel === "linkedin_1to1" ? "linkedin_1to1" : "linkedin_outbound";
+  return { emailChannel, linkedinChannel, emailish };
+}
+
 export function demoFollowupSuggestions(
   lead: Lead,
   userPrompt?: string,
   sequenceMode: FollowupSequenceMode = "full",
+  channelMix: FollowupChannelMix = "lead",
 ): FollowupSuggestResponse {
   const name = lead.contactName.split(" ")[0] || lead.contactName;
   const company = lead.companyName;
   const channel = lead.channel;
   const hint = userPrompt?.trim() ? ` (${userPrompt.trim()})` : "";
-  const emailish = isEmailishChannel(channel);
   const continueMode = sequenceMode === "continue";
-  const emailChannel: FollowupChannel = emailish ? channel : "personalized_email";
+  const { emailChannel, linkedinChannel, emailish } = resolveMixChannels(channel, channelMix);
   const profile = buildFollowupPersonalizationProfile({ title: lead.contactTitle });
   const roleCopy = ROLE_COPY[profile.roleFamily];
   const signal = getDemoSignal(lead);
@@ -144,107 +173,183 @@ export function demoFollowupSuggestions(
   // Mid-market and enterprise both benefit from committee-aware, forwardable copy.
   const segment = classifyAccountSegment({ lead });
   const enterprise = segment === "enterprise" || segment === "mid_market";
-  const isLinkedin = channel === "linkedin_outbound" || channel === "linkedin_1to1";
 
-  // Step 1 - opener: specific signal + role-relevant value hypothesis + soft interest check.
-  const step1Body =
+  const effectiveMix: FollowupChannelMix =
+    channelMix === "lead"
+      ? channel === "linkedin_outbound" || channel === "linkedin_1to1"
+        ? "linkedin"
+        : emailish
+          ? "email"
+          : "lead"
+      : channelMix;
+
+  const isLinkedinOnly = effectiveMix === "linkedin";
+  const isMulti = effectiveMix === "multi_channel";
+  const isEmailOnly = effectiveMix === "email" || (!isLinkedinOnly && !isMulti && emailish);
+
+  const linkedInOpener = `Hi ${name} - ${relevanceOpener} ${roleCopy.relevance} ${roleCopy.interestAsk}`;
+  const linkedInBump = `Hi ${name} - quick add on ${company}: ${roleCopy.offer} Useful to connect?`;
+  const linkedInReframe = `Hi ${name}, one more thought on ${company}. ${roleCopy.reframe}`;
+  const linkedInBreakup = `Hi ${name}, last note from me on ${company}. If timing is off, just say no and I'll close the loop.`;
+
+  const emailOpener =
     channel === "upwork"
       ? `Hi ${name},\n\nOn ${company}: happy to clarify scope or share a short case study if useful.\n\n${roleCopy.interestAsk}`
       : continueMode
         ? `Hi ${name},\n\nOn my earlier note about ${company}: ${roleCopy.offer}\n\n${roleCopy.interestAsk}`
         : `Hi ${name},\n\n${relevanceOpener} ${roleCopy.relevance}\n\n${roleCopy.interestAsk}`;
 
-  // Step 2 - proof/value: a distinct angle, written so it can be forwarded internally at larger accounts.
-  const step2Body = isLinkedin
-    ? `Hi ${name} - quick add on ${company}: ${roleCopy.offer} Useful to connect?`
-    : enterprise
-      ? `Hi ${name},\n\nDifferent angle on ${company}: ${roleCopy.offer} Happy to keep it to a short, forwardable summary if anyone else on your side weighs in.\n\nWant me to send it over?`
-      : `Hi ${name},\n\nOne new angle on ${company}: ${roleCopy.offer}\n\nWant me to send it over?`;
+  const emailBump = enterprise
+    ? `Hi ${name},\n\nDifferent angle on ${company}: ${roleCopy.offer} Happy to keep it to a short, forwardable summary if anyone else on your side weighs in.\n\nWant me to send it over?`
+    : `Hi ${name},\n\nOne new angle on ${company}: ${roleCopy.offer}\n\nWant me to send it over?`;
 
-  // Step 3 - reframe: change the lens; for larger accounts, offer to reach the right owner instead of pushing.
-  const step3Body = isLinkedin
-    ? `Hi ${name}, one more thought on ${company}. ${roleCopy.reframe}`
-    : `Hi ${name},\n\nRethinking this for ${company}: ${roleCopy.reframe}\n\nEither way, is this on your radar this quarter?`;
+  const emailReframe = `Hi ${name},\n\nRethinking this for ${company}: ${roleCopy.reframe}\n\nEither way, is this on your radar this quarter?`;
+  const emailBreakup = `Hi ${name},\n\nI'll close the loop on my side unless you want to reopen. If ${company} still wants help later, just reply here.`;
 
-  // Step 4 - break-up: gracious take-away with permission to decline; recovers silent prospects.
-  const step4Body = isLinkedin
-    ? `Hi ${name}, last note from me on ${company}. If timing is off, just say no and I'll close the loop.`
-    : `Hi ${name},\n\nI'll close the loop on my side unless you want to reopen. If ${company} still wants help later, just reply here.`;
+  const bodyFor = (ch: FollowupChannel, kind: "opener" | "bump" | "reframe" | "breakup") => {
+    const li = ch === "linkedin_outbound" || ch === "linkedin_1to1";
+    if (kind === "opener") {
+      return li ? clampLinkedInBody(linkedInOpener, "connection_note") : emailOpener;
+    }
+    if (kind === "bump") return li ? clampLinkedInBody(linkedInBump, "message") : emailBump;
+    if (kind === "reframe") {
+      return li ? clampLinkedInBody(linkedInReframe, "message") : emailReframe;
+    }
+    return li ? clampLinkedInBody(linkedInBreakup, "message") : emailBreakup;
+  };
+
+  const stepChannel = (index: number): FollowupChannel => {
+    if (isMulti) {
+      // Full: LI, email, LI, email. Continue: LI, email, LI.
+      const pattern = continueMode
+        ? ([linkedinChannel, emailChannel, linkedinChannel] as const)
+        : ([linkedinChannel, emailChannel, linkedinChannel, emailChannel] as const);
+      return pattern[Math.min(index, pattern.length - 1)]!;
+    }
+    if (isLinkedinOnly) return linkedinChannel;
+    if (isEmailOnly) return emailChannel;
+    if (channel === "upwork") return index === 0 && !continueMode ? "upwork" : "other";
+    return channel;
+  };
 
   const items: FollowupSuggestResponse["items"] = [];
+  let stepIndex = 0;
 
   // offsetDays mirrors relative business-day gaps (UI assigns dates via dateInputForSequenceStep):
   // Full: Day 0 → +3 BD → +5 BD → +7 BD. Continue: +3 BD → +5 BD → +7 BD.
   if (!continueMode) {
+    const ch = stepChannel(stepIndex);
+    const li = ch === "linkedin_outbound" || ch === "linkedin_1to1";
     items.push({
-      title: emailish ? `Email 1 - Intro to ${name}` : `Touch 1 - Reach ${name}`,
+      title: li
+        ? `LinkedIn 1 - Connect with ${name}`
+        : emailish || isEmailOnly || isMulti
+          ? `Email 1 - Intro to ${name}`
+          : `Touch 1 - Reach ${name}`,
       offsetDays: 0,
       priority: "high",
-      channel: emailish ? emailChannel : channel,
-      emailSubject: emailish ? roleCopy.subject : undefined,
-      messageBody: step1Body,
-      description: "First personalized touch",
+      channel: ch,
+      emailSubject: li ? undefined : roleCopy.subject,
+      messageBody: bodyFor(ch, "opener"),
+      description: li ? "LinkedIn connection / first note" : "First personalized touch",
       rationale: "Open with a specific hook and soft interest check",
+    });
+    stepIndex += 1;
+  }
+
+  {
+    const ch = stepChannel(stepIndex);
+    const li = ch === "linkedin_outbound" || ch === "linkedin_1to1";
+    items.push({
+      title: continueMode
+        ? li
+          ? `LinkedIn - Value bump for ${company}`
+          : emailish || isEmailOnly || isMulti
+            ? `Email 2 - Value bump for ${company}`
+            : `Follow-up with ${name}`
+        : li
+          ? `LinkedIn 2 - Value bump`
+          : emailish || isEmailOnly || isMulti
+            ? `Email 2 - Value bump`
+            : `Second touch, ${company}`,
+      offsetDays: 3,
+      priority: "high",
+      channel: ch,
+      emailSubject: li ? undefined : roleCopy.proofSubject,
+      messageBody: bodyFor(ch, continueMode ? "opener" : "bump"),
+      description: continueMode
+        ? "Next touch after intro already sent"
+        : enterprise
+          ? "Proof/insight beat (forwardable for committee)"
+          : "Proof/insight beat",
+      rationale: continueMode
+        ? "Lead already received intro; continue the thread"
+        : enterprise
+          ? "Add a forwardable proof angle a champion can share internally"
+          : "Add a new angle without repeating the opener",
+    });
+    stepIndex += 1;
+  }
+
+  {
+    const ch = stepChannel(stepIndex);
+    const li = ch === "linkedin_outbound" || ch === "linkedin_1to1";
+    items.push({
+      title: li
+        ? `LinkedIn - Reframe`
+        : emailish || isEmailOnly || isMulti
+          ? `Email 3 - Reframe`
+          : `Reframe for ${company}`,
+      offsetDays: 5,
+      priority: "medium",
+      channel: ch,
+      emailSubject: li ? undefined : "different angle",
+      messageBody: bodyFor(ch, "reframe"),
+      description: enterprise
+        ? "New lens / offer to reach the right owner"
+        : "New lens on the value",
+      rationale: enterprise
+        ? "Multi-thread: make it easy to route you to the real decision-maker"
+        : "Shift the angle before the break-up so it does not feel repetitive",
+    });
+    stepIndex += 1;
+  }
+
+  {
+    const ch = stepChannel(stepIndex);
+    const li = ch === "linkedin_outbound" || ch === "linkedin_1to1";
+    items.push({
+      title: li
+        ? `LinkedIn - Last note`
+        : emailish || isEmailOnly || isMulti
+          ? `Email 4 - Break-up`
+          : `Last touch, ${company}`,
+      offsetDays: 7,
+      priority: "medium",
+      channel: ch,
+      emailSubject: li ? undefined : "closing the loop",
+      messageBody: bodyFor(ch, "breakup"),
+      description: "Break-up / permission to decline",
+      rationale: "Easy out recovers silent prospects and completes the +3 / +5 / +7 cadence",
     });
   }
 
-  items.push({
-    title: continueMode
-      ? emailish
-        ? `Email 2 - Value bump for ${company}`
-        : `Follow-up with ${name}`
-      : emailish
-        ? `Email 2 - Value bump`
-        : `Second touch, ${company}`,
-    offsetDays: 3,
-    priority: "high",
-    channel: emailish ? emailChannel : channel === "upwork" ? "upwork" : "other",
-    emailSubject: emailish ? roleCopy.proofSubject : undefined,
-    messageBody: continueMode ? step1Body : step2Body,
-    description: continueMode
-      ? "Next touch after intro already sent"
-      : enterprise
-        ? "Proof/insight beat (forwardable for committee)"
-        : "Proof/insight beat",
-    rationale: continueMode
-      ? "Lead already received intro; continue the thread"
-      : enterprise
-        ? "Add a forwardable proof angle a champion can share internally"
-        : "Add a new angle without repeating the opener",
-  });
-
-  items.push({
-    title: emailish ? `Email 3 - Reframe` : `Reframe for ${company}`,
-    offsetDays: 5,
-    priority: "medium",
-    channel: emailish ? emailChannel : "other",
-    emailSubject: emailish ? "different angle" : undefined,
-    messageBody: step3Body,
-    description: enterprise
-      ? "New lens / offer to reach the right owner"
-      : "New lens on the value",
-    rationale: enterprise
-      ? "Multi-thread: make it easy to route you to the real decision-maker"
-      : "Shift the angle before the break-up so it does not feel repetitive",
-  });
-
-  items.push({
-    title: emailish ? `Email 4 - Break-up` : `Last touch, ${company}`,
-    offsetDays: 7,
-    priority: "medium",
-    channel: emailish ? emailChannel : "other",
-    emailSubject: emailish ? "closing the loop" : undefined,
-    messageBody: step4Body,
-    description: "Break-up / permission to decline",
-    rationale: "Easy out recovers silent prospects and completes the +3 / +5 / +7 cadence",
-  });
+  const mixLabel =
+    effectiveMix === "multi_channel"
+      ? "email + LinkedIn"
+      : effectiveMix === "linkedin"
+        ? "LinkedIn"
+        : effectiveMix === "email"
+          ? "email"
+          : channel;
 
   return {
     planSummary: continueMode
-      ? `Demo continue sequence for ${lead.contactName} on ${channel}${hint} (intro already sent).`
-      : `Demo full sequence for ${lead.contactName}: personalized touches on ${channel}${hint}.`,
+      ? `Demo continue sequence for ${lead.contactName} on ${mixLabel}${hint} (intro already sent).`
+      : `Demo full sequence for ${lead.contactName}: personalized ${mixLabel} touches${hint}.`,
     leadChannel: channel,
     sequenceMode,
+    channelMix,
     items,
   };
 }
