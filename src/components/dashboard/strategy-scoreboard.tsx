@@ -7,6 +7,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { StrategyScoreboardSettings } from "@/components/dashboard/strategy-scoreboard-settings";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { useDashboardPreferences } from "@/hooks/use-dashboard-preferences";
 import {
@@ -37,6 +38,7 @@ export function StrategyScoreboard({
   className?: string;
 } = {}) {
   const ws = useWorkspace();
+  const timeZone = useOrgTimezone();
   const { currentUserId, intentPlaybook } = ws;
   const leads = leadsOverride ?? ws.leads;
   const deals = dealsOverride ?? ws.deals;
@@ -58,8 +60,18 @@ export function StrategyScoreboard({
         followups,
         range,
         outreachThreshold: intentPlaybook.outreachThreshold,
+        timeZone,
       }),
-    [strategies, assignments, leads, deals, followups, range, intentPlaybook.outreachThreshold],
+    [
+      strategies,
+      assignments,
+      leads,
+      deals,
+      followups,
+      range,
+      intentPlaybook.outreachThreshold,
+      timeZone,
+    ],
   );
 
   const settingsOptions = React.useMemo(

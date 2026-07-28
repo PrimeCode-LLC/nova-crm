@@ -32,6 +32,7 @@ import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { ChannelKey, Lead, Deal, Followup, LeadTask, User } from "@/lib/types";
 import { getMemberServer } from "@/lib/platform/members-server";
+import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import {
   getCachedDashboardBriefServer,
   saveDashboardBriefServer,
@@ -55,7 +56,9 @@ const briefSchema = z.object({
 const bodySchema = z.object({
   channelScope: z.array(z.string()).default([]),
   ownerScope: z.string().default("all-owners"),
-  timeRange: z.enum(["12h", "1d", "7d", "30d", "90d", "qtd", "ytd", "all"]).default("30d"),
+  timeRange: z
+    .enum(["today", "12h", "1d", "7d", "30d", "90d", "qtd", "ytd", "all"])
+    .default("30d"),
   regenerate: z.boolean().optional(),
   demoBundle: z
     .object({
@@ -139,21 +142,24 @@ export async function POST(req: Request) {
     getOwnerDisplayName,
   };
 
+  const org = await getOrganizationServer(orgId);
+  const rangeOpts = { timeZone: org?.settings.timezone };
+
   let leads = bundle.leads;
   if (channelScope.length) leads = leads.filter((l) => channelScope.includes(l.channel));
   leads = filterLeadsByOwnerScope(leads, parsed.data.ownerScope, ownerScopeDeps);
-  leads = filterLeadsByDateRange(leads, timeRange);
+  leads = filterLeadsByDateRange(leads, timeRange, rangeOpts);
 
   const leadIds = new Set(leads.map((l) => l.id));
   let deals = bundle.deals.filter((d) => leadIds.has(d.leadId));
-  deals = filterDealsByDateRange(deals, timeRange);
+  deals = filterDealsByDateRange(deals, timeRange, rangeOpts);
 
   let activityCounters = bundle.activityCounters;
   if (channelScope.length) {
     activityCounters = activityCounters.filter((r) => channelScope.includes(r.channel));
   }
   activityCounters = filterActivityCountersByOwnerScope(
-    filterActivityCountersByDateRange(activityCounters, timeRange),
+    filterActivityCountersByDateRange(activityCounters, timeRange, rangeOpts),
     parsed.data.ownerScope,
     ownerScopeDeps,
   );
@@ -163,7 +169,7 @@ export async function POST(req: Request) {
     activityRecords = activityRecords.filter((r) => channelScope.includes(r.channel));
   }
   activityRecords = filterActivityRecordsByOwnerScope(
-    filterActivityRecordsByDateRange(activityRecords, timeRange),
+    filterActivityRecordsByDateRange(activityRecords, timeRange, rangeOpts),
     parsed.data.ownerScope,
     ownerScopeDeps,
   );

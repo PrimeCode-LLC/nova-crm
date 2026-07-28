@@ -7,6 +7,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { buildInboxPerformanceRows } from "@/lib/dashboard-ops-analytics";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead, User } from "@/lib/types";
@@ -24,9 +25,18 @@ export function InboxPerformance({
   range: DashboardTimeRangeKey;
   wall?: boolean;
 }) {
+  const timeZone = useOrgTimezone();
   const rows = React.useMemo(
-    () => buildInboxPerformanceRows({ users, leads, followups, range, limit: wall ? 6 : 10 }),
-    [users, leads, followups, range, wall],
+    () =>
+      buildInboxPerformanceRows({
+        users,
+        leads,
+        followups,
+        range,
+        timeZone,
+        limit: wall ? 6 : 10,
+      }),
+    [users, leads, followups, range, wall, timeZone],
   );
 
   return (

@@ -6,6 +6,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildOpsScorecardRows } from "@/lib/dashboard-ops-analytics";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
@@ -31,6 +32,7 @@ export function PersonScorecard({
   wall?: boolean;
 } = {}) {
   const ws = useWorkspace();
+  const timeZone = useOrgTimezone();
   const { users, currentUserId, leadTasks, followups: wsFollowups } = ws;
   const leads = leadsOverride ?? ws.leads;
   const deals = dealsOverride ?? ws.deals;
@@ -52,8 +54,9 @@ export function PersonScorecard({
         followups,
         tasks,
         range,
+        timeZone,
       }),
-    [users, leads, deals, followups, tasks, range],
+    [users, leads, deals, followups, tasks, range, timeZone],
   );
 
   const rows = canSeeTeam ? rowsAll : rowsAll.filter((r) => r.userId === currentUserId);

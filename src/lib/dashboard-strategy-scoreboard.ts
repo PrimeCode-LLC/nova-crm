@@ -52,6 +52,7 @@ export function buildStrategyScoreboardRows(input: {
   range: DashboardTimeRangeKey;
   outreachThreshold: number;
   now?: Date;
+  timeZone?: string;
 }): {
   rows: StrategyScoreboardRow[];
   /** Share of prospects in-range that carry a strategyId. */
@@ -60,7 +61,10 @@ export function buildStrategyScoreboardRows(input: {
   attributedInRange: number;
 } {
   const now = input.now ?? new Date();
-  const start = getDashboardRangeStart(input.range, now).getTime();
+  const start = getDashboardRangeStart(input.range, {
+    now,
+    timeZone: input.timeZone,
+  }).getTime();
   const threshold = input.outreachThreshold;
 
   const published = input.strategies.filter((s) => s.status === "published");

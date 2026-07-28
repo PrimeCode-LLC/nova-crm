@@ -196,8 +196,11 @@ export default function DashboardPage() {
   );
 
   const scopedLeads = React.useMemo(
-    () => filterLeadsByDateRange(ownerScopedLeads, timeRange as DashboardTimeRangeKey),
-    [ownerScopedLeads, timeRange],
+    () =>
+      filterLeadsByDateRange(ownerScopedLeads, timeRange as DashboardTimeRangeKey, {
+        timeZone: organizationTimezone,
+      }),
+    [ownerScopedLeads, timeRange, organizationTimezone],
   );
 
   const scopedLeadIds = React.useMemo(() => new Set(scopedLeads.map((l) => l.id)), [scopedLeads]);
@@ -216,8 +219,11 @@ export default function DashboardPage() {
   }, [deals, channelScopedLeads, ownerScope, ownerScopeDeps, channelScope.length]);
 
   const scopedDeals = React.useMemo(
-    () => filterDealsByDateRange(ownerScopedDeals, timeRange as DashboardTimeRangeKey),
-    [ownerScopedDeals, timeRange],
+    () =>
+      filterDealsByDateRange(ownerScopedDeals, timeRange as DashboardTimeRangeKey, {
+        timeZone: organizationTimezone,
+      }),
+    [ownerScopedDeals, timeRange, organizationTimezone],
   );
 
   const activityAfterChannel = React.useMemo(
@@ -231,11 +237,13 @@ export default function DashboardPage() {
   const scopedActivityCounters = React.useMemo(
     () =>
       filterActivityCountersByOwnerScope(
-        filterActivityCountersByDateRange(activityAfterChannel, timeRange as DashboardTimeRangeKey),
+        filterActivityCountersByDateRange(activityAfterChannel, timeRange as DashboardTimeRangeKey, {
+          timeZone: organizationTimezone,
+        }),
         ownerScope,
         ownerScopeDeps,
       ),
-    [activityAfterChannel, ownerScope, ownerScopeDeps, timeRange],
+    [activityAfterChannel, ownerScope, ownerScopeDeps, timeRange, organizationTimezone],
   );
 
   const activityRecordsAfterChannel = React.useMemo(
@@ -247,11 +255,15 @@ export default function DashboardPage() {
   const scopedActivityRecords = React.useMemo(
     () =>
       filterActivityRecordsByOwnerScope(
-        filterActivityRecordsByDateRange(activityRecordsAfterChannel, timeRange as DashboardTimeRangeKey),
+        filterActivityRecordsByDateRange(
+          activityRecordsAfterChannel,
+          timeRange as DashboardTimeRangeKey,
+          { timeZone: organizationTimezone },
+        ),
         ownerScope,
         ownerScopeDeps,
       ),
-    [activityRecordsAfterChannel, ownerScope, ownerScopeDeps, timeRange],
+    [activityRecordsAfterChannel, ownerScope, ownerScopeDeps, timeRange, organizationTimezone],
   );
 
   const workflowFollowups = React.useMemo(

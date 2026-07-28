@@ -88,7 +88,10 @@ export function computeDashboardWorkflowMetrics(input: {
 }): DashboardWorkflowMetrics {
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
-  const start = getDashboardRangeStart(input.range, now).getTime();
+  const start = getDashboardRangeStart(input.range, {
+    now,
+    timeZone: input.timeZone,
+  }).getTime();
   const timeOpts = { now, timeZone: input.timeZone };
 
   const salesLeads = input.leads.filter(isSalesLead);

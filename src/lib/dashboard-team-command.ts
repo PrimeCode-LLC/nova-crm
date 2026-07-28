@@ -257,10 +257,14 @@ export function buildTeamCommandRows(input: {
   /** Intent Playbook outreach threshold (a prospect at/above this is "qualified"). */
   outreachThreshold: number;
   now?: Date;
+  timeZone?: string;
 }): TeamCommandRow[] {
   const now = input.now ?? new Date();
   const end = now.getTime();
-  const start = getDashboardRangeStart(input.range, now).getTime();
+  const start = getDashboardRangeStart(input.range, {
+    now,
+    timeZone: input.timeZone,
+  }).getTime();
   const allTime = input.range === "all";
 
   const cur = computeWindowMetrics(input, start, end);

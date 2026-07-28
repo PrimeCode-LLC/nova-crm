@@ -332,9 +332,13 @@ export function buildOpsScorecardRows(input: {
   tasks: readonly LeadTask[];
   range: DashboardTimeRangeKey;
   now?: Date;
+  timeZone?: string;
 }): OpsScorecardRow[] {
   const now = input.now ?? new Date();
-  const start = getDashboardRangeStart(input.range, now).getTime();
+  const start = getDashboardRangeStart(input.range, {
+    now,
+    timeZone: input.timeZone,
+  }).getTime();
   const activeUsers = input.users.filter((u) => u.status === "active" && u.roleId !== "director");
 
   return activeUsers
@@ -417,10 +421,14 @@ export function buildInboxPerformanceRows(input: {
   followups: readonly Followup[];
   range: DashboardTimeRangeKey;
   now?: Date;
+  timeZone?: string;
   limit?: number;
 }): InboxPerfRow[] {
   const now = input.now ?? new Date();
-  const start = getDashboardRangeStart(input.range, now).getTime();
+  const start = getDashboardRangeStart(input.range, {
+    now,
+    timeZone: input.timeZone,
+  }).getTime();
   const limit = input.limit ?? 8;
 
   return input.users

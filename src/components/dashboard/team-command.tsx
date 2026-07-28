@@ -6,6 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   TEAM_COMMAND_LENSES,
   buildTeamCommandRows,
@@ -211,6 +212,7 @@ export function TeamCommand({
   className?: string;
 } = {}) {
   const ws = useWorkspace();
+  const timeZone = useOrgTimezone();
   const { users, currentUserId, leadTasks, followups: wsFollowups, intentPlaybook } = ws;
   // Prefer overrides (channel/owner-scoped, not date-capped) when the parent
   // supplies them; fall back to full workspace for standalone / wall usage.
@@ -244,8 +246,9 @@ export function TeamCommand({
         tasks,
         range: localRange,
         outreachThreshold: intentPlaybook.outreachThreshold,
+        timeZone,
       }),
-    [users, leads, deals, followups, tasks, localRange, intentPlaybook.outreachThreshold],
+    [users, leads, deals, followups, tasks, localRange, intentPlaybook.outreachThreshold, timeZone],
   );
 
   const scoped = canSeeTeam ? rowsAll : rowsAll.filter((r) => r.userId === currentUserId);
