@@ -813,7 +813,7 @@ export default function DashboardPage() {
                 tasks={workflowTasks}
                 currentUserId={currentUserId}
                 range={timeRange as DashboardTimeRangeKey}
-                widgets={w}
+                widgets={opsWidgets}
                 pipelineValue={pipelineValue}
                 closedValue={closedValue}
                 pipelineHint={pipelineHint}

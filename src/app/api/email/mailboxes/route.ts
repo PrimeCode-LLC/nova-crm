@@ -9,6 +9,7 @@ import {
   upsertMailboxWithSecretsMerged,
 } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, mailboxReadOnlyForClient } from "@/lib/email/mailbox-data-owner-server";
+import { mergeOwnAndAssignedMailboxes } from "@/lib/email/merge-own-and-assigned-mailboxes";
 import { getMailboxSendCountForDayServer, utcSendDayKey } from "@/lib/email/mailbox-send-quota-server";
 import { normalizeCrmEmailKey } from "@/lib/crm-dedup-keys";
 
@@ -72,10 +73,7 @@ export async function GET(req: Request) {
       organizationId,
       viewerUid,
     });
-    if (assigned.length > 0) {
-      const ownIds = new Set(ownMailboxes.map((m) => m.id));
-      mailboxes = [...ownMailboxes, ...assigned.filter((m) => !ownIds.has(m.id))];
-    }
+    mailboxes = mergeOwnAndAssignedMailboxes(ownMailboxes, assigned);
   }
 
   const includeUsage = new URL(req.url).searchParams.get("includeUsage") === "1";
@@ -135,7 +133,36 @@ export async function PATCH(req: Request) {
   }
 
   const { organizationId, uid } = g.ctx.session;
-  const { dataOwnerUid: _ignore, ...mailboxRest } = parsed.data.mailbox;
+  const { dataOwnerUid: payloadOwner, ...mailboxRest } = parsed.data.mailbox;
+  if (payloadOwner?.trim() && payloadOwner.trim() !== uid) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "This mailbox is assigned from a teammate. Only the owner can change its settings.",
+      },
+      { status: 403 },
+    );
+  }
+  const assigned = await listMailboxesAssignedToViewerServer({
+    organizationId,
+    viewerUid: uid,
+  });
+  if (
+    assigned.some(
+      (m) =>
+        m.id === mailboxRest.id ||
+        (normalizeCrmEmailKey(m.emailAddress) &&
+          normalizeCrmEmailKey(m.emailAddress) === normalizeCrmEmailKey(mailboxRest.emailAddress)),
+    )
+  ) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "This mailbox is assigned from a teammate. Only the owner can change its settings.",
+      },
+      { status: 403 },
+    );
+  }
   const emailKey = normalizeCrmEmailKey(mailboxRest.emailAddress);
   if (emailKey) {
     const existing = await listMailboxesForMemberServer({ organizationId, uid });

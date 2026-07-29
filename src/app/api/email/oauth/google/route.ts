@@ -5,7 +5,10 @@ import {
   googleMailOAuthConfigured,
   googleOAuthClientCreds,
 } from "@/lib/email/mailbox-google-oauth-server";
-import { upsertMailboxGoogleOAuthServer } from "@/lib/email/mailbox-secrets-server";
+import {
+  getMailboxSecretsServer,
+  upsertMailboxGoogleOAuthServer,
+} from "@/lib/email/mailbox-secrets-server";
 import {
   applyGoogleWorkspacePreset,
   withGoogleWorkspaceConnection,
@@ -175,12 +178,21 @@ export async function GET(req: Request) {
     ? new Date(Date.now() + tokens.expires_in * 1000).toISOString()
     : new Date(Date.now() + 3600 * 1000).toISOString();
 
+  // Google often omits refresh_token on reconnect — keep the existing one instead of wiping it.
+  const priorSecrets = await getMailboxSecretsServer({
+    organizationId: statePayload.orgId,
+    uid: statePayload.uid,
+    mailboxId: statePayload.mailboxId,
+  });
+  const refreshToken =
+    tokens.refresh_token?.trim() || priorSecrets?.googleOAuth?.refreshToken?.trim() || "";
+
   const oauthResult = await upsertMailboxGoogleOAuthServer({
     organizationId: statePayload.orgId,
     uid: statePayload.uid,
     mailboxId: statePayload.mailboxId,
     googleOAuth: {
-      refreshToken: tokens.refresh_token ?? "",
+      refreshToken,
       accessToken: tokens.access_token,
       tokenExpiresAt: expiresAt,
       accountEmail,
@@ -191,7 +203,7 @@ export async function GET(req: Request) {
     return NextResponse.redirect(`${origin}/settings?tab=email&google_mail_error=vault`);
   }
 
-  if (!tokens.refresh_token) {
+  if (!refreshToken) {
     return NextResponse.redirect(
       `${origin}/settings?tab=email&google_mail_connected=1&google_mail_warning=no_refresh`,
     );

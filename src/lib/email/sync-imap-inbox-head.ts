@@ -52,7 +52,7 @@ export async function syncImapInboxHead(opts: {
         host: acct.imap.host,
         port: acct.imap.port,
         secure: acct.imap.secure,
-        user: acct.imap.user,
+        user: acct.imap.user.trim() || acct.emailAddress.trim(),
         pass: acct.imap.password,
       },
     }),

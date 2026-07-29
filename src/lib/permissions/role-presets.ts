@@ -92,6 +92,8 @@ const FRONTLINE_ACTIONS: ActionKey[] = [
   "prospects.push_to_lead",
   "prospects.move_back_to_prospect",
   "deals.change_stage",
+  /** Scoped to assigned/owned inboxes by the utilization API (not org-wide). */
+  "dashboard.view_mailbox_utilization",
 ];
 
 const TEAM_LEAD_ACTIONS: ActionKey[] = [
@@ -109,7 +111,6 @@ const TEAM_LEAD_ACTIONS: ActionKey[] = [
   "mailbox.view_others",
   "scheduling.manage_org_links",
   "dashboard.view_team_ops",
-  "dashboard.view_mailbox_utilization",
   "people.edit_hierarchy",
 ];
 

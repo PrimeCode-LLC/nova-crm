@@ -123,7 +123,7 @@ function firestoreToMailbox(
   secrets: {
     smtp: { user: string; password: string };
     imap: { user: string; password: string };
-    googleOAuth?: { accountEmail: string };
+    googleOAuth?: { accountEmail: string; refreshToken?: string };
   } | null,
   options?: { dataOwnerUid?: string; stripSecrets?: boolean },
 ): EmailMailboxSettings {
@@ -132,6 +132,8 @@ function firestoreToMailbox(
   const smtpPassword = strip ? "" : (secrets?.smtp.password ?? "");
   const imapUser = strip ? "" : (secrets?.imap.user ?? "");
   const imapPassword = strip ? "" : (secrets?.imap.password ?? "");
+  const googleEmail = secrets?.googleOAuth?.accountEmail?.trim() ?? "";
+  const googleRefresh = secrets?.googleOAuth?.refreshToken?.trim() ?? "";
   const mailbox: EmailMailboxSettings = {
     id: mailboxId,
     label: String(data.label ?? "Mailbox"),
@@ -161,7 +163,8 @@ function firestoreToMailbox(
     dailySendLimit: parseDailySendLimit(data.dailySendLimit),
     sendGapSeconds: parseSendGapSeconds(data.sendGapSeconds),
     assignedUserIds: parseAssignedUserIds(data.assignedUserIds),
-    googleAuthConnected: Boolean(secrets?.googleOAuth?.accountEmail),
+    // Require a refresh token — access-only / empty-token vault rows look "connected" but IMAP fails.
+    googleAuthConnected: Boolean(googleEmail && googleRefresh),
   };
   if (options?.dataOwnerUid) {
     mailbox.dataOwnerUid = options.dataOwnerUid;
@@ -271,7 +274,18 @@ export async function listMailboxesForMemberServer(input: {
         uid: input.uid,
         mailboxId: doc.id,
       });
-      return firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, secrets);
+      return firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, secrets
+        ? {
+            smtp: secrets.smtp,
+            imap: secrets.imap,
+            googleOAuth: secrets.googleOAuth
+              ? {
+                  accountEmail: secrets.googleOAuth.accountEmail,
+                  refreshToken: secrets.googleOAuth.refreshToken,
+                }
+              : undefined,
+          }
+        : null);
     }),
   );
   out.sort((a, b) => a.label.localeCompare(b.label));
@@ -288,7 +302,22 @@ export async function getMailboxProfileServer(input: {
   const snap = await ref.get();
   if (!snap.exists) return null;
   const secrets = await getMailboxSecretsServer(input);
-  return firestoreToMailbox(snap.id, snap.data() as Record<string, unknown>, secrets);
+  return firestoreToMailbox(
+    snap.id,
+    snap.data() as Record<string, unknown>,
+    secrets
+      ? {
+          smtp: secrets.smtp,
+          imap: secrets.imap,
+          googleOAuth: secrets.googleOAuth
+            ? {
+                accountEmail: secrets.googleOAuth.accountEmail,
+                refreshToken: secrets.googleOAuth.refreshToken,
+              }
+            : undefined,
+        }
+      : null,
+  );
 }
 
 /** Mailboxes on other members where `assignedUserIds` includes the viewer (secrets stripped). */
