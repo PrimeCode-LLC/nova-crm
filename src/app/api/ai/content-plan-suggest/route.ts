@@ -6,6 +6,7 @@ import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import {
   formatBrandContextForPrompt,
   getContentBrandServer,
@@ -305,7 +306,10 @@ export async function POST(req: Request) {
       updatedAt: now,
     };
 
-    await db.collection(COLLECTIONS.contentPlans).doc(plan.id).set(plan);
+    await db
+      .collection(COLLECTIONS.contentPlans)
+      .doc(plan.id)
+      .set(stripUndefined(plan));
 
     return NextResponse.json({ plan });
   } catch (e) {
