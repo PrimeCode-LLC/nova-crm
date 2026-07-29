@@ -220,6 +220,18 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     fieldName: "instantly",
     message: () => "Instantly disconnected",
   },
+  "millionverifier.connected": {
+    operation: "update",
+    tableName: "integrationSecrets",
+    fieldName: "millionverifier",
+    message: () => "Million Verifier connected",
+  },
+  "millionverifier.disconnected": {
+    operation: "update",
+    tableName: "integrationSecrets",
+    fieldName: "millionverifier",
+    message: () => "Million Verifier disconnected",
+  },
   "instantly.campaign_created": {
     operation: "create",
     tableName: "campaigns",

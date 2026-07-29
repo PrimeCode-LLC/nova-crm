@@ -55,6 +55,8 @@ export type AuditEvent =
   | "instantly.campaign_leads_synced"
   | "instantly.leads_pushed"
   | "instantly.webhook_reply"
+  | "millionverifier.connected"
+  | "millionverifier.disconnected"
   | "feature.page_view"
   | "feature.fit_check"
   | "feature.intent_radar_evaluate"

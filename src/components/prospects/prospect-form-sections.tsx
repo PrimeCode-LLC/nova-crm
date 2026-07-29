@@ -1,7 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, CheckCircle2, ChevronDown } from "lucide-react";
+import { AlertTriangle, CheckCircle2, ChevronDown, Loader2, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 
 import { ProspectQualifyPanel } from "@/components/prospecting/prospect-qualify-panel";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,10 @@ import {
   PROSPECT_FORM_UNSET,
   type ProspectFormValues,
 } from "@/lib/prospects/prospect-form";
+import {
+  formatVerifySummary,
+  verifyLeadEmailsClient,
+} from "@/lib/integrations/millionverifier/verify-client";
 import type {
   BestContactChannel,
   BusinessStatus,
@@ -112,6 +117,8 @@ type Props = {
   existingContactsForCompany: number;
   maxContactsPerCompany: number;
   renderAnnotation?: (key: AnnotationKey) => React.ReactNode;
+  /** When set (saved prospect), show Million Verifier control next to email status. */
+  verifyLeadId?: string;
 };
 
 function SectionTitle({ children }: { children: React.ReactNode }) {
@@ -151,7 +158,9 @@ export function ProspectFormSections({
   existingContactsForCompany,
   maxContactsPerCompany,
   renderAnnotation,
+  verifyLeadId,
 }: Props) {
+  const [verifyingEmail, setVerifyingEmail] = React.useState(false);
   const update = <K extends keyof ProspectFormValues>(
     key: K,
     value: ProspectFormValues[K],
@@ -164,6 +173,27 @@ export function ProspectFormSections({
     (profile) => profile.active !== false && profile.channel === values.channel,
   );
   const readinessIssues = evaluateOutreachReadiness(values);
+
+  async function handleVerifyEmail() {
+    if (!verifyLeadId || !values.email.trim() || verifyingEmail) return;
+    setVerifyingEmail(true);
+    try {
+      const { results, summary } = await verifyLeadEmailsClient([verifyLeadId]);
+      const first = results[0];
+      if (first?.error && !first.status) {
+        toast.error(first.error);
+        return;
+      }
+      if (first?.status) {
+        update("emailVerify", first.status);
+      }
+      toast.success(formatVerifySummary(summary));
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Email verification failed");
+    } finally {
+      setVerifyingEmail(false);
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -473,7 +503,34 @@ export function ProspectFormSections({
             <Input type="email" value={values.personalEmail} onChange={(event) => update("personalEmail", event.target.value)} />
           </Field>
           <Field label="Email verified">
-            <SimpleSelect value={values.emailVerify} options={EMAIL_OPTIONS} onChange={(value) => update("emailVerify", value as ProspectFormValues["emailVerify"])} />
+            <div className="flex items-center gap-2">
+              <div className="min-w-0 flex-1">
+                <SimpleSelect
+                  value={values.emailVerify}
+                  options={EMAIL_OPTIONS}
+                  onChange={(value) =>
+                    update("emailVerify", value as ProspectFormValues["emailVerify"])
+                  }
+                />
+              </div>
+              {verifyLeadId && values.email.trim() ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="shrink-0"
+                  disabled={verifyingEmail}
+                  onClick={() => void handleVerifyEmail()}
+                >
+                  {verifyingEmail ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                  )}
+                  Verify
+                </Button>
+              ) : null}
+            </div>
           </Field>
           <Field label="Phone number" annotation={renderAnnotation?.("contactPhone")}>
             <Input value={values.phone} onChange={(event) => update("phone", event.target.value, "contactPhone")} />

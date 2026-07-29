@@ -15,7 +15,8 @@ import {
 } from "@/lib/constants";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { AlertTriangle, ChevronDown, MailWarning, Pencil } from "lucide-react";
+import { AlertTriangle, ChevronDown, Loader2, MailWarning, Pencil, ShieldCheck } from "lucide-react";
+import { toast } from "sonner";
 import { UserChip } from "@/components/common/user-chip";
 import type { LeadEditSection } from "@/components/leads/edit-lead-dialog";
 import { LeadSourceButton } from "@/components/leads/lead-source-button";
@@ -30,6 +31,10 @@ import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { contactHasBouncedEmail } from "@/lib/email/contact-email-change";
+import {
+  formatVerifySummary,
+  verifyLeadEmailsClient,
+} from "@/lib/integrations/millionverifier/verify-client";
 import { LeadIntentQualityCard } from "@/components/leads/lead-intent-quality-card";
 import type {
   BuyerPersona,
@@ -126,8 +131,10 @@ export function LeadOverview({
 }) {
   const ws = useWorkspace();
   const [intelligenceOpen, setIntelligenceOpen] = React.useState(false);
+  const [verifyingEmail, setVerifyingEmail] = React.useState(false);
   const canEdit = ws.canEditLead(lead);
   const emailBounced = contactHasBouncedEmail(contact);
+  const companyEmail = (contact?.email || lead.contactEmail || "").trim();
   const emailResponseCtx = useLeadEmailResponseContext();
   const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
@@ -138,6 +145,28 @@ export function LeadOverview({
   const linkedSalesLead = lead.linkedSalesLeadId
     ? ws.getLeadById(lead.linkedSalesLeadId)
     : undefined;
+
+  async function handleVerifyEmail() {
+    if (!companyEmail || verifyingEmail || ws.isDemo) return;
+    setVerifyingEmail(true);
+    try {
+      const { results, summary } = await verifyLeadEmailsClient([lead.id]);
+      const first = results[0];
+      if (first?.error && !first.status) {
+        toast.error(first.error);
+        return;
+      }
+      toast.success(formatVerifySummary(summary), {
+        description: first?.status
+          ? `${companyEmail} → ${first.status.replace(/_/g, " ")}`
+          : undefined,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Email verification failed");
+    } finally {
+      setVerifyingEmail(false);
+    }
+  }
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
       <LeadIntentQualityCard
@@ -212,10 +241,50 @@ export function LeadOverview({
                       Fix
                     </Button>
                   ) : null}
+                  {canEdit && companyEmail && !ws.isDemo ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="ml-1 h-6 px-2 text-[11px]"
+                      disabled={verifyingEmail}
+                      onClick={() => void handleVerifyEmail()}
+                    >
+                      {verifyingEmail ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="h-3 w-3" />
+                      )}
+                      Re-verify
+                    </Button>
+                  ) : null}
                 </span>
               ) : (
-                contact?.emailVerificationStatus ||
-                (contact?.emailVerified || lead.emailVerified ? "Verified" : "Not verified")
+                <span className="inline-flex items-center gap-1.5">
+                  <span>
+                    {contact?.emailVerificationStatus ||
+                      (contact?.emailVerified || lead.emailVerified
+                        ? "Verified"
+                        : "Not verified")}
+                  </span>
+                  {canEdit && companyEmail && !ws.isDemo ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      className="ml-1 h-6 px-2 text-[11px]"
+                      disabled={verifyingEmail}
+                      onClick={() => void handleVerifyEmail()}
+                    >
+                      {verifyingEmail ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="h-3 w-3" />
+                      )}
+                      Verify
+                    </Button>
+                  ) : null}
+                </span>
               )}
             </Field>
             <Field label="Phone">{contact?.phone || "-"}</Field>

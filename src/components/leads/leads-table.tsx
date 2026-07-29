@@ -56,9 +56,11 @@ import {
   ChevronRight,
   Columns3,
   Filter,
+  Loader2,
   MoreHorizontal,
   Search,
   Plus,
+  ShieldCheck,
   Trash2,
   Tag,
   CalendarClock,
@@ -76,6 +78,10 @@ import {
   PUSH_STATUS_TONE,
   INTAKE_KIND_META,
 } from "@/lib/constants";
+import {
+  formatVerifySummary,
+  verifyLeadEmailsClient,
+} from "@/lib/integrations/millionverifier/verify-client";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { ChannelTagsRow } from "@/components/common/channel-tags-row";
@@ -446,6 +452,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [markLostOpen, setMarkLostOpen] = React.useState(false);
   const [markLostLeadIds, setMarkLostLeadIds] = React.useState<string[]>([]);
   const [markLostBusy, setMarkLostBusy] = React.useState(false);
+  const [verifyingEmails, setVerifyingEmails] = React.useState(false);
 
   const openReassignForIds = React.useCallback((ids: string[]) => {
     setReassignLeadIds(ids);
@@ -479,6 +486,40 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     setMarkLostLeadIds(ids);
     setMarkLostOpen(true);
   }, []);
+
+  const verifyEmailsForIds = React.useCallback(
+    async (ids: string[]) => {
+      if (!ids.length) return;
+      const selected = leads.filter((l) => ids.includes(l.id));
+      const withEmail = selected.filter((l) => Boolean(l.contactEmail?.trim()));
+      if (!withEmail.length) {
+        toast.error("None of the selected leads have a company email");
+        return;
+      }
+      if (isDemo) {
+        toast.info("Demo workspace", {
+          description: "Email verification is disabled in sample data.",
+        });
+        return;
+      }
+      setVerifyingEmails(true);
+      try {
+        const { summary } = await verifyLeadEmailsClient(withEmail.map((l) => l.id));
+        toast.success(formatVerifySummary(summary), {
+          description:
+            withEmail.length < selected.length
+              ? `${selected.length - withEmail.length} skipped (no email)`
+              : undefined,
+        });
+        setRowSelection({});
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Email verification failed");
+      } finally {
+        setVerifyingEmails(false);
+      }
+    },
+    [isDemo, leads],
+  );
 
   const confirmArchive = React.useCallback(async () => {
     if (!archiveLeadIds.length) return;
@@ -1785,6 +1826,23 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             }
           >
             <Tag className="h-3.5 w-3.5" /> Tag
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            type="button"
+            disabled={verifyingEmails}
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              void verifyEmailsForIds(ids);
+            }}
+          >
+            {verifyingEmails ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <ShieldCheck className="h-3.5 w-3.5" />
+            )}
+            Verify emails
           </Button>
           <Button
             variant="outline"

@@ -50,6 +50,7 @@ import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 import { WallDisplaySettingsCard } from "@/components/settings/wall-display-settings-card";
 import { InstantlyIntegrationCard } from "@/components/integrations/instantly-integration-card";
+import { MillionVerifierIntegrationCard } from "@/components/integrations/millionverifier-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
 import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
@@ -756,6 +757,7 @@ function SettingsPage() {
           <TabsContent value="integrations">
             <div className="max-w-lg space-y-3">
               <InstantlyIntegrationCard />
+              <MillionVerifierIntegrationCard />
               {INTEGRATIONS.map((int) => (
                 <Card key={int.id}>
                   <CardContent className="p-4 flex items-center gap-4">
