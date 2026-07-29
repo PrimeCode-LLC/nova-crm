@@ -577,8 +577,9 @@ export function EmailInboxSettingsCard() {
   }, [emailServerHydrated, emailServerSyncEnabled, persistMailboxesRemote]);
 
   /**
-   * If local signature is empty but the server still has one (e.g. after a prior wipe race),
-   * pull it back into the store for editing. Does not overwrite non-empty local edits.
+   * On Settings mount: refresh transport health (transportError, googleAuthConnected) and
+   * signatures from Firestore so stale in-memory state from another tab/page session does
+   * not hide real "Needs fix" issues.
    */
   React.useEffect(() => {
     if (isDemo || !emailServerHydrated || !emailServerSyncEnabled) return;
@@ -596,22 +597,51 @@ export function EmailInboxSettingsCard() {
         }
         if (!Array.isArray(data.mailboxes)) return;
         const serverById = new Map(
-          data.mailboxes.map((m) => [m.id, typeof m.signature === "string" ? m.signature : ""]),
+          data.mailboxes.map((m) => [
+            m.id,
+            {
+              signature: typeof m.signature === "string" ? m.signature : "",
+              transportError:
+                typeof m.transportError === "string" ? m.transportError.trim() : "",
+              transportCheckedAt:
+                typeof m.transportCheckedAt === "string" ? m.transportCheckedAt : undefined,
+              googleAuthConnected:
+                typeof m.googleAuthConnected === "boolean" ? m.googleAuthConnected : undefined,
+            },
+          ]),
         );
         const local = useEmailAccountStore.getState().mailboxes;
-        let restored = false;
+        let changed = false;
         for (const mb of local) {
           if (isAssignedMailbox(mb, currentUserId)) continue;
-          const serverSig = serverById.get(mb.id);
-          if (serverSig == null) continue;
+          const server = serverById.get(mb.id);
+          if (!server) continue;
+          const patch: Partial<EmailMailboxSettings> = {};
+          // Restore signature from server if local is blank
           const localSig = typeof mb.signature === "string" ? mb.signature : "";
-          if (!localSig.trim() && serverSig.trim()) {
-            updateMailbox(mb.id, { signature: serverSig });
-            restored = true;
+          if (!localSig.trim() && server.signature.trim()) {
+            patch.signature = server.signature;
+          }
+          // Always sync transport health from server — it is the source of truth
+          if (server.transportError !== (mb.transportError ?? "")) {
+            patch.transportError = server.transportError;
+          }
+          if (server.transportCheckedAt && server.transportCheckedAt !== mb.transportCheckedAt) {
+            patch.transportCheckedAt = server.transportCheckedAt;
+          }
+          if (
+            server.googleAuthConnected !== undefined &&
+            server.googleAuthConnected !== mb.googleAuthConnected
+          ) {
+            patch.googleAuthConnected = server.googleAuthConnected;
+          }
+          if (Object.keys(patch).length > 0) {
+            updateMailbox(mb.id, patch);
+            changed = true;
           }
         }
-        // Restoring from server is not a user edit - refresh baseline after store updates.
-        if (restored) {
+        // Server sync is not a user edit — refresh baseline so auto-save does not fire.
+        if (changed) {
           queueMicrotask(() => {
             persistBaselineRef.current = JSON.stringify(
               useEmailAccountStore
