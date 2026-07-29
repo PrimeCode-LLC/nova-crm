@@ -118,6 +118,7 @@ import { LeadCampaignBadge } from "@/components/leads/lead-campaign-badge";
 import { AddToCampaignDialog } from "@/components/outreach/add-to-campaign-dialog";
 import { BulkBuildSequencesDialog } from "@/components/leads/bulk-build-sequences-dialog";
 import { BulkScheduleSequencesDialog } from "@/components/leads/bulk-schedule-sequences-dialog";
+import { BulkTagLeadsDialog } from "@/components/leads/bulk-tag-leads-dialog";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { buildInboxSyncedLeadIds } from "@/lib/email/lead-inbox-sync";
@@ -443,6 +444,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [bulkBuildLeadIds, setBulkBuildLeadIds] = React.useState<string[]>([]);
   const [bulkScheduleOpen, setBulkScheduleOpen] = React.useState(false);
   const [bulkScheduleLeadIds, setBulkScheduleLeadIds] = React.useState<string[]>([]);
+  const [bulkTagOpen, setBulkTagOpen] = React.useState(false);
+  const [bulkTagLeadIds, setBulkTagLeadIds] = React.useState<string[]>([]);
   const [prospectAssignedToMe, setProspectAssignedToMe] = React.useState(false);
   const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
 
@@ -1345,6 +1348,15 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         leadIds={bulkScheduleLeadIds}
         onComplete={() => setRowSelection({})}
       />
+      <BulkTagLeadsDialog
+        open={bulkTagOpen}
+        onOpenChange={(o) => {
+          setBulkTagOpen(o);
+          if (!o) setBulkTagLeadIds([]);
+        }}
+        leadIds={bulkTagLeadIds}
+        onSuccess={() => setRowSelection({})}
+      />
       <AlertDialog
         open={archiveOpen}
         onOpenChange={(o) => {
@@ -1910,13 +1922,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             variant="outline"
             size="sm"
             type="button"
-            onClick={() =>
-              toast.info(isDemo ? "Demo workspace" : "Not yet available", {
-                description: isDemo
-                  ? "Bulk tagging is read-only in sample data."
-                  : "Bulk tags will be available once your workspace is connected.",
-              })
-            }
+            onClick={() => {
+              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+              if (!ids.length) return;
+              setBulkTagLeadIds(ids);
+              setBulkTagOpen(true);
+            }}
           >
             <Tag className="h-3.5 w-3.5" /> Tag
           </Button>
