@@ -136,6 +136,7 @@ import {
 import { appendMailDataOwnerParam, resolveMailApiForUserUid } from "@/lib/email/mail-data-owner-query";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
+import { mapPool } from "@/lib/async/map-pool";
 import {
   MAX_COMPOSE_ATTACHMENTS,
   MAX_COMPOSE_ATTACHMENT_BYTES,
@@ -382,6 +383,18 @@ type ImapListFolder = "inbox" | "trash" | "sent";
 
 /** Matches server-side IMAP list batching; older messages load via “Load more”. */
 const INBOX_IMAP_PAGE_LIMIT = INBOX_IMAP_HEAD_LIMIT;
+/** Per-mailbox page when aggregating All mailboxes (avoids 19×800 body-heavy fetches). */
+const ALL_MAILBOXES_IMAP_PAGE_LIMIT = 100;
+/** Max concurrent IMAP list requests under All mailboxes. */
+const ALL_MAILBOXES_FETCH_CONCURRENCY = 3;
+/**
+ * Cap merged conversation rows used for list + sidebar stats under All mailboxes.
+ * Full per-mailbox caches can still be larger; this keeps main-thread work bounded.
+ */
+const ALL_MAILBOXES_VISIBLE_ROW_CAP = 400;
+/** Approximate row height for windowed list rendering. */
+const MAIL_LIST_ROW_ESTIMATE_PX = 72;
+const MAIL_LIST_OVERSCAN = 10;
 
 export default function InboxWorkspace() {
   const router = useRouter();
@@ -574,6 +587,15 @@ export default function InboxWorkspace() {
   const [inboundLoadingMore, setInboundLoadingMore] = React.useState(false);
   const [trashLoading, setTrashLoading] = React.useState(false);
   const [trashSyncing, setTrashSyncing] = React.useState(false);
+  /** Nested All-mailbox fetches; only clear loading when the last one finishes. */
+  const inboundFetchDepthRef = React.useRef(0);
+  const trashFetchDepthRef = React.useRef(0);
+  const sentFetchDepthRef = React.useRef(0);
+  const listFetchAbortRef = React.useRef<AbortController | null>(null);
+  const listFetchGenerationRef = React.useRef(0);
+  const mailListScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const [mailListScrollTop, setMailListScrollTop] = React.useState(0);
+  const [mailListViewportHeight, setMailListViewportHeight] = React.useState(600);
   const [sentLoading, setSentLoading] = React.useState(false);
   const [sentSyncing, setSentSyncing] = React.useState(false);
   const [sentLoadingMore, setSentLoadingMore] = React.useState(false);
@@ -791,13 +813,62 @@ export default function InboxWorkspace() {
     currentUserId,
   ]);
 
+  const beginFolderFetch = React.useCallback((folder: ImapListFolder, hasCache: boolean) => {
+    if (folder === "inbox") {
+      inboundFetchDepthRef.current += 1;
+      if (hasCache) setInboundSyncing(true);
+      else setInboundLoading(true);
+    } else if (folder === "sent") {
+      sentFetchDepthRef.current += 1;
+      if (hasCache) setSentSyncing(true);
+      else setSentLoading(true);
+    } else {
+      trashFetchDepthRef.current += 1;
+      if (hasCache) setTrashSyncing(true);
+      else setTrashLoading(true);
+    }
+  }, []);
+
+  const endFolderFetch = React.useCallback((folder: ImapListFolder) => {
+    if (folder === "inbox") {
+      inboundFetchDepthRef.current = Math.max(0, inboundFetchDepthRef.current - 1);
+      if (inboundFetchDepthRef.current === 0) {
+        setInboundLoading(false);
+        setInboundSyncing(false);
+      }
+    } else if (folder === "sent") {
+      sentFetchDepthRef.current = Math.max(0, sentFetchDepthRef.current - 1);
+      if (sentFetchDepthRef.current === 0) {
+        setSentLoading(false);
+        setSentSyncing(false);
+      }
+    } else {
+      trashFetchDepthRef.current = Math.max(0, trashFetchDepthRef.current - 1);
+      if (trashFetchDepthRef.current === 0) {
+        setTrashLoading(false);
+        setTrashSyncing(false);
+      }
+    }
+  }, []);
+
   const fetchImapListFolder = React.useCallback(
     async (
       folder: ImapListFolder,
       mailboxOverride?: EmailMailboxSettings,
-      opts?: { silent?: boolean },
+      opts?: {
+        silent?: boolean;
+        signal?: AbortSignal;
+        /** Default true — list sync only needs envelopes; bodies load on thread open. */
+        headsOnly?: boolean;
+        limit?: number;
+        /** Ignore loading end if a newer All-mailboxes batch replaced this one. */
+        fetchGeneration?: number;
+      },
     ): Promise<{ ok: boolean; error?: string; mailboxLabel: string }> => {
       const silent = Boolean(opts?.silent);
+      const headsOnly = opts?.headsOnly !== false;
+      const signal = opts?.signal;
+      const fetchGeneration = opts?.fetchGeneration;
       if (isDemo) {
         if (folder === "inbox" && !silent) {
           toast.message("Demo inbox", { description: "Sample threads only, no IMAP server is used." });
@@ -831,24 +902,24 @@ export default function InboxWorkspace() {
         };
       }
       if (folder === "sent") setSentFetchError(null);
+      if (signal?.aborted) {
+        return { ok: false, error: "aborted", mailboxLabel };
+      }
       const stBefore = useEmailAccountStore.getState();
+      const allSelected = stBefore.activeMailboxId === ALL_MAILBOXES_ID;
+      const pageLimit =
+        typeof opts?.limit === "number" && Number.isFinite(opts.limit)
+          ? Math.max(1, Math.floor(opts.limit))
+          : allSelected
+            ? ALL_MAILBOXES_IMAP_PAGE_LIMIT
+            : INBOX_IMAP_PAGE_LIMIT;
       const cachedLen =
         folder === "inbox"
           ? (stBefore.inboundByMailbox[acct.id]?.length ?? 0)
           : folder === "trash"
             ? (stBefore.trashInboundByMailbox[acct.id]?.length ?? 0)
             : stBefore.sent.filter((m) => m.mailboxId === acct.id && m.uid != null).length;
-      if (folder === "inbox") {
-        if (cachedLen > 0) setInboundSyncing(true);
-        else setInboundLoading(true);
-      } else if (folder === "sent") {
-        if (cachedLen > 0) setSentSyncing(true);
-        else setSentLoading(true);
-      } else if (cachedLen > 0) {
-        setTrashSyncing(true);
-      } else {
-        setTrashLoading(true);
-      }
+      beginFolderFetch(folder, cachedLen > 0);
       try {
         const apiForUid = resolveMailApiForUserUid({
           mailViewAsUid,
@@ -858,12 +929,15 @@ export default function InboxWorkspace() {
         const url = appendMailDataOwnerParam("/api/email/imap-fetch", apiForUid, currentUserId);
         const res = await fetch(url, {
           method: "POST",
+          signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mailboxId: acct.id,
             folder,
-            limit: INBOX_IMAP_PAGE_LIMIT,
+            limit: pageLimit,
             offset: 0,
+            // List sync only needs envelopes — full bodies load when a thread is opened.
+            headsOnly,
             imap: {
               host: acct.imap.host,
               port: acct.imap.port,
@@ -885,6 +959,9 @@ export default function InboxWorkspace() {
         try {
           data = (await res.json()) as typeof data;
         } catch {
+          if (signal?.aborted) {
+            return { ok: false, error: "aborted", mailboxLabel };
+          }
           const err = "Invalid response from mail server";
           if (!silent) toast.error(err);
           if (folder === "sent") setSentFetchError(err);
@@ -941,10 +1018,10 @@ export default function InboxWorkspace() {
           typeof data.mailboxTotal === "number" && Number.isFinite(data.mailboxTotal) ? data.mailboxTotal : null;
         if (folder === "inbox") {
           reconcileInboundHeadFromSync(acct.id, rows);
-          setImapMailboxTotal(total);
+          if (!allSelected) setImapMailboxTotal(total);
         } else if (folder === "sent") {
           reconcileSentHeadFromSync(mailboxId, rows);
-          setImapSentTotal(total);
+          if (!allSelected) setImapSentTotal(total);
           if (rows.length === 0) {
             const serverTotal = total ?? 0;
             const skipped = data.skippedNoEnvelope ?? 0;
@@ -960,24 +1037,23 @@ export default function InboxWorkspace() {
           }
         } else {
           reconcileTrashHeadFromSync(acct.id, rows);
-          setImapTrashTotal(total);
+          if (!allSelected) setImapTrashTotal(total);
         }
         return { ok: true, mailboxLabel };
-      } catch {
+      } catch (e) {
+        if (signal?.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+          return { ok: false, error: "aborted", mailboxLabel };
+        }
         const err = "Could not reach the server";
         if (!silent) toast.error(err);
         if (folder === "sent") setSentFetchError("Could not reach the server. Check your connection and try Refresh mail.");
         return { ok: false, error: err, mailboxLabel };
       } finally {
-        if (folder === "inbox") {
-          setInboundLoading(false);
-          setInboundSyncing(false);
-        } else if (folder === "sent") {
-          setSentLoading(false);
-          setSentSyncing(false);
-        } else {
-          setTrashLoading(false);
-          setTrashSyncing(false);
+        if (
+          fetchGeneration == null ||
+          fetchGeneration === listFetchGenerationRef.current
+        ) {
+          endFolderFetch(folder);
         }
       }
     },
@@ -993,19 +1069,21 @@ export default function InboxWorkspace() {
       currentUserId,
       emailServerHydrated,
       updateMailbox,
+      beginFolderFetch,
+      endFolderFetch,
     ],
   );
 
   const fetchScopedFolder = React.useCallback(
     async (folder: ImapListFolder) => {
       const state = useEmailAccountStore.getState();
-      const targets =
-        state.activeMailboxId === ALL_MAILBOXES_ID
-          ? state.mailboxes.filter(isMailboxReadyForImapFetch)
-          : [getActiveMailbox(state)].filter(isMailboxReadyForImapFetch);
+      const allSelected = state.activeMailboxId === ALL_MAILBOXES_ID;
+      const targets = allSelected
+        ? state.mailboxes.filter(isMailboxReadyForImapFetch)
+        : [getActiveMailbox(state)].filter(isMailboxReadyForImapFetch);
       const skippedGoogle = state.mailboxes.filter(
         (m) =>
-          (state.activeMailboxId === ALL_MAILBOXES_ID || m.id === state.activeMailboxId) &&
+          (allSelected || m.id === state.activeMailboxId) &&
           isImapInboxConfigured(m) &&
           !isMailboxReadyForImapFetch(m),
       );
@@ -1018,10 +1096,30 @@ export default function InboxWorkspace() {
         }
         return;
       }
-      const results = await Promise.all(
-        targets.map((mailbox) => fetchImapListFolder(folder, mailbox, { silent: true })),
+
+      listFetchAbortRef.current?.abort();
+      const ac = new AbortController();
+      listFetchAbortRef.current = ac;
+      const fetchGeneration = ++listFetchGenerationRef.current;
+      // Reset depth for this folder so a cancelled batch cannot leave sticky loading.
+      if (folder === "inbox") inboundFetchDepthRef.current = 0;
+      else if (folder === "sent") sentFetchDepthRef.current = 0;
+      else trashFetchDepthRef.current = 0;
+
+      const concurrency = allSelected ? ALL_MAILBOXES_FETCH_CONCURRENCY : 1;
+      const limit = allSelected ? ALL_MAILBOXES_IMAP_PAGE_LIMIT : INBOX_IMAP_PAGE_LIMIT;
+      const results = await mapPool(targets, concurrency, (mailbox) =>
+        fetchImapListFolder(folder, mailbox, {
+          silent: true,
+          signal: ac.signal,
+          headsOnly: true,
+          limit,
+          fetchGeneration,
+        }),
       );
-      const failed = results.filter((r) => !r.ok);
+      if (ac.signal.aborted) return;
+
+      const failed = results.filter((r) => r.ok === false && r.error !== "aborted");
       if (failed.length === 0) return;
       const sample = failed[0]!.error ?? "Unknown error";
       const names = failed
@@ -1065,6 +1163,7 @@ export default function InboxWorkspace() {
           folder: "sent",
           limit: INBOX_IMAP_PAGE_LIMIT,
           offset,
+          headsOnly: true,
           imap: {
             host: acct.imap.host,
             port: acct.imap.port,
@@ -1130,6 +1229,7 @@ export default function InboxWorkspace() {
           folder: "inbox",
           limit: INBOX_IMAP_PAGE_LIMIT,
           offset,
+          headsOnly: true,
           imap: {
             host: acct.imap.host,
             port: acct.imap.port,
@@ -1233,20 +1333,10 @@ export default function InboxWorkspace() {
     if (isDemo) return;
     if (!emailServerHydrated) return;
 
-    const targets =
-      useEmailAccountStore.getState().activeMailboxId === ALL_MAILBOXES_ID
-        ? useEmailAccountStore.getState().mailboxes
-        : [getActiveMailbox(useEmailAccountStore.getState())];
-    for (const acct of targets) {
-      if (!isImapInboxConfigured(acct)) {
-        setInbound(acct.id, []);
-        setTrashInbound(acct.id, []);
-        continue;
-      }
-      if (mailFolder === "inbox") void fetchImapListFolder("inbox", acct);
-      else if (mailFolder === "sent") void fetchImapListFolder("sent", acct);
-      else void fetchImapListFolder("trash", acct);
-    }
+    void fetchScopedFolder(mailFolder);
+    return () => {
+      listFetchAbortRef.current?.abort();
+    };
   }, [
     mailFolder,
     isDemo,
@@ -1257,10 +1347,8 @@ export default function InboxWorkspace() {
     account.imap.port,
     account.imap.secure,
     account.imap.user,
-    mailboxes,
-    fetchImapListFolder,
-    setInbound,
-    setTrashInbound,
+    mailboxes.length,
+    fetchScopedFolder,
     mailViewAsUid, mailApiForUid,
     currentUserId,
   ]);
@@ -2080,41 +2168,55 @@ export default function InboxWorkspace() {
   }
 
   const mailListRows: MailListRow[] = React.useMemo(() => {
+    const headCap = allMailboxesSelected ? ALL_MAILBOXES_IMAP_PAGE_LIMIT : undefined;
+    const capRows = (rows: MailListRow[]) =>
+      allMailboxesSelected && rows.length > ALL_MAILBOXES_VISIBLE_ROW_CAP
+        ? rows.slice(0, ALL_MAILBOXES_VISIBLE_ROW_CAP)
+        : rows;
+
     if (mailFolder === "inbox") {
-      return scopedMailboxes
-        .flatMap((mailbox) =>
-          groupInboundIntoThreads(inboundByMailbox[mailbox.id] ?? []).map((t) => ({
-            id: `${mailbox.id}:thread:${t.threadId}`,
-            mailboxId: mailbox.id,
-            title: t.conversationSubject,
-            subtitle: `${allMailboxesSelected ? `${mailboxDisplayLabel(mailbox)} · ` : ""}${
-              t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from
-            }`,
-            at: t.latest.date,
-            row: t.latest,
-            muted: !t.hasUnread,
-            thread: t,
-          })),
-        )
-        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      return capRows(
+        scopedMailboxes
+          .flatMap((mailbox) => {
+            const messages = inboundByMailbox[mailbox.id] ?? [];
+            const head = headCap != null ? messages.slice(0, headCap) : messages;
+            return groupInboundIntoThreads(head).map((t) => ({
+              id: `${mailbox.id}:thread:${t.threadId}`,
+              mailboxId: mailbox.id,
+              title: t.conversationSubject,
+              subtitle: `${allMailboxesSelected ? `${mailboxDisplayLabel(mailbox)} · ` : ""}${
+                t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from
+              }`,
+              at: t.latest.date,
+              row: t.latest,
+              muted: !t.hasUnread,
+              thread: t,
+            }));
+          })
+          .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
+      );
     }
     if (mailFolder === "trash") {
-      return scopedMailboxes
-        .flatMap((mailbox) =>
-          groupInboundIntoThreads(trashInboundByMailbox[mailbox.id] ?? []).map((t) => ({
-            id: `${mailbox.id}:trash-thread:${t.threadId}`,
-            mailboxId: mailbox.id,
-            title: t.conversationSubject,
-            subtitle: `${allMailboxesSelected ? `${mailboxDisplayLabel(mailbox)} · ` : ""}${
-              t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from
-            }`,
-            at: t.latest.date,
-            row: t.latest,
-            muted: true,
-            thread: t,
-          })),
-        )
-        .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime());
+      return capRows(
+        scopedMailboxes
+          .flatMap((mailbox) => {
+            const messages = trashInboundByMailbox[mailbox.id] ?? [];
+            const head = headCap != null ? messages.slice(0, headCap) : messages;
+            return groupInboundIntoThreads(head).map((t) => ({
+              id: `${mailbox.id}:trash-thread:${t.threadId}`,
+              mailboxId: mailbox.id,
+              title: t.conversationSubject,
+              subtitle: `${allMailboxesSelected ? `${mailboxDisplayLabel(mailbox)} · ` : ""}${
+                t.messages.length > 1 ? `${t.latest.from} · ${t.messages.length} messages` : t.latest.from
+              }`,
+              at: t.latest.date,
+              row: t.latest,
+              muted: true,
+              thread: t,
+            }));
+          })
+          .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime()),
+      );
     }
     if (mailFolder === "sent") {
       return sentForMailbox.map((m) => ({
@@ -2183,8 +2285,12 @@ export default function InboxWorkspace() {
   );
 
   const inboxMailListRows = React.useMemo((): MailListRow[] => {
-    return scopedMailboxes.flatMap((mailbox) =>
-      groupInboundIntoThreads(inboundByMailbox[mailbox.id] ?? []).map((t) => ({
+    if (mailFolder === "inbox") return mailListRows;
+    const headCap = allMailboxesSelected ? ALL_MAILBOXES_IMAP_PAGE_LIMIT : undefined;
+    const rows = scopedMailboxes.flatMap((mailbox) => {
+      const messages = inboundByMailbox[mailbox.id] ?? [];
+      const head = headCap != null ? messages.slice(0, headCap) : messages;
+      return groupInboundIntoThreads(head).map((t) => ({
         id: `${mailbox.id}:thread:${t.threadId}`,
         mailboxId: mailbox.id,
         title: t.conversationSubject,
@@ -2193,9 +2299,13 @@ export default function InboxWorkspace() {
         row: t.latest,
         muted: !t.hasUnread,
         thread: t,
-      })),
-    );
-  }, [scopedMailboxes, inboundByMailbox]);
+      }));
+    });
+    if (!allMailboxesSelected || rows.length <= ALL_MAILBOXES_VISIBLE_ROW_CAP) return rows;
+    return rows
+      .sort((a, b) => new Date(b.at).getTime() - new Date(a.at).getTime())
+      .slice(0, ALL_MAILBOXES_VISIBLE_ROW_CAP);
+  }, [mailFolder, mailListRows, scopedMailboxes, inboundByMailbox, allMailboxesSelected]);
 
   const inboxMailFilterStats = React.useMemo(() => {
     const all = { ...EMPTY_MAIL_FILTER_STATS };
@@ -2348,6 +2458,43 @@ export default function InboxWorkspace() {
     selectedMailFlagId,
     flagByMessageId,
   ]);
+
+  React.useEffect(() => {
+    const el = mailListScrollRef.current;
+    if (!el) return;
+    const measure = () => setMailListViewportHeight(el.clientHeight || 600);
+    measure();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
+    ro?.observe(el);
+    return () => ro?.disconnect();
+  }, [mailFolder, visibleMailRows.length === 0]);
+
+  const mailListWindow = React.useMemo(() => {
+    const total = visibleMailRows.length;
+    if (total === 0) {
+      return { start: 0, end: 0, offsetY: 0, height: 0, rows: [] as typeof visibleMailRows };
+    }
+    // Window when the list is large enough that full DOM would hitch the UI.
+    if (total <= 80) {
+      return {
+        start: 0,
+        end: total,
+        offsetY: 0,
+        height: total * MAIL_LIST_ROW_ESTIMATE_PX,
+        rows: visibleMailRows,
+      };
+    }
+    const visibleCount = Math.ceil(mailListViewportHeight / MAIL_LIST_ROW_ESTIMATE_PX) + MAIL_LIST_OVERSCAN * 2;
+    const start = Math.max(0, Math.floor(mailListScrollTop / MAIL_LIST_ROW_ESTIMATE_PX) - MAIL_LIST_OVERSCAN);
+    const end = Math.min(total, start + visibleCount);
+    return {
+      start,
+      end,
+      offsetY: start * MAIL_LIST_ROW_ESTIMATE_PX,
+      height: total * MAIL_LIST_ROW_ESTIMATE_PX,
+      rows: visibleMailRows.slice(start, end),
+    };
+  }, [visibleMailRows, mailListScrollTop, mailListViewportHeight]);
 
   const selectMailRowRange = React.useCallback((anchorIdx: number, endIdx: number) => {
     const lo = Math.min(anchorIdx, endIdx);
@@ -3649,12 +3796,22 @@ export default function InboxWorkspace() {
                   </div>
                 ) : null}
                 {mailFolder === "inbox" &&
+                  !allMailboxesSelected &&
                   imapMailboxTotal != null &&
                   imapMailboxTotal > inbound.length && (
                     <div className="font-normal text-[10px] leading-snug normal-case">
                       Loaded newest {inbound.length} of {imapMailboxTotal} messages in INBOX
                     </div>
                   )}
+                {mailFolder === "inbox" && allMailboxesSelected && (
+                  <div className="font-normal text-[10px] leading-snug normal-case text-muted-foreground">
+                    Showing newest conversations across {scopedMailboxes.length} mailboxes
+                    {visibleMailRows.length >= ALL_MAILBOXES_VISIBLE_ROW_CAP
+                      ? ` (capped at ${ALL_MAILBOXES_VISIBLE_ROW_CAP})`
+                      : ""}
+                    . Pick one mailbox for full history.
+                  </div>
+                )}
                 {mailFolder === "inbox" && isImapInboxConfigured(account) && inboundSyncing && (
                   <div className="flex items-center gap-1.5 font-normal text-[10px] text-muted-foreground normal-case">
                     <Loader2 className="h-3 w-3 animate-spin shrink-0" aria-hidden />
@@ -3662,6 +3819,7 @@ export default function InboxWorkspace() {
                   </div>
                 )}
                 {mailFolder === "trash" &&
+                  !allMailboxesSelected &&
                   imapTrashTotal != null &&
                   imapTrashTotal > trashInbound.length && (
                     <div className="font-normal text-[10px] leading-snug normal-case">
@@ -4009,7 +4167,14 @@ export default function InboxWorkspace() {
                   ) : null}
                 </div>
               </div>
-              <div className="flex-1 overflow-y-auto divide-y">
+              <div
+                ref={mailListScrollRef}
+                className="flex-1 overflow-y-auto divide-y"
+                onScroll={(e) => {
+                  const next = e.currentTarget.scrollTop;
+                  setMailListScrollTop((prev) => (Math.abs(prev - next) < 8 ? prev : next));
+                }}
+              >
                 {mailFolder === "inbox" && !hasScopedImapMailbox && (
                   <div className="p-4 space-y-2">
                     <p className="text-sm text-muted-foreground">
@@ -4129,107 +4294,116 @@ export default function InboxWorkspace() {
                         : null}
                     </div>
                   )}
-                {visibleMailRows.map((row, rowIndex) => {
-                  const isRowSelected =
-                    selectedRowMailboxId === row.mailboxId &&
-                    (row.scheduled
-                      ? selectedScheduled?.id === row.scheduled.id
-                      : row.thread
-                        ? selectedThread?.threadId === row.thread.threadId
-                        : selectedMail?.id === row.row.id && selectedThread == null);
-                  const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
-                  const bulkChecked = selectedMailRowIds.has(row.id);
-                  const rowLabelIds = labelIdsForRow(row, row.mailboxId, mailFolder, labelsByMessageId);
-                  const rowFlagId = flagIdForRow(row, row.mailboxId, mailFolder, flagByMessageId);
-                  return (
-                    <div
-                      key={row.id}
-                      ref={(el) => {
-                        if (el) mailRowElByIdRef.current.set(row.id, el);
-                        else mailRowElByIdRef.current.delete(row.id);
-                      }}
-                      className="flex items-stretch gap-0 border-b border-border/60 last:border-b-0"
-                    >
-                      {showSelect ? (
-                        <div
-                          className="flex w-9 shrink-0 items-center justify-center border-r border-border/60 bg-muted/5"
-                          onPointerDown={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            handleMailRowBulkSelect(row.id, rowIndex, e.shiftKey);
-                          }}
-                          onKeyDown={(e) => e.stopPropagation()}
-                          role="presentation"
-                        >
-                          <Checkbox
-                            checked={bulkChecked}
-                            tabIndex={-1}
-                            aria-label={row.thread ? "Select conversation" : "Select message"}
-                          />
-                        </div>
-                      ) : null}
-                      <button
-                        type="button"
-                        data-mail-list-row
-                        onClick={() => selectVisibleMailRow(row)}
-                        className={cn(
-                          "min-w-0 flex-1 text-left px-3 py-2.5 hover:bg-muted/20 text-sm",
-                          isRowSelected && "bg-muted/30",
-                          row.muted && "opacity-80",
-                        )}
-                      >
-                        <div className="flex items-start gap-2 min-w-0">
-                          {rowLabelIds.length > 0 ? (
-                            <MailLabelChips
-                              labelIds={rowLabelIds}
-                              labels={mailLabels}
-                              className="mt-0.5 shrink-0 max-w-[5rem]"
-                              max={1}
-                              disabled={inboxReadOnly}
-                              onRemoveLabel={(labelId) => handleRemoveLabelFromMailRow(row, labelId)}
-                            />
-                          ) : null}
-                          <div className="flex-1 min-w-0">
-                            <div
-                              className={cn(
-                                "truncate",
-                                !row.muted && mailFolder === "inbox" && "font-medium",
-                              )}
-                            >
-                              {row.thread?.messages.some((m) => (m.attachments?.length ?? 0) > 0) ? (
-                                <span className="inline-flex items-center gap-1.5">
-                                  <Paperclip
-                                    className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
-                                    aria-label="Has attachment"
-                                  />
-                                  <span className="truncate">{row.title}</span>
-                                </span>
-                              ) : (
-                                row.title
-                              )}
-                            </div>
-                            <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
-                            {rowFlagId ? (
-                              <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
-                                <MailFlagIcon flagId={rowFlagId} className="h-3 w-3 shrink-0" />
-                                <span className="truncate">{mailFlagById(rowFlagId)?.name ?? "Flagged"}</span>
+                {mailListWindow.rows.length > 0 ? (
+                  <div style={{ height: mailListWindow.height, position: "relative" }}>
+                    <div style={{ transform: `translateY(${mailListWindow.offsetY}px)` }}>
+                      {mailListWindow.rows.map((row, windowIndex) => {
+                        const rowIndex = mailListWindow.start + windowIndex;
+                        const isRowSelected =
+                          selectedRowMailboxId === row.mailboxId &&
+                          (row.scheduled
+                            ? selectedScheduled?.id === row.scheduled.id
+                            : row.thread
+                              ? selectedThread?.threadId === row.thread.threadId
+                              : selectedMail?.id === row.row.id && selectedThread == null);
+                        const showSelect = showImapBulkMailActions && emailFolderSupportsImapList;
+                        const bulkChecked = selectedMailRowIds.has(row.id);
+                        const rowLabelIds = labelIdsForRow(row, row.mailboxId, mailFolder, labelsByMessageId);
+                        const rowFlagId = flagIdForRow(row, row.mailboxId, mailFolder, flagByMessageId);
+                        return (
+                          <div
+                            key={row.id}
+                            ref={(el) => {
+                              if (el) mailRowElByIdRef.current.set(row.id, el);
+                              else mailRowElByIdRef.current.delete(row.id);
+                            }}
+                            className="flex items-stretch gap-0 border-b border-border/60 last:border-b-0"
+                            style={{ minHeight: MAIL_LIST_ROW_ESTIMATE_PX }}
+                          >
+                            {showSelect ? (
+                              <div
+                                className="flex w-9 shrink-0 items-center justify-center border-r border-border/60 bg-muted/5"
+                                onPointerDown={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  handleMailRowBulkSelect(row.id, rowIndex, e.shiftKey);
+                                }}
+                                onKeyDown={(e) => e.stopPropagation()}
+                                role="presentation"
+                              >
+                                <Checkbox
+                                  checked={bulkChecked}
+                                  tabIndex={-1}
+                                  aria-label={row.thread ? "Select conversation" : "Select message"}
+                                />
                               </div>
                             ) : null}
-                            <div className="text-[11px] text-muted-foreground mt-0.5">
-                              {fmtRelative(row.at)}
-                            </div>
+                            <button
+                              type="button"
+                              data-mail-list-row
+                              onClick={() => selectVisibleMailRow(row)}
+                              className={cn(
+                                "min-w-0 flex-1 text-left px-3 py-2.5 hover:bg-muted/20 text-sm",
+                                isRowSelected && "bg-muted/30",
+                                row.muted && "opacity-80",
+                              )}
+                            >
+                              <div className="flex items-start gap-2 min-w-0">
+                                {rowLabelIds.length > 0 ? (
+                                  <MailLabelChips
+                                    labelIds={rowLabelIds}
+                                    labels={mailLabels}
+                                    className="mt-0.5 shrink-0 max-w-[5rem]"
+                                    max={1}
+                                    disabled={inboxReadOnly}
+                                    onRemoveLabel={(labelId) => handleRemoveLabelFromMailRow(row, labelId)}
+                                  />
+                                ) : null}
+                                <div className="flex-1 min-w-0">
+                                  <div
+                                    className={cn(
+                                      "truncate",
+                                      !row.muted && mailFolder === "inbox" && "font-medium",
+                                    )}
+                                  >
+                                    {row.thread?.messages.some((m) => (m.attachments?.length ?? 0) > 0) ? (
+                                      <span className="inline-flex items-center gap-1.5">
+                                        <Paperclip
+                                          className="h-3.5 w-3.5 shrink-0 text-muted-foreground"
+                                          aria-label="Has attachment"
+                                        />
+                                        <span className="truncate">{row.title}</span>
+                                      </span>
+                                    ) : (
+                                      row.title
+                                    )}
+                                  </div>
+                                  <div className="text-xs text-muted-foreground truncate">{row.subtitle}</div>
+                                  {rowFlagId ? (
+                                    <div className="mt-1 flex items-center gap-1 text-[10px] text-muted-foreground">
+                                      <MailFlagIcon flagId={rowFlagId} className="h-3 w-3 shrink-0" />
+                                      <span className="truncate">{mailFlagById(rowFlagId)?.name ?? "Flagged"}</span>
+                                    </div>
+                                  ) : null}
+                                  <div className="text-[11px] text-muted-foreground mt-0.5">
+                                    {fmtRelative(row.at)}
+                                  </div>
+                                </div>
+                                {row.thread && row.thread.messages.length > 1 && (
+                                  <Badge variant="secondary" className="shrink-0 h-5 px-1.5 text-[10px] tabular-nums">
+                                    {row.thread.messages.length}
+                                  </Badge>
+                                )}
+                              </div>
+                            </button>
                           </div>
-                          {row.thread && row.thread.messages.length > 1 && (
-                            <Badge variant="secondary" className="shrink-0 h-5 px-1.5 text-[10px] tabular-nums">
-                              {row.thread.messages.length}
-                            </Badge>
-                          )}
-                        </div>
-                      </button>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                ) : null}
                 {mailFolder === "inbox" &&
+                  !allMailboxesSelected &&
                   !isDemo &&
                   isImapInboxConfigured(account) &&
                   imapMailboxTotal != null &&
@@ -4253,6 +4427,7 @@ export default function InboxWorkspace() {
                     </div>
                   )}
                 {mailFolder === "sent" &&
+                  !allMailboxesSelected &&
                   !isDemo &&
                   isImapInboxConfigured(account) &&
                   imapSentTotal != null &&

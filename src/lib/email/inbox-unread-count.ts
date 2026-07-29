@@ -12,13 +12,13 @@ export function countUnreadInboxThreads(
   state: Pick<EmailAccountStore, "inboundByMailbox" | "mailboxes" | "activeMailboxId">,
 ): number {
   if (state.activeMailboxId === ALL_MAILBOXES_ID) {
-    return state.mailboxes.reduce(
-      (total, mailbox) =>
-        total +
-        groupInboundIntoThreads(state.inboundByMailbox[mailbox.id] ?? []).filter((t) => t.hasUnread)
-          .length,
-      0,
-    );
+    // Cap per-mailbox work so sidebar badges stay cheap with many mailboxes.
+    const perMailboxCap = 100;
+    return state.mailboxes.reduce((total, mailbox) => {
+      const messages = state.inboundByMailbox[mailbox.id] ?? [];
+      const head = messages.length > perMailboxCap ? messages.slice(0, perMailboxCap) : messages;
+      return total + groupInboundIntoThreads(head).filter((t) => t.hasUnread).length;
+    }, 0);
   }
   const account = getActiveMailbox(state);
   const inbound = state.inboundByMailbox[account.id] ?? [];
