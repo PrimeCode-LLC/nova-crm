@@ -5,6 +5,7 @@ import Link from "next/link";
 import { TriangleAlert } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Avatar, AvatarFallback, AvatarGroup, AvatarGroupCount } from "@/components/ui/avatar";
 import { StrategyScoreboardSettings } from "@/components/dashboard/strategy-scoreboard-settings";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
@@ -17,7 +18,7 @@ import {
 import { isStrategyScoreboardVisible } from "@/lib/dashboard-preferences";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
-import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/format";
+import { fmtCurrency, fmtNumber, fmtPercent, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WallMetricTiles } from "@/components/dashboard/wall-metric-tiles";
 import type { Deal, Followup, Lead } from "@/lib/types";
@@ -182,6 +183,7 @@ export function StrategyScoreboard({
                           &lt;{STRATEGY_SCOREBOARD_THIN_SAMPLE_MIN}
                         </Badge>
                       ) : null}
+                      <StrategyAssigneeAvatars userIds={r.assigneeUserIds} />
                     </div>
                     <div className="mt-1.5 h-2 overflow-hidden rounded-full bg-muted">
                       <div
@@ -241,6 +243,7 @@ export function StrategyScoreboard({
                           &lt;{STRATEGY_SCOREBOARD_THIN_SAMPLE_MIN} sample
                         </Badge>
                       ) : null}
+                      <StrategyAssigneeAvatars userIds={r.assigneeUserIds} />
                     </div>
 
                     <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-muted">
@@ -293,6 +296,44 @@ export function StrategyScoreboard({
         )}
       </CardContent>
     </Card>
+  );
+}
+
+function StrategyAssigneeAvatars({
+  userIds,
+  max = 3,
+}: {
+  userIds: readonly string[];
+  max?: number;
+}) {
+  const { getUserById, getOwnerDisplayName } = useWorkspace();
+  if (userIds.length === 0) return null;
+
+  const shown = userIds.slice(0, max);
+  const extra = userIds.length - shown.length;
+
+  return (
+    <AvatarGroup className="shrink-0 -space-x-1.5">
+      {shown.map((uid) => {
+        const name =
+          getUserById(uid)?.displayName?.trim() || getOwnerDisplayName(uid)?.trim() || "?";
+        return (
+          <Avatar
+            key={uid}
+            size="sm"
+            className="size-5 after:border-border/80"
+            title={name === "?" ? uid : name}
+          >
+            <AvatarFallback className="bg-primary/15 text-[9px] font-semibold text-primary">
+              {initials(name)}
+            </AvatarFallback>
+          </Avatar>
+        );
+      })}
+      {extra > 0 ? (
+        <AvatarGroupCount className="size-5 text-[9px] font-medium">+{extra}</AvatarGroupCount>
+      ) : null}
+    </AvatarGroup>
   );
 }
 

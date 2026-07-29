@@ -125,8 +125,10 @@ import {
   moveBackBlockedReason,
   moveBackConfirmCopy,
   moveBackModeFor,
+  type MoveBackActivity,
 } from "@/lib/prospects/move-back-to-prospect";
 import { prospectOwnerIdOf } from "@/lib/prospects/prospect-access";
+import { Checkbox } from "@/components/ui/checkbox";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { extractEmailAddresses } from "@/lib/email/reply-compose";
 import {
@@ -191,6 +193,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const [deleteBusy, setDeleteBusy] = React.useState(false);
   const [moveBackOpen, setMoveBackOpen] = React.useState(false);
   const [moveBackBusy, setMoveBackBusy] = React.useState(false);
+  const [moveBackAck, setMoveBackAck] = React.useState(false);
   const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
   const [aiInsights, setAiInsights] = React.useState<{
     summary: string;
@@ -498,7 +501,20 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       lead.ownerId?.trim() === ws.currentUserId);
   const showMoveBack =
     Boolean(moveBackMode) && canMoveBackPermission && canMoveBackAccess;
-  const moveBackCopy = moveBackMode ? moveBackConfirmCopy(moveBackMode) : null;
+  const moveBackActivity: MoveBackActivity = {
+    touches: lead.touches ?? 0,
+    openFollowups: followups.filter((f) => !f.completedAt).length,
+    hasActiveSequence: followupPlansMerged.some(
+      (p) =>
+        p.leadId === lead.id &&
+        (p.status === "active" || p.status === "paused") &&
+        (p.kind === "sequence" || Boolean(p.planSummary)),
+    ),
+  };
+  const moveBackCopy = moveBackMode
+    ? moveBackConfirmCopy(moveBackMode, moveBackActivity)
+    : null;
+  const moveBackNeedsAck = Boolean(moveBackCopy?.requiresAck);
   const companyEmail = (contact?.email || lead.contactEmail || "").trim() || undefined;
   const personalEmail = contact?.personalEmail?.trim() || undefined;
   const primaryEmail = companyEmail || personalEmail;
@@ -703,7 +719,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-      <AlertDialog open={moveBackOpen} onOpenChange={(o) => !moveBackBusy && setMoveBackOpen(o)}>
+      <AlertDialog
+        open={moveBackOpen}
+        onOpenChange={(o) => {
+          if (moveBackBusy) return;
+          setMoveBackOpen(o);
+          if (!o) setMoveBackAck(false);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{moveBackCopy?.title ?? "Move back to prospect?"}</AlertDialogTitle>
@@ -712,12 +735,31 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 "This returns the record to Prospects and removes it from the sales pipeline."}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {moveBackNeedsAck ? (
+            <label className="flex cursor-pointer items-start gap-3 rounded-md border border-border/80 bg-muted/30 px-3 py-2.5 text-sm">
+              <Checkbox
+                checked={moveBackAck}
+                onCheckedChange={(v) => setMoveBackAck(v === true)}
+                disabled={moveBackBusy}
+                className="mt-0.5"
+              />
+              <span className="text-foreground">
+                {moveBackCopy?.ackLabel ??
+                  "I understand open follow-ups and scheduled emails will be cancelled."}
+              </span>
+            </label>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={moveBackBusy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              disabled={moveBackBusy}
+              variant="destructive"
+              disabled={moveBackBusy || (moveBackNeedsAck && !moveBackAck)}
               onClick={() => {
                 void (async () => {
+                  if (moveBackNeedsAck && !moveBackAck) {
+                    toast.error("Confirm that outreach will be cancelled first.");
+                    return;
+                  }
                   setMoveBackBusy(true);
                   try {
                     const res = await fetch(`/api/org/leads/${lead.id}/move-back-to-prospect`, {
@@ -726,13 +768,22 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     const data = (await res.json().catch(() => ({}))) as {
                       error?: string;
                       prospectId?: string;
+                      closedFollowups?: number;
+                      cancelledScheduled?: number;
                     };
                     if (!res.ok) {
                       toast.error(data.error ?? "Could not move back to prospect");
                       return;
                     }
-                    toast.success("Moved back to prospect");
+                    const closed = data.closedFollowups ?? 0;
+                    const cancelled = data.cancelledScheduled ?? 0;
+                    toast.success(
+                      closed > 0 || cancelled > 0
+                        ? `Moved back to prospect · cancelled ${closed} follow-up${closed === 1 ? "" : "s"}`
+                        : "Moved back to prospect",
+                    );
                     setMoveBackOpen(false);
+                    setMoveBackAck(false);
                     const prospectId = data.prospectId?.trim() || lead.id;
                     router.push(`/leads/${prospectId}?from=prospects`);
                   } catch (e) {
@@ -927,6 +978,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                           toast.error(moveBackBlocked);
                           return;
                         }
+                        setMoveBackAck(false);
                         setMoveBackOpen(true);
                       }}
                     >

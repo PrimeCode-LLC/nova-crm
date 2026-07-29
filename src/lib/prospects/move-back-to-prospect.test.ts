@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   moveBackBlockedReason,
+  moveBackConfirmCopy,
+  moveBackHasActivity,
   moveBackModeFor,
 } from "@/lib/prospects/move-back-to-prospect";
 import type { Lead } from "@/lib/types";
@@ -58,15 +60,46 @@ describe("moveBackBlockedReason", () => {
     ).toMatch(/Qualified/);
   });
 
-  it("blocks when touchpoints exist", () => {
+  it("allows leads with touches (strong confirm instead)", () => {
     expect(
       moveBackBlockedReason(baseLead({ prospectOwnerId: "u1", touches: 2 })),
-    ).toMatch(/touchpoints/);
+    ).toBeNull();
   });
 
   it("blocks when a deal is attached", () => {
     expect(
       moveBackBlockedReason(baseLead({ prospectOwnerId: "u1" }), { hasDeal: true }),
     ).toMatch(/deal/);
+  });
+});
+
+describe("moveBackConfirmCopy", () => {
+  it("requires acknowledgement when outreach activity exists", () => {
+    const copy = moveBackConfirmCopy("demote_inplace", {
+      touches: 3,
+      openFollowups: 2,
+      hasActiveSequence: true,
+    });
+    expect(copy.requiresAck).toBe(true);
+    expect(copy.description).toMatch(/follow-up/);
+    expect(copy.confirmLabel).toMatch(/Cancel outreach/);
+  });
+
+  it("skips acknowledgement for quiet leads", () => {
+    const activity = { touches: 0, openFollowups: 0, hasActiveSequence: false };
+    const copy = moveBackConfirmCopy("demote_inplace", activity);
+    expect(copy.requiresAck).toBe(false);
+    expect(moveBackHasActivity(activity)).toBe(false);
+  });
+});
+
+describe("moveBackHasActivity", () => {
+  it("detects any outreach signal", () => {
+    expect(
+      moveBackHasActivity({ touches: 0, openFollowups: 0, hasActiveSequence: false }),
+    ).toBe(false);
+    expect(
+      moveBackHasActivity({ touches: 1, openFollowups: 0, hasActiveSequence: false }),
+    ).toBe(true);
   });
 });

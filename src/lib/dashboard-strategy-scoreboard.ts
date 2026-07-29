@@ -9,6 +9,8 @@ export type StrategyScoreboardRow = {
   status: ProspectingStrategy["status"];
   /** Active assignments currently working this strategy. */
   activeAssignees: number;
+  /** Active assignee user ids (priority desc, primary first, de-duped). */
+  assigneeUserIds: string[];
   prospects: number;
   avgQuality: number | null;
   qualified: number;
@@ -68,10 +70,27 @@ export function buildStrategyScoreboardRows(input: {
   const threshold = input.outreachThreshold;
 
   const published = input.strategies.filter((s) => s.status === "published");
-  const activeByStrategy = new Map<string, number>();
+  const activeAssignmentsByStrategy = new Map<string, StrategyAssignment[]>();
   for (const a of input.assignments) {
     if (a.status !== "active") continue;
-    activeByStrategy.set(a.strategyId, (activeByStrategy.get(a.strategyId) ?? 0) + 1);
+    const list = activeAssignmentsByStrategy.get(a.strategyId) ?? [];
+    list.push(a);
+    activeAssignmentsByStrategy.set(a.strategyId, list);
+  }
+
+  function assigneeUserIdsFor(strategyId: string): string[] {
+    const list = activeAssignmentsByStrategy.get(strategyId) ?? [];
+    const sorted = [...list].sort(
+      (a, b) =>
+        b.priority - a.priority ||
+        (a.assignmentType === "primary" ? 0 : 1) - (b.assignmentType === "primary" ? 0 : 1) ||
+        a.userId.localeCompare(b.userId),
+    );
+    const ids: string[] = [];
+    for (const a of sorted) {
+      if (!ids.includes(a.userId)) ids.push(a.userId);
+    }
+    return ids;
   }
 
   const prospectsInRange = input.leads.filter(
@@ -143,11 +162,14 @@ export function buildStrategyScoreboardRows(input: {
         closedValue / 1000,
     );
 
+    const assigneeUserIds = assigneeUserIdsFor(strategy.id);
+
     return {
       strategyId: strategy.id,
       name: strategy.name?.trim() || "Untitled strategy",
       status: strategy.status,
-      activeAssignees: activeByStrategy.get(strategy.id) ?? 0,
+      activeAssignees: assigneeUserIds.length,
+      assigneeUserIds,
       prospects: myProspects.length,
       avgQuality,
       qualified,
