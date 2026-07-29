@@ -11,6 +11,7 @@ import {
   type ProspectImportField,
   type ProspectImportFieldKey,
 } from "@/lib/imports/prospect-import-schema";
+import { domainFromWebsiteOrEmail } from "@/lib/prospects/prospect-form";
 
 export type ImportIssueSeverity = "error" | "warning";
 
@@ -88,6 +89,9 @@ const enumAliases: Record<string, string> = {
   "500": "501-1000",
   "5000": "5001+",
   unknown: "unknown",
+  incomplete: "incomplete",
+  completed: "completed",
+  rejected: "rejected",
 };
 
 function compactKey(value: string): string {
@@ -262,14 +266,29 @@ function normalizeField(
     case "json": {
       try {
         const parsed = JSON.parse(text) as unknown;
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("object required");
+        if (parsed === null || typeof parsed !== "object") throw new Error("object required");
         return parsed;
       } catch {
-        addIssue(issues, rowNumber, field, "invalid_json", `${field.header} must contain a JSON object.`);
+        addIssue(
+          issues,
+          rowNumber,
+          field,
+          "invalid_json",
+          `${field.header} must contain valid JSON (object or array).`,
+        );
         return undefined;
       }
     }
   }
+}
+
+function deriveCompanyDomain(normalized: NormalizedProspectImportRow): string | undefined {
+  if (typeof normalized.companyDomain === "string" && normalized.companyDomain) {
+    return normalized.companyDomain;
+  }
+  const website = typeof normalized.website === "string" ? normalized.website : "";
+  const email = typeof normalized.companyEmail === "string" ? normalized.companyEmail : "";
+  return domainFromWebsiteOrEmail(website, email);
 }
 
 function validateBusinessRules(
@@ -287,6 +306,17 @@ function validateBusinessRules(
         message: `${field.header} is required.`,
       });
     }
+  }
+
+  if (!normalized.companyDomain) {
+    issues.push({
+      rowNumber,
+      field: "Company Domain",
+      severity: "error",
+      code: "domain_required",
+      message:
+        "Company Domain is required (or provide Website URL / Company Email so it can be derived).",
+    });
   }
 
   if (
@@ -307,24 +337,30 @@ function validateBusinessRules(
   if (typeof year === "number" && (year < 1800 || year > new Date().getFullYear() + 1)) {
     issues.push({ rowNumber, field: "Year Founded", severity: "error", code: "invalid_year", message: "Year Founded is outside the supported range." });
   }
-  for (const key of ["bantBudget", "bantAuthority", "bantNeed", "bantTimeline"] as const) {
-    const value = normalized[key];
-    if (typeof value === "number" && (value < 1 || value > 5)) {
-      issues.push({ rowNumber, field: PROSPECT_IMPORT_FIELDS.find((field) => field.key === key)?.header, severity: "error", code: "invalid_bant", message: "BANT scores must be between 1 and 5." });
-    }
-  }
-  for (const key of ["estimatedValue", "responseTimeMinutes", "touches", "idleDays"] as const) {
-    const value = normalized[key];
-    if (typeof value === "number" && value < 0) {
-      issues.push({ rowNumber, field: PROSPECT_IMPORT_FIELDS.find((field) => field.key === key)?.header, severity: "error", code: "negative_value", message: "This value cannot be negative." });
-    }
-  }
   if (
     normalized.companyEmail &&
     normalized.personalEmail &&
     normalized.companyEmail === normalized.personalEmail
   ) {
     issues.push({ rowNumber, field: "Personal Email", severity: "error", code: "duplicate_emails", message: "Company Email and Personal Email must differ." });
+  }
+  if (normalized.prospectQualifyStatus === "rejected" && !normalized.rejectionReason) {
+    issues.push({
+      rowNumber,
+      field: "Rejection Reason",
+      severity: "error",
+      code: "rejection_reason_required",
+      message: "Rejection Reason is required when Qualify Status is rejected.",
+    });
+  }
+  if (normalized.intentEvidence != null && !Array.isArray(normalized.intentEvidence)) {
+    issues.push({
+      rowNumber,
+      field: "Intent Evidence JSON",
+      severity: "error",
+      code: "invalid_intent_evidence",
+      message: "Intent Evidence JSON must be a JSON array.",
+    });
   }
 }
 
@@ -335,20 +371,8 @@ function normalizeRawRow(rowNumber: number, raw: Record<string, unknown>): Parse
     const value = normalizeField(field, raw[field.header], rowNumber, issues);
     if (value !== undefined) normalized[field.key as ProspectImportFieldKey] = value;
   }
-  normalized.recordType = "prospect";
-  if (
-    typeof normalized.emailVerified === "boolean" &&
-    !normalized.emailVerificationStatus
-  ) {
-    normalized.emailVerificationStatus = normalized.emailVerified
-      ? "verified"
-      : "not_verified";
-  } else if (
-    typeof normalized.emailVerificationStatus === "string" &&
-    normalized.emailVerified === undefined
-  ) {
-    normalized.emailVerified = normalized.emailVerificationStatus === "verified";
-  }
+  const derivedDomain = deriveCompanyDomain(normalized);
+  if (derivedDomain) normalized.companyDomain = derivedDomain;
   validateBusinessRules(rowNumber, normalized, issues);
   return { rowNumber, raw, normalized, issues };
 }

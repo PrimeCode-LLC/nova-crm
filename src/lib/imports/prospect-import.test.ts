@@ -19,9 +19,9 @@ function csvRow(values: Record<string, string>): string {
 }
 
 describe("prospect import template", () => {
-  it("keeps a unique 74-column registry", () => {
-    expect(PROSPECT_IMPORT_FIELDS).toHaveLength(74);
-    expect(new Set(PROSPECT_IMPORT_HEADERS).size).toBe(74);
+  it("keeps a unique 53-column registry aligned to the New prospect form", () => {
+    expect(PROSPECT_IMPORT_FIELDS).toHaveLength(53);
+    expect(new Set(PROSPECT_IMPORT_HEADERS).size).toBe(53);
   });
 
   it("generates the official workbook without an importable sample row", async () => {
@@ -44,7 +44,6 @@ describe("prospect import template", () => {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(template as never);
     const values: Record<string, string> = {
-      "Record Type": "prospect",
       "Company Name": "Acme Inc.",
       "Company Domain": "acme.example",
       "First Name": "Jane",
@@ -67,7 +66,6 @@ describe("prospect import template", () => {
 describe("prospect import parsing", () => {
   it("normalizes a valid exact-header CSV row", async () => {
     const csv = `${buildProspectImportCsv()}${csvRow({
-      "Record Type": "Prospect",
       "Company Name": "Acme Inc.",
       "Company Domain": "https://www.acme.com/path",
       "First Name": "Jane",
@@ -82,7 +80,6 @@ describe("prospect import parsing", () => {
     expect(parsed.rows).toHaveLength(1);
     expect(parsed.rows[0]!.issues).toEqual([]);
     expect(parsed.rows[0]!.normalized).toMatchObject({
-      recordType: "prospect",
       companyDomain: "acme.com",
       companyEmail: "jane@acme.com",
       channel: "cold_email",
@@ -90,6 +87,19 @@ describe("prospect import parsing", () => {
       temperature: "warm",
       priority: "high",
     });
+  });
+
+  it("derives company domain from website when domain is blank", async () => {
+    const csv = `${buildProspectImportCsv()}${csvRow({
+      "Company Name": "Acme Inc.",
+      "Website URL": "https://www.acme.com/about",
+      "First Name": "Jane",
+      "Last Name": "Doe",
+      "Company Email": "jane@other.example",
+    })}\r\n`;
+    const parsed = await parseProspectImportFile("prospects.csv", Buffer.from(csv));
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.companyDomain).toBe("acme.com");
   });
 
   it("accepts a CSV exported from the grouped XLSX template", async () => {
@@ -104,7 +114,7 @@ describe("prospect import parsing", () => {
       "First Name": "Savannah",
       "Last Name": "Clark",
       "Company Email": "sfaulkinham@cryoport.com",
-      "Email Verified": "Verified",
+      "Email Verification Status": "Verified",
       "Revenue Range": "$100M – $200M",
       "Company Size": "500+",
       "Last Website Activity Date": "November 19, 2025",
@@ -113,8 +123,6 @@ describe("prospect import parsing", () => {
     expect(parsed.rows).toHaveLength(1);
     expect(parsed.rows[0]!.issues).toEqual([]);
     expect(parsed.rows[0]!.normalized).toMatchObject({
-      recordType: "prospect",
-      emailVerified: true,
       emailVerificationStatus: "verified",
       revenueRange: "100m_500m",
       companySize: "501-1000",
@@ -122,12 +130,13 @@ describe("prospect import parsing", () => {
     });
   });
 
-  it("requires company, names, domain, and a contact identity", async () => {
-    const csv = `${buildProspectImportCsv()}${csvRow({ "Record Type": "Prospect" })}\r\n`;
+  it("requires company, names, domain (or derivable), and a contact identity", async () => {
+    const csv = `${buildProspectImportCsv()}${csvRow({ Industry: "Software" })}\r\n`;
     const parsed = await parseProspectImportFile("prospects.csv", Buffer.from(csv));
     expect(parsed.rows[0]!.issues.map((issue) => issue.code)).toEqual(
       expect.arrayContaining([
         "required",
+        "domain_required",
         "contact_identity_required",
       ]),
     );
@@ -135,7 +144,6 @@ describe("prospect import parsing", () => {
 
   it("rejects formula-like CSV values", async () => {
     const csv = `${buildProspectImportCsv()}${csvRow({
-      "Record Type": "Prospect",
       "Company Name": "=HYPERLINK(\"https://example.com\")",
       "Company Domain": "example.com",
       "First Name": "Jane",
@@ -148,16 +156,15 @@ describe("prospect import parsing", () => {
 
   it("rejects modified template headers", async () => {
     const headers = [...PROSPECT_IMPORT_HEADERS];
-    headers[1] = "Business";
+    headers[0] = "Business";
     await expect(
       parseProspectImportFile("prospects.csv", Buffer.from(`${headers.join(",")}\r\n`)),
-    ).rejects.toThrow('Column 2 must be "Company Name"');
+    ).rejects.toThrow('Column 1 must be "Company Name"');
   });
 
   it("accepts the configured 10,000-row limit", async () => {
     const rows = Array.from({ length: 10_000 }, (_, index) =>
       csvRow({
-        "Record Type": "Prospect",
         "Company Name": `Company ${index}`,
         "Company Domain": `company-${index}.example.com`,
         "First Name": "Jane",

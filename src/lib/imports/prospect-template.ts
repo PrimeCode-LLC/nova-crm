@@ -106,21 +106,25 @@ function configureInstructionsSheet(sheet: ExcelJS.Worksheet): void {
   sheet.columns = [{ width: 28 }, { width: 100 }];
   sheet.addRow(["Nova Prospect Import", `Template version ${PROSPECT_IMPORT_TEMPLATE_VERSION}`]);
   sheet.addRow(["Maximum rows", PROSPECT_IMPORT_MAX_ROWS]);
-  sheet.addRow(["Required fields", "Company Name, Company Domain, First Name, and Last Name."]);
+  sheet.addRow(["Required fields", "Company Name, First Name, and Last Name."]);
+  sheet.addRow([
+    "Company domain",
+    "Optional. If blank, derived from Website URL or Company Email (same as the New prospect form).",
+  ]);
   sheet.addRow([
     "Contact identity",
     "Provide at least one: Company Email, Personal Email, Contact LinkedIn URL, or Phone.",
   ]);
-  sheet.addRow(["Lists", "Separate labels, tools, and technologies with semicolons."]);
+  sheet.addRow(["Lists", "Separate tech stack values with semicolons."]);
   sheet.addRow(["Dates", "Use YYYY-MM-DD."]);
   sheet.addRow(["Do not modify", "Do not rename, add, remove, merge, or reorder Data sheet columns."]);
-  sheet.addRow(["Prospect behavior", "Every imported row is treated as a prospect."]);
+  sheet.addRow(["Prospect behavior", "Every imported row is treated as a prospect (matches New prospect form fields)."]);
   sheet.addRow([
     "Example",
     "Examples are documented here rather than in the Data sheet so sample data cannot be imported accidentally.",
   ]);
   sheet.addRow(["Example company", "Acme Robotics Inc."]);
-  sheet.addRow(["Example domain", "acmerobotics.com"]);
+  sheet.addRow(["Example domain", "acmerobotics.com (or leave blank and set Website URL)"]);
   sheet.addRow(["Example contact", "Jane Doe; jane.doe@acmerobotics.com"]);
   sheet.getRow(1).font = { bold: true, size: 16 };
   sheet.getColumn(1).font = { bold: true };

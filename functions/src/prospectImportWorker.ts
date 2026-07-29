@@ -183,6 +183,10 @@ function applyOwnerManagerIds(
 }
 
 function accountValues(row: Record<string, unknown>, ownerId: string): Record<string, unknown> {
+  const city = asString(row.city);
+  const state = asString(row.state);
+  const country = asString(row.country);
+  const location = [city, state, country].filter(Boolean).join(", ") || undefined;
   return cleanRecord({
     name: asString(row.companyName),
     domain: asString(row.companyDomain),
@@ -190,10 +194,10 @@ function accountValues(row: Record<string, unknown>, ownerId: string): Record<st
     businessDescription: asString(row.businessDescription),
     size: asString(row.companySize),
     revenueRange: asString(row.revenueRange),
-    location: asString(row.companyLocation),
-    city: asString(row.city),
-    state: asString(row.state),
-    country: asString(row.country),
+    location,
+    city,
+    state,
+    country,
     yearFounded: typeof row.yearFounded === "number" ? row.yearFounded : undefined,
     businessStatus: asString(row.businessStatus),
     website: asString(row.website),
@@ -204,7 +208,6 @@ function accountValues(row: Record<string, unknown>, ownerId: string): Record<st
     lastWebsiteActivityAt: dateIso(row.lastWebsiteActivityAt),
     lastWebsiteActivityNote: asString(row.lastWebsiteActivityNote),
     careersPageUrl: asString(row.careersPageUrl),
-    labelIds: asStringArray(row.accountLabels),
     ownerId,
   });
 }
@@ -216,6 +219,7 @@ function contactValues(
 ): Record<string, unknown> {
   const firstName = asString(row.firstName) ?? "";
   const lastName = asString(row.lastName) ?? "";
+  const emailVerificationStatus = asString(row.emailVerificationStatus);
   return cleanRecord({
     accountId,
     firstName,
@@ -223,8 +227,9 @@ function contactValues(
     fullName: `${firstName} ${lastName}`.trim(),
     email: asString(row.companyEmail),
     personalEmail: asString(row.personalEmail),
-    emailVerified: typeof row.emailVerified === "boolean" ? row.emailVerified : undefined,
-    emailVerificationStatus: asString(row.emailVerificationStatus),
+    emailVerified: emailVerificationStatus === "verified" ? true : undefined,
+    emailVerificationStatus,
+    emailVerificationSource: emailVerificationStatus ? "manual" : undefined,
     phone: asString(row.phone),
     linkedin: asString(row.contactLinkedIn),
     title: asString(row.jobTitle),
@@ -232,9 +237,33 @@ function contactValues(
     location: asString(row.contactLocation),
     contactSource: asString(row.contactSource),
     bestContactChannel: asString(row.bestContactChannel),
-    labelIds: asStringArray(row.contactLabels),
     ownerId,
   });
+}
+
+function personalizationNote(row: Record<string, unknown>): Record<string, string> | undefined {
+  const note = {
+    trigger: asString(row.personalizationTrigger) ?? "",
+    likelyImpact: asString(row.personalizationLikelyImpact) ?? "",
+    relevantService: asString(row.personalizationRelevantService) ?? "",
+    suggestedAngle: asString(row.personalizationSuggestedAngle) ?? "",
+  };
+  const hasContent = Object.values(note).some((value) => value.trim());
+  return hasContent ? note : undefined;
+}
+
+function formatPsLine(note: Record<string, string> | undefined): string | undefined {
+  if (!note) return undefined;
+  const line = [
+    note.trigger,
+    note.likelyImpact,
+    note.relevantService,
+    note.suggestedAngle,
+  ]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" · ");
+  return line || undefined;
 }
 
 function leadValues(
@@ -246,21 +275,19 @@ function leadValues(
 ): Record<string, unknown> {
   const firstName = asString(row.firstName) ?? "";
   const lastName = asString(row.lastName) ?? "";
-  const budget = typeof row.bantBudget === "number" ? row.bantBudget : undefined;
-  const authority = typeof row.bantAuthority === "number" ? row.bantAuthority : undefined;
-  const need = typeof row.bantNeed === "number" ? row.bantNeed : undefined;
-  const timeline = typeof row.bantTimeline === "number" ? row.bantTimeline : undefined;
-  const bant =
-    budget != null || authority != null || need != null || timeline != null
-      ? { budget: budget ?? 3, authority: authority ?? 3, need: need ?? 3, timeline: timeline ?? 3 }
-      : undefined;
   const ownerId = asString(row.ownerEmail) ?? "";
+  const note = personalizationNote(row);
+  const emailVerificationStatus = asString(row.emailVerificationStatus);
+  const intentEvidence = Array.isArray(row.intentEvidence) ? row.intentEvidence : undefined;
   return cleanRecord({
     accountId,
     contactId,
     channel: asString(row.channel) ?? (withDefaults ? "cold_email" : undefined),
-    campaignId: asString(row.campaign),
     profileId: asString(row.profile),
+    strategyId: asString(row.strategy),
+    personaId: asString(row.persona),
+    strategyVersion:
+      typeof row.strategyVersion === "number" ? row.strategyVersion : undefined,
     stage: asString(row.stage) ?? (withDefaults ? "new" : undefined),
     temperature: asString(row.temperature) ?? (withDefaults ? "cold" : undefined),
     priority: asString(row.priority) ?? (withDefaults ? "medium" : undefined),
@@ -269,8 +296,7 @@ function leadValues(
     scraperId: asString(row.sourcedByEmail) ?? ownerId,
     intakeKind: "prospect",
     prospectOwnerId: asString(row.prospectOwnerEmail) ?? ownerId,
-    prospectVisibility:
-      asString(row.prospectVisibility) ?? (withDefaults ? "open" : undefined),
+    prospectVisibility: withDefaults ? "open" : undefined,
     contactName: `${firstName} ${lastName}`.trim(),
     contactTitle: asString(row.jobTitle),
     contactEmail: asString(row.companyEmail) ?? asString(row.personalEmail),
@@ -282,35 +308,26 @@ function leadValues(
     revenueRange: asString(row.revenueRange),
     triggerEvent: asString(row.triggerEvent),
     painPoints: asString(row.painPoints),
-    businessFocus: asString(row.businessFocus),
-    hiringSignals: asString(row.hiringSignals),
-    recentNews: asString(row.recentNews),
-    psLine: asString(row.psLine),
-    toolsUsed: asStringArray(row.toolsUsed),
-    caseStudyId: asString(row.caseStudy),
-    pushToInstantly: asString(row.pushToInstantly),
-    pushToLinkedIn: asString(row.pushToLinkedIn),
+    personalizationNote: note,
+    psLine: formatPsLine(note),
+    primaryOpportunityLabel: asString(row.primaryOpportunityLabel),
+    deeplyPersonalized:
+      typeof row.deeplyPersonalized === "boolean" ? row.deeplyPersonalized : undefined,
+    prospectQualifyStatus: asString(row.prospectQualifyStatus),
+    rejectionReason: asString(row.rejectionReason),
+    rejectionNote: asString(row.rejectionNote),
+    intentEvidence,
+    emailVerified: emailVerificationStatus === "verified" ? true : undefined,
     doNotContact:
       typeof row.doNotContact === "boolean"
         ? row.doNotContact
         : withDefaults
           ? false
           : undefined,
-    bant,
-    estimatedValue: typeof row.estimatedValue === "number" ? row.estimatedValue : undefined,
-    expectedCloseDate: dateIso(row.expectedCloseDate),
-    firstContactAt: dateIso(row.firstContactAt),
-    lastActivityAt: dateIso(row.lastActivityAt),
-    responseTimeMinutes: typeof row.responseTimeMinutes === "number" ? row.responseTimeMinutes : undefined,
-    touches:
-      typeof row.touches === "number" ? row.touches : withDefaults ? 0 : undefined,
-    isIdle:
-      typeof row.isIdle === "boolean" ? row.isIdle : withDefaults ? false : undefined,
-    idleDays: typeof row.idleDays === "number" ? row.idleDays : undefined,
+    touches: withDefaults ? 0 : undefined,
+    isIdle: withDefaults ? false : undefined,
     notes: asString(row.notes),
     nextAction: asString(row.nextAction),
-    extensions: row.extensions && typeof row.extensions === "object" ? row.extensions : undefined,
-    labelIds: asStringArray(row.leadLabels),
     updatedAt: now,
   });
 }

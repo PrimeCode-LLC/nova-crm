@@ -155,7 +155,7 @@ function lookupByNameOrId(
 function resolveSingleReference(
   rowNumber: number,
   normalized: NormalizedProspectImportRow,
-  key: "campaign" | "profile" | "caseStudy",
+  key: "profile" | "strategy" | "persona",
   label: string,
   lookup: Map<string, string>,
   issues: StagedProspectImportRow["issues"],
@@ -168,26 +168,6 @@ function resolveSingleReference(
     delete normalized[key];
     addIssue(rowNumber, issues, "warning", "unknown_reference", `${label} "${raw}" was ignored.`, label);
   }
-}
-
-function resolveLabelReference(
-  rowNumber: number,
-  normalized: NormalizedProspectImportRow,
-  key: "accountLabels" | "contactLabels" | "leadLabels",
-  labelLookup: Map<string, string>,
-  issues: StagedProspectImportRow["issues"],
-): void {
-  const values = Array.isArray(normalized[key])
-    ? normalized[key].filter((value): value is string => typeof value === "string")
-    : [];
-  if (!values.length) return;
-  const ids: string[] = [];
-  for (const value of values) {
-    const id = labelLookup.get(value.toLowerCase());
-    if (id) ids.push(id);
-    else addIssue(rowNumber, issues, "warning", "unknown_reference", `Label "${value}" was ignored.`, key);
-  }
-  normalized[key] = [...new Set(ids)];
 }
 
 function splitStagedRows(rows: StagedProspectImportRow[]): StagedProspectImportRow[][] {
@@ -239,10 +219,9 @@ export async function createProspectImportPreview(input: {
     personalEmailDocs,
     linkedInDocs,
     phoneDocs,
-    usersSnap,
-    labelsSnap,
-    campaignsSnap,
     profilesSnap,
+    strategiesSnap,
+    personasSnap,
     previousJobSnap,
     identityDocs,
   ] = await Promise.all([
@@ -251,10 +230,9 @@ export async function createProspectImportPreview(input: {
     queryTenantValues(db, organizationId, COLLECTIONS.contacts, "personalEmail", personalEmails),
     queryTenantValues(db, organizationId, COLLECTIONS.contacts, "linkedin", linkedInUrls),
     queryTenantValues(db, organizationId, COLLECTIONS.contacts, "phone", phones),
-    db.collection(COLLECTIONS.users).where("organizationId", "==", organizationId).get(),
-    db.collection(COLLECTIONS.labels).where("organizationId", "==", organizationId).get(),
-    db.collection(COLLECTIONS.campaigns).where("organizationId", "==", organizationId).get(),
     db.collection(COLLECTIONS.profiles).where("organizationId", "==", organizationId).get(),
+    db.collection(COLLECTIONS.prospectingStrategies).where("organizationId", "==", organizationId).get(),
+    db.collection(COLLECTIONS.buyerPersonas).where("organizationId", "==", organizationId).get(),
     db.collection(COLLECTIONS.importJobs)
       .where("organizationId", "==", organizationId)
       .where("fingerprint", "==", parsed.fingerprint)
@@ -337,22 +315,21 @@ export async function createProspectImportPreview(input: {
     }
   }
 
-  const userByEmail = new Map<string, string>();
-  for (const doc of usersSnap.docs) {
-    if (String(doc.data().status ?? "active") !== "active") continue;
-    const email = String(doc.data().email ?? "").trim().toLowerCase();
-    if (email) userByEmail.set(email, doc.id);
-  }
-  const labelLookup = lookupByNameOrId(labelsSnap.docs);
-  const campaignLookup = lookupByNameOrId(campaignsSnap.docs);
   const profileLookup = lookupByNameOrId(profilesSnap.docs);
-  const emptyLookup = new Map<string, string>();
+  const strategyLookup = lookupByNameOrId(strategiesSnap.docs);
+  const personaLookup = lookupByNameOrId(personasSnap.docs);
+  const strategyVersionById = new Map<string, number>();
+  for (const doc of strategiesSnap.docs) {
+    const version = Number(doc.data().version);
+    if (Number.isInteger(version) && version > 0) strategyVersionById.set(doc.id, version);
+  }
   const seenInFile = new Set<string>();
   const stagedRows: StagedProspectImportRow[] = [];
   const counts = { ...EMPTY_IMPORT_COUNTS, total: parsed.rows.length };
 
   for (const parsedRow of parsed.rows) {
-    const normalized = structuredClone(parsedRow.normalized);
+    const normalized = structuredClone(parsedRow.normalized) as NormalizedProspectImportRow &
+      Record<string, unknown>;
     const issues = [...parsedRow.issues];
     const identity = contactIdentity(normalized);
     const rowIdentities = contactIdentities(normalized);
@@ -363,30 +340,24 @@ export async function createProspectImportPreview(input: {
     }
     rowIdentities.forEach((candidate) => seenInFile.add(candidate));
 
-    for (const [key, label] of [
-      ["ownerEmail", "Owner Email"],
-      ["createdByEmail", "Created By Email"],
-      ["sourcedByEmail", "Sourced By Email"],
-      ["prospectOwnerEmail", "Prospect Owner Email"],
+    // Owners always default to the uploader (New prospect form behavior).
+    for (const key of [
+      "ownerEmail",
+      "createdByEmail",
+      "sourcedByEmail",
+      "prospectOwnerEmail",
     ] as const) {
-      const email = typeof normalized[key] === "string" ? normalized[key].toLowerCase() : "";
-      if (!email) {
-        normalized[key] = uploaderId;
-        (normalized as Record<string, unknown>)[`__defaulted_${key}`] = true;
-      }
-      else {
-        const userId = userByEmail.get(email);
-        if (userId) normalized[key] = userId;
-        else addIssue(parsedRow.rowNumber, issues, "error", "unknown_owner", `${label} does not match an active workspace user.`, label);
-      }
+      normalized[key] = uploaderId;
+      normalized[`__defaulted_${key}`] = true;
     }
 
-    resolveSingleReference(parsedRow.rowNumber, normalized, "campaign", "Campaign", campaignLookup, issues);
     resolveSingleReference(parsedRow.rowNumber, normalized, "profile", "Outreach Profile", profileLookup, issues);
-    resolveSingleReference(parsedRow.rowNumber, normalized, "caseStudy", "Case Study", emptyLookup, issues);
-    resolveLabelReference(parsedRow.rowNumber, normalized, "accountLabels", labelLookup, issues);
-    resolveLabelReference(parsedRow.rowNumber, normalized, "contactLabels", labelLookup, issues);
-    resolveLabelReference(parsedRow.rowNumber, normalized, "leadLabels", labelLookup, issues);
+    resolveSingleReference(parsedRow.rowNumber, normalized, "strategy", "Prospecting Strategy", strategyLookup, issues);
+    resolveSingleReference(parsedRow.rowNumber, normalized, "persona", "Buyer Persona", personaLookup, issues);
+    if (typeof normalized.strategy === "string") {
+      const version = strategyVersionById.get(normalized.strategy);
+      if (version) normalized.strategyVersion = version;
+    }
 
     const matchingContactIds = new Set<string>();
     const identityCandidates = contactIdentities(normalized);
