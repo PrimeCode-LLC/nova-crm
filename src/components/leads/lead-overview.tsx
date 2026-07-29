@@ -32,6 +32,13 @@ import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-con
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { contactHasBouncedEmail } from "@/lib/email/contact-email-change";
 import {
+  emailVerificationBadgeClass,
+  emailVerificationDescription,
+  emailVerificationLabel,
+  resolveEmailVerificationStatus,
+  shouldOfferEmailVerify,
+} from "@/lib/email/email-verification-status";
+import {
   formatVerifySummary,
   verifyLeadEmailsClient,
 } from "@/lib/integrations/millionverifier/verify-client";
@@ -135,6 +142,8 @@ export function LeadOverview({
   const canEdit = ws.canEditLead(lead);
   const emailBounced = contactHasBouncedEmail(contact);
   const companyEmail = (contact?.email || lead.contactEmail || "").trim();
+  const emailStatus = resolveEmailVerificationStatus(contact, lead);
+  const showVerify = canEdit && Boolean(companyEmail) && !ws.isDemo && shouldOfferEmailVerify(emailStatus);
   const emailResponseCtx = useLeadEmailResponseContext();
   const responseTimeMinutes = resolveLeadResponseTimeMinutes(lead, emailResponseCtx);
   const openQueue = !lead.ownerId?.trim();
@@ -158,7 +167,7 @@ export function LeadOverview({
       }
       toast.success(formatVerifySummary(summary), {
         description: first?.status
-          ? `${companyEmail} → ${first.status.replace(/_/g, " ")}`
+          ? `${companyEmail} → ${emailVerificationLabel(first.status)}`
           : undefined,
       });
     } catch (err) {
@@ -226,66 +235,46 @@ export function LeadOverview({
             <Field label="Company email">{contact?.email || lead.contactEmail || "-"}</Field>
             <Field label="Personal email">{contact?.personalEmail || "-"}</Field>
             <Field label="Email status">
-              {emailBounced ? (
-                <span className="inline-flex items-center gap-1.5 text-destructive">
-                  <MailWarning className="h-3.5 w-3.5" />
-                  bounced
-                  {canEdit && onUpdateEmail ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="ml-1 h-6 px-2 text-[11px]"
-                      onClick={onUpdateEmail}
-                    >
-                      Fix
-                    </Button>
+              <span className="inline-flex flex-wrap items-center gap-1.5">
+                <Badge
+                  variant="outline"
+                  className={cn("text-[10px] font-medium", emailVerificationBadgeClass(emailStatus))}
+                  title={emailVerificationDescription(emailStatus)}
+                >
+                  {emailStatus === "bounced" ? (
+                    <MailWarning className="mr-1 h-3 w-3" />
                   ) : null}
-                  {canEdit && companyEmail && !ws.isDemo ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="ml-1 h-6 px-2 text-[11px]"
-                      disabled={verifyingEmail}
-                      onClick={() => void handleVerifyEmail()}
-                    >
-                      {verifyingEmail ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <ShieldCheck className="h-3 w-3" />
-                      )}
-                      Re-verify
-                    </Button>
-                  ) : null}
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-1.5">
-                  <span>
-                    {contact?.emailVerificationStatus ||
-                      (contact?.emailVerified || lead.emailVerified
-                        ? "Verified"
-                        : "Not verified")}
-                  </span>
-                  {canEdit && companyEmail && !ws.isDemo ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      className="ml-1 h-6 px-2 text-[11px]"
-                      disabled={verifyingEmail}
-                      onClick={() => void handleVerifyEmail()}
-                    >
-                      {verifyingEmail ? (
-                        <Loader2 className="h-3 w-3 animate-spin" />
-                      ) : (
-                        <ShieldCheck className="h-3 w-3" />
-                      )}
-                      Verify
-                    </Button>
-                  ) : null}
-                </span>
-              )}
+                  {emailVerificationLabel(emailStatus)}
+                </Badge>
+                {emailBounced && canEdit && onUpdateEmail ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={onUpdateEmail}
+                  >
+                    Fix
+                  </Button>
+                ) : null}
+                {showVerify ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    disabled={verifyingEmail}
+                    onClick={() => void handleVerifyEmail()}
+                  >
+                    {verifyingEmail ? (
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                    ) : (
+                      <ShieldCheck className="h-3 w-3" />
+                    )}
+                    {emailBounced ? "Re-verify" : "Verify email"}
+                  </Button>
+                ) : null}
+              </span>
             </Field>
             <Field label="Phone">{contact?.phone || "-"}</Field>
             <Field label="LinkedIn">

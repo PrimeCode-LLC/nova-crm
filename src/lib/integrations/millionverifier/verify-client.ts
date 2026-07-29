@@ -94,7 +94,7 @@ export function formatVerifySummary(summary: VerifyEmailApiSummary): string {
   const parts: string[] = [];
   if (summary.verified) parts.push(`${summary.verified} verified`);
   if (summary.bounced) parts.push(`${summary.bounced} invalid`);
-  if (summary.catchAll) parts.push(`${summary.catchAll} catch-all`);
+  if (summary.catchAll) parts.push(`${summary.catchAll} risky (catch-all)`);
   if (summary.notVerified) parts.push(`${summary.notVerified} unknown`);
   if (summary.skipped) parts.push(`${summary.skipped} skipped`);
   if (summary.failed) parts.push(`${summary.failed} failed`);

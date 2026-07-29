@@ -504,6 +504,7 @@ export async function applyEmailBounceServer(
           {
             emailVerificationStatus: "bounced",
             emailVerified: false,
+            emailVerificationSource: "bounce",
             emailBouncedAt: now,
           },
           input.actorUid,
@@ -514,6 +515,8 @@ export async function applyEmailBounceServer(
   if (leadId) {
     const leadPatch: Record<string, unknown> = {
       emailVerified: false,
+      emailVerificationStatus: "bounced",
+      emailVerificationSource: "bounce",
       emailHardBounceCount: bounceCountAfter,
     };
     if (recoveryAction === "pause_linkedin" || recoveryAction === "pause_find_email") {

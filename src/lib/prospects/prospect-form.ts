@@ -453,6 +453,8 @@ export function buildProspectEntities(input: BuildProspectEntitiesInput): {
     personalEmail: normalizedEmail(form.personalEmail) || undefined,
     emailVerificationStatus:
       form.emailVerify === PROSPECT_FORM_UNSET ? undefined : form.emailVerify,
+    emailVerificationSource:
+      form.emailVerify === PROSPECT_FORM_UNSET ? undefined : ("manual" as const),
     phone: form.phone.trim() || undefined,
     title: form.title.trim() || undefined,
     seniority: form.seniority.trim() || undefined,

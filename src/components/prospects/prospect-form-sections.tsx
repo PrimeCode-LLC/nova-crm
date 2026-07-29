@@ -73,8 +73,8 @@ const ACTIVITY_OPTIONS: Array<{ value: OnlineActivityScore; label: string }> = [
 const EMAIL_OPTIONS: Array<{ value: EmailVerificationStatus; label: string }> = [
   { value: "not_verified", label: "Not verified" },
   { value: "verified", label: "Verified" },
-  { value: "bounced", label: "Bounced" },
-  { value: "catch_all", label: "Catch-all" },
+  { value: "bounced", label: "Invalid" },
+  { value: "catch_all", label: "Risky (catch-all)" },
 ];
 const BEST_CHANNEL_OPTIONS: Array<{ value: BestContactChannel; label: string }> = [
   { value: "email", label: "Email" },

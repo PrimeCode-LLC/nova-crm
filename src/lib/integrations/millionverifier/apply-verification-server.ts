@@ -127,6 +127,7 @@ export async function verifyLeadsEmailsServer(input: {
         const contactPatch: Record<string, unknown> = {
           emailVerificationStatus: mapped.emailVerificationStatus,
           emailVerified: mapped.emailVerified,
+          emailVerificationSource: "millionverifier",
         };
         if (mapped.emailVerificationStatus === "bounced") {
           contactPatch.emailBouncedAt = now;
@@ -146,6 +147,8 @@ export async function verifyLeadsEmailsServer(input: {
           stampForUpdate(
             {
               emailVerified: mapped.emailVerified,
+              emailVerificationStatus: mapped.emailVerificationStatus,
+              emailVerificationSource: "millionverifier",
             },
             input.actorUid,
           ),

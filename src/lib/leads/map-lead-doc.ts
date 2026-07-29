@@ -154,5 +154,18 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
     rejectionNote: typeof raw.rejectionNote === "string" ? raw.rejectionNote : undefined,
     deeplyPersonalized: raw.deeplyPersonalized === true ? true : undefined,
     emailVerified: raw.emailVerified === true ? true : undefined,
+    emailVerificationStatus:
+      raw.emailVerificationStatus === "verified" ||
+      raw.emailVerificationStatus === "not_verified" ||
+      raw.emailVerificationStatus === "bounced" ||
+      raw.emailVerificationStatus === "catch_all"
+        ? raw.emailVerificationStatus
+        : undefined,
+    emailVerificationSource:
+      raw.emailVerificationSource === "millionverifier" ||
+      raw.emailVerificationSource === "bounce" ||
+      raw.emailVerificationSource === "manual"
+        ? raw.emailVerificationSource
+        : undefined,
   };
 }

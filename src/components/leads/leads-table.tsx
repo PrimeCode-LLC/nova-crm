@@ -65,6 +65,7 @@ import {
   Tag,
   CalendarClock,
   Mail,
+  MailWarning,
   Sparkles,
   UserCog,
   XCircle,
@@ -78,6 +79,15 @@ import {
   PUSH_STATUS_TONE,
   INTAKE_KIND_META,
 } from "@/lib/constants";
+import {
+  EMAIL_VERIFICATION_FILTER_OPTIONS,
+  emailVerificationBadgeClass,
+  emailVerificationDescription,
+  emailVerificationFilterBucket,
+  emailVerificationLabel,
+  resolveEmailVerificationStatus,
+  type EmailVerificationFilterBucket,
+} from "@/lib/email/email-verification-status";
 import {
   formatVerifySummary,
   verifyLeadEmailsClient,
@@ -376,6 +386,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     getUserById,
     getOwnerDisplayName,
     getProfileById,
+    getContactById,
     profiles,
     crmLabels,
     intentPlaybook,
@@ -770,6 +781,47 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ),
     },
     {
+      id: "email",
+      accessorFn: (row) => row.contactEmail ?? "",
+      header: COL.email,
+      cell: ({ row }) => {
+        const lead = row.original;
+        const email =
+          getContactById(lead.contactId)?.email?.trim() || lead.contactEmail?.trim() || "";
+        if (!email) {
+          return <span className="text-xs text-muted-foreground">-</span>;
+        }
+        const status = resolveEmailVerificationStatus(getContactById(lead.contactId), lead);
+        return (
+          <div className="flex min-w-0 max-w-[220px] items-center gap-1.5">
+            <span className="min-w-0 truncate text-sm" title={email}>
+              {email}
+            </span>
+            <Badge
+              variant="outline"
+              className={cn(
+                "shrink-0 text-[10px] font-medium",
+                emailVerificationBadgeClass(status),
+              )}
+              title={emailVerificationDescription(status)}
+            >
+              {status === "bounced" ? <MailWarning className="mr-0.5 h-3 w-3" /> : null}
+              {emailVerificationLabel(status)}
+            </Badge>
+          </div>
+        );
+      },
+      filterFn: (row, _id, value: EmailVerificationFilterBucket[]) => {
+        const selected = value as EmailVerificationFilterBucket[];
+        if (!selected?.length) return true;
+        const status = resolveEmailVerificationStatus(
+          getContactById(row.original.contactId),
+          row.original,
+        );
+        return selected.includes(emailVerificationFilterBucket(status));
+      },
+    },
+    {
       id: "company",
       accessorKey: "companyName",
       header: lockedIntakeScope === "prospect" ? COL.businessName : COL.company,
@@ -1147,7 +1199,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, getContactById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -1212,6 +1264,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const labelFilter = (columnFilters.find((f) => f.id === "labelIds")?.value as string[]) ?? [];
   const companyFilter = (columnFilters.find((f) => f.id === "company")?.value as string[]) ?? [];
   const industryFilter = (columnFilters.find((f) => f.id === "industry")?.value as string[]) ?? [];
+  const emailStatusFilter =
+    (columnFilters.find((f) => f.id === "email")?.value as EmailVerificationFilterBucket[]) ?? [];
 
   function toggleStage(key: PipelineStage) {
     const next = stageFilter.includes(key)
@@ -1248,6 +1302,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ? industryFilter.filter((s) => s !== key)
       : [...industryFilter, key];
     table.getColumn("industry")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleEmailStatusFilter(key: EmailVerificationFilterBucket) {
+    const next = emailStatusFilter.includes(key)
+      ? emailStatusFilter.filter((s) => s !== key)
+      : [...emailStatusFilter, key];
+    table.getColumn("email")?.setFilterValue(next.length ? next : undefined);
   }
 
   return (
@@ -1472,6 +1532,39 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             </DropdownMenu>
           </>
         ) : null}
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button variant="outline" size="sm" className="gap-1.5">
+                <Filter className="h-3.5 w-3.5" />
+                Email status
+                {emailStatusFilter.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {emailStatusFilter.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-64">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Match any selected status
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            {EMAIL_VERIFICATION_FILTER_OPTIONS.map((opt) => (
+              <DropdownMenuCheckboxItem
+                key={opt.value}
+                checked={emailStatusFilter.includes(opt.value)}
+                onCheckedChange={() => toggleEmailStatusFilter(opt.value)}
+              >
+                {opt.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
 
         <DropdownMenu>
           <DropdownMenuTrigger

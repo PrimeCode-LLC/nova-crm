@@ -402,6 +402,11 @@ export interface Contact {
   personalEmail?: string;
   emailVerified?: boolean;
   emailVerificationStatus?: EmailVerificationStatus;
+  /**
+   * Who last set `emailVerificationStatus`. Badge UI only trusts
+   * `millionverifier` / `bounce` — not the manual qualify checkbox.
+   */
+  emailVerificationSource?: "millionverifier" | "bounce" | "manual";
   /** When `emailVerificationStatus` was last set to `bounced` (hard bounce). */
   emailBouncedAt?: ISODate;
   phone?: string;
@@ -590,6 +595,12 @@ export interface Lead {
   deeplyPersonalized?: boolean;
   /** Denormalized from contact at create - used for daily verified-email targets. */
   emailVerified?: boolean;
+  /**
+   * Denormalized email verification enum from Million Verifier / bounce automation.
+   * Badge UI only trusts this when `emailVerificationSource` is `millionverifier` or `bounce`.
+   */
+  emailVerificationStatus?: EmailVerificationStatus;
+  emailVerificationSource?: "millionverifier" | "bounce" | "manual";
   /**
    * Hard email bounce count for this lead (company → personal failover, then LinkedIn pivot).
    * Incremented by bounce apply; used to stop email reroutes after 2 failures.

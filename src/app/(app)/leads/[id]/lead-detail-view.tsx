@@ -20,7 +20,9 @@ import {
   UserPlus,
   Copy,
   ShieldAlert,
+  ShieldCheck,
   ListTodo,
+  Loader2,
   MailWarning,
   Undo2,
 } from "lucide-react";
@@ -85,6 +87,17 @@ import {
   diffContactEmailChanges,
   openBounceReviewTasksForLead,
 } from "@/lib/email/contact-email-change";
+import {
+  emailVerificationBadgeClass,
+  emailVerificationDescription,
+  emailVerificationLabel,
+  resolveEmailVerificationStatus,
+  shouldOfferEmailVerify,
+} from "@/lib/email/email-verification-status";
+import {
+  formatVerifySummary,
+  verifyLeadEmailsClient,
+} from "@/lib/integrations/millionverifier/verify-client";
 import { findSuggestedNewEmailFromMessages } from "@/lib/email/extract-suggested-new-email";
 import {
   DropdownMenu,
@@ -188,6 +201,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     "manual",
   );
   const [updateEmailSuggested, setUpdateEmailSuggested] = React.useState<string | undefined>();
+  const [verifyingEmail, setVerifyingEmail] = React.useState(false);
   const [linkedinSuggestOpen, setLinkedinSuggestOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
@@ -532,6 +546,31 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   );
   const openFollowupCount = followups.filter((f) => !f.completedAt).length;
   const openTaskCount = leadTasksForTab.filter((t) => !t.completedAt).length;
+  const emailStatus = resolveEmailVerificationStatus(contact, lead);
+  const showVerifyEmail =
+    canEditLead && Boolean(companyEmail) && !ws.isDemo && shouldOfferEmailVerify(emailStatus);
+
+  async function handleVerifyCompanyEmail() {
+    if (!companyEmail || verifyingEmail || ws.isDemo) return;
+    setVerifyingEmail(true);
+    try {
+      const { results, summary } = await verifyLeadEmailsClient([lead.id]);
+      const first = results[0];
+      if (first?.error && !first.status) {
+        toast.error(first.error);
+        return;
+      }
+      toast.success(formatVerifySummary(summary), {
+        description: first?.status
+          ? `${companyEmail} → ${emailVerificationLabel(first.status)}`
+          : undefined,
+      });
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Email verification failed");
+    } finally {
+      setVerifyingEmail(false);
+    }
+  }
 
   async function handleResumeSequence(to: string) {
     if (!pausedBouncePlan || !lead) {
@@ -1283,7 +1322,24 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               <CardHeader className="pb-2">
                 <CardTitle className="text-xs uppercase text-muted-foreground tracking-wide">Contact</CardTitle>
                 {canEditLead && contact ? (
-                  <CardAction>
+                  <CardAction className="flex items-center gap-1">
+                    {showVerifyEmail ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 gap-1 px-2 text-xs"
+                        disabled={verifyingEmail}
+                        onClick={() => void handleVerifyCompanyEmail()}
+                      >
+                        {verifyingEmail ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <ShieldCheck className="h-3.5 w-3.5" />
+                        )}
+                        {emailBounced ? "Re-verify" : "Verify email"}
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       size="sm"
@@ -1312,11 +1368,16 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                         {companyEmail}
                       </a>
                     </div>
-                    {emailBounced ? (
-                      <Badge variant="outline" className="shrink-0 border-destructive/40 text-[10px] text-destructive">
-                        bounced
-                      </Badge>
-                    ) : null}
+                    <Badge
+                      variant="outline"
+                      className={cn(
+                        "shrink-0 text-[10px] font-medium",
+                        emailVerificationBadgeClass(emailStatus),
+                      )}
+                      title={emailVerificationDescription(emailStatus)}
+                    >
+                      {emailVerificationLabel(emailStatus)}
+                    </Badge>
                     <Button
                       type="button"
                       variant="ghost"
@@ -1652,7 +1713,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             const clearedContactPatch = contactPatchClearingBounce(contact, contactPatch);
             const emailChanges = diffContactEmailChanges(contact, clearedContactPatch);
             const nextLeadPatch = { ...leadPatch };
-            if (clearedContactPatch.emailVerified !== undefined) {
+            // Manual form status is for qualify targets only — do not stamp provider
+            // verification source/status onto the lead (badge trusts MV/bounce only).
+            if (clearedContactPatch.emailVerificationStatus !== undefined) {
+              clearedContactPatch.emailVerified =
+                clearedContactPatch.emailVerificationStatus === "verified";
+              clearedContactPatch.emailVerificationSource = "manual";
+              nextLeadPatch.emailVerified =
+                clearedContactPatch.emailVerificationStatus === "verified";
+            } else if (clearedContactPatch.emailVerified !== undefined) {
               nextLeadPatch.emailVerified = clearedContactPatch.emailVerified;
             }
 

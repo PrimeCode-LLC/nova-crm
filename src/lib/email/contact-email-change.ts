@@ -149,6 +149,8 @@ export function applyContactEmailUpdate(input: {
   if (contactPatch.emailVerified !== undefined) {
     leadPatch.emailVerified = contactPatch.emailVerified;
   }
+  // Do not copy manual contact.emailVerificationStatus onto the lead —
+  // lead status/source is reserved for Million Verifier / bounce.
   return { contactPatch, leadPatch, changes };
 }
 
