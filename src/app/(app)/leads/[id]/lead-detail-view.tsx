@@ -22,6 +22,7 @@ import {
   ShieldAlert,
   ListTodo,
   MailWarning,
+  Undo2,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -118,6 +119,14 @@ import type { Lead, OrganizationMember, PipelineStage, User } from "@/lib/types"
 import { filterLeadTasksForLeadDetail, workspaceViewerForLeadTasks } from "@/lib/lead-task-visibility";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 import { useLeadEmailResponseContext } from "@/hooks/use-lead-email-response-context";
+import { canAction } from "@/lib/permissions/can";
+import { roleAtLeast } from "@/lib/platform/org-role";
+import {
+  moveBackBlockedReason,
+  moveBackConfirmCopy,
+  moveBackModeFor,
+} from "@/lib/prospects/move-back-to-prospect";
+import { prospectOwnerIdOf } from "@/lib/prospects/prospect-access";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { extractEmailAddresses } from "@/lib/email/reply-compose";
 import {
@@ -180,6 +189,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const [linkedinSuggestOpen, setLinkedinSuggestOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [moveBackOpen, setMoveBackOpen] = React.useState(false);
+  const [moveBackBusy, setMoveBackBusy] = React.useState(false);
   const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
   const [aiInsights, setAiInsights] = React.useState<{
     summary: string;
@@ -467,6 +478,27 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const account = ws.getAccountById(lead.accountId);
   const contact = ws.getContactById(lead.contactId);
   const deal = ws.deals.find((d) => d.leadId === lead.id);
+  const moveBackMode = moveBackModeFor(lead);
+  const moveBackBlocked = moveBackMode
+    ? moveBackBlockedReason(lead, { hasDeal: Boolean(deal) })
+    : null;
+  const viewerUser = ws.getUserById(ws.currentUserId);
+  const canMoveBackPermission =
+    roleAtLeast(ws.viewerOrgRole, "admin") ||
+    canAction(viewerUser, "prospects.move_back_to_prospect") ||
+    canAction(viewerUser, "prospects.push_to_lead");
+  const moveBackAuthorityOwnerId = prospectSourceId
+    ? prospectOwnerIdOf(ws.getLeadById(prospectSourceId) ?? lead)
+    : prospectOwnerIdOf(lead) || lead.ownerId?.trim() || "";
+  const canMoveBackAccess =
+    Boolean(ws.currentUserId) &&
+    (roleAtLeast(ws.viewerOrgRole, "admin") ||
+      Boolean(lead.sharedOwnerIds?.includes(ws.currentUserId)) ||
+      moveBackAuthorityOwnerId === ws.currentUserId ||
+      lead.ownerId?.trim() === ws.currentUserId);
+  const showMoveBack =
+    Boolean(moveBackMode) && canMoveBackPermission && canMoveBackAccess;
+  const moveBackCopy = moveBackMode ? moveBackConfirmCopy(moveBackMode) : null;
   const companyEmail = (contact?.email || lead.contactEmail || "").trim() || undefined;
   const personalEmail = contact?.personalEmail?.trim() || undefined;
   const primaryEmail = companyEmail || personalEmail;
@@ -671,6 +703,52 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog open={moveBackOpen} onOpenChange={(o) => !moveBackBusy && setMoveBackOpen(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{moveBackCopy?.title ?? "Move back to prospect?"}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {moveBackCopy?.description ??
+                "This returns the record to Prospects and removes it from the sales pipeline."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={moveBackBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={moveBackBusy}
+              onClick={() => {
+                void (async () => {
+                  setMoveBackBusy(true);
+                  try {
+                    const res = await fetch(`/api/org/leads/${lead.id}/move-back-to-prospect`, {
+                      method: "POST",
+                    });
+                    const data = (await res.json().catch(() => ({}))) as {
+                      error?: string;
+                      prospectId?: string;
+                    };
+                    if (!res.ok) {
+                      toast.error(data.error ?? "Could not move back to prospect");
+                      return;
+                    }
+                    toast.success("Moved back to prospect");
+                    setMoveBackOpen(false);
+                    const prospectId = data.prospectId?.trim() || lead.id;
+                    router.push(`/leads/${prospectId}?from=prospects`);
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    toast.error("Could not move back to prospect", { description: msg });
+                  } finally {
+                    setMoveBackBusy(false);
+                  }
+                })();
+              }}
+            >
+              {moveBackBusy ? "Moving…" : moveBackCopy?.confirmLabel ?? "Move back to prospect"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <PageHeader
         title={
           <div className="flex min-w-0 items-center gap-3">
@@ -837,6 +915,26 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <DropdownMenuItem onSelect={() => void copyToClipboard(lead.id, "Lead ID copied")}>
                   Copy lead ID
                 </DropdownMenuItem>
+                {showMoveBack ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={Boolean(moveBackBlocked)}
+                      title={moveBackBlocked ?? undefined}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        if (moveBackBlocked) {
+                          toast.error(moveBackBlocked);
+                          return;
+                        }
+                        setMoveBackOpen(true);
+                      }}
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                      Move back to prospect
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 {ws.canDeleteLeads ? (
                   <>
                     <DropdownMenuSeparator />

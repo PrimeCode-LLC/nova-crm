@@ -189,6 +189,24 @@ export function pickWellUtilizedRows(
     .slice(0, limit);
 }
 
+/** True when the viewer owns the mailbox credentials or is assigned to send from it. */
+export function isMailboxAssignedToViewer(
+  row: Pick<MailboxUtilizationRow, "ownerUid" | "assignedUserIds">,
+  viewerUid: string,
+): boolean {
+  if (!viewerUid) return false;
+  if (row.ownerUid === viewerUid) return true;
+  return row.assignedUserIds.includes(viewerUid);
+}
+
+/** Salespeople see only inboxes they own or are assigned to; managers keep the full list. */
+export function filterMailboxUtilizationForViewer(
+  rows: readonly MailboxUtilizationRow[],
+  viewerUid: string,
+): MailboxUtilizationRow[] {
+  return rows.filter((row) => isMailboxAssignedToViewer(row, viewerUid));
+}
+
 /** Demo / offline builder from the local email account store. */
 export function buildDemoMailboxUtilization(input: {
   mailboxes: readonly EmailMailboxSettings[];

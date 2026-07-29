@@ -333,6 +333,7 @@ export type ActionKey =
   | "leads.manage_labels"
   | "prospects.assign_channels"
   | "prospects.push_to_lead"
+  | "prospects.move_back_to_prospect"
   | "prospects.edit_sourced"
   | "prospects.promote_from_intake"
   | "intake.delete_posts"
@@ -442,6 +443,11 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
     description: "Promote a prospect into a sales lead",
     group: "leads_prospects",
   },
+  "prospects.move_back_to_prospect": {
+    label: "Move lead back to prospect",
+    description: "Undo an accidental promote or channel push back to prospect intake",
+    group: "leads_prospects",
+  },
   "prospects.edit_sourced": {
     label: "Edit sourced prospects",
     description: "Edit prospects the user sourced",
@@ -544,7 +550,7 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
   },
   "dashboard.view_mailbox_utilization": {
     label: "View mailbox utilization",
-    description: "See mailbox utilization analytics",
+    description: "See org-wide mailbox utilization on the ops dashboard (salespeople always see their own assigned inboxes)",
     group: "dashboard",
   },
   "dashboard.preview_as_role": {

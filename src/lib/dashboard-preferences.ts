@@ -107,7 +107,7 @@ export const DASHBOARD_WIDGET_META: {
   { key: "scorecard", label: "Team scorecard", group: "ops" },
   { key: "needsAttention", label: "Needs attention", group: "shared" },
   { key: "inboxPerformance", label: "Top performers", group: "ops" },
-  { key: "mailboxUtilization", label: "Inbox utilization", group: "ops" },
+  { key: "mailboxUtilization", label: "Inbox utilization", group: "shared" },
   { key: "activityFeed", label: "Live activity", group: "ops" },
   { key: "actionBoard", label: "Action board / My day", group: "shared" },
   { key: "wallLink", label: "Wall mode link", group: "ops" },

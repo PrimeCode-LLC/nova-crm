@@ -21,6 +21,7 @@ import {
   Handshake,
   Sparkles,
   ArrowUpRight,
+  ArrowDownLeft,
   type LucideIcon,
 } from "lucide-react";
 import type { Lead, TimelineEvent, TimelineEventType, User } from "@/lib/types";
@@ -57,6 +58,7 @@ const ICONS: Record<TimelineEventType, LucideIcon> = {
   meeting_completed: CalendarCheck,
   meeting_cancelled: CalendarX,
   prospect_channel_pushed: ArrowUpRight,
+  lead_moved_back_to_prospect: ArrowDownLeft,
 };
 
 const TONES: Record<TimelineEventType, string> = {
@@ -82,6 +84,7 @@ const TONES: Record<TimelineEventType, string> = {
   meeting_completed: "bg-success/10 text-success border-success/20",
   meeting_cancelled: "bg-muted text-muted-foreground border-muted",
   prospect_channel_pushed: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 border-emerald-500/20",
+  lead_moved_back_to_prospect: "bg-amber-500/10 text-amber-700 dark:text-amber-400 border-amber-500/20",
 };
 
 function newTeId() {

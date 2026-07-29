@@ -6,6 +6,7 @@ import { BookOpen, Clock, DollarSign, MessageSquareReply, TrendingUp, UserRoundS
 import { OpsPulseStrip, type OpsPulseFocus } from "@/components/dashboard/ops-pulse-strip";
 import { ActionBoardPanel } from "@/components/dashboard/action-board-panel";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
+import { MailboxUtilizationPanel } from "@/components/dashboard/mailbox-utilization-panel";
 import { KpiCard } from "@/components/common/kpi-card";
 import { buttonVariants } from "@/components/ui/button";
 import { useDashboardMeetings } from "@/hooks/use-dashboard-meetings";
@@ -35,6 +36,7 @@ export function FrontlineBoard({
   pipelineHint,
   wonDealCount,
   avgResponseMin,
+  isDemo,
 }: {
   role: Role | undefined;
   metrics: DashboardWorkflowMetrics;
@@ -50,10 +52,12 @@ export function FrontlineBoard({
   pipelineHint: string;
   wonDealCount: number;
   avgResponseMin: number | null;
+  isDemo?: boolean;
 }) {
   const isProspecting = role === "prospecting" || role === "data_scraper";
   const focus = pulseFocusForRole(role);
   const { meetings } = useDashboardMeetings(Boolean(widgets.actionBoard || widgets.pulse), false);
+  const showMailboxUtilization = Boolean(widgets.mailboxUtilization) && !isProspecting;
 
   const meetingsToday = React.useMemo(() => {
     const start = new Date();
@@ -190,6 +194,15 @@ export function FrontlineBoard({
           />
         </div>
       ) : null}
+
+      {showMailboxUtilization ? (
+        <MailboxUtilizationPanel
+          isDemo={Boolean(isDemo)}
+          currentUserId={currentUserId}
+          scope="mine"
+        />
+      ) : null}
+
       {(widgets.actionBoard || widgets.needsAttention) && (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           {widgets.actionBoard ? (

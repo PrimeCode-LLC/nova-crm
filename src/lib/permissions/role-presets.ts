@@ -90,6 +90,7 @@ const FRONTLINE_ACTIONS: ActionKey[] = [
   "leads.manage_labels",
   "prospects.edit_sourced",
   "prospects.push_to_lead",
+  "prospects.move_back_to_prospect",
   "deals.change_stage",
 ];
 
@@ -152,6 +153,7 @@ const PROSPECTING_ACTIONS: ActionKey[] = [
   "leads.log_touchpoint",
   "prospects.assign_channels",
   "prospects.push_to_lead",
+  "prospects.move_back_to_prospect",
   "prospects.edit_sourced",
   "prospects.promote_from_intake",
   "intake.bulk_dismiss",

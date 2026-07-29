@@ -819,6 +819,7 @@ export default function DashboardPage() {
                 pipelineHint={pipelineHint}
                 wonDealCount={scopedDeals.filter((d) => d.stage === "won").length}
                 avgResponseMin={avgResponseMin}
+                isDemo={isDemo}
               />
             ) : w.classicKpis ? (
               <>

@@ -9,9 +9,12 @@ import {
 } from "@/lib/email/mailbox-utilization";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
+export type MailboxUtilizationScope = "org" | "mine";
+
 type State = {
   rows: MailboxUtilizationRow[];
   summary: MailboxUtilizationSummary | null;
+  scope: MailboxUtilizationScope;
   loading: boolean;
   error: string | null;
 };
@@ -28,6 +31,7 @@ export function useMailboxUtilization(opts: {
   const [state, setState] = React.useState<State>({
     rows: [],
     summary: null,
+    scope: "org",
     loading: false,
     error: null,
   });
@@ -44,7 +48,7 @@ export function useMailboxUtilization(opts: {
 
   React.useEffect(() => {
     if (!opts.enabled) {
-      setState({ rows: [], summary: null, loading: false, error: null });
+      setState({ rows: [], summary: null, scope: "org", loading: false, error: null });
       return;
     }
 
@@ -52,6 +56,7 @@ export function useMailboxUtilization(opts: {
       setState({
         rows: demoRows,
         summary: summarizeMailboxUtilization(demoRows),
+        scope: "mine",
         loading: false,
         error: null,
       });
@@ -66,6 +71,7 @@ export function useMailboxUtilization(opts: {
         const res = await fetch("/api/email/mailboxes/utilization");
         const data = (await res.json()) as {
           ok?: boolean;
+          scope?: MailboxUtilizationScope;
           rows?: MailboxUtilizationRow[];
           summary?: MailboxUtilizationSummary;
           error?: string;
@@ -75,6 +81,7 @@ export function useMailboxUtilization(opts: {
           setState({
             rows: [],
             summary: null,
+            scope: "org",
             loading: false,
             error: data.error ?? "Could not load inbox utilization",
           });
@@ -83,6 +90,7 @@ export function useMailboxUtilization(opts: {
         setState({
           rows: data.rows,
           summary: data.summary ?? summarizeMailboxUtilization(data.rows),
+          scope: data.scope === "mine" ? "mine" : "org",
           loading: false,
           error: null,
         });
@@ -91,6 +99,7 @@ export function useMailboxUtilization(opts: {
         setState({
           rows: [],
           summary: null,
+          scope: "org",
           loading: false,
           error: "Could not reach the server",
         });

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
-import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { guardTenantApi, roleAtLeast } from "@/lib/platform/tenant-api-guard";
 import { buildOrgMailboxUtilizationServer } from "@/lib/email/mailbox-utilization-server";
-import { summarizeMailboxUtilization } from "@/lib/email/mailbox-utilization";
-import type { MailboxUtilizationRow } from "@/lib/email/mailbox-utilization";
+import {
+  filterMailboxUtilizationForViewer,
+  summarizeMailboxUtilization,
+  type MailboxUtilizationRow,
+} from "@/lib/email/mailbox-utilization";
 
 const UTILIZATION_CACHE_TTL_MS = 60_000;
 const utilizationCache = new Map<
@@ -15,48 +18,62 @@ const utilizationCache = new Map<
 >();
 
 /**
- * Org-wide inbox capacity utilization (owners / admins / managers).
+ * Inbox capacity utilization.
+ * - Managers / admins / owners: org-wide rows
+ * - Members (salespeople): only mailboxes they own or are assigned to
+ *
  * Powers the dashboard "Inbox utilization" card + detail dialog.
  */
 export async function GET() {
-  const g = await guardTenantApi({ minRole: "manager" });
+  const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
   try {
     const orgId = g.ctx.session.organizationId;
+    const viewerUid = g.ctx.session.uid;
+    const canViewOrgWide = roleAtLeast(g.ctx.role, "manager");
+
     const hit = utilizationCache.get(orgId);
+    let rows: MailboxUtilizationRow[];
+    let generatedAt: string;
+    let cached: boolean;
+
     if (hit && hit.expiresAt > Date.now()) {
-      return NextResponse.json({
-        ok: true,
-        rows: hit.rows,
-        summary: hit.summary,
-        generatedAt: new Date(hit.expiresAt - UTILIZATION_CACHE_TTL_MS).toISOString(),
-        cached: true,
+      rows = hit.rows;
+      generatedAt = new Date(hit.expiresAt - UTILIZATION_CACHE_TTL_MS).toISOString();
+      cached = true;
+    } else {
+      rows = await buildOrgMailboxUtilizationServer({
+        organizationId: orgId,
       });
+      const summary = summarizeMailboxUtilization(rows);
+      utilizationCache.set(orgId, {
+        expiresAt: Date.now() + UTILIZATION_CACHE_TTL_MS,
+        rows,
+        summary,
+      });
+      if (utilizationCache.size > 100) {
+        const now = Date.now();
+        for (const [k, v] of utilizationCache) {
+          if (v.expiresAt <= now) utilizationCache.delete(k);
+        }
+      }
+      generatedAt = new Date().toISOString();
+      cached = false;
     }
 
-    const rows = await buildOrgMailboxUtilizationServer({
-      organizationId: orgId,
-    });
-    const summary = summarizeMailboxUtilization(rows);
-    utilizationCache.set(orgId, {
-      expiresAt: Date.now() + UTILIZATION_CACHE_TTL_MS,
-      rows,
-      summary,
-    });
-    if (utilizationCache.size > 100) {
-      const now = Date.now();
-      for (const [k, v] of utilizationCache) {
-        if (v.expiresAt <= now) utilizationCache.delete(k);
-      }
-    }
+    const scopedRows = canViewOrgWide
+      ? rows
+      : filterMailboxUtilizationForViewer(rows, viewerUid);
+    const summary = summarizeMailboxUtilization(scopedRows);
 
     return NextResponse.json({
       ok: true,
-      rows,
+      scope: canViewOrgWide ? "org" : "mine",
+      rows: scopedRows,
       summary,
-      generatedAt: new Date().toISOString(),
-      cached: false,
+      generatedAt,
+      cached,
     });
   } catch (err) {
     console.error("[mailboxes/utilization]", err);

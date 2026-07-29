@@ -263,6 +263,7 @@ export function OwnerOpsBoard({
           <MailboxUtilizationPanel
             isDemo={Boolean(isDemo)}
             currentUserId={currentUserId}
+            scope="org"
             wall
             className="min-h-0 flex-1"
           />
@@ -503,6 +504,7 @@ export function OwnerOpsBoard({
                 <MailboxUtilizationPanel
                   isDemo={Boolean(isDemo)}
                   currentUserId={currentUserId}
+                  scope="org"
                 />
               ) : null}
             </div>

@@ -117,18 +117,23 @@ export function MailboxUtilizationPanel({
   currentUserId,
   wall,
   className,
+  scope: scopeProp,
 }: {
   isDemo: boolean;
   currentUserId: string;
   wall?: boolean;
   className?: string;
+  /** Prefer API scope; pass "mine" on the frontline board for correct empty-state copy. */
+  scope?: "org" | "mine";
 }) {
   const [detailOpen, setDetailOpen] = React.useState(false);
-  const { rows, loading, error } = useMailboxUtilization({
+  const { rows, loading, error, scope: apiScope } = useMailboxUtilization({
     enabled: true,
     isDemo,
     currentUserId,
   });
+  const scope = scopeProp ?? apiScope;
+  const isMine = scope === "mine";
   const {
     prefs,
     setMailboxUtilizationVisible,
@@ -182,10 +187,12 @@ export function MailboxUtilizationPanel({
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0 space-y-1">
               <CardTitle className={cn("font-semibold", wall ? "text-base" : "text-sm")}>
-                Inbox utilization
+                {isMine ? "My inbox performance" : "Inbox utilization"}
               </CardTitle>
               <CardDescription className={cn(wall ? "text-sm" : "text-xs")}>
-                Capacity ROI · reassign idle inboxes · push underused senders
+                {isMine
+                  ? "Your assigned inboxes · top senders and ones needing attention"
+                  : "Capacity ROI · reassign idle inboxes · push underused senders"}
               </CardDescription>
             </div>
             {!wall ? (
@@ -242,7 +249,9 @@ export function MailboxUtilizationPanel({
             <p className="py-6 text-center text-xs text-destructive">{error}</p>
           ) : rows.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
-              No mailboxes yet. Connect inboxes in Settings → Email.
+              {isMine
+                ? "No inboxes assigned to you yet. Ask an owner to assign one in Settings → Email."
+                : "No mailboxes yet. Connect inboxes in Settings → Email."}
             </p>
           ) : visibleRows.length === 0 ? (
             <p className="py-6 text-center text-xs text-muted-foreground">
