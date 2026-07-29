@@ -929,6 +929,20 @@ export function isImapInboxConfigured(account: EmailMailboxSettings): boolean {
   return !!normalizeMailHost(account.imap.host);
 }
 
+/**
+ * Whether the client should attempt an IMAP list/fetch for this mailbox.
+ * Assigned boxes always try (owner vault is resolved via `dataOwnerUid`).
+ * Owned Google Workspace boxes without OAuth are skipped to avoid toast spam.
+ */
+export function isMailboxReadyForImapFetch(account: EmailMailboxSettings): boolean {
+  if (!isImapInboxConfigured(account)) return false;
+  if (account.dataOwnerUid?.trim()) return true;
+  if (account.connectionType === "google_workspace") {
+    return Boolean(account.googleAuthConnected) || Boolean(account.imap.password || account.smtp.password);
+  }
+  return true;
+}
+
 export function getActiveMailbox(state: Pick<EmailAccountStore, "mailboxes" | "activeMailboxId">) {
   if (state.mailboxes.length === 0) return defaultEmailMailboxSettings({ label: "Primary mailbox" });
   return (

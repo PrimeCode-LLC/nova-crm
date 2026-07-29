@@ -69,6 +69,7 @@ import {
   isEmailAccountConfigured,
   getActiveMailbox,
   isImapInboxConfigured,
+  isMailboxReadyForImapFetch,
   useEmailAccountStore,
 } from "@/stores/email-account-store";
 import type {
@@ -790,21 +791,43 @@ export default function InboxWorkspace() {
   ]);
 
   const fetchImapListFolder = React.useCallback(
-    async (folder: ImapListFolder, mailboxOverride?: EmailMailboxSettings) => {
+    async (
+      folder: ImapListFolder,
+      mailboxOverride?: EmailMailboxSettings,
+      opts?: { silent?: boolean },
+    ): Promise<{ ok: boolean; error?: string; mailboxLabel: string }> => {
+      const silent = Boolean(opts?.silent);
       if (isDemo) {
-        if (folder === "inbox") {
+        if (folder === "inbox" && !silent) {
           toast.message("Demo inbox", { description: "Sample threads only, no IMAP server is used." });
         }
-        return;
+        return { ok: true, mailboxLabel: "Demo" };
       }
-      if (!useEmailAccountStore.getState().emailServerHydrated) return;
+      if (!useEmailAccountStore.getState().emailServerHydrated) {
+        return { ok: false, error: "Mailboxes still loading", mailboxLabel: "Mailbox" };
+      }
       const acct = mailboxOverride ?? getActiveMailbox(useEmailAccountStore.getState());
+      const mailboxLabel =
+        acct.label?.trim() || acct.emailAddress.trim() || acct.id || "Mailbox";
       const mailboxId = acct.id;
-      if (!isImapInboxConfigured(acct)) {
+      if (!isMailboxReadyForImapFetch(acct)) {
         if (folder === "inbox") setInbound(acct.id, []);
         else if (folder === "trash") setTrashInbound(acct.id, []);
-        else if (folder === "sent") setSentFetchError("Configure IMAP in Settings → Email to load Sent mail.");
-        return;
+        else if (folder === "sent") {
+          const msg =
+            acct.connectionType === "google_workspace" && !acct.googleAuthConnected && !acct.dataOwnerUid
+              ? "Google Workspace is not connected. Sign in with Google in Settings → Email."
+              : "Configure IMAP in Settings → Email to load Sent mail.";
+          setSentFetchError(msg);
+        }
+        return {
+          ok: false,
+          error:
+            acct.connectionType === "google_workspace" && !acct.googleAuthConnected && !acct.dataOwnerUid
+              ? "Google Workspace is not connected. Sign in with Google in Settings → Email."
+              : "IMAP is not configured for this mailbox.",
+          mailboxLabel,
+        };
       }
       if (folder === "sent") setSentFetchError(null);
       const stBefore = useEmailAccountStore.getState();
@@ -860,22 +883,31 @@ export default function InboxWorkspace() {
         try {
           data = (await res.json()) as typeof data;
         } catch {
-          toast.error("Invalid response from mail server");
-          if (folder === "sent") setSentFetchError("Invalid response from mail server.");
-          return;
+          const err = "Invalid response from mail server";
+          if (!silent) toast.error(err);
+          if (folder === "sent") setSentFetchError(err);
+          return { ok: false, error: err, mailboxLabel };
         }
         if (!res.ok || !data.ok) {
           const err = data.error ?? `Mail server error (${res.status})`;
-          const label =
-            folder === "inbox" ? "Couldn’t refresh mail" : folder === "sent" ? "Couldn’t load Sent" : "Couldn’t load Trash";
-          toast.error(label, {
-            description: err.length > 400 ? `${err.slice(0, 400)}…` : err,
-          });
+          if (!silent) {
+            const label =
+              folder === "inbox"
+                ? "Couldn’t refresh mail"
+                : folder === "sent"
+                  ? "Couldn’t load Sent"
+                  : "Couldn’t load Trash";
+            toast.error(label, {
+              description: err.length > 400 ? `${err.slice(0, 400)}…` : err,
+            });
+          }
           if (folder === "sent") setSentFetchError(err);
-          return;
+          return { ok: false, error: err, mailboxLabel };
         }
         const currentSelection = useEmailAccountStore.getState().activeMailboxId;
-        if (currentSelection !== ALL_MAILBOXES_ID && currentSelection !== mailboxId) return;
+        if (currentSelection !== ALL_MAILBOXES_ID && currentSelection !== mailboxId) {
+          return { ok: true, mailboxLabel };
+        }
 
         let rows = Array.isArray(data.messages) ? data.messages : [];
         if (folder === "inbox") {
@@ -902,7 +934,7 @@ export default function InboxWorkspace() {
             if (serverTotal > 0 && skipped > 0) {
               const err = `Found ${serverTotal} messages in Sent but could not read them. Try Refresh mail.`;
               setSentFetchError(err);
-              toast.error("Couldn’t load Sent messages", { description: err });
+              if (!silent) toast.error("Couldn’t load Sent messages", { description: err });
             } else if (serverTotal === 0) {
               setSentFetchError(null);
             }
@@ -913,9 +945,12 @@ export default function InboxWorkspace() {
           reconcileTrashHeadFromSync(acct.id, rows);
           setImapTrashTotal(total);
         }
+        return { ok: true, mailboxLabel };
       } catch {
-        toast.error("Could not reach the server");
+        const err = "Could not reach the server";
+        if (!silent) toast.error(err);
         if (folder === "sent") setSentFetchError("Could not reach the server. Check your connection and try Refresh mail.");
+        return { ok: false, error: err, mailboxLabel };
       } finally {
         if (folder === "inbox") {
           setInboundLoading(false);
@@ -948,13 +983,45 @@ export default function InboxWorkspace() {
       const state = useEmailAccountStore.getState();
       const targets =
         state.activeMailboxId === ALL_MAILBOXES_ID
-          ? state.mailboxes
-          : [getActiveMailbox(state)];
-      await Promise.all(
-        targets
-          .filter(isImapInboxConfigured)
-          .map((mailbox) => fetchImapListFolder(folder, mailbox)),
+          ? state.mailboxes.filter(isMailboxReadyForImapFetch)
+          : [getActiveMailbox(state)].filter(isMailboxReadyForImapFetch);
+      const skippedGoogle = state.mailboxes.filter(
+        (m) =>
+          (state.activeMailboxId === ALL_MAILBOXES_ID || m.id === state.activeMailboxId) &&
+          isImapInboxConfigured(m) &&
+          !isMailboxReadyForImapFetch(m),
       );
+      if (targets.length === 0) {
+        if (skippedGoogle.length > 0 && folder === "inbox") {
+          toast.error("Couldn’t refresh mail", {
+            description:
+              "Google Workspace inboxes need Sign in with Google in Settings → Email before they can sync.",
+          });
+        }
+        return;
+      }
+      const results = await Promise.all(
+        targets.map((mailbox) => fetchImapListFolder(folder, mailbox, { silent: true })),
+      );
+      const failed = results.filter((r) => !r.ok);
+      if (failed.length === 0) return;
+      const sample = failed[0]!.error ?? "Unknown error";
+      const names = failed
+        .slice(0, 3)
+        .map((f) => f.mailboxLabel)
+        .join(", ");
+      const more = failed.length > 3 ? ` +${failed.length - 3} more` : "";
+      const label =
+        folder === "inbox" ? "Couldn’t refresh mail" : folder === "sent" ? "Couldn’t load Sent" : "Couldn’t load Trash";
+      toast.error(label, {
+        description:
+          failed.length === 1
+            ? sample.length > 400
+              ? `${sample.slice(0, 400)}…`
+              : sample
+            : `${failed.length} mailboxes failed (${names}${more}). ${sample.length > 220 ? `${sample.slice(0, 220)}…` : sample}`,
+      });
+      if (folder === "sent" && failed[0]?.error) setSentFetchError(failed[0].error);
     },
     [fetchImapListFolder],
   );

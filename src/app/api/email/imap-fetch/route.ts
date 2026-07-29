@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
-import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";
+import { resolveMailboxTransportAuthServer, googleAuthFailureMessage } from "@/lib/email/resolve-mailbox-transport-auth";
 import {
   fetchImapFolderServer,
   IMAP_FETCH_DEFAULT_LIMIT,
@@ -10,6 +10,7 @@ import {
   type ImapFolderKind,
 } from "@/lib/email/imap-fetch-folder-server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
+import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
 
 export async function POST(req: Request) {
   try {
@@ -31,9 +32,9 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
     const dataOwnerUid = resolved.dataOwnerUid;
-    const host = normalizeMailHost(String(imap?.host ?? ""));
+    let host = normalizeMailHost(String(imap?.host ?? ""));
     const port = Number(imap?.port ?? 993);
-    const secure = Boolean(imap?.secure);
+    const secure = Boolean(imap?.secure ?? true);
     const auth = await resolveMailboxTransportAuthServer({
       organizationId: g.ctx.session.organizationId,
       uid: dataOwnerUid,
@@ -42,9 +43,22 @@ export async function POST(req: Request) {
       fallbackPass: String(imap?.pass ?? ""),
       prefer: "imap",
     });
-    const user = auth.user;
+    let user = auth.user;
     const pass = auth.pass;
     const accessToken = auth.accessToken;
+
+    if ((!host || !user) && mailboxId) {
+      const profile = await getMailboxProfileServer({
+        organizationId: g.ctx.session.organizationId,
+        uid: dataOwnerUid,
+        mailboxId,
+      });
+      if (profile) {
+        if (!host) host = normalizeMailHost(profile.imap.host);
+        if (!user) user = profile.emailAddress.trim() || profile.imap.user.trim();
+      }
+    }
+
     const requested = Number(b.limit);
     const limit =
       Number.isFinite(requested) && requested > 0
@@ -67,8 +81,8 @@ export async function POST(req: Request) {
       return NextResponse.json(
         {
           ok: false,
-          error:
-            "IMAP credentials missing. For Google Workspace, reconnect with Sign in with Google in Settings → Email.",
+          error: googleAuthFailureMessage(auth.googleAuthFailure),
+          googleAuthFailure: auth.googleAuthFailure ?? "no_tokens",
         },
         { status: 400 },
       );

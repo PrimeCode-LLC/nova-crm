@@ -216,17 +216,17 @@ export async function getMailboxSecretsServer(input: {
           : "",
       },
     };
-    if (
-      isEncryptedBlob(data.googleRefreshToken) &&
-      isEncryptedBlob(data.googleAccessToken) &&
-      typeof data.googleAccountEmail === "string"
-    ) {
-      stored.googleOAuth = {
-        refreshToken: decryptValue(data.googleRefreshToken, key),
-        accessToken: decryptValue(data.googleAccessToken, key),
-        tokenExpiresAt: String(data.googleTokenExpiresAt ?? ""),
-        accountEmail: data.googleAccountEmail.trim(),
-      };
+    if (typeof data.googleAccountEmail === "string") {
+      const refreshBlob = data.googleRefreshToken;
+      const accessBlob = data.googleAccessToken;
+      if (isEncryptedBlob(refreshBlob) || isEncryptedBlob(accessBlob)) {
+        stored.googleOAuth = {
+          refreshToken: isEncryptedBlob(refreshBlob) ? decryptValue(refreshBlob, key) : "",
+          accessToken: isEncryptedBlob(accessBlob) ? decryptValue(accessBlob, key) : "",
+          tokenExpiresAt: String(data.googleTokenExpiresAt ?? ""),
+          accountEmail: data.googleAccountEmail.trim(),
+        };
+      }
     }
     return stored;
   } catch {

@@ -22,6 +22,7 @@ export async function refreshGoogleMailAccessToken(refreshToken: string): Promis
 } | null> {
   const creds = googleOAuthClientCreds();
   if (!creds) return null;
+  if (!refreshToken.trim()) return null;
 
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
@@ -33,7 +34,17 @@ export async function refreshGoogleMailAccessToken(refreshToken: string): Promis
       grant_type: "refresh_token",
     }),
   });
-  if (!res.ok) return null;
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const body = (await res.json()) as { error?: string; error_description?: string };
+      detail = [body.error, body.error_description].filter(Boolean).join(": ");
+    } catch {
+      detail = `HTTP ${res.status}`;
+    }
+    console.warn("[google-mail-oauth] refresh failed:", detail || res.status);
+    return null;
+  }
   const tokens = (await res.json()) as { access_token?: string; expires_in?: number };
   if (!tokens.access_token) return null;
   const expiresAt = tokens.expires_in
@@ -42,25 +53,40 @@ export async function refreshGoogleMailAccessToken(refreshToken: string): Promis
   return { accessToken: tokens.access_token, expiresAt };
 }
 
+export type GoogleMailAuthFailureReason =
+  | "not_configured"
+  | "no_tokens"
+  | "no_account_email"
+  | "refresh_failed"
+  | "expired";
+
 /**
  * Returns a fresh access token for Google Workspace IMAP/SMTP (XOAUTH2), or null if not connected.
+ * When `detail` is provided, sets a machine-readable failure reason for API error messages.
  */
 export async function resolveMailboxGoogleAccessTokenServer(input: {
   organizationId: string;
   uid: string;
   mailboxId: string;
+  detail?: { reason?: GoogleMailAuthFailureReason };
 }): Promise<{ user: string; accessToken: string } | null> {
   if (!input.mailboxId.trim()) return null;
   const secrets = await getMailboxSecretsServer(input);
   const oauth = secrets?.googleOAuth;
-  if (!oauth?.refreshToken && !oauth?.accessToken) return null;
+  if (!oauth?.refreshToken && !oauth?.accessToken) {
+    if (input.detail) input.detail.reason = "no_tokens";
+    return null;
+  }
 
   const user =
     oauth.accountEmail.trim() ||
     secrets?.smtp.user.trim() ||
     secrets?.imap.user.trim() ||
     "";
-  if (!user) return null;
+  if (!user) {
+    if (input.detail) input.detail.reason = "no_account_email";
+    return null;
+  }
 
   const now = Date.now();
   const expiresMs = oauth.tokenExpiresAt ? new Date(oauth.tokenExpiresAt).getTime() : 0;
@@ -70,6 +96,10 @@ export async function resolveMailboxGoogleAccessTokenServer(input: {
   }
 
   if (oauth.refreshToken) {
+    if (!googleOAuthClientCreds()) {
+      if (input.detail) input.detail.reason = "not_configured";
+      return null;
+    }
     const refreshed = await refreshGoogleMailAccessToken(oauth.refreshToken);
     if (refreshed) {
       await patchMailboxGoogleAccessTokenServer({
@@ -79,6 +109,7 @@ export async function resolveMailboxGoogleAccessTokenServer(input: {
       });
       return { user, accessToken: refreshed.accessToken };
     }
+    if (input.detail) input.detail.reason = "refresh_failed";
   }
 
   if (oauth.accessToken) {
@@ -88,6 +119,7 @@ export async function resolveMailboxGoogleAccessTokenServer(input: {
     if (probe.ok) return { user, accessToken: oauth.accessToken };
   }
 
+  if (input.detail && !input.detail.reason) input.detail.reason = "expired";
   return null;
 }
 
