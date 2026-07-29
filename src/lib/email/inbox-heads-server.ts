@@ -141,6 +141,46 @@ export async function markInboxSyncErrorServer(input: {
   );
 }
 
+/** Clear transport error after a successful IMAP/SMTP operation. */
+export async function clearInboxSyncErrorServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+}): Promise<void> {
+  const mb = mailboxRef(input.organizationId, input.uid, input.mailboxId);
+  if (!mb) return;
+  const syncedAt = new Date().toISOString();
+  await mb.set(
+    {
+      inboxLastSyncedAt: syncedAt,
+      inboxLastSyncError: null,
+      updatedAt: syncedAt,
+    },
+    { merge: true },
+  );
+}
+
+/**
+ * Record auth/transport health for Settings CONNECTED / NEEDS FIX.
+ * Prefer calling this from interactive IMAP/SMTP paths (cron already uses mark/clear via heads write).
+ */
+export async function recordMailboxTransportHealthServer(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
+  ok: boolean;
+  error?: string;
+}): Promise<void> {
+  if (!input.mailboxId.trim()) return;
+  if (input.ok) {
+    await clearInboxSyncErrorServer(input);
+    return;
+  }
+  const error = (input.error ?? "Transport failed").trim();
+  if (!error) return;
+  await markInboxSyncErrorServer({ ...input, error });
+}
+
 export async function readInboxHeadsServer(input: {
   organizationId: string;
   uid: string;

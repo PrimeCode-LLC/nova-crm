@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
-import { resolveMailboxTransportAuthServer, googleAuthFailureMessage } from "@/lib/email/resolve-mailbox-transport-auth";
+import {
+  resolveMailboxTransportAuthServer,
+  googleAuthFailureMessage,
+} from "@/lib/email/resolve-mailbox-transport-auth";
 import {
   fetchImapFolderServer,
   IMAP_FETCH_DEFAULT_LIMIT,
@@ -11,8 +14,27 @@ import {
 } from "@/lib/email/imap-fetch-folder-server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
+import { recordMailboxTransportHealthServer } from "@/lib/email/inbox-heads-server";
+
+function isAuthTransportFailure(error: string): boolean {
+  return (
+    /credentials missing/i.test(error) ||
+    /sign-in expired/i.test(error) ||
+    /access expired/i.test(error) ||
+    /oauth/i.test(error) ||
+    /authentication/i.test(error) ||
+    /AUTHENTICATIONFAILED/i.test(error) ||
+    /invalid credentials/i.test(error) ||
+    /login rejected/i.test(error) ||
+    /reconnect with Sign in with Google/i.test(error)
+  );
+}
 
 export async function POST(req: Request) {
+  let healthOrgId = "";
+  let healthUid = "";
+  let healthMailboxId = "";
+
   try {
     const g = await guardTenantApi();
     if (!g.ok) return g.response;
@@ -32,6 +54,10 @@ export async function POST(req: Request) {
       return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
     }
     const dataOwnerUid = resolved.dataOwnerUid;
+    healthOrgId = g.ctx.session.organizationId;
+    healthUid = dataOwnerUid;
+    healthMailboxId = mailboxId;
+
     let host = normalizeMailHost(String(imap?.host ?? ""));
     const port = Number(imap?.port ?? 993);
     const secure = Boolean(imap?.secure ?? true);
@@ -72,17 +98,38 @@ export async function POST(req: Request) {
         : 0;
 
     if (!host || !user) {
+      const error = "IMAP host and username are required.";
+      if (mailboxId) {
+        await recordMailboxTransportHealthServer({
+          organizationId: healthOrgId,
+          uid: healthUid,
+          mailboxId,
+          ok: false,
+          error,
+        });
+      }
       return NextResponse.json(
-        { ok: false, error: "IMAP host and username are required." },
+        { ok: false, error, transportError: error },
         { status: 400 },
       );
     }
     if (!accessToken && !pass) {
+      const error = googleAuthFailureMessage(auth.googleAuthFailure);
+      if (mailboxId) {
+        await recordMailboxTransportHealthServer({
+          organizationId: healthOrgId,
+          uid: healthUid,
+          mailboxId,
+          ok: false,
+          error,
+        });
+      }
       return NextResponse.json(
         {
           ok: false,
-          error: googleAuthFailureMessage(auth.googleAuthFailure),
+          error,
           googleAuthFailure: auth.googleAuthFailure ?? "no_tokens",
+          transportError: error,
         },
         { status: 400 },
       );
@@ -105,6 +152,15 @@ export async function POST(req: Request) {
       headsOnly: Boolean(b.headsOnly),
     });
 
+    if (mailboxId) {
+      await recordMailboxTransportHealthServer({
+        organizationId: healthOrgId,
+        uid: healthUid,
+        mailboxId,
+        ok: true,
+      });
+    }
+
     return NextResponse.json({
       ok: true,
       messages: result.messages,
@@ -113,8 +169,26 @@ export async function POST(req: Request) {
       loadedThrough: result.loadedThrough,
       mailboxPath: result.mailboxPath,
       skippedNoEnvelope: result.skippedNoEnvelope,
+      transportError: null,
     });
   } catch (e) {
-    return NextResponse.json({ ok: false, error: toImapFetchErrorMessage(e) }, { status: 400 });
+    const error = toImapFetchErrorMessage(e);
+    if (healthMailboxId && isAuthTransportFailure(error)) {
+      await recordMailboxTransportHealthServer({
+        organizationId: healthOrgId,
+        uid: healthUid,
+        mailboxId: healthMailboxId,
+        ok: false,
+        error,
+      });
+    }
+    return NextResponse.json(
+      {
+        ok: false,
+        error,
+        ...(isAuthTransportFailure(error) ? { transportError: error } : {}),
+      },
+      { status: 400 },
+    );
   }
 }

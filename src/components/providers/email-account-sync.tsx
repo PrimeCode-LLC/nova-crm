@@ -93,6 +93,13 @@ export function EmailAccountSync() {
                       ? m.connectionType
                       : "custom",
                   ...(m.dataOwnerUid ? { dataOwnerUid: m.dataOwnerUid } : {}),
+                  // Always set so a cleared server error overwrites a stale client failure.
+                  transportError:
+                    typeof m.transportError === "string" ? m.transportError.trim().slice(0, 500) : "",
+                  ...(m.transportCheckedAt ? { transportCheckedAt: m.transportCheckedAt } : {}),
+                  ...(typeof m.googleAuthConnected === "boolean"
+                    ? { googleAuthConnected: m.googleAuthConnected }
+                    : {}),
                 }),
               )
             : [defaultEmailMailboxSettings({ label: "Primary mailbox" })];

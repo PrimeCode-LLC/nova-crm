@@ -49,6 +49,13 @@ export interface EmailAccountSettings {
   assignedUserIds: string[];
   /** True when Google OAuth (XOAUTH2) tokens are stored for this mailbox. */
   googleAuthConnected?: boolean;
+  /**
+   * Last transport failure from IMAP sync / send (cleared on successful sync).
+   * When set, Settings treats the mailbox as disconnected / needs fix.
+   */
+  transportError?: string;
+  /** ISO time of last successful or failed transport check. */
+  transportCheckedAt?: string;
 }
 
 export interface EmailMailboxSettings extends EmailAccountSettings {

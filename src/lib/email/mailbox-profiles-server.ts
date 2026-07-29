@@ -165,6 +165,12 @@ function firestoreToMailbox(
     assignedUserIds: parseAssignedUserIds(data.assignedUserIds),
     // Require a refresh token — access-only / empty-token vault rows look "connected" but IMAP fails.
     googleAuthConnected: Boolean(googleEmail && googleRefresh),
+    ...(typeof data.inboxLastSyncError === "string" && data.inboxLastSyncError.trim()
+      ? { transportError: data.inboxLastSyncError.trim().slice(0, 500) }
+      : {}),
+    ...(typeof data.inboxLastSyncedAt === "string" && data.inboxLastSyncedAt.trim()
+      ? { transportCheckedAt: data.inboxLastSyncedAt.trim() }
+      : {}),
   };
   if (options?.dataOwnerUid) {
     mailbox.dataOwnerUid = options.dataOwnerUid;

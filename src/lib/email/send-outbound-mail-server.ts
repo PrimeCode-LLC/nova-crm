@@ -5,9 +5,10 @@ import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { formatSmtpError } from "@/lib/email/smtp-client-options";
 import { runWithSmtpTransporter } from "@/lib/email/smtp-connect-retry";
-import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";
+import { resolveMailboxTransportAuthServer, googleAuthFailureMessage } from "@/lib/email/resolve-mailbox-transport-auth";
 import type { OutboundAttachment } from "@/lib/email/outbound-attachments";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
+import { recordMailboxTransportHealthServer } from "@/lib/email/inbox-heads-server";
 
 function sanitizeOutboundMessageId(raw: string | undefined): string | undefined {
   const value = normalizeMessageId(raw);
@@ -71,11 +72,17 @@ export async function sendOutboundMailServer(
     return { ok: false, error: "SMTP host, user, and From address are required." };
   }
   if (!accessToken && !pass) {
-    return {
+    const error = auth.googleAuthFailure
+      ? googleAuthFailureMessage(auth.googleAuthFailure).replace(/^IMAP/i, "SMTP")
+      : "SMTP credentials missing. For Google Workspace, reconnect with Sign in with Google in Settings → Email.";
+    await recordMailboxTransportHealthServer({
+      organizationId: input.organizationId,
+      uid: input.uid,
+      mailboxId: input.mailboxId,
       ok: false,
-      error:
-        "SMTP credentials missing. For Google Workspace, reconnect with Sign in with Google in Settings → Email.",
-    };
+      error,
+    });
+    return { ok: false, error };
   }
 
   const displayName = input.displayName?.trim() ?? "";
@@ -142,6 +149,12 @@ export async function sendOutboundMailServer(
         : normalizeMessageId(outboundMessageId);
 
     const imapHost = normalizeMailHost(input.imap?.host ?? "");
+    await recordMailboxTransportHealthServer({
+      organizationId: input.organizationId,
+      uid: input.uid,
+      mailboxId: input.mailboxId,
+      ok: true,
+    });
     if (imapHost && shouldAppendSentCopy) {
       const appendResult = await appendSentMailServer({
         organizationId: input.organizationId,
@@ -165,6 +178,22 @@ export async function sendOutboundMailServer(
       messageId,
     };
   } catch (e) {
-    return { ok: false, error: formatSmtpError(e) };
+    const error = formatSmtpError(e);
+    if (
+      /credentials missing/i.test(error) ||
+      /authentication/i.test(error) ||
+      /login rejected/i.test(error) ||
+      /oauth/i.test(error) ||
+      /Sign in with Google/i.test(error)
+    ) {
+      await recordMailboxTransportHealthServer({
+        organizationId: input.organizationId,
+        uid: input.uid,
+        mailboxId: input.mailboxId,
+        ok: false,
+        error,
+      });
+    }
+    return { ok: false, error };
   }
 }

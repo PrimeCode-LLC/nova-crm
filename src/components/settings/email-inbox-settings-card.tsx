@@ -76,8 +76,9 @@ function findDuplicateMailboxByEmail(
   });
 }
 
-/** Transport ready: Google OAuth for Workspace, otherwise SMTP host set. */
+/** Transport ready for Settings overview: Google OAuth / SMTP host, and no live sync/send failure. */
 function isMailboxTransportConnected(mb: EmailMailboxSettings): boolean {
+  if (mb.transportError?.trim()) return false;
   if (mb.connectionType === "google_workspace") {
     return Boolean(mb.googleAuthConnected);
   }
@@ -180,6 +181,7 @@ function MailboxQuickStatus({
   sendUsage?: { used: number; limit: number | null };
 }) {
   const connected = isMailboxTransportConnected(mailbox);
+  const transportBroken = Boolean(mailbox.transportError?.trim());
   const assignedCount = (mailbox.assignedUserIds ?? []).length;
   const hasSignature = Boolean(mailbox.signature?.trim());
   const limit = mailbox.dailySendLimit;
@@ -187,13 +189,15 @@ function MailboxQuickStatus({
   const limitNear =
     limit != null && limit > 0 && used / limit >= 0.9;
 
-  const connectedTooltip = connected
-    ? mailbox.connectionType === "google_workspace"
-      ? "Google OAuth connected"
-      : "SMTP host configured"
-    : mailbox.connectionType === "google_workspace"
-      ? "Google not connected - sign in required"
-      : "SMTP not configured yet";
+  const connectedTooltip = transportBroken
+    ? mailbox.transportError!.trim()
+    : connected
+      ? mailbox.connectionType === "google_workspace"
+        ? "Google OAuth connected"
+        : "SMTP host configured"
+      : mailbox.connectionType === "google_workspace"
+        ? "Google not connected - sign in required"
+        : "SMTP not configured yet";
 
   const limitLabel = limit == null ? "∞" : String(limit);
   const limitTooltip =
@@ -316,7 +320,10 @@ export function EmailInboxSettingsCard() {
       withSignature,
       withAssignees,
       needsAttention: ownedMailboxes.filter(
-        (mb) => !isMailboxTransportConnected(mb) || !mb.signature?.trim(),
+        (mb) =>
+          Boolean(mb.transportError?.trim()) ||
+          !isMailboxTransportConnected(mb) ||
+          !mb.signature?.trim(),
       ).length,
     };
   }, [ownedMailboxes]);
@@ -669,10 +676,16 @@ export function EmailInboxSettingsCard() {
           pass: prepared.smtp.password,
         }),
       });
-      const smtpData = (await smtpRes.json()) as { ok?: boolean; error?: string };
+      const smtpData = (await smtpRes.json()) as {
+        ok?: boolean;
+        error?: string;
+        transportError?: string | null;
+      };
 
-      let imapData: { ok?: boolean; error?: string } | null = null;
-      if (testImap) {
+      let imapData: { ok?: boolean; error?: string; transportError?: string | null } | null =
+        null;
+      // Skip IMAP when SMTP already failed so a later IMAP success cannot clear the SMTP error.
+      if (testImap && Boolean(smtpData.ok)) {
         const imapRes = await fetch("/api/email/imap-verify", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -685,13 +698,21 @@ export function EmailInboxSettingsCard() {
             pass: prepared.imap.password || prepared.smtp.password,
           }),
         });
-        imapData = (await imapRes.json()) as { ok?: boolean; error?: string };
+        imapData = (await imapRes.json()) as {
+          ok?: boolean;
+          error?: string;
+          transportError?: string | null;
+        };
+      } else if (testImap && !smtpData.ok) {
+        imapData = { ok: false, error: "Skipped — fix SMTP first." };
       }
 
       const smtpOk = Boolean(smtpData.ok);
       const imapOk = !testImap || Boolean(imapData?.ok);
+      const checkedAt = new Date().toISOString();
 
       if (smtpOk && imapOk) {
+        updateMailbox(mb.id, { transportError: "", transportCheckedAt: checkedAt });
         toast.success(
           testImap ? "SMTP and IMAP settings look correct." : "SMTP settings look correct.",
         );
@@ -701,6 +722,16 @@ export function EmailInboxSettingsCard() {
         if (testImap && imapData && !imapData.ok) {
           parts.push(`IMAP: ${imapData.error ?? "failed"}`);
         }
+        const transportError = (
+          (typeof imapData?.transportError === "string" && imapData.transportError.trim()
+            ? imapData.transportError
+            : null) ||
+          (typeof smtpData.transportError === "string" && smtpData.transportError.trim()
+            ? smtpData.transportError
+            : null) ||
+          parts.join(" · ")
+        ).slice(0, 500);
+        updateMailbox(mb.id, { transportError, transportCheckedAt: checkedAt });
         toast.error("Connection check failed", {
           description: parts.join("\n\n"),
         });
@@ -970,7 +1001,7 @@ export function EmailInboxSettingsCard() {
                 {
                   label: "Connected",
                   value: mailboxOverviewStats.connected,
-                  hint: "OAuth / SMTP ready",
+                  hint: "Working auth (updates when sync/send fails)",
                   tone:
                     mailboxOverviewStats.connected === mailboxOverviewStats.total &&
                     mailboxOverviewStats.total > 0
@@ -1003,7 +1034,7 @@ export function EmailInboxSettingsCard() {
                 {
                   label: "Needs fix",
                   value: mailboxOverviewStats.needsAttention,
-                  hint: "Missing connection or signature",
+                  hint: "Broken sync/send, missing Google sign-in, or no signature",
                   tone:
                     mailboxOverviewStats.needsAttention > 0
                       ? ("warn" as const)
@@ -1322,7 +1353,19 @@ export function EmailInboxSettingsCard() {
                             passwords) for SMTP/IMAP. Sign in with Google once - use the inbox email and
                             preferred password on Google&apos;s login screen - then Nova uses OAuth tokens.
                           </p>
-                          {mb.googleAuthConnected ? (
+                          {mb.transportError?.trim() ? (
+                            <div className="rounded-md border border-destructive/25 bg-destructive/10 px-3 py-2.5">
+                              <p className="text-xs font-medium text-destructive">
+                                Disconnected — sync/send failed
+                              </p>
+                              <p className="mt-0.5 text-[11px] text-muted-foreground break-words">
+                                {mb.transportError.trim()}
+                              </p>
+                              <p className="mt-1 text-[11px] text-muted-foreground">
+                                Reconnect Google below, then refresh Inbox to clear this.
+                              </p>
+                            </div>
+                          ) : mb.googleAuthConnected ? (
                             <div className="flex flex-wrap items-center gap-2.5 rounded-md border border-success/25 bg-success/10 px-3 py-2.5">
                               <CheckCircle2
                                 className="h-4 w-4 shrink-0 text-success"

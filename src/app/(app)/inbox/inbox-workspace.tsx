@@ -470,6 +470,7 @@ export default function InboxWorkspace() {
   const emailServerHydrated = useEmailAccountStore((s) => s.emailServerHydrated);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
+  const updateMailbox = useEmailAccountStore((s) => s.updateMailbox);
   const inboxWriteDisabled = useEmailAccountStore((s) => s.inboxWriteDisabled);
   const allMailboxesSelected = activeMailboxId === ALL_MAILBOXES_ID;
   const account = getActiveMailbox({ mailboxes, activeMailboxId });
@@ -875,6 +876,7 @@ export default function InboxWorkspace() {
         let data: {
           ok?: boolean;
           error?: string;
+          transportError?: string | null;
           messages?: MailInbound[];
           mailboxTotal?: number;
           mailboxPath?: string;
@@ -890,6 +892,17 @@ export default function InboxWorkspace() {
         }
         if (!res.ok || !data.ok) {
           const err = data.error ?? `Mail server error (${res.status})`;
+          if (typeof data.transportError === "string" && data.transportError.trim()) {
+            updateMailbox(acct.id, {
+              transportError: data.transportError.trim().slice(0, 500),
+              transportCheckedAt: new Date().toISOString(),
+            });
+          } else if (/credentials missing|Sign in with Google|oauth|authentication/i.test(err)) {
+            updateMailbox(acct.id, {
+              transportError: err.slice(0, 500),
+              transportCheckedAt: new Date().toISOString(),
+            });
+          }
           if (!silent) {
             const label =
               folder === "inbox"
@@ -904,6 +917,10 @@ export default function InboxWorkspace() {
           if (folder === "sent") setSentFetchError(err);
           return { ok: false, error: err, mailboxLabel };
         }
+        updateMailbox(acct.id, {
+          transportError: "",
+          transportCheckedAt: new Date().toISOString(),
+        });
         const currentSelection = useEmailAccountStore.getState().activeMailboxId;
         if (currentSelection !== ALL_MAILBOXES_ID && currentSelection !== mailboxId) {
           return { ok: true, mailboxLabel };
@@ -975,6 +992,7 @@ export default function InboxWorkspace() {
       mailViewAsUid, mailApiForUid,
       currentUserId,
       emailServerHydrated,
+      updateMailbox,
     ],
   );
 
