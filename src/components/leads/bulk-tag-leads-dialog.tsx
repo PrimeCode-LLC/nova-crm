@@ -54,7 +54,7 @@ export function BulkTagLeadsDialog({
   const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
   const [localCreated, setLocalCreated] = React.useState<CrmLabel[]>([]);
   const [createName, setCreateName] = React.useState("");
-  const [createColor, setCreateColor] = React.useState(CRM_LABEL_COLOR_PRESETS[0]!);
+  const [createColor, setCreateColor] = React.useState<string>(CRM_LABEL_COLOR_PRESETS[0]!);
   const [showCreate, setShowCreate] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
   const [progressDone, setProgressDone] = React.useState(0);
