@@ -554,7 +554,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     if (!companyEmail || verifyingEmail || ws.isDemo) return;
     setVerifyingEmail(true);
     try {
-      const { results, summary } = await verifyLeadEmailsClient([lead.id]);
+      const { results, summary } = await verifyLeadEmailsClient([resolvedLead.id]);
       const first = results[0];
       if (first?.error && !first.status) {
         toast.error(first.error);
