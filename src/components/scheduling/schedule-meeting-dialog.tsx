@@ -82,6 +82,7 @@ export function ScheduleMeetingDialog({
   onOpenChange,
   hostId,
   hostLabel,
+  calendarEmail,
   links,
   isDemo,
   initialDate,
@@ -97,6 +98,8 @@ export function ScheduleMeetingDialog({
   onOpenChange: (open: boolean) => void;
   hostId: string;
   hostLabel: string;
+  /** Connected Google Calendar account email for the selected host, when known. */
+  calendarEmail?: string;
   links: SchedulingLink[];
   isDemo?: boolean;
   initialDate?: Date;
@@ -265,31 +268,42 @@ export function ScheduleMeetingDialog({
             className="h-11 min-h-11 border-0 bg-transparent px-0 py-2 text-xl font-semibold leading-normal shadow-none focus-visible:border-0 focus-visible:ring-0"
           />
           {hostOptions && hostOptions.length > 1 && onHostChange ? (
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <span>Calendar</span>
-              <Select
-                value={hostId}
-                onValueChange={(v) => {
-                  if (v) onHostChange(v);
-                }}
-              >
-                <SelectTrigger className="h-8 w-full max-w-xs">
-                  <SelectValue placeholder="Select calendar">
-                    {hostOptions.find((o) => o.id === hostId)?.label}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  {hostOptions.map((o) => (
-                    <SelectItem key={o.id} value={o.id}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+            <div className="space-y-1.5">
+              <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                <span>Calendar</span>
+                <Select
+                  value={hostId}
+                  onValueChange={(v) => {
+                    if (v) onHostChange(v);
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-full max-w-xs">
+                    <SelectValue placeholder="Select calendar">
+                      {hostOptions.find((o) => o.id === hostId)?.label}
+                    </SelectValue>
+                  </SelectTrigger>
+                  <SelectContent>
+                    {hostOptions.map((o) => (
+                      <SelectItem key={o.id} value={o.id}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              {calendarEmail ? (
+                <p className="text-xs text-muted-foreground">{calendarEmail}</p>
+              ) : null}
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">
               Calendar · <span className="font-medium text-foreground">{hostLabel}</span>
+              {calendarEmail ? (
+                <>
+                  {" "}
+                  · <span className="font-medium text-foreground">{calendarEmail}</span>
+                </>
+              ) : null}
             </p>
           )}
         </DialogHeader>

@@ -104,6 +104,16 @@ function senderLabel(raw: string): string {
   return (match?.[1] ?? raw).trim().replace(/^["']|["']$/g, "") || "Unknown sender";
 }
 
+function resolveOutboundFrom(input: {
+  messageFrom?: string;
+  mailboxEmail?: string;
+  fallbackEmail?: string;
+}): string {
+  const from = input.messageFrom?.trim() || "";
+  if (from) return from;
+  return input.mailboxEmail?.trim() || input.fallbackEmail?.trim() || "";
+}
+
 function bodyToHtml(body: string): string {
   return body
     .split("\n")
@@ -159,6 +169,8 @@ function relevantLeadMessages(input: {
   linkedLeadByMessageId: Record<string, string>;
   /** CRM sequence sends that may not yet appear in IMAP Sent. */
   crmSentFollowups?: readonly Followup[];
+  /** Fallback From when CRM synthetic rows have no stored sender. */
+  fallbackFromEmail?: string;
 }): LeadEmailMessage[] {
   const email = input.contactEmail?.trim().toLowerCase() ?? "";
   const rows: LeadEmailMessage[] = [];
@@ -190,7 +202,7 @@ function relevantLeadMessages(input: {
     const synthetic: MailSent = {
       id,
       mailboxId: "crm",
-      from: "",
+      from: input.fallbackFromEmail?.trim() || "",
       to: email || "",
       subject: followup.emailSubject?.trim() || followup.title,
       body: followup.messageBody?.trim() || "",
@@ -306,8 +318,17 @@ export function LeadEmailsPanel({
         sent,
         linkedLeadByMessageId,
         crmSentFollowups,
+        fallbackFromEmail: activeMailbox.emailAddress,
       }),
-    [contactEmail, crmSentFollowups, inboundByMailbox, lead, linkedLeadByMessageId, sent],
+    [
+      activeMailbox.emailAddress,
+      contactEmail,
+      crmSentFollowups,
+      inboundByMailbox,
+      lead,
+      linkedLeadByMessageId,
+      sent,
+    ],
   );
   const messages = React.useMemo(
     () => mergeLeadEmailMessages(storedMessages, liveMessages),
@@ -338,7 +359,8 @@ export function LeadEmailsPanel({
   const [includeFooter, setIncludeFooter] = React.useState(true);
 
   const selectedMailbox = selected
-    ? mailboxes.find((mailbox) => mailbox.id === selected.mailboxId)
+    ? mailboxes.find((mailbox) => mailbox.id === selected.mailboxId) ??
+      (selected.mailboxId === "crm" ? activeMailbox : undefined)
     : undefined;
   const newComposeMailbox =
     mailboxes.find((mailbox) => mailbox.id === composeMailboxId) ??
@@ -1339,7 +1361,10 @@ export function LeadEmailsPanel({
               <DialogTitle className="text-base leading-snug">{selected.subject}</DialogTitle>
               <DialogDescription>
                 {selected.messages.length} message{selected.messages.length === 1 ? "" : "s"} ·{" "}
-                {selectedMailbox?.label || selectedMailbox?.emailAddress || "Mailbox"}
+                {selectedMailbox?.label ||
+                  selectedMailbox?.emailAddress ||
+                  activeMailbox.emailAddress ||
+                  "Mailbox"}
               </DialogDescription>
               <div className="flex flex-wrap gap-2 pt-1" role="toolbar" aria-label="Conversation actions">
                 <Button size="sm" disabled={conversationReadOnly} onClick={() => openComposer("reply")}>
@@ -1372,15 +1397,31 @@ export function LeadEmailsPanel({
                       ? mailReaderContentFromInbound(row.message)
                       : mailReaderContentFromSent(row.message);
                   const date = leadEmailMessageAt(row);
+                  const rowMailbox =
+                    mailboxes.find((mailbox) => mailbox.id === row.mailboxId) ??
+                    (row.mailboxId === "crm" ? activeMailbox : undefined);
+                  const fromDisplay =
+                    row.direction === "inbound"
+                      ? row.message.from?.trim() || "Unknown"
+                      : resolveOutboundFrom({
+                          messageFrom: row.message.from,
+                          mailboxEmail: rowMailbox?.emailAddress,
+                          fallbackEmail: activeMailbox.emailAddress,
+                        });
+                  const toDisplay = row.message.to?.trim() || "";
+                  const headline =
+                    row.direction === "inbound"
+                      ? senderLabel(row.message.from)
+                      : fromDisplay
+                        ? `${fromDisplay} → ${toDisplay}`
+                        : `You → ${toDisplay}`;
                   return (
                     <article key={row.key} className="overflow-hidden rounded-lg border bg-card shadow-sm">
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/15 px-4 py-3">
                         <div className="min-w-0">
-                          <p className="truncate text-sm font-medium">
-                            {row.direction === "inbound" ? senderLabel(row.message.from) : `You → ${row.message.to}`}
-                          </p>
+                          <p className="truncate text-sm font-medium">{headline}</p>
                           <p className="mt-0.5 break-all text-[11px] text-muted-foreground">
-                            From {row.message.from} · To {row.message.to}
+                            From {fromDisplay || "Unknown"} · To {toDisplay || "Unknown"}
                             {row.message.cc ? ` · Cc ${row.message.cc}` : ""}
                           </p>
                         </div>

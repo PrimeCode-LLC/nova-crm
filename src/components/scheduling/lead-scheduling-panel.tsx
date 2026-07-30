@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScheduleMeetingDialog } from "@/components/scheduling/schedule-meeting-dialog";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useCalendarConnections } from "@/lib/scheduling/use-calendar-connections";
 import type { Lead, Meeting, SchedulingLink } from "@/lib/types";
 import {
   demoDelegatedHosts,
@@ -21,6 +22,10 @@ import { fmtDate } from "@/lib/format";
 
 export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
   const { isDemo, users, currentUserId } = useWorkspace();
+  const { connections, loading: calendarLoading } = useCalendarConnections(
+    isDemo,
+    currentUserId,
+  );
   const [bookableHosts, setBookableHosts] = React.useState<
     { hostId: string; hostName: string }[]
   >([]);
@@ -70,6 +75,9 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
     hostOptions.find((o) => o.id === hostId)?.label ?? "Selected calendar";
 
   const shareLink = links[0];
+  const guestEmail = lead.contactEmail?.trim() || "";
+  const myCalendarEmail = connections[0]?.accountEmail?.trim() || "";
+  const bookingOnMyCalendar = hostId === currentUserId;
 
   function copySchedulingLink() {
     if (lead.doNotContact) {
@@ -101,6 +109,20 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
             Outreach is disabled because this record is marked do not contact.
           </p>
         ) : null}
+        <div className="space-y-1 text-xs text-muted-foreground">
+          <p>
+            <span className="font-medium text-foreground/80">Guest · </span>
+            {guestEmail || "No contact email on this lead"}
+          </p>
+          <p>
+            <span className="font-medium text-foreground/80">Calendar · </span>
+            {calendarLoading && bookingOnMyCalendar
+              ? "Checking connected calendar…"
+              : bookingOnMyCalendar
+                ? myCalendarEmail || "No calendar connected — set one in Scheduling settings"
+                : `${hostLabel}'s connected calendar`}
+          </p>
+        </div>
         <div className="flex flex-wrap gap-2">
           <Button size="sm" disabled={lead.doNotContact} onClick={() => setBookOpen(true)}>
             Book meeting
@@ -142,6 +164,7 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
         onOpenChange={setBookOpen}
         hostId={hostId}
         hostLabel={hostLabel}
+        calendarEmail={bookingOnMyCalendar ? myCalendarEmail || undefined : undefined}
         links={links}
         isDemo={isDemo}
         lead={lead}
