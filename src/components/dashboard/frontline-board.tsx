@@ -162,7 +162,7 @@ export function FrontlineBoard({
             tone={wonDealCount > 0 ? "success" : "default"}
           />
           <KpiCard
-            label="Avg response"
+            label="Avg first outreach"
             value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "-"}
             hint="Sales lead created → first outbound email"
             deltaType="positive-down"

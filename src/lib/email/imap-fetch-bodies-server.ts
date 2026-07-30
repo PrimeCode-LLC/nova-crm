@@ -169,11 +169,12 @@ export async function fetchImapBodiesServer(
             bodySynced: true,
           });
         } catch {
+          // Mark synced so UIs don't spin forever; preview/subject is enough to exit loading.
           updates.push({
             uid: row.uid,
             preview: subjFallback,
-            bodyText: "",
-            bodySynced: false,
+            bodyText: subjFallback,
+            bodySynced: true,
           });
         }
       }

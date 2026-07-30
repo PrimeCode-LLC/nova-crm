@@ -23,6 +23,8 @@ export function inboundMessageLeadId(input: {
   message: MailInbound;
   leads: Lead[];
   linkedLeadByMessageId: Record<string, string>;
+  /** Optional contact emails keyed by contact id (company + personal). */
+  emailsByContactId?: Record<string, readonly string[]>;
 }): string | null {
   const mid = `${input.mailboxId}:in:${input.message.id}`;
   const manual = input.linkedLeadByMessageId[mid];
@@ -32,8 +34,9 @@ export function inboundMessageLeadId(input: {
   if (!fromAddr) return null;
 
   for (const lead of input.leads) {
-    const emails = leadContactEmails(lead);
-    if (emails.some((e) => fromAddr === e || fromAddr.endsWith(e))) return lead.id;
+    const extras = lead.contactId ? input.emailsByContactId?.[lead.contactId] : undefined;
+    const emails = leadContactEmails(lead, ...(extras ?? []));
+    if (emails.some((e) => fromAddr === e)) return lead.id;
     if (emails.some((e) => `${input.message.from} ${input.message.to}`.toLowerCase().includes(e))) {
       return lead.id;
     }
@@ -45,6 +48,8 @@ export function isInboundFromLeadContact(input: {
   message: MailInbound;
   lead: Lead;
   mailboxEmail?: string;
+  /** Extra emails (e.g. personal) beyond lead.contactEmail. */
+  contactEmails?: readonly string[];
 }): boolean {
   // Bounce DSNs and OOO must not pause sequences as a human reply.
   if (isDeliveryStatusNotification(input.message) || isLikelyAutoReply(input.message)) {
@@ -54,8 +59,11 @@ export function isInboundFromLeadContact(input: {
   if (!fromAddr) return false;
   const mailbox = input.mailboxEmail?.trim().toLowerCase();
   if (mailbox && fromAddr === mailbox) return false;
-  const contacts = leadContactEmails(input.lead);
-  return contacts.some((e) => fromAddr === e || fromAddr.includes(e));
+  const contacts =
+    input.contactEmails && input.contactEmails.length > 0
+      ? leadContactEmails(input.lead, ...input.contactEmails)
+      : leadContactEmails(input.lead);
+  return contacts.some((e) => fromAddr === e);
 }
 
 export function findActivePlanToPauseOnReply(input: {

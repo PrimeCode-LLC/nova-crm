@@ -7,6 +7,7 @@ import {
   findActivePlanToPauseOnReply,
   inboundMessageLeadId,
   isInboundFromLeadContact,
+  isLikelyAutoReply,
 } from "@/lib/followup-plan-reply";
 import {
   cancelScheduledEmailsForFollowups,
@@ -17,6 +18,8 @@ import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-s
 import { toast } from "sonner";
 
 const PROCESSED_KEY = "nova-followup-reply-processed";
+/** Still process recently-seen mail so sync-after-read stamps lastReplyAt. */
+const MAX_REPLY_AGE_MS = 14 * 24 * 60 * 60 * 1000;
 
 function readProcessed(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -41,9 +44,9 @@ function writeProcessed(set: Set<string>) {
 }
 
 /**
- * When new unread inbound mail arrives from a lead:
- * - Cancel pending scheduled emails on that lead's open followups
- * - If an active AI plan exists, pause remaining steps and surface regenerate UX
+ * When new inbound mail arrives from a lead:
+ * - Human replies: cancel scheduled emails, pause plans, set lastReplyAt / reply review
+ * - OOO / auto-replies: stamp lastAutoReplyAt only (no sequence pause, no dashboard reply)
  */
 export function FollowupPlanReplyWatcher() {
   const {
@@ -51,6 +54,7 @@ export function FollowupPlanReplyWatcher() {
     sessionHydrated,
     currentUserId,
     leads,
+    contacts,
     followups,
     followupPlans,
     pauseFollowupPlanForReply,
@@ -65,6 +69,17 @@ export function FollowupPlanReplyWatcher() {
   const processedRef = React.useRef(readProcessed());
   const inFlightRef = React.useRef(new Set<string>());
 
+  const emailsByContactId = React.useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const c of contacts) {
+      const emails = [c.email, c.personalEmail]
+        .map((e) => e?.trim().toLowerCase())
+        .filter((e): e is string => Boolean(e && e.includes("@")));
+      if (emails.length) map[c.id] = emails;
+    }
+    return map;
+  }, [contacts]);
+
   const plans = React.useMemo(
     () => mergeFollowupPlans(followupPlans, followups),
     [followupPlans, followups],
@@ -78,20 +93,56 @@ export function FollowupPlanReplyWatcher() {
     const messages = inboundByMailbox[acct.id] ?? [];
 
     for (const message of messages) {
-      if (message.seen) continue;
       const mid = `${acct.id}:in:${message.id}`;
       if (processedRef.current.has(mid) || inFlightRef.current.has(mid)) continue;
+
+      const ageMs = Date.now() - Date.parse(message.date);
+      if (!Number.isFinite(ageMs) || ageMs > MAX_REPLY_AGE_MS) continue;
 
       const leadId = inboundMessageLeadId({
         mailboxId: acct.id,
         message,
         leads,
         linkedLeadByMessageId,
+        emailsByContactId,
       });
       if (!leadId) continue;
 
       const lead = leads.find((l) => l.id === leadId);
-      if (!lead || !isInboundFromLeadContact({ message, lead, mailboxEmail })) continue;
+      if (!lead) continue;
+
+      const contactExtras = lead.contactId ? emailsByContactId[lead.contactId] : undefined;
+
+      // OOO / auto-reply: surface on lead without counting as a dashboard reply.
+      if (isLikelyAutoReply(message)) {
+        inFlightRef.current.add(mid);
+        void (async () => {
+          try {
+            await patchLeadAsync(leadId, {
+              lastAutoReplyAt: message.date || new Date().toISOString(),
+              lastAutoReplyMessageId: mid,
+              lastActivityAt: message.date || new Date().toISOString(),
+            });
+            processedRef.current.add(mid);
+            writeProcessed(processedRef.current);
+          } catch {
+            /* retry next sync */
+          } finally {
+            inFlightRef.current.delete(mid);
+          }
+        })();
+        continue;
+      }
+
+      if (
+        !isInboundFromLeadContact({
+          message,
+          lead,
+          mailboxEmail,
+          contactEmails: contactExtras,
+        })
+      )
+        continue;
 
       const scheduledOpen = openFollowupsWithScheduledEmail(followups, leadId);
       const plan = findActivePlanToPauseOnReply({ leadId, plans });
@@ -172,10 +223,12 @@ export function FollowupPlanReplyWatcher() {
     currentUserId,
     isDemo,
     leads,
+    contacts,
     followups,
     plans,
     inboundByMailbox,
     linkedLeadByMessageId,
+    emailsByContactId,
     mailboxes,
     activeMailboxId,
     pauseFollowupPlanForReply,

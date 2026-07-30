@@ -37,6 +37,8 @@ import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
 import { useQualityOutreachGate } from "@/components/leads/use-quality-outreach-gate";
 import type { MailInbound, MailSent } from "@/lib/email-account-types";
 import type { Followup, Lead } from "@/lib/types";
+import { isLikelyAutoReply } from "@/lib/followup-plan-reply";
+import { leadContactEmails } from "@/lib/followup-plans";
 import {
   appendGlobalEmailFooter,
   appendMailboxSignature,
@@ -168,6 +170,9 @@ function sentAsInbound(message: MailSent): MailInbound {
 
 function relevantLeadMessages(input: {
   lead: Lead;
+  /** All emails that should match this lead (company + personal). */
+  contactEmails?: readonly string[];
+  /** @deprecated Prefer contactEmails — still accepted as a single extra address. */
   contactEmail?: string;
   inboundByMailbox: Record<string, MailInbound[]>;
   sent: MailSent[];
@@ -177,14 +182,16 @@ function relevantLeadMessages(input: {
   /** Fallback From when CRM synthetic rows have no stored sender. */
   fallbackFromEmail?: string;
 }): LeadEmailMessage[] {
-  const email = input.contactEmail?.trim().toLowerCase() ?? "";
+  const emails = leadContactEmails(input.lead, input.contactEmail, ...(input.contactEmails ?? []));
+  const emailSet = new Set(emails);
   const rows: LeadEmailMessage[] = [];
   for (const [mailboxId, messages] of Object.entries(input.inboundByMailbox)) {
     for (const message of messages) {
       const key = `${mailboxId}:in:${message.id}`;
       const manual = input.linkedLeadByMessageId[key] === input.lead.id;
       const automatic =
-        Boolean(email) && extractEmailAddresses(message.from, message.to, message.cc).has(email);
+        emailSet.size > 0 &&
+        [...extractEmailAddresses(message.from, message.to, message.cc)].some((e) => emailSet.has(e));
       if (manual || automatic) rows.push({ key, mailboxId, direction: "inbound", message });
     }
   }
@@ -192,12 +199,14 @@ function relevantLeadMessages(input: {
   for (const message of input.sent) {
     const manual = input.linkedLeadByMessageId[message.id] === input.lead.id;
     const automatic =
-      Boolean(email) && extractEmailAddresses(message.from, message.to, message.cc).has(email);
+      emailSet.size > 0 &&
+      [...extractEmailAddresses(message.from, message.to, message.cc)].some((e) => emailSet.has(e));
     if (manual || automatic) {
       rows.push({ key: message.id, mailboxId: message.mailboxId, direction: "sent", message });
       if (message.messageId) seenMessageIds.add(message.messageId.toLowerCase());
     }
   }
+  const primaryTo = emails[0] || "";
   for (const followup of input.crmSentFollowups ?? []) {
     if (followup.leadId !== input.lead.id) continue;
     if (followup.deliveryStatus !== "sent" || !followup.sentAt) continue;
@@ -208,7 +217,7 @@ function relevantLeadMessages(input: {
       id,
       mailboxId: "crm",
       from: input.fallbackFromEmail?.trim() || "",
-      to: email || "",
+      to: primaryTo,
       subject: followup.emailSubject?.trim() || followup.title,
       body: followup.messageBody?.trim() || "",
       sentAt: followup.sentAt,
@@ -269,11 +278,19 @@ function leadEmailMessageToPersistPayload(row: LeadEmailMessage) {
 export function LeadEmailsPanel({
   lead,
   contactEmail = lead.contactEmail,
+  contactEmails,
 }: {
   lead: Lead;
   contactEmail?: string;
+  /** Company + personal (and any other) emails for matching inbound/outbound. */
+  contactEmails?: readonly string[];
 }) {
   const workspace = useWorkspace();
+  const matchEmails = React.useMemo(
+    () => leadContactEmails(lead, contactEmail, ...(contactEmails ?? [])),
+    [lead, contactEmail, contactEmails],
+  );
+  const primaryContactEmail = matchEmails[0] || contactEmail;
   const crmSentFollowups = React.useMemo(
     () =>
       workspace.followups.filter(
@@ -319,7 +336,7 @@ export function LeadEmailsPanel({
     () =>
       relevantLeadMessages({
         lead,
-        contactEmail,
+        contactEmails: matchEmails,
         inboundByMailbox,
         sent,
         linkedLeadByMessageId,
@@ -328,11 +345,11 @@ export function LeadEmailsPanel({
       }),
     [
       activeMailbox.emailAddress,
-      contactEmail,
       crmSentFollowups,
       inboundByMailbox,
       lead,
       linkedLeadByMessageId,
+      matchEmails,
       sent,
     ],
   );
@@ -346,6 +363,7 @@ export function LeadEmailsPanel({
       conversation.messages.some((message) => message.key === selectedId),
     ) ?? null;
   const [loadingBodies, setLoadingBodies] = React.useState(false);
+  const [bodyLoadAttempt, setBodyLoadAttempt] = React.useState(0);
   const bodyLoadIdRef = React.useRef(0);
   const [composeMode, setComposeMode] = React.useState<ComposeMode | null>(null);
   const [composeMailboxId, setComposeMailboxId] = React.useState("");
@@ -523,10 +541,12 @@ export function LeadEmailsPanel({
         if (force || !hasServerSent) jobs.push({ mailbox, folder: "sent" });
       }
 
-      // Prefer durable lead mail: skip IMAP unless empty or user forced refresh.
-      if (!force && storedMessages.length > 0 && jobs.length > 0) {
-        initialSyncKeyRef.current = syncKey;
-        return;
+      // Always refresh INBOX heads so new replies (incl. OOO) appear even when
+      // durable lead mail already has older outbound history. Sent can wait for Refresh.
+      if (!force && storedMessages.length > 0) {
+        for (let i = jobs.length - 1; i >= 0; i--) {
+          if (jobs[i]?.folder === "sent") jobs.splice(i, 1);
+        }
       }
       if (!force) initialSyncKeyRef.current = syncKey;
       if (jobs.length === 0) return;
@@ -599,7 +619,7 @@ export function LeadEmailsPanel({
 
       const matched = relevantLeadMessages({
         lead,
-        contactEmail,
+        contactEmails: matchEmails,
         inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
         sent: useEmailAccountStore.getState().sent,
         linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
@@ -608,12 +628,12 @@ export function LeadEmailsPanel({
       if (matched.length > 0) void persistLeadMail(matched);
     },
     [
-      contactEmail,
       crmSentFollowups,
       emailServerHydrated,
       lead,
       mailViewAsUid,
       mailboxes,
+      matchEmails,
       persistLeadMail,
       reconcileInboundHeadFromSync,
       reconcileSentHeadFromSync,
@@ -629,21 +649,24 @@ export function LeadEmailsPanel({
   }, [loadingStored, syncConversationLists]);
 
   React.useEffect(() => {
-    if (!selected || !selectedMailbox || workspace.isDemo) return;
+    if (!selected || workspace.isDemo) return;
     const loadId = ++bodyLoadIdRef.current;
-    const inboundUids = selected.messages
-      .filter(
-        (row): row is Extract<LeadEmailMessage, { direction: "inbound" }> =>
-          row.direction === "inbound" && row.message.bodySynced === false,
-      )
-      .map((row) => row.message.uid);
-    const sentUids = selected.messages
-      .filter(
-        (row): row is Extract<LeadEmailMessage, { direction: "sent" }> =>
-          row.direction === "sent" && row.message.bodySynced === false && row.message.uid != null,
-      )
-      .map((row) => row.message.uid!);
-    if (inboundUids.length === 0 && sentUids.length === 0) {
+
+    type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
+    const jobsByKey = new Map<string, BodyJob>();
+    for (const row of selected.messages) {
+      if (row.message.bodySynced !== false) continue;
+      if (row.mailboxId === "crm") continue;
+      const uid = row.message.uid;
+      if (uid == null) continue;
+      const folder = row.direction === "inbound" ? "inbox" : "sent";
+      const key = `${row.mailboxId}:${folder}`;
+      const existing = jobsByKey.get(key);
+      if (existing) existing.uids.push(uid);
+      else jobsByKey.set(key, { mailboxId: row.mailboxId, folder, uids: [uid] });
+    }
+    const jobs = [...jobsByKey.values()];
+    if (jobs.length === 0) {
       void Promise.resolve().then(() => {
         if (bodyLoadIdRef.current === loadId) setLoadingBodies(false);
       });
@@ -651,11 +674,12 @@ export function LeadEmailsPanel({
     }
 
     let cancelled = false;
-    const fetchBodies = async (folder: "inbox" | "sent", uids: number[]) => {
-      if (uids.length === 0) return;
+    const fetchBodies = async (job: BodyJob) => {
+      const mailbox = mailboxes.find((m) => m.id === job.mailboxId);
+      if (!mailbox || !isImapInboxConfigured(mailbox)) return;
       const forUid = resolveMailApiForUserUid({
         mailViewAsUid,
-        activeMailboxDataOwnerUid: selectedMailbox.dataOwnerUid,
+        activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
         selfUid: workspace.currentUserId ?? "",
       });
       const url = appendMailDataOwnerParam(
@@ -668,15 +692,15 @@ export function LeadEmailsPanel({
         headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
         body: JSON.stringify({
-          mailboxId: selectedMailbox.id,
-          folder,
-          uids,
+          mailboxId: mailbox.id,
+          folder: job.folder,
+          uids: job.uids,
           imap: {
-            host: selectedMailbox.imap.host,
-            port: selectedMailbox.imap.port,
-            secure: selectedMailbox.imap.secure,
-            user: selectedMailbox.imap.user,
-            pass: selectedMailbox.imap.password,
+            host: mailbox.imap.host,
+            port: mailbox.imap.port,
+            secure: mailbox.imap.secure,
+            user: mailbox.imap.user,
+            pass: mailbox.imap.password,
           },
         }),
       });
@@ -687,20 +711,20 @@ export function LeadEmailsPanel({
       };
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not load full email");
       if (cancelled || !data.updates) return;
-      if (folder === "inbox") mergeInboundBodies(selectedMailbox.id, data.updates);
-      else mergeSentBodies(selectedMailbox.id, data.updates);
+      if (job.folder === "inbox") mergeInboundBodies(mailbox.id, data.updates);
+      else mergeSentBodies(mailbox.id, data.updates);
     };
 
     void Promise.resolve()
       .then(() => {
         if (!cancelled) setLoadingBodies(true);
-        return Promise.all([fetchBodies("inbox", inboundUids), fetchBodies("sent", sentUids)]);
+        return Promise.all(jobs.map((job) => fetchBodies(job)));
       })
       .then(() => {
         if (cancelled) return;
         const refreshed = relevantLeadMessages({
           lead,
-          contactEmail,
+          contactEmails: matchEmails,
           inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
           sent: useEmailAccountStore.getState().sent,
           linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
@@ -720,15 +744,16 @@ export function LeadEmailsPanel({
       cancelled = true;
     };
   }, [
-    contactEmail,
+    bodyLoadAttempt,
     crmSentFollowups,
     lead,
     mailViewAsUid,
+    mailboxes,
+    matchEmails,
     mergeInboundBodies,
     mergeSentBodies,
     persistLeadMail,
     selected,
-    selectedMailbox,
     workspace.currentUserId,
     workspace.isDemo,
   ]);
@@ -780,7 +805,7 @@ export function LeadEmailsPanel({
       }
       setSelectedId(null);
       setComposeMailboxId(mailbox.id);
-      setTo(contactEmail?.trim() || "");
+      setTo(primaryContactEmail?.trim() || "");
       setCc("");
       setSubject("");
       setBody("");
@@ -837,7 +862,7 @@ export function LeadEmailsPanel({
               to:
                 latest.direction === "inbound"
                   ? replyRecipientAddress(source)
-                  : contactEmail || extractReplyAddress(source.to),
+                  : primaryContactEmail || extractReplyAddress(source.to),
               cc: "",
             };
       if (!recipients.to) {
@@ -1238,7 +1263,8 @@ export function LeadEmailsPanel({
               <Mail className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
               <p className="text-sm font-medium">No recent linked emails</p>
               <p className="mt-1 text-xs text-muted-foreground">
-                Messages linked in Inbox or matching {contactEmail || "the lead’s email"} appear here.
+                Messages linked in Inbox or matching{" "}
+                {matchEmails.length > 0 ? matchEmails.join(" / ") : "the lead’s email"} appear here.
               </p>
               {loadingStored || syncingLists ? (
                 <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
@@ -1322,7 +1348,7 @@ export function LeadEmailsPanel({
             <DialogTitle>Compose</DialogTitle>
             <DialogDescription>
               Send through your SMTP account saved in Settings.
-              {contactEmail ? ` Prefilled for ${contactEmail}.` : ""}
+              {primaryContactEmail ? ` Prefilled for ${primaryContactEmail}.` : ""}
             </DialogDescription>
           </DialogHeader>
           <div className="shrink-0 space-y-3 border-b px-5 py-3">
@@ -1484,10 +1510,24 @@ export function LeadEmailsPanel({
                           <Badge variant={row.direction === "inbound" ? "secondary" : "outline"} className="text-[10px]">
                             {row.direction === "inbound" ? "Received" : "Sent"}
                           </Badge>
+                          {row.direction === "inbound" &&
+                          isLikelyAutoReply({
+                            subject: row.message.subject,
+                            preview: row.message.preview,
+                          }) ? (
+                            <Badge variant="outline" className="text-[10px] border-amber-500/40 text-amber-700 dark:text-amber-400">
+                              Auto-reply / OOO
+                            </Badge>
+                          ) : null}
                           <span className="text-[11px] text-muted-foreground">{fmtRelative(date)}</span>
                         </div>
                       </div>
-                      <MailReaderBody content={content} className="p-4" />
+                      <MailReaderBody
+                        content={content}
+                        className="p-4"
+                        bodyLoading={loadingBodies}
+                        onRetryBody={() => setBodyLoadAttempt((n) => n + 1)}
+                      />
                     </article>
                   );
                 })}

@@ -230,13 +230,25 @@ export function mergeFollowupPlans(
   return [...reconciled, ...synth];
 }
 
-export function leadContactEmails(lead: Lead, contactEmail?: string | null): string[] {
+/** All known contact emails for a lead (company, personal, and any extras). */
+export function leadContactEmails(
+  lead: Pick<Lead, "contactEmail">,
+  ...extras: (string | null | undefined)[]
+): string[] {
   const emails = new Set<string>();
   const add = (v?: string | null) => {
     const e = v?.trim().toLowerCase();
     if (e && e.includes("@")) emails.add(e);
   };
   add(lead.contactEmail);
-  add(contactEmail);
+  for (const extra of extras) add(extra);
   return [...emails];
+}
+
+/** Lead emails plus linked contact company/personal addresses. */
+export function leadEmailsWithContact(
+  lead: Pick<Lead, "contactEmail">,
+  contact?: Pick<{ email?: string; personalEmail?: string }, "email" | "personalEmail"> | null,
+): string[] {
+  return leadContactEmails(lead, contact?.email, contact?.personalEmail);
 }

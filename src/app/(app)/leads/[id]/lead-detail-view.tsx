@@ -1312,7 +1312,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   <LeadTasksPanel tasks={leadTasksForTab} lead={lead} />
                 </TabsContent>
                 <TabsContent value="emails">
-                  <LeadEmailsPanel lead={lead} contactEmail={primaryEmail} />
+                  <LeadEmailsPanel
+                    lead={lead}
+                    contactEmail={primaryEmail}
+                    contactEmails={[companyEmail, personalEmail].filter(Boolean) as string[]}
+                  />
                 </TabsContent>
               </div>
             </Tabs>
@@ -1653,7 +1657,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 ) : (
                   <>
                     <p>
-                      Response time was{" "}
+                      Time to first outreach was{" "}
                       <span className="font-semibold text-foreground tabular-nums">
                         {responseTimeMinutes != null ? `${responseTimeMinutes}m` : "n/a"}
                       </span>

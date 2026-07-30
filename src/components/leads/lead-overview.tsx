@@ -821,12 +821,16 @@ export function LeadOverview({
           <Metric label="Touches" value={lead.touches} />
           <Metric label="Last activity" value={fmtRelative(lead.lastActivityAt)} />
           <Metric
-            label="Response time"
+            label="Time to first outreach"
             value={responseTimeMinutes != null ? `${responseTimeMinutes}m` : "-"}
           />
           <Metric label="First contact" value={lead.firstContactAt ? fmtDate(lead.firstContactAt) : "-"} />
           <Metric label="Idle" value={lead.isIdle ? `Yes · ${lead.idleDays ?? 0} day(s)` : "No"} />
           <Metric label="Last reply" value={lead.lastReplyAt ? fmtDate(lead.lastReplyAt) : "-"} />
+          <Metric
+            label="Last auto-reply"
+            value={lead.lastAutoReplyAt ? fmtDate(lead.lastAutoReplyAt) : "-"}
+          />
           <Metric label="Reply source" value={lead.lastReplySource || "-"} />
           <Metric label="Created" value={fmtRelative(lead.createdAt)} />
         </CardContent>

@@ -620,10 +620,13 @@ export interface Lead {
   isIdle: boolean;
   idleDays?: number;
 
-  /** Latest inbound reply detected (IMAP / Instantly). */
+  /** Latest inbound reply detected (IMAP / Instantly). Human replies only — not OOO/auto-replies. */
   lastReplyAt?: ISODate;
   lastReplyMessageId?: string;
   lastReplySource?: "imap" | "instantly" | "manual";
+  /** Latest OOO / auto-reply detected (shown on lead, not counted in Dashboard Replies). */
+  lastAutoReplyAt?: ISODate;
+  lastAutoReplyMessageId?: string;
   /**
    * Soft prompt after a reply: promote prospect → sales lead and/or move stage to `replied`.
    * Set to `pending` on reply; cleared via accept (`accepted`) or dismiss (`dismissed`).
@@ -864,6 +867,7 @@ export type TimelineEventType =
   | "touchpoint_added"
   | "email_sent"
   | "email_replied"
+  | "email_auto_replied"
   | "email_bounced"
   | "note_added"
   | "followup_created"

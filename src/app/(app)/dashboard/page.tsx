@@ -517,7 +517,7 @@ export default function DashboardPage() {
         { label: "Won deals", value: String(scopedDeals.filter((d) => d.stage === "won").length) },
         { label: "Idle leads", value: String(workflowMetrics.idleSalesLeads) },
         {
-          label: "Avg response (minutes)",
+          label: "Avg first outreach (minutes)",
           value: avgResponseMin != null ? String(Math.round(avgResponseMin)) : "-",
         },
       ],
@@ -961,7 +961,7 @@ export default function DashboardPage() {
                       }
                     />
                     <KpiCard
-                      label="Avg response"
+                      label="Avg first outreach"
                       value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "-"}
                       hint="Sales lead created → first outbound email"
                       deltaType="positive-down"
@@ -1050,7 +1050,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
                 <KpiCard
-                  label="Avg response"
+                  label="Avg first outreach"
                   value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "-"}
                   hint="Sales lead created → first outbound email"
                   deltaType="positive-down"

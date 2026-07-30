@@ -26,7 +26,7 @@ const STATS = [
     accent: "text-emerald-400",
   },
   {
-    label: "Avg response",
+    label: "Avg first outreach",
     value: "33m",
     sub: "first outbound",
     icon: Clock,

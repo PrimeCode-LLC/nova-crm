@@ -140,10 +140,28 @@ function MailAttachmentButton({ att }: { att: MailInboundAttachment }) {
   );
 }
 
-export function MailReaderBody({ content, className }: { content: MailReaderContent; className?: string }) {
+export function MailReaderBody({
+  content,
+  className,
+  bodyLoading,
+  onRetryBody,
+}: {
+  content: MailReaderContent;
+  className?: string;
+  /** True while a body fetch is in flight for this message. */
+  bodyLoading?: boolean;
+  /** Shown when bodySynced is false and loading finished — retry fetch. */
+  onRetryBody?: () => void;
+}) {
   const html = content.bodyHtml?.trim();
   const srcDoc = html ? buildInboundHtmlSrcDoc(html) : undefined;
   const { iframeRef, heightPx } = useInboundHtmlIframeHeight(html, srcDoc);
+  const needsBody = content.bodySynced === false && !content.bodyText?.trim();
+  const showBodySpinner = needsBody && bodyLoading === true;
+  const showBodyFailed = needsBody && bodyLoading === false;
+  // No loading controller (e.g. inbox reader): prefer preview over an infinite spinner.
+  const showHeadsOnlyPreview =
+    needsBody && bodyLoading === undefined && Boolean(content.preview?.trim());
 
   return (
     <div className={cn("flex flex-col gap-3", className)}>
@@ -175,10 +193,28 @@ export function MailReaderBody({ content, className }: { content: MailReaderCont
           sandbox="allow-popups allow-popups-to-escape-sandbox"
           srcDoc={srcDoc}
         />
-      ) : content.bodySynced === false && !content.bodyText?.trim() ? (
+      ) : showBodySpinner || (needsBody && bodyLoading === undefined && !content.preview?.trim()) ? (
         <div className="flex items-center gap-2 py-8 text-sm text-muted-foreground">
           <Loader2 className="h-4 w-4 animate-spin" />
           Loading full message…
+        </div>
+      ) : showBodyFailed || showHeadsOnlyPreview ? (
+        <div className="space-y-3 rounded-md border border-dashed bg-muted/5 p-4">
+          {content.preview?.trim() ? (
+            <div className="whitespace-pre-wrap text-[15px] leading-relaxed text-muted-foreground">
+              {content.preview}
+            </div>
+          ) : null}
+          {showBodyFailed ? (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Couldn’t load full message.</span>
+              {onRetryBody ? (
+                <Button type="button" variant="outline" size="sm" className="h-7" onClick={onRetryBody}>
+                  Retry
+                </Button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       ) : (
         <div className="whitespace-pre-wrap overflow-x-auto rounded-md border bg-muted/5 p-4 text-[15px] leading-relaxed">

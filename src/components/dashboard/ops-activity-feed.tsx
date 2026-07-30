@@ -33,6 +33,7 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   lead_created: UserPlus,
   email_sent: Send,
   email_replied: MessageSquareReply,
+  email_auto_replied: MessageSquareReply,
   followup_created: Mail,
   followup_completed: CheckCircle2,
   followup_plan_paused: Mail,

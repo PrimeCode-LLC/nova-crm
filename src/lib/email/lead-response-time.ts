@@ -3,6 +3,7 @@ import { OWNER_SCOPE_PREFIX } from "@/lib/owner-scope";
 import type { Lead } from "@/lib/types";
 import { extractPrimaryEmailFromMailField } from "@/lib/email/parse-mail-address";
 import { extractEmailAddresses } from "@/lib/email/reply-compose";
+import { leadContactEmails } from "@/lib/followup-plans";
 
 export type ResponseTimeResolveMode = "prefer-email" | "prefer-stored" | "auto";
 
@@ -38,11 +39,13 @@ function rowMatchesLead(
   messageKey: string,
   message: MailRow,
   linked: Record<string, string>,
+  extraEmails?: readonly (string | null | undefined)[],
 ): boolean {
   if (linked[messageKey] === lead.id) return true;
-  const contact = lead.contactEmail?.trim().toLowerCase();
-  if (!contact) return false;
-  return extractEmailAddresses(message.from, message.to, message.cc).has(contact);
+  const contacts = leadContactEmails(lead, ...(extraEmails ?? []));
+  if (contacts.length === 0) return false;
+  const addrs = extractEmailAddresses(message.from, message.to, message.cc);
+  return contacts.some((e) => addrs.has(e));
 }
 
 function collectLeadMailEvents(
@@ -72,6 +75,7 @@ function collectLeadMailEvents(
 /**
  * Minutes from `lead.createdAt` to the first outbound email to this lead
  * (connected sent row or inbox copy where From is a workspace mailbox).
+ * This is “time to first outreach”, not inbound reply latency.
  */
 export function computeLeadFirstOutboundResponseMinutes(
   lead: Lead,

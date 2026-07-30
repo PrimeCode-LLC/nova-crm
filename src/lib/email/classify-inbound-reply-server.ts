@@ -23,6 +23,7 @@ import { buildInboundReplySignalBlock } from "@/lib/email/reply-signals";
 import { replyTextOnly, stripQuotedReply } from "@/lib/email/strip-quoted-reply";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
+import { buildReplyDetectedPatch } from "@/lib/leads/reply-review";
 
 export const replyClassifySchema = z.object({
   classification: z.enum([
@@ -200,6 +201,25 @@ async function writeReplyActionAndLead(input: {
     .doc(actionId)
     .set(stripUndefined(doc as unknown as Record<string, unknown>), { merge: true });
 
+  const isAutoReply = doc.classification === "auto_reply";
+  const replySource: "imap" | "instantly" | "manual" =
+    input.source === "instantly" ? "instantly" : input.source === "imap" ? "imap" : "manual";
+
+  const leadSnapForPatch = await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
+  const leadForPatch = leadSnapForPatch.exists
+    ? mapLeadDoc(leadSnapForPatch.id, leadSnapForPatch.data() as Record<string, unknown>)
+    : null;
+
+  const humanReplyPatch =
+    !isAutoReply && leadForPatch
+      ? buildReplyDetectedPatch({
+          lead: leadForPatch,
+          replyAt: now,
+          replyMessageId: input.inboundProviderKey,
+          source: replySource,
+        })
+      : null;
+
   await db
     .collection(COLLECTIONS.leads)
     .doc(input.leadId)
@@ -211,13 +231,23 @@ async function writeReplyActionAndLead(input: {
         nextAction: needsDraft ? `${nextAction} · Draft generating…` : nextAction,
         lastActivityAt: now,
         updatedAt: now,
+        ...(isAutoReply
+          ? {
+              lastAutoReplyAt: now,
+              ...(input.inboundProviderKey
+                ? { lastAutoReplyMessageId: input.inboundProviderKey }
+                : {}),
+            }
+          : humanReplyPatch ?? {}),
       }),
       { merge: true },
     );
 
   // Timeline: inbound reply classified (complete process visibility).
   try {
-    const leadSnap = await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
+    const leadSnap = leadSnapForPatch.exists
+      ? leadSnapForPatch
+      : await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
     const rawOwner = leadSnap.data()?.ownerId;
     const leadOwnerId =
       (typeof rawOwner === "string" && rawOwner.trim()) ||
@@ -227,6 +257,14 @@ async function writeReplyActionAndLead(input: {
     const actorId = input.actorUid?.trim() || leadOwnerId;
     const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
     const teId = `te-${crypto.randomUUID()}`;
+    const timelineType = isAutoReply ? "email_auto_replied" : "email_replied";
+    const timelineSummary = isAutoReply
+      ? inboundSubject
+        ? `Auto-reply / OOO: ${inboundSubject}`
+        : "Auto-reply / out-of-office received"
+      : inboundSubject
+        ? `Email replied: ${inboundSubject}`
+        : "Lead replied by email";
     await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
       stampForCreate(
         input.organizationId,
@@ -234,11 +272,9 @@ async function writeReplyActionAndLead(input: {
           leadId: input.leadId,
           leadOwnerId,
           leadOwnerManagerIds,
-          type: "email_replied",
+          type: timelineType,
           actorId,
-          summary: inboundSubject
-            ? `Email replied: ${inboundSubject}`
-            : "Lead replied by email",
+          summary: timelineSummary,
           payload: {
             source: "reply_intelligence",
             replyActionId: actionId,
@@ -355,54 +391,71 @@ export async function classifyInboundLeadMailServer(input: {
   if (!result) {
     const settings = await getOrganizationAiSettingsServer(input.organizationId);
     if (!settings.enabled || !canUseAiFeature(settings, "email_reply_classify", undefined)) {
-      skipped += 1;
-      return { classified, skipped };
-    }
-
-    try {
-      const thread = await buildThreadSnippet({
-        organizationId: input.organizationId,
-        leadId: input.leadId,
-        latestProviderKey: newest.providerKey,
-      });
-      const signals = buildInboundReplySignalBlock({
-        from: newest.from,
-        subject: newest.subject,
-        body,
-        receivedAt: newest.date,
-        leadContactEmail: lead.contactEmail,
-        inboundCount: thread.inboundCount,
-        outboundCount: thread.outboundCount,
-        firstOutboundAt: thread.firstOutboundAt,
-        lastOutboundAt: thread.lastOutboundAt,
-        hadQuotedTrail: stripped.hadQuotedTrail,
-        doNotContact: lead.doNotContact,
-      });
-
-      result = await runAiStructuredFeature({
-        organizationId: input.organizationId,
-        userId: input.actorUid || "system",
-        feature: "email_reply_classify",
-        leadId: input.leadId,
-        schema: replyClassifySchema,
-        promptVars: {
-          today: new Date().toISOString().slice(0, 10),
+      // AI off: still stamp human inbound so dashboard/timeline stay consistent with Inbox.
+      result = {
+        classification: "unclear",
+        potentialScore: 50,
+        recommendedAction: "reply_now",
+        rationale: "Inbound reply detected; AI reply classify is off for this organization.",
+        nextStepSummary: "Review the reply in Inbox or Emails and decide the next step.",
+      };
+    } else {
+      try {
+        const thread = await buildThreadSnippet({
+          organizationId: input.organizationId,
+          leadId: input.leadId,
+          latestProviderKey: newest.providerKey,
+        });
+        const signals = buildInboundReplySignalBlock({
           from: newest.from,
           subject: newest.subject,
-          date: newest.date,
-          body: body.slice(0, 8_000),
-          signals,
-          thread: thread.text.slice(0, 12_000),
-          leadContext: leadSnapshotForClassify(lead),
-        },
-      });
-    } catch (error) {
-      if (error instanceof AiForbiddenError || error instanceof AiNotConfiguredError) {
-        skipped += 1;
-        return { classified, skipped };
+          body,
+          receivedAt: newest.date,
+          leadContactEmail: lead.contactEmail,
+          inboundCount: thread.inboundCount,
+          outboundCount: thread.outboundCount,
+          firstOutboundAt: thread.firstOutboundAt,
+          lastOutboundAt: thread.lastOutboundAt,
+          hadQuotedTrail: stripped.hadQuotedTrail,
+          doNotContact: lead.doNotContact,
+        });
+
+        result = await runAiStructuredFeature({
+          organizationId: input.organizationId,
+          userId: input.actorUid || "system",
+          feature: "email_reply_classify",
+          leadId: input.leadId,
+          schema: replyClassifySchema,
+          promptVars: {
+            today: new Date().toISOString().slice(0, 10),
+            from: newest.from,
+            subject: newest.subject,
+            date: newest.date,
+            body: body.slice(0, 8_000),
+            signals,
+            thread: thread.text.slice(0, 12_000),
+            leadContext: leadSnapshotForClassify(lead),
+          },
+        });
+      } catch (error) {
+        if (error instanceof AiForbiddenError || error instanceof AiNotConfiguredError) {
+          result = {
+            classification: "unclear",
+            potentialScore: 50,
+            recommendedAction: "reply_now",
+            rationale: "Inbound reply detected; AI classify unavailable.",
+            nextStepSummary: "Review the reply and decide the next step.",
+          };
+        } else {
+          result = {
+            classification: "unclear",
+            potentialScore: 50,
+            recommendedAction: "reply_now",
+            rationale: "Inbound reply detected; classification failed.",
+            nextStepSummary: "Review the reply and decide the next step.",
+          };
+        }
       }
-      skipped += 1;
-      return { classified, skipped };
     }
   }
 

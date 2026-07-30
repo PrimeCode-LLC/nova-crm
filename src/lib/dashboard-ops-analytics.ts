@@ -474,6 +474,7 @@ const FEED_TYPES = new Set<TimelineEventType>([
   "lead_created",
   "email_sent",
   "email_replied",
+  "email_auto_replied",
   "followup_created",
   "followup_completed",
   "followup_plan_paused",

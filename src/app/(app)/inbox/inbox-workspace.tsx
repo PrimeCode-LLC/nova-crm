@@ -85,6 +85,7 @@ import {
   type MailThread,
 } from "@/lib/email/thread-inbound";
 import type { Contact, Lead } from "@/lib/types";
+import { leadEmailsWithContact } from "@/lib/followup-plans";
 import {
   Collapsible,
   CollapsibleContent,
@@ -285,7 +286,7 @@ function rowMatchesEntityMailFilter(
 ): boolean {
   if (filter === ENTITY_MAIL_FILTER_ALL) return true;
 
-  const lead = resolveLeadForMailListRow(row, mailboxId, linkedLeadByMessageId, leads);
+  const lead = resolveLeadForMailListRow(row, mailboxId, linkedLeadByMessageId, leads, contacts);
   const contact = resolveContactForMailListRow(row, contacts);
 
   if (filter === ENTITY_LEAD_LINKED) {
@@ -2320,7 +2321,7 @@ export default function InboxWorkspace() {
       all.total += 1;
       if (rowIsUnread(row)) all.unread += 1;
 
-      const lead = resolveLeadForMailListRow(row, row.mailboxId, linkedLeadByMessageId, leads);
+      const lead = resolveLeadForMailListRow(row, row.mailboxId, linkedLeadByMessageId, leads, contacts);
       const contact = resolveContactForMailListRow(row, contacts);
 
       if (lead) {
@@ -3281,7 +3282,14 @@ export default function InboxWorkspace() {
       const manuallyLinked = linkedLeadByMessageId[mid];
       if (manuallyLinked) return leads.find((l) => l.id === manuallyLinked) ?? null;
       const emails = collectMessageEmails(msg);
-      return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+      return (
+        leads.find((lead) => {
+          const contact = lead.contactId
+            ? contacts.find((c) => c.id === lead.contactId)
+            : undefined;
+          return leadEmailsWithContact(lead, contact).some((e) => emails.has(e));
+        }) ?? null
+      );
     };
 
     if ((mailFolder === "inbox" || mailFolder === "trash") && selectedThread) {
@@ -3293,7 +3301,7 @@ export default function InboxWorkspace() {
     }
     if (!selectedMail) return null;
     return matchFromMessage(selectedMail);
-  }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads]);
+  }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads, contacts]);
 
   function composeLeadContextPayload() {
     if (!selectedLead) return "";
@@ -5662,15 +5670,21 @@ function resolveLeadForMailListRow(
   mailboxId: string,
   linkedLeadByMessageId: Record<string, string>,
   leads: Lead[],
+  contacts: Contact[] = [],
 ): Lead | null {
   const byId = (id: string) => leads.find((l) => l.id === id) ?? null;
+  const contactFor = (lead: Lead) =>
+    lead.contactId ? contacts.find((c) => c.id === lead.contactId) : undefined;
 
   const matchInbound = (msg: MailInbound) => {
     const mid = `${mailboxId}:in:${msg.id}`;
     const manual = linkedLeadByMessageId[mid];
     if (manual) return byId(manual);
     const emails = collectMessageEmails(msg);
-    return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+    return (
+      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
+      null
+    );
   };
 
   if (row.thread) {
@@ -5689,7 +5703,10 @@ function resolveLeadForMailListRow(
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
     const emails = collectMessageEmails(item as MailSent);
-    return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+    return (
+      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
+      null
+    );
   }
   if ("date" in item && "uid" in item) {
     return matchInbound(item as MailInbound);
@@ -5698,7 +5715,10 @@ function resolveLeadForMailListRow(
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
     const emails = collectMessageEmails(item as MailDraft);
-    return leads.find((lead) => lead.contactEmail && emails.has(lead.contactEmail.toLowerCase())) ?? null;
+    return (
+      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
+      null
+    );
   }
   return null;
 }
