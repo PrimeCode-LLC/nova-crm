@@ -3,7 +3,7 @@ import {
   appendMailDataOwnerParam,
   resolveMailApiForUserUid,
 } from "@/lib/email/mail-data-owner-query";
-import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
+import { BACKGROUND_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
 import {
   getActiveMailbox,
   isImapInboxConfigured,
@@ -13,6 +13,7 @@ import {
 /**
  * Fetches the newest Sent-folder page into the email store (Gmail web/mobile, other clients, Nova).
  * Silent on failure - the Sent tab surfaces errors when opened.
+ * Uses a small head limit so background sync does not monopolize the local Next.js process.
  */
 export async function syncImapSentHead(opts: {
   mailViewAsUid: string | null;
@@ -35,7 +36,7 @@ export async function syncImapSentHead(opts: {
     body: JSON.stringify({
       mailboxId: acct.id,
       folder: "sent",
-      limit: INBOX_IMAP_HEAD_LIMIT,
+      limit: BACKGROUND_IMAP_HEAD_LIMIT,
       offset: 0,
       // Background Sent sync only needs envelopes - full bodies load on thread open.
       headsOnly: true,

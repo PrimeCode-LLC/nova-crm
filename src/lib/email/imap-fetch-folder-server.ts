@@ -20,8 +20,8 @@ export const IMAP_FETCH_MAX_LIMIT = 2_000;
 /** Download RFC822 for the newest N messages in this request; older rows load on thread open. */
 export const IMAP_FULL_BODY_SYNC_CAP = 320;
 /**
- * Cron / badge hydrate head page - matches `INBOX_IMAP_HEAD_LIMIT` so off-Inbox
- * unread + bounce windows stay accurate for large mailboxes.
+ * Cron inbox head page - full window for unread/bounce accuracy.
+ * Client background badge sync uses `BACKGROUND_IMAP_HEAD_LIMIT` (smaller) instead.
  */
 export const IMAP_CRON_HEAD_LIMIT = 800;
 

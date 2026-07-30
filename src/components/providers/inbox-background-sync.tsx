@@ -20,9 +20,13 @@ import {
 } from "@/stores/email-account-store";
 
 /** Poll cron-persisted heads while the app is open (no IMAP). */
-const HEADS_POLL_MS = 120_000;
+const HEADS_POLL_MS = 180_000;
 /** On the Inbox route, still do a light IMAP refresh on this interval. */
 const INBOX_IMAP_MIN_MS = 5 * 60_000;
+/** Skip heads hydrate if we just ran (visibility + effect remount thrash). */
+const HEADS_MIN_GAP_MS = 30_000;
+/** Skip background IMAP if we just ran. */
+const IMAP_MIN_GAP_MS = 90_000;
 
 /**
  * Keeps the Inbox badge / email store fresh without every open tab hammering IMAP.
@@ -49,7 +53,7 @@ export function InboxBackgroundSync() {
     if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
     if (!emailServerSyncEnabled) return;
     if (syncingRef.current) return;
-    if (Date.now() - lastHeadsAtRef.current < 15_000) return;
+    if (Date.now() - lastHeadsAtRef.current < HEADS_MIN_GAP_MS) return;
 
     const st = useEmailAccountStore.getState();
     const configured = st.mailboxes.filter((m) => isImapInboxConfigured(m));
@@ -145,7 +149,7 @@ export function InboxBackgroundSync() {
     const onInbox = pathname === "/inbox" || pathname.startsWith("/inbox/");
     if (!onInbox) return;
     if (syncingRef.current) return;
-    if (Date.now() - lastImapAtRef.current < 60_000) return;
+    if (Date.now() - lastImapAtRef.current < IMAP_MIN_GAP_MS) return;
 
     const st = useEmailAccountStore.getState();
     const acct = getActiveMailbox(st);

@@ -1,3 +1,5 @@
+"use client";
+
 /** Browser event so Emails tab / timeline can refresh after AI approve & send. */
 export const LEAD_REPLY_SENT_EVENT = "crm:lead-reply-sent";
 

@@ -4,13 +4,17 @@ import {
   isFollowupDueThroughToday,
   isFollowupOverdue,
 } from "@/lib/followup-open-status";
-import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
+import {
+  computeDashboardWorkflowMetrics,
+  prospectNeedsRouting,
+  prospectReadyToPush,
+} from "@/lib/dashboard-workflow";
 import {
   buildActionBoard,
   buildFollowupScheduleByDay,
   collectEmailBounceTimes,
 } from "@/lib/dashboard-ops-analytics";
-import type { Contact, Followup, LeadTask, TimelineEvent } from "@/lib/types";
+import type { Contact, Followup, Lead, LeadTask, TimelineEvent } from "@/lib/types";
 
 function followup(partial: Partial<Followup> & Pick<Followup, "id" | "dueAt">): Followup {
   return {
@@ -213,5 +217,72 @@ describe("collectEmailBounceTimes", () => {
       } as unknown as Contact,
     ];
     expect(collectEmailBounceTimes({ contacts, timelineByLead })).toHaveLength(1);
+  });
+});
+
+describe("prospect routing funnel metrics", () => {
+  function prospect(partial: Partial<Lead> = {}): Lead {
+    return {
+      id: "p1",
+      accountId: "a1",
+      contactId: "c1",
+      channel: "cold_email",
+      stage: "new",
+      temperature: "cold",
+      priority: "medium",
+      ownerId: "u1",
+      contactName: "Ada",
+      companyName: "Acme",
+      touches: 0,
+      isIdle: false,
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      intakeKind: "prospect",
+      ...partial,
+    };
+  }
+
+  it("splits unassigned vs assigned-unpushed vs pushed", () => {
+    const unassigned = prospect({ id: "unassigned" });
+    const ready = prospect({
+      id: "ready",
+      prospectChannelAssignments: [
+        { id: "a1", channel: "cold_email", assigneeId: "u2", assignedAt: "2026-01-02T00:00:00.000Z" },
+      ],
+    });
+    const pushed = prospect({
+      id: "pushed",
+      linkedSalesLeadId: "s1",
+      prospectChannelAssignments: [
+        {
+          id: "a1",
+          channel: "cold_email",
+          assigneeId: "u2",
+          assignedAt: "2026-01-02T00:00:00.000Z",
+          pushedAt: "2026-01-03T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(prospectNeedsRouting(unassigned)).toBe(true);
+    expect(prospectReadyToPush(unassigned)).toBe(false);
+
+    expect(prospectNeedsRouting(ready)).toBe(false);
+    expect(prospectReadyToPush(ready)).toBe(true);
+
+    expect(prospectNeedsRouting(pushed)).toBe(false);
+    expect(prospectReadyToPush(pushed)).toBe(false);
+
+    const metrics = computeDashboardWorkflowMetrics({
+      leads: [unassigned, ready, pushed],
+      followups: [],
+      plans: [],
+      tasks: [],
+      currentUserId: "u1",
+      range: "7d",
+    });
+    expect(metrics.prospectsNeedRouting).toBe(1);
+    expect(metrics.prospectsReadyToPush).toBe(1);
+    expect(metrics.prospectsPushed).toBe(1);
   });
 });

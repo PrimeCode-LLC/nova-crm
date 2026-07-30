@@ -98,6 +98,10 @@ function buildEmailHints(metrics: DashboardWorkflowMetrics): HintPart[] {
   const emailHints: HintPart[] = [
     { text: `${metrics.scheduledSteps} queued` },
     {
+      text: `${metrics.readyUnscheduledSteps} need schedule`,
+      tone: metrics.readyUnscheduledSteps > 0 ? "warn" : undefined,
+    },
+    {
       text: `${metrics.failedDeliveries} failed`,
       tone: metrics.failedDeliveries > 0 ? "danger" : undefined,
     },
@@ -119,6 +123,23 @@ function buildEmailHints(metrics: DashboardWorkflowMetrics): HintPart[] {
   return emailHints;
 }
 
+function buildProspectHints(metrics: DashboardWorkflowMetrics): HintPart[] {
+  return [
+    {
+      text: `${metrics.prospectsNeedRouting} need routing`,
+      tone: metrics.prospectsNeedRouting > 0 ? "warn" : undefined,
+    },
+    {
+      text: `${metrics.prospectsReadyToPush} ready to push`,
+      tone: metrics.prospectsReadyToPush > 0 ? "warn" : undefined,
+    },
+    {
+      text: `${metrics.prospectsPushed} pushed`,
+      tone: metrics.prospectsPushed > 0 ? "success" : undefined,
+    },
+  ];
+}
+
 export function OpsPulseStrip({
   metrics,
   meetingsToday,
@@ -138,6 +159,7 @@ export function OpsPulseStrip({
 }) {
   const openTasks = openTasksCount ?? metrics.myOpenTasks;
   const emailHints = buildEmailHints(metrics);
+  const prospectHints = buildProspectHints(metrics);
 
   const byKey: Record<string, PulseItem> = {
     emails: {
@@ -171,24 +193,7 @@ export function OpsPulseStrip({
       key: "prospects",
       label: "Prospects",
       value: metrics.prospects,
-      hint: (
-        <HintLine
-          parts={[
-            {
-              text: `${metrics.prospectsNeedRouting} need routing`,
-              tone: metrics.prospectsNeedRouting > 0 ? "warn" : undefined,
-            },
-            ...(focus === "prospecting"
-              ? [
-                  {
-                    text: `${metrics.prospectsPushed} pushed`,
-                    tone: metrics.prospectsPushed > 0 ? ("success" as const) : undefined,
-                  },
-                ]
-              : []),
-          ]}
-        />
-      ),
+      hint: <HintLine parts={prospectHints} />,
       icon: UserRoundSearch,
       href: "/prospects",
       tone: prospectsTone(metrics),
@@ -221,6 +226,10 @@ export function OpsPulseStrip({
             {
               text: `${metrics.overdueFollowups} overdue`,
               tone: metrics.overdueFollowups > 0 ? "danger" : undefined,
+            },
+            {
+              text: `${metrics.remainingSequenceSteps} in sequence`,
+              tone: metrics.remainingSequenceSteps > 0 ? "info" : undefined,
             },
           ]}
         />

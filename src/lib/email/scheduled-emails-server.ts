@@ -665,6 +665,8 @@ async function sendScheduledDoc(
   data: Record<string, unknown>,
   runContext?: {
     lastSentAtByMailbox: Map<string, number>;
+    /** When true, never sleep for send gaps — requeue instead (local process-due). */
+    requeueSendGaps?: boolean;
   },
 ): Promise<"sent" | "failed" | "skipped"> {
   const organizationId = String(data.organizationId ?? "");
@@ -759,7 +761,9 @@ async function sendScheduledDoc(
       const earliest = lastMs + gapSeconds * 1000;
       const waitMs = earliest - Date.now();
       if (waitMs > 0) {
-        if (waitMs <= 25_000) {
+        // Local/dev process-due must not block the Next.js process for up to 25s per gap.
+        const shouldSleep = !runContext?.requeueSendGaps && waitMs <= 25_000;
+        if (shouldSleep) {
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
           const retryAt = new Date(earliest).toISOString();
@@ -1050,11 +1054,15 @@ async function sendScheduledDoc(
 
 async function processScheduledSnap(
   docs: Array<{ ref: DocumentReference; data: () => Record<string, unknown> }>,
+  opts?: { requeueSendGaps?: boolean },
 ): Promise<{ processed: number; sent: number; failed: number; skipped: number }> {
   let sent = 0;
   let failed = 0;
   let skipped = 0;
-  const runContext = { lastSentAtByMailbox: new Map<string, number>() };
+  const runContext = {
+    lastSentAtByMailbox: new Map<string, number>(),
+    requeueSendGaps: Boolean(opts?.requeueSendGaps),
+  };
 
   for (const doc of docs) {
     const claimed = await claimScheduledDoc(doc.ref);
@@ -1104,6 +1112,8 @@ export async function processDueScheduledEmailsForMemberServer(input: {
       ref: doc.ref,
       data: () => doc.data() as Record<string, unknown>,
     })),
+    // Never sleep on send gaps in the browser-driven local poller.
+    { requeueSendGaps: true },
   );
 }
 

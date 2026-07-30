@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
+import { withDevProcessDueLock } from "@/lib/email/dev-process-due-lock";
 import { processDueScheduledEmailsForMemberServer } from "@/lib/email/scheduled-emails-server";
 
 /**
@@ -35,10 +36,24 @@ export async function POST(req: Request) {
     );
   }
 
-  const result = await processDueScheduledEmailsForMemberServer({
-    organizationId: g.ctx.session.organizationId,
-    uid: resolved.dataOwnerUid,
-  });
+  const lockKey = `${g.ctx.session.organizationId}/${resolved.dataOwnerUid}`;
+  const locked = await withDevProcessDueLock(lockKey, () =>
+    processDueScheduledEmailsForMemberServer({
+      organizationId: g.ctx.session.organizationId,
+      uid: resolved.dataOwnerUid,
+    }),
+  );
 
-  return NextResponse.json({ ok: true, ...result });
+  if (!locked.ok) {
+    return NextResponse.json({
+      ok: true,
+      busy: true,
+      processed: 0,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+    });
+  }
+
+  return NextResponse.json({ ok: true, ...locked.result });
 }

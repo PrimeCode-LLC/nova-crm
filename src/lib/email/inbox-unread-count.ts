@@ -7,6 +7,11 @@ import {
 
 /** Matches inbox page initial IMAP list size (newest messages). */
 export const INBOX_IMAP_HEAD_LIMIT = 800;
+/**
+ * Background badge / off-Inbox IMAP envelope page.
+ * Keep small so local Next.js is not blocked for 10–25s by 800-UID fetches.
+ */
+export const BACKGROUND_IMAP_HEAD_LIMIT = 120;
 
 export function countUnreadInboxThreads(
   state: Pick<EmailAccountStore, "inboundByMailbox" | "mailboxes" | "activeMailboxId">,
