@@ -176,7 +176,7 @@ export async function moveBackToProspectServer(input: {
     const lead = mapLeadDoc(leadSnap.id, leadRaw);
     const mode = moveBackModeFor(lead);
     if (!mode) {
-      return { error: "This record was not promoted from a prospect." };
+      return { error: "This record is already a prospect." };
     }
 
     const dealsSnap = await db

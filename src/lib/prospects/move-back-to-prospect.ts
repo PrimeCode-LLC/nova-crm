@@ -21,18 +21,14 @@ export type MoveBackActivity = {
 /**
  * Whether this sales lead can be moved back to prospect, and how.
  * - `unpush_sales_lead`: channel push created a sibling sales row
- * - `demote_inplace`: same row was promoted (reply review / record type)
+ * - `demote_inplace`: same row returns to prospect intake (promote undo or manual)
  */
 export function moveBackModeFor(lead: Lead): MoveBackMode | null {
   if (isProspectRow(lead)) return null;
   if (lead.prospectSourceId?.trim()) return "unpush_sales_lead";
-  if (
-    Boolean(lead.prospectOwnerId?.trim()) ||
-    (lead.prospectChannelAssignments?.length ?? 0) > 0
-  ) {
-    return "demote_inplace";
-  }
-  return null;
+  // Any sales lead can be returned to prospect intake (same as Edit → Record type),
+  // including in-place promotes that no longer carry prospectOwnerId markers.
+  return "demote_inplace";
 }
 
 /** Hard blocks only — activity (touches / follow-ups) uses a stronger confirm instead. */
@@ -41,7 +37,7 @@ export function moveBackBlockedReason(
   opts?: { hasDeal?: boolean },
 ): string | null {
   if (moveBackModeFor(lead) == null) {
-    return "This record was not promoted from a prospect.";
+    return "This record is already a prospect.";
   }
   if (!MOVE_BACK_SAFE_STAGES.includes(lead.stage)) {
     const label = STAGES_BY_KEY[lead.stage]?.label ?? lead.stage;

@@ -42,8 +42,8 @@ describe("moveBackModeFor", () => {
     ).toBe("demote_inplace");
   });
 
-  it("returns null for ordinary sales leads", () => {
-    expect(moveBackModeFor(baseLead())).toBeNull();
+  it("allows demoting ordinary sales leads back to prospect intake", () => {
+    expect(moveBackModeFor(baseLead())).toBe("demote_inplace");
   });
 });
 

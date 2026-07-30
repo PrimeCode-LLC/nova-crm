@@ -141,7 +141,11 @@ import {
   moveBackModeFor,
   type MoveBackActivity,
 } from "@/lib/prospects/move-back-to-prospect";
-import { prospectOwnerIdOf } from "@/lib/prospects/prospect-access";
+import {
+  prospectOwnerIdOf,
+  viewerManagesProspectOwner,
+} from "@/lib/prospects/prospect-access";
+import { seesAllLeadsInTenant } from "@/lib/workspace-hierarchy";
 import { Checkbox } from "@/components/ui/checkbox";
 import { resolveLeadResponseTimeMinutes } from "@/lib/email/lead-response-time";
 import { extractEmailAddresses } from "@/lib/email/reply-compose";
@@ -503,15 +507,23 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const viewerUser = ws.getUserById(ws.currentUserId);
   const canMoveBackPermission =
     roleAtLeast(ws.viewerOrgRole, "admin") ||
+    Boolean(viewerUser && seesAllLeadsInTenant(viewerUser)) ||
     canAction(viewerUser, "prospects.move_back_to_prospect") ||
     canAction(viewerUser, "prospects.push_to_lead");
-  const moveBackAuthorityOwnerId = prospectSourceId
-    ? prospectOwnerIdOf(ws.getLeadById(prospectSourceId) ?? lead)
-    : prospectOwnerIdOf(lead) || lead.ownerId?.trim() || "";
+  const moveBackAuthorityLead = prospectSourceId
+    ? (ws.getLeadById(prospectSourceId) ?? lead)
+    : lead;
+  const moveBackAuthorityOwnerId =
+    prospectOwnerIdOf(moveBackAuthorityLead) || lead.ownerId?.trim() || "";
   const canMoveBackAccess =
     Boolean(ws.currentUserId) &&
     (roleAtLeast(ws.viewerOrgRole, "admin") ||
+      Boolean(viewerUser && seesAllLeadsInTenant(viewerUser)) ||
       Boolean(lead.sharedOwnerIds?.includes(ws.currentUserId)) ||
+      Boolean(
+        viewerUser &&
+          viewerManagesProspectOwner(viewerUser, moveBackAuthorityLead, ws.users),
+      ) ||
       moveBackAuthorityOwnerId === ws.currentUserId ||
       lead.ownerId?.trim() === ws.currentUserId);
   const showMoveBack =
