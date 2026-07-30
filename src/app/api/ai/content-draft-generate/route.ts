@@ -253,6 +253,13 @@ export async function POST(req: Request) {
       lint,
     });
   } catch (e) {
-    return aiErrorResponse(e);
+    return aiErrorResponse(e, {
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      actorEmail: g.ctx.session.email,
+      location: "src/app/api/ai/content-draft-generate/route.ts",
+      functionName: "handler",
+      route: "/api/ai/content-draft-generate",
+    });
   }
 }

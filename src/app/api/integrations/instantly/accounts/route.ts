@@ -11,6 +11,12 @@ export async function GET() {
     const accounts = await listInstantlyAccounts(g.apiKey);
     return NextResponse.json({ accounts });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/accounts/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/accounts",
+    });
   }
 }

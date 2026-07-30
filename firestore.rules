@@ -531,6 +531,11 @@ service cloud.firestore {
       allow update, delete: if false;
     }
 
+    // Error logs — Admin SDK only (POST/GET via /api/org/error-logs).
+    match /errorLogs/{id} {
+      allow read, write: if false;
+    }
+
     // Scheduling module — server (Admin SDK) only; block direct client access.
     match /schedulingLinks/{id} {
       allow read, write: if false;

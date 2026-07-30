@@ -70,6 +70,12 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     const remote = await patchInstantlyCampaign(g.apiKey, instantlyId, parsed.data);
     return NextResponse.json({ ok: true, remote });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/[id]/options/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/[id]/options",
+    });
   }
 }

@@ -8,6 +8,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { toastError } from "@/lib/error-logging/toast-error";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { signOut } from "firebase/auth";
 
@@ -78,7 +79,12 @@ function ResetPasswordForm() {
         redirect?: string;
       };
       if (!res.ok || !data.ok) {
-        toast.error(data.error ?? "Could not reset password.");
+        toastError(data.error ?? "Could not reset password.", new Error(data.error ?? "Could not reset password."), {
+          location: "src/app/(auth)/reset-password/page.tsx",
+          functionName: "onSubmit",
+          httpStatus: res.status,
+          route: "/api/auth/password-reset/complete",
+        });
         return;
       }
 
@@ -93,8 +99,11 @@ function ResetPasswordForm() {
       );
 
       window.location.assign(data.redirect ?? "/login?reset=complete");
-    } catch {
-      toast.error("Request failed.");
+    } catch (e) {
+      toastError("Request failed.", e, {
+        location: "src/app/(auth)/reset-password/page.tsx",
+        functionName: "onSubmit",
+      });
     } finally {
       setSubmitting(false);
     }

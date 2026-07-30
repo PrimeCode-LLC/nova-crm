@@ -53,6 +53,12 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
     });
     return NextResponse.json({ ok: true, email_list: remote.email_list ?? parsed.data.email_list });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/[id]/accounts/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/[id]/accounts",
+    });
   }
 }

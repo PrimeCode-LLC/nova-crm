@@ -17,6 +17,18 @@ export interface AdminSubSection {
 }
 
 export const ADMIN_SUBSECTIONS: Record<string, AdminSubSection[]> = {
+  "/admin/logs": [
+    {
+      tab: "activity",
+      label: "Activity",
+      keywords: ["audit", "events", "trail"],
+    },
+    {
+      tab: "errors",
+      label: "Error logs",
+      keywords: ["exceptions", "failures", "stack", "debug", "request failed"],
+    },
+  ],
   "/admin/ai": [
     {
       tab: "overview",

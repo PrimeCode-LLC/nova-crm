@@ -6,6 +6,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { toast } from "sonner";
+import { toastError } from "@/lib/error-logging/toast-error";
 import { Loader2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -59,13 +60,21 @@ export default function ForgotPasswordPage() {
         message?: string;
       };
       if (!res.ok || data.ok === false) {
-        toast.error(data.error ?? "Request failed");
+        toastError(data.error ?? "Request failed", new Error(data.error ?? "Request failed"), {
+          location: "src/app/(auth)/forgot-password/page.tsx",
+          functionName: "onSubmit",
+          httpStatus: res.status,
+          route: "/api/auth/password-reset-mail",
+        });
         return;
       }
       setSent(true);
       toast.success(data.message ?? "Reset link sent. Check your inbox");
-    } catch {
-      toast.error("Could not reach the server.");
+    } catch (e) {
+      toastError("Could not reach the server.", e, {
+        location: "src/app/(auth)/forgot-password/page.tsx",
+        functionName: "onSubmit",
+      });
     } finally {
       setLoading(false);
     }

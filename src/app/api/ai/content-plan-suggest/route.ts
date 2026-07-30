@@ -313,6 +313,13 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ plan });
   } catch (e) {
-    return aiErrorResponse(e);
+    return aiErrorResponse(e, {
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      actorEmail: g.ctx.session.email,
+      location: "src/app/api/ai/content-plan-suggest/route.ts",
+      functionName: "handler",
+      route: "/api/ai/content-plan-suggest",
+    });
   }
 }

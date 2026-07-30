@@ -284,6 +284,13 @@ export async function POST(req: Request) {
       errorMessage: e instanceof Error ? e.message : "AI failed",
       updatedAt: new Date().toISOString(),
     });
-    return aiErrorResponse(e);
+    return aiErrorResponse(e, {
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      actorEmail: g.ctx.session.email,
+      location: "src/app/api/ai/content-capture-normalize/route.ts",
+      functionName: "handler",
+      route: "/api/ai/content-capture-normalize",
+    });
   }
 }

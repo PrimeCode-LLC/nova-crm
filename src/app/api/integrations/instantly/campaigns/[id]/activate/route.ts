@@ -37,6 +37,12 @@ export async function POST(_req: Request, ctx: RouteCtx) {
     await updateCampaignServer(id, { status: "active" }, g.uid);
     return NextResponse.json({ ok: true, status: "active" });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/[id]/activate/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/[id]/activate",
+    });
   }
 }

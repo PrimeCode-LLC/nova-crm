@@ -3,7 +3,7 @@ import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import { listMembersForDisplayServer } from "@/lib/platform/member-display";
-import { ActivityLogsClient } from "./activity-logs-client";
+import { AdminLogsClient } from "./admin-logs-client";
 
 export const dynamic = "force-dynamic";
 
@@ -19,5 +19,5 @@ export default async function ActivityLogsPage() {
 
   const members = orgId ? await listMembersForDisplayServer(orgId) : [];
 
-  return <ActivityLogsClient orgRole={role ?? "member"} members={members} />;
+  return <AdminLogsClient orgRole={role ?? "member"} members={members} />;
 }

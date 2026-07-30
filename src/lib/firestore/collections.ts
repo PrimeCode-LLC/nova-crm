@@ -53,6 +53,8 @@ export const COLLECTIONS = {
   /** 7-day staging pool before promote to prospect/lead. */
   scraperRawItems: "scraperRawItems",
   auditLog: "auditLog",
+  /** Append-only exception / request-failure log for admin debugging. */
+  errorLogs: "errorLogs",
   workspaceChatChannels: "workspaceChatChannels",
   workspaceChatMessages: "workspaceChatMessages",
   /** Per-user last-read timestamps per channel (`channels.{channelId}` → ISO string). */
@@ -153,6 +155,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.importJobChunks,
   COLLECTIONS.importIdentityKeys,
   COLLECTIONS.auditLog,
+  COLLECTIONS.errorLogs,
   COLLECTIONS.workspaceChatChannels,
   COLLECTIONS.workspaceChatMessages,
   COLLECTIONS.workspaceChatReads,

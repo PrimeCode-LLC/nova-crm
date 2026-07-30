@@ -12,6 +12,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
+import { toastError } from "@/lib/error-logging/toast-error";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -137,8 +138,9 @@ export default function AdminImportPage() {
       setReimportConfirmed(false);
       toast.success(`Validated ${data.job.counts.total.toLocaleString()} rows`);
     } catch (error) {
-      toast.error("Could not preview import", {
-        description: error instanceof Error ? error.message : String(error),
+      toastError("Could not preview import", error, {
+        location: "src/app/(app)/admin/import/page.tsx",
+        functionName: "previewFile",
       });
     } finally {
       setBusy(false);
@@ -162,7 +164,10 @@ export default function AdminImportPage() {
       setJob(data.job);
       toast.success("Import queued. It will continue if you leave this page.");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not start import.");
+      toastError(error instanceof Error ? error.message : "Could not start import.", error, {
+        location: "src/app/(app)/admin/import/page.tsx",
+        functionName: "startImport",
+      });
     } finally {
       setBusy(false);
     }
@@ -185,7 +190,10 @@ export default function AdminImportPage() {
           : "Cancellation requested. Completed rows will be kept.",
       );
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not cancel import.");
+      toastError(error instanceof Error ? error.message : "Could not cancel import.", error, {
+        location: "src/app/(app)/admin/import/page.tsx",
+        functionName: "cancelImport",
+      });
     } finally {
       setBusy(false);
     }

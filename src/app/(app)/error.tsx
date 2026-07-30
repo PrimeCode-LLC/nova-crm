@@ -3,6 +3,7 @@
 import * as React from "react";
 import { AlertTriangle, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { reportClientError } from "@/lib/error-logging/report-client";
 
 /** Runtime crash boundary for the (app) shell. Shows the real error in production so we can diagnose React #185 / hook errors that minified bundles otherwise hide behind a generic "this page couldn't load" screen. */
 export default function AppRouteError({
@@ -20,6 +21,15 @@ export default function AppRouteError({
         message: error.message,
         digest: error.digest,
         stack: error.stack,
+      });
+      reportClientError({
+        message: error.message || "Something broke on this page",
+        error,
+        location: "src/app/(app)/error.tsx",
+        functionName: "AppRouteError",
+        stack: error.stack,
+        url: window.location.href,
+        route: window.location.pathname,
       });
     }
   }, [error]);

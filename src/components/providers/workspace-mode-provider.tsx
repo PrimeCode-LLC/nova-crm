@@ -88,6 +88,7 @@ import {
 import { persistOrgActivityEventCreate } from "@/lib/firestore/persist-org-activity-client";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { toast } from "sonner";
+import { toastError } from "@/lib/error-logging/toast-error";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { setWorkspaceModeCookie } from "@/app/(app)/actions/workspace-mode";
 import { setDemoPersonaCookie } from "@/app/(app)/actions/demo-persona";
@@ -593,8 +594,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistProfileUpdate(db, id, patch);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save profile", { description: msg });
+            toastError("Could not save profile", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
         return;
@@ -618,8 +621,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistProfileCreate(db, orgId, profile);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save profile", { description: msg });
+            toastError("Could not save profile", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
         return;
@@ -640,7 +645,10 @@ export function WorkspaceModeProvider({
             await persistCampaignUpdate(db, id, patch);
           } catch (e) {
             console.error(e);
-            toast.error("Could not save campaign");
+            toastError("Could not save campaign", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "updateCampaign",
+            });
           }
         })();
         return;
@@ -662,7 +670,10 @@ export function WorkspaceModeProvider({
             await persistCampaignCreate(db, orgId, campaign);
           } catch (e) {
             console.error(e);
-            toast.error("Could not create campaign");
+            toastError("Could not create campaign", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "addCampaign",
+            });
           }
         })();
         return;
@@ -682,8 +693,10 @@ export function WorkspaceModeProvider({
           const db = getFirebaseDb();
           await persistAccountCreateClient(db, orgId, account);
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not save company", { description: msg });
+            toastError("Could not save company", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           throw e;
         }
       }
@@ -702,8 +715,10 @@ export function WorkspaceModeProvider({
           const db = getFirebaseDb();
           await persistContactCreateClient(db, orgId, contact);
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not save contact", { description: msg });
+            toastError("Could not save contact", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           throw e;
         }
       }
@@ -737,8 +752,10 @@ export function WorkspaceModeProvider({
             isProspect: isProspectRow(scored),
           });
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not save lead", { description: msg });
+            toastError("Could not save lead", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           throw e;
         }
       }
@@ -785,8 +802,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistLeadActivityBump(db, leadId);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update activity", { description: msg });
+            toastError("Could not update activity", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
         return;
@@ -839,8 +858,10 @@ export function WorkspaceModeProvider({
               );
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save follow-up", { description: msg });
+            toastError("Could not save follow-up", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -902,8 +923,10 @@ export function WorkspaceModeProvider({
               );
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save follow-up plan", { description: msg });
+            toastError("Could not save follow-up plan", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -960,8 +983,10 @@ export function WorkspaceModeProvider({
           };
           await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not pause follow-up plan", { description: msg });
+            toastError("Could not pause follow-up plan", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           throw e;
         }
       }
@@ -1045,8 +1070,10 @@ export function WorkspaceModeProvider({
           };
           await persistTimelineEventCreate(db, orgId, te, leadOwnerIdForFirestore(input.leadId));
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          toast.error("Could not resume follow-up plan", { description: msg });
+            toastError("Could not resume follow-up plan", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           throw e;
         }
       }
@@ -1106,8 +1133,10 @@ export function WorkspaceModeProvider({
               supersededByPlanId: newPlanId,
             });
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update prior plan", { description: msg });
+            toastError("Could not update prior plan", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1163,8 +1192,10 @@ export function WorkspaceModeProvider({
               );
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update follow-up", { description: msg });
+            toastError("Could not update follow-up", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1195,8 +1226,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistFollowupEmailSchedule(db, id, schedule);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update email schedule", { description: msg });
+            toastError("Could not update email schedule", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1284,8 +1317,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistFollowupPatch(db, id, patch);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update follow-up", { description: msg });
+            toastError("Could not update follow-up", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1334,8 +1369,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistFollowupDelete(db, id);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not delete follow-up", { description: msg });
+            toastError("Could not delete follow-up", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1386,8 +1423,10 @@ export function WorkspaceModeProvider({
               );
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save task", { description: msg });
+            toastError("Could not save task", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1433,8 +1472,10 @@ export function WorkspaceModeProvider({
             await persistTimelineEventCreate(db, orgId, timeline, leadOwnerIdForFirestore(leadId));
             await persistLeadActivityBump(db, leadId);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save note", { description: msg });
+            toastError("Could not save note", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1466,8 +1507,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistNoteUpdate(db, noteId, patch);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save note", { description: msg });
+            toastError("Could not save note", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1499,8 +1542,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistNoteDelete(db, noteId);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not delete note", { description: msg });
+            toastError("Could not delete note", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1541,8 +1586,10 @@ export function WorkspaceModeProvider({
             await persistTimelineEventCreate(db, orgId, event, leadOwnerIdForFirestore(t.leadId));
             await persistLeadActivityBump(db, t.leadId);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save touchpoint", { description: msg });
+            toastError("Could not save touchpoint", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1575,8 +1622,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistTimelineEventCreate(db, orgId, e, leadOwnerIdForFirestore(e.leadId));
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error("Could not save timeline event", { description: msg });
+            toastError("Could not save timeline event", err, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "addTimelineEvent",
+            });
           }
         })();
       }
@@ -1608,8 +1657,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistOrgActivityEventCreate(db, orgId, e);
           } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
-            toast.error("Could not save activity", { description: msg });
+            toastError("Could not save activity", err, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "addOrgActivityEvent",
+            });
           }
         })();
       }
@@ -1678,9 +1729,15 @@ export function WorkspaceModeProvider({
       void patchLeadAsync(leadId, patch).catch((e) => {
         const msg = e instanceof Error ? e.message : String(e);
         if (msg.includes("Only workspace admins")) {
-          toast.error(msg);
+          toastError(msg, e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "patchLead",
+          });
         } else {
-          toast.error("Could not save lead", { description: msg });
+          toastError("Could not save lead", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "patchLead",
+          });
         }
       });
     },
@@ -1821,8 +1878,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistAccountPatchClient(db, accountId, { ...patch, updatedAt: iso });
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save company", { description: msg });
+            toastError("Could not save company", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1848,8 +1907,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistContactPatchClient(db, contactId, { ...patch, updatedAt: iso });
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save contact", { description: msg });
+            toastError("Could not save contact", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1890,8 +1951,10 @@ export function WorkspaceModeProvider({
               });
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save deal", { description: msg });
+            toastError("Could not save deal", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -1914,17 +1977,25 @@ export function WorkspaceModeProvider({
           try {
             const orgId = await resolveOrganizationIdForFirestoreWrite(userDoc?.organizationId);
             if (!orgId) {
-              toast.error("Could not save label", {
-                description:
+              toastError(
+                "Could not save label",
+                new Error(
                   "No organization id on your session. Try refreshing the page or signing out and back in.",
-              });
+                ),
+                {
+                  location: "src/components/providers/workspace-mode-provider.tsx",
+                  functionName: "addCrmLabel",
+                },
+              );
               return;
             }
             const db = getFirebaseDb();
             await persistCrmLabelCreate(db, orgId, label);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save label", { description: msg });
+            toastError("Could not save label", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
         return;
@@ -1944,8 +2015,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistCrmLabelUpdate(db, id, patch);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update label", { description: msg });
+            toastError("Could not update label", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
         return;
@@ -1968,8 +2041,10 @@ export function WorkspaceModeProvider({
             const db = getFirebaseDb();
             await persistCrmLabelDelete(db, id);
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not delete label", { description: msg });
+            toastError("Could not delete label", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
         return;
@@ -2034,8 +2109,12 @@ export function WorkspaceModeProvider({
           });
           return true;
         } catch (e) {
-          const msg = e instanceof Error ? e.message : String(e);
-          if (!quiet) toast.error("Could not delete lead", { description: msg });
+          if (!quiet) {
+            toastError("Could not delete lead", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "deleteLead",
+            });
+          }
           return false;
         }
       }
@@ -2109,8 +2188,10 @@ export function WorkspaceModeProvider({
               channel: lead?.channel,
             });
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not save stage", { description: msg });
+            toastError("Could not save stage", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
@@ -2354,8 +2435,10 @@ export function WorkspaceModeProvider({
               );
             }
           } catch (e) {
-            const msg = e instanceof Error ? e.message : String(e);
-            toast.error("Could not update task", { description: msg });
+            toastError("Could not update task", e, {
+              location: "src/components/providers/workspace-mode-provider.tsx",
+              functionName: "workspacePersist",
+            });
           }
         })();
       }
