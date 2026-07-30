@@ -41,6 +41,10 @@ export type ReplyAction = {
   draftTo?: string;
   draftInReplyTo?: string;
   draftReferenceIds?: string[];
+  /** Snippet of the inbound message this draft replies to (for approval UI). */
+  inboundPreview?: string;
+  inboundFrom?: string;
+  inboundSubject?: string;
   draftStatus?: "none" | "pending" | "ready" | "failed";
   draftError?: string;
   sentAt?: ISODate;

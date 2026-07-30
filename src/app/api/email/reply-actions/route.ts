@@ -36,6 +36,7 @@ const patchSchema = z.object({
   decision: z.enum(["accepted", "dismissed", "send", "save_draft", "regenerate"]),
   draftBody: z.string().max(50_000).optional(),
   draftSubject: z.string().max(500).optional(),
+  regenerateDirection: z.string().max(400).optional(),
 });
 
 export async function PATCH(req: Request) {
@@ -63,6 +64,7 @@ export async function PATCH(req: Request) {
       actionId: parsed.data.id,
       actorUid: uid,
       force: true,
+      regenerateDirection: parsed.data.regenerateDirection,
     });
     if (!result.ok) {
       return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
@@ -100,7 +102,20 @@ export async function PATCH(req: Request) {
     if (!result.ok) {
       return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
     }
-    return NextResponse.json({ ok: true, messageId: result.messageId });
+    return NextResponse.json({
+      ok: true,
+      messageId: result.messageId,
+      subject: result.subject,
+      to: result.to,
+      from: result.from,
+      body: result.body,
+      mailboxId: result.mailboxId,
+      mailboxOwnerUid: result.mailboxOwnerUid,
+      sentAt: result.sentAt,
+      inReplyTo: result.inReplyTo,
+      referenceIds: result.referenceIds,
+      leadId: result.leadId,
+    });
   }
 
   const result = await decideReplyActionServer({

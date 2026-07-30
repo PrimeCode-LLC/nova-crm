@@ -1082,6 +1082,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                           ? `Apply suggested email: ${suggestedNewEmail}`
                           : lead.nextAction || "Add a next action to keep this record moving"}
                   </p>
+                  {canEditLead &&
+                  lead.replyActionStatus === "pending" &&
+                  lead.pendingReplyActionId &&
+                  !lead.doNotContact &&
+                  !needsEmailFix &&
+                  !suggestedNewEmail &&
+                  (lead.nextAction?.includes("Draft generating") ||
+                    lead.nextAction?.includes("Rewriting draft")) ? (
+                    <p className="mt-2 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      AI is preparing the reply draft…
+                    </p>
+                  ) : null}
                   {!lead.doNotContact && (companyEmail || personalEmail || primaryPhone) ? (
                     <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
                       {companyEmail ? (

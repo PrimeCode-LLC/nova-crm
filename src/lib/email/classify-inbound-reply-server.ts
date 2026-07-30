@@ -3,6 +3,8 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/firestore/tenant-write";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { AiForbiddenError, AiNotConfiguredError, runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
@@ -19,6 +21,7 @@ import {
 import { generateReplyActionDraftServer } from "@/lib/email/generate-reply-action-draft-server";
 import { buildInboundReplySignalBlock } from "@/lib/email/reply-signals";
 import { replyTextOnly, stripQuotedReply } from "@/lib/email/strip-quoted-reply";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 
 export const replyClassifySchema = z.object({
@@ -140,6 +143,10 @@ async function writeReplyActionAndLead(input: {
   mailboxId: string;
   mailboxOwnerUid?: string;
   inboundProviderKey: string;
+  inboundPreview?: string;
+  inboundFrom?: string;
+  inboundSubject?: string;
+  inboundMessageId?: string;
   source: ReplyAction["source"];
   result: z.infer<typeof replyClassifySchema>;
   actorUid?: string;
@@ -160,6 +167,11 @@ async function writeReplyActionAndLead(input: {
     recommendedAction: input.result.recommendedAction as ReplyRecommendedAction,
   });
 
+  const inboundPreview = (input.inboundPreview || "").replace(/\s+/g, " ").trim().slice(0, 280);
+  const inboundFrom = (input.inboundFrom || "").trim().slice(0, 200);
+  const inboundSubject = (input.inboundSubject || "").trim().slice(0, 300);
+  const inboundMessageId = (input.inboundMessageId || "").trim() || undefined;
+
   const doc: ReplyAction = {
     id: actionId,
     organizationId: input.organizationId,
@@ -173,6 +185,10 @@ async function writeReplyActionAndLead(input: {
     recommendedAction: input.result.recommendedAction as ReplyRecommendedAction,
     rationale: input.result.rationale.trim().slice(0, 1_000),
     nextStepSummary: input.result.nextStepSummary.trim().slice(0, 500),
+    ...(inboundPreview ? { inboundPreview } : {}),
+    ...(inboundFrom ? { inboundFrom } : {}),
+    ...(inboundSubject ? { inboundSubject } : {}),
+    ...(inboundMessageId ? { draftInReplyTo: inboundMessageId } : {}),
     draftStatus: needsDraft ? "pending" : "none",
     source: input.source,
     createdAt: now,
@@ -198,6 +214,46 @@ async function writeReplyActionAndLead(input: {
       }),
       { merge: true },
     );
+
+  // Timeline: inbound reply classified (complete process visibility).
+  try {
+    const leadSnap = await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
+    const rawOwner = leadSnap.data()?.ownerId;
+    const leadOwnerId =
+      (typeof rawOwner === "string" && rawOwner.trim()) ||
+      input.mailboxOwnerUid ||
+      input.actorUid ||
+      "system";
+    const actorId = input.actorUid?.trim() || leadOwnerId;
+    const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
+    const teId = `te-${crypto.randomUUID()}`;
+    await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+      stampForCreate(
+        input.organizationId,
+        {
+          leadId: input.leadId,
+          leadOwnerId,
+          leadOwnerManagerIds,
+          type: "email_replied",
+          actorId,
+          summary: inboundSubject
+            ? `Email replied: ${inboundSubject}`
+            : "Lead replied by email",
+          payload: {
+            source: "reply_intelligence",
+            replyActionId: actionId,
+            classification: doc.classification,
+            potentialScore: doc.potentialScore,
+            ...(inboundMessageId ? { messageId: inboundMessageId } : {}),
+          },
+          createdAt: now,
+        },
+        actorId,
+      ),
+    );
+  } catch {
+    /* timeline best-effort */
+  }
 
   if (needsDraft) {
     // Fire-and-forget-ish: await so cron sees draft ready before tick ends, but never fail classify.
@@ -365,6 +421,10 @@ export async function classifyInboundLeadMailServer(input: {
     mailboxId: newest.mailboxId,
     mailboxOwnerUid: newest.mailboxOwnerUid || input.actorUid,
     inboundProviderKey: newest.providerKey,
+    inboundPreview: body,
+    inboundFrom: newest.from,
+    inboundSubject: newest.subject,
+    inboundMessageId: normalizeMessageId(newest.messageId) ?? undefined,
     source,
     result,
     actorUid: input.actorUid,
@@ -406,6 +466,9 @@ export async function getReplyActionServer(input: {
     draftReferenceIds: Array.isArray(data.draftReferenceIds)
       ? data.draftReferenceIds.map((x) => String(x)).filter(Boolean)
       : undefined,
+    inboundPreview: typeof data.inboundPreview === "string" ? data.inboundPreview : undefined,
+    inboundFrom: typeof data.inboundFrom === "string" ? data.inboundFrom : undefined,
+    inboundSubject: typeof data.inboundSubject === "string" ? data.inboundSubject : undefined,
     draftStatus: (data.draftStatus as ReplyAction["draftStatus"]) ?? "none",
     draftError: typeof data.draftError === "string" ? data.draftError : undefined,
     sentAt: typeof data.sentAt === "string" ? data.sentAt : undefined,

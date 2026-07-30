@@ -9,7 +9,10 @@ import {
   formatFollowupRoleGuidance,
 } from "@/lib/ai/followup-personalization";
 import { buildLeadSignalProfile, formatLeadSignalGuidance } from "@/lib/ai/lead-signal-profile";
-import { listLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";
+import {
+  getLeadMailMessageServer,
+  listLeadMailMessagesServer,
+} from "@/lib/email/lead-mail-store-server";
 import { extractReplyAddress, replySubject } from "@/lib/email/reply-compose";
 import { replyTextOnly } from "@/lib/email/strip-quoted-reply";
 import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
@@ -55,6 +58,7 @@ function buildReplyGuidance(input: {
   recommendedAction: ReplyRecommendedAction;
   potentialScore: number;
   nextStepSummary: string;
+  regenerateDirection?: string;
 }): string {
   const profile = buildFollowupPersonalizationProfile({ title: input.lead.contactTitle });
   const signalProfile = buildLeadSignalProfile({ lead: input.lead });
@@ -71,6 +75,10 @@ function buildReplyGuidance(input: {
     `Temperature: ${input.lead.temperature || "unknown"}`,
   ];
 
+  if (input.regenerateDirection?.trim()) {
+    lines.push("", `Regenerate direction (mandatory): ${input.regenerateDirection.trim()}`);
+  }
+
   if (input.lead.doNotContact) {
     lines.push(
       "COMPLIANCE: this lead is marked do-not-contact. Acknowledge and close out. Do not pitch and do not ask for a meeting.",
@@ -83,14 +91,45 @@ function buildReplyGuidance(input: {
 async function buildThreadForDraft(input: {
   organizationId: string;
   leadId: string;
-}): Promise<{ thread: string; subject: string; to: string; inReplyTo?: string; referenceIds?: string[] }> {
+  inboundProviderKey?: string;
+  draftInReplyTo?: string;
+}): Promise<{
+  thread: string;
+  subject: string;
+  to: string;
+  inReplyTo?: string;
+  referenceIds?: string[];
+  inboundPreview?: string;
+  inboundFrom?: string;
+  inboundSubject?: string;
+  mailboxId?: string;
+}> {
   const rows = await listLeadMailMessagesServer({
     organizationId: input.organizationId,
     leadId: input.leadId,
     limit: 24,
   });
   const chronological = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-  const latestInbound = [...chronological].reverse().find((r) => r.direction === "inbound");
+
+  let targetInbound =
+    (input.inboundProviderKey
+      ? await getLeadMailMessageServer({
+          organizationId: input.organizationId,
+          leadId: input.leadId,
+          providerKey: input.inboundProviderKey,
+        })
+      : null) ||
+    chronological
+      .slice()
+      .reverse()
+      .find(
+        (r) =>
+          r.direction === "inbound" &&
+          (!input.draftInReplyTo ||
+            normalizeMessageId(r.messageId) === normalizeMessageId(input.draftInReplyTo)),
+      ) ||
+    chronological.slice().reverse().find((r) => r.direction === "inbound");
+
   const lines: string[] = [];
   for (const row of chronological.slice(-12)) {
     const who = row.direction === "inbound" ? "THEM" : "US";
@@ -102,17 +141,23 @@ async function buildThreadForDraft(input: {
   }
 
   const to =
-    (latestInbound ? extractReplyAddress(latestInbound.replyTo || latestInbound.from) : "") ||
-    "";
-  const subject = replySubject(latestInbound?.subject);
-  const inReplyTo = normalizeMessageId(latestInbound?.messageId);
+    (targetInbound ? extractReplyAddress(targetInbound.replyTo || targetInbound.from) : "") || "";
+  const subject = replySubject(targetInbound?.subject);
+  const inReplyTo = normalizeMessageId(targetInbound?.messageId) || normalizeMessageId(input.draftInReplyTo);
   const referenceIds = [
-    ...(latestInbound?.referenceIds ?? []),
+    ...(targetInbound?.referenceIds ?? []),
     ...(inReplyTo ? [inReplyTo] : []),
   ]
     .map((id) => normalizeMessageId(id))
     .filter((id): id is string => Boolean(id))
     .slice(-50);
+
+  const inboundPreview = targetInbound
+    ? replyTextOnly(targetInbound.bodyText || targetInbound.preview || "")
+        .replace(/\s+/g, " ")
+        .trim()
+        .slice(0, 280)
+    : undefined;
 
   return {
     thread: lines.length ? lines.join("\n\n") : "(no prior thread stored)",
@@ -120,6 +165,10 @@ async function buildThreadForDraft(input: {
     to,
     inReplyTo,
     referenceIds: referenceIds.length ? referenceIds : undefined,
+    inboundPreview: inboundPreview || undefined,
+    inboundFrom: targetInbound?.from,
+    inboundSubject: targetInbound?.subject,
+    mailboxId: targetInbound?.mailboxId,
   };
 }
 
@@ -131,6 +180,7 @@ export async function generateReplyActionDraftServer(input: {
   actionId: string;
   actorUid?: string;
   force?: boolean;
+  regenerateDirection?: string;
 }): Promise<{ ok: true; action: Partial<ReplyAction> } | { ok: false; error: string; status: number }> {
   const db = getAdminDb();
   if (!db) return { ok: false, error: "Database not configured.", status: 503 };
@@ -170,10 +220,29 @@ export async function generateReplyActionDraftServer(input: {
     { merge: true },
   );
 
+  // Surface generating state on the lead NBA while regenerate runs.
+  if (input.force) {
+    const baseNext = formatReplyNextActionForLead(data);
+    await db
+      .collection(COLLECTIONS.leads)
+      .doc(leadId)
+      .set(
+        {
+          nextAction: `${baseNext} · Rewriting draft…`,
+          updatedAt: now,
+        },
+        { merge: true },
+      )
+      .catch(() => undefined);
+  }
+
   try {
     const threadCtx = await buildThreadForDraft({
       organizationId: input.organizationId,
       leadId,
+      inboundProviderKey: String(data.inboundProviderKey ?? "") || undefined,
+      draftInReplyTo:
+        typeof data.draftInReplyTo === "string" ? data.draftInReplyTo : undefined,
     });
     const to = threadCtx.to || lead.contactEmail?.trim() || "";
     if (!to) {
@@ -222,6 +291,7 @@ export async function generateReplyActionDraftServer(input: {
           recommendedAction,
           potentialScore: Number(data.potentialScore ?? 0),
           nextStepSummary,
+          regenerateDirection: input.regenerateDirection,
         }),
         thread: threadCtx.thread.slice(0, 20_000),
         leadContext: leadSnapshot(lead),
@@ -236,12 +306,31 @@ export async function generateReplyActionDraftServer(input: {
       draftTo: to,
       draftInReplyTo: threadCtx.inReplyTo,
       draftReferenceIds: threadCtx.referenceIds,
+      inboundPreview: threadCtx.inboundPreview || data.inboundPreview,
+      inboundFrom: threadCtx.inboundFrom || data.inboundFrom,
+      inboundSubject: threadCtx.inboundSubject || data.inboundSubject,
       draftStatus: "ready" as const,
       draftError: null,
       updatedAt: new Date().toISOString(),
     });
 
     await db.collection(COLLECTIONS.replyActions).doc(input.actionId).set(patch, { merge: true });
+
+    if (input.force) {
+      const baseNext = formatReplyNextActionForLead(data);
+      await db
+        .collection(COLLECTIONS.leads)
+        .doc(leadId)
+        .set(
+          {
+            nextAction: `${baseNext} · Draft ready for approval`,
+            updatedAt: new Date().toISOString(),
+          },
+          { merge: true },
+        )
+        .catch(() => undefined);
+    }
+
     return {
       ok: true,
       action: {
@@ -250,6 +339,9 @@ export async function generateReplyActionDraftServer(input: {
         draftTo: to,
         draftInReplyTo: threadCtx.inReplyTo,
         draftReferenceIds: threadCtx.referenceIds,
+        inboundPreview: typeof patch.inboundPreview === "string" ? patch.inboundPreview : undefined,
+        inboundFrom: typeof patch.inboundFrom === "string" ? patch.inboundFrom : undefined,
+        inboundSubject: typeof patch.inboundSubject === "string" ? patch.inboundSubject : undefined,
         draftStatus: "ready",
       },
     };
@@ -270,4 +362,17 @@ export async function generateReplyActionDraftServer(input: {
     );
     return { ok: false, error: message, status: 500 };
   }
+}
+
+function formatReplyNextActionForLead(data: Record<string, unknown>): string {
+  const classification = String(data.classification ?? "unclear") as ReplyClass;
+  const nextStepSummary = String(data.nextStepSummary ?? "");
+  const potentialScore = Number(data.potentialScore ?? 0);
+  const label = REPLY_CLASS_LABELS[classification] || "Reply analyzed";
+  const score =
+    Number.isFinite(potentialScore) && classification !== "auto_reply"
+      ? ` · potential ${Math.round(potentialScore)}`
+      : "";
+  const step = nextStepSummary.trim();
+  return step ? `${label}${score}: ${step}` : `${label}${score}`;
 }

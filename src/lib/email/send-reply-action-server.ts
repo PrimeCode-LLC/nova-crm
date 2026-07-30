@@ -1,17 +1,21 @@
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/firestore/tenant-write";
 import {
   appendGlobalEmailFooter,
   appendMailboxSignature,
 } from "@/lib/email/append-mailbox-signature";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
+import { getLeadMailMessageServer } from "@/lib/email/lead-mail-store-server";
 import { getEmailAccountMetaServer, getMailboxProfileServer, listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-server";
 import {
   assertMailboxDailySendQuotaServer,
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
+import { replySubject } from "@/lib/email/reply-compose";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { getReplyActionServer } from "@/lib/email/classify-inbound-reply-server";
@@ -104,7 +108,20 @@ export async function sendReplyActionServer(input: {
   draftBody?: string;
   draftSubject?: string;
 }): Promise<
-  | { ok: true; messageId?: string }
+  | {
+      ok: true;
+      messageId?: string;
+      subject: string;
+      to: string;
+      from: string;
+      body: string;
+      mailboxId: string;
+      mailboxOwnerUid: string;
+      sentAt: string;
+      inReplyTo?: string;
+      referenceIds?: string[];
+      leadId: string;
+    }
   | { ok: false; error: string; status: number }
 > {
   const db = getAdminDb();
@@ -170,6 +187,32 @@ export async function sendReplyActionServer(input: {
   const to = (action.draftTo || lead.contactEmail || "").trim();
   if (!to) return { ok: false, error: "Missing recipient address.", status: 409 };
 
+  // Prefer threading headers from the specific inbound that triggered this action.
+  let inReplyTo = normalizeMessageId(action.draftInReplyTo);
+  let referenceIds = action.draftReferenceIds?.map((id) => normalizeMessageId(id)).filter(
+    (id): id is string => Boolean(id),
+  );
+  let subject = draftSubject || action.draftSubject || "";
+  if (action.inboundProviderKey) {
+    const inbound = await getLeadMailMessageServer({
+      organizationId: input.organizationId,
+      leadId: action.leadId,
+      providerKey: action.inboundProviderKey,
+    });
+    if (inbound) {
+      inReplyTo = normalizeMessageId(inbound.messageId) || inReplyTo;
+      const refs = [
+        ...(inbound.referenceIds ?? []),
+        ...(inReplyTo ? [inReplyTo] : []),
+      ]
+        .map((id) => normalizeMessageId(id))
+        .filter((id): id is string => Boolean(id));
+      if (refs.length) referenceIds = [...new Set(refs)].slice(-50);
+      if (!subject.trim()) subject = replySubject(inbound.subject);
+    }
+  }
+  if (!subject.trim()) subject = "Re:";
+
   const meta = await getEmailAccountMetaServer({
     organizationId: input.organizationId,
     uid: resolved.ownerUid,
@@ -205,11 +248,11 @@ export async function sendReplyActionServer(input: {
     displayName: mailbox.displayName,
     replyTo: mailbox.replyTo,
     to,
-    subject: draftSubject || "Re:",
+    subject,
     text: outboundBody,
     html: bodyToHtml(outboundBody),
-    inReplyTo: action.draftInReplyTo,
-    referenceIds: action.draftReferenceIds,
+    inReplyTo,
+    referenceIds,
   });
 
   if (!result.ok) {
@@ -223,8 +266,10 @@ export async function sendReplyActionServer(input: {
     {
       status: "sent",
       draftBody,
-      draftSubject: draftSubject || action.draftSubject || "Re:",
+      draftSubject: subject,
       draftStatus: "ready",
+      draftInReplyTo: inReplyTo,
+      ...(referenceIds?.length ? { draftReferenceIds: referenceIds } : {}),
       sentAt: now,
       ...(messageId ? { sentMessageId: messageId } : {}),
       decidedAt: now,
@@ -251,15 +296,44 @@ export async function sendReplyActionServer(input: {
     from: mailbox.emailAddress,
     to,
     replyTo: mailbox.replyTo,
-    subject: draftSubject || "Re:",
+    subject,
     bodyText: outboundBody,
     bodyHtml: bodyToHtml(outboundBody),
     sentAt: now,
     messageId,
-    inReplyTo: action.draftInReplyTo,
-    referenceIds: action.draftReferenceIds,
+    inReplyTo,
+    referenceIds,
     source: "smtp_send",
   });
+
+  try {
+    const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, lead.ownerId);
+    const teId = `te-${crypto.randomUUID()}`;
+    await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+      stampForCreate(
+        input.organizationId,
+        {
+          leadId: action.leadId,
+          leadOwnerId: lead.ownerId,
+          leadOwnerManagerIds,
+          type: "email_sent",
+          actorId: input.decidedBy,
+          summary: `Email sent: ${subject.trim() || "(no subject)"}`,
+          payload: {
+            source: "reply_intelligence",
+            replyActionId: action.id,
+            mailboxId: resolved.mailboxId,
+            ...(messageId ? { messageId } : {}),
+            ...(inReplyTo ? { inReplyTo } : {}),
+          },
+          createdAt: now,
+        },
+        input.decidedBy,
+      ),
+    );
+  } catch {
+    /* timeline best-effort */
+  }
 
   try {
     await incrementMailboxSendCountServer({
@@ -271,7 +345,20 @@ export async function sendReplyActionServer(input: {
     /* send already succeeded */
   }
 
-  return { ok: true, messageId };
+  return {
+    ok: true,
+    messageId,
+    subject,
+    to,
+    from: mailbox.emailAddress,
+    body: outboundBody,
+    mailboxId: resolved.mailboxId,
+    mailboxOwnerUid: resolved.ownerUid,
+    sentAt: now,
+    inReplyTo,
+    referenceIds,
+    leadId: action.leadId,
+  };
 }
 
 export async function saveReplyActionDraftServer(input: {

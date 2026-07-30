@@ -60,6 +60,11 @@ import {
   type LeadEmailMessage,
 } from "@/lib/email/lead-email-conversations";
 import {
+  LEAD_REPLY_SENT_EVENT,
+  takePendingLeadReplySent,
+  type LeadReplySentDetail,
+} from "@/lib/email/lead-reply-events";
+import {
   leadMailToLeadEmailMessage,
   mergeLeadEmailMessages,
 } from "@/lib/email/lead-mail-map";
@@ -304,6 +309,7 @@ export function LeadEmailsPanel({
   );
 
   const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [highlightKey, setHighlightKey] = React.useState<string | null>(null);
   const [syncingLists, setSyncingLists] = React.useState(false);
   const [storedMessages, setStoredMessages] = React.useState<LeadEmailMessage[]>([]);
   const [loadingStored, setLoadingStored] = React.useState(!workspace.isDemo);
@@ -451,6 +457,51 @@ export function LeadEmailsPanel({
     storedReadyRef.current = false;
     void loadStoredLeadMail();
   }, [loadStoredLeadMail]);
+
+  React.useEffect(() => {
+    function applyReplySent(detail: LeadReplySentDetail) {
+      if (detail.leadId !== lead.id) return;
+
+      const mailboxId = detail.mailboxId || activeMailbox.id;
+      if (detail.to && detail.from && detail.body) {
+        const id = addSent({
+          mailboxId,
+          from: detail.from,
+          to: detail.to,
+          subject: detail.subject || "(no subject)",
+          body: detail.body,
+          preview: detail.body.replace(/\s+/g, " ").trim().slice(0, 180),
+          messageId: detail.messageId,
+          inReplyTo: detail.inReplyTo,
+          referenceIds: detail.referenceIds,
+        });
+        linkMessageToLead(id, lead.id);
+        setSelectedId(id);
+        setHighlightKey(id);
+        window.setTimeout(() => setHighlightKey((prev) => (prev === id ? null : prev)), 8_000);
+      }
+
+      void loadStoredLeadMail();
+    }
+
+    const pending = takePendingLeadReplySent(lead.id);
+    if (pending) applyReplySent(pending);
+
+    function onReplySent(event: Event) {
+      const detail = (event as CustomEvent<LeadReplySentDetail>).detail;
+      if (!detail) return;
+      applyReplySent(detail);
+    }
+
+    window.addEventListener(LEAD_REPLY_SENT_EVENT, onReplySent);
+    return () => window.removeEventListener(LEAD_REPLY_SENT_EVENT, onReplySent);
+  }, [
+    activeMailbox.id,
+    addSent,
+    lead.id,
+    linkMessageToLead,
+    loadStoredLeadMail,
+  ]);
 
   const syncConversationLists = React.useCallback(
     async (force: boolean) => {
@@ -1215,7 +1266,11 @@ export function LeadEmailsPanel({
                 <button
                   key={conversation.id}
                   type="button"
-                  className="group flex w-full items-start gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  className={
+                    conversation.messages.some((m) => m.key === highlightKey)
+                      ? "group flex w-full items-start gap-3 rounded-lg border border-primary/50 bg-primary/5 p-3 text-left transition-colors ring-2 ring-primary/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      : "group flex w-full items-start gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:border-primary/35 hover:bg-muted/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  }
                   onClick={() => {
                     resetComposer();
                     setSelectedId(conversation.latest.key);

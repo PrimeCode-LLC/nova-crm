@@ -42,6 +42,9 @@ function parseReplyAction(id: string, data: Record<string, unknown>): ReplyActio
     draftReferenceIds: Array.isArray(data.draftReferenceIds)
       ? data.draftReferenceIds.map((x) => String(x)).filter(Boolean)
       : undefined,
+    inboundPreview: typeof data.inboundPreview === "string" ? data.inboundPreview : undefined,
+    inboundFrom: typeof data.inboundFrom === "string" ? data.inboundFrom : undefined,
+    inboundSubject: typeof data.inboundSubject === "string" ? data.inboundSubject : undefined,
     draftStatus: (data.draftStatus as ReplyAction["draftStatus"]) ?? "none",
     draftError: typeof data.draftError === "string" ? data.draftError : undefined,
     sentAt: typeof data.sentAt === "string" ? data.sentAt : undefined,
