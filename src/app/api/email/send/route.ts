@@ -12,6 +12,7 @@ import {
 } from "@/lib/email/mailbox-send-quota-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
+import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 
 export async function POST(req: Request) {
   try {
@@ -161,6 +162,27 @@ export async function POST(req: Request) {
         organizationId: g.ctx.session.organizationId,
         uid: dataOwnerUid,
         mailboxId,
+      });
+    }
+
+    if (leadId && mailboxId) {
+      await persistOutboundLeadMailServer({
+        organizationId: g.ctx.session.organizationId,
+        leadId,
+        mailboxId,
+        mailboxOwnerUid: dataOwnerUid,
+        from,
+        to,
+        cc: cc || undefined,
+        replyTo: replyTo || undefined,
+        subject,
+        bodyText: text || html,
+        bodyHtml: html || undefined,
+        sentAt: new Date().toISOString(),
+        messageId: result.messageId,
+        inReplyTo: inReplyTo || undefined,
+        referenceIds,
+        source: "smtp_send",
       });
     }
 

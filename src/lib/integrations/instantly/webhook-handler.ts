@@ -11,6 +11,9 @@ import { recordAudit } from "@/lib/firestore/audit";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { buildReplyDetectedPatch } from "@/lib/leads/reply-review";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
+import { upsertLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";
+import { classifyInboundLeadMailServer } from "@/lib/email/classify-inbound-reply-server";
+import { leadMailProviderKey } from "@/lib/email/lead-mail-ids";
 
 export type InstantlyWebhookPayload = {
   timestamp?: string;
@@ -199,6 +202,47 @@ export async function handleInstantlyWebhookEvent(
       createdAt: payload.timestamp ?? new Date().toISOString(),
     }),
   );
+
+  try {
+    const localId =
+      payload.unibox_url?.trim() ||
+      `instantly-${email}-${replyAt}`;
+    const messages = [
+      {
+        mailboxId: "instantly",
+        mailboxOwnerUid: leadOwnerId || undefined,
+        direction: "inbound" as const,
+        providerKey: leadMailProviderKey({
+          mailboxId: "instantly",
+          direction: "inbound",
+          localId,
+        }),
+        subject: payload.reply_subject?.trim() || payload.email_subject?.trim() || "Reply",
+        from: email,
+        to: "",
+        date: payload.timestamp ?? replyAt,
+        seen: false,
+        preview: replyBody.slice(0, 240),
+        bodyText: replyBody,
+        bodySynced: true,
+        source: "instantly" as const,
+      },
+    ];
+    await upsertLeadMailMessagesServer({
+      organizationId,
+      leadId,
+      mailboxOwnerUid: leadOwnerId || undefined,
+      messages,
+    });
+    await classifyInboundLeadMailServer({
+      organizationId,
+      leadId,
+      messages,
+      actorUid: leadOwnerId || "system",
+    });
+  } catch {
+    /* reply stamp already applied */
+  }
 
   await recordAudit({
     organizationId,

@@ -76,6 +76,7 @@ const PROMPT_GROUPS: {
     hint: "Typically reads Company + profile-linked libraries for proof in sequences and replies.",
     features: [
       { key: "email_reply", label: "Email reply" },
+      { key: "email_reply_classify", label: "Reply classification" },
       { key: "followup_suggest", label: "Follow-up suggestions" },
     ],
   },

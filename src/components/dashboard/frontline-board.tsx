@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { BookOpen, Clock, DollarSign, MessageSquareReply, TrendingUp, UserRoundSearch } from "lucide-react";
+import { ArrowUpRight, BookOpen, Clock, DollarSign, MessageSquareReply, TrendingUp, UserRoundSearch } from "lucide-react";
 import { OpsPulseStrip, type OpsPulseFocus } from "@/components/dashboard/ops-pulse-strip";
 import { ActionBoardPanel } from "@/components/dashboard/action-board-panel";
 import { DashboardNeedsAttention } from "@/components/dashboard/dashboard-needs-attention";
@@ -121,8 +121,10 @@ export function FrontlineBoard({
             >
               <UserRoundSearch className="h-3.5 w-3.5" />
               Prospects
-              {metrics.prospectsNeedRouting > 0 ? (
-                <span className="tabular-nums text-warning">· {metrics.prospectsNeedRouting}</span>
+              {metrics.prospectsNeedRouting + metrics.prospectsReadyToPush > 0 ? (
+                <span className="tabular-nums text-warning">
+                  · {metrics.prospectsNeedRouting + metrics.prospectsReadyToPush}
+                </span>
               ) : null}
             </Link>
             <Link
@@ -167,7 +169,7 @@ export function FrontlineBoard({
       ) : null}
 
       {isProspecting && widgets.pipelineKpis ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           <KpiCard
             label="Need routing"
             value={metrics.prospectsNeedRouting}
@@ -175,6 +177,14 @@ export function FrontlineBoard({
             icon={UserRoundSearch}
             href="/prospects"
             tone={metrics.prospectsNeedRouting > 0 ? "warn" : "default"}
+          />
+          <KpiCard
+            label="Ready to push"
+            value={metrics.prospectsReadyToPush}
+            hint="Channel assigned, waiting on handoff"
+            icon={ArrowUpRight}
+            href="/prospects"
+            tone={metrics.prospectsReadyToPush > 0 ? "warn" : "default"}
           />
           <KpiCard
             label="Pushed to sales"

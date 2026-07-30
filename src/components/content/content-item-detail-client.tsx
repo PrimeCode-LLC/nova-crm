@@ -15,6 +15,7 @@ import {
   ExternalLink,
   Info,
   MapPin,
+  Pencil,
   Plus,
   SkipForward,
   Sparkles,
@@ -73,6 +74,12 @@ import {
 } from "@/lib/content-calendar/platform-playbooks";
 import { contentLintSummary, lintContentVariant } from "@/lib/content-calendar/post-lint";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
+import {
+  formatTimezoneDisplayLabel,
+  isoFromDatetimeLocalInZone,
+} from "@/lib/org-timezone";
 import type { OrganizationMember } from "@/lib/types";
 
 /** Editable shape of one platform variant, with hashtags as raw text. */
@@ -451,6 +458,8 @@ export function ContentItemDetailClient() {
     [navAccess],
   );
   const canEdit = can(permissionSubject, "content_calendar", "edit");
+  const timezone = useOrgTimezone();
+  const timezoneLabel = formatTimezoneDisplayLabel(timezone);
 
   const item = data.items.find((i) => i.id === itemId);
   const brand = data.brands.find((b) => b.id === item?.brandId);
@@ -469,6 +478,9 @@ export function ContentItemDetailClient() {
   const [repurposeBusy, setRepurposeBusy] = React.useState<ContentPlatform | null>(null);
   const [adaptSource, setAdaptSource] = React.useState<ContentPlatform | null>(null);
   const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
+  const [scheduleEditing, setScheduleEditing] = React.useState(false);
+  const [scheduleDraft, setScheduleDraft] = React.useState("");
+  const [scheduleBusy, setScheduleBusy] = React.useState(false);
 
   const current = edits.key === revisionKey ? edits : null;
   const drafts = current?.drafts ?? {};
@@ -515,6 +527,11 @@ export function ContentItemDetailClient() {
       cancelled = true;
     };
   }, [ws.users]);
+
+  React.useEffect(() => {
+    setScheduleEditing(false);
+    setScheduleDraft("");
+  }, [itemId]);
 
   const checklist = React.useMemo(() => {
     if (!item) return [] as ContentChecklistStep[];
@@ -598,6 +615,50 @@ export function ContentItemDetailClient() {
     );
     await persistChecklist(next);
     toast.success("Assignee updated");
+  }
+
+  function startScheduleEdit() {
+    if (!canEdit || !item) return;
+    setScheduleDraft(toDatetimeLocalValue(new Date(item.publishAt), timezone));
+    setScheduleEditing(true);
+  }
+
+  function cancelScheduleEdit() {
+    setScheduleEditing(false);
+    setScheduleDraft("");
+  }
+
+  async function saveSchedule() {
+    if (!canEdit || !item || scheduleBusy) return;
+    const raw = scheduleDraft.trim();
+    if (!raw) {
+      toast.error("Pick a date and time");
+      return;
+    }
+    const iso = isoFromDatetimeLocalInZone(raw, timezone);
+    const nextAt = new Date(iso);
+    if (Number.isNaN(nextAt.getTime())) {
+      toast.error("Enter a valid date and time");
+      return;
+    }
+    setScheduleBusy(true);
+    try {
+      const nextChecklist = checklist.map((step) =>
+        step.status === "pending" ? { ...step, dueAt: iso } : step,
+      );
+      await data.updateItem(item.id, {
+        publishAt: iso,
+        dueAt: iso,
+        checklist: nextChecklist,
+      });
+      setScheduleEditing(false);
+      setScheduleDraft("");
+      toast.success("Schedule updated");
+    } catch {
+      toast.error("Could not update schedule");
+    } finally {
+      setScheduleBusy(false);
+    }
   }
 
   async function addAssetLink() {
@@ -939,16 +1000,72 @@ export function ContentItemDetailClient() {
       <CardContent className="space-y-4">
         <div className="grid gap-3 sm:grid-cols-3">
           <div className="rounded-md border bg-muted/20 px-3 py-2.5">
-            <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
-              <Clock className="h-3.5 w-3.5" />
-              When
+            <div className="mb-1 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                <Clock className="h-3.5 w-3.5" />
+                When
+              </div>
+              {canEdit && !scheduleEditing ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-xs"
+                  onClick={startScheduleEdit}
+                >
+                  <Pencil className="h-3 w-3" />
+                  Edit
+                </Button>
+              ) : null}
             </div>
-            <p className={cn("text-sm font-medium", overdue && "text-destructive")}>
-              {publishWhen}
-            </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {overdue ? `Overdue · ${fmtRelative(item.publishAt)}` : fmtRelative(item.publishAt)}
-            </p>
+            {scheduleEditing ? (
+              <div className="space-y-2">
+                <Input
+                  id="content-schedule-at"
+                  type="datetime-local"
+                  value={scheduleDraft}
+                  onChange={(e) => setScheduleDraft(e.target.value)}
+                  disabled={scheduleBusy}
+                  className="h-9"
+                />
+                <p className="text-[10px] text-muted-foreground">{timezoneLabel}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={scheduleBusy || !scheduleDraft.trim()}
+                    onClick={() => void saveSchedule()}
+                  >
+                    {scheduleBusy ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Check className="h-3.5 w-3.5" />
+                    )}
+                    Save
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={scheduleBusy}
+                    onClick={cancelScheduleEdit}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <p className={cn("text-sm font-medium", overdue && "text-destructive")}>
+                  {publishWhen}
+                </p>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {overdue
+                    ? `Overdue · ${fmtRelative(item.publishAt)}`
+                    : fmtRelative(item.publishAt)}
+                </p>
+              </>
+            )}
           </div>
           <div className="rounded-md border bg-muted/20 px-3 py-2.5">
             <div className="mb-1 flex items-center gap-1.5 text-xs font-medium text-muted-foreground">

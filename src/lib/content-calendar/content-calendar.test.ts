@@ -414,7 +414,7 @@ describe("content prompt templates", () => {
     const stale = "platform: {{platform}}\nangle: {{angle}}\ncharLimit: {{charLimit}}";
     expect(promptTemplateIsCurrent("content_draft_generate", stale)).toBe(false);
     // Features without required placeholders are unaffected.
-    expect(promptTemplateIsCurrent("email_reply", "anything")).toBe(true);
+    expect(promptTemplateIsCurrent("lead_analyze", "anything")).toBe(true);
   });
 });
 

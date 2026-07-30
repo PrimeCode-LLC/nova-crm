@@ -484,6 +484,9 @@ export default function DashboardPage() {
         { label: "Scope", value: scope },
         { label: "Open sales leads", value: String(workflowMetrics.openSalesLeads) },
         { label: "Prospects", value: String(workflowMetrics.prospects) },
+        { label: "Prospects need routing", value: String(workflowMetrics.prospectsNeedRouting) },
+        { label: "Prospects ready to push", value: String(workflowMetrics.prospectsReadyToPush) },
+        { label: "Prospects pushed", value: String(workflowMetrics.prospectsPushed) },
         { label: "Follow-ups due", value: String(workflowMetrics.followupsDue) },
         { label: "Active sequences", value: String(workflowMetrics.activeSequences) },
         { label: "Sequence steps remaining", value: String(workflowMetrics.remainingSequenceSteps) },
@@ -493,6 +496,7 @@ export default function DashboardPage() {
         { label: "Replies pending review", value: String(workflowMetrics.repliesPendingReview) },
         { label: "Emails sent in range", value: String(workflowMetrics.sentInRange) },
         { label: "Emails scheduled", value: String(workflowMetrics.scheduledSteps) },
+        { label: "Emails need schedule", value: String(workflowMetrics.readyUnscheduledSteps) },
         { label: "Email failures", value: String(workflowMetrics.failedDeliveries) },
         ...(workflowMetrics.retryingDeliveries > 0
           ? [{ label: "Email retrying", value: String(workflowMetrics.retryingDeliveries) }]
@@ -841,11 +845,12 @@ export default function DashboardPage() {
                   <KpiCard
                     label="Prospects"
                     value={scopedProspects.length}
-                    hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsPushed} pushed`}
+                    hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsReadyToPush} ready to push · ${workflowMetrics.prospectsPushed} pushed`}
                     icon={UserRoundSearch}
                     href="/prospects"
                     tone={
-                      workflowMetrics.prospectsNeedRouting > 0
+                      workflowMetrics.prospectsNeedRouting > 0 ||
+                      workflowMetrics.prospectsReadyToPush > 0
                         ? "warn"
                         : scopedProspects.length > 0
                           ? "info"
@@ -869,7 +874,7 @@ export default function DashboardPage() {
                   <KpiCard
                     label="Follow-ups due"
                     value={workflowMetrics.followupsDue}
-                    hint={`${workflowMetrics.overdueFollowups} overdue · ${workflowMetrics.scheduledSteps} scheduled`}
+                    hint={`${workflowMetrics.overdueFollowups} overdue · ${workflowMetrics.remainingSequenceSteps} in sequence · ${workflowMetrics.scheduledSteps} scheduled`}
                     icon={CalendarClock}
                     href="/followups"
                     tone={
@@ -905,7 +910,7 @@ export default function DashboardPage() {
                   <KpiCard
                     label="Email delivery"
                     value={workflowMetrics.sentInRange}
-                    hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.failedDeliveries} failed${
+                    hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.readyUnscheduledSteps} need schedule · ${workflowMetrics.failedDeliveries} failed${
                       workflowMetrics.retryingDeliveries > 0
                         ? ` · ${workflowMetrics.retryingDeliveries} retrying`
                         : ""
@@ -922,7 +927,8 @@ export default function DashboardPage() {
                         if (workflowMetrics.failedDeliveries > 0) return "danger";
                         if (
                           workflowMetrics.bouncedEmailsInRange > 0 ||
-                          workflowMetrics.openBounceReviewTasks > 0
+                          workflowMetrics.openBounceReviewTasks > 0 ||
+                          workflowMetrics.readyUnscheduledSteps > 0
                         ) {
                           return "warn";
                         }

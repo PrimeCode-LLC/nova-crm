@@ -630,6 +630,28 @@ export interface Lead {
    */
   replyReviewStatus?: "pending" | "dismissed" | "accepted";
 
+  /** Denormalized count of durable leadMailMessages (Emails tab). */
+  emailMailCount?: number;
+  /** Latest stored lead mail timestamp (inbound or outbound). */
+  lastEmailAt?: ISODate;
+  /** Latest stored inbound lead mail timestamp. */
+  lastInboundEmailAt?: ISODate;
+
+  /** Pending AI reply classification action id (`replyActions` doc). */
+  pendingReplyActionId?: string;
+  /** Latest reply class from AI / heuristic. */
+  replyClass?:
+    | "auto_reply"
+    | "positive"
+    | "meeting_ready"
+    | "neutral"
+    | "objection"
+    | "soft_no"
+    | "hard_no"
+    | "unclear";
+  /** Status of the pending reply action on this lead. */
+  replyActionStatus?: "pending" | "accepted" | "dismissed" | "expired" | "sent";
+
   // Free-form
   notes?: string;
   nextAction?: string;

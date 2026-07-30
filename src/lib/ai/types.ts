@@ -10,6 +10,7 @@ export type AiFeatureKey =
   | "intent_suggest"
   | "followup_suggest"
   | "email_reply"
+  | "email_reply_classify"
   | "prospect_draft_extract"
   | "opportunity_fit"
   | "opportunity_fit_discuss"
@@ -182,6 +183,10 @@ export const DEFAULT_AI_SETTINGS: OrganizationAiSettings = {
     email_reply: {
       enabled: true,
       ragMode: "reference",
+    },
+    email_reply_classify: {
+      enabled: true,
+      ragMode: "open",
     },
     prospect_draft_extract: {
       enabled: true,

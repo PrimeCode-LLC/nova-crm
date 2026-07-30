@@ -30,7 +30,10 @@ export type DashboardWorkflowMetrics = {
   openSalesLeads: number;
   idleSalesLeads: number;
   prospects: number;
+  /** Prospects with no channel assignment yet. */
   prospectsNeedRouting: number;
+  /** Prospects with a channel assigned but at least one assignment not pushed. */
+  prospectsReadyToPush: number;
   prospectsPushed: number;
   followupsDue: number;
   overdueFollowups: number;
@@ -69,8 +72,14 @@ export function isSalesLead(lead: Lead): boolean {
 
 export function prospectNeedsRouting(lead: Lead): boolean {
   if (lead.intakeKind !== "prospect") return false;
+  return (lead.prospectChannelAssignments ?? []).length === 0;
+}
+
+export function prospectReadyToPush(lead: Lead): boolean {
+  if (lead.intakeKind !== "prospect") return false;
   const assignments = lead.prospectChannelAssignments ?? [];
-  return assignments.length === 0 || assignments.some((assignment) => !assignment.pushedAt);
+  if (assignments.length === 0) return false;
+  return assignments.some((assignment) => !assignment.pushedAt);
 }
 
 export function computeDashboardWorkflowMetrics(input: {
@@ -129,6 +138,7 @@ export function computeDashboardWorkflowMetrics(input: {
     ).length,
     prospects: prospects.length,
     prospectsNeedRouting: prospects.filter(prospectNeedsRouting).length,
+    prospectsReadyToPush: prospects.filter(prospectReadyToPush).length,
     prospectsPushed: prospects.filter((lead) => Boolean(lead.linkedSalesLeadId)).length,
     followupsDue: dueFollowups.length,
     overdueFollowups: dueFollowups.filter((followup) =>

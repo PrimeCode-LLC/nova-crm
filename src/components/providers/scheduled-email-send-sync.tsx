@@ -5,7 +5,11 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
-const POLL_MS = 60_000;
+/** Slower than before — overlapping 20s handlers were starving the local Next.js process. */
+const POLL_MS = 120_000;
+/** Ignore visibility/effect re-fires that would stack process-due calls. */
+const MIN_RUN_GAP_MS = 45_000;
+const PROCESS_DUE_LOCK = "nova-crm-process-due";
 
 /**
  * Local/dev-only sender for due scheduled emails.
@@ -29,59 +33,92 @@ export function ScheduledEmailSendSync() {
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
   const scheduled = useEmailAccountStore((s) => s.scheduled);
   const runningRef = React.useRef(false);
+  const lastRunAtRef = React.useRef(0);
   const syncedDemoStatusRef = React.useRef(new Map<string, string>());
+
+  const currentUserIdRef = React.useRef(currentUserId);
+  const mailViewAsUidRef = React.useRef(mailViewAsUid);
+  const setScheduledRef = React.useRef(setScheduled);
+  currentUserIdRef.current = currentUserId;
+  mailViewAsUidRef.current = mailViewAsUid;
+  setScheduledRef.current = setScheduled;
 
   const isLocalDev = process.env.NODE_ENV === "development";
 
   const runLive = React.useCallback(async () => {
     if (runningRef.current) return;
-    runningRef.current = true;
-    try {
-      const qs =
-        mailViewAsUid && mailViewAsUid !== currentUserId
-          ? `?forUser=${encodeURIComponent(mailViewAsUid)}`
-          : "";
-      const processRes = await fetch(`/api/email/scheduled/process-due${qs}`, {
-        method: "POST",
-      });
-      const processData = (await processRes.json().catch(() => null)) as {
-        ok?: boolean;
-        sent?: number;
-        failed?: number;
-      } | null;
-      if (!processData?.ok) return;
+    if (Date.now() - lastRunAtRef.current < MIN_RUN_GAP_MS) return;
 
-      const sent = processData.sent ?? 0;
-      const failed = processData.failed ?? 0;
-      if (sent > 0) {
-        toast.success(
-          sent === 1 ? "Scheduled email sent" : `${sent} scheduled emails sent`,
-        );
-      }
-      if (failed > 0) {
-        toast.error(
-          failed === 1
-            ? "A scheduled email failed to send"
-            : `${failed} scheduled emails failed`,
-          { description: "Check Inbox → Scheduled for the error details." },
-        );
-      }
-      if (sent > 0 || failed > 0) {
-        const listRes = await fetch(`/api/email/scheduled${qs}`);
-        const listData = (await listRes.json().catch(() => null)) as {
+    const execute = async () => {
+      if (runningRef.current) return;
+      runningRef.current = true;
+      lastRunAtRef.current = Date.now();
+      try {
+        const uid = currentUserIdRef.current;
+        const viewAs = mailViewAsUidRef.current;
+        const qs =
+          viewAs && viewAs !== uid ? `?forUser=${encodeURIComponent(viewAs)}` : "";
+        const processRes = await fetch(`/api/email/scheduled/process-due${qs}`, {
+          method: "POST",
+        });
+        const processData = (await processRes.json().catch(() => null)) as {
           ok?: boolean;
-          items?: Parameters<typeof setScheduled>[0];
+          busy?: boolean;
+          sent?: number;
+          failed?: number;
         } | null;
-        if (listData?.ok && Array.isArray(listData.items)) {
-          setScheduled(listData.items);
+        if (!processData?.ok || processData.busy) return;
+
+        const sent = processData.sent ?? 0;
+        const failed = processData.failed ?? 0;
+        if (sent > 0) {
+          toast.success(
+            sent === 1 ? "Scheduled email sent" : `${sent} scheduled emails sent`,
+          );
         }
+        if (failed > 0) {
+          toast.error(
+            failed === 1
+              ? "A scheduled email failed to send"
+              : `${failed} scheduled emails failed`,
+            { description: "Check Inbox → Scheduled for the error details." },
+          );
+        }
+        if (sent > 0 || failed > 0) {
+          const listRes = await fetch(`/api/email/scheduled${qs}`);
+          const listData = (await listRes.json().catch(() => null)) as {
+            ok?: boolean;
+            items?: Parameters<typeof setScheduled>[0];
+          } | null;
+          if (listData?.ok && Array.isArray(listData.items)) {
+            setScheduledRef.current(listData.items);
+          }
+        }
+      } catch {
+        /* best-effort */
+      } finally {
+        runningRef.current = false;
       }
-    } catch {
-      /* best-effort */
-    } finally {
-      runningRef.current = false;
+    };
+
+    // Cross-tab lock so multiple open Nova tabs do not stack process-due on one Node process.
+    if (typeof navigator !== "undefined" && "locks" in navigator) {
+      try {
+        await navigator.locks.request(
+          PROCESS_DUE_LOCK,
+          { ifAvailable: true },
+          async (lock) => {
+            if (!lock) return;
+            await execute();
+          },
+        );
+        return;
+      } catch {
+        /* fall through */
+      }
     }
-  }, [currentUserId, mailViewAsUid, setScheduled]);
+    await execute();
+  }, []);
 
   React.useEffect(() => {
     // Production: do not poll - cron + existing Inbox demo interval remain the source of truth.

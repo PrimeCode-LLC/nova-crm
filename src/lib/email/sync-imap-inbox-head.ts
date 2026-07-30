@@ -3,7 +3,7 @@ import {
   appendMailDataOwnerParam,
   resolveMailApiForUserUid,
 } from "@/lib/email/mail-data-owner-query";
-import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
+import { BACKGROUND_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
 import { filterInboxBatchAndTrashBlocked } from "@/lib/email/trash-blocked-inbox-uids";
 import {
   getActiveMailbox,
@@ -14,6 +14,7 @@ import {
 /**
  * Fetches the newest INBOX page into the email store (for sidebar unread badge + inbox UI).
  * Silent on failure - callers may surface errors in the inbox UI.
+ * Uses a small head limit so background sync does not monopolize the local Next.js process.
  */
 export async function syncImapInboxHead(opts: {
   mailViewAsUid: string | null;
@@ -44,7 +45,7 @@ export async function syncImapInboxHead(opts: {
     body: JSON.stringify({
       mailboxId: acct.id,
       folder: "inbox",
-      limit: INBOX_IMAP_HEAD_LIMIT,
+      limit: BACKGROUND_IMAP_HEAD_LIMIT,
       offset: 0,
       // Background badge/list sync only needs envelopes - full bodies load on thread open.
       headsOnly: true,
