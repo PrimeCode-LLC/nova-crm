@@ -9,6 +9,7 @@ import {
   ChevronDown,
   AlertTriangle,
   Search,
+  Calendar,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -45,12 +46,28 @@ import { LogsTabBar } from "./logs-tab-bar";
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50] as const;
 
+function toYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+/** Inclusive last 7 calendar days (today and 6 days before). */
+function last7DaysRange(): { from: string; to: string } {
+  const to = new Date();
+  const from = new Date();
+  from.setDate(from.getDate() - 6);
+  return { from: toYmd(from), to: toYmd(to) };
+}
+
 type ErrorLogsClientProps = {
   orgRole: OrgMemberRole;
 };
 
 export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
   const canView = roleAtLeast(orgRole, "admin");
+  const initialRange = React.useMemo(() => last7DaysRange(), []);
   const [items, setItems] = React.useState<ErrorLogRecord[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [nextCursor, setNextCursor] = React.useState<string | null>(null);
@@ -61,7 +78,15 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
   const [source, setSource] = React.useState<"all" | ErrorLogSource>("all");
   const [search, setSearch] = React.useState("");
   const [searchApplied, setSearchApplied] = React.useState("");
+  const [dateFrom, setDateFrom] = React.useState(initialRange.from);
+  const [dateTo, setDateTo] = React.useState(initialRange.to);
+  const [dateFromApplied, setDateFromApplied] = React.useState(initialRange.from);
+  const [dateToApplied, setDateToApplied] = React.useState(initialRange.to);
   const [expandedId, setExpandedId] = React.useState<string | null>(null);
+
+  const last7 = last7DaysRange();
+  const isDefaultLast7 =
+    dateFromApplied === last7.from && dateToApplied === last7.to;
 
   const load = React.useCallback(
     async (cursor: string | null) => {
@@ -76,6 +101,8 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
         if (cursor) params.set("cursor", cursor);
         if (source !== "all") params.set("source", source);
         if (searchApplied.trim()) params.set("search", searchApplied.trim());
+        if (dateFromApplied) params.set("from", dateFromApplied);
+        if (dateToApplied) params.set("to", dateToApplied);
 
         const res = await fetch(`/api/org/error-logs?${params}`);
         const data = (await res.json()) as {
@@ -98,7 +125,7 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
         setLoading(false);
       }
     },
-    [canView, pageSize, source, searchApplied],
+    [canView, pageSize, source, searchApplied, dateFromApplied, dateToApplied],
   );
 
   React.useEffect(() => {
@@ -111,6 +138,23 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
     setCursorStack([null]);
     setPageIndex(0);
     void load(null);
+  }
+
+  function applyDateFilter() {
+    if (dateFrom && dateTo && dateFrom > dateTo) {
+      toast.error("From date must be on or before To date.");
+      return;
+    }
+    setDateFromApplied(dateFrom);
+    setDateToApplied(dateTo);
+  }
+
+  function resetToLast7Days() {
+    const range = last7DaysRange();
+    setDateFrom(range.from);
+    setDateTo(range.to);
+    setDateFromApplied(range.from);
+    setDateToApplied(range.to);
   }
 
   function goNext() {
@@ -156,7 +200,7 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeader
         title="Error logs"
-        description="Full failure details from client and server — location, function, and message."
+        description="Shows the last 7 days by default. Use From / To to look up older failures."
         actions={
           <Button variant="outline" size="sm" disabled={loading} onClick={refresh}>
             {loading ? (
@@ -172,6 +216,48 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
         <LogsTabBar value="errors" />
 
         <div className="flex flex-wrap items-end gap-3">
+          <div className="space-y-1.5">
+            <Label
+              htmlFor="error-log-from"
+              className="text-xs text-muted-foreground flex items-center gap-1"
+            >
+              <Calendar className="h-3 w-3" />
+              From
+            </Label>
+            <Input
+              id="error-log-from"
+              type="date"
+              className="h-9 w-[150px]"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="error-log-to" className="text-xs text-muted-foreground">
+              To
+            </Label>
+            <Input
+              id="error-log-to"
+              type="date"
+              className="h-9 w-[150px]"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+            />
+          </div>
+          <Button type="button" size="sm" className="h-9" onClick={applyDateFilter}>
+            Apply dates
+          </Button>
+          {!isDefaultLast7 ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-9"
+              onClick={resetToLast7Days}
+            >
+              Last 7 days
+            </Button>
+          ) : null}
           <div className="space-y-1.5">
             <Label className="text-xs text-muted-foreground">Source</Label>
             <Select
@@ -237,6 +323,12 @@ export function ErrorLogsClient({ orgRole }: ErrorLogsClientProps) {
             </Select>
           </div>
         </div>
+
+        <p className="text-xs text-muted-foreground">
+          {isDefaultLast7
+            ? "Showing the last 7 days. Change From / To and click Apply dates to search older logs."
+            : `Showing ${dateFromApplied} → ${dateToApplied}.`}
+        </p>
 
         <Card>
           <CardContent className="p-0">

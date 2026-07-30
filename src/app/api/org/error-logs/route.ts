@@ -90,6 +90,16 @@ export async function GET(req: Request) {
   const source: ErrorLogSource | undefined =
     sourceParam === "client" || sourceParam === "server" ? sourceParam : undefined;
   const search = url.searchParams.get("search") ?? undefined;
+  const fromDate = url.searchParams.get("from") ?? undefined;
+  const toDate = url.searchParams.get("to") ?? undefined;
+
+  const ymd = /^\d{4}-\d{2}-\d{2}$/;
+  if (fromDate && !ymd.test(fromDate)) {
+    return NextResponse.json({ error: "Invalid from date. Use YYYY-MM-DD." }, { status: 400 });
+  }
+  if (toDate && !ymd.test(toDate)) {
+    return NextResponse.json({ error: "Invalid to date. Use YYYY-MM-DD." }, { status: 400 });
+  }
 
   try {
     const { items, nextCursor, totalCount } = await listErrorLogsServer({
@@ -98,6 +108,8 @@ export async function GET(req: Request) {
       cursor,
       source,
       search,
+      fromDate: fromDate ?? null,
+      toDate: toDate ?? null,
     });
 
     return NextResponse.json({ items, nextCursor, totalCount });

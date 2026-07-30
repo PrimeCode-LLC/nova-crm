@@ -1,5 +1,6 @@
 import {
   FieldValue,
+  type Query,
   type QueryDocumentSnapshot,
 } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
@@ -143,6 +144,31 @@ function isMissingIndexError(e: unknown): boolean {
   );
 }
 
+function parseDayBound(ymd: string, endOfDay: boolean): Date | null {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(ymd.trim());
+  if (!m) return null;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  if (!Number.isFinite(y) || !Number.isFinite(mo) || !Number.isFinite(d)) return null;
+  if (endOfDay) return new Date(y, mo - 1, d, 23, 59, 59, 999);
+  return new Date(y, mo - 1, d, 0, 0, 0, 0);
+}
+
+function inDateRange(
+  createdAt: string | null,
+  from: Date | null,
+  to: Date | null,
+): boolean {
+  if (!from && !to) return true;
+  if (!createdAt) return false;
+  const t = new Date(createdAt).getTime();
+  if (Number.isNaN(t)) return false;
+  if (from && t < from.getTime()) return false;
+  if (to && t > to.getTime()) return false;
+  return true;
+}
+
 /**
  * Fallback when the composite index is not deployed yet:
  * equality filter only (no orderBy), then sort/paginate in memory.
@@ -153,6 +179,8 @@ async function listErrorLogsInMemory(input: {
   cursor?: string;
   source?: ErrorLogSource;
   search?: string;
+  from?: Date | null;
+  to?: Date | null;
 }): Promise<{ items: ErrorLogRecord[]; nextCursor: string | null; totalCount: number }> {
   const db = getAdminDb();
   if (!db) return { items: [], nextCursor: null, totalCount: 0 };
@@ -166,6 +194,8 @@ async function listErrorLogsInMemory(input: {
   let items = sortErrorLogs(
     snap.docs.map((doc) => docToErrorLogRecord(doc, input.organizationId)),
   );
+
+  items = items.filter((row) => inDateRange(row.createdAt, input.from ?? null, input.to ?? null));
 
   const search = input.search?.trim().toLowerCase();
   if (search) {
@@ -193,45 +223,50 @@ export async function listErrorLogsServer(input: {
   cursor?: string;
   source?: ErrorLogSource;
   search?: string;
+  /** Inclusive start day `YYYY-MM-DD` (local). */
+  fromDate?: string | null;
+  /** Inclusive end day `YYYY-MM-DD` (local). */
+  toDate?: string | null;
 }): Promise<{ items: ErrorLogRecord[]; nextCursor: string | null; totalCount: number }> {
   const db = getAdminDb();
   if (!db) return { items: [], nextCursor: null, totalCount: 0 };
 
   const limit = Math.min(Math.max(input.limit ?? 50, 1), 100);
   const col = db.collection(COLLECTIONS.errorLogs);
-  const base = col.where("organizationId", "==", input.organizationId);
+  const from = input.fromDate ? parseDayBound(input.fromDate, false) : null;
+  const to = input.toDate ? parseDayBound(input.toDate, true) : null;
 
   try {
+    let q: Query = col.where("organizationId", "==", input.organizationId);
+    if (input.source) {
+      q = q.where("source", "==", input.source);
+    }
+    if (from) {
+      q = q.where("createdAt", ">=", from);
+    }
+    if (to) {
+      q = q.where("createdAt", "<=", to);
+    }
+    q = q.orderBy("createdAt", "desc");
+
     let totalCount = 0;
     try {
-      const countQ = input.source
-        ? base.where("source", "==", input.source)
-        : base;
-      const countSnap = await countQ.count().get();
+      const countSnap = await q.count().get();
       totalCount = countSnap.data().count;
     } catch {
       totalCount = 0;
     }
 
     const fetchLimit = limit + 1;
-    let q = input.source
-      ? base.where("source", "==", input.source).orderBy("createdAt", "desc").limit(fetchLimit)
-      : base.orderBy("createdAt", "desc").limit(fetchLimit);
-
+    let pageQ = q.limit(fetchLimit);
     if (input.cursor) {
       const cursorSnap = await col.doc(input.cursor).get();
       if (cursorSnap.exists) {
-        q = input.source
-          ? base
-              .where("source", "==", input.source)
-              .orderBy("createdAt", "desc")
-              .startAfter(cursorSnap)
-              .limit(fetchLimit)
-          : base.orderBy("createdAt", "desc").startAfter(cursorSnap).limit(fetchLimit);
+        pageQ = q.startAfter(cursorSnap).limit(fetchLimit);
       }
     }
 
-    const snap = await q.get();
+    const snap = await pageQ.get();
     let items = snap.docs.map((doc) => docToErrorLogRecord(doc, input.organizationId));
 
     const search = input.search?.trim().toLowerCase();
@@ -258,6 +293,8 @@ export async function listErrorLogsServer(input: {
         cursor: input.cursor,
         source: input.source,
         search: input.search,
+        from,
+        to,
       });
     }
     throw e;
