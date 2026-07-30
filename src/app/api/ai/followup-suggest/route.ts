@@ -346,6 +346,13 @@ export async function POST(req: Request) {
       channelMix,
     });
   } catch (e) {
-    return aiErrorResponse(e);
+    return aiErrorResponse(e, {
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      actorEmail: g.ctx.session.email,
+      location: "src/app/api/ai/followup-suggest/route.ts",
+      functionName: "handler",
+      route: "/api/ai/followup-suggest",
+    });
   }
 }

@@ -12,7 +12,7 @@ export default async function PlatformShellLayout({
 
   return (
     <div className="min-h-screen bg-background text-foreground">
-      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+      <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-backdrop-filter:bg-background/80">
         <div className="mx-auto flex h-14 max-w-6xl items-center gap-8 px-4 sm:px-6">
           <Link
             href="/platform"

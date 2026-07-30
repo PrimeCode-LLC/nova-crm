@@ -140,6 +140,12 @@ export async function POST(req: Request) {
 
     return NextResponse.json({ campaign });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns",
+    });
   }
 }

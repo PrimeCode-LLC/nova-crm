@@ -81,7 +81,13 @@ export async function GET(_req: Request, ctx: RouteCtx) {
     try {
       remote = await getInstantlyCampaign(g.apiKey, instantlyId);
     } catch (err) {
-      return instantlyErrorResponse(err);
+      return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/[id]/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/[id]",
+    });
     }
   }
 
@@ -156,6 +162,12 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
       campaign: asCampaignFromDoc(id, updated.data() as Record<string, unknown>),
     });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/[id]/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/[id]",
+    });
   }
 }

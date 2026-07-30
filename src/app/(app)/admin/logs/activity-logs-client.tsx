@@ -58,6 +58,7 @@ import { useChannelOptions } from "@/hooks/use-channel-options";
 import { Input } from "@/components/ui/input";
 import type { AuditAnalyticsResult } from "@/lib/audit-analytics";
 import { ActivityLogsDashboard } from "./activity-logs-dashboard";
+import { LogsTabBar } from "./logs-tab-bar";
 import { cn } from "@/lib/utils";
 import type { StageHistoryEntry } from "@/lib/audit-stage-history";
 
@@ -420,7 +421,8 @@ export function ActivityLogsClient({
           title="Activity logs"
           description="Workspace owners and admins can review who used which tools and when."
         />
-        <PageBody>
+        <PageBody className="space-y-4">
+          <LogsTabBar value="activity" />
           <Card>
             <CardContent className="py-10 text-center text-sm text-muted-foreground">
               You need owner or admin access on this workspace to view activity logs.
@@ -456,6 +458,7 @@ export function ActivityLogsClient({
         }
       />
       <PageBody className="min-h-0 flex-1 space-y-6">
+        <LogsTabBar value="activity" />
         <div className="flex flex-wrap items-end gap-3">
           <div className="space-y-1.5">
             <span className="text-xs font-medium text-muted-foreground flex items-center gap-1">

@@ -117,6 +117,12 @@ export async function POST(req: Request, ctx: RouteCtx) {
       instantly: result,
     });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/[id]/leads/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/[id]/leads",
+    });
   }
 }

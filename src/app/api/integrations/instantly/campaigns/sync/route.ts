@@ -20,6 +20,12 @@ export async function POST() {
 
     return NextResponse.json({ ok: true, ...result });
   } catch (err) {
-    return instantlyErrorResponse(err);
+    return instantlyErrorResponse(err, {
+      organizationId: g.organizationId,
+      actorUid: g.uid,
+      location: "src/app/api/integrations/instantly/campaigns/sync/route.ts",
+      functionName: "handler",
+      route: "/api/integrations/instantly/campaigns/sync",
+    });
   }
 }

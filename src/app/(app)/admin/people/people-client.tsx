@@ -21,6 +21,7 @@ import {
   Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
+import { toastError } from "@/lib/error-logging/toast-error";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { UserChip } from "@/components/common/user-chip";
@@ -493,7 +494,10 @@ function PeoplePageClientInner({
       setProvisionRole("member");
       await refresh();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed");
+      toastError(err instanceof Error ? err.message : "Failed", err, {
+        location: "src/app/(app)/admin/people/people-client.tsx",
+        functionName: "provisionLogin",
+      });
     } finally {
       setProvisionSubmitting(false);
     }

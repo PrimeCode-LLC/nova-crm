@@ -122,6 +122,13 @@ Output only the improved email body text (no closing line like "Best,", no signa
     });
     return NextResponse.json({ body: stripTrailingEmailSignOff(body) });
   } catch (e) {
-    return aiErrorResponse(e);
+    return aiErrorResponse(e, {
+      organizationId: g.ctx.session.organizationId,
+      actorUid: g.ctx.session.uid,
+      actorEmail: g.ctx.session.email,
+      location: "src/app/api/ai/email-reply/route.ts",
+      functionName: "handler",
+      route: "/api/ai/email-reply",
+    });
   }
 }

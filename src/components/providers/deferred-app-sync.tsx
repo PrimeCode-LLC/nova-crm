@@ -57,6 +57,13 @@ const ActivityAuditTracker = dynamic(
   () => import("@/components/providers/activity-audit-tracker").then((m) => ({ default: m.ActivityAuditTracker })),
   { ssr: false },
 );
+const GlobalErrorListener = dynamic(
+  () =>
+    import("@/components/providers/global-error-listener").then((m) => ({
+      default: m.GlobalErrorListener,
+    })),
+  { ssr: false },
+);
 
 function needsFollowupReplyWatcher(pathname: string) {
   return (
@@ -95,6 +102,7 @@ export function DeferredAppSync() {
     <>
       {/* Mailbox hydrate must not wait on idle - settings/inbox need real boxes ASAP */}
       <EmailAccountSync />
+      <GlobalErrorListener />
       {ready ? (
         <>
           <AlertSoundUnlock />
