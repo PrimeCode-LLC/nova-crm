@@ -180,6 +180,7 @@ export const PAGE_PATH_TO_FEATURE: Record<string, string> = {
   "/deals": "Deals",
   "/activity": "Activity",
   "/followups": "Followups",
+  "/replies": "Replies",
   "/tasks": "Tasks",
   "/scripts": "Scripts",
   "/outreach": "Email outreach",

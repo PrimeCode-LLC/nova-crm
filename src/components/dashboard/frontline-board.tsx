@@ -10,7 +10,11 @@ import { MailboxUtilizationPanel } from "@/components/dashboard/mailbox-utilizat
 import { KpiCard } from "@/components/common/kpi-card";
 import { buttonVariants } from "@/components/ui/button";
 import { useDashboardMeetings } from "@/hooks/use-dashboard-meetings";
-import { DASHBOARD_TIME_RANGE_LABELS, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import {
+  buildRepliesDrillHref,
+  DASHBOARD_TIME_RANGE_LABELS,
+  type DashboardTimeRangeKey,
+} from "@/lib/dashboard-date-range";
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import type { DashboardWidgets } from "@/lib/dashboard-preferences";
 import { cn } from "@/lib/utils";
@@ -102,6 +106,7 @@ export function FrontlineBoard({
           openTasksCount={metrics.myOpenTasks}
           pipelineLabel={isProspecting ? "your day" : "your pipeline"}
           focus={focus}
+          range={range}
         />
       ) : null}
 
@@ -199,7 +204,7 @@ export function FrontlineBoard({
             value={metrics.repliesPendingReview}
             hint="Confirm stage or promote"
             icon={MessageSquareReply}
-            href="/leads?stage=replied"
+            href={buildRepliesDrillHref(range, { reviewPending: true })}
             tone={metrics.repliesPendingReview > 0 ? "warn" : "default"}
           />
         </div>

@@ -14,6 +14,7 @@ const APP_PROTECTED_PREFIXES = [
   "/deals",
   "/activity",
   "/followups",
+  "/replies",
   "/scheduling",
   "/tasks",
   "/content",

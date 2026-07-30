@@ -383,6 +383,7 @@ export function OwnerOpsBoard({
               meetingsToday={meetingsToday}
               openTasksCount={openTasksCount}
               wall
+              range={range}
             />
           </div>
         ) : null}
@@ -423,6 +424,7 @@ export function OwnerOpsBoard({
           metrics={metrics}
           meetingsToday={meetingsToday}
           openTasksCount={openTasksCount}
+          range={range}
         />
       ) : null}
 

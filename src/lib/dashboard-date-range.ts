@@ -24,6 +24,29 @@ export const DASHBOARD_TIME_RANGE_LABELS: Record<DashboardTimeRangeKey, string> 
   all: "All time",
 };
 
+export function isDashboardTimeRangeKey(value: string): value is DashboardTimeRangeKey {
+  return Object.prototype.hasOwnProperty.call(DASHBOARD_TIME_RANGE_LABELS, value);
+}
+
+export function parseDashboardTimeRangeKey(
+  value: string | null | undefined,
+  fallback: DashboardTimeRangeKey = "30d",
+): DashboardTimeRangeKey {
+  if (value && isDashboardTimeRangeKey(value)) return value;
+  return fallback;
+}
+
+/** Dashboard Replies KPI → list of leads/prospects with `lastReplyAt` in range. */
+export function buildRepliesDrillHref(
+  range: DashboardTimeRangeKey = "30d",
+  opts?: { reviewPending?: boolean },
+): string {
+  const p = new URLSearchParams();
+  p.set("range", range);
+  if (opts?.reviewPending) p.set("review", "pending");
+  return `/replies?${p.toString()}`;
+}
+
 /** Compact presets shown on Team Command (and similar ops widgets). */
 export const TEAM_COMMAND_TIME_RANGES = ["today", "12h", "1d", "7d", "30d", "all"] as const;
 export type TeamCommandTimeRangeKey = (typeof TEAM_COMMAND_TIME_RANGES)[number];

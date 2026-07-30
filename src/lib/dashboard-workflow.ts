@@ -21,6 +21,28 @@ function leadHasReply(lead: Lead): boolean {
   return Boolean(lead.lastReplyAt) || stageAtOrAfterReplied(lead.stage);
 }
 
+/** Leads/prospects whose `lastReplyAt` falls in the dashboard range (newest first). */
+export function listLeadsRepliedInRange(
+  leads: readonly Lead[],
+  range: DashboardTimeRangeKey,
+  opts?: { now?: Date; timeZone?: string },
+): Lead[] {
+  const start = getDashboardRangeStart(range, {
+    now: opts?.now,
+    timeZone: opts?.timeZone,
+  }).getTime();
+  return leads
+    .filter((lead) => {
+      const repliedAt = validTime(lead.lastReplyAt);
+      return repliedAt !== undefined && repliedAt >= start;
+    })
+    .sort((a, b) => {
+      const aTime = validTime(a.lastReplyAt) ?? 0;
+      const bTime = validTime(b.lastReplyAt) ?? 0;
+      return bTime - aTime;
+    });
+}
+
 function isBounceReviewTask(task: LeadTask): boolean {
   if (task.source === "email_bounce") return true;
   return task.taskType === "review" && task.title === BOUNCE_REVIEW_TASK_TITLE;

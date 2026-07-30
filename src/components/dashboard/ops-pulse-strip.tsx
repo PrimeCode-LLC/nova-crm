@@ -2,6 +2,10 @@
 
 import type { ReactNode } from "react";
 import { KpiCard, type KpiTone } from "@/components/common/kpi-card";
+import {
+  buildRepliesDrillHref,
+  type DashboardTimeRangeKey,
+} from "@/lib/dashboard-date-range";
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -147,6 +151,7 @@ export function OpsPulseStrip({
   pipelineLabel,
   wall,
   focus = "ops",
+  range = "30d",
 }: {
   metrics: DashboardWorkflowMetrics;
   meetingsToday: number;
@@ -156,6 +161,8 @@ export function OpsPulseStrip({
   wall?: boolean;
   /** Reorders tiles for leadership vs sales vs prospecting day-to-day work. */
   focus?: OpsPulseFocus;
+  /** Dashboard date range — used for the Replies KPI drill-down. */
+  range?: DashboardTimeRangeKey;
 }) {
   const openTasks = openTasksCount ?? metrics.myOpenTasks;
   const emailHints = buildEmailHints(metrics);
@@ -186,7 +193,7 @@ export function OpsPulseStrip({
         />
       ),
       icon: MessageSquareReply,
-      href: "/leads?stage=replied",
+      href: buildRepliesDrillHref(range),
       tone: repliesTone(metrics),
     },
     prospects: {

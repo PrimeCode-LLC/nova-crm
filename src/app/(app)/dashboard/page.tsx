@@ -63,6 +63,7 @@ import {
   filterActivityCountersByDateRange,
   type DashboardTimeRangeKey,
   DASHBOARD_TIME_RANGE_LABELS,
+  buildRepliesDrillHref,
 } from "@/lib/dashboard-date-range";
 import {
   OWNER_SCOPE_PREFIX,
@@ -862,7 +863,7 @@ export default function DashboardPage() {
                     value={workflowMetrics.totalReplies}
                     hint={`${workflowMetrics.repliesInRange} in ${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey].toLowerCase()} · ${workflowMetrics.repliesPendingReview} to review`}
                     icon={MessageSquareReply}
-                    href="/leads?stage=replied"
+                    href={buildRepliesDrillHref(timeRange as DashboardTimeRangeKey)}
                     tone={
                       workflowMetrics.repliesPendingReview > 0
                         ? "warn"
