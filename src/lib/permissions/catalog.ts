@@ -717,6 +717,7 @@ export const MODULE_BY_HREF: Record<string, ModuleKey> = {
       .map(([k, m]) => [m.href!, k as ModuleKey]),
   ),
   "/admin/departments": "departments",
+  "/dashboard/reply-intelligence": "dashboard",
 };
 
 export function modulesByCluster(): {

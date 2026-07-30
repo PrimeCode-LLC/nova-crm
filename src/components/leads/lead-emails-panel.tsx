@@ -59,6 +59,11 @@ import {
   leadEmailMessageAt,
   type LeadEmailMessage,
 } from "@/lib/email/lead-email-conversations";
+import {
+  leadMailToLeadEmailMessage,
+  mergeLeadEmailMessages,
+} from "@/lib/email/lead-mail-map";
+import type { LeadMailMessage } from "@/lib/email/lead-mail-types";
 import { appendMailDataOwnerParam, resolveMailApiForUserUid } from "@/lib/email/mail-data-owner-query";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import {
@@ -199,6 +204,51 @@ function relevantLeadMessages(input: {
   return rows;
 }
 
+function leadEmailMessageToPersistPayload(row: LeadEmailMessage) {
+  if (row.direction === "inbound") {
+    return {
+      mailboxId: row.mailboxId,
+      direction: "inbound" as const,
+      id: row.message.id,
+      uid: row.message.uid,
+      subject: row.message.subject,
+      from: row.message.from,
+      to: row.message.to,
+      cc: row.message.cc,
+      replyTo: row.message.replyTo,
+      date: row.message.date,
+      seen: row.message.seen,
+      preview: row.message.preview,
+      bodyText: row.message.bodyText,
+      bodyHtml: row.message.bodyHtml,
+      bodySynced: row.message.bodySynced,
+      messageId: row.message.messageId,
+      inReplyTo: row.message.inReplyTo,
+      referenceIds: row.message.referenceIds,
+    };
+  }
+  return {
+    mailboxId: row.mailboxId,
+    direction: "outbound" as const,
+    id: row.message.id,
+    uid: row.message.uid,
+    subject: row.message.subject,
+    from: row.message.from,
+    to: row.message.to,
+    cc: row.message.cc,
+    replyTo: row.message.replyTo,
+    date: row.message.sentAt,
+    seen: true,
+    preview: row.message.preview,
+    bodyText: row.message.body,
+    bodyHtml: row.message.bodyHtml,
+    bodySynced: row.message.bodySynced,
+    messageId: row.message.messageId,
+    inReplyTo: row.message.inReplyTo,
+    referenceIds: row.message.referenceIds,
+  };
+}
+
 export function LeadEmailsPanel({
   lead,
   contactEmail = lead.contactEmail,
@@ -241,7 +291,13 @@ export function LeadEmailsPanel({
     [mailboxes, workspace.isDemo],
   );
 
-  const messages = React.useMemo(
+  const [selectedId, setSelectedId] = React.useState<string | null>(null);
+  const [syncingLists, setSyncingLists] = React.useState(false);
+  const [storedMessages, setStoredMessages] = React.useState<LeadEmailMessage[]>([]);
+  const [loadingStored, setLoadingStored] = React.useState(!workspace.isDemo);
+  const storedReadyRef = React.useRef(false);
+  const initialSyncKeyRef = React.useRef("");
+  const liveMessages = React.useMemo(
     () =>
       relevantLeadMessages({
         lead,
@@ -253,10 +309,11 @@ export function LeadEmailsPanel({
       }),
     [contactEmail, crmSentFollowups, inboundByMailbox, lead, linkedLeadByMessageId, sent],
   );
+  const messages = React.useMemo(
+    () => mergeLeadEmailMessages(storedMessages, liveMessages),
+    [liveMessages, storedMessages],
+  );
   const conversations = React.useMemo(() => groupLeadEmailConversations(messages), [messages]);
-  const [selectedId, setSelectedId] = React.useState<string | null>(null);
-  const [syncingLists, setSyncingLists] = React.useState(false);
-  const initialSyncKeyRef = React.useRef("");
   const selected =
     conversations.find((conversation) =>
       conversation.messages.some((message) => message.key === selectedId),
@@ -320,13 +377,67 @@ export function LeadEmailsPanel({
       threshold: workspace.intentPlaybook.outreachThreshold,
     });
 
+  const persistLeadMail = React.useCallback(
+    async (rows: LeadEmailMessage[]) => {
+      if (workspace.isDemo || rows.length === 0) return;
+      const payload = rows
+        .filter((row) => row.mailboxId !== "crm")
+        .slice(0, 80)
+        .map(leadEmailMessageToPersistPayload);
+      if (payload.length === 0) return;
+      try {
+        await fetch("/api/email/lead-mail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ leadId: lead.id, messages: payload }),
+        });
+      } catch {
+        /* best-effort backfill */
+      }
+    },
+    [lead.id, workspace.isDemo],
+  );
+
+  const loadStoredLeadMail = React.useCallback(async () => {
+    if (workspace.isDemo) {
+      storedReadyRef.current = true;
+      setLoadingStored(false);
+      return;
+    }
+    setLoadingStored(true);
+    try {
+      const response = await fetch(`/api/email/lead-mail?leadId=${encodeURIComponent(lead.id)}`, {
+        credentials: "same-origin",
+      });
+      const data = (await response.json()) as {
+        ok?: boolean;
+        messages?: LeadMailMessage[];
+      };
+      if (response.ok && data.ok && Array.isArray(data.messages)) {
+        setStoredMessages(data.messages.map(leadMailToLeadEmailMessage));
+      }
+    } catch {
+      /* fall back to live mailbox */
+    } finally {
+      storedReadyRef.current = true;
+      setLoadingStored(false);
+    }
+  }, [lead.id, workspace.isDemo]);
+
+  React.useEffect(() => {
+    storedReadyRef.current = false;
+    void loadStoredLeadMail();
+  }, [loadStoredLeadMail]);
+
   const syncConversationLists = React.useCallback(
     async (force: boolean) => {
       if (workspace.isDemo || !emailServerHydrated) return;
+      // Wait for lead-local store so we can skip IMAP when history is already persisted.
+      if (!force && !storedReadyRef.current) return;
       const eligible = mailboxes.filter(isImapInboxConfigured);
       const syncKey = eligible.map((mailbox) => mailbox.id).sort().join("|");
       if (!force && initialSyncKeyRef.current === syncKey) return;
-      if (!force) initialSyncKeyRef.current = syncKey;
 
       const store = useEmailAccountStore.getState();
       const jobs: Array<{ mailbox: (typeof eligible)[number]; folder: "inbox" | "sent" }> = [];
@@ -338,6 +449,13 @@ export function LeadEmailsPanel({
         if (force || !hasInbox) jobs.push({ mailbox, folder: "inbox" });
         if (force || !hasServerSent) jobs.push({ mailbox, folder: "sent" });
       }
+
+      // Prefer durable lead mail: skip IMAP unless empty or user forced refresh.
+      if (!force && storedMessages.length > 0 && jobs.length > 0) {
+        initialSyncKeyRef.current = syncKey;
+        return;
+      }
+      if (!force) initialSyncKeyRef.current = syncKey;
       if (jobs.length === 0) return;
 
       setSyncingLists(true);
@@ -405,21 +523,37 @@ export function LeadEmailsPanel({
       );
       setSyncingLists(false);
       if (firstError && force) toast.error("Couldn’t refresh lead emails", { description: firstError });
+
+      const matched = relevantLeadMessages({
+        lead,
+        contactEmail,
+        inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+        sent: useEmailAccountStore.getState().sent,
+        linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+        crmSentFollowups,
+      });
+      if (matched.length > 0) void persistLeadMail(matched);
     },
     [
+      contactEmail,
+      crmSentFollowups,
       emailServerHydrated,
+      lead,
       mailViewAsUid,
       mailboxes,
+      persistLeadMail,
       reconcileInboundHeadFromSync,
       reconcileSentHeadFromSync,
+      storedMessages.length,
       workspace.currentUserId,
       workspace.isDemo,
     ],
   );
 
   React.useEffect(() => {
+    if (!storedReadyRef.current && loadingStored) return;
     void Promise.resolve().then(() => syncConversationLists(false));
-  }, [syncConversationLists]);
+  }, [loadingStored, syncConversationLists]);
 
   React.useEffect(() => {
     if (!selected || !selectedMailbox || workspace.isDemo) return;
@@ -489,6 +623,20 @@ export function LeadEmailsPanel({
         if (!cancelled) setLoadingBodies(true);
         return Promise.all([fetchBodies("inbox", inboundUids), fetchBodies("sent", sentUids)]);
       })
+      .then(() => {
+        if (cancelled) return;
+        const refreshed = relevantLeadMessages({
+          lead,
+          contactEmail,
+          inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+          sent: useEmailAccountStore.getState().sent,
+          linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+          crmSentFollowups,
+        });
+        const keys = new Set(selected.messages.map((m) => m.key));
+        const toPersist = refreshed.filter((m) => keys.has(m.key));
+        if (toPersist.length > 0) void persistLeadMail(toPersist);
+      })
       .catch((error) => {
         if (!cancelled) toast.error(error instanceof Error ? error.message : "Could not load full email");
       })
@@ -499,9 +647,13 @@ export function LeadEmailsPanel({
       cancelled = true;
     };
   }, [
+    contactEmail,
+    crmSentFollowups,
+    lead,
     mailViewAsUid,
     mergeInboundBodies,
     mergeSentBodies,
+    persistLeadMail,
     selected,
     selectedMailbox,
     workspace.currentUserId,
@@ -1015,10 +1167,10 @@ export function LeadEmailsPanel({
               <p className="mt-1 text-xs text-muted-foreground">
                 Messages linked in Inbox or matching {contactEmail || "the lead’s email"} appear here.
               </p>
-              {syncingLists ? (
+              {loadingStored || syncingLists ? (
                 <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
                   <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  Checking mailbox for matches…
+                  {loadingStored ? "Loading saved conversations…" : "Checking mailbox for matches…"}
                 </p>
               ) : null}
               <div className="mt-4 flex justify-center">

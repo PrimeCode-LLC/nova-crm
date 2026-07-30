@@ -138,6 +138,37 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       raw.replyReviewStatus === "accepted"
         ? raw.replyReviewStatus
         : undefined,
+    emailMailCount:
+      typeof raw.emailMailCount === "number" && Number.isFinite(raw.emailMailCount)
+        ? raw.emailMailCount
+        : undefined,
+    lastEmailAt: raw.lastEmailAt ? firestoreValueToIso(raw.lastEmailAt) : undefined,
+    lastInboundEmailAt: raw.lastInboundEmailAt
+      ? firestoreValueToIso(raw.lastInboundEmailAt)
+      : undefined,
+    pendingReplyActionId:
+      typeof raw.pendingReplyActionId === "string" && raw.pendingReplyActionId.trim()
+        ? raw.pendingReplyActionId.trim()
+        : undefined,
+    replyClass:
+      raw.replyClass === "auto_reply" ||
+      raw.replyClass === "positive" ||
+      raw.replyClass === "meeting_ready" ||
+      raw.replyClass === "neutral" ||
+      raw.replyClass === "objection" ||
+      raw.replyClass === "soft_no" ||
+      raw.replyClass === "hard_no" ||
+      raw.replyClass === "unclear"
+        ? raw.replyClass
+        : undefined,
+    replyActionStatus:
+      raw.replyActionStatus === "pending" ||
+      raw.replyActionStatus === "accepted" ||
+      raw.replyActionStatus === "dismissed" ||
+      raw.replyActionStatus === "expired" ||
+      raw.replyActionStatus === "sent"
+        ? raw.replyActionStatus
+        : undefined,
     strategyId: typeof raw.strategyId === "string" ? raw.strategyId : undefined,
     personaId: typeof raw.personaId === "string" ? raw.personaId : undefined,
     strategyVersion:

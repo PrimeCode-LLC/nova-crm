@@ -13,6 +13,7 @@ import {
   writeInboxHeadsServer,
 } from "@/lib/email/inbox-heads-server";
 import { processInboxBouncesFromHeadsServer } from "@/lib/email/process-inbox-bounces-server";
+import { fanoutInboxHeadsToLeadMailServer } from "@/lib/email/fanout-inbox-to-lead-mail-server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
 
 /** Cap IMAP connects per cron tick (cost + duration). */
@@ -98,6 +99,8 @@ async function syncOneMailbox(mb: DueMailbox): Promise<{
   count?: number;
   bouncesApplied?: number;
   bounceCandidates?: number;
+  leadMailWritten?: number;
+  leadMailMatched?: number;
 }> {
   try {
     const auth = await resolveMailboxTransportAuthServer({
@@ -138,6 +141,15 @@ async function syncOneMailbox(mb: DueMailbox): Promise<{
       mailboxTotal: result.mailboxTotal,
     });
 
+    const imapCreds = {
+      host: mb.imapHost,
+      port: mb.imapPort,
+      secure: mb.imapSecure,
+      user: auth.user,
+      pass: auth.pass,
+      accessToken: auth.accessToken,
+    };
+
     // Server-side bounce apply so CRM tasks/leads update without an open browser tab.
     let bouncesApplied = 0;
     let bounceCandidates = 0;
@@ -147,14 +159,7 @@ async function syncOneMailbox(mb: DueMailbox): Promise<{
         dataOwnerUid: mb.uid,
         mailboxId: mb.mailboxId,
         messages: result.messages,
-        imap: {
-          host: mb.imapHost,
-          port: mb.imapPort,
-          secure: mb.imapSecure,
-          user: auth.user,
-          pass: auth.pass,
-          accessToken: auth.accessToken,
-        },
+        imap: imapCreds,
       });
       bouncesApplied = bounceResult.applied;
       bounceCandidates = bounceResult.candidates;
@@ -162,11 +167,30 @@ async function syncOneMailbox(mb: DueMailbox): Promise<{
       /* head sync succeeded; bounce apply retries next tick */
     }
 
+    // Persist matched inbound mail on leads so Emails tab does not wait on IMAP.
+    let leadMailWritten = 0;
+    let leadMailMatched = 0;
+    try {
+      const fanout = await fanoutInboxHeadsToLeadMailServer({
+        organizationId: mb.organizationId,
+        dataOwnerUid: mb.uid,
+        mailboxId: mb.mailboxId,
+        messages: result.messages,
+        imap: imapCreds,
+      });
+      leadMailWritten = fanout.written;
+      leadMailMatched = fanout.matched;
+    } catch {
+      /* head sync succeeded; lead mail fan-out retries next tick */
+    }
+
     return {
       ok: true,
       count: result.messages.length,
       bouncesApplied,
       bounceCandidates,
+      leadMailWritten,
+      leadMailMatched,
     };
   } catch (e) {
     const error = toImapFetchErrorMessage(e);
@@ -187,6 +211,8 @@ export type InboxImapCronResult = {
   skipped: number;
   bouncesApplied: number;
   bounceCandidates: number;
+  leadMailWritten: number;
+  leadMailMatched: number;
   errors: Array<{ organizationId: string; mailboxId: string; error: string }>;
 };
 
@@ -212,6 +238,8 @@ export async function runInboxImapSyncCronServer(): Promise<InboxImapCronResult>
   let failed = 0;
   let bouncesApplied = 0;
   let bounceCandidates = 0;
+  let leadMailWritten = 0;
+  let leadMailMatched = 0;
   const errors: InboxImapCronResult["errors"] = [];
 
   // Sequential IMAP connects - safer for provider rate limits than a fan-out.
@@ -221,6 +249,8 @@ export async function runInboxImapSyncCronServer(): Promise<InboxImapCronResult>
       synced += 1;
       bouncesApplied += result.bouncesApplied ?? 0;
       bounceCandidates += result.bounceCandidates ?? 0;
+      leadMailWritten += result.leadMailWritten ?? 0;
+      leadMailMatched += result.leadMailMatched ?? 0;
     } else {
       failed += 1;
       if (result.error) {
@@ -240,6 +270,8 @@ export async function runInboxImapSyncCronServer(): Promise<InboxImapCronResult>
     skipped,
     bouncesApplied,
     bounceCandidates,
+    leadMailWritten,
+    leadMailMatched,
     errors: errors.slice(0, 20),
   };
 }

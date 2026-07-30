@@ -81,6 +81,7 @@ export const NAV_SECTIONS: NavSection[] = [
     label: "Workspace",
     items: [
       { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/dashboard/reply-intelligence", label: "Reply intelligence", icon: Sparkles },
       { href: "/leads", label: "Leads", icon: Target },
       { href: "/prospects", label: "Prospects", icon: ScanSearch },
       { href: "/my-strategy", label: "My Strategy", icon: BookOpen },

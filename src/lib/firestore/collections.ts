@@ -87,6 +87,10 @@ export const COLLECTIONS = {
   contentCaptures: "contentCaptures",
   /** Batch plan jobs for fill-next-N-days. */
   contentPlans: "contentPlans",
+  /** Durable per-lead email messages (IMAP/send fan-out; Emails tab reads here first). */
+  leadMailMessages: "leadMailMessages",
+  /** AI reply classification + next-step actions awaiting human verification. */
+  replyActions: "replyActions",
 } as const;
 
 /** Subcollections under `organizations/{orgId}/*` (server-managed). */
@@ -161,4 +165,6 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.contentItems,
   COLLECTIONS.contentCaptures,
   COLLECTIONS.contentPlans,
+  COLLECTIONS.leadMailMessages,
+  COLLECTIONS.replyActions,
 ] as const;

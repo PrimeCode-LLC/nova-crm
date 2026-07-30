@@ -13,6 +13,7 @@ const FEATURE_KEYS = [
   "intent_suggest",
   "followup_suggest",
   "email_reply",
+  "email_reply_classify",
   "prospect_draft_extract",
   "opportunity_fit",
   "opportunity_fit_discuss",

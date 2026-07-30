@@ -16,6 +16,7 @@ import {
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
+import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 import {
   resolveSequenceThreadContext,
   type SequenceThreadStep,
@@ -950,6 +951,24 @@ async function sendScheduledDoc(
         messageId,
         followupId: followupId || undefined,
         mailboxId,
+      });
+      await persistOutboundLeadMailServer({
+        organizationId,
+        leadId,
+        mailboxId,
+        mailboxOwnerUid: uid,
+        from: String(data.from ?? ""),
+        to: String(data.to ?? ""),
+        cc: String(data.cc ?? "") || undefined,
+        replyTo: String(data.replyTo ?? "") || undefined,
+        subject,
+        bodyText: String(data.text ?? data.body ?? ""),
+        bodyHtml: String(data.html ?? "") || undefined,
+        sentAt: now,
+        messageId,
+        inReplyTo,
+        referenceIds,
+        source: followupId ? "crm_followup" : "scheduled",
       });
     }
     try {

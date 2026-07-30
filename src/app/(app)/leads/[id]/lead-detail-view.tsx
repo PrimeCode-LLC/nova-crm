@@ -60,6 +60,7 @@ import { LeadTouchpoints } from "@/components/leads/lead-touchpoints";
 import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
 import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-banner";
+import { LeadReplyActionBanner } from "@/components/leads/lead-reply-action-banner";
 import { LeadContactEmailActionBanner } from "@/components/leads/lead-contact-email-action-banner";
 import { UpdateContactEmailDialog } from "@/components/leads/update-contact-email-dialog";
 import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
@@ -1127,6 +1128,18 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       </Button>
                     </div>
                   ) : null}
+                  {canEditLead &&
+                  lead.replyActionStatus === "pending" &&
+                  lead.pendingReplyActionId &&
+                  !lead.doNotContact &&
+                  !needsEmailFix &&
+                  !suggestedNewEmail ? (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <Button type="button" size="sm" onClick={() => onTabChange("emails")}>
+                        Review reply in Emails
+                      </Button>
+                    </div>
+                  ) : null}
                 </div>
                 <Button
                   type="button"
@@ -1203,6 +1216,10 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     suggestLinkedInSequence={suggestLinkedIn}
                     hasLinkedIn={hasLinkedIn}
                     onBuildLinkedInSequence={() => setLinkedinSuggestOpen(true)}
+                  />
+                  <LeadReplyActionBanner
+                    lead={lead}
+                    onOpenEmails={() => onTabChange("emails")}
                   />
                   <LeadReplyReviewBanner lead={lead} />
                   {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
