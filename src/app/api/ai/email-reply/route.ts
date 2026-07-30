@@ -111,8 +111,11 @@ Output only the improved email body text (no closing line like "Best,", no signa
       roleId,
       feature: "email_reply",
       promptVars: {
+        today: new Date().toISOString().slice(0, 10),
         tone: parsed.data.tone,
         goal: parsed.data.goal,
+        replyGuidance:
+          "(none - rep is composing manually; infer the right next step from the thread)",
         thread: threadText || draftText,
         leadContext: parsed.data.leadContext ?? "(no lead linked)",
         ragBlock: ragBlock || "(none)",

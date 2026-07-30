@@ -17,6 +17,8 @@ import {
   type ReplyRecommendedAction,
 } from "@/lib/email/reply-action-types";
 import { generateReplyActionDraftServer } from "@/lib/email/generate-reply-action-draft-server";
+import { buildInboundReplySignalBlock } from "@/lib/email/reply-signals";
+import { replyTextOnly, stripQuotedReply } from "@/lib/email/strip-quoted-reply";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 
 export const replyClassifySchema = z.object({
@@ -77,6 +79,8 @@ function leadSnapshotForClassify(lead: ReturnType<typeof mapLeadDoc>): string {
       stage: lead.stage,
       temperature: lead.temperature,
       companyName: lead.companyName,
+      companyIndustry: lead.companyIndustry,
+      companySize: lead.companySize,
       contactName: lead.contactName,
       contactTitle: lead.contactTitle,
       contactEmail: lead.contactEmail,
@@ -90,25 +94,44 @@ function leadSnapshotForClassify(lead: ReturnType<typeof mapLeadDoc>): string {
   );
 }
 
+type ThreadContext = {
+  text: string;
+  inboundCount: number;
+  outboundCount: number;
+  firstOutboundAt?: string;
+  lastOutboundAt?: string;
+};
+
 async function buildThreadSnippet(input: {
   organizationId: string;
   leadId: string;
   latestProviderKey: string;
-}): Promise<string> {
+}): Promise<ThreadContext> {
   const rows = await listLeadMailMessagesServer({
     organizationId: input.organizationId,
     leadId: input.leadId,
     limit: 24,
   });
-  const chronological = [...rows].sort((a, b) => a.date.localeCompare(b.date));
+  const chronological = [...rows]
+    .filter((row) => row.providerKey !== input.latestProviderKey)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const outbound = chronological.filter((row) => row.direction === "outbound");
   const lines: string[] = [];
   for (const row of chronological.slice(-12)) {
     const who = row.direction === "inbound" ? "THEM" : "US";
-    const snippet = (row.bodyText || row.preview || "").replace(/\s+/g, " ").trim().slice(0, 400);
+    const raw = row.bodyText || row.preview || "";
+    const snippet = replyTextOnly(raw).replace(/\s+/g, " ").trim().slice(0, 400);
     lines.push(`[${who}] ${row.date} · ${row.subject}\n${snippet}`);
   }
-  if (lines.length === 0) return "(no prior thread stored)";
-  return lines.join("\n\n");
+
+  return {
+    text: lines.length ? lines.join("\n\n") : "(no prior thread stored)",
+    inboundCount: chronological.length - outbound.length,
+    outboundCount: outbound.length,
+    firstOutboundAt: outbound[0]?.date,
+    lastOutboundAt: outbound[outbound.length - 1]?.date,
+  };
 }
 
 async function writeReplyActionAndLead(input: {
@@ -262,7 +285,10 @@ export async function classifyInboundLeadMailServer(input: {
   }
   const lead = mapLeadDoc(leadSnap.id, leadSnap.data() as Record<string, unknown>);
 
-  const body = (newest.bodyText || newest.preview || "").trim();
+  const rawBody = (newest.bodyText || newest.preview || "").trim();
+  // Our own quoted pitch below their reply skews classification and burns tokens.
+  const stripped = stripQuotedReply(rawBody);
+  const body = stripped.text;
   const heuristic = heuristicAutoReply({
     subject: newest.subject,
     preview: newest.preview || "",
@@ -283,6 +309,20 @@ export async function classifyInboundLeadMailServer(input: {
         leadId: input.leadId,
         latestProviderKey: newest.providerKey,
       });
+      const signals = buildInboundReplySignalBlock({
+        from: newest.from,
+        subject: newest.subject,
+        body,
+        receivedAt: newest.date,
+        leadContactEmail: lead.contactEmail,
+        inboundCount: thread.inboundCount,
+        outboundCount: thread.outboundCount,
+        firstOutboundAt: thread.firstOutboundAt,
+        lastOutboundAt: thread.lastOutboundAt,
+        hadQuotedTrail: stripped.hadQuotedTrail,
+        doNotContact: lead.doNotContact,
+      });
+
       result = await runAiStructuredFeature({
         organizationId: input.organizationId,
         userId: input.actorUid || "system",
@@ -290,11 +330,13 @@ export async function classifyInboundLeadMailServer(input: {
         leadId: input.leadId,
         schema: replyClassifySchema,
         promptVars: {
+          today: new Date().toISOString().slice(0, 10),
           from: newest.from,
           subject: newest.subject,
           date: newest.date,
           body: body.slice(0, 8_000),
-          thread: thread.slice(0, 12_000),
+          signals,
+          thread: thread.text.slice(0, 12_000),
           leadContext: leadSnapshotForClassify(lead),
         },
       });

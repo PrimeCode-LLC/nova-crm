@@ -4,13 +4,20 @@ import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { AiForbiddenError, AiNotConfiguredError, runAiTextFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
+import {
+  buildFollowupPersonalizationProfile,
+  formatFollowupRoleGuidance,
+} from "@/lib/ai/followup-personalization";
+import { buildLeadSignalProfile, formatLeadSignalGuidance } from "@/lib/ai/lead-signal-profile";
 import { listLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";
 import { extractReplyAddress, replySubject } from "@/lib/email/reply-compose";
+import { replyTextOnly } from "@/lib/email/strip-quoted-reply";
 import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
   draftGoalForReplyAction,
   replyActionNeedsDraft,
+  REPLY_CLASS_LABELS,
   type ReplyAction,
   type ReplyClass,
   type ReplyRecommendedAction,
@@ -22,16 +29,55 @@ function leadSnapshot(lead: ReturnType<typeof mapLeadDoc>): string {
     {
       id: lead.id,
       stage: lead.stage,
+      temperature: lead.temperature,
       companyName: lead.companyName,
+      companyIndustry: lead.companyIndustry,
+      companySize: lead.companySize,
       contactName: lead.contactName,
       contactTitle: lead.contactTitle,
       contactEmail: lead.contactEmail,
       channel: lead.channel,
+      doNotContact: lead.doNotContact,
       notes: lead.notes?.slice(0, 400),
     },
     null,
     2,
   );
+}
+
+/**
+ * Carry the classifier's decision and the sequence-grade role targets into the
+ * draft so an approved next step and the written email cannot drift apart.
+ */
+function buildReplyGuidance(input: {
+  lead: ReturnType<typeof mapLeadDoc>;
+  classification: ReplyClass;
+  recommendedAction: ReplyRecommendedAction;
+  potentialScore: number;
+  nextStepSummary: string;
+}): string {
+  const profile = buildFollowupPersonalizationProfile({ title: input.lead.contactTitle });
+  const signalProfile = buildLeadSignalProfile({ lead: input.lead });
+
+  const lines = [
+    `Reply classification: ${REPLY_CLASS_LABELS[input.classification]} (${input.classification})`,
+    `Recommended action: ${input.recommendedAction}`,
+    `Potential score: ${Math.round(input.potentialScore)}/100`,
+    `Approved next step (write the email that delivers this): ${input.nextStepSummary || "Advance toward a clear next step"}`,
+    "",
+    formatFollowupRoleGuidance(profile),
+    formatLeadSignalGuidance(signalProfile),
+    `Lead stage: ${input.lead.stage || "unknown"}`,
+    `Temperature: ${input.lead.temperature || "unknown"}`,
+  ];
+
+  if (input.lead.doNotContact) {
+    lines.push(
+      "COMPLIANCE: this lead is marked do-not-contact. Acknowledge and close out. Do not pitch and do not ask for a meeting.",
+    );
+  }
+
+  return lines.filter((line) => line !== undefined).join("\n");
 }
 
 async function buildThreadForDraft(input: {
@@ -48,7 +94,10 @@ async function buildThreadForDraft(input: {
   const lines: string[] = [];
   for (const row of chronological.slice(-12)) {
     const who = row.direction === "inbound" ? "THEM" : "US";
-    const snippet = (row.bodyText || row.preview || "").replace(/\s+/g, " ").trim().slice(0, 600);
+    const snippet = replyTextOnly(row.bodyText || row.preview || "")
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 600);
     lines.push(`[${who}] ${row.date} · ${row.subject}\nFrom: ${row.from}\n${snippet}`);
   }
 
@@ -164,8 +213,16 @@ export async function generateReplyActionDraftServer(input: {
       feature: "email_reply",
       leadId,
       promptVars: {
+        today: new Date().toISOString().slice(0, 10),
         tone: "professional",
         goal,
+        replyGuidance: buildReplyGuidance({
+          lead,
+          classification,
+          recommendedAction,
+          potentialScore: Number(data.potentialScore ?? 0),
+          nextStepSummary,
+        }),
         thread: threadCtx.thread.slice(0, 20_000),
         leadContext: leadSnapshot(lead),
         ragBlock: ragBlock || "(none)",
