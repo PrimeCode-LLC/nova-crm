@@ -2,13 +2,13 @@
 
 import * as React from "react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { mergeFollowupPlans, openFollowupsForPlan } from "@/lib/followup-plans";
+import { buildLeadEmailToIdMap, mergeFollowupPlans, openFollowupsForPlan } from "@/lib/followup-plans";
 import {
+  extractEmailAddress,
   findActivePlanToPauseOnReply,
-  inboundMessageLeadId,
-  isInboundFromLeadContact,
   isLikelyAutoReply,
 } from "@/lib/followup-plan-reply";
+import { isDeliveryStatusNotification } from "@/lib/email/detect-hard-bounce";
 import {
   cancelScheduledEmailsForFollowups,
   openFollowupsWithScheduledEmail,
@@ -18,8 +18,12 @@ import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-s
 import { toast } from "sonner";
 
 const PROCESSED_KEY = "nova-followup-reply-processed";
-/** Still process recently-seen mail so sync-after-read stamps lastReplyAt. */
+/** Only backfill recently-seen mail so sync-after-read still stamps lastReplyAt. */
 const MAX_REPLY_AGE_MS = 14 * 24 * 60 * 60 * 1000;
+/** Cap in-flight Firestore patches so inbox stays responsive. */
+const MAX_CONCURRENT = 2;
+/** Seen (already-read) messages processed per effect tick — unread are uncapped within concurrency. */
+const MAX_SEEN_BACKFILL_PER_RUN = 3;
 
 function readProcessed(): Set<string> {
   if (typeof window === "undefined") return new Set();
@@ -47,6 +51,8 @@ function writeProcessed(set: Set<string>) {
  * When new inbound mail arrives from a lead:
  * - Human replies: cancel scheduled emails, pause plans, set lastReplyAt / reply review
  * - OOO / auto-replies: stamp lastAutoReplyAt only (no sequence pause, no dashboard reply)
+ *
+ * Performance: unread-first, concurrency-limited, skip already-stamped leads, O(1) email→lead map.
  */
 export function FollowupPlanReplyWatcher() {
   const {
@@ -69,16 +75,11 @@ export function FollowupPlanReplyWatcher() {
   const processedRef = React.useRef(readProcessed());
   const inFlightRef = React.useRef(new Set<string>());
 
-  const emailsByContactId = React.useMemo(() => {
-    const map: Record<string, string[]> = {};
-    for (const c of contacts) {
-      const emails = [c.email, c.personalEmail]
-        .map((e) => e?.trim().toLowerCase())
-        .filter((e): e is string => Boolean(e && e.includes("@")));
-      if (emails.length) map[c.id] = emails;
-    }
-    return map;
-  }, [contacts]);
+  const emailToLeadId = React.useMemo(
+    () => buildLeadEmailToIdMap(leads, contacts),
+    [leads, contacts],
+  );
+  const leadById = React.useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads]);
 
   const plans = React.useMemo(
     () => mergeFollowupPlans(followupPlans, followups),
@@ -91,72 +92,114 @@ export function FollowupPlanReplyWatcher() {
     const acct = getActiveMailbox({ mailboxes, activeMailboxId });
     const mailboxEmail = acct.emailAddress?.trim().toLowerCase();
     const messages = inboundByMailbox[acct.id] ?? [];
+    const now = Date.now();
+
+    type Candidate = {
+      mid: string;
+      message: (typeof messages)[number];
+      leadId: string;
+      seen: boolean;
+      auto: boolean;
+    };
+    const candidates: Candidate[] = [];
 
     for (const message of messages) {
       const mid = `${acct.id}:in:${message.id}`;
       if (processedRef.current.has(mid) || inFlightRef.current.has(mid)) continue;
 
-      const ageMs = Date.now() - Date.parse(message.date);
+      const ageMs = now - Date.parse(message.date);
       if (!Number.isFinite(ageMs) || ageMs > MAX_REPLY_AGE_MS) continue;
+      if (isDeliveryStatusNotification(message)) continue;
 
-      const leadId = inboundMessageLeadId({
-        mailboxId: acct.id,
-        message,
-        leads,
-        linkedLeadByMessageId,
-        emailsByContactId,
-      });
+      const manual = linkedLeadByMessageId[mid];
+      const fromAddr = extractEmailAddress(message.from);
+      const leadId =
+        manual ||
+        (fromAddr ? emailToLeadId.get(fromAddr) : undefined) ||
+        null;
       if (!leadId) continue;
 
-      const lead = leads.find((l) => l.id === leadId);
+      const lead = leadById.get(leadId);
       if (!lead) continue;
 
-      const contactExtras = lead.contactId ? emailsByContactId[lead.contactId] : undefined;
+      const auto = isLikelyAutoReply(message);
+      if (auto) {
+        if (
+          lead.lastAutoReplyMessageId === mid ||
+          (lead.lastAutoReplyAt &&
+            Number.isFinite(Date.parse(lead.lastAutoReplyAt)) &&
+            Date.parse(lead.lastAutoReplyAt) >= Date.parse(message.date))
+        ) {
+          processedRef.current.add(mid);
+          continue;
+        }
+        candidates.push({ mid, message, leadId, seen: Boolean(message.seen), auto: true });
+        continue;
+      }
 
-      // OOO / auto-reply: surface on lead without counting as a dashboard reply.
-      if (isLikelyAutoReply(message)) {
-        inFlightRef.current.add(mid);
+      if (lead.lastReplyMessageId === mid) {
+        processedRef.current.add(mid);
+        continue;
+      }
+
+      // Already matched From → lead via email index (company + personal).
+      // Only block mail that is from our own mailbox (sent copies in INBOX).
+      if (mailboxEmail && fromAddr === mailboxEmail) continue;
+
+      // Prefer unread; still allow a small seen backfill for sync-after-read.
+      candidates.push({ mid, message, leadId, seen: Boolean(message.seen), auto: false });
+    }
+
+    // Unread first, then newest.
+    candidates.sort((a, b) => {
+      if (a.seen !== b.seen) return Number(a.seen) - Number(b.seen);
+      return b.message.date.localeCompare(a.message.date);
+    });
+
+    let seenStarted = 0;
+    for (const c of candidates) {
+      if (inFlightRef.current.size >= MAX_CONCURRENT) break;
+      if (c.seen) {
+        if (seenStarted >= MAX_SEEN_BACKFILL_PER_RUN) continue;
+        seenStarted += 1;
+      }
+
+      const lead = leadById.get(c.leadId);
+      if (!lead) continue;
+
+      inFlightRef.current.add(c.mid);
+
+      if (c.auto) {
         void (async () => {
           try {
-            await patchLeadAsync(leadId, {
-              lastAutoReplyAt: message.date || new Date().toISOString(),
-              lastAutoReplyMessageId: mid,
-              lastActivityAt: message.date || new Date().toISOString(),
+            await patchLeadAsync(c.leadId, {
+              lastAutoReplyAt: c.message.date || new Date().toISOString(),
+              lastAutoReplyMessageId: c.mid,
+              lastActivityAt: c.message.date || new Date().toISOString(),
             });
-            processedRef.current.add(mid);
+            processedRef.current.add(c.mid);
             writeProcessed(processedRef.current);
           } catch {
             /* retry next sync */
           } finally {
-            inFlightRef.current.delete(mid);
+            inFlightRef.current.delete(c.mid);
           }
         })();
         continue;
       }
 
-      if (
-        !isInboundFromLeadContact({
-          message,
-          lead,
-          mailboxEmail,
-          contactEmails: contactExtras,
-        })
-      )
-        continue;
-
-      const scheduledOpen = openFollowupsWithScheduledEmail(followups, leadId);
-      const plan = findActivePlanToPauseOnReply({ leadId, plans });
+      const scheduledOpen = openFollowupsWithScheduledEmail(followups, c.leadId);
+      const plan = findActivePlanToPauseOnReply({ leadId: c.leadId, plans });
       const openIds = plan ? openFollowupsForPlan(followups, plan.id).map((f) => f.id) : [];
 
-      inFlightRef.current.add(mid);
       void (async () => {
         try {
           if (plan && openIds.length > 0) {
             await pauseFollowupPlanForReply({
               planId: plan.id,
-              leadId,
+              leadId: c.leadId,
               reason: "Lead replied by email",
-              replyMessageId: mid,
+              replyMessageId: c.mid,
               actorId: currentUserId,
               openFollowupIds: openIds,
             });
@@ -181,11 +224,11 @@ export function FollowupPlanReplyWatcher() {
           const replyAt = new Date().toISOString();
           try {
             await patchLeadAsync(
-              leadId,
+              c.leadId,
               buildReplyDetectedPatch({
                 lead,
                 replyAt,
-                replyMessageId: mid,
+                replyMessageId: c.mid,
                 source: "imap",
               }),
             );
@@ -193,7 +236,7 @@ export function FollowupPlanReplyWatcher() {
             /* Reply pause/cancel already applied; review stamp can retry next sync. */
           }
 
-          processedRef.current.add(mid);
+          processedRef.current.add(c.mid);
           writeProcessed(processedRef.current);
 
           const openedReview = shouldOpenReplyReview(lead);
@@ -214,21 +257,24 @@ export function FollowupPlanReplyWatcher() {
         } catch {
           /* Leave unprocessed so the next inbox sync retries the reply. */
         } finally {
-          inFlightRef.current.delete(mid);
+          inFlightRef.current.delete(c.mid);
         }
       })();
     }
+
+    // Persist skip marks for already-stamped messages without waiting for writes.
+    if (processedRef.current.size > 0) writeProcessed(processedRef.current);
   }, [
     sessionHydrated,
     currentUserId,
     isDemo,
     leads,
-    contacts,
     followups,
     plans,
     inboundByMailbox,
     linkedLeadByMessageId,
-    emailsByContactId,
+    emailToLeadId,
+    leadById,
     mailboxes,
     activeMailboxId,
     pauseFollowupPlanForReply,

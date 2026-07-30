@@ -85,7 +85,7 @@ import {
   type MailThread,
 } from "@/lib/email/thread-inbound";
 import type { Contact, Lead } from "@/lib/types";
-import { leadEmailsWithContact } from "@/lib/followup-plans";
+import { buildLeadEmailToIdMap, leadEmailsWithContact } from "@/lib/followup-plans";
 import {
   Collapsible,
   CollapsibleContent,
@@ -283,11 +283,23 @@ function rowMatchesEntityMailFilter(
   linkedLeadByMessageId: Record<string, string>,
   leads: Lead[],
   contacts: Contact[],
+  emailToLeadId?: Map<string, string>,
+  leadById?: Map<string, Lead>,
+  emailToContactId?: Map<string, string>,
+  contactById?: Map<string, Contact>,
 ): boolean {
   if (filter === ENTITY_MAIL_FILTER_ALL) return true;
 
-  const lead = resolveLeadForMailListRow(row, mailboxId, linkedLeadByMessageId, leads, contacts);
-  const contact = resolveContactForMailListRow(row, contacts);
+  const lead = resolveLeadForMailListRow(
+    row,
+    mailboxId,
+    linkedLeadByMessageId,
+    leads,
+    contacts,
+    emailToLeadId,
+    leadById,
+  );
+  const contact = resolveContactForMailListRow(row, contacts, emailToContactId, contactById);
 
   if (filter === ENTITY_LEAD_LINKED) {
     if (lead == null) return false;
@@ -543,6 +555,22 @@ export default function InboxWorkspace() {
       ),
     [contacts],
   );
+
+  const emailToLeadId = React.useMemo(
+    () => buildLeadEmailToIdMap(leads, contacts),
+    [leads, contacts],
+  );
+  const leadById = React.useMemo(() => new Map(leads.map((l) => [l.id, l])), [leads]);
+  const contactById = React.useMemo(() => new Map(contacts.map((c) => [c.id, c])), [contacts]);
+  const emailToContactId = React.useMemo(() => {
+    const map = new Map<string, string>();
+    for (const c of contacts) {
+      for (const e of contactEmailSet(c)) {
+        if (!map.has(e)) map.set(e, c.id);
+      }
+    }
+    return map;
+  }, [contacts]);
 
   const [mailFolder, setMailFolder] = React.useState<MailFolder>("inbox");
   const [selectedThread, setSelectedThread] = React.useState<MailThread | null>(null);
@@ -2321,8 +2349,16 @@ export default function InboxWorkspace() {
       all.total += 1;
       if (rowIsUnread(row)) all.unread += 1;
 
-      const lead = resolveLeadForMailListRow(row, row.mailboxId, linkedLeadByMessageId, leads, contacts);
-      const contact = resolveContactForMailListRow(row, contacts);
+      const lead = resolveLeadForMailListRow(
+        row,
+        row.mailboxId,
+        linkedLeadByMessageId,
+        leads,
+        contacts,
+        emailToLeadId,
+        leadById,
+      );
+      const contact = resolveContactForMailListRow(row, contacts, emailToContactId, contactById);
 
       if (lead) {
         leadLinked.total += 1;
@@ -2368,10 +2404,13 @@ export default function InboxWorkspace() {
     };
   }, [
     inboxMailListRows,
-    account.id,
     linkedLeadByMessageId,
     leads,
     contacts,
+    emailToLeadId,
+    leadById,
+    emailToContactId,
+    contactById,
     leadsSortedForMailFilter,
     contactsSortedForMailFilter,
   ]);
@@ -2389,6 +2428,10 @@ export default function InboxWorkspace() {
           linkedLeadByMessageId,
           leads,
           contacts,
+          emailToLeadId,
+          leadById,
+          emailToContactId,
+          contactById,
         ),
       );
     }
@@ -2398,10 +2441,13 @@ export default function InboxWorkspace() {
     mailListRows,
     entityMailFilter,
     entitySubFilter,
-    account.id,
     linkedLeadByMessageId,
     leads,
     contacts,
+    emailToLeadId,
+    leadById,
+    emailToContactId,
+    contactById,
   ]);
 
   const readFilterStats = React.useMemo(() => {
@@ -2426,6 +2472,10 @@ export default function InboxWorkspace() {
           linkedLeadByMessageId,
           leads,
           contacts,
+          emailToLeadId,
+          leadById,
+          emailToContactId,
+          contactById,
         ),
       );
     }
@@ -2450,10 +2500,13 @@ export default function InboxWorkspace() {
     readStatusFilter,
     entityMailFilter,
     entitySubFilter,
-    account.id,
     linkedLeadByMessageId,
     leads,
     contacts,
+    emailToLeadId,
+    leadById,
+    emailToContactId,
+    contactById,
     selectedMailLabelId,
     labelsByMessageId,
     selectedMailFlagId,
@@ -3280,16 +3333,13 @@ export default function InboxWorkspace() {
       if ("updatedAt" in msg) return null;
       const mid = "uid" in msg ? `${account.id}:in:${msg.id}` : msg.id;
       const manuallyLinked = linkedLeadByMessageId[mid];
-      if (manuallyLinked) return leads.find((l) => l.id === manuallyLinked) ?? null;
+      if (manuallyLinked) return leadById.get(manuallyLinked) ?? null;
       const emails = collectMessageEmails(msg);
-      return (
-        leads.find((lead) => {
-          const contact = lead.contactId
-            ? contacts.find((c) => c.id === lead.contactId)
-            : undefined;
-          return leadEmailsWithContact(lead, contact).some((e) => emails.has(e));
-        }) ?? null
-      );
+      for (const e of emails) {
+        const id = emailToLeadId.get(e);
+        if (id) return leadById.get(id) ?? null;
+      }
+      return null;
     };
 
     if ((mailFolder === "inbox" || mailFolder === "trash") && selectedThread) {
@@ -3301,7 +3351,15 @@ export default function InboxWorkspace() {
     }
     if (!selectedMail) return null;
     return matchFromMessage(selectedMail);
-  }, [mailFolder, selectedThread, selectedMail, account.id, linkedLeadByMessageId, leads, contacts]);
+  }, [
+    mailFolder,
+    selectedThread,
+    selectedMail,
+    account.id,
+    linkedLeadByMessageId,
+    emailToLeadId,
+    leadById,
+  ]);
 
   function composeLeadContextPayload() {
     if (!selectedLead) return "";
@@ -5609,9 +5667,22 @@ function ThreadInboundMessage({
   );
 }
 
-function resolveContactForMailListRow(row: MailListRow, contacts: Contact[]): Contact | null {
-  const matchInbound = (msg: MailInbound) => {
-    const emails = collectMessageEmails(msg);
+function resolveContactForMailListRow(
+  row: MailListRow,
+  contacts: Contact[],
+  emailToContactId?: Map<string, string>,
+  contactById?: Map<string, Contact>,
+): Contact | null {
+  const byId = (id: string) => contactById?.get(id) ?? contacts.find((c) => c.id === id) ?? null;
+
+  const matchEmails = (emails: Set<string>) => {
+    if (emailToContactId) {
+      for (const e of emails) {
+        const id = emailToContactId.get(e);
+        if (id) return byId(id);
+      }
+      return null;
+    }
     return (
       contacts.find((contact) => {
         const owned = contactEmailSet(contact);
@@ -5622,6 +5693,8 @@ function resolveContactForMailListRow(row: MailListRow, contacts: Contact[]): Co
       }) ?? null
     );
   };
+
+  const matchInbound = (msg: MailInbound) => matchEmails(collectMessageEmails(msg));
 
   if (row.thread) {
     for (let i = row.thread.messages.length - 1; i >= 0; i--) {
@@ -5636,31 +5709,13 @@ function resolveContactForMailListRow(row: MailListRow, contacts: Contact[]): Co
     return null;
   }
   if ("sentAt" in item && !("date" in item)) {
-    const emails = collectMessageEmails(item as MailDraft | MailSent);
-    return (
-      contacts.find((contact) => {
-        const owned = contactEmailSet(contact);
-        for (const e of owned) {
-          if (emails.has(e)) return true;
-        }
-        return false;
-      }) ?? null
-    );
+    return matchEmails(collectMessageEmails(item as MailDraft | MailSent));
   }
   if ("date" in item && "uid" in item) {
     return matchInbound(item as MailInbound);
   }
   if ("updatedAt" in item) {
-    const emails = collectMessageEmails(item as MailDraft | MailSent | MailInbound);
-    return (
-      contacts.find((contact) => {
-        const owned = contactEmailSet(contact);
-        for (const e of owned) {
-          if (emails.has(e)) return true;
-        }
-        return false;
-      }) ?? null
-    );
+    return matchEmails(collectMessageEmails(item as MailDraft));
   }
   return null;
 }
@@ -5671,20 +5726,32 @@ function resolveLeadForMailListRow(
   linkedLeadByMessageId: Record<string, string>,
   leads: Lead[],
   contacts: Contact[] = [],
+  emailToLeadId?: Map<string, string>,
+  leadById?: Map<string, Lead>,
 ): Lead | null {
-  const byId = (id: string) => leads.find((l) => l.id === id) ?? null;
+  const byId = (id: string) => leadById?.get(id) ?? leads.find((l) => l.id === id) ?? null;
   const contactFor = (lead: Lead) =>
     lead.contactId ? contacts.find((c) => c.id === lead.contactId) : undefined;
+
+  const matchEmails = (emails: Set<string>) => {
+    if (emailToLeadId) {
+      for (const e of emails) {
+        const id = emailToLeadId.get(e);
+        if (id) return byId(id);
+      }
+      return null;
+    }
+    return (
+      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
+      null
+    );
+  };
 
   const matchInbound = (msg: MailInbound) => {
     const mid = `${mailboxId}:in:${msg.id}`;
     const manual = linkedLeadByMessageId[mid];
     if (manual) return byId(manual);
-    const emails = collectMessageEmails(msg);
-    return (
-      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
-      null
-    );
+    return matchEmails(collectMessageEmails(msg));
   };
 
   if (row.thread) {
@@ -5702,11 +5769,7 @@ function resolveLeadForMailListRow(
   if ("sentAt" in item && !("date" in item)) {
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
-    const emails = collectMessageEmails(item as MailSent);
-    return (
-      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
-      null
-    );
+    return matchEmails(collectMessageEmails(item as MailSent));
   }
   if ("date" in item && "uid" in item) {
     return matchInbound(item as MailInbound);
@@ -5714,11 +5777,7 @@ function resolveLeadForMailListRow(
   if ("updatedAt" in item) {
     const manual = linkedLeadByMessageId[item.id];
     if (manual) return byId(manual);
-    const emails = collectMessageEmails(item as MailDraft);
-    return (
-      leads.find((lead) => leadEmailsWithContact(lead, contactFor(lead)).some((e) => emails.has(e))) ??
-      null
-    );
+    return matchEmails(collectMessageEmails(item as MailDraft));
   }
   return null;
 }

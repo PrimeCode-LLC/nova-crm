@@ -139,6 +139,8 @@ export function EmailBounceWatcher() {
       selfUid: currentUserId,
     });
     const now = Date.now();
+    let started = 0;
+    const MAX_BOUNCE_BODY_FETCHES = 2;
 
     for (const raw of messages) {
       const mid = `${acct.id}:in:${raw.id}`;
@@ -146,6 +148,8 @@ export function EmailBounceWatcher() {
       const retryAt = nextRetryAtRef.current.get(mid) ?? 0;
       if (retryAt > now) continue;
       if (!isDeliveryStatusNotification(raw)) continue;
+      if (started >= MAX_BOUNCE_BODY_FETCHES) break;
+      started += 1;
 
       inFlightRef.current.add(mid);
       void (async () => {

@@ -252,3 +252,22 @@ export function leadEmailsWithContact(
 ): string[] {
   return leadContactEmails(lead, contact?.email, contact?.personalEmail);
 }
+
+/**
+ * Fast lookup: lowercase email → lead id (first lead wins on collisions).
+ * Prefer this over scanning all leads per message in hot inbox loops.
+ */
+export function buildLeadEmailToIdMap(
+  leads: readonly Pick<Lead, "id" | "contactEmail" | "contactId">[],
+  contacts: readonly { id: string; email?: string; personalEmail?: string }[],
+): Map<string, string> {
+  const contactById = new Map(contacts.map((c) => [c.id, c]));
+  const map = new Map<string, string>();
+  for (const lead of leads) {
+    const contact = lead.contactId ? contactById.get(lead.contactId) : undefined;
+    for (const email of leadEmailsWithContact(lead, contact)) {
+      if (!map.has(email)) map.set(email, lead.id);
+    }
+  }
+  return map;
+}
