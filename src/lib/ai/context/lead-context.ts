@@ -20,6 +20,7 @@ import type {
   ProspectingStrategy,
   StrategyAssignment,
 } from "@/lib/prospecting-strategy/types";
+import type { LeadAiEmailThread } from "@/lib/ai/lead-ai-email-threads";
 
 const MAX_CONTEXT_STRING_LENGTH = 2_000;
 
@@ -52,7 +53,7 @@ export function buildLeadAiContext(input: {
   touchpoints: Touchpoint[];
   followups: Followup[];
   tasks: LeadTask[];
-  emailThreads?: { subject: string; messages: { from: string; date: string; snippet: string }[] }[];
+  emailThreads?: LeadAiEmailThread[];
   followupPlans?: FollowupPlan[];
   regenerateContext?: string;
   campaign?: Campaign;

@@ -409,12 +409,26 @@ describe("content prompt templates", () => {
   });
 
   it("rejects a stale override that would drop the playbook", async () => {
-    const { promptTemplateIsCurrent } = await import("@/lib/ai/prompt-defaults");
+    const { AI_PROMPT_DEFAULTS, promptTemplateIsCurrent } = await import(
+      "@/lib/ai/prompt-defaults"
+    );
     // The pre-2026 template: platform name only, no playbook or length target.
     const stale = "platform: {{platform}}\nangle: {{angle}}\ncharLimit: {{charLimit}}";
     expect(promptTemplateIsCurrent("content_draft_generate", stale)).toBe(false);
-    // Features without required placeholders are unaffected.
-    expect(promptTemplateIsCurrent("lead_analyze", "anything")).toBe(true);
+    // A lead_analyze override must still carry the strategy prompt and today's date.
+    expect(promptTemplateIsCurrent("lead_analyze", "anything")).toBe(false);
+    expect(
+      promptTemplateIsCurrent(
+        "lead_analyze",
+        "Analyze {{context}} with {{userPrompt}} and {{ragBlock}}",
+      ),
+    ).toBe(false);
+    expect(
+      promptTemplateIsCurrent(
+        "lead_analyze",
+        AI_PROMPT_DEFAULTS.lead_analyze.userPromptTemplate,
+      ),
+    ).toBe(true);
   });
 });
 

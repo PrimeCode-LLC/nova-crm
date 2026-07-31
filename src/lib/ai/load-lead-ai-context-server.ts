@@ -21,6 +21,12 @@ import type {
   ProspectingStrategy,
   StrategyAssignment,
 } from "@/lib/prospecting-strategy/types";
+import {
+  buildLeadAiEmailThreadsFromMail,
+  type LeadAiEmailThread,
+} from "@/lib/ai/lead-ai-email-threads";
+import { listLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";
+import { LEAD_MAIL_LIST_LIMIT } from "@/lib/email/lead-mail-types";
 
 export type LeadAiContextInput = {
   lead: Lead;
@@ -32,7 +38,7 @@ export type LeadAiContextInput = {
   touchpoints: Touchpoint[];
   followups: Followup[];
   tasks: LeadTask[];
-  emailThreads?: { subject: string; messages: { from: string; date: string; snippet: string }[] }[];
+  emailThreads?: LeadAiEmailThread[];
   campaign?: Campaign;
   profile?: Profile;
   strategy?: ProspectingStrategy;
@@ -194,6 +200,17 @@ export async function loadLeadAiContextServer(input: {
   const belongsToOrganization = (snap: DocumentSnapshot | undefined) =>
     Boolean(snap?.exists && snap.data()?.organizationId === input.organizationId);
 
+  // Prefer durable lead-mail (sent + replies). Fall back to client threads when store is empty.
+  const storedMail = await listLeadMailMessagesServer({
+    organizationId: input.organizationId,
+    leadId: lead.id,
+    limit: LEAD_MAIL_LIST_LIMIT,
+  });
+  const emailThreads =
+    storedMail.length > 0
+      ? buildLeadAiEmailThreadsFromMail(storedMail)
+      : (input.emailThreads ?? []);
+
   return {
     lead,
     account: belongsToOrganization(accountSnap)
@@ -208,7 +225,7 @@ export async function loadLeadAiContextServer(input: {
     touchpoints: touchSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Touchpoint),
     followups: followSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Followup),
     tasks: tasksSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as LeadTask),
-    emailThreads: input.emailThreads ?? [],
+    emailThreads,
     campaign: belongsToOrganization(campaignSnap)
       ? ({ ...campaignSnap!.data(), id: campaignSnap!.id } as Campaign)
       : undefined,

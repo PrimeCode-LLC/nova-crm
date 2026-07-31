@@ -310,7 +310,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         .map((e) => e.trim().toLowerCase())
         .filter(Boolean),
     );
-    const rows: { id: string; subject: string; at: string; from: string; to: string; body: string }[] = [];
+    const rows: {
+      id: string;
+      subject: string;
+      at: string;
+      from: string;
+      to: string;
+      body: string;
+      direction: "inbound" | "outbound";
+    }[] = [];
     for (const [mailboxId, messages] of Object.entries(inboundByMailbox)) {
       for (const m of messages) {
         const mid = `${mailboxId}:in:${m.id}`;
@@ -318,7 +326,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
         const addrs = extractEmailAddresses(m.from, m.to, m.cc);
         const auto = [...known].some((e) => addrs.has(e));
         if (!manual && !auto) continue;
-        rows.push({ id: mid, subject: m.subject, at: m.date, from: m.from, to: m.to, body: m.bodyText });
+        rows.push({
+          id: mid,
+          subject: m.subject,
+          at: m.date,
+          from: m.from,
+          to: m.to,
+          body: m.bodyText,
+          direction: "inbound",
+        });
       }
     }
     for (const m of sent) {
@@ -326,7 +342,15 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       const addrs = extractEmailAddresses(m.from, m.to, m.cc);
       const auto = [...known].some((e) => addrs.has(e));
       if (!manual && !auto) continue;
-      rows.push({ id: m.id, subject: m.subject, at: m.sentAt, from: m.from, to: m.to, body: m.body });
+      rows.push({
+        id: m.id,
+        subject: m.subject,
+        at: m.sentAt,
+        from: m.from,
+        to: m.to,
+        body: m.body,
+        direction: "outbound",
+      });
     }
     return rows.sort((a, b) => (a.at < b.at ? 1 : -1));
   }, [inboundByMailbox, linkedLeadByMessageId, lead, relatedEmailAddress, relatedPersonalEmail, sent]);
@@ -347,14 +371,26 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       string,
       {
         subject: string;
-        messages: { from: string; date: string; snippet: string }[];
+        messages: {
+          from: string;
+          to?: string;
+          date: string;
+          direction: "inbound" | "outbound";
+          snippet: string;
+        }[];
         lastAt: string;
       }
     >();
     for (const e of relatedEmails) {
       const cleaned = normalizeSubject(e.subject) || "(no subject)";
       const key = cleaned.toLowerCase();
-      const message = { from: e.from, date: e.at, snippet: e.body.slice(0, 2_000) };
+      const message = {
+        from: e.from,
+        to: e.to || undefined,
+        date: e.at,
+        direction: e.direction,
+        snippet: e.body.slice(0, 2_000),
+      };
       const existing = threads.get(key);
       if (existing) {
         existing.messages.push(message);
@@ -369,7 +405,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       .map((t) => ({
         subject: t.subject,
         // Oldest-first so the model reads each conversation in natural order.
-        messages: t.messages.sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 20),
+        messages: t.messages.sort((a, b) => (a.date < b.date ? -1 : 1)).slice(0, 40),
       }));
   }, [relatedEmails]);
   const attributedStrategy = lead?.strategyId

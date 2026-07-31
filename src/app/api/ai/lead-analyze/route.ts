@@ -13,6 +13,14 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import { recordAudit } from "@/lib/firestore/audit";
 import type { Role } from "@/lib/types";
 
+const emailMessageSchema = z.object({
+  from: z.string().max(500),
+  to: z.string().max(500).optional(),
+  date: z.string().max(100),
+  direction: z.enum(["inbound", "outbound"]).optional(),
+  snippet: z.string().max(2_000),
+});
+
 const analysisSchema = z.object({
   summary: z.string(),
   wins: z.array(z.string()),
@@ -20,23 +28,20 @@ const analysisSchema = z.object({
   improvements: z.array(z.string()),
   riskLevel: z.enum(["low", "medium", "high"]),
   nextActions: z.array(z.string()),
+  strategyAlignment: z.enum(["on_track", "needs_adjustment", "off_track", "not_applicable"]),
+  strategyFeedback: z.string(),
+  strategySuggestions: z.array(z.string()),
 });
 
 const bodySchema = z.object({
   leadId: z.string().min(1),
+  /** Optional rep hypothesis / planned next step to evaluate against the full lead. */
+  userPrompt: z.string().max(2_000).optional(),
   emailThreads: z
     .array(
       z.object({
         subject: z.string().max(500),
-        messages: z
-          .array(
-            z.object({
-              from: z.string().max(500),
-              date: z.string().max(100),
-              snippet: z.string().max(2_000),
-            }),
-          )
-          .max(20),
+        messages: z.array(emailMessageSchema).max(40),
       }),
     )
     .max(20)
@@ -63,9 +68,7 @@ const bodySchema = z.object({
         .array(
           z.object({
             subject: z.string(),
-            messages: z.array(
-              z.object({ from: z.string(), date: z.string(), snippet: z.string() }),
-            ),
+            messages: z.array(emailMessageSchema),
           }),
         )
         .optional(),
@@ -112,6 +115,7 @@ export async function POST(req: Request) {
   }
 
   const context = buildLeadAiContext(loaded);
+  const userPrompt = parsed.data.userPrompt?.trim() || "(none)";
   const feat = settings.features.lead_analyze;
   const ragMode = feat.ragMode ?? "reference";
   const chunks = await retrieveRagChunksServer({
@@ -137,6 +141,7 @@ export async function POST(req: Request) {
       loaded.strategy?.objective,
       loaded.persona?.name,
       loaded.persona?.recommendedAngle,
+      userPrompt !== "(none)" ? userPrompt : "",
       "lead analysis qualification risk next action",
     ]
       .filter(Boolean)
@@ -164,6 +169,8 @@ export async function POST(req: Request) {
       promptVars: {
         context,
         ragBlock: ragBlock || "(none)",
+        userPrompt,
+        today: new Date().toISOString().slice(0, 10),
       },
       schema: analysisSchema,
       leadId: parsed.data.leadId,
