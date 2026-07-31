@@ -209,7 +209,11 @@ function normalizeField(
     addIssue(issues, rowNumber, field, "value_too_long", `${field.header} exceeds 10,000 characters.`);
     return undefined;
   }
-  if ((text.startsWith("=") || text.startsWith("+") || text.startsWith("@")) && field.type !== "number") {
+  if (
+    (text.startsWith("=") || text.startsWith("+") || text.startsWith("@")) &&
+    field.type !== "number" &&
+    field.key !== "phone"
+  ) {
     addIssue(issues, rowNumber, field, "formula_like_value", `${field.header} cannot start with a spreadsheet formula character.`);
     return undefined;
   }

@@ -103,6 +103,10 @@ import { cn } from "@/lib/utils";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { downloadLeadsCsv } from "@/lib/leads-csv";
+import {
+  downloadProspectExportXlsx,
+  leadsToProspectExportRows,
+} from "@/lib/imports/prospect-export";
 import { LEAD_TABLE_COLUMN_LABELS as COL } from "@/lib/leads/lead-table-labels";
 import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
 import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
@@ -309,7 +313,11 @@ function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
 export type LeadsTablePreset = "default" | "high-priority" | "ready-outreach";
 
 export type LeadsTableRef = {
-  /** Downloads CSV for rows currently visible after toolbar filters (search, stage, channel, priority preset, etc.). */
+  /**
+   * Downloads the currently filtered table rows.
+   * Prospects pages: official import-compatible XLSX (same columns as bulk import / New prospect).
+   * Leads pages: lightweight CSV of table columns.
+   */
   exportFilteredCsv: () => void;
 };
 
@@ -388,6 +396,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     getOwnerDisplayName,
     getProfileById,
     getContactById,
+    getAccountById,
     profiles,
     crmLabels,
     intentPlaybook,
@@ -1248,11 +1257,31 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           });
           return;
         }
+        // Prospects export matches the bulk-import sheet + New prospect form columns.
+        if (lockedIntakeScope === "prospect" || effectiveIntakeScope === "prospect") {
+          const exportRows = leadsToProspectExportRows(rows, {
+            getAccountById,
+            getContactById,
+            getProfileName: (profileId) => getProfileById(profileId)?.name,
+          });
+          void downloadProspectExportXlsx(exportRows)
+            .then(() => {
+              toast.success("Exported", {
+                description: `${rows.length} prospect(s) downloaded — same columns as Import.`,
+              });
+            })
+            .catch(() => {
+              toast.error("Export failed", {
+                description: "Could not build the spreadsheet. Try again.",
+              });
+            });
+          return;
+        }
         downloadLeadsCsv(rows);
         toast.success("Exported", { description: `${rows.length} lead(s) downloaded as CSV.` });
       },
     }),
-    [table],
+    [table, lockedIntakeScope, effectiveIntakeScope, getAccountById, getContactById, getProfileById],
   );
 
   React.useEffect(() => {
