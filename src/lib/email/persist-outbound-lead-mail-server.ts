@@ -12,6 +12,7 @@ export async function persistOutboundLeadMailServer(input: {
   from: string;
   to: string;
   cc?: string;
+  bcc?: string;
   replyTo?: string;
   subject: string;
   bodyText: string;
@@ -48,6 +49,7 @@ export async function persistOutboundLeadMailServer(input: {
           from: input.from,
           to: input.to,
           cc: input.cc,
+          bcc: input.bcc,
           replyTo: input.replyTo,
           date: input.sentAt,
           seen: true,

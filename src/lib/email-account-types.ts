@@ -122,6 +122,8 @@ export interface MailDraft {
   to: string;
   /** Optional Cc line (comma-separated addresses). */
   cc?: string;
+  /** Optional Bcc line (comma-separated addresses). */
+  bcc?: string;
   subject: string;
   body: string;
   attachments?: MailDraftAttachment[];
@@ -138,6 +140,7 @@ export interface MailSent {
   replyTo?: string;
   to: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
   sentAt: string;
@@ -171,6 +174,7 @@ export interface ScheduledEmail {
   replyTo?: string;
   to: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   body: string;
   text?: string;

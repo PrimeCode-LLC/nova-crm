@@ -697,6 +697,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     mailboxId,
     to,
     cc,
+    bcc,
     subject,
     body,
     attachments,
@@ -708,11 +709,13 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     const prev = get().drafts;
     const idx = prev.findIndex((d) => d.id === draftId);
     const ccTrim = cc?.trim();
+    const bccTrim = bcc?.trim();
     const row: MailDraft = {
       id: draftId,
       mailboxId,
       to,
       ...(ccTrim ? { cc: ccTrim } : {}),
+      ...(bccTrim ? { bcc: bccTrim } : {}),
       subject,
       body,
       ...(attachments?.length ? { attachments } : {}),
@@ -765,6 +768,7 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         from: s.from,
         to: s.to,
         cc: s.cc,
+        bcc: s.bcc,
         subject: s.subject,
         body: s.body,
         attachments: s.attachments?.map((attachment) => ({

@@ -16,10 +16,13 @@ import {
 } from "@/lib/email/compose-attachments";
 
 type EmailComposeFormProps = {
+  fromField?: React.ReactNode;
   to: string;
   onToChange: (value: string) => void;
   cc: string;
   onCcChange: (value: string) => void;
+  bcc?: string;
+  onBccChange?: (value: string) => void;
   subject: string;
   onSubjectChange: (value: string) => void;
   body: string;
@@ -41,13 +44,17 @@ type EmailComposeFormProps = {
   onSend: () => void;
   onScheduleSend?: () => void;
   compact?: boolean;
+  handoffHint?: string | null;
 };
 
 export function EmailComposeForm({
+  fromField,
   to,
   onToChange,
   cc,
   onCcChange,
+  bcc = "",
+  onBccChange,
   subject,
   onSubjectChange,
   body,
@@ -69,6 +76,7 @@ export function EmailComposeForm({
   onSend,
   onScheduleSend,
   compact = false,
+  handoffHint,
 }: EmailComposeFormProps) {
   const fileInputRef = React.useRef<HTMLInputElement>(null);
   const supportsScheduling = Boolean(onScheduleEnabledChange && onScheduledAtChange && onScheduleSend);
@@ -76,6 +84,8 @@ export function EmailComposeForm({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className={compact ? "space-y-3 py-3" : "min-h-0 flex-1 space-y-3 overflow-y-auto px-5 py-4"}>
+        {fromField ? <div className="space-y-1.5">{fromField}</div> : null}
+
         <div className={compact ? "grid gap-3 sm:grid-cols-2" : "space-y-3"}>
           <div className="space-y-1.5">
             <Label className="text-xs">To</Label>
@@ -96,6 +106,22 @@ export function EmailComposeForm({
             />
           </div>
         </div>
+
+        {onBccChange ? (
+          <div className="space-y-1.5">
+            <Label className="text-xs">Bcc</Label>
+            <Input
+              value={bcc}
+              onChange={(event) => onBccChange(event.target.value)}
+              placeholder="Optional, hidden from recipients"
+              disabled={disabled}
+            />
+          </div>
+        ) : null}
+
+        {handoffHint ? (
+          <p className="text-[11px] text-muted-foreground">{handoffHint}</p>
+        ) : null}
 
         <div className="space-y-1.5">
           <Label className="text-xs">Subject</Label>

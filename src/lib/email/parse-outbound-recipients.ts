@@ -13,7 +13,7 @@ export function extractEmailAddress(raw: string): string | null {
 
 export function normalizeRecipientList(
   raw: string,
-  label: "To" | "Cc" = "To",
+  label: "To" | "Cc" | "Bcc" = "To",
 ): { ok: true; addresses: string[] } | { ok: false; error: string } {
   const parts = raw
     .split(/[,;]/)

@@ -148,9 +148,11 @@ import {
 } from "@/lib/email/compose-attachments";
 import { mergeAiBodyIntoCompose, splitComposerReplyBody } from "@/lib/email/compose-draft-text";
 import {
+  applyMailboxHandoffCc,
   extractReplyAddress,
   forwardedBody,
   forwardSubject,
+  rebuildComposeBodyWithMailboxSignature,
   replyAllRecipientLine,
   replyContextForMessage,
   replyQuotedBody,
@@ -595,12 +597,15 @@ export default function InboxWorkspace() {
   );
   const [composeTo, setComposeTo] = React.useState("");
   const [composeCc, setComposeCc] = React.useState("");
+  const [composeBcc, setComposeBcc] = React.useState("");
   const [composeSubject, setComposeSubject] = React.useState("");
   const [composeBody, setComposeBody] = React.useState("");
   const [composeDraftId, setComposeDraftId] = React.useState<string | undefined>();
   const [composeInReplyTo, setComposeInReplyTo] = React.useState<string | undefined>();
   const [composeReferenceIds, setComposeReferenceIds] = React.useState<string[]>([]);
   const [composeAttachments, setComposeAttachments] = React.useState<ComposeAttachment[]>([]);
+  const [composeMailboxId, setComposeMailboxId] = React.useState("");
+  const [composeThreadMailboxId, setComposeThreadMailboxId] = React.useState("");
   const [aiReplyGenerating, setAiReplyGenerating] = React.useState(false);
   const [aiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
   const [aiReplyGoal] = React.useState("follow up");
@@ -655,6 +660,26 @@ export default function InboxWorkspace() {
     mailboxes.find((mailbox) => mailbox.id === selectedRowMailboxId) ?? account;
   const actionAccount =
     allMailboxesSelected && selectedRowMailboxId ? selectedRowMailbox : account;
+  const smtpMailboxes = React.useMemo(
+    () => mailboxes.filter((mailbox) => isEmailAccountConfigured(mailbox) || isDemo),
+    [mailboxes, isDemo],
+  );
+  const composeMailbox =
+    smtpMailboxes.find((mailbox) => mailbox.id === composeMailboxId) ??
+    mailboxes.find((mailbox) => mailbox.id === composeMailboxId) ??
+    actionAccount;
+  const composeMailApiForUid = resolveMailApiForUserUid({
+    mailViewAsUid,
+    activeMailboxDataOwnerUid: composeMailbox.dataOwnerUid,
+    selfUid: currentUserId,
+  });
+  const showComposeFromPicker = smtpMailboxes.length > 1;
+  const composeHandoffHint =
+    composeInReplyTo &&
+    composeThreadMailboxId &&
+    composeMailbox.id !== composeThreadMailboxId
+      ? "Sending from a different mailbox — previous sender stays on Cc when you switch From."
+      : null;
   const actionMailApiForUid = resolveMailApiForUserUid({
     mailViewAsUid,
     activeMailboxDataOwnerUid: actionAccount.dataOwnerUid,
@@ -1474,15 +1499,23 @@ export default function InboxWorkspace() {
     return `${y}-${mo}-${da}T${h}:${mi}`;
   }
 
-  function openCompose(preset?: Partial<MailDraft>) {
+  function openCompose(preset?: Partial<MailDraft> & { threadMailboxId?: string }) {
     if (inboxReadOnly) {
       toast.error("Compose is disabled while viewing another member’s mailbox.");
       return;
     }
+    const mailboxId = preset?.mailboxId || actionAccount.id;
+    setComposeMailboxId(mailboxId);
+    setComposeThreadMailboxId(preset?.threadMailboxId ?? (preset?.inReplyTo ? mailboxId : ""));
     setComposeTo(preset?.to ?? "");
     setComposeCc(preset?.cc?.trim() ? preset.cc.trim() : "");
+    setComposeBcc(preset?.bcc?.trim() ? preset.bcc.trim() : "");
     setComposeSubject(preset?.subject ?? "");
-    setComposeBody(preset?.body ?? (actionAccount.signature ? `\n\n${actionAccount.signature}` : ""));
+    const mailbox =
+      smtpMailboxes.find((item) => item.id === mailboxId) ??
+      mailboxes.find((item) => item.id === mailboxId) ??
+      actionAccount;
+    setComposeBody(preset?.body ?? (mailbox.signature ? `\n\n${mailbox.signature}` : ""));
     setComposeDraftId(preset?.id);
     setComposeInReplyTo(preset?.inReplyTo);
     setComposeReferenceIds(preset?.referenceIds ?? []);
@@ -1490,6 +1523,35 @@ export default function InboxWorkspace() {
     setComposeScheduleEnabled(false);
     setComposeScheduledAt(defaultScheduleDatetimeLocal());
     setComposeOpen(true);
+  }
+
+  function changeComposeMailbox(nextId: string) {
+    const previous = composeMailbox;
+    const next =
+      smtpMailboxes.find((mailbox) => mailbox.id === nextId) ??
+      mailboxes.find((mailbox) => mailbox.id === nextId);
+    if (!next || next.id === previous.id) {
+      setComposeMailboxId(nextId);
+      return;
+    }
+    setComposeMailboxId(nextId);
+    if (composeInReplyTo || composeThreadMailboxId) {
+      const handoff = applyMailboxHandoffCc({
+        to: composeTo,
+        cc: composeCc,
+        previousMailbox: previous,
+        nextMailbox: next,
+      });
+      setComposeCc(handoff.cc);
+      if (handoff.added) {
+        toast.message("Kept previous mailbox on Cc", {
+          description: `${handoff.added} stays on the thread while you send as ${next.emailAddress || next.label}.`,
+        });
+      }
+      setComposeBody((current) => rebuildComposeBodyWithMailboxSignature(current, next.signature));
+    } else {
+      setComposeBody((current) => rebuildComposeBodyWithMailboxSignature(current, next.signature));
+    }
   }
 
   const fetchScheduledEmails = React.useCallback(async () => {
@@ -1583,9 +1645,15 @@ export default function InboxWorkspace() {
       toast.error(ccParsed.error);
       return;
     }
+    const bccParsed = composeBcc.trim() ? normalizeRecipientList(composeBcc, "Bcc") : null;
+    if (bccParsed && !bccParsed.ok) {
+      toast.error(bccParsed.error);
+      return;
+    }
     const toLine = toParsed.addresses.join(", ");
     const ccLine = ccParsed?.addresses.join(", ");
-    if (!actionAccount.emailAddress.trim()) {
+    const bccLine = bccParsed?.addresses.join(", ");
+    if (!composeMailbox.emailAddress.trim()) {
       toast.error("Set your From email in Settings → Email before sending.");
       return;
     }
@@ -1593,10 +1661,11 @@ export default function InboxWorkspace() {
       setSending(true);
       try {
         addSent({
-          mailboxId: actionAccount.id,
-          from: actionAccount.emailAddress.trim() || "demo@nova.local",
+          mailboxId: composeMailbox.id,
+          from: composeMailbox.emailAddress.trim() || "demo@nova.local",
           to: toLine,
           cc: ccLine || undefined,
+          bcc: bccLine || undefined,
           subject: composeSubject.trim() || "(no subject)",
           body: composeBody,
           inReplyTo: composeInReplyTo,
@@ -1619,7 +1688,7 @@ export default function InboxWorkspace() {
       }
       return;
     }
-    if (!isEmailAccountConfigured(actionAccount)) {
+    if (!isEmailAccountConfigured(composeMailbox)) {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
@@ -1631,18 +1700,19 @@ export default function InboxWorkspace() {
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const url = appendMailDataOwnerParam("/api/email/send", actionMailApiForUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/send", composeMailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mailboxId: actionAccount.id,
+          mailboxId: composeMailbox.id,
           leadId: selectedLead?.id,
-          from: actionAccount.emailAddress,
-          displayName: actionAccount.displayName,
-          replyTo: actionAccount.replyTo,
+          from: composeMailbox.emailAddress,
+          displayName: composeMailbox.displayName,
+          replyTo: composeMailbox.replyTo,
           to: toLine,
           cc: ccLine || undefined,
+          bcc: bccLine || undefined,
           subject: composeSubject.trim(),
           text,
           html,
@@ -1657,19 +1727,19 @@ export default function InboxWorkspace() {
                 }))
               : undefined,
           smtp: {
-            host: actionAccount.smtp.host,
-            port: actionAccount.smtp.port,
-            secure: actionAccount.smtp.secure,
-            user: actionAccount.smtp.user,
-            pass: actionAccount.smtp.password,
+            host: composeMailbox.smtp.host,
+            port: composeMailbox.smtp.port,
+            secure: composeMailbox.smtp.secure,
+            user: composeMailbox.smtp.user,
+            pass: composeMailbox.smtp.password,
           },
-          imap: isImapInboxConfigured(account)
+          imap: isImapInboxConfigured(composeMailbox)
             ? {
-                host: actionAccount.imap.host,
-                port: actionAccount.imap.port,
-                secure: actionAccount.imap.secure,
-                user: actionAccount.imap.user.trim() || actionAccount.emailAddress.trim(),
-                pass: actionAccount.imap.password,
+                host: composeMailbox.imap.host,
+                port: composeMailbox.imap.port,
+                secure: composeMailbox.imap.secure,
+                user: composeMailbox.imap.user.trim() || composeMailbox.emailAddress.trim(),
+                pass: composeMailbox.imap.password,
               }
             : undefined,
         }),
@@ -1690,7 +1760,7 @@ export default function InboxWorkspace() {
       if (composeDraftId) deleteDraft(composeDraftId);
       toast.success("Message sent", {
         description:
-          data.sentSavedToMailbox === false && isImapInboxConfigured(account)
+          data.sentSavedToMailbox === false && isImapInboxConfigured(composeMailbox)
             ? "Delivered, but could not save a copy to your mail server Sent folder. Refresh Sent to check."
             : undefined,
       });
@@ -1699,14 +1769,15 @@ export default function InboxWorkspace() {
       setMailFolder("sent");
       setSelectedMail(null);
       setSelectedThread(null);
-      if (isImapInboxConfigured(account)) {
+      if (isImapInboxConfigured(composeMailbox)) {
         await fetchImapListFolder("sent");
       } else {
         addSent({
-          mailboxId: actionAccount.id,
-          from: actionAccount.emailAddress,
+          mailboxId: composeMailbox.id,
+          from: composeMailbox.emailAddress,
           to: toLine,
           cc: ccLine || undefined,
+          bcc: bccLine || undefined,
           subject: composeSubject.trim(),
           body: composeBody,
           messageId: data.messageId,
@@ -1732,8 +1803,14 @@ export default function InboxWorkspace() {
       toast.error(ccParsed.error);
       return;
     }
+    const bccParsed = composeBcc.trim() ? normalizeRecipientList(composeBcc, "Bcc") : null;
+    if (bccParsed && !bccParsed.ok) {
+      toast.error(bccParsed.error);
+      return;
+    }
     const toLine = toParsed.addresses.join(", ");
     const ccLine = ccParsed?.addresses.join(", ");
+    const bccLine = bccParsed?.addresses.join(", ");
     if (!composeScheduledAt.trim()) {
       toast.error("Pick a date and time");
       return;
@@ -1752,10 +1829,11 @@ export default function InboxWorkspace() {
       setSending(true);
       try {
         addScheduled({
-          mailboxId: actionAccount.id,
-          from: actionAccount.emailAddress.trim() || "demo@nova.local",
+          mailboxId: composeMailbox.id,
+          from: composeMailbox.emailAddress.trim() || "demo@nova.local",
           to: toLine,
           cc: ccLine || undefined,
+          bcc: bccLine || undefined,
           subject: composeSubject.trim() || "(no subject)",
           body: composeBody,
           text: composeBody,
@@ -1778,7 +1856,7 @@ export default function InboxWorkspace() {
       return;
     }
 
-    if (!isEmailAccountConfigured(actionAccount)) {
+    if (!isEmailAccountConfigured(composeMailbox)) {
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
@@ -1791,18 +1869,19 @@ export default function InboxWorkspace() {
     try {
       const text = composeBody;
       const html = composeBody.split("\n").map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`).join("");
-      const url = appendMailDataOwnerParam("/api/email/scheduled", actionMailApiForUid, currentUserId);
+      const url = appendMailDataOwnerParam("/api/email/scheduled", composeMailApiForUid, currentUserId);
       const res = await fetch(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mailboxId: actionAccount.id,
+          mailboxId: composeMailbox.id,
           leadId: selectedLead?.id,
-          from: actionAccount.emailAddress,
-          displayName: actionAccount.displayName,
-          replyTo: actionAccount.replyTo,
+          from: composeMailbox.emailAddress,
+          displayName: composeMailbox.displayName,
+          replyTo: composeMailbox.replyTo,
           to: toLine,
           cc: ccLine || undefined,
+          bcc: bccLine || undefined,
           subject: composeSubject.trim(),
           text,
           html,
@@ -1870,9 +1949,10 @@ export default function InboxWorkspace() {
   function saveDraft() {
     const id = upsertDraft({
       id: composeDraftId,
-      mailboxId: actionAccount.id,
+      mailboxId: composeMailbox.id,
       to: composeTo,
       cc: composeCc.trim() || undefined,
+      bcc: composeBcc.trim() || undefined,
       subject: composeSubject,
       body: composeBody,
       attachments: composeAttachments,
@@ -4560,6 +4640,8 @@ export default function InboxWorkspace() {
                             return;
                           }
                           openCompose({
+                            mailboxId: actionAccount.id,
+                            threadMailboxId: actionAccount.id,
                             to: addr,
                             subject: replySubject(latest.subject),
                             body: withMailboxSignature(replyQuotedBody(latest), actionAccount.signature),
@@ -4577,12 +4659,14 @@ export default function InboxWorkspace() {
                         disabled={inboxReadOnly}
                         onClick={() => {
                           const latest = selectedThread.latest;
-                          const pack = replyAllRecipientLine(latest, account);
+                          const pack = replyAllRecipientLine(latest, actionAccount);
                           if (!pack.to) {
                             toast.error("Could not read a reply address from this conversation.");
                             return;
                           }
                           openCompose({
+                            mailboxId: actionAccount.id,
+                            threadMailboxId: actionAccount.id,
                             to: pack.to,
                             cc: pack.cc,
                             subject: replySubject(latest.subject),
@@ -4617,6 +4701,7 @@ export default function InboxWorkspace() {
                         onClick={() => {
                           const latest = selectedThread.latest;
                           openCompose({
+                            mailboxId: actionAccount.id,
                             to: "",
                             cc: "",
                             subject: forwardSubject(latest.subject),
@@ -4833,8 +4918,13 @@ export default function InboxWorkspace() {
                         disabled={inboxReadOnly}
                         onClick={() =>
                           openCompose({
+                            mailboxId: selectedScheduled.mailboxId,
+                            threadMailboxId: selectedScheduled.inReplyTo
+                              ? selectedScheduled.mailboxId
+                              : undefined,
                             to: selectedScheduled.to,
                             cc: selectedScheduled.cc,
+                            bcc: selectedScheduled.bcc,
                             subject: selectedScheduled.subject,
                             body: selectedScheduled.body,
                             inReplyTo: selectedScheduled.inReplyTo,
@@ -4894,6 +4984,9 @@ export default function InboxWorkspace() {
                       {selectedMail.cc ? (
                         <p className="text-xs text-muted-foreground">Cc: {selectedMail.cc}</p>
                       ) : null}
+                      {"bcc" in selectedMail && selectedMail.bcc ? (
+                        <p className="text-xs text-muted-foreground">Bcc: {selectedMail.bcc}</p>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">{fmtRelative(selectedMail.updatedAt)}</p>
                     </div>
                     <div className="rounded-lg border bg-muted/10 p-4 text-sm whitespace-pre-wrap">{selectedMail.body}</div>
@@ -4904,8 +4997,13 @@ export default function InboxWorkspace() {
                         onClick={() =>
                           openCompose({
                             id: selectedMail.id,
+                            mailboxId: selectedMail.mailboxId,
+                            threadMailboxId: selectedMail.inReplyTo
+                              ? selectedMail.mailboxId
+                              : undefined,
                             to: selectedMail.to,
                             cc: selectedMail.cc,
+                            bcc: selectedMail.bcc,
                             subject: selectedMail.subject,
                             body: selectedMail.body,
                             attachments: selectedMail.attachments,
@@ -4947,6 +5045,8 @@ export default function InboxWorkspace() {
                               return;
                             }
                             openCompose({
+                              mailboxId: actionAccount.id,
+                              threadMailboxId: actionAccount.id,
                               to: addr,
                               subject: replySubject(selectedMail.subject),
                               body: withMailboxSignature(replyQuotedBody(selectedMail), actionAccount.signature),
@@ -4963,12 +5063,14 @@ export default function InboxWorkspace() {
                           className="gap-1.5"
                           disabled={inboxReadOnly}
                           onClick={() => {
-                            const pack = replyAllRecipientLine(selectedMail, account);
+                            const pack = replyAllRecipientLine(selectedMail, actionAccount);
                             if (!pack.to) {
                               toast.error("Could not read a reply address from this message.");
                               return;
                             }
                             openCompose({
+                              mailboxId: actionAccount.id,
+                              threadMailboxId: actionAccount.id,
                               to: pack.to,
                               cc: pack.cc,
                               subject: replySubject(selectedMail.subject),
@@ -5002,6 +5104,7 @@ export default function InboxWorkspace() {
                           disabled={inboxReadOnly}
                           onClick={() => {
                             openCompose({
+                              mailboxId: actionAccount.id,
                               to: "",
                               cc: "",
                               subject: forwardSubject(selectedMail.subject),
@@ -5278,10 +5381,39 @@ export default function InboxWorkspace() {
             <DialogDescription>Send through your SMTP account saved in Settings.</DialogDescription>
           </DialogHeader>
           <EmailComposeForm
+            fromField={
+              showComposeFromPicker ? (
+                <>
+                  <Label className="text-xs">From</Label>
+                  <Select
+                    value={composeMailbox.id}
+                    onValueChange={(value) => {
+                      if (value) changeComposeMailbox(value);
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Select mailbox">
+                        {composeMailbox.label || composeMailbox.emailAddress || "Mailbox"}
+                      </SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      {smtpMailboxes.map((mailbox) => (
+                        <SelectItem key={mailbox.id} value={mailbox.id}>
+                          {mailbox.label || mailbox.emailAddress || mailbox.id}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              ) : undefined
+            }
             to={composeTo}
             onToChange={setComposeTo}
             cc={composeCc}
             onCcChange={setComposeCc}
+            bcc={composeBcc}
+            onBccChange={setComposeBcc}
+            handoffHint={composeHandoffHint}
             subject={composeSubject}
             onSubjectChange={setComposeSubject}
             body={composeBody}

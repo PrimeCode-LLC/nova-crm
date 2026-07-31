@@ -77,6 +77,8 @@ import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import {
   extractEmailAddresses,
   extractReplyAddress,
+  applyMailboxHandoffCc,
+  rebuildComposeBodyWithMailboxSignature,
   replyAllRecipientLine,
   replyContextForMessage,
   replyRecipientAddress,
@@ -370,8 +372,10 @@ export function LeadEmailsPanel({
   const bodyLoadIdRef = React.useRef(0);
   const [composeMode, setComposeMode] = React.useState<ComposeMode | null>(null);
   const [composeMailboxId, setComposeMailboxId] = React.useState("");
+  const [threadMailboxId, setThreadMailboxId] = React.useState("");
   const [to, setTo] = React.useState("");
   const [cc, setCc] = React.useState("");
+  const [bcc, setBcc] = React.useState("");
   const [subject, setSubject] = React.useState("");
   const [body, setBody] = React.useState("");
   const [inReplyTo, setInReplyTo] = React.useState<string | undefined>();
@@ -389,12 +393,13 @@ export function LeadEmailsPanel({
     ? mailboxes.find((mailbox) => mailbox.id === selected.mailboxId) ??
       (selected.mailboxId === "crm" ? activeMailbox : undefined)
     : undefined;
-  const newComposeMailbox =
+  const composeMailbox =
+    smtpMailboxes.find((mailbox) => mailbox.id === composeMailboxId) ??
     mailboxes.find((mailbox) => mailbox.id === composeMailboxId) ??
+    (composeMode && composeMode !== "compose" ? selectedMailbox : undefined) ??
     smtpMailboxes.find((mailbox) => mailbox.id === activeMailbox.id) ??
     smtpMailboxes[0] ??
     activeMailbox;
-  const composeMailbox = composeMode === "compose" ? newComposeMailbox : selectedMailbox;
   const conversationReadOnly = Boolean(
     inboxWriteDisabled ||
       !selectedMailbox ||
@@ -405,6 +410,15 @@ export function LeadEmailsPanel({
       !composeMailbox ||
       lead.doNotContact,
   );
+  const showComposeFromPicker = smtpMailboxes.length > 1;
+  const handoffHint =
+    composeMode &&
+    composeMode !== "compose" &&
+    threadMailboxId &&
+    composeMailbox?.id &&
+    composeMailbox.id !== threadMailboxId
+      ? "Sending from a different mailbox — previous sender stays on Cc when you switch From."
+      : null;
   const canComposeNew = Boolean(
     !inboxWriteDisabled &&
       !lead.doNotContact &&
@@ -852,8 +866,10 @@ export function LeadEmailsPanel({
   function resetComposer() {
     setComposeMode(null);
     setComposeMailboxId("");
+    setThreadMailboxId("");
     setTo("");
     setCc("");
+    setBcc("");
     setSubject("");
     setBody("");
     setInReplyTo(undefined);
@@ -864,6 +880,35 @@ export function LeadEmailsPanel({
     setDraftId(undefined);
     setIncludeSignature(true);
     setIncludeFooter(Boolean(globalEmailFooter.trim()));
+  }
+
+  function changeComposeMailbox(nextId: string) {
+    const previous = composeMailbox;
+    const next =
+      smtpMailboxes.find((mailbox) => mailbox.id === nextId) ??
+      mailboxes.find((mailbox) => mailbox.id === nextId);
+    if (!next || !previous || next.id === previous.id) {
+      setComposeMailboxId(nextId);
+      return;
+    }
+    setComposeMailboxId(nextId);
+    if (composeMode && composeMode !== "compose") {
+      const handoff = applyMailboxHandoffCc({
+        to,
+        cc,
+        previousMailbox: previous,
+        nextMailbox: next,
+      });
+      setCc(handoff.cc);
+      if (handoff.added) {
+        toast.message("Kept previous mailbox on Cc", {
+          description: `${handoff.added} stays on the thread while you send as ${next.emailAddress || next.label}.`,
+        });
+      }
+      setBody((current) => rebuildComposeBodyWithMailboxSignature(current, next.signature));
+    } else if (composeMode === "compose" && includeSignature) {
+      setBody((current) => rebuildComposeBodyWithMailboxSignature(current, next.signature));
+    }
   }
 
   function openNewCompose() {
@@ -896,8 +941,10 @@ export function LeadEmailsPanel({
       }
       setSelectedId(null);
       setComposeMailboxId(mailbox.id);
+      setThreadMailboxId("");
       setTo(primaryContactEmail?.trim() || "");
       setCc("");
+      setBcc("");
       setSubject("");
       setBody("");
       setInReplyTo(undefined);
@@ -925,6 +972,9 @@ export function LeadEmailsPanel({
 
     const latest = selected.latest;
     const source = latest.direction === "inbound" ? latest.message : sentAsInbound(latest.message);
+    setComposeMailboxId(selectedMailbox.id);
+    setThreadMailboxId(selectedMailbox.id);
+    setBcc("");
     if (mode === "forward") {
       const original = messageBody(latest);
       setTo("");
@@ -1029,9 +1079,15 @@ export function LeadEmailsPanel({
       toast.error(ccResult.error);
       return null;
     }
+    const bccResult = bcc.trim() ? normalizeRecipientList(bcc, "Bcc") : null;
+    if (bccResult && !bccResult.ok) {
+      toast.error(bccResult.error);
+      return null;
+    }
     return {
       to: toResult.addresses.join(", "),
       cc: ccResult?.addresses.join(", "),
+      bcc: bccResult?.addresses.join(", "),
     };
   }
 
@@ -1040,6 +1096,7 @@ export function LeadEmailsPanel({
     from: string;
     to: string;
     cc?: string;
+    bcc?: string;
     body: string;
     messageId?: string;
   }) {
@@ -1048,6 +1105,7 @@ export function LeadEmailsPanel({
       from: input.from,
       to: input.to,
       cc: input.cc,
+      bcc: input.bcc,
       subject: subject.trim() || "(no subject)",
       body: input.body,
       attachments: attachments.map((attachment) => ({
@@ -1094,6 +1152,7 @@ export function LeadEmailsPanel({
           from: composeMailbox.emailAddress || "demo@nova.local",
           to: recipients.to,
           cc: recipients.cc,
+          bcc: recipients.bcc,
           body: outboundBody,
         });
         rememberLastUsedMailbox(
@@ -1124,6 +1183,7 @@ export function LeadEmailsPanel({
           replyTo: composeMailbox.replyTo,
           to: recipients.to,
           cc: recipients.cc,
+          bcc: recipients.bcc,
           subject: subject.trim(),
           text: outboundBody,
           html: bodyToHtml(outboundBody),
@@ -1159,6 +1219,7 @@ export function LeadEmailsPanel({
         from: composeMailbox.emailAddress,
         to: recipients.to,
         cc: recipients.cc,
+        bcc: recipients.bcc,
         body: outboundBody,
         messageId: data.messageId,
       });
@@ -1206,6 +1267,7 @@ export function LeadEmailsPanel({
         replyTo: composeMailbox.replyTo,
         to: recipients.to,
         cc: recipients.cc,
+        bcc: recipients.bcc,
         subject: subject.trim(),
         body: outboundBody,
         text: outboundBody,
@@ -1260,6 +1322,7 @@ export function LeadEmailsPanel({
       mailboxId: composeMailbox.id,
       to,
       cc: cc.trim() || undefined,
+      bcc: bcc.trim() || undefined,
       subject,
       body,
       attachments,
@@ -1444,13 +1507,13 @@ export function LeadEmailsPanel({
             </DialogDescription>
           </DialogHeader>
           <div className="shrink-0 space-y-3 border-b px-5 py-3">
-            {smtpMailboxes.length > 1 ? (
+            {showComposeFromPicker ? (
               <div className="space-y-1.5">
                 <Label className="text-xs">From</Label>
                 <Select
                   value={composeMailbox?.id}
                   onValueChange={(value) => {
-                    if (value) setComposeMailboxId(value);
+                    if (value) changeComposeMailbox(value);
                   }}
                 >
                   <SelectTrigger className="w-full">
@@ -1489,6 +1552,8 @@ export function LeadEmailsPanel({
             onToChange={setTo}
             cc={cc}
             onCcChange={setCc}
+            bcc={bcc}
+            onBccChange={setBcc}
             subject={subject}
             onSubjectChange={setSubject}
             body={body}
@@ -1596,6 +1661,7 @@ export function LeadEmailsPanel({
                           <p className="mt-0.5 break-all text-[11px] text-muted-foreground">
                             From {fromDisplay || "Unknown"} · To {toDisplay || "Unknown"}
                             {row.message.cc ? ` · Cc ${row.message.cc}` : ""}
+                            {"bcc" in row.message && row.message.bcc ? ` · Bcc ${row.message.bcc}` : ""}
                           </p>
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
@@ -1637,10 +1703,41 @@ export function LeadEmailsPanel({
                   </div>
                   <EmailComposeForm
                     compact
+                    fromField={
+                      showComposeFromPicker ? (
+                        <>
+                          <Label className="text-xs">From</Label>
+                          <Select
+                            value={composeMailbox?.id}
+                            onValueChange={(value) => {
+                              if (value) changeComposeMailbox(value);
+                            }}
+                          >
+                            <SelectTrigger className="w-full">
+                              <SelectValue placeholder="Select mailbox">
+                                {composeMailbox
+                                  ? composeMailbox.label || composeMailbox.emailAddress || "Mailbox"
+                                  : "Select mailbox"}
+                              </SelectValue>
+                            </SelectTrigger>
+                            <SelectContent>
+                              {smtpMailboxes.map((mailbox) => (
+                                <SelectItem key={mailbox.id} value={mailbox.id}>
+                                  {mailbox.label || mailbox.emailAddress || mailbox.id}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </>
+                      ) : undefined
+                    }
                     to={to}
                     onToChange={setTo}
                     cc={cc}
                     onCcChange={setCc}
+                    bcc={bcc}
+                    onBccChange={setBcc}
+                    handoffHint={handoffHint}
                     subject={subject}
                     onSubjectChange={setSubject}
                     body={body}

@@ -5,6 +5,7 @@ export type OutboundRawMailInput = {
   from: string;
   to: string[];
   cc?: string[];
+  bcc?: string[];
   subject: string;
   text?: string;
   html?: string;
@@ -21,6 +22,7 @@ export async function buildOutboundRawMail(input: OutboundRawMailInput): Promise
     from: input.from,
     to: input.to,
     cc: input.cc && input.cc.length > 0 ? input.cc : undefined,
+    bcc: input.bcc && input.bcc.length > 0 ? input.bcc : undefined,
     subject: input.subject,
     text: input.text || undefined,
     html: input.html || undefined,

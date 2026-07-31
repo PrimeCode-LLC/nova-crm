@@ -44,6 +44,7 @@ function parseStoredLeadMail(id: string, data: Record<string, unknown>): LeadMai
     from: String(data.from ?? ""),
     to: String(data.to ?? ""),
     ...(data.cc ? { cc: String(data.cc) } : {}),
+    ...(data.bcc ? { bcc: String(data.bcc) } : {}),
     ...(data.replyTo ? { replyTo: String(data.replyTo) } : {}),
     date: String(data.date ?? new Date(0).toISOString()),
     ...(typeof data.seen === "boolean" ? { seen: data.seen } : {}),
@@ -224,6 +225,7 @@ export async function upsertLeadMailMessagesServer(input: {
         from: msg.from || prev?.from || "",
         to: msg.to || prev?.to || "",
         ...(msg.cc || prev?.cc ? { cc: msg.cc || prev?.cc } : {}),
+        ...(msg.bcc || prev?.bcc ? { bcc: msg.bcc || prev?.bcc } : {}),
         ...(msg.replyTo || prev?.replyTo ? { replyTo: msg.replyTo || prev?.replyTo } : {}),
         date: msg.date || prev?.date || now,
         ...(typeof msg.seen === "boolean"

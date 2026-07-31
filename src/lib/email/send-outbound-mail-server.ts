@@ -30,6 +30,7 @@ export type SendOutboundMailInput = {
   replyTo?: string;
   to: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   text?: string;
   html?: string;
@@ -67,6 +68,10 @@ export async function sendOutboundMailServer(
     ? normalizeRecipientList(input.cc, "Cc")
     : { ok: true as const, addresses: [] as string[] };
   if (!ccParsed.ok) return { ok: false, error: ccParsed.error };
+  const bccParsed = input.bcc?.trim()
+    ? normalizeRecipientList(input.bcc, "Bcc")
+    : { ok: true as const, addresses: [] as string[] };
+  if (!bccParsed.ok) return { ok: false, error: bccParsed.error };
 
   if (!host || !user || !from) {
     return { ok: false, error: "SMTP host, user, and From address are required." };
@@ -115,6 +120,7 @@ export async function sendOutboundMailServer(
       from: fromHeader,
       to: toParsed.addresses,
       cc: ccParsed.addresses.length > 0 ? ccParsed.addresses : undefined,
+      bcc: bccParsed.addresses.length > 0 ? bccParsed.addresses : undefined,
       subject,
       text: input.text || undefined,
       html: input.html || undefined,
@@ -133,6 +139,7 @@ export async function sendOutboundMailServer(
           from: fromHeader,
           to: toParsed.addresses,
           cc: ccParsed.addresses.length > 0 ? ccParsed.addresses : undefined,
+          bcc: bccParsed.addresses.length > 0 ? bccParsed.addresses : undefined,
           subject,
           text: input.text || undefined,
           html: input.html || undefined,

@@ -73,6 +73,7 @@ export async function POST(req: Request) {
     const replyTo = String(b.replyTo ?? "").trim();
     const to = String(b.to ?? "").trim();
     const cc = String(b.cc ?? "").trim();
+    const bcc = String(b.bcc ?? "").trim();
     const subject = String(b.subject ?? "").trim();
     const text = String(b.text ?? "");
     const html = String(b.html ?? "");
@@ -145,6 +146,7 @@ export async function POST(req: Request) {
       replyTo,
       to,
       cc,
+      bcc,
       subject,
       text,
       html,
@@ -174,6 +176,7 @@ export async function POST(req: Request) {
         from,
         to,
         cc: cc || undefined,
+        bcc: bcc || undefined,
         replyTo: replyTo || undefined,
         subject,
         bodyText: text || html,

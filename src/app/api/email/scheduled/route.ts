@@ -132,6 +132,7 @@ export async function POST(req: Request) {
     replyTo: String(body.replyTo ?? "").trim() || undefined,
     to,
     cc: String(body.cc ?? "").trim() || undefined,
+    bcc: String(body.bcc ?? "").trim() || undefined,
     subject: String(body.subject ?? "").trim(),
     text,
     html,

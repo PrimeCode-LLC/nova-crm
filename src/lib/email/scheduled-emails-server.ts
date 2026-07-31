@@ -72,6 +72,7 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     replyTo: String(data.replyTo ?? ""),
     to: String(data.to ?? ""),
     cc: data.cc ? String(data.cc) : undefined,
+    bcc: data.bcc ? String(data.bcc) : undefined,
     subject: String(data.subject ?? ""),
     body: String(data.body ?? data.text ?? ""),
     text: String(data.text ?? data.body ?? ""),
@@ -154,6 +155,7 @@ export async function createScheduledEmailServer(input: {
   replyTo?: string;
   to: string;
   cc?: string;
+  bcc?: string;
   subject: string;
   text: string;
   html: string;
@@ -192,6 +194,7 @@ export async function createScheduledEmailServer(input: {
     replyTo: input.replyTo ?? "",
     to: input.to,
     cc: input.cc ?? "",
+    bcc: input.bcc ?? "",
     subject: input.subject,
     body: input.text,
     text: input.text,
@@ -903,6 +906,7 @@ async function sendScheduledDoc(
     replyTo: String(data.replyTo ?? mailbox.replyTo),
     to: String(data.to ?? ""),
     cc: String(data.cc ?? "") || undefined,
+    bcc: String(data.bcc ?? "") || undefined,
     subject,
     text: String(data.text ?? data.body ?? ""),
     html: String(data.html ?? ""),
@@ -964,6 +968,7 @@ async function sendScheduledDoc(
         from: String(data.from ?? ""),
         to: String(data.to ?? ""),
         cc: String(data.cc ?? "") || undefined,
+        bcc: String(data.bcc ?? "") || undefined,
         replyTo: String(data.replyTo ?? "") || undefined,
         subject,
         bodyText: String(data.text ?? data.body ?? ""),

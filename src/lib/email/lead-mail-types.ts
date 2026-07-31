@@ -26,6 +26,7 @@ export type LeadMailMessage = {
   from: string;
   to: string;
   cc?: string;
+  bcc?: string;
   replyTo?: string;
   /** Message timestamp (inbound date / outbound sentAt). */
   date: string;
@@ -53,6 +54,7 @@ export type LeadMailUpsertInput = {
   from: string;
   to: string;
   cc?: string;
+  bcc?: string;
   replyTo?: string;
   date: string;
   seen?: boolean;
