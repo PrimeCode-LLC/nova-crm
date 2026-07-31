@@ -44,6 +44,7 @@ export function LeadReplyActionBanner({
   const [draftSubject, setDraftSubject] = React.useState("");
   const [regenerateDirection, setRegenerateDirection] =
     React.useState<ReplyRegenerateDirectionId | null>(null);
+  const [regeneratePrompt, setRegeneratePrompt] = React.useState("");
   const [confirmSend, setConfirmSend] = React.useState(false);
   const [optimisticPending, setOptimisticPending] = React.useState(false);
   const [streamReveal, setStreamReveal] = React.useState<string | null>(null);
@@ -59,8 +60,17 @@ export function LeadReplyActionBanner({
     const response = await fetch(`/api/email/reply-actions?id=${encodeURIComponent(actionId)}`, {
       credentials: "same-origin",
     });
-    const data = (await response.json()) as { ok?: boolean; action?: ReplyAction };
+    const data = (await response.json()) as { ok?: boolean; action?: ReplyAction; resolvedByManualSend?: boolean };
     if (response.ok && data.ok && data.action) {
+      if (data.resolvedByManualSend || data.action.status === "sent") {
+        await patchLeadAsync(lead.id, {
+          pendingReplyActionId: undefined,
+          replyActionStatus: "sent",
+          nextAction: "Reply sent — wait for their response",
+        });
+        setAction(null);
+        return;
+      }
       setAction(data.action);
       setDraftBody(data.action.draftBody ?? "");
       setDraftSubject(data.action.draftSubject ?? "");
@@ -68,7 +78,7 @@ export function LeadReplyActionBanner({
         setOptimisticPending(false);
       }
     }
-  }, [actionId, pending]);
+  }, [actionId, lead.id, patchLeadAsync, pending]);
 
   React.useEffect(() => {
     if (!pending || !actionId) {
@@ -203,6 +213,10 @@ export function LeadReplyActionBanner({
         } else {
           await loadAction();
         }
+        if (decision === "regenerate") {
+          setRegeneratePrompt("");
+          setRegenerateDirection(null);
+        }
         setEditing(false);
         toast.success(decision === "regenerate" ? "New draft ready" : "Draft saved");
         return;
@@ -248,10 +262,25 @@ export function LeadReplyActionBanner({
     }
   }
 
+  function buildRegenerateDirection(): string | undefined {
+    const preset = REPLY_REGENERATE_DIRECTIONS.find((d) => d.id === regenerateDirection)?.hint?.trim();
+    const custom = regeneratePrompt.trim();
+    if (preset && custom) return `${preset} Additional guidance: ${custom}`;
+    return custom || preset || undefined;
+  }
+
+  function regenerateLabel(): string {
+    const preset = REPLY_REGENERATE_DIRECTIONS.find((d) => d.id === regenerateDirection)?.label;
+    const hasCustom = Boolean(regeneratePrompt.trim());
+    if (preset && hasCustom) return ` · ${preset} + prompt`;
+    if (preset) return ` · ${preset}`;
+    if (hasCustom) return " · Custom prompt";
+    return "";
+  }
+
   function runRegenerate() {
-    const direction = REPLY_REGENERATE_DIRECTIONS.find((d) => d.id === regenerateDirection);
     void patchDecision("regenerate", {
-      regenerateDirection: direction?.hint,
+      regenerateDirection: buildRegenerateDirection(),
     });
   }
 
@@ -371,6 +400,20 @@ export function LeadReplyActionBanner({
               );
             })}
           </div>
+          <Textarea
+            value={regeneratePrompt}
+            onChange={(e) => setRegeneratePrompt(e.target.value.slice(0, 400))}
+            disabled={busy}
+            rows={2}
+            className="min-h-[56px] text-xs"
+            placeholder="Or describe how to rewrite (tone, length, what to ask, what to avoid…)"
+            aria-label="Custom regenerate prompt"
+          />
+          {regeneratePrompt.trim() ? (
+            <p className="text-[11px] text-muted-foreground">
+              {regeneratePrompt.trim().length}/400 · Applied with Regenerate
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -445,9 +488,7 @@ export function LeadReplyActionBanner({
                 <Loader2 className="h-3.5 w-3.5 animate-spin" />
               ) : null}
               Regenerate
-              {regenerateDirection
-                ? ` · ${REPLY_REGENERATE_DIRECTIONS.find((d) => d.id === regenerateDirection)?.label}`
-                : ""}
+              {regenerateLabel()}
             </Button>
           </>
         ) : needsDraft && (draftFailed || action?.draftStatus === "none") && !draftPending ? (

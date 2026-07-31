@@ -13,6 +13,7 @@ import {
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
+import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 
 export async function POST(req: Request) {
   try {
@@ -187,6 +188,19 @@ export async function POST(req: Request) {
         referenceIds,
         source: "smtp_send",
       });
+    }
+
+    if (leadId) {
+      try {
+        await resolvePendingReplyActionOnOutboundServer({
+          organizationId: g.ctx.session.organizationId,
+          leadId,
+          decidedBy: g.ctx.session.uid,
+          messageId: result.messageId,
+        });
+      } catch {
+        /* Delivery succeeded; reply-intelligence cleanup can recover on next sync. */
+      }
     }
 
     return NextResponse.json({

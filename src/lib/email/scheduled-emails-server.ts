@@ -17,6 +17,7 @@ import {
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
+import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 import {
   resolveSequenceThreadContext,
   type SequenceThreadStep,
@@ -979,6 +980,17 @@ async function sendScheduledDoc(
         referenceIds,
         source: followupId ? "crm_followup" : "scheduled",
       });
+      try {
+        await resolvePendingReplyActionOnOutboundServer({
+          organizationId,
+          leadId,
+          decidedBy: scheduledByUserId || uid,
+          messageId,
+          sentAt: now,
+        });
+      } catch {
+        /* Delivery succeeded; reply-intelligence cleanup is best-effort. */
+      }
     }
     try {
       await incrementMailboxSendCountServer({ organizationId, uid, mailboxId });

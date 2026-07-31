@@ -6,6 +6,7 @@ import {
   getReplyActionServer,
 } from "@/lib/email/classify-inbound-reply-server";
 import { generateReplyActionDraftServer } from "@/lib/email/generate-reply-action-draft-server";
+import { reconcilePendingReplyActionWithOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 import {
   saveReplyActionDraftServer,
   sendReplyActionServer,
@@ -20,12 +21,35 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "id is required" }, { status: 400 });
   }
 
-  const action = await getReplyActionServer({
+  let action = await getReplyActionServer({
     organizationId: g.ctx.session.organizationId,
     actionId,
   });
   if (!action) {
     return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
+  }
+
+  if (action.status === "pending") {
+    try {
+      const reconciled = await reconcilePendingReplyActionWithOutboundServer({
+        organizationId: g.ctx.session.organizationId,
+        actionId,
+        decidedBy: g.ctx.session.uid,
+      });
+      if (reconciled.cleared) {
+        action = await getReplyActionServer({
+          organizationId: g.ctx.session.organizationId,
+          actionId,
+        });
+        return NextResponse.json({
+          ok: true,
+          action,
+          resolvedByManualSend: true,
+        });
+      }
+    } catch {
+      /* best-effort; still return the pending action */
+    }
   }
 
   return NextResponse.json({ ok: true, action });
@@ -36,7 +60,7 @@ const patchSchema = z.object({
   decision: z.enum(["accepted", "dismissed", "send", "save_draft", "regenerate"]),
   draftBody: z.string().max(50_000).optional(),
   draftSubject: z.string().max(500).optional(),
-  regenerateDirection: z.string().max(400).optional(),
+  regenerateDirection: z.string().max(800).optional(),
 });
 
 export async function PATCH(req: Request) {

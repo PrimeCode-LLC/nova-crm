@@ -1160,6 +1160,13 @@ export function LeadEmailsPanel({
           workspace.currentUserId,
           composeMailbox.id,
         );
+        if (lead.replyActionStatus === "pending" && lead.pendingReplyActionId) {
+          await workspace.patchLeadAsync(lead.id, {
+            pendingReplyActionId: undefined,
+            replyActionStatus: "sent",
+            nextAction: "Reply sent — wait for their response",
+          });
+        }
         toast.success("Message saved to Sent (demo)");
         resetComposer();
         return;
@@ -1229,6 +1236,13 @@ export function LeadEmailsPanel({
         workspace.currentUserId,
         composeMailbox.id,
       );
+      if (lead.replyActionStatus === "pending" && lead.pendingReplyActionId) {
+        await workspace.patchLeadAsync(lead.id, {
+          pendingReplyActionId: undefined,
+          replyActionStatus: "sent",
+          nextAction: "Reply sent — wait for their response",
+        });
+      }
       toast.success("Message sent");
       resetComposer();
     } catch (error) {
