@@ -146,6 +146,7 @@ import {
   readFileAsBase64,
   type ComposeAttachment,
 } from "@/lib/email/compose-attachments";
+import { mergeAiBodyIntoCompose, splitComposerReplyBody } from "@/lib/email/compose-draft-text";
 import {
   extractReplyAddress,
   forwardedBody,
@@ -3361,32 +3362,22 @@ export default function InboxWorkspace() {
     leadById,
   ]);
 
-  function composeLeadContextPayload() {
-    if (!selectedLead) return "";
-    return JSON.stringify({
-      id: selectedLead.id,
-      stage: selectedLead.stage,
-      company: selectedLead.companyName,
-      contact: selectedLead.contactName,
-      channel: selectedLead.channel,
-    });
-  }
-
   async function generateAiReply() {
-    if (!composeBody.trim() && !composeSubject.trim()) {
+    if (!composeBody.trim() && !composeSubject.trim() && !selectedLead?.id) {
       toast.error("Open a reply with thread context first, or paste the conversation.");
       return;
     }
     setAiReplyGenerating(true);
     try {
-      const thread = composeBody.trim() || composeSubject;
+      const originalBody = composeBody;
       const res = await fetch("/api/ai/email-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "reply",
-          thread,
-          leadContext: composeLeadContextPayload(),
+          mode: "suggest",
+          composeBody: composeBody.trim() || undefined,
+          thread: composeBody.trim() || composeSubject || undefined,
+          subject: composeSubject.trim() || undefined,
           leadId: selectedLead?.id,
           channel: selectedLead?.channel,
           profileId: selectedLead?.profileId,
@@ -3400,8 +3391,12 @@ export default function InboxWorkspace() {
         toast.error(data.error ?? "Could not generate reply");
         return;
       }
-      setComposeBody(data.body ?? "");
-      toast.success("Draft generated, review before sending");
+      setComposeBody(mergeAiBodyIntoCompose(data.body ?? "", originalBody));
+      toast.success(
+        data.mode === "improve"
+          ? "Draft evaluated and improved, review before sending"
+          : "Draft generated, review before sending",
+      );
     } catch {
       toast.error("Network error");
     } finally {
@@ -3410,20 +3405,21 @@ export default function InboxWorkspace() {
   }
 
   async function improviseComposeWithAi() {
-    if (!composeBody.trim()) {
+    const { userDraft } = splitComposerReplyBody(composeBody);
+    if (!userDraft) {
       toast.error("Write a message first, then improvise with AI.");
       return;
     }
     setAiReplyGenerating(true);
     try {
+      const originalBody = composeBody;
       const res = await fetch("/api/ai/email-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           mode: "improve",
-          draft: composeBody.trim(),
+          composeBody: composeBody.trim(),
           subject: composeSubject.trim() || undefined,
-          leadContext: composeLeadContextPayload(),
           leadId: selectedLead?.id,
           channel: selectedLead?.channel,
           profileId: selectedLead?.profileId,
@@ -3437,7 +3433,7 @@ export default function InboxWorkspace() {
         toast.error(data.error ?? "Could not improve message");
         return;
       }
-      setComposeBody(data.body ?? "");
+      setComposeBody(mergeAiBodyIntoCompose(data.body ?? "", originalBody));
       toast.success("Message improved, review before sending");
     } catch {
       toast.error("Network error");

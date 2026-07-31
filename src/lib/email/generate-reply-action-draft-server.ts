@@ -10,13 +10,10 @@ import {
 } from "@/lib/ai/followup-personalization";
 import { buildLeadSignalProfile, formatLeadSignalGuidance } from "@/lib/ai/lead-signal-profile";
 import {
-  getLeadMailMessageServer,
-  listLeadMailMessagesServer,
-} from "@/lib/email/lead-mail-store-server";
-import { extractReplyAddress, replySubject } from "@/lib/email/reply-compose";
-import { replyTextOnly } from "@/lib/email/strip-quoted-reply";
+  buildLeadMailThreadForReply,
+  leadSnapshotForReply,
+} from "@/lib/email/email-reply-context-server";
 import { stripTrailingEmailSignOff } from "@/lib/email/strip-trailing-email-signoff";
-import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
   draftGoalForReplyAction,
   replyActionNeedsDraft,
@@ -26,27 +23,6 @@ import {
   type ReplyRecommendedAction,
 } from "@/lib/email/reply-action-types";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
-
-function leadSnapshot(lead: ReturnType<typeof mapLeadDoc>): string {
-  return JSON.stringify(
-    {
-      id: lead.id,
-      stage: lead.stage,
-      temperature: lead.temperature,
-      companyName: lead.companyName,
-      companyIndustry: lead.companyIndustry,
-      companySize: lead.companySize,
-      contactName: lead.contactName,
-      contactTitle: lead.contactTitle,
-      contactEmail: lead.contactEmail,
-      channel: lead.channel,
-      doNotContact: lead.doNotContact,
-      notes: lead.notes?.slice(0, 400),
-    },
-    null,
-    2,
-  );
-}
 
 /**
  * Carry the classifier's decision and the sequence-grade role targets into the
@@ -86,90 +62,6 @@ function buildReplyGuidance(input: {
   }
 
   return lines.filter((line) => line !== undefined).join("\n");
-}
-
-async function buildThreadForDraft(input: {
-  organizationId: string;
-  leadId: string;
-  inboundProviderKey?: string;
-  draftInReplyTo?: string;
-}): Promise<{
-  thread: string;
-  subject: string;
-  to: string;
-  inReplyTo?: string;
-  referenceIds?: string[];
-  inboundPreview?: string;
-  inboundFrom?: string;
-  inboundSubject?: string;
-  mailboxId?: string;
-}> {
-  const rows = await listLeadMailMessagesServer({
-    organizationId: input.organizationId,
-    leadId: input.leadId,
-    limit: 24,
-  });
-  const chronological = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-
-  let targetInbound =
-    (input.inboundProviderKey
-      ? await getLeadMailMessageServer({
-          organizationId: input.organizationId,
-          leadId: input.leadId,
-          providerKey: input.inboundProviderKey,
-        })
-      : null) ||
-    chronological
-      .slice()
-      .reverse()
-      .find(
-        (r) =>
-          r.direction === "inbound" &&
-          (!input.draftInReplyTo ||
-            normalizeMessageId(r.messageId) === normalizeMessageId(input.draftInReplyTo)),
-      ) ||
-    chronological.slice().reverse().find((r) => r.direction === "inbound");
-
-  const lines: string[] = [];
-  for (const row of chronological.slice(-12)) {
-    const who = row.direction === "inbound" ? "THEM" : "US";
-    const snippet = replyTextOnly(row.bodyText || row.preview || "")
-      .replace(/\s+/g, " ")
-      .trim()
-      .slice(0, 600);
-    lines.push(`[${who}] ${row.date} · ${row.subject}\nFrom: ${row.from}\n${snippet}`);
-  }
-
-  const to =
-    (targetInbound ? extractReplyAddress(targetInbound.replyTo || targetInbound.from) : "") || "";
-  const subject = replySubject(targetInbound?.subject);
-  const inReplyTo = normalizeMessageId(targetInbound?.messageId) || normalizeMessageId(input.draftInReplyTo);
-  const referenceIds = [
-    ...(targetInbound?.referenceIds ?? []),
-    ...(inReplyTo ? [inReplyTo] : []),
-  ]
-    .map((id) => normalizeMessageId(id))
-    .filter((id): id is string => Boolean(id))
-    .slice(-50);
-
-  const inboundPreview = targetInbound
-    ? replyTextOnly(targetInbound.bodyText || targetInbound.preview || "")
-        .replace(/\s+/g, " ")
-        .trim()
-        .slice(0, 280)
-    : undefined;
-
-  return {
-    thread: lines.length ? lines.join("\n\n") : "(no prior thread stored)",
-    subject,
-    to,
-    inReplyTo,
-    referenceIds: referenceIds.length ? referenceIds : undefined,
-    inboundPreview: inboundPreview || undefined,
-    inboundFrom: targetInbound?.from,
-    inboundSubject: targetInbound?.subject,
-    mailboxId: targetInbound?.mailboxId,
-  };
 }
 
 /**
@@ -237,7 +129,7 @@ export async function generateReplyActionDraftServer(input: {
   }
 
   try {
-    const threadCtx = await buildThreadForDraft({
+    const threadCtx = await buildLeadMailThreadForReply({
       organizationId: input.organizationId,
       leadId,
       inboundProviderKey: String(data.inboundProviderKey ?? "") || undefined,
@@ -294,7 +186,7 @@ export async function generateReplyActionDraftServer(input: {
           regenerateDirection: input.regenerateDirection,
         }),
         thread: threadCtx.thread.slice(0, 20_000),
-        leadContext: leadSnapshot(lead),
+        leadContext: leadSnapshotForReply(lead),
         ragBlock: ragBlock || "(none)",
       },
     });

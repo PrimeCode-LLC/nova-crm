@@ -56,6 +56,7 @@ import {
   formatComposeFileSize,
   readFileAsBase64,
 } from "@/lib/email/compose-attachments";
+import { mergeAiBodyIntoCompose, splitComposerReplyBody } from "@/lib/email/compose-draft-text";
 import {
   groupLeadEmailConversations,
   leadEmailMessageAt,
@@ -1180,27 +1181,24 @@ export function LeadEmailsPanel({
   }
 
   async function runAi(mode: "reply" | "improve") {
-    if (mode === "improve" && !body.trim()) {
-      toast.error("Write a message first, then improvise with AI.");
-      return;
+    if (mode === "improve") {
+      const { userDraft } = splitComposerReplyBody(body);
+      if (!userDraft) {
+        toast.error("Write a message first, then improvise with AI.");
+        return;
+      }
     }
     setAiBusy(true);
     try {
+      const originalBody = body;
       const response = await fetch("/api/ai/email-reply", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode,
-          ...(mode === "reply"
-            ? { thread: body.trim() || subject }
-            : { draft: body.trim(), subject: subject.trim() || undefined }),
-          leadContext: JSON.stringify({
-            id: lead.id,
-            stage: lead.stage,
-            company: lead.companyName,
-            contact: lead.contactName,
-            channel: lead.channel,
-          }),
+          mode: mode === "reply" ? "suggest" : "improve",
+          composeBody: body.trim() || undefined,
+          subject: subject.trim() || undefined,
+          ...(mode === "reply" ? { thread: body.trim() || subject || undefined } : {}),
           leadId: lead.id,
           channel: lead.channel,
           profileId: lead.profileId,
@@ -1209,10 +1207,14 @@ export function LeadEmailsPanel({
           goal: mode === "reply" ? "follow up" : "Polish and improve clarity while keeping my intent and facts",
         }),
       });
-      const data = (await response.json()) as { body?: string; error?: string };
+      const data = (await response.json()) as { body?: string; mode?: string; error?: string };
       if (!response.ok) throw new Error(data.error || "Could not generate reply");
-      setBody(data.body ?? "");
-      toast.success(mode === "reply" ? "Draft generated, review before sending" : "Message improved");
+      setBody(mergeAiBodyIntoCompose(data.body ?? "", originalBody));
+      toast.success(
+        data.mode === "improve" || mode === "improve"
+          ? "Message improved, review before sending"
+          : "Draft generated, review before sending",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Network error");
     } finally {
