@@ -1417,7 +1417,7 @@ export function LeadEmailsPanel({
       const data = (await response.json()) as {
         review?: {
           summary: string;
-          verdict: string;
+          verdict: "send_ready" | "minor_edits" | "needs_work" | "rewrite";
           overallScore: number;
           dimensions: {
             personalization: number;

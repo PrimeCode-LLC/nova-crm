@@ -16,7 +16,7 @@ import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress
 
 type EmailComposeReview = {
   summary: string;
-  verdict: string;
+  verdict: "send_ready" | "minor_edits" | "needs_work" | "rewrite";
   overallScore: number;
   dimensions: {
     personalization: number;
@@ -43,6 +43,13 @@ const SCORE_TONE = {
   okay: "border-warning/20 bg-warning/10 text-warning",
   weak: "border-destructive/20 bg-destructive/10 text-destructive",
 } as const;
+
+const VERDICT_LABELS: Record<EmailComposeReview["verdict"], string> = {
+  send_ready: "Ready to send",
+  minor_edits: "Minor edits",
+  needs_work: "Needs work",
+  rewrite: "Rewrite",
+};
 
 const DIMENSION_LABELS: Array<{
   key: keyof EmailComposeReview["dimensions"];
@@ -123,7 +130,7 @@ export function EmailComposeReviewDialog({
                   <p className="text-2xl font-semibold">{review.overallScore}%</p>
                 </div>
                 <Badge variant="outline" className={scoreTone(review.overallScore)}>
-                  {review.verdict}
+                  {VERDICT_LABELS[review.verdict] ?? review.verdict}
                 </Badge>
               </div>
               <p className="mt-3 text-sm leading-relaxed text-muted-foreground">{review.summary}</p>
@@ -137,7 +144,9 @@ export function EmailComposeReviewDialog({
                 {DIMENSION_LABELS.map(({ key, label }) => (
                   <Progress key={key} value={review.dimensions[key]} className="gap-1.5">
                     <ProgressLabel className="text-xs">{label}</ProgressLabel>
-                    <ProgressValue className="text-xs">{review.dimensions[key]}%</ProgressValue>
+                    <ProgressValue className="text-xs">
+                      {() => `${review.dimensions[key]}%`}
+                    </ProgressValue>
                   </Progress>
                 ))}
               </div>

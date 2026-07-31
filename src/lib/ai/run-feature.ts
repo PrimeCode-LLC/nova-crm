@@ -69,6 +69,8 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
   schema: T;
   /** When set, used instead of interpolating the org prompt template. */
   userPromptOverride?: string;
+  /** When set, used instead of the org system prompt (e.g. review reuses the reply feature's model/limits). */
+  systemPromptOverride?: string;
   filterHash?: string;
   leadId?: string;
 }): Promise<z.infer<T>> {
@@ -92,7 +94,7 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
 
     const result = await generateText({
       model: languageModel,
-      system: prompt.systemPrompt,
+      system: input.systemPromptOverride ?? prompt.systemPrompt,
       prompt: userPrompt,
       output: Output.object({ schema: input.schema }),
       maxRetries: 0,
