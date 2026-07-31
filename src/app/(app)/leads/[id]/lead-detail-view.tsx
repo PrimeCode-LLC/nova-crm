@@ -25,6 +25,7 @@ import {
   Loader2,
   MailWarning,
   Undo2,
+  ArrowUpRight,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -142,6 +143,12 @@ import {
   type MoveBackActivity,
 } from "@/lib/prospects/move-back-to-prospect";
 import {
+  buildMoveToLeadPatch,
+  canMoveToLead,
+  moveToLeadBlockedReason,
+  moveToLeadConfirmCopy,
+} from "@/lib/prospects/move-to-lead";
+import {
   prospectOwnerIdOf,
   viewerManagesProspectOwner,
 } from "@/lib/prospects/prospect-access";
@@ -213,6 +220,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const [moveBackOpen, setMoveBackOpen] = React.useState(false);
   const [moveBackBusy, setMoveBackBusy] = React.useState(false);
   const [moveBackAck, setMoveBackAck] = React.useState(false);
+  const [moveToLeadOpen, setMoveToLeadOpen] = React.useState(false);
+  const [moveToLeadBusy, setMoveToLeadBusy] = React.useState(false);
   const [analyzeOpen, setAnalyzeOpen] = React.useState(false);
   const [aiInsights, setAiInsights] = React.useState<{
     summary: string;
@@ -528,6 +537,10 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       lead.ownerId?.trim() === ws.currentUserId);
   const showMoveBack =
     Boolean(moveBackMode) && canMoveBackPermission && canMoveBackAccess;
+  const moveToLeadBlocked = canMoveToLead(lead) ? moveToLeadBlockedReason(lead) : null;
+  const showMoveToLead =
+    canMoveToLead(lead) && canMoveBackPermission && canMoveBackAccess;
+  const moveToLeadCopy = moveToLeadConfirmCopy();
   const moveBackActivity: MoveBackActivity = {
     touches: lead.touches ?? 0,
     openFollowups: followups.filter((f) => !f.completedAt).length,
@@ -852,6 +865,64 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+      <AlertDialog
+        open={moveToLeadOpen}
+        onOpenChange={(o) => {
+          if (moveToLeadBusy) return;
+          setMoveToLeadOpen(o);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{moveToLeadCopy.title}</AlertDialogTitle>
+            <AlertDialogDescription>{moveToLeadCopy.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={moveToLeadBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={moveToLeadBusy}
+              onClick={() => {
+                void (async () => {
+                  const blocked = moveToLeadBlockedReason(lead);
+                  if (blocked) {
+                    toast.error(blocked);
+                    return;
+                  }
+                  setMoveToLeadBusy(true);
+                  try {
+                    const now = new Date().toISOString();
+                    const patch = buildMoveToLeadPatch({
+                      lead,
+                      actorId: ws.currentUserId,
+                      now,
+                    });
+                    await ws.patchLeadAsync(lead.id, patch);
+                    ws.addTimelineEvent({
+                      id: newTimelineId(),
+                      leadId: lead.id,
+                      type: "lead_moved_to_lead",
+                      actorId: ws.currentUserId,
+                      summary: "Moved to lead (sales pipeline)",
+                      createdAt: now,
+                    });
+                    ws.bumpLeadActivity(lead.id);
+                    toast.success("Moved to lead");
+                    setMoveToLeadOpen(false);
+                    router.replace(`/leads/${lead.id}`);
+                  } catch (e) {
+                    const msg = e instanceof Error ? e.message : String(e);
+                    toast.error("Could not move to lead", { description: msg });
+                  } finally {
+                    setMoveToLeadBusy(false);
+                  }
+                })();
+              }}
+            >
+              {moveToLeadBusy ? "Moving…" : moveToLeadCopy.confirmLabel}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <PageHeader
         title={
           <div className="flex min-w-0 items-center gap-3">
@@ -1018,6 +1089,26 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <DropdownMenuItem onSelect={() => void copyToClipboard(lead.id, "Lead ID copied")}>
                   Copy lead ID
                 </DropdownMenuItem>
+                {showMoveToLead ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={Boolean(moveToLeadBlocked)}
+                      title={moveToLeadBlocked ?? undefined}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        if (moveToLeadBlocked) {
+                          toast.error(moveToLeadBlocked);
+                          return;
+                        }
+                        setMoveToLeadOpen(true);
+                      }}
+                    >
+                      <ArrowUpRight className="h-3.5 w-3.5" />
+                      Move to lead
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 {showMoveBack ? (
                   <>
                     <DropdownMenuSeparator />

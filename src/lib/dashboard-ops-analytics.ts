@@ -481,6 +481,7 @@ const FEED_TYPES = new Set<TimelineEventType>([
   "meeting_scheduled",
   "meeting_completed",
   "prospect_channel_pushed",
+  "lead_moved_to_lead",
   "lead_moved_back_to_prospect",
   "lead_task_created",
   "lead_task_completed",

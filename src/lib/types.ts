@@ -885,6 +885,7 @@ export type TimelineEventType =
   | "meeting_completed"
   | "meeting_cancelled"
   | "prospect_channel_pushed"
+  | "lead_moved_to_lead"
   | "lead_moved_back_to_prospect";
 
 /** Scheduling / calendar module */

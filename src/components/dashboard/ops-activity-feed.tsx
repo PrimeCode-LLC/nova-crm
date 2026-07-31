@@ -40,6 +40,7 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   meeting_scheduled: CalendarPlus,
   meeting_completed: CalendarPlus,
   prospect_channel_pushed: Workflow,
+  lead_moved_to_lead: Workflow,
   lead_moved_back_to_prospect: Workflow,
   lead_task_created: CheckCircle2,
   lead_task_completed: CheckCircle2,

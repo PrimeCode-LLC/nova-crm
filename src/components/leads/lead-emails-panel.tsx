@@ -96,6 +96,8 @@ type ComposeMode = "compose" | "reply" | "replyAll" | "forward";
 /** Header-only sync is enough to match lead emails; bodies load when a thread is opened. */
 const LEAD_EMAIL_SYNC_LIMIT = 40;
 const LEAD_EMAIL_SYNC_TIMEOUT_MS = 22_000;
+/** Cap body downloads during lead Emails tab sync so full threads land in DB without opening each conversation. */
+const LEAD_EMAIL_BODY_BACKFILL_LIMIT = 40;
 
 function messageBody(message: LeadEmailMessage): string {
   return message.direction === "inbound"
@@ -618,7 +620,7 @@ export function LeadEmailsPanel({
       setSyncingLists(false);
       if (firstError && force) toast.error("Couldn’t refresh lead emails", { description: firstError });
 
-      const matched = relevantLeadMessages({
+      let matched = relevantLeadMessages({
         lead,
         contactEmails: matchEmails,
         inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
@@ -626,6 +628,92 @@ export function LeadEmailsPanel({
         linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
         crmSentFollowups,
       });
+
+      // Backfill full bodies for lead-matched heads so complete threads persist in DB.
+      type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
+      const bodyJobsByKey = new Map<string, BodyJob>();
+      let bodyBudget = LEAD_EMAIL_BODY_BACKFILL_LIMIT;
+      const unsynced = matched
+        .filter((row) => {
+          if (row.mailboxId === "crm") return false;
+          if (row.message.bodySynced !== false) return false;
+          return row.message.uid != null;
+        })
+        .sort((a, b) => {
+          const ad = a.direction === "inbound" ? a.message.date : a.message.sentAt;
+          const bd = b.direction === "inbound" ? b.message.date : b.message.sentAt;
+          return bd.localeCompare(ad);
+        });
+      for (const row of unsynced) {
+        if (bodyBudget <= 0) break;
+        const uid = row.message.uid;
+        if (uid == null) continue;
+        const folder = row.direction === "inbound" ? "inbox" : "sent";
+        const key = `${row.mailboxId}:${folder}`;
+        const existing = bodyJobsByKey.get(key);
+        if (existing) {
+          if (existing.uids.includes(uid)) continue;
+          existing.uids.push(uid);
+        } else {
+          bodyJobsByKey.set(key, { mailboxId: row.mailboxId, folder, uids: [uid] });
+        }
+        bodyBudget -= 1;
+      }
+
+      for (const job of bodyJobsByKey.values()) {
+        const mailbox = mailboxes.find((m) => m.id === job.mailboxId);
+        if (!mailbox || !isImapInboxConfigured(mailbox)) continue;
+        try {
+          const forUid = resolveMailApiForUserUid({
+            mailViewAsUid,
+            activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
+            selfUid: workspace.currentUserId ?? "",
+          });
+          const url = appendMailDataOwnerParam(
+            "/api/email/imap-fetch-bodies",
+            forUid,
+            workspace.currentUserId ?? "",
+          );
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            signal: AbortSignal.timeout(LEAD_EMAIL_SYNC_TIMEOUT_MS),
+            body: JSON.stringify({
+              mailboxId: mailbox.id,
+              folder: job.folder,
+              uids: job.uids,
+              imap: {
+                host: mailbox.imap.host,
+                port: mailbox.imap.port,
+                secure: mailbox.imap.secure,
+                user: mailbox.imap.user,
+                pass: mailbox.imap.password,
+              },
+            }),
+          });
+          const data = (await response.json()) as {
+            ok?: boolean;
+            updates?: Array<{ uid: number } & Partial<MailInbound>>;
+          };
+          if (!response.ok || !data.ok || !data.updates) continue;
+          if (job.folder === "inbox") mergeInboundBodies(mailbox.id, data.updates);
+          else mergeSentBodies(mailbox.id, data.updates);
+        } catch {
+          /* heads already persisted; body fill retries on open / next refresh */
+        }
+      }
+
+      if (bodyJobsByKey.size > 0) {
+        matched = relevantLeadMessages({
+          lead,
+          contactEmails: matchEmails,
+          inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+          sent: useEmailAccountStore.getState().sent,
+          linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+          crmSentFollowups,
+        });
+      }
       if (matched.length > 0) void persistLeadMail(matched);
     },
     [
@@ -635,6 +723,8 @@ export function LeadEmailsPanel({
       mailViewAsUid,
       mailboxes,
       matchEmails,
+      mergeInboundBodies,
+      mergeSentBodies,
       persistLeadMail,
       reconcileInboundHeadFromSync,
       reconcileSentHeadFromSync,

@@ -8,6 +8,7 @@ import {
   toImapBodiesErrorMessage,
 } from "@/lib/email/imap-fetch-bodies-server";
 import type { ImapFolderKind } from "@/lib/email/imap-fetch-folder-server";
+import { persistImapBodiesToLeadMailServer } from "@/lib/email/fanout-inbox-to-lead-mail-server";
 
 export async function POST(req: Request) {
   try {
@@ -90,6 +91,21 @@ export async function POST(req: Request) {
       folder,
       uids,
     });
+
+    // Durable lead thread store: persist lead-matched reply bodies when Inbox loads them.
+    if (folder === "inbox" && mailboxId && updates.length > 0) {
+      try {
+        await persistImapBodiesToLeadMailServer({
+          organizationId: g.ctx.session.organizationId,
+          dataOwnerUid,
+          mailboxId,
+          folder,
+          updates,
+        });
+      } catch {
+        /* body response still useful; cron / Emails tab retry persistence */
+      }
+    }
 
     return NextResponse.json({ ok: true, updates });
   } catch (e) {

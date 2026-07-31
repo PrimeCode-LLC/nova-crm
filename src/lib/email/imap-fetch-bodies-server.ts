@@ -21,6 +21,12 @@ export type ImapBodyUpdate = {
   preview: string;
   bodyText: string;
   bodyHtml?: string;
+  /** Envelope fields when IMAP returned them (used to persist lead mail without cron heads). */
+  subject?: string;
+  from?: string;
+  to?: string;
+  date?: string;
+  seen?: boolean;
   cc?: string;
   replyTo?: string;
   attachments?: MailInboundAttachment[];
@@ -113,9 +119,24 @@ export async function fetchImapBodiesServer(
         { uid: true },
       );
       for (const row of rows) {
-        const subjFallback = row.envelope
-          ? envelopeHeaderFields(row.envelope).subj
-          : "(no subject)";
+        const envFields = row.envelope ? envelopeHeaderFields(row.envelope) : null;
+        const subjFallback = envFields?.subj ?? "(no subject)";
+        const envelopeMeta = envFields
+          ? {
+              subject: envFields.subj,
+              from: envFields.from,
+              to: envFields.to,
+              date: (
+                row.internalDate instanceof Date
+                  ? row.internalDate
+                  : row.envelope?.date
+                    ? new Date(row.envelope.date)
+                    : new Date()
+              ).toISOString(),
+              seen: row.flags?.has("\\Seen") ?? false,
+              ...(envFields.cc.trim() ? { cc: envFields.cc } : {}),
+            }
+          : {};
 
         if (!row.source?.length) {
           updates.push({
@@ -123,6 +144,7 @@ export async function fetchImapBodiesServer(
             preview: subjFallback,
             bodyText: "",
             bodySynced: true,
+            ...envelopeMeta,
           });
           continue;
         }
@@ -131,7 +153,7 @@ export async function fetchImapBodiesServer(
           let messageId = parsed.messageId;
           let inReplyTo = parsed.inReplyTo;
           let referenceIds = parsed.referenceIds;
-          const envCc = row.envelope ? envelopeHeaderFields(row.envelope).cc.trim() : "";
+          const envCc = envFields?.cc.trim() ?? "";
           const cc: string | undefined = parsed.cc.trim()
             ? parsed.cc
             : envCc
@@ -159,7 +181,8 @@ export async function fetchImapBodiesServer(
             preview,
             bodyText,
             bodyHtml: parsed.bodyHtml,
-            cc,
+            ...envelopeMeta,
+            ...(cc ? { cc } : {}),
             replyTo: parsed.replyTo,
             attachments,
             messageId,
@@ -175,6 +198,7 @@ export async function fetchImapBodiesServer(
             preview: subjFallback,
             bodyText: subjFallback,
             bodySynced: true,
+            ...envelopeMeta,
           });
         }
       }
