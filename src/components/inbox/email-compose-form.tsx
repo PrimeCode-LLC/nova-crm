@@ -34,6 +34,7 @@ type EmailComposeFormProps = {
   sending?: boolean;
   aiBusy?: boolean;
   onImproveWithAi?: () => void;
+  onReviewWithAi?: () => void;
   onGenerateAiDraft?: () => void;
   onSaveDraft?: () => void;
   scheduleEnabled?: boolean;
@@ -66,6 +67,7 @@ export function EmailComposeForm({
   sending = false,
   aiBusy = false,
   onImproveWithAi,
+  onReviewWithAi,
   onGenerateAiDraft,
   onSaveDraft,
   scheduleEnabled = false,
@@ -135,19 +137,34 @@ export function EmailComposeForm({
         <div className="space-y-1.5">
           <div className="flex items-center justify-between gap-2">
             <Label className="text-xs">Message</Label>
-            {onImproveWithAi ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
-                disabled={!body.trim() || aiBusy || disabled}
-                onClick={onImproveWithAi}
-              >
-                {aiBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-                Improvise with AI
-              </Button>
-            ) : null}
+            <div className="flex items-center gap-1">
+              {onReviewWithAi ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  disabled={!body.trim() || aiBusy || disabled}
+                  onClick={onReviewWithAi}
+                >
+                  <Sparkles className="h-3.5 w-3.5" />
+                  Review with AI
+                </Button>
+              ) : null}
+              {onImproveWithAi ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+                  disabled={!body.trim() || aiBusy || disabled}
+                  onClick={onImproveWithAi}
+                >
+                  {aiBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+                  Improvise with AI
+                </Button>
+              ) : null}
+            </div>
           </div>
           <Textarea
             className={compact ? "min-h-[180px] resize-y text-sm" : "min-h-[280px] resize-y text-sm"}

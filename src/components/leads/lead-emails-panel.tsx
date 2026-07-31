@@ -6,6 +6,7 @@ import { Forward, Loader2, Mail, PenLine, RefreshCw, Reply, ReplyAll, Send, User
 import { toast } from "sonner";
 
 import { EmailComposeForm } from "@/components/inbox/email-compose-form";
+import { EmailComposeReviewDialog } from "@/components/inbox/email-compose-review-dialog";
 import {
   MailReaderBody,
   mailReaderContentFromInbound,
@@ -383,6 +384,7 @@ export function LeadEmailsPanel({
   const [attachments, setAttachments] = React.useState<ComposeAttachment[]>([]);
   const [sending, setSending] = React.useState(false);
   const [aiBusy, setAiBusy] = React.useState(false);
+  const [composeReviewOpen, setComposeReviewOpen] = React.useState(false);
   const [scheduleEnabled, setScheduleEnabled] = React.useState(false);
   const [scheduledAt, setScheduledAt] = React.useState(defaultScheduleDatetimeLocal);
   const [draftId, setDraftId] = React.useState<string | undefined>();
@@ -880,6 +882,7 @@ export function LeadEmailsPanel({
     setDraftId(undefined);
     setIncludeSignature(true);
     setIncludeFooter(Boolean(globalEmailFooter.trim()));
+    setComposeReviewOpen(false);
   }
 
   function changeComposeMailbox(nextId: string) {
@@ -1389,6 +1392,58 @@ export function LeadEmailsPanel({
     }
   }
 
+  async function reviewComposeWithAi() {
+    const { userDraft } = splitComposerReplyBody(body);
+    if (!userDraft) {
+      toast.error("Write a message first, then review it with AI.");
+      return null;
+    }
+    try {
+      const response = await fetch("/api/ai/email-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "review",
+          composeBody: body.trim(),
+          subject: subject.trim() || undefined,
+          leadId: lead.id,
+          channel: lead.channel,
+          profileId: lead.profileId,
+          campaignId: lead.campaignId,
+          tone: "professional",
+          goal: "Review my draft, score it, and suggest a stronger version",
+        }),
+      });
+      const data = (await response.json()) as {
+        review?: {
+          summary: string;
+          verdict: string;
+          overallScore: number;
+          dimensions: {
+            personalization: number;
+            threadFit: number;
+            clarity: number;
+            cta: number;
+            tone: number;
+          };
+          wins: string[];
+          issues: string[];
+          improvements: string[];
+          improvedBody: string;
+        };
+        error?: string;
+      };
+      if (!response.ok) {
+        toast.error(data.error ?? "Could not review message");
+        return null;
+      }
+      return data.review ?? null;
+    } catch {
+      toast.error("Network error");
+      return null;
+    }
+  }
+
   return (
     <>
       {qualityGateDialog}
@@ -1578,6 +1633,7 @@ export function LeadEmailsPanel({
             disabled={composeReadOnly}
             sending={sending}
             aiBusy={aiBusy}
+            onReviewWithAi={() => setComposeReviewOpen(true)}
             onImproveWithAi={() => void runAi("improve")}
             onGenerateAiDraft={() => void runAi("reply")}
             onSaveDraft={saveDraft}
@@ -1762,6 +1818,7 @@ export function LeadEmailsPanel({
                     disabled={composeReadOnly}
                     sending={sending}
                     aiBusy={aiBusy}
+                    onReviewWithAi={() => setComposeReviewOpen(true)}
                     onImproveWithAi={() => void runAi("improve")}
                     onGenerateAiDraft={() => void runAi("reply")}
                     onSaveDraft={saveDraft}
@@ -1782,6 +1839,15 @@ export function LeadEmailsPanel({
           </DialogContent>
         ) : null}
       </Dialog>
+      <EmailComposeReviewDialog
+        open={composeReviewOpen}
+        onOpenChange={setComposeReviewOpen}
+        onRun={reviewComposeWithAi}
+        onApplyImproved={(improvedBody) => {
+          setBody((current) => mergeAiBodyIntoCompose(improvedBody, current));
+          toast.success("Improved draft applied");
+        }}
+      />
     </>
   );
 }

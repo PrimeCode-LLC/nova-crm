@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { EmailComposeForm } from "@/components/inbox/email-compose-form";
+import { EmailComposeReviewDialog } from "@/components/inbox/email-compose-review-dialog";
 import {
   MailReaderDialog,
   MailZoomButton,
@@ -607,6 +608,7 @@ export default function InboxWorkspace() {
   const [composeMailboxId, setComposeMailboxId] = React.useState("");
   const [composeThreadMailboxId, setComposeThreadMailboxId] = React.useState("");
   const [aiReplyGenerating, setAiReplyGenerating] = React.useState(false);
+  const [composeReviewOpen, setComposeReviewOpen] = React.useState(false);
   const [aiReplyTone] = React.useState<"professional" | "friendly" | "concise">("professional");
   const [aiReplyGoal] = React.useState("follow up");
   const [sending, setSending] = React.useState(false);
@@ -3522,6 +3524,40 @@ export default function InboxWorkspace() {
     }
   }
 
+  async function reviewComposeWithAi() {
+    const { userDraft } = splitComposerReplyBody(composeBody);
+    if (!userDraft) {
+      toast.error("Write a message first, then review it with AI.");
+      return null;
+    }
+    try {
+      const res = await fetch("/api/ai/email-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "review",
+          composeBody: composeBody.trim(),
+          subject: composeSubject.trim() || undefined,
+          leadId: selectedLead?.id,
+          channel: selectedLead?.channel,
+          profileId: selectedLead?.profileId,
+          campaignId: selectedLead?.campaignId,
+          tone: aiReplyTone,
+          goal: "Review my draft, score it, and suggest a stronger version",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        toast.error(data.error ?? "Could not review message");
+        return null;
+      }
+      return data.review ?? null;
+    } catch {
+      toast.error("Network error");
+      return null;
+    }
+  }
+
   async function createLeadFromSelectedMessage() {
     if (inboxReadOnly) {
       toast.error("You can’t add leads from another member’s inbox.");
@@ -5369,7 +5405,10 @@ export default function InboxWorkspace() {
         open={composeOpen}
         onOpenChange={(open) => {
           setComposeOpen(open);
-          if (!open) setComposeAttachments([]);
+          if (!open) {
+            setComposeAttachments([]);
+            setComposeReviewOpen(false);
+          }
         }}
       >
         <DialogContent
@@ -5424,6 +5463,7 @@ export default function InboxWorkspace() {
             disabled={inboxReadOnly}
             sending={sending}
             aiBusy={aiReplyGenerating}
+            onReviewWithAi={() => setComposeReviewOpen(true)}
             onImproveWithAi={() => void improviseComposeWithAi()}
             onGenerateAiDraft={() => void generateAiReply()}
             onSaveDraft={saveDraft}
@@ -5440,6 +5480,15 @@ export default function InboxWorkspace() {
           />
         </DialogContent>
       </Dialog>
+      <EmailComposeReviewDialog
+        open={composeReviewOpen}
+        onOpenChange={setComposeReviewOpen}
+        onRun={reviewComposeWithAi}
+        onApplyImproved={(improvedBody) => {
+          setComposeBody((current) => mergeAiBodyIntoCompose(improvedBody, current));
+          toast.success("Improved draft applied");
+        }}
+      />
     </>
   );
 }

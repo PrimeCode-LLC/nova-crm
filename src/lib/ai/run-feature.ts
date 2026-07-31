@@ -67,6 +67,8 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
   feature: AiFeatureKey;
   promptVars: Record<string, string>;
   schema: T;
+  /** When set, used instead of interpolating the org prompt template. */
+  userPromptOverride?: string;
   filterHash?: string;
   leadId?: string;
 }): Promise<z.infer<T>> {
@@ -77,7 +79,8 @@ export async function runAiStructuredFeature<T extends z.ZodType>(input: {
 
   const { provider, model } = resolveFeatureModel(settings, input.feature);
   const prompt = await getAiPromptServer(input.organizationId, input.feature);
-  const userPrompt = interpolatePrompt(prompt.userPromptTemplate, input.promptVars);
+  const userPrompt =
+    input.userPromptOverride ?? interpolatePrompt(prompt.userPromptTemplate, input.promptVars);
 
   const started = Date.now();
   try {

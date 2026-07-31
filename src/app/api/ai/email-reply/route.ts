@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
-import { runAiTextFeature } from "@/lib/ai/run-feature";
+import { runAiStructuredFeature, runAiTextFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
 import { getAdminDb } from "@/lib/firebase/admin";
@@ -19,7 +19,7 @@ import type { Role } from "@/lib/types";
 
 const bodySchema = z.object({
   /** reply = generate; improve = polish draft; suggest = improve if draft exists else generate */
-  mode: z.enum(["reply", "improve", "suggest"]).default("reply"),
+  mode: z.enum(["reply", "improve", "review", "suggest"]).default("reply"),
   thread: z.string().max(50_000).optional(),
   draft: z.string().max(50_000).optional(),
   /** Full composer body (signature + quote). Used by suggest to detect user draft. */
@@ -32,6 +32,23 @@ const bodySchema = z.object({
   campaignId: z.string().optional(),
   tone: z.enum(["professional", "friendly", "concise"]).default("professional"),
   goal: z.string().max(200).default("follow up"),
+});
+
+const reviewSchema = z.object({
+  summary: z.string().min(1).max(600),
+  verdict: z.string().min(1).max(120),
+  overallScore: z.number().int().min(0).max(100),
+  dimensions: z.object({
+    personalization: z.number().int().min(0).max(100),
+    threadFit: z.number().int().min(0).max(100),
+    clarity: z.number().int().min(0).max(100),
+    cta: z.number().int().min(0).max(100),
+    tone: z.number().int().min(0).max(100),
+  }),
+  wins: z.array(z.string().min(1).max(240)).max(4),
+  issues: z.array(z.string().min(1).max(240)).max(4),
+  improvements: z.array(z.string().min(1).max(240)).max(5),
+  improvedBody: z.string().min(1).max(12_000),
 });
 
 export async function POST(req: Request) {
@@ -66,14 +83,16 @@ export async function POST(req: Request) {
   // Prefer extracted user text so signature + quoted trail never pollute the draft.
   const explicitDraft = userDraft;
 
-  let effectiveMode: "reply" | "improve" =
-    parsed.data.mode === "improve"
-      ? "improve"
-      : parsed.data.mode === "suggest"
-        ? explicitDraft
-          ? "improve"
-          : "reply"
-        : "reply";
+  let effectiveMode: "reply" | "improve" | "review" =
+    parsed.data.mode === "review"
+      ? "review"
+      : parsed.data.mode === "improve"
+        ? "improve"
+        : parsed.data.mode === "suggest"
+          ? explicitDraft
+            ? "improve"
+            : "reply"
+          : "reply";
 
   // Enrich from lead mail + prospect details when a lead is linked (same sources as Reply intelligence).
   let threadText = parsed.data.thread?.trim() ?? "";
@@ -120,10 +139,13 @@ export async function POST(req: Request) {
   if (effectiveMode === "improve" && !explicitDraft) {
     return NextResponse.json({ error: "draft is required for improve mode" }, { status: 400 });
   }
+  if (effectiveMode === "review" && !explicitDraft) {
+    return NextResponse.json({ error: "draft is required for review mode" }, { status: 400 });
+  }
 
   const feat = settings.features.email_reply;
   const ragQuery =
-    effectiveMode === "improve" ? explicitDraft.slice(0, 500) : threadText.slice(0, 500);
+    effectiveMode === "reply" ? threadText.slice(0, 500) : explicitDraft.slice(0, 500);
   const { ragBlock } = await retrieveOutreachKnowledgeServer({
     organizationId: orgId,
     query: ragQuery,
@@ -138,6 +160,7 @@ export async function POST(req: Request) {
 
   try {
     const isImprove = effectiveMode === "improve";
+    const isReview = effectiveMode === "review";
     const draftText = explicitDraft;
     const subjectLine = parsed.data.subject?.trim() || "(no subject)";
 
@@ -167,7 +190,70 @@ ${replyGuidance}
 ${ragBlock || "(none)"}
 
 Output only the improved email body text (no closing line like "Best,", no signature).`
+      : isReview
+        ? `Review this outbound email draft against the full email thread, lead context, and outreach guidance. Be specific, practical, and honest. Preserve facts and do not invent details.
+
+Score each dimension from 0 to 100:
+- personalization: how tailored it feels to this recipient
+- threadFit: how well it matches the live conversation and lead context
+- clarity: how easy the message is to understand quickly
+- cta: how clear and easy the next step is
+- tone: how credible, natural, and professional the wording feels
+
+Review rules:
+- Reward relevance, specificity, and an easy next step.
+- Penalize generic openers, vague CTAs, needless length, and unsupported claims.
+- Keep wins, issues, and improvements concrete and short.
+- improvedBody must be a stronger rewrite of the same message, not a different strategy.
+- Do not include a sign-off, signature, subject line, markdown, or explanation outside the structured response.
+- Match tone: ${parsed.data.tone}. Goal: ${parsed.data.goal}.
+
+Subject: ${subjectLine}
+
+Draft to review:
+${draftText}
+${threadText ? `\nThread context:\n${threadText}` : "\nThread context:\n(no prior thread available)"}
+
+Lead context (if any):
+${leadContextText || "(no lead linked)"}
+
+Reply guidance:
+${replyGuidance}
+
+Reference knowledge:
+${ragBlock || "(none)"}
+`
       : undefined;
+
+    if (isReview) {
+      const review = await runAiStructuredFeature({
+        organizationId: orgId,
+        userId: uid,
+        userDisplayName: g.ctx.session.name,
+        roleId,
+        feature: "email_reply",
+        promptVars: {
+          today: new Date().toISOString().slice(0, 10),
+          tone: parsed.data.tone,
+          goal: parsed.data.goal,
+          replyGuidance,
+          thread: threadText || draftText,
+          leadContext: leadContextText || "(no lead linked)",
+          ragBlock: ragBlock || "(none)",
+        },
+        schema: reviewSchema,
+        userPromptOverride,
+        leadId: parsed.data.leadId,
+      });
+
+      return NextResponse.json({
+        review: {
+          ...review,
+          improvedBody: stripTrailingEmailSignOff(review.improvedBody),
+        },
+        mode: effectiveMode,
+      });
+    }
 
     const body = await runAiTextFeature({
       organizationId: orgId,
