@@ -5,6 +5,15 @@ import {
   type ReplyClass,
   type ReplyRecommendedAction,
 } from "@/lib/email/reply-action-types";
+import {
+  prospectVisibleToViewer,
+  salesLeadVisibleViaSharedOwnership,
+} from "@/lib/prospects/prospect-access";
+import type { Lead, User } from "@/lib/types";
+import {
+  leadOwnerIdsVisibleToViewer,
+  seesAllLeadsInTenant,
+} from "@/lib/workspace-hierarchy";
 
 export type ReplyAnalyticsRangeKey = "7d" | "30d" | "90d" | "all" | "custom";
 
@@ -22,8 +31,62 @@ export type ReplyLeadOutcome = "won" | "lost" | "open" | "unknown";
 export type ReplyActionAnalyticsRow = ReplyAction & {
   leadStage?: string;
   leadOwnerId?: string;
+  leadContactName?: string;
+  leadCompanyName?: string;
+  /** Fields used to mirror lead/prospect visibility for non-elevated viewers. */
+  leadSharedOwnerIds?: string[];
+  leadIntakeKind?: "prospect" | "sales_lead";
+  leadScraperId?: string;
+  leadProspectOwnerId?: string;
+  leadCreatedById?: string;
+  leadProspectAssigneeIds?: string[];
   outcome: ReplyLeadOutcome;
 };
+
+/** Slim row for reply-intelligence drill-down lists (no draft bodies). */
+export type ReplyActionDrillRow = {
+  id: string;
+  leadId: string;
+  leadContactName?: string;
+  leadCompanyName?: string;
+  classification: ReplyClass;
+  status: ReplyActionStatus;
+  recommendedAction: ReplyRecommendedAction;
+  potentialScore: number;
+  draftStatus?: ReplyAction["draftStatus"];
+  outcome: ReplyLeadOutcome;
+  leadStage?: string;
+  leadOwnerId?: string;
+  inboundFrom?: string;
+  inboundSubject?: string;
+  nextStepSummary: string;
+  createdAt: string;
+  sentAt?: string;
+  decidedAt?: string;
+};
+
+export function toReplyActionDrillRow(row: ReplyActionAnalyticsRow): ReplyActionDrillRow {
+  return {
+    id: row.id,
+    leadId: row.leadId,
+    leadContactName: row.leadContactName,
+    leadCompanyName: row.leadCompanyName,
+    classification: row.classification,
+    status: row.status,
+    recommendedAction: row.recommendedAction,
+    potentialScore: row.potentialScore,
+    draftStatus: row.draftStatus,
+    outcome: row.outcome,
+    leadStage: row.leadStage,
+    leadOwnerId: row.leadOwnerId,
+    inboundFrom: row.inboundFrom,
+    inboundSubject: row.inboundSubject,
+    nextStepSummary: row.nextStepSummary,
+    createdAt: row.createdAt,
+    sentAt: row.sentAt,
+    decidedAt: row.decidedAt,
+  };
+}
 
 export type ReplyAnalyticsKpis = {
   total: number;
@@ -85,7 +148,7 @@ export type ReplyIntelligenceAnalytics = {
   dailyTrend: DailyPoint[];
 };
 
-const STATUS_LABELS: Record<ReplyActionStatus, string> = {
+export const REPLY_ACTION_STATUS_LABELS: Record<ReplyActionStatus, string> = {
   pending: "Pending",
   accepted: "Accepted",
   dismissed: "Dismissed",
@@ -93,7 +156,7 @@ const STATUS_LABELS: Record<ReplyActionStatus, string> = {
   sent: "Sent",
 };
 
-const ACTION_LABELS: Record<ReplyRecommendedAction, string> = {
+export const REPLY_RECOMMENDED_ACTION_LABELS: Record<ReplyRecommendedAction, string> = {
   reply_now: "Reply now",
   schedule_followup: "Schedule follow-up",
   book_meeting: "Book meeting",
@@ -102,6 +165,124 @@ const ACTION_LABELS: Record<ReplyRecommendedAction, string> = {
   ignore: "Ignore",
   wait: "Wait",
 };
+
+const STATUS_LABELS = REPLY_ACTION_STATUS_LABELS;
+const ACTION_LABELS = REPLY_RECOMMENDED_ACTION_LABELS;
+
+/** Extra filters applied after the base range/class/status window (for drill-down). */
+export type ReplyAnalyticsDrillFilters = {
+  classification?: string;
+  status?: string;
+  recommendedAction?: string;
+  draftStatus?: string;
+  ownerId?: string;
+  outcome?: ReplyLeadOutcome;
+  /** YYYY-MM-DD — match createdAt day. */
+  day?: string;
+  /** Only rows with a decision/sent timestamp (avg decision time). */
+  decidedOnly?: boolean;
+  /** Sent or accepted with a terminal lead outcome (win-rate population). */
+  winRateCohort?: boolean;
+};
+
+export function filterReplyAnalyticsRows(
+  rows: readonly ReplyActionAnalyticsRow[],
+  filters: ReplyAnalyticsDrillFilters,
+): ReplyActionAnalyticsRow[] {
+  return rows.filter((row) => {
+    if (
+      filters.classification &&
+      filters.classification !== "all" &&
+      row.classification !== filters.classification
+    ) {
+      return false;
+    }
+    if (filters.status && filters.status !== "all" && row.status !== filters.status) {
+      return false;
+    }
+    if (
+      filters.recommendedAction &&
+      filters.recommendedAction !== "all" &&
+      row.recommendedAction !== filters.recommendedAction
+    ) {
+      return false;
+    }
+    if (
+      filters.draftStatus &&
+      filters.draftStatus !== "all" &&
+      (row.draftStatus || "none") !== filters.draftStatus
+    ) {
+      return false;
+    }
+    if (filters.ownerId && filters.ownerId !== "all") {
+      const ownerId = row.leadOwnerId || row.decidedBy || row.mailboxOwnerUid || "unknown";
+      if (ownerId !== filters.ownerId) return false;
+    }
+    if (filters.outcome && row.outcome !== filters.outcome) return false;
+    if (filters.day && row.createdAt.slice(0, 10) !== filters.day) return false;
+    if (filters.decidedOnly && !(row.sentAt || row.decidedAt)) return false;
+    if (filters.winRateCohort) {
+      if (row.status !== "sent" && row.status !== "accepted") return false;
+      if (row.outcome !== "won" && row.outcome !== "lost") return false;
+    }
+    return true;
+  });
+}
+
+/**
+ * Same visibility rules as leads/prospects lists: directors/admins see all;
+ * salespeople see own (+ reports), shared ownership, and prospect assignee access.
+ */
+export function replyActionVisibleToViewer(
+  row: ReplyActionAnalyticsRow,
+  viewer: User,
+  orgUsers: readonly User[],
+): boolean {
+  if (seesAllLeadsInTenant(viewer)) return true;
+
+  const ownerId = row.leadOwnerId?.trim() ?? "";
+  const sharedOwnerIds = row.leadSharedOwnerIds;
+  const intakeKind = row.leadIntakeKind;
+
+  if (intakeKind === "prospect") {
+    const prospectStub = {
+      id: row.leadId,
+      ownerId,
+      intakeKind: "prospect" as const,
+      prospectOwnerId: row.leadProspectOwnerId,
+      createdById: row.leadCreatedById,
+      prospectAssigneeIds: row.leadProspectAssigneeIds,
+      sharedOwnerIds,
+      scraperId: row.leadScraperId,
+    } as Lead;
+    return prospectVisibleToViewer(prospectStub, viewer, orgUsers);
+  }
+
+  const salesStub = {
+    id: row.leadId,
+    ownerId,
+    sharedOwnerIds,
+  } as Lead;
+  if (salesLeadVisibleViaSharedOwnership(salesStub, viewer.id)) return true;
+
+  if (!ownerId) return false;
+  if (leadOwnerIdsVisibleToViewer(viewer, orgUsers).has(ownerId)) return true;
+
+  if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
+    return row.leadScraperId === viewer.id;
+  }
+
+  return false;
+}
+
+export function filterReplyActionsVisibleToViewer(
+  rows: readonly ReplyActionAnalyticsRow[],
+  viewer: User,
+  orgUsers: readonly User[],
+): ReplyActionAnalyticsRow[] {
+  if (seesAllLeadsInTenant(viewer)) return [...rows];
+  return rows.filter((row) => replyActionVisibleToViewer(row, viewer, orgUsers));
+}
 
 function rate(num: number, den: number): number | null {
   if (den <= 0) return null;

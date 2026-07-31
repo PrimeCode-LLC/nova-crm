@@ -50,6 +50,7 @@ export default function ReplyIntelligencePage() {
   const [memberLabels, setMemberLabels] = React.useState<Record<string, string>>({});
   const [error, setError] = React.useState("");
   const [rowCount, setRowCount] = React.useState(0);
+  const [scope, setScope] = React.useState<"org" | "mine">("org");
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -69,6 +70,7 @@ export default function ReplyIntelligencePage() {
         analytics?: ReplyIntelligenceAnalytics;
         memberLabels?: Record<string, string>;
         rowCount?: number;
+        scope?: "org" | "mine";
       };
       if (!response.ok || !data.ok || !data.analytics) {
         throw new Error(data.error || "Could not load analytics");
@@ -76,6 +78,7 @@ export default function ReplyIntelligencePage() {
       setAnalytics(data.analytics);
       setMemberLabels(data.memberLabels ?? {});
       setRowCount(data.rowCount ?? 0);
+      setScope(data.scope === "mine" ? "mine" : "org");
     } catch (e) {
       setAnalytics(null);
       setError(e instanceof Error ? e.message : "Could not load analytics");
@@ -169,6 +172,7 @@ export default function ReplyIntelligencePage() {
           {!loading ? (
             <span className="text-xs text-muted-foreground tabular-nums">
               {rowCount} action{rowCount === 1 ? "" : "s"}
+              {scope === "mine" ? " · your leads" : ""}
             </span>
           ) : null}
         </div>
@@ -184,6 +188,9 @@ export default function ReplyIntelligencePage() {
           analytics={analytics}
           memberLabels={memberLabels}
           loading={loading}
+          range={range}
+          classificationFilter={classification}
+          statusFilter={status}
         />
       </PageBody>
     </AppPage>

@@ -10,8 +10,22 @@ import type {
   ReplyClass,
   ReplyRecommendedAction,
 } from "@/lib/email/reply-action-types";
+import type { ProspectChannelAssignment } from "@/lib/types";
 
 const MAX_ROWS = 2_000;
+
+type LeadAnalyticsMeta = {
+  stage?: string;
+  ownerId?: string;
+  contactName?: string;
+  companyName?: string;
+  sharedOwnerIds?: string[];
+  intakeKind?: "prospect" | "sales_lead";
+  scraperId?: string;
+  prospectOwnerId?: string;
+  createdById?: string;
+  prospectAssigneeIds?: string[];
+};
 
 function parseReplyAction(id: string, data: Record<string, unknown>): ReplyAction | null {
   const organizationId = String(data.organizationId ?? "").trim();
@@ -63,8 +77,54 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+function parseStringArray(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const out = value.map((x) => String(x).trim()).filter(Boolean);
+  return out.length ? out : undefined;
+}
+
+function parseProspectAssigneeIds(data: Record<string, unknown>): string[] | undefined {
+  const denorm = parseStringArray(data.prospectAssigneeIds);
+  if (denorm?.length) return denorm;
+  const assignments = data.prospectChannelAssignments;
+  if (!Array.isArray(assignments)) return undefined;
+  const ids = [
+    ...new Set(
+      assignments
+        .map((a) =>
+          a && typeof a === "object"
+            ? String((a as ProspectChannelAssignment).assigneeId ?? "").trim()
+            : "",
+        )
+        .filter(Boolean),
+    ),
+  ];
+  return ids.length ? ids : undefined;
+}
+
+function parseLeadMeta(data: Record<string, unknown>): LeadAnalyticsMeta {
+  const intakeRaw = typeof data.intakeKind === "string" ? data.intakeKind : undefined;
+  const intakeKind =
+    intakeRaw === "prospect" || intakeRaw === "sales_lead" ? intakeRaw : undefined;
+
+  return {
+    stage: typeof data.stage === "string" ? data.stage : undefined,
+    ownerId: typeof data.ownerId === "string" ? data.ownerId : undefined,
+    contactName: typeof data.contactName === "string" ? data.contactName : undefined,
+    companyName: typeof data.companyName === "string" ? data.companyName : undefined,
+    sharedOwnerIds: parseStringArray(data.sharedOwnerIds),
+    intakeKind,
+    scraperId: typeof data.scraperId === "string" ? data.scraperId : undefined,
+    prospectOwnerId:
+      typeof data.prospectOwnerId === "string" ? data.prospectOwnerId : undefined,
+    createdById: typeof data.createdById === "string" ? data.createdById : undefined,
+    prospectAssigneeIds: parseProspectAssigneeIds(data),
+  };
+}
+
 /**
- * List org reply actions in a createdAt window and join lead stage for outcomes.
+ * List org reply actions in a createdAt window and join lead stage / ownership for outcomes
+ * and hierarchy visibility.
  */
 export async function listReplyActionsForAnalyticsServer(input: {
   organizationId: string;
@@ -102,7 +162,7 @@ export async function listReplyActionsForAnalyticsServer(input: {
   }
 
   const leadIds = [...new Set(actions.map((a) => a.leadId))];
-  const leadMeta = new Map<string, { stage?: string; ownerId?: string }>();
+  const leadMeta = new Map<string, LeadAnalyticsMeta>();
 
   for (const group of chunkArray(leadIds, 100)) {
     const refs = group.map((id) => db.collection(COLLECTIONS.leads).doc(id));
@@ -111,10 +171,7 @@ export async function listReplyActionsForAnalyticsServer(input: {
       if (!leadSnap.exists) return;
       const data = leadSnap.data() as Record<string, unknown>;
       if (String(data.organizationId ?? "") !== input.organizationId) return;
-      leadMeta.set(group[index]!, {
-        stage: typeof data.stage === "string" ? data.stage : undefined,
-        ownerId: typeof data.ownerId === "string" ? data.ownerId : undefined,
-      });
+      leadMeta.set(group[index]!, parseLeadMeta(data));
     });
   }
 
@@ -124,6 +181,14 @@ export async function listReplyActionsForAnalyticsServer(input: {
       ...action,
       leadStage: meta?.stage,
       leadOwnerId: meta?.ownerId,
+      leadContactName: meta?.contactName,
+      leadCompanyName: meta?.companyName,
+      leadSharedOwnerIds: meta?.sharedOwnerIds,
+      leadIntakeKind: meta?.intakeKind,
+      leadScraperId: meta?.scraperId,
+      leadProspectOwnerId: meta?.prospectOwnerId,
+      leadCreatedById: meta?.createdById,
+      leadProspectAssigneeIds: meta?.prospectAssigneeIds,
       outcome: outcomeFromLeadStage(meta?.stage),
     };
   });
