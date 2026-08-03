@@ -40,10 +40,10 @@ export default function RootLayout({
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${GeistSans.variable} ${GeistMono.variable} h-dvh overflow-hidden`}
+      className={`${GeistSans.variable} ${GeistMono.variable} h-dvh`}
     >
       <body
-        className="h-dvh overflow-hidden bg-background text-foreground font-sans antialiased"
+        className="h-dvh bg-background text-foreground font-sans antialiased"
         suppressHydrationWarning
       >
         <ThemeProvider
@@ -54,10 +54,10 @@ export default function RootLayout({
         >
           <QueryProvider>
             <AuthProvider>
-            <TooltipProvider delay={200}>
-              {children}
-              <Toaster richColors closeButton expand={false} visibleToasts={4} position="bottom-right" />
-            </TooltipProvider>
+              <TooltipProvider delay={200}>
+                {children}
+                <Toaster richColors closeButton expand={false} visibleToasts={4} position="bottom-right" />
+              </TooltipProvider>
             </AuthProvider>
           </QueryProvider>
         </ThemeProvider>
