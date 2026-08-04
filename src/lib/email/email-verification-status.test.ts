@@ -86,9 +86,16 @@ describe("emailVerificationDescription", () => {
 
 describe("emailVerificationFilterBucket", () => {
   it("maps statuses into filter buckets", () => {
-    expect(emailVerificationFilterBucket("verified")).toBe("verified");
-    expect(emailVerificationFilterBucket("catch_all")).toBe("risky");
-    expect(emailVerificationFilterBucket("not_verified")).toBe("not_verified");
-    expect(emailVerificationFilterBucket("bounced")).toBe("invalid");
+    expect(emailVerificationFilterBucket("verified", "a@b.com")).toBe("verified");
+    expect(emailVerificationFilterBucket("catch_all", "a@b.com")).toBe("risky");
+    expect(emailVerificationFilterBucket("not_verified", "a@b.com")).toBe("not_verified");
+    expect(emailVerificationFilterBucket("bounced", "a@b.com")).toBe("invalid");
+  });
+
+  it("maps missing email to no_email regardless of status", () => {
+    expect(emailVerificationFilterBucket("verified")).toBe("no_email");
+    expect(emailVerificationFilterBucket("not_verified", "")).toBe("no_email");
+    expect(emailVerificationFilterBucket("not_verified", "   ")).toBe("no_email");
+    expect(emailVerificationFilterBucket("bounced", null)).toBe("no_email");
   });
 });

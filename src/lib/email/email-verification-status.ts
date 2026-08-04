@@ -79,7 +79,8 @@ export type EmailVerificationFilterBucket =
   | "verified"
   | "risky"
   | "not_verified"
-  | "invalid";
+  | "invalid"
+  | "no_email";
 
 export const EMAIL_VERIFICATION_FILTER_OPTIONS: Array<{
   value: EmailVerificationFilterBucket;
@@ -89,11 +90,14 @@ export const EMAIL_VERIFICATION_FILTER_OPTIONS: Array<{
   { value: "risky", label: "Risky (catch-all)" },
   { value: "not_verified", label: "Not verified" },
   { value: "invalid", label: "Invalid" },
+  { value: "no_email", label: "No email" },
 ];
 
 export function emailVerificationFilterBucket(
   status: EmailVerificationStatus,
+  email?: string | null,
 ): EmailVerificationFilterBucket {
+  if (!email?.trim()) return "no_email";
   if (status === "verified") return "verified";
   if (status === "catch_all") return "risky";
   if (status === "bounced") return "invalid";

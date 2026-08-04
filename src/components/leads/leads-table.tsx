@@ -920,11 +920,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       filterFn: (row, _id, value: EmailVerificationFilterBucket[]) => {
         const selected = value as EmailVerificationFilterBucket[];
         if (!selected?.length) return true;
-        const status = resolveEmailVerificationStatus(
-          getContactById(row.original.contactId),
-          row.original,
-        );
-        return selected.includes(emailVerificationFilterBucket(status));
+        const lead = row.original;
+        const contact = getContactById(lead.contactId);
+        const email = contact?.email?.trim() || lead.contactEmail?.trim() || "";
+        const status = resolveEmailVerificationStatus(contact, lead);
+        return selected.includes(emailVerificationFilterBucket(status, email));
       },
     },
     {
