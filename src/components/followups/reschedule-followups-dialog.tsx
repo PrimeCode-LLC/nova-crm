@@ -39,13 +39,17 @@ export function RescheduleFollowupsDialog({
   open,
   onOpenChange,
   count,
+  skippedNonEmailCount = 0,
   timeZone,
   referenceDueAt,
   onConfirm,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Email followups that will be updated. */
   count: number;
+  /** LinkedIn / other channel steps skipped from this bulk action. */
+  skippedNonEmailCount?: number;
   timeZone: string;
   /** Used for "same time" and custom defaults (typically first selected). */
   referenceDueAt?: string;
@@ -98,10 +102,14 @@ export function RescheduleFollowupsDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <CalendarClock className="h-4 w-4" />
-            Reschedule {count === 1 ? "followup" : `${count} followups`}
+            Reschedule {count === 1 ? "email followup" : `${count} email followups`}
           </DialogTitle>
           <DialogDescription>
-            Pick a new due date and time. Linked scheduled emails will be cancelled so you can
+            Only email steps will be updated
+            {skippedNonEmailCount > 0
+              ? ` (${skippedNonEmailCount} LinkedIn/other skipped)`
+              : ""}
+            . Pick a new due date and time. Linked scheduled emails will be cancelled so you can
             re-queue them after.
           </DialogDescription>
         </DialogHeader>

@@ -4,6 +4,7 @@ import {
   buildChannelMixHint,
   channelMixForFollowupChannel,
   defaultFollowupChannelMix,
+  isFollowupEmailChannel,
 } from "@/lib/followup-plans";
 import type { Lead } from "@/lib/types";
 
@@ -24,6 +25,16 @@ function baseLead(overrides: Partial<Lead> = {}): Lead {
 }
 
 describe("followup channel mix", () => {
+  it("treats LinkedIn / Upwork / job apply as non-email channels", () => {
+    expect(isFollowupEmailChannel({ channel: "linkedin_outbound" }, "cold_email")).toBe(false);
+    expect(isFollowupEmailChannel({ channel: "linkedin_1to1" }, "cold_email")).toBe(false);
+    expect(isFollowupEmailChannel({ channel: "upwork" }, "cold_email")).toBe(false);
+    expect(isFollowupEmailChannel({ channel: "job_apply" }, "cold_email")).toBe(false);
+    expect(isFollowupEmailChannel({ channel: "cold_email" }, "linkedin_outbound")).toBe(true);
+    expect(isFollowupEmailChannel({ channel: "other" }, "linkedin_outbound")).toBe(false);
+    expect(isFollowupEmailChannel({ channel: "other" }, "cold_email")).toBe(true);
+  });
+
   it("defaults to multi_channel when LinkedIn is present", () => {
     expect(
       defaultFollowupChannelMix({

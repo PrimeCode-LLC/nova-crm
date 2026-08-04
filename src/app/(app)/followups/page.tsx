@@ -52,6 +52,7 @@ import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-emai
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
 import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
+import { isFollowupEmailChannel } from "@/lib/followup-plans";
 import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
@@ -146,8 +147,6 @@ function categorizeFollowupBucket(
 
 type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
 
-const RETRY_CONFIRM_THRESHOLD = 10;
-
 export default function FollowupsPage() {
   const router = useRouter();
   const ws = useWorkspace();
@@ -168,6 +167,7 @@ export default function FollowupsPage() {
     setFollowupEmailSchedule,
     getOwnerDisplayName,
     getContactById,
+    getLeadById,
   } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<Followup | null>(null);
@@ -339,6 +339,16 @@ export default function FollowupsPage() {
     () => selectedFollowups.filter((f) => canMutateRow(f)),
     [selectedFollowups, canMutateRow],
   );
+  const selectedEmailMutable = React.useMemo(() => {
+    return selectedMutable.filter((f) => {
+      const lead = f.leadId ? getLeadById(f.leadId) : undefined;
+      const leadChannel =
+        lead?.channel ??
+        (f.channel && f.channel !== "other" ? f.channel : "cold_email");
+      return isFollowupEmailChannel(f, leadChannel);
+    });
+  }, [selectedMutable, getLeadById]);
+  const selectedNonEmailCount = selectedMutable.length - selectedEmailMutable.length;
 
   const sendableMailbox = React.useMemo(() => {
     const list = mailboxes.length > 0 ? mailboxes : [activeMailbox];
@@ -721,29 +731,22 @@ export default function FollowupsPage() {
   }
 
   function requestBulkTryNow() {
-    if (selectedMutable.length === 0) {
-      toast.error("Nothing selected that you can update.");
+    if (selectedEmailMutable.length === 0) {
+      toast.error(
+        selectedMutable.length > 0
+          ? "No email followups in selection. LinkedIn and other channels are skipped."
+          : "Nothing selected that you can update.",
+      );
       return;
     }
-    if (selectedMutable.length > RETRY_CONFIRM_THRESHOLD) {
-      setRetryConfirmOpen(true);
-      return;
-    }
-    void (async () => {
-      setBulkBusy(true);
-      try {
-        await tryNowFollowups(selectedMutable);
-      } finally {
-        setBulkBusy(false);
-      }
-    })();
+    setRetryConfirmOpen(true);
   }
 
   async function confirmBulkTryNow() {
     setRetryConfirmOpen(false);
     setBulkBusy(true);
     try {
-      await tryNowFollowups(selectedMutable);
+      await tryNowFollowups(selectedEmailMutable);
     } finally {
       setBulkBusy(false);
     }
@@ -752,10 +755,22 @@ export default function FollowupsPage() {
   async function handleBulkReschedule(dueAt: string) {
     setBulkBusy(true);
     try {
-      await applyDueAtToFollowups(selectedMutable, dueAt);
+      await applyDueAtToFollowups(selectedEmailMutable, dueAt);
     } finally {
       setBulkBusy(false);
     }
+  }
+
+  function requestBulkReschedule() {
+    if (selectedEmailMutable.length === 0) {
+      toast.error(
+        selectedMutable.length > 0
+          ? "No email followups in selection. LinkedIn and other channels are skipped."
+          : "Nothing selected that you can update.",
+      );
+      return;
+    }
+    setRescheduleOpen(true);
   }
 
   async function handleSingleTryNow(f: Followup) {
@@ -1219,7 +1234,7 @@ export default function FollowupsPage() {
               variant="outline"
               className="h-8"
               disabled={bulkBusy || selectedMutable.length === 0}
-              onClick={() => setRescheduleOpen(true)}
+              onClick={requestBulkReschedule}
             >
               <CalendarClock className="h-3.5 w-3.5" />
               Reschedule
@@ -1273,11 +1288,19 @@ export default function FollowupsPage() {
       <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Try {selectedMutable.length} followups now?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Try {selectedEmailMutable.length === 1
+                ? "1 email followup"
+                : `${selectedEmailMutable.length} email followups`}{" "}
+              now?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Email-ready steps queue to send shortly (staggered). Failed sends are retried.
-              Reminders without outbound email get their due time set to now. Large batches may hit
-              daily send limits.
+              Only email steps will be queued or retried
+              {selectedNonEmailCount > 0
+                ? ` (${selectedNonEmailCount} LinkedIn/other skipped)`
+                : ""}
+              . Email-ready steps send shortly (staggered). Failed sends are retried. Large batches
+              may hit daily send limits.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1318,9 +1341,10 @@ export default function FollowupsPage() {
         <RescheduleFollowupsDialog
           open={rescheduleOpen}
           onOpenChange={setRescheduleOpen}
-          count={selectedMutable.length || selectedIds.size}
+          count={selectedEmailMutable.length}
+          skippedNonEmailCount={selectedNonEmailCount}
           timeZone={timeZone}
-          referenceDueAt={selectedMutable[0]?.dueAt ?? selectedFollowups[0]?.dueAt}
+          referenceDueAt={selectedEmailMutable[0]?.dueAt ?? selectedMutable[0]?.dueAt}
           onConfirm={handleBulkReschedule}
         />
       ) : null}

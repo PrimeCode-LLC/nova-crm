@@ -97,6 +97,14 @@ export function resolveFollowupChannel(
   return channel;
 }
 
+/** True when the step resolves to an email-sendable channel (not LinkedIn / Upwork / job apply). */
+export function isFollowupEmailChannel(
+  f: Pick<Followup, "channel">,
+  leadChannel: ChannelKey,
+): boolean {
+  return !REMIND_ONLY_CHANNELS.has(resolveFollowupChannel(f.channel, leadChannel));
+}
+
 /** True when this step can be auto-scheduled as outbound email. */
 export function canAutoScheduleFollowupEmail(
   f: Followup,
@@ -104,8 +112,7 @@ export function canAutoScheduleFollowupEmail(
 ): boolean {
   if (!f.messageBody?.trim() && !f.hasMessageBody) return false;
   if (f.scheduledEmailId || f.pausedAt || f.completedAt) return false;
-  const resolved = resolveFollowupChannel(f.channel, leadChannel);
-  return !REMIND_ONLY_CHANNELS.has(resolved);
+  return isFollowupEmailChannel(f, leadChannel);
 }
 
 export function sequenceModeLabel(mode: FollowupPlan["sequenceMode"]): string {
