@@ -5,15 +5,19 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  CalendarClock,
   AlertTriangle,
+  CalendarClock,
   CheckCircle2,
   Clock,
+  Loader2,
+  MailWarning,
   Pencil,
   Plus,
+  RefreshCw,
   Sparkles,
   Trash2,
   Users,
+  X,
 } from "lucide-react";
 import {
   endOfWeek,
@@ -31,7 +35,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { PRIORITY_TONE } from "@/lib/constants";
-import { fmtDate, fmtRelative } from "@/lib/format";
+import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead } from "@/lib/types";
@@ -44,6 +48,7 @@ import {
   zonedWallTimeToUtc,
 } from "@/lib/org-timezone";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
+import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-store";
 import {
   buildWorkspaceOwnerPickerOptions,
@@ -51,6 +56,12 @@ import {
   getOwnerFilterTriggerLabel,
   OWNER_SCOPE_PREFIX,
 } from "@/lib/owner-scope";
+import {
+  formatFollowupDueLabel,
+  isFollowupDeliveryIssue,
+  isFollowupRetryable,
+  type FollowupDueBucket,
+} from "@/lib/followup-due-display";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -79,6 +90,14 @@ const NewFollowupDialog = dynamic(
   { ssr: false },
 );
 
+const RescheduleFollowupsDialog = dynamic(
+  () =>
+    import("@/components/followups/reschedule-followups-dialog").then((m) => ({
+      default: m.RescheduleFollowupsDialog,
+    })),
+  { ssr: false },
+);
+
 /**
  * Buckets relative to a chosen calendar day (org/browser TZ) and the ISO week
  * containing that day (Mon–Sun).
@@ -103,6 +122,8 @@ function categorizeFollowupBucket(
 
 type BucketFilter = "all" | "overdue" | "today" | "thisWeek";
 
+const RETRY_CONFIRM_THRESHOLD = 10;
+
 export default function FollowupsPage() {
   const router = useRouter();
   const ws = useWorkspace();
@@ -118,6 +139,7 @@ export default function FollowupsPage() {
     removeFollowup,
     updateFollowup,
     clearFollowupEmailSchedule,
+    setFollowupEmailSchedule,
     getOwnerDisplayName,
   } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
@@ -127,8 +149,14 @@ export default function FollowupsPage() {
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
   const [viewDateYmd, setViewDateYmd] = React.useState(() => todayDateInputInZone(timeZone));
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
+  const [rescheduleOpen, setRescheduleOpen] = React.useState(false);
+  const [retryConfirmOpen, setRetryConfirmOpen] = React.useState(false);
+  const [bulkBusy, setBulkBusy] = React.useState(false);
 
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
+  const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
+  const setScheduled = useEmailAccountStore((s) => s.setScheduled);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
@@ -192,17 +220,47 @@ export default function FollowupsPage() {
   });
   const done = followups.filter((f) => f.completedAt);
 
-  const overdue = open.filter(
+  const failed = open.filter((f) => isFollowupDeliveryIssue(f));
+  const timedOpen = open.filter((f) => !isFollowupDeliveryIssue(f));
+
+  const overdue = timedOpen.filter(
     (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue",
   );
-  const today = open.filter(
+  const today = timedOpen.filter(
     (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today",
   );
-  const thisWeek = open.filter(
+  const thisWeek = timedOpen.filter(
     (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "thisWeek",
   );
-  const later = open.filter(
+  const later = timedOpen.filter(
     (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "later",
+  );
+
+  // KPI overdue includes failed sends that are also past due, so counts stay familiar.
+  const overdueKpiCount =
+    overdue.length +
+    failed.filter((f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue")
+      .length;
+  const todayKpiCount =
+    today.length +
+    failed.filter((f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today")
+      .length;
+
+  React.useEffect(() => {
+    setSelectedIds(new Set());
+  }, [tab, bucketFilter, ownerScope, viewDateYmd]);
+
+  const selectedFollowups = React.useMemo(
+    () => open.filter((f) => selectedIds.has(f.id)),
+    [open, selectedIds],
+  );
+  const selectedMutable = React.useMemo(
+    () => selectedFollowups.filter((f) => canMutateRow(f)),
+    [selectedFollowups, canMutateRow],
+  );
+  const selectedRetryable = React.useMemo(
+    () => selectedMutable.filter((f) => isFollowupRetryable(f)),
+    [selectedMutable],
   );
 
   function toggleBucket(next: BucketFilter) {
@@ -210,13 +268,17 @@ export default function FollowupsPage() {
     setBucketFilter((prev) => (prev === next ? "all" : next));
   }
 
-  function scrollToBucket(b: Exclude<BucketFilter, "all">) {
+  function scrollToBucket(b: Exclude<BucketFilter, "all"> | "failed") {
     const id =
       b === "overdue"
         ? "followups-bucket-overdue"
         : b === "today"
           ? "followups-bucket-today"
-          : "followups-bucket-week";
+          : b === "thisWeek"
+            ? "followups-bucket-week"
+            : b === "failed"
+              ? "followups-bucket-failed"
+              : "followups-bucket-week";
     document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
@@ -241,6 +303,27 @@ export default function FollowupsPage() {
   }
 
   const showGroup = (bucket: BucketFilter) => bucketFilter === "all" || bucketFilter === bucket;
+  const showFailedGroup = bucketFilter === "all" || bucketFilter === "overdue" || bucketFilter === "today";
+
+  function toggleSelect(id: string, selected: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (selected) next.add(id);
+      else next.delete(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll(ids: string[], selected: boolean) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (selected) next.add(id);
+        else next.delete(id);
+      }
+      return next;
+    });
+  }
 
   const confirmDeleteFollowup = React.useCallback(async () => {
     if (!deleteTarget) return;
@@ -308,6 +391,194 @@ export default function FollowupsPage() {
     }
     updateFollowup(id, patch);
   }
+
+  async function applyDueAtToFollowups(targets: Followup[], dueAt: string) {
+    let ok = 0;
+    let failedCount = 0;
+    for (const f of targets) {
+      if (!canMutateRow(f)) {
+        failedCount += 1;
+        continue;
+      }
+      if (f.scheduledEmailId) {
+        const result = await cancelScheduledEmailClient({
+          scheduledEmailId: f.scheduledEmailId,
+          isDemo,
+          cancelDemo: cancelScheduled,
+          followupId: f.id,
+          selfUid: currentUserId,
+          mailViewAsUid,
+          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+        });
+        if ("error" in result) {
+          failedCount += 1;
+          continue;
+        }
+        clearFollowupEmailSchedule(f.id);
+      }
+      updateFollowup(f.id, { dueAt });
+      ok += 1;
+    }
+    if (ok > 0) {
+      toast.success(
+        ok === 1 ? "Followup rescheduled" : `${ok} followups rescheduled`,
+      );
+    }
+    if (failedCount > 0) {
+      toast.error(
+        failedCount === 1
+          ? "Could not reschedule 1 followup"
+          : `Could not reschedule ${failedCount} followups`,
+      );
+    }
+    setSelectedIds(new Set());
+  }
+
+  async function retryFollowups(targets: Followup[]) {
+    let ok = 0;
+    let skipped = 0;
+    for (const f of targets) {
+      if (!isFollowupRetryable(f) || !f.scheduledEmailId) {
+        skipped += 1;
+        continue;
+      }
+      const result = await retryScheduledEmailClient({
+        scheduledEmailId: f.scheduledEmailId,
+        isDemo,
+        selfUid: currentUserId,
+        mailViewAsUid,
+        activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+        retryDemo: (id) => {
+          setScheduled(
+            scheduledEmails.map((s) =>
+              s.id === id
+                ? {
+                    ...s,
+                    status: "pending" as const,
+                    scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+                    error: undefined,
+                  }
+                : s,
+            ),
+          );
+        },
+      });
+      if ("error" in result) {
+        skipped += 1;
+        continue;
+      }
+      if (result.scheduledAt) {
+        setFollowupEmailSchedule(f.id, {
+          scheduledEmailId: f.scheduledEmailId,
+          emailScheduledAt: result.scheduledAt,
+        });
+      }
+      ok += 1;
+    }
+    if (ok > 0) {
+      toast.success(ok === 1 ? "Retry queued" : `${ok} retries queued`);
+    }
+    if (skipped > 0) {
+      toast.error(
+        skipped === 1
+          ? "Could not retry 1 followup"
+          : `Could not retry ${skipped} followups`,
+      );
+    }
+    setSelectedIds(new Set());
+  }
+
+  async function handleBulkMarkDone() {
+    if (selectedMutable.length === 0) return;
+    setBulkBusy(true);
+    try {
+      for (const f of selectedMutable) {
+        setFollowupCompleted(f.id, true);
+      }
+      toast.success(
+        selectedMutable.length === 1
+          ? "Marked complete"
+          : `${selectedMutable.length} marked complete`,
+      );
+      setSelectedIds(new Set());
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function requestBulkRetry() {
+    if (selectedRetryable.length === 0) {
+      toast.error("None of the selected followups can be retried.");
+      return;
+    }
+    if (selectedRetryable.length > RETRY_CONFIRM_THRESHOLD) {
+      setRetryConfirmOpen(true);
+      return;
+    }
+    void (async () => {
+      setBulkBusy(true);
+      try {
+        await retryFollowups(selectedRetryable);
+      } finally {
+        setBulkBusy(false);
+      }
+    })();
+  }
+
+  async function confirmBulkRetry() {
+    setRetryConfirmOpen(false);
+    setBulkBusy(true);
+    try {
+      await retryFollowups(selectedRetryable);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleBulkReschedule(dueAt: string) {
+    setBulkBusy(true);
+    try {
+      await applyDueAtToFollowups(selectedMutable, dueAt);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  async function handleSingleRetry(f: Followup) {
+    if (!isFollowupRetryable(f)) {
+      toast.error("No scheduled email linked to retry.");
+      return;
+    }
+    setBulkBusy(true);
+    try {
+      await retryFollowups([f]);
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
+  function handleSingleReschedule(f: Followup) {
+    setSelectedIds(new Set([f.id]));
+    setRescheduleOpen(true);
+  }
+
+  const groupProps = {
+    getLeadById: ws.getLeadById,
+    onToggleComplete: setFollowupCompleted,
+    onRowNavigate: (leadId: string) => router.push(`/leads/${leadId}`),
+    canMutate: canMutateRow,
+    onRequestDelete: setDeleteTarget,
+    onRequestEdit: setEditTarget,
+    selectedIds,
+    onToggleSelect: toggleSelect,
+    onToggleSelectAll: toggleSelectAll,
+    timeZone,
+    isViewToday,
+    onRequestRetry: handleSingleRetry,
+    onRequestReschedule: handleSingleReschedule,
+    busy: bulkBusy,
+  };
+
   return (
     <>
       <PageHeader
@@ -319,7 +590,7 @@ export default function FollowupsPage() {
           </Button>
         }
       />
-      <PageBody>
+      <PageBody className={cn(selectedIds.size > 0 && tab === "open" && "pb-24")}>
         {!isDemo && allFollowups.length === 0 ? (
           <WorkspaceEmptyHint title="No followups in workspace" />
         ) : (
@@ -405,14 +676,14 @@ export default function FollowupsPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
               <KpiCard
                 label="Overdue"
-                value={overdue.length}
+                value={overdueKpiCount}
                 icon={AlertTriangle}
                 onClick={handleKpiOverdue}
                 selected={tab === "open" && bucketFilter === "overdue"}
               />
               <KpiCard
                 label={dueAnchorKpiLabel}
-                value={today.length}
+                value={todayKpiCount}
                 icon={Clock}
                 onClick={handleKpiToday}
                 selected={tab === "open" && bucketFilter === "today"}
@@ -472,20 +743,45 @@ export default function FollowupsPage() {
                     open followups.
                   </p>
                 )}
+                {(() => {
+                  if (!showFailedGroup || failed.length === 0) return null;
+                  const failedItems =
+                    bucketFilter === "overdue"
+                      ? failed.filter(
+                          (f) =>
+                            categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue",
+                        )
+                      : bucketFilter === "today"
+                        ? failed.filter(
+                            (f) =>
+                              categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today",
+                          )
+                        : failed;
+                  if (failedItems.length === 0) return null;
+                  return (
+                    <div id="followups-bucket-failed">
+                      <FollowupGroup
+                        title="Failed sends"
+                        description="Delivery failed or waiting for retry."
+                        tone="rose"
+                        bucket="failed"
+                        items={failedItems}
+                        empty="No failed sends."
+                        {...groupProps}
+                      />
+                    </div>
+                  );
+                })()}
                 {showGroup("overdue") && (
                   <div id="followups-bucket-overdue">
                     <FollowupGroup
                       title="Overdue"
                       description="Past due (highest priority)."
                       tone="rose"
+                      bucket="overdue"
                       items={overdue}
                       empty="Nothing overdue. Nice."
-                      getLeadById={ws.getLeadById}
-                      onToggleComplete={setFollowupCompleted}
-                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canMutate={canMutateRow}
-                      onRequestDelete={setDeleteTarget}
-                      onRequestEdit={setEditTarget}
+                      {...groupProps}
                     />
                   </div>
                 )}
@@ -499,16 +795,12 @@ export default function FollowupsPage() {
                           : `Scheduled on ${format(anchorDay, "MMMM d, yyyy")}.`
                       }
                       tone="amber"
+                      bucket="today"
                       items={today}
                       empty={
                         isViewToday ? "Nothing due today." : `Nothing due on ${format(anchorDay, "MMM d")}.`
                       }
-                      getLeadById={ws.getLeadById}
-                      onToggleComplete={setFollowupCompleted}
-                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canMutate={canMutateRow}
-                      onRequestDelete={setDeleteTarget}
-                      onRequestEdit={setEditTarget}
+                      {...groupProps}
                     />
                   </div>
                 )}
@@ -518,14 +810,10 @@ export default function FollowupsPage() {
                       title="This week"
                       description="Coming up in the next 7 days."
                       tone="neutral"
+                      bucket="thisWeek"
                       items={thisWeek}
                       empty="No followups this week."
-                      getLeadById={ws.getLeadById}
-                      onToggleComplete={setFollowupCompleted}
-                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canMutate={canMutateRow}
-                      onRequestDelete={setDeleteTarget}
-                      onRequestEdit={setEditTarget}
+                      {...groupProps}
                     />
                   </div>
                 )}
@@ -535,14 +823,10 @@ export default function FollowupsPage() {
                       title="Later"
                       description="Scheduled further out."
                       tone="neutral"
+                      bucket="later"
                       items={later}
                       empty="Nothing scheduled further out."
-                      getLeadById={ws.getLeadById}
-                      onToggleComplete={setFollowupCompleted}
-                      onRowNavigate={(leadId) => router.push(`/leads/${leadId}`)}
-                      canMutate={canMutateRow}
-                      onRequestDelete={setDeleteTarget}
-                      onRequestEdit={setEditTarget}
+                      {...groupProps}
                     />
                   </div>
                 )}
@@ -649,6 +933,61 @@ export default function FollowupsPage() {
         )}
       </PageBody>
 
+      {selectedIds.size > 0 && tab === "open" ? (
+        <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+          <div className="pointer-events-auto flex max-w-full flex-wrap items-center gap-2 rounded-lg border bg-background/95 px-3 py-2 shadow-lg backdrop-blur supports-backdrop-filter:bg-background/90">
+            <span className="text-sm font-medium tabular-nums whitespace-nowrap">
+              {selectedIds.size} selected
+            </span>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8"
+              disabled={bulkBusy || selectedRetryable.length === 0}
+              onClick={requestBulkRetry}
+            >
+              {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              Try again
+              {selectedRetryable.length > 0 ? ` (${selectedRetryable.length})` : ""}
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-8"
+              disabled={bulkBusy || selectedMutable.length === 0}
+              onClick={() => setRescheduleOpen(true)}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+              Reschedule
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              className="h-8"
+              disabled={bulkBusy || selectedMutable.length === 0}
+              onClick={() => void handleBulkMarkDone()}
+            >
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Mark done
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant="ghost"
+              className="h-8"
+              disabled={bulkBusy}
+              onClick={() => setSelectedIds(new Set())}
+              aria-label="Clear selection"
+            >
+              <X className="h-3.5 w-3.5" />
+              Clear
+            </Button>
+          </div>
+        </div>
+      ) : null}
+
       <AlertDialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -664,6 +1003,24 @@ export default function FollowupsPage() {
               onClick={() => void confirmDeleteFollowup()}
             >
               Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Retry {selectedRetryable.length} sends?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This queues each failed or retrying email to send again shortly. Large batches may hit
+              daily send limits.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction disabled={bulkBusy} onClick={() => void confirmBulkRetry()}>
+              Try again
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -693,13 +1050,26 @@ export default function FollowupsPage() {
           }}
         />
       ) : null}
+
+      {rescheduleOpen ? (
+        <RescheduleFollowupsDialog
+          open={rescheduleOpen}
+          onOpenChange={setRescheduleOpen}
+          count={selectedMutable.length || selectedIds.size}
+          timeZone={timeZone}
+          referenceDueAt={selectedMutable[0]?.dueAt ?? selectedFollowups[0]?.dueAt}
+          onConfirm={handleBulkReschedule}
+        />
+      ) : null}
     </>
   );
 }
+
 function FollowupGroup({
   title,
   description,
   tone,
+  bucket,
   items,
   empty,
   getLeadById,
@@ -708,10 +1078,19 @@ function FollowupGroup({
   canMutate,
   onRequestDelete,
   onRequestEdit,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  timeZone,
+  isViewToday,
+  onRequestRetry,
+  onRequestReschedule,
+  busy,
 }: {
   title: string;
   description: string;
   tone: "rose" | "amber" | "neutral";
+  bucket: FollowupDueBucket;
   items: Followup[];
   empty: string;
   getLeadById: (id: string) => Lead | undefined;
@@ -720,6 +1099,14 @@ function FollowupGroup({
   canMutate: (f: Followup) => boolean;
   onRequestDelete: (f: Followup) => void;
   onRequestEdit: (f: Followup) => void;
+  selectedIds: Set<string>;
+  onToggleSelect: (id: string, selected: boolean) => void;
+  onToggleSelectAll: (ids: string[], selected: boolean) => void;
+  timeZone: string;
+  isViewToday: boolean;
+  onRequestRetry: (f: Followup) => void;
+  onRequestReschedule: (f: Followup) => void;
+  busy: boolean;
 }) {
   const toneRing =
     tone === "rose"
@@ -728,18 +1115,34 @@ function FollowupGroup({
         ? "border-warning/30 bg-warning/5"
         : "";
 
+  const selectableIds = items.map((f) => f.id);
+  const selectedInGroup = selectableIds.filter((id) => selectedIds.has(id));
+  const allSelected = selectableIds.length > 0 && selectedInGroup.length === selectableIds.length;
+  const someSelected = selectedInGroup.length > 0 && !allSelected;
+
   return (
     <Card className={cn(toneRing)}>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle className="text-sm">
-              {title}
-              <Badge variant="secondary" className="ml-2 h-4 px-1 text-[10px]">
-                {items.length}
-              </Badge>
-            </CardTitle>
-            <CardDescription className="text-xs">{description}</CardDescription>
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-start gap-3 min-w-0">
+            {items.length > 0 ? (
+              <Checkbox
+                className="mt-0.5"
+                checked={allSelected}
+                indeterminate={someSelected}
+                onCheckedChange={(v) => onToggleSelectAll(selectableIds, v === true)}
+                aria-label={`Select all in ${title}`}
+              />
+            ) : null}
+            <div className="min-w-0">
+              <CardTitle className="text-sm">
+                {title}
+                <Badge variant="secondary" className="ml-2 h-4 px-1 text-[10px]">
+                  {items.length}
+                </Badge>
+              </CardTitle>
+              <CardDescription className="text-xs">{description}</CardDescription>
+            </div>
           </div>
         </div>
       </CardHeader>
@@ -752,19 +1155,25 @@ function FollowupGroup({
               const lead = f.leadId ? getLeadById(f.leadId) : undefined;
               const done = Boolean(f.completedAt);
               const mutate = canMutate(f);
+              const selected = selectedIds.has(f.id);
+              const retryable = isFollowupRetryable(f);
+              const isFailed = f.deliveryStatus === "failed";
+              const isRetrying = f.deliveryStatus === "needs_retry";
+              const due = formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
               return (
                 <li
                   key={f.id}
                   className={cn(
                     "flex items-center gap-3 py-2.5 -mx-1 px-1 rounded-md transition-colors",
                     lead && "cursor-pointer hover:bg-muted/40",
+                    selected && "bg-muted/50",
                   )}
                   role={lead ? "button" : undefined}
                   tabIndex={lead ? 0 : undefined}
                   onClick={(e) => {
                     if (
                       (e.target as HTMLElement).closest(
-                        "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit]",
+                        "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-retry], [data-followup-reschedule]",
                       )
                     )
                       return;
@@ -779,12 +1188,17 @@ function FollowupGroup({
                   }}
                 >
                   <Checkbox
+                    checked={selected}
+                    onCheckedChange={(v) => onToggleSelect(f.id, v === true)}
+                    aria-label={`Select ${f.title}`}
+                  />
+                  <Checkbox
                     checked={done}
                     onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
                     aria-label={done ? `Mark ${f.title} incomplete` : `Mark ${f.title} complete`}
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-sm font-medium truncate">{f.title}</span>
                       <Badge
                         className={cn(
@@ -794,6 +1208,24 @@ function FollowupGroup({
                       >
                         {PRIORITY_TONE[f.priority].label}
                       </Badge>
+                      {isFailed ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] gap-1 border-destructive/50 text-destructive"
+                        >
+                          <MailWarning className="h-2.5 w-2.5" />
+                          Send failed
+                        </Badge>
+                      ) : null}
+                      {isRetrying ? (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400"
+                        >
+                          <RefreshCw className="h-2.5 w-2.5" />
+                          Retrying
+                        </Badge>
+                      ) : null}
                       {f.auto && (
                         <Badge variant="outline" className="text-[10px] gap-1">
                           <Sparkles className="h-2.5 w-2.5" /> Auto
@@ -812,11 +1244,52 @@ function FollowupGroup({
                   </div>
                   <div className="flex items-center gap-2 shrink-0">
                     <UserChip userId={f.ownerId} size="xs" nameOnly />
-                    <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                      {fmtDate(f.dueAt, "MMM d")} · {fmtRelative(f.dueAt)}
+                    <span
+                      className={cn(
+                        "text-xs tabular-nums whitespace-nowrap",
+                        bucket === "overdue" || bucket === "failed"
+                          ? "text-destructive"
+                          : due.soon
+                            ? "text-amber-600 dark:text-amber-400"
+                            : "text-muted-foreground",
+                      )}
+                    >
+                      {due.label}
                     </span>
+                    {mutate && retryable ? (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        data-followup-retry
+                        disabled={busy}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onRequestRetry(f);
+                        }}
+                      >
+                        <RefreshCw className="h-3 w-3" />
+                        Try again
+                      </Button>
+                    ) : null}
                     {mutate ? (
                       <>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-muted-foreground"
+                          data-followup-reschedule
+                          aria-label="Reschedule followup"
+                          disabled={busy}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onRequestReschedule(f);
+                          }}
+                        >
+                          <CalendarClock className="h-3.5 w-3.5" />
+                        </Button>
                         <Button
                           type="button"
                           variant="ghost"
