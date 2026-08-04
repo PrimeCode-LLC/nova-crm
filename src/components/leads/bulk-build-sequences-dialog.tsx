@@ -1,7 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Loader2, Sparkles, XCircle } from "lucide-react";
+import {
+  CheckCircle2,
+  Circle,
+  Loader2,
+  MinusCircle,
+  Sparkles,
+  XCircle,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -129,16 +136,61 @@ export function BulkBuildSequencesDialog({
   const [selectedScript, setSelectedScript] = React.useState<ScriptLibraryItem | null>(null);
   const [rows, setRows] = React.useState<LeadRow[]>([]);
   const [progressIndex, setProgressIndex] = React.useState(0);
+  const [runTotal, setRunTotal] = React.useState(0);
   const cancelRef = React.useRef(false);
+  const wasOpenRef = React.useRef(false);
+  const listRef = React.useRef<HTMLUListElement | null>(null);
 
+  // Keep latest workspace data in refs so the batch loop and open-init
+  // don't reset UI when leads/plans update mid-run.
+  const leadsRef = React.useRef(leads);
+  const followupsRef = React.useRef(followups);
+  const followupPlansRef = React.useRef(followupPlans);
+  const notesRef = React.useRef(notes);
+  const dealsRef = React.useRef(deals);
+  const timelineByLeadRef = React.useRef(timelineByLead);
+  const touchpointsRef = React.useRef(touchpoints);
+  const leadTasksRef = React.useRef(leadTasks);
+  const crmLabelsRef = React.useRef(crmLabels);
+  const getContactByIdRef = React.useRef(getContactById);
+  const getAccountByIdRef = React.useRef(getAccountById);
+  const getCampaignByIdRef = React.useRef(getCampaignById);
+  const getProfileByIdRef = React.useRef(getProfileById);
+  const createPlanRef = React.useRef(createFollowupPlanWithFollowups);
+  const onCompleteRef = React.useRef(onComplete);
+  const leadIdsRef = React.useRef(leadIds);
+  leadsRef.current = leads;
+  followupsRef.current = followups;
+  followupPlansRef.current = followupPlans;
+  notesRef.current = notes;
+  dealsRef.current = deals;
+  timelineByLeadRef.current = timelineByLead;
+  touchpointsRef.current = touchpoints;
+  leadTasksRef.current = leadTasks;
+  crmLabelsRef.current = crmLabels;
+  getContactByIdRef.current = getContactById;
+  getAccountByIdRef.current = getAccountById;
+  getCampaignByIdRef.current = getCampaignById;
+  getProfileByIdRef.current = getProfileById;
+  createPlanRef.current = createFollowupPlanWithFollowups;
+  onCompleteRef.current = onComplete;
+  leadIdsRef.current = leadIds;
+
+  // Only reset when the dialog opens (false → true). Do not reset when
+  // leads/plans change mid-run — that was bouncing users back to setup
+  // while the batch continued in the background.
   React.useEffect(() => {
-    if (!open) return;
+    const justOpened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!justOpened) return;
+
     cancelRef.current = false;
     setPhase("setup");
     setSequenceMode("full");
-    const first = leads.find((l) => l.id === leadIds[0]);
+    const ids = leadIdsRef.current;
+    const first = leadsRef.current.find((l) => l.id === ids[0]);
     const hasLi = first
-      ? leadHasLinkedIn(first, getContactById(first.contactId))
+      ? leadHasLinkedIn(first, getContactByIdRef.current(first.contactId))
       : false;
     setChannelMix(
       first
@@ -152,9 +204,10 @@ export function BulkBuildSequencesDialog({
     setScriptId("");
     setSelectedScript(null);
     setProgressIndex(0);
+    setRunTotal(0);
     setRows(
-      leadIds.map((id) => {
-        const lead = leads.find((l) => l.id === id);
+      ids.map((id) => {
+        const lead = leadsRef.current.find((l) => l.id === id);
         return {
           leadId: id,
           label: lead ? leadLabel(lead) : id,
@@ -162,30 +215,36 @@ export function BulkBuildSequencesDialog({
         };
       }),
     );
-  }, [open, leadIds, leads, getContactById]);
+  }, [open]);
 
   function buildAiContext(leadId: string): LeadFollowupAiContext | null {
-    const lead = leads.find((l) => l.id === leadId);
+    const lead = leadsRef.current.find((l) => l.id === leadId);
     if (!lead) return null;
     return {
       lead,
-      account: getAccountById(lead.accountId),
-      contact: getContactById(lead.contactId),
-      deal: deals.find((d) => d.leadId === lead.id),
-      notes: notes.filter((n) => n.leadId === lead.id),
-      timeline: timelineByLead[lead.id] ?? [],
-      touchpoints: touchpoints.filter((t) => t.leadId === lead.id),
-      followups: followups.filter((f) => f.leadId === lead.id),
-      tasks: leadTasks.filter((t) => t.leadId === lead.id),
-      campaign: getCampaignById(lead.campaignId),
-      profile: getProfileById(lead.profileId),
-      labels: crmLabels.filter((label) => lead.labelIds?.includes(label.id)),
+      account: getAccountByIdRef.current(lead.accountId),
+      contact: getContactByIdRef.current(lead.contactId),
+      deal: dealsRef.current.find((d) => d.leadId === lead.id),
+      notes: notesRef.current.filter((n) => n.leadId === lead.id),
+      timeline: timelineByLeadRef.current[lead.id] ?? [],
+      touchpoints: touchpointsRef.current.filter((t) => t.leadId === lead.id),
+      followups: followupsRef.current.filter((f) => f.leadId === lead.id),
+      tasks: leadTasksRef.current.filter((t) => t.leadId === lead.id),
+      campaign: getCampaignByIdRef.current(lead.campaignId),
+      profile: getProfileByIdRef.current(lead.profileId),
+      labels: crmLabelsRef.current.filter((label) => lead.labelIds?.includes(label.id)),
     };
   }
 
   function patchRow(leadId: string, patch: Partial<LeadRow>) {
     setRows((prev) => prev.map((r) => (r.leadId === leadId ? { ...r, ...patch } : r)));
   }
+
+  React.useEffect(() => {
+    if (phase !== "running") return;
+    const el = listRef.current?.querySelector('[data-status="running"]');
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [phase, progressIndex]);
 
   async function generateForLead(
     leadId: string,
@@ -201,7 +260,7 @@ export function BulkBuildSequencesDialog({
     const ctx = buildAiContext(leadId);
     if (!ctx) return { ok: false, error: "Lead not found" };
     const lead = ctx.lead;
-    const leadPlans = followupPlans.filter((p) => p.leadId === leadId);
+    const leadPlans = followupPlansRef.current.filter((p) => p.leadId === leadId);
 
     const demoContext = isDemo
       ? {
@@ -292,7 +351,7 @@ export function BulkBuildSequencesDialog({
     items: SuggestApiItem[],
     tplId: string,
   ): { ok: true; stepCount: number } | { ok: false; error: string } {
-    const lead = leads.find((l) => l.id === leadId);
+    const lead = leadsRef.current.find((l) => l.id === leadId);
     if (!lead) return { ok: false, error: "Lead not found" };
     if (items.length === 0) return { ok: false, error: "AI returned no steps" };
 
@@ -330,7 +389,7 @@ export function BulkBuildSequencesDialog({
       priority: it.priority,
       auto: false,
     }));
-    createFollowupPlanWithFollowups(plan, created);
+    createPlanRef.current(plan, created);
     return { ok: true, stepCount: created.length };
   }
 
@@ -341,27 +400,29 @@ export function BulkBuildSequencesDialog({
     const prompt = userPrompt;
     const tplId = scriptId;
     const script = selectedScript;
+    const ids = leadIdsRef.current;
     setPhase("running");
     setProgressIndex(0);
+    setRunTotal(ids.length);
 
     let success = 0;
     let skipped = 0;
     let failed = 0;
 
-    for (let i = 0; i < leadIds.length; i++) {
+    for (let i = 0; i < ids.length; i++) {
       if (cancelRef.current) {
-        for (let j = i; j < leadIds.length; j++) {
-          patchRow(leadIds[j]!, { status: "skipped", detail: "Cancelled" });
+        for (let j = i; j < ids.length; j++) {
+          patchRow(ids[j]!, { status: "skipped", detail: "Cancelled" });
           skipped += 1;
         }
         break;
       }
 
-      const leadId = leadIds[i]!;
+      const leadId = ids[i]!;
       setProgressIndex(i + 1);
       patchRow(leadId, { status: "running", detail: undefined });
 
-      const lead = leads.find((l) => l.id === leadId);
+      const lead = leadsRef.current.find((l) => l.id === leadId);
       if (!lead) {
         patchRow(leadId, { status: "skipped", detail: "Lead not found" });
         skipped += 1;
@@ -372,7 +433,7 @@ export function BulkBuildSequencesDialog({
         skipped += 1;
         continue;
       }
-      if (getActiveFollowupPlanForLead(followupPlans, leadId)) {
+      if (getActiveFollowupPlanForLead(followupPlansRef.current, leadId)) {
         patchRow(leadId, { status: "skipped", detail: "Already has an active sequence" });
         skipped += 1;
         continue;
@@ -414,7 +475,7 @@ export function BulkBuildSequencesDialog({
         : undefined,
     );
     if (failed === 0 && skipped === 0 && success > 0) {
-      onComplete?.();
+      onCompleteRef.current?.();
     }
   }
 
@@ -426,6 +487,8 @@ export function BulkBuildSequencesDialog({
   const successCount = rows.filter((r) => r.status === "success").length;
   const skippedCount = rows.filter((r) => r.status === "skipped").length;
   const failedCount = rows.filter((r) => r.status === "failed").length;
+  const progressPct =
+    runTotal > 0 ? Math.min(100, Math.round((progressIndex / runTotal) * 100)) : 0;
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
@@ -436,8 +499,11 @@ export function BulkBuildSequencesDialog({
             Build sequences
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Generate a personalized sequence for each selected prospect. Scheduling is a separate
-            step — review samples on Follow-ups first if you want.
+            {phase === "setup"
+              ? "Generate a personalized sequence for each selected prospect. Scheduling is a separate step — review samples on Follow-ups first if you want."
+              : phase === "running"
+                ? "Generating personalized sequences one by one. You can stop after the current prospect."
+                : "All selected prospects have been processed."}
           </DialogDescription>
         </DialogHeader>
 
@@ -555,35 +621,86 @@ export function BulkBuildSequencesDialog({
 
         {phase === "running" || phase === "done" ? (
           <div className="space-y-3 py-1">
-            <p className="text-xs text-muted-foreground">
-              {phase === "running"
-                ? `Building ${progressIndex} / ${leadIds.length}…`
-                : `Done · ${successCount} built · ${skippedCount} skipped · ${failedCount} failed`}
-            </p>
-            <ul className="max-h-64 space-y-1.5 overflow-y-auto rounded-md border p-2">
+            <div className="space-y-2 rounded-md border bg-muted/30 px-3 py-2.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <p className="font-medium">
+                  {phase === "running" ? (
+                    <>
+                      Building{" "}
+                      <span className="tabular-nums">
+                        {progressIndex} / {runTotal}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      Done ·{" "}
+                      <span className="tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {successCount} built
+                      </span>
+                      {skippedCount > 0 ? (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {skippedCount} skipped
+                        </span>
+                      ) : null}
+                      {failedCount > 0 ? (
+                        <span className="text-destructive"> · {failedCount} failed</span>
+                      ) : null}
+                    </>
+                  )}
+                </p>
+                {phase === "running" ? (
+                  <p className="tabular-nums text-muted-foreground">
+                    {successCount} done
+                    {failedCount > 0 ? ` · ${failedCount} failed` : ""}
+                  </p>
+                ) : null}
+              </div>
+              <div
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-valuenow={phase === "done" ? 100 : progressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-300 ease-out",
+                    phase === "done" && failedCount === 0
+                      ? "bg-emerald-500"
+                      : phase === "done" && failedCount > 0
+                        ? "bg-amber-500"
+                        : "bg-primary",
+                  )}
+                  style={{ width: `${phase === "done" ? 100 : progressPct}%` }}
+                />
+              </div>
+            </div>
+
+            <ul
+              ref={listRef}
+              className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2"
+            >
               {rows.map((row) => (
                 <li
                   key={row.leadId}
-                  className="flex items-start gap-2 rounded px-1.5 py-1 text-xs"
+                  data-status={row.status}
+                  className={cn(
+                    "flex items-start gap-2 rounded px-1.5 py-1 text-xs",
+                    row.status === "running" && "bg-primary/5",
+                    row.status === "pending" && "opacity-60",
+                  )}
                 >
-                  {row.status === "running" || row.status === "pending" ? (
-                    <Loader2
-                      className={cn(
-                        "mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground",
-                        row.status === "running" && "animate-spin text-primary",
-                      )}
-                    />
+                  {row.status === "running" ? (
+                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                  ) : row.status === "pending" ? (
+                    <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
                   ) : row.status === "success" ? (
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  ) : row.status === "skipped" ? (
+                    <MinusCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   ) : (
-                    <XCircle
-                      className={cn(
-                        "mt-0.5 h-3.5 w-3.5 shrink-0",
-                        row.status === "skipped"
-                          ? "text-muted-foreground"
-                          : "text-destructive",
-                      )}
-                    />
+                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{row.label}</p>
