@@ -615,9 +615,20 @@ service cloud.firestore {
     /**
      * Durable CRM notifications for a single recipient.
      * Any org member may create (targeted handoffs); only the recipient may read/update/dismiss.
+     * `get` allows resource == null so idempotent creates can existence-check missing docs
+     * (FollowupDueNotificationSync / deterministic ids) without permission-denied.
      */
     match /userNotifications/{id} {
-      allow read: if signedIn()
+      allow get: if signedIn()
+        && (
+          (resource == null && hasActiveTenantAccess())
+          || (
+            resource.data.organizationId == callerOrgId()
+            && resource.data.recipientId == request.auth.uid
+          )
+        );
+
+      allow list: if signedIn()
         && resource.data.organizationId == callerOrgId()
         && resource.data.recipientId == request.auth.uid;
 
