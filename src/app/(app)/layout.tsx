@@ -11,6 +11,7 @@ import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
 import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-provider";
+import { WorkspaceInboxNotificationsProvider } from "@/components/providers/workspace-inbox-notifications-provider";
 import { DeferredAppSync } from "@/components/providers/deferred-app-sync";
 import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher";
 import { ModuleRouteGate } from "@/components/permissions/module-route-gate";
@@ -61,19 +62,21 @@ export default async function AppLayout({
       organizationTimezone={organizationTimezone}
     >
       <TeamChatUnreadProvider deferSubscriptions>
-        <DeferredAppSync />
-        <QuickAddLauncherProvider>
-          <SidebarProvider>
-            <AppSidebar showPlatformLink={showPlatformLink} />
-            <SidebarInset>
-              <AppTopbar />
-              <WorkspaceStatusBanner />
-              <div className="flex h-0 min-h-0 flex-1 flex-col overflow-hidden">
-                <ModuleRouteGate>{children}</ModuleRouteGate>
-              </div>
-            </SidebarInset>
-          </SidebarProvider>
-        </QuickAddLauncherProvider>
+        <WorkspaceInboxNotificationsProvider>
+          <DeferredAppSync />
+          <QuickAddLauncherProvider>
+            <SidebarProvider>
+              <AppSidebar showPlatformLink={showPlatformLink} />
+              <SidebarInset>
+                <AppTopbar />
+                <WorkspaceStatusBanner />
+                <div className="flex h-0 min-h-0 flex-1 flex-col overflow-hidden">
+                  <ModuleRouteGate>{children}</ModuleRouteGate>
+                </div>
+              </SidebarInset>
+            </SidebarProvider>
+          </QuickAddLauncherProvider>
+        </WorkspaceInboxNotificationsProvider>
       </TeamChatUnreadProvider>
     </WorkspaceModeProvider>
   );

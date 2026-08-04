@@ -54,6 +54,8 @@ import { persistBulkOwnerReassignClient } from "@/lib/firestore/persist-bulk-own
 import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
 import { createUserNotifications, actorLabel } from "@/lib/notifications/create-user-notification";
 import { buildOwnershipHandoffNotifications } from "@/lib/notifications/ownership-handoff";
+import { persistUserNotificationDismiss } from "@/lib/notifications/persist-user-notification-client";
+import { useDemoUserNotifications } from "@/stores/demo-user-notifications-store";
 import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
 import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
 import { persistDealPatchClient } from "@/lib/firestore/persist-deal-patch-client";
@@ -148,6 +150,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     userProfileError: Error | null;
     /** True while workspace data is still loading (live Firestore or demo bundle). */
     workspaceLoading: boolean;
+    /** Live: followups listener has delivered its first snapshot (page can leave skeleton). */
+    followupsReady: boolean;
     setMode: (next: WorkspaceMode) => Promise<void>;
     setDemoPersona: (userId: string) => Promise<void>;
     addPermissionOverride: (override: PermissionOverride) => void;
@@ -1333,12 +1337,13 @@ export function WorkspaceModeProvider({
       }
       setSessionV2((s) => {
         const inExtras = s.followups.extras.some((f) => f.id === id);
-        const normalized: typeof patch = { ...patch };
+        const normalized: Partial<Followup> = { ...patch };
         if (patch.description !== undefined) {
           normalized.description = patch.description.trim() || undefined;
         }
         if (patch.messageBody !== undefined) {
           normalized.messageBody = patch.messageBody.trim() || undefined;
+          normalized.hasMessageBody = undefined;
         }
         if (patch.emailSubject !== undefined) {
           normalized.emailSubject = patch.emailSubject.trim() || undefined;
@@ -2447,6 +2452,11 @@ export function WorkspaceModeProvider({
                 leadOwnerIdForFirestore(task.leadId),
               );
             }
+            if (completed) {
+              await persistUserNotificationDismiss(db, `lt-inbox-${id}`).catch(() => {
+                /* row may not exist for pre-fanout tasks */
+              });
+            }
           } catch (e) {
             toastError("Could not update task", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",
@@ -2454,6 +2464,8 @@ export function WorkspaceModeProvider({
             });
           }
         })();
+      } else if (completed && mode === "demo") {
+        useDemoUserNotifications.getState().dismiss(`lt-inbox-${id}`);
       }
       setSessionV2((s) => {
         const completion = { ...s.leadTasks.completion };
@@ -2519,6 +2531,8 @@ export function WorkspaceModeProvider({
       liveFirestoreError: mode === "live" ? liveFs.error : null,
       userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
       workspaceLoading: mode === "live" ? liveFs.loading : demoSnapshot == null,
+      followupsReady:
+        mode === "demo" ? demoSnapshot != null : liveFs.coreReady.followups,
       setMode,
       setDemoPersona,
       addPermissionOverride,
@@ -2590,6 +2604,7 @@ export function WorkspaceModeProvider({
     setIntentPlaybook,
     liveFs.error,
     liveFs.loading,
+    liveFs.coreReady.followups,
     demoSnapshot,
     userProfileLoadError,
     fbUser,

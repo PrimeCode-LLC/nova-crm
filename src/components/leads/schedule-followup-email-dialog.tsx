@@ -42,6 +42,7 @@ import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
 } from "@/lib/email/contact-recipient-options";
+import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
 import {
   loadLastUsedMailboxPrefs,
   rememberLastUsedMailbox,
@@ -153,28 +154,36 @@ export function ScheduleFollowupEmailDialog({
 
   React.useEffect(() => {
     if (!open || !followup) return;
-    const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
-    const defaultId = resolveDefaultScheduleMailboxId({
-      mailboxIds: mailboxOptions.map((mb) => mb.id),
-      lastUsedId: prefs.lastMailboxId,
-      activeMailboxId,
-    });
-    setMailboxId(defaultId);
-    setTo(defaultContactRecipientEmail(recipientOptions));
-    setSubject(followup.emailSubject?.trim() || followup.title || "");
-    setScheduledAt(
-      defaultAudienceScheduleDatetimeLocal({
-        preferIso: followup.dueAt,
-        timeZone: scheduleTimezone,
-        sendWindowStartHour: sendWindow.startHour,
-        sendWindowEndHour: sendWindow.endHour,
-        spreadKey: followup.id,
-      }),
-    );
-    setBody(followup.messageBody ?? "");
-    setIncludeSignature(true);
-    setIncludeFooter(true);
-    setSubmitting(false);
+    let cancelled = false;
+    void (async () => {
+      const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+      const defaultId = resolveDefaultScheduleMailboxId({
+        mailboxIds: mailboxOptions.map((mb) => mb.id),
+        lastUsedId: prefs.lastMailboxId,
+        activeMailboxId,
+      });
+      const hydrated = await hydrateFollowupMessageBody(followup);
+      if (cancelled) return;
+      setMailboxId(defaultId);
+      setTo(defaultContactRecipientEmail(recipientOptions));
+      setSubject(hydrated.emailSubject?.trim() || hydrated.title || "");
+      setScheduledAt(
+        defaultAudienceScheduleDatetimeLocal({
+          preferIso: hydrated.dueAt,
+          timeZone: scheduleTimezone,
+          sendWindowStartHour: sendWindow.startHour,
+          sendWindowEndHour: sendWindow.endHour,
+          spreadKey: hydrated.id,
+        }),
+      );
+      setBody(hydrated.messageBody ?? "");
+      setIncludeSignature(true);
+      setIncludeFooter(true);
+      setSubmitting(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     open,
     followup,

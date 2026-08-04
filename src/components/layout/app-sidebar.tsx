@@ -32,7 +32,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useTeamChatUnread } from "@/components/providers/team-chat-unread-provider";
 import { useInboxMailUnreadTotal } from "@/hooks/use-inbox-mail-unread-total";
-import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
+import { useWorkspaceInboxNotifications } from "@/components/providers/workspace-inbox-notifications-provider";
 import { formatUnreadBadgeCount } from "@/lib/email/inbox-unread-count";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useComputedPermissions } from "@/lib/hooks/use-computed-permissions";

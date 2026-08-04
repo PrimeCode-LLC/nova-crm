@@ -4,7 +4,6 @@ import * as React from "react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { buildDemoNotifications, type DemoNotification } from "@/lib/inbox-demo-notifications";
 import { buildLeadTaskInboxNotifications } from "@/lib/inbox-lead-task-notifications";
-import { buildActivityInboxNotifications } from "@/lib/inbox-activity-notifications";
 import {
   mergeNotificationSeed,
   useInboxNotificationOverrides,
@@ -44,8 +43,23 @@ function filterByPrefs(rows: DemoNotification[]): DemoNotification[] {
   });
 }
 
-/** Demo + durable Firestore + tasks + Activity log rows - same source for Notifications and top bar. */
-export function useWorkspaceInboxNotifications() {
+export type WorkspaceInboxNotificationsValue = {
+  notifications: DemoNotification[];
+  unreadCount: number;
+  loading: boolean;
+  markRead: (id: string) => void;
+  markUnread: (id: string) => void;
+  dismiss: (id: string) => void;
+  markAllRead: (ids: string[]) => void;
+};
+
+/**
+ * Inbox state: durable Firestore rows + open assigned tasks (cheap filter).
+ * Activity-log derivation was removed — it scanned full activityRecords on every
+ * workspace update and duplicated work across multiple hook mounts.
+ * Prefer mounting via WorkspaceInboxNotificationsProvider (one listener).
+ */
+export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificationsValue {
   const {
     leads,
     users,
@@ -54,8 +68,6 @@ export function useWorkspaceInboxNotifications() {
     demoPersonaId,
     leadTasks,
     currentUserId,
-    activityRecords,
-    getLeadById,
     organizationId,
   } = useWorkspace();
   const readIds = useInboxNotificationOverrides((s) => s.readIds);
@@ -83,8 +95,6 @@ export function useWorkspaceInboxNotifications() {
     return () => window.removeEventListener("storage", onStorage);
   }, []);
 
-  // Same-tab Settings updates: poll lightly via custom event if Settings dispatches one;
-  // also re-read when prefsTick changes and when window gains focus.
   React.useEffect(() => {
     const bump = () => setPrefsTick((t) => t + 1);
     window.addEventListener("focus", bump);
@@ -135,15 +145,10 @@ export function useWorkspaceInboxNotifications() {
 
   const seed = React.useMemo(() => {
     const demo = isDemo ? buildDemoNotifications(leads, users, demoPersonaId) : [];
+    // Open assigned tasks stay client-derived (small filtered set). New assigns also
+    // write durable rows (lt-task-{id}); durable wins on id collision.
     const fromTasks = buildLeadTaskInboxNotifications(leadTasks, currentUserId, users);
-    const fromActivity = buildActivityInboxNotifications(
-      activityRecords,
-      currentUserId,
-      users,
-      getLeadById,
-    );
-    const derived = filterByPrefs([...demo, ...fromTasks, ...fromActivity]);
-    // Durable rows win on id collision.
+    const derived = filterByPrefs([...demo, ...fromTasks]);
     const byId = new Map<string, DemoNotification>();
     for (const n of derived) byId.set(n.id, n);
     for (const n of durableRows) byId.set(n.id, n);
@@ -156,8 +161,6 @@ export function useWorkspaceInboxNotifications() {
     demoPersonaId,
     leadTasks,
     currentUserId,
-    activityRecords,
-    getLeadById,
     durableRows,
     prefsTick,
   ]);

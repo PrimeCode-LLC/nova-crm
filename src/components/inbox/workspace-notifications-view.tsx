@@ -14,7 +14,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { type DemoNotification, type NotificationKind } from "@/lib/inbox-demo-notifications";
 import { useInboxNotificationOverrides } from "@/stores/inbox-notification-overrides-store";
-import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
+import { useWorkspaceInboxNotifications } from "@/components/providers/workspace-inbox-notifications-provider";
 import {
   Inbox,
   AtSign,

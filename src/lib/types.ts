@@ -790,6 +790,11 @@ export interface Followup {
   description?: string;
   /** Ready-to-send message (Upwork, LinkedIn, email, etc.). */
   messageBody?: string;
+  /**
+   * Live list snapshots omit `messageBody` for performance. When true, the body
+   * exists in Firestore and should be fetched before send/edit (`hydrateFollowupMessageBody`).
+   */
+  hasMessageBody?: boolean;
   /** Subject line when this step is queued/sent as email. */
   emailSubject?: string;
   channel?: FollowupChannel;

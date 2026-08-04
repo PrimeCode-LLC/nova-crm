@@ -102,7 +102,7 @@ export function canAutoScheduleFollowupEmail(
   f: Followup,
   leadChannel: ChannelKey,
 ): boolean {
-  if (!f.messageBody?.trim()) return false;
+  if (!f.messageBody?.trim() && !f.hasMessageBody) return false;
   if (f.scheduledEmailId || f.pausedAt || f.completedAt) return false;
   const resolved = resolveFollowupChannel(f.channel, leadChannel);
   return !REMIND_ONLY_CHANNELS.has(resolved);

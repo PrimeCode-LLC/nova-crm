@@ -81,11 +81,11 @@ export function isFollowupDeliveryIssue(f: { deliveryStatus?: string }): boolean
 export function canTryNowScheduleEmail(
   f: Pick<
     Followup,
-    "messageBody" | "pausedAt" | "completedAt" | "channel" | "scheduledEmailId"
+    "messageBody" | "hasMessageBody" | "pausedAt" | "completedAt" | "channel" | "scheduledEmailId"
   >,
   leadChannel: ChannelKey,
 ): boolean {
-  if (!f.messageBody?.trim() || f.pausedAt || f.completedAt) return false;
+  if (f.pausedAt || f.completedAt) return false;
   return canAutoScheduleFollowupEmail(
     {
       ...f,

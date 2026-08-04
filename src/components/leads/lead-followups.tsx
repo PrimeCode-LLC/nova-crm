@@ -47,6 +47,7 @@ import {
 import { FollowupPlanPausedBanner } from "@/components/leads/followup-plan-paused-banner";
 import { ScheduleFollowupEmailDialog } from "@/components/leads/schedule-followup-email-dialog";
 import { ScheduleSequenceEmailsDialog } from "@/components/leads/schedule-sequence-emails-dialog";
+import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
 import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
@@ -193,6 +194,7 @@ function FollowupRow({
   timeZone: string;
 }) {
   const [expanded, setExpanded] = React.useState(false);
+  const [hydratedBody, setHydratedBody] = React.useState<string | undefined>(f.messageBody);
   const chLabel = channelBadgeLabel(f.channel);
   const isScheduled = Boolean(f.scheduledEmailId && f.emailScheduledAt);
   const isFailed = f.deliveryStatus === "failed";
@@ -206,6 +208,23 @@ function FollowupRow({
     canMutate &&
     Boolean(f.scheduledEmailId) &&
     (isFailed || isRetrying);
+  const bodyText = hydratedBody ?? f.messageBody;
+  const hasBody = Boolean(bodyText?.trim()) || Boolean(f.hasMessageBody);
+
+  React.useEffect(() => {
+    setHydratedBody(f.messageBody);
+  }, [f.id, f.messageBody]);
+
+  React.useEffect(() => {
+    if (!expanded || bodyText?.trim() || !f.hasMessageBody) return;
+    let cancelled = false;
+    void hydrateFollowupMessageBody(f).then((next) => {
+      if (!cancelled && next.messageBody) setHydratedBody(next.messageBody);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, bodyText, f]);
 
   return (
     <li
@@ -274,12 +293,12 @@ function FollowupRow({
                   : ""}
               </Badge>
             )}
-            {!isScheduled && !f.pausedAt && !isFailed && !isRetrying && channelSupportsEmail && f.messageBody ? (
+            {!isScheduled && !f.pausedAt && !isFailed && !isRetrying && channelSupportsEmail && hasBody ? (
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Email-ready
               </Badge>
             ) : null}
-            {!channelSupportsEmail && f.messageBody && !isScheduled ? (
+            {!channelSupportsEmail && hasBody && !isScheduled ? (
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Reminder + copy
               </Badge>
@@ -306,12 +325,15 @@ function FollowupRow({
           {f.description && (
             <p className="text-xs text-muted-foreground truncate mt-0.5">{f.description}</p>
           )}
-          {f.messageBody && !expanded && (
+          {bodyText && !expanded && (
             <p className="text-xs text-muted-foreground truncate mt-0.5 font-mono">
-              {f.messageBody.slice(0, 80)}
-              {f.messageBody.length > 80 ? "…" : ""}
+              {bodyText.slice(0, 80)}
+              {bodyText.length > 80 ? "…" : ""}
             </p>
           )}
+          {!bodyText && f.hasMessageBody && !expanded ? (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">Message available</p>
+          ) : null}
         </div>
         <div className="flex items-center gap-2 shrink-0">
           <UserChip userId={f.ownerId} size="xs" nameOnly />
@@ -324,7 +346,7 @@ function FollowupRow({
             <Clock className="h-3 w-3" />
             {fmtDate(f.dueAt, "MMM d")} · {fmtRelative(f.dueAt)}
           </span>
-          {f.messageBody ? (
+          {hasBody ? (
             <Button
               type="button"
               variant="ghost"
@@ -362,14 +384,14 @@ function FollowupRow({
           ) : null}
         </div>
       </div>
-      {expanded && f.messageBody && (
+      {expanded && bodyText && (
         <div className="mt-2 ml-9 space-y-2 border-t pt-2">
           <pre className="text-xs whitespace-pre-wrap font-mono text-foreground/90 max-h-52 overflow-y-auto">
-            {f.messageBody}
+            {bodyText}
           </pre>
           {channelSupportsEmail ? <OutboundTrailersPreview /> : null}
           <div className="flex flex-wrap items-center gap-2">
-            <CopyBodyButton text={f.messageBody} />
+            <CopyBodyButton text={bodyText} />
             {canRetry ? (
               <Button
                 type="button"
@@ -408,6 +430,9 @@ function FollowupRow({
           </div>
         </div>
       )}
+      {expanded && !bodyText && f.hasMessageBody ? (
+        <p className="mt-2 ml-9 text-xs text-muted-foreground">Loading message…</p>
+      ) : null}
       {(isFailed || isRetrying) && !expanded && canRetry ? (
         <div className="mt-2 ml-9">
           <Button
@@ -771,10 +796,14 @@ export function LeadFollowups({
         stepIndex={stepIndex}
         leadChannel={lead.channel}
         onComplete={(done) => setFollowupCompleted(f.id, done)}
-        onEdit={() => setEditTarget(f)}
+        onEdit={() => {
+          void hydrateFollowupMessageBody(f).then(setEditTarget);
+        }}
         onDelete={() => setDeleteTarget(f)}
         canMutate={mutate}
-        onSchedule={() => setScheduleTarget(f)}
+        onSchedule={() => {
+          void hydrateFollowupMessageBody(f).then(setScheduleTarget);
+        }}
         onCancelSchedule={() => void handleCancelSchedule(f)}
         onRetrySend={() => void handleRetrySend(f)}
         cancellingSchedule={cancellingId === f.id}
@@ -977,7 +1006,9 @@ export function LeadFollowups({
                       size="icon"
                       className="h-8 w-8 shrink-0 text-muted-foreground"
                       aria-label="Edit followup"
-                      onClick={() => setEditTarget(f)}
+                      onClick={() => {
+                        void hydrateFollowupMessageBody(f).then(setEditTarget);
+                      }}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                     </Button>

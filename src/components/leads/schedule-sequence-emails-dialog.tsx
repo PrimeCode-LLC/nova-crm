@@ -23,6 +23,7 @@ import {
 } from "@/lib/email/audience-schedule";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
+import { hydrateFollowupsMessageBodies } from "@/lib/firestore/fetch-followup-message-body-client";
 import {
   autoFixScheduleDates,
   buildDemoMailboxDayLoads,
@@ -207,41 +208,49 @@ export function ScheduleSequenceEmailsDialog({
 
   React.useEffect(() => {
     if (!open) return;
-    const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
-    const priorId =
-      hasPriorSent && priorSender?.mailboxId &&
-      mailboxOptions.some((m) => m.id === priorSender.mailboxId)
-        ? priorSender.mailboxId
-        : "";
-    const defaultId =
-      priorId ||
-      resolveDefaultScheduleMailboxId({
-        mailboxIds: mailboxOptions.map((mb) => mb.id),
-        lastUsedId: prefs.lastMailboxId,
-        activeMailboxId,
-      });
-    setMailboxId(defaultId);
-    setTo(defaultContactRecipientEmail(recipientOptions));
-    setIncludeSignature(true);
-    setIncludeFooter(true);
-    setContinuityMode("continue");
-    setSteps(
-      schedulable.map((f) => ({
-        followupId: f.id,
-        title: f.title,
-        subject: f.emailSubject?.trim() || f.title,
-        scheduledAt: defaultAudienceScheduleDatetimeLocal({
-          preferIso: f.dueAt,
-          timeZone: scheduleTimezone,
-          sendWindowStartHour: sendWindow.startHour,
-          sendWindowEndHour: sendWindow.endHour,
-          spreadKey: f.id,
-        }),
-        body: f.messageBody ?? "",
-        included: true,
-      })),
-    );
-    setSubmitting(false);
+    let cancelled = false;
+    void (async () => {
+      const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+      const priorId =
+        hasPriorSent && priorSender?.mailboxId &&
+        mailboxOptions.some((m) => m.id === priorSender.mailboxId)
+          ? priorSender.mailboxId
+          : "";
+      const defaultId =
+        priorId ||
+        resolveDefaultScheduleMailboxId({
+          mailboxIds: mailboxOptions.map((mb) => mb.id),
+          lastUsedId: prefs.lastMailboxId,
+          activeMailboxId,
+        });
+      const hydrated = await hydrateFollowupsMessageBodies(schedulable);
+      if (cancelled) return;
+      setMailboxId(defaultId);
+      setTo(defaultContactRecipientEmail(recipientOptions));
+      setIncludeSignature(true);
+      setIncludeFooter(true);
+      setContinuityMode("continue");
+      setSteps(
+        hydrated.map((f) => ({
+          followupId: f.id,
+          title: f.title,
+          subject: f.emailSubject?.trim() || f.title,
+          scheduledAt: defaultAudienceScheduleDatetimeLocal({
+            preferIso: f.dueAt,
+            timeZone: scheduleTimezone,
+            sendWindowStartHour: sendWindow.startHour,
+            sendWindowEndHour: sendWindow.endHour,
+            spreadKey: f.id,
+          }),
+          body: f.messageBody ?? "",
+          included: true,
+        })),
+      );
+      setSubmitting(false);
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [
     open,
     recipientOptions,

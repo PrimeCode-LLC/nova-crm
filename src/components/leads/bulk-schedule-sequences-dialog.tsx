@@ -41,6 +41,7 @@ import {
   filterMailboxesSharedWithLeadOwner,
   ownerSharedMailboxSkipReason,
 } from "@/lib/email/owner-shared-mailbox";
+import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
 import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
@@ -578,8 +579,9 @@ export function BulkScheduleSequencesDialog({
       let okCount = 0;
       let lastError = "";
       for (const step of assigned.steps.filter((s) => s.included)) {
-        const followup = schedulable.find((f) => f.id === step.id);
-        if (!followup) continue;
+        const followupRaw = schedulable.find((f) => f.id === step.id);
+        if (!followupRaw) continue;
+        const followup = await hydrateFollowupMessageBody(followupRaw);
         const result = await scheduleFollowupEmailClient({
           followupId: followup.id,
           leadId: lead.id,

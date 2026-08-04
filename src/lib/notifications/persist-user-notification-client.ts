@@ -72,12 +72,42 @@ export async function persistUserNotificationsCreateMany(
   });
   if (!eligible.length) return;
 
-  // Prefer create-if-missing when ids are deterministic (follow-up due alerts).
+  // Prefer create-if-missing when ids are deterministic (follow-up due alerts / task assigns).
   const withIds = eligible.filter((i) => i.id?.trim());
   const withoutIds = eligible.filter((i) => !i.id?.trim());
 
-  for (const input of withIds) {
-    await persistUserNotificationCreate(db, input);
+  const EXIST_CHUNK = 40;
+  for (let i = 0; i < withIds.length; i += EXIST_CHUNK) {
+    const slice = withIds.slice(i, i + EXIST_CHUNK);
+    const snaps = await Promise.all(
+      slice.map((input) => getDoc(userNotificationRef(db, input.id!.trim()))),
+    );
+    const missing = slice.filter((_, idx) => !snaps[idx]?.exists());
+    if (!missing.length) continue;
+    const batch = writeBatch(db);
+    for (const input of missing) {
+      const id = input.id!.trim();
+      const createdAt = input.createdAt ?? new Date().toISOString();
+      batch.set(
+        userNotificationRef(db, id),
+        stripUndefined({
+          organizationId: input.organizationId,
+          recipientId: input.recipientId.trim(),
+          kind: input.kind,
+          actorId: input.actorId.trim(),
+          message: input.message,
+          target: input.target,
+          targetHref: input.targetHref,
+          entityType: input.entityType,
+          entityId: input.entityId,
+          prefKey: input.prefKey,
+          createdAt,
+          readAt: null,
+          dismissedAt: null,
+        }),
+      );
+    }
+    await batch.commit();
   }
 
   if (!withoutIds.length) return;

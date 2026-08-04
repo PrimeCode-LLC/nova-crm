@@ -180,7 +180,7 @@ export function computeDashboardWorkflowMetrics(input: {
     readyUnscheduledSteps: openUnpausedFollowups.filter(
       (followup) =>
         isFollowupActionable(followup) &&
-        Boolean(followup.messageBody?.trim()) &&
+        (Boolean(followup.messageBody?.trim()) || Boolean(followup.hasMessageBody)) &&
         !followup.scheduledEmailId,
     ).length,
     sentInRange: input.followups.filter((followup) => {

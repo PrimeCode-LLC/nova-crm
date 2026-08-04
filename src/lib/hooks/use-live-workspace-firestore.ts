@@ -3,9 +3,12 @@
 import * as React from "react";
 import {
   collection,
+  limit,
   onSnapshot,
+  orderBy,
   query,
   where,
+  type QueryConstraint,
   type Unsubscribe,
 } from "firebase/firestore";
 import { getFirebaseDb } from "@/lib/firebase/client";
@@ -38,8 +41,20 @@ import type {
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 
+/** Cap history listeners so WebChannel does not load unbounded org history into every client. */
+const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
+const ORG_ACTIVITY_EVENTS_LIVE_LIMIT = 120;
+const TIMELINE_EVENTS_LIVE_LIMIT = 400;
+
+/** Collections that must arrive before CRM pages leave the loading skeleton. */
+export type LiveWorkspaceCoreKey = "users" | "leads" | "followups";
+
+export type LiveWorkspaceCoreReady = Record<LiveWorkspaceCoreKey, boolean>;
+
 export type LiveWorkspaceFirestoreState = {
   loading: boolean;
+  /** Per-collection first snapshot received (success or empty). */
+  coreReady: LiveWorkspaceCoreReady;
   error: Error | null;
   users: User[];
   leads: Lead[];
@@ -60,8 +75,15 @@ export type LiveWorkspaceFirestoreState = {
   crmLabels: CrmLabel[];
 };
 
+const coreReadyEmpty: LiveWorkspaceCoreReady = {
+  users: false,
+  leads: false,
+  followups: false,
+};
+
 const empty: LiveWorkspaceFirestoreState = {
   loading: true,
+  coreReady: coreReadyEmpty,
   error: null,
   users: [],
   leads: [],
@@ -81,6 +103,14 @@ const empty: LiveWorkspaceFirestoreState = {
   campaigns: [],
   crmLabels: [],
 };
+
+function isCoreKey(key: string): key is LiveWorkspaceCoreKey {
+  return key === "users" || key === "leads" || key === "followups";
+}
+
+function coreLoadingComplete(ready: LiveWorkspaceCoreReady): boolean {
+  return ready.users && ready.leads && ready.followups;
+}
 
 function asUser(id: string, raw: Record<string, unknown>): User {
   return {
@@ -234,6 +264,8 @@ function asNote(id: string, raw: Record<string, unknown>): Note {
 }
 
 function asFollowup(id: string, raw: Record<string, unknown>): Followup {
+  const rawBody = typeof raw.messageBody === "string" ? raw.messageBody : undefined;
+  const hasMessageBody = Boolean(rawBody?.trim());
   return {
     id,
     leadId: optionalNonEmptyString(raw.leadId),
@@ -246,7 +278,9 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     ownerId: String(raw.ownerId ?? ""),
     priority: (raw.priority as Followup["priority"]) ?? "medium",
     auto: Boolean(raw.auto),
-    messageBody: typeof raw.messageBody === "string" ? raw.messageBody : undefined,
+    // Omit full email HTML from live CRM React state — hydrate on send/edit.
+    messageBody: undefined,
+    hasMessageBody: hasMessageBody || undefined,
     emailSubject: typeof raw.emailSubject === "string" ? raw.emailSubject : undefined,
     channel: typeof raw.channel === "string" ? (raw.channel as Followup["channel"]) : undefined,
     planId: typeof raw.planId === "string" ? raw.planId : undefined,
@@ -451,6 +485,7 @@ export function useLiveWorkspaceFirestore(
       listenerErrorsRef.current.clear();
       setState({
         loading: false,
+        coreReady: { users: true, leads: true, followups: true },
         error: null,
         users: [],
         leads: [],
@@ -480,6 +515,7 @@ export function useLiveWorkspaceFirestore(
       listenerErrorsRef.current.clear();
       setState({
         loading: false,
+        coreReady: { users: true, leads: true, followups: true },
         error: e instanceof Error ? e : new Error(String(e)),
         users: [],
         leads: [],
@@ -503,7 +539,12 @@ export function useLiveWorkspaceFirestore(
     }
 
     listenerErrorsRef.current.clear();
-    setState((s) => ({ ...s, loading: true, error: null }));
+    setState((s) => ({
+      ...s,
+      loading: true,
+      coreReady: coreReadyEmpty,
+      error: null,
+    }));
 
     const memberScope = Boolean(narrowToMemberCrm && viewerUid);
     const uid = viewerUid ?? "";
@@ -529,21 +570,37 @@ export function useLiveWorkspaceFirestore(
       value: LiveWorkspaceFirestoreState[K],
     ) => {
       listenerErrorsRef.current.delete(listenerKey);
-      setState((prev) => ({
-        ...prev,
-        [dataKey]: value,
-        loading: false,
-        error: firstAggregateError(),
-      }));
+      setState((prev) => {
+        const nextCore = { ...prev.coreReady };
+        if (isCoreKey(String(dataKey))) {
+          nextCore[String(dataKey) as LiveWorkspaceCoreKey] = true;
+        }
+        return {
+          ...prev,
+          [dataKey]: value,
+          coreReady: nextCore,
+          loading: !coreLoadingComplete(nextCore),
+          error: firstAggregateError(),
+        };
+      });
     };
 
     const applyListenerError = (listenerKey: string, err: Error) => {
       listenerErrorsRef.current.set(listenerKey, err);
-      setState((prev) => ({
-        ...prev,
-        loading: false,
-        error: firstAggregateError(),
-      }));
+      setState((prev) => {
+        // Treat errors on core collections as "received" so the UI can leave the skeleton.
+        const nextCore = { ...prev.coreReady };
+        const baseKey = listenerKey.split(":")[0] ?? listenerKey;
+        if (isCoreKey(baseKey)) {
+          nextCore[baseKey] = true;
+        }
+        return {
+          ...prev,
+          coreReady: nextCore,
+          loading: !coreLoadingComplete(nextCore),
+          error: firstAggregateError(),
+        };
+      });
     };
 
     const unsubs: Unsubscribe[] = [];
@@ -643,12 +700,26 @@ export function useLiveWorkspaceFirestore(
         : never,
       managerField: "ownerManagerIds" | "leadOwnerManagerIds" | "userManagerIds",
       ownerField: "ownerId" | "leadOwnerId" | "userId",
+      opts?: {
+        /** When set with limitCount, prefers recent docs (requires composite indexes). */
+        orderByField?: string;
+        limitCount?: number;
+      },
     ) => {
       type Row = LiveWorkspaceFirestoreState[K] extends (infer R)[] ? R : never;
+      const withCap = (constraints: QueryConstraint[]) => {
+        const next = [...constraints];
+        if (opts?.orderByField) next.push(orderBy(opts.orderByField, "desc"));
+        if (opts?.limitCount) next.push(limit(opts.limitCount));
+        return next;
+      };
       if (!memberScope) {
         unsubs.push(
           onSnapshot(
-            query(collection(db, collectionName), where("organizationId", "==", organizationId)),
+            query(
+              collection(db, collectionName),
+              ...withCap([where("organizationId", "==", organizationId)]),
+            ),
             (snap) => {
               applySnapshot(
                 String(dataKey),
@@ -678,10 +749,10 @@ export function useLiveWorkspaceFirestore(
           Array.from(byId.values()) as unknown as LiveWorkspaceFirestoreState[K],
         );
       };
-      const sub = (key: string, q: ReturnType<typeof query>) => {
+      const sub = (key: string, constraints: QueryConstraint[]) => {
         unsubs.push(
           onSnapshot(
-            q,
+            query(collection(db, collectionName), ...withCap(constraints)),
             (snap) => {
               slices.set(
                 key,
@@ -695,22 +766,14 @@ export function useLiveWorkspaceFirestore(
           ),
         );
       };
-      sub(
-        "owner",
-        query(
-          collection(db, collectionName),
-          where("organizationId", "==", organizationId),
-          where(ownerField, "==", listOwnerId),
-        ),
-      );
-      sub(
-        "managers",
-        query(
-          collection(db, collectionName),
-          where("organizationId", "==", organizationId),
-          where(managerField, "array-contains", uid),
-        ),
-      );
+      sub("owner", [
+        where("organizationId", "==", organizationId),
+        where(ownerField, "==", listOwnerId),
+      ]);
+      sub("managers", [
+        where("organizationId", "==", organizationId),
+        where(managerField, "array-contains", uid),
+      ]);
     };
 
     subscribeOwnedByOwnerOrManager("accounts", COLLECTIONS.accounts, asAccount, "ownerManagerIds", "ownerId");
@@ -731,6 +794,7 @@ export function useLiveWorkspaceFirestore(
       asTimelineEvent,
       "leadOwnerManagerIds",
       "leadOwnerId",
+      { orderByField: "createdAt", limitCount: TIMELINE_EVENTS_LIVE_LIMIT },
     );
     subscribeOwnedByOwnerOrManager(
       "activityCounters",
@@ -745,6 +809,7 @@ export function useLiveWorkspaceFirestore(
       asActivityRecord,
       "userManagerIds",
       "userId",
+      { orderByField: "occurredAt", limitCount: ACTIVITY_RECORDS_LIVE_LIMIT },
     );
 
     // Split note listeners so rules can prove each result set.
@@ -865,6 +930,8 @@ export function useLiveWorkspaceFirestore(
     const qOrgActivity = query(
       collection(db, COLLECTIONS.orgActivityEvents),
       where("organizationId", "==", organizationId),
+      orderBy("createdAt", "desc"),
+      limit(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
     );
     unsubs.push(
       onSnapshot(

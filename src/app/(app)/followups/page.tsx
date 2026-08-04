@@ -51,6 +51,7 @@ import {
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
+import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
 import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
@@ -82,6 +83,7 @@ import {
 } from "@/lib/followup-due-display";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   Select,
   SelectContent,
@@ -116,6 +118,10 @@ const RescheduleFollowupsDialog = dynamic(
   { ssr: false },
 );
 
+const COMPLETED_PAGE_SIZE = 100;
+const VIRTUALIZE_THRESHOLD = 40;
+const ROW_ESTIMATE_PX = 64;
+
 /**
  * Buckets relative to a chosen calendar day (org/browser TZ) and the ISO week
  * containing that day (Mon–Sun).
@@ -149,7 +155,7 @@ export default function FollowupsPage() {
   const {
     followups: allFollowups,
     isDemo,
-    workspaceLoading,
+    followupsReady,
     leads,
     users,
     currentUserId,
@@ -174,6 +180,8 @@ export default function FollowupsPage() {
   const [rescheduleOpen, setRescheduleOpen] = React.useState(false);
   const [retryConfirmOpen, setRetryConfirmOpen] = React.useState(false);
   const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [completedVisible, setCompletedVisible] = React.useState(COMPLETED_PAGE_SIZE);
+  const [laterCollapsed, setLaterCollapsed] = React.useState(true);
 
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
@@ -235,43 +243,93 @@ export default function FollowupsPage() {
     [currentUserId, viewer, ws],
   );
 
-  const open = followups.filter((f) => {
-    if (f.completedAt) return false;
-    // Keep delivery failures visible in the queue; other terminal states stay out of due buckets.
-    if (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry") return true;
-    return isFollowupActionable(f);
-  });
-  const done = followups.filter((f) => f.completedAt);
+  const open = React.useMemo(
+    () =>
+      followups.filter((f) => {
+        if (f.completedAt) return false;
+        // Keep delivery failures visible in the queue; other terminal states stay out of due buckets.
+        if (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry") return true;
+        return isFollowupActionable(f);
+      }),
+    [followups],
+  );
+  const done = React.useMemo(
+    () =>
+      followups
+        .filter((f) => f.completedAt)
+        .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
+    [followups],
+  );
+  const doneVisible = React.useMemo(
+    () => done.slice(0, completedVisible),
+    [done, completedVisible],
+  );
 
-  const failed = open.filter((f) => isFollowupDeliveryIssue(f));
-  const timedOpen = open.filter((f) => !isFollowupDeliveryIssue(f));
+  const failed = React.useMemo(
+    () => open.filter((f) => isFollowupDeliveryIssue(f)),
+    [open],
+  );
+  const timedOpen = React.useMemo(
+    () => open.filter((f) => !isFollowupDeliveryIssue(f)),
+    [open],
+  );
 
-  const overdue = timedOpen.filter(
-    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue",
+  const overdue = React.useMemo(
+    () =>
+      timedOpen.filter(
+        (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue",
+      ),
+    [timedOpen, viewDateYmd, timeZone],
   );
-  const today = timedOpen.filter(
-    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today",
+  const today = React.useMemo(
+    () =>
+      timedOpen.filter(
+        (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today",
+      ),
+    [timedOpen, viewDateYmd, timeZone],
   );
-  const thisWeek = timedOpen.filter(
-    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "thisWeek",
+  const thisWeek = React.useMemo(
+    () =>
+      timedOpen.filter(
+        (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "thisWeek",
+      ),
+    [timedOpen, viewDateYmd, timeZone],
   );
-  const later = timedOpen.filter(
-    (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "later",
+  const later = React.useMemo(
+    () =>
+      timedOpen.filter(
+        (f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "later",
+      ),
+    [timedOpen, viewDateYmd, timeZone],
   );
 
   // KPI overdue includes failed sends that are also past due, so counts stay familiar.
-  const overdueKpiCount =
-    overdue.length +
-    failed.filter((f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue")
-      .length;
-  const todayKpiCount =
-    today.length +
-    failed.filter((f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today")
-      .length;
+  const overdueKpiCount = React.useMemo(
+    () =>
+      overdue.length +
+      failed.filter((f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "overdue")
+        .length,
+    [overdue.length, failed, viewDateYmd, timeZone],
+  );
+  const todayKpiCount = React.useMemo(
+    () =>
+      today.length +
+      failed.filter((f) => categorizeFollowupBucket(f.dueAt, viewDateYmd, timeZone) === "today")
+        .length,
+    [today.length, failed, viewDateYmd, timeZone],
+  );
 
   React.useEffect(() => {
     setSelectedIds(new Set());
   }, [tab, bucketFilter, ownerScope, viewDateYmd]);
+
+  React.useEffect(() => {
+    setCompletedVisible(COMPLETED_PAGE_SIZE);
+  }, [ownerScope, tab]);
+
+  React.useEffect(() => {
+    if (later.length > VIRTUALIZE_THRESHOLD) setLaterCollapsed(true);
+  }, [viewDateYmd, ownerScope]); // eslint-disable-line react-hooks/exhaustive-deps -- reset collapse on agenda/owner change only
 
   const selectedFollowups = React.useMemo(
     () => open.filter((f) => selectedIds.has(f.id)),
@@ -475,11 +533,12 @@ export default function FollowupsPage() {
     let scheduleIndex = 0;
     const now = Date.now();
 
-    for (const f of targets) {
-      if (!canMutateRow(f)) {
+    for (const raw of targets) {
+      if (!canMutateRow(raw)) {
         skipped += 1;
         continue;
       }
+      const f = await hydrateFollowupMessageBody(raw);
       const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
       const plan = planFollowupTryNow(f, lead?.channel);
 
@@ -717,13 +776,20 @@ export default function FollowupsPage() {
     setRescheduleOpen(true);
   }
 
+  function handleRequestEdit(f: Followup) {
+    void (async () => {
+      const hydrated = await hydrateFollowupMessageBody(f);
+      setEditTarget(hydrated);
+    })();
+  }
+
   const groupProps = {
     getLeadById: ws.getLeadById,
     onToggleComplete: setFollowupCompleted,
     onRowNavigate: (leadId: string) => router.push(`/leads/${leadId}`),
     canMutate: canMutateRow,
     onRequestDelete: setDeleteTarget,
-    onRequestEdit: setEditTarget,
+    onRequestEdit: handleRequestEdit,
     selectedIds,
     onToggleSelect: toggleSelect,
     onToggleSelectAll: toggleSelectAll,
@@ -746,7 +812,7 @@ export default function FollowupsPage() {
         }
       />
       <PageBody className={cn(selectedIds.size > 0 && tab === "open" && "pb-24")}>
-        {workspaceLoading ? (
+        {!followupsReady ? (
           <WorkspacePageSkeleton />
         ) : !isDemo && allFollowups.length === 0 ? (
           <WorkspaceEmptyHint title="No followups in workspace" />
@@ -976,15 +1042,41 @@ export default function FollowupsPage() {
                 )}
                 {bucketFilter === "all" && (
                   <div id="followups-bucket-later">
-                    <FollowupGroup
-                      title="Later"
-                      description="Scheduled further out."
-                      tone="neutral"
-                      bucket="later"
-                      items={later}
-                      empty="Nothing scheduled further out."
-                      {...groupProps}
-                    />
+                    {later.length > VIRTUALIZE_THRESHOLD && laterCollapsed ? (
+                      <Card>
+                        <CardHeader className="pb-2">
+                          <CardTitle className="text-sm">
+                            Later
+                            <Badge variant="secondary" className="ml-2 h-4 px-1 text-[10px]">
+                              {later.length}
+                            </Badge>
+                          </CardTitle>
+                          <CardDescription className="text-xs">
+                            Scheduled further out — collapsed for speed.
+                          </CardDescription>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setLaterCollapsed(false)}
+                          >
+                            Show {later.length} later followups
+                          </Button>
+                        </CardContent>
+                      </Card>
+                    ) : (
+                      <FollowupGroup
+                        title="Later"
+                        description="Scheduled further out."
+                        tone="neutral"
+                        bucket="later"
+                        items={later}
+                        empty="Nothing scheduled further out."
+                        {...groupProps}
+                      />
+                    )}
                   </div>
                 )}
               </TabsContent>
@@ -992,7 +1084,7 @@ export default function FollowupsPage() {
               <TabsContent value="completed" className="mt-4">
                 <Card>
                   <CardContent className="p-0 divide-y">
-                    {done.map((f) => {
+                    {doneVisible.map((f) => {
                       const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
                       return (
                         <div
@@ -1053,7 +1145,7 @@ export default function FollowupsPage() {
                                 aria-label="Edit followup"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  setEditTarget(f);
+                                  handleRequestEdit(f);
                                 }}
                               >
                                 <Pencil className="h-3.5 w-3.5" />
@@ -1082,6 +1174,20 @@ export default function FollowupsPage() {
                         Nothing completed yet.
                       </div>
                     )}
+                    {done.length > doneVisible.length ? (
+                      <div className="p-3 flex justify-center">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() =>
+                            setCompletedVisible((n) => n + COMPLETED_PAGE_SIZE)
+                          }
+                        >
+                          Show more ({done.length - doneVisible.length} remaining)
+                        </Button>
+                      </div>
+                    ) : null}
                   </CardContent>
                 </Card>
               </TabsContent>
@@ -1272,10 +1378,20 @@ function FollowupGroup({
         ? "border-warning/30 bg-warning/5"
         : "";
 
-  const selectableIds = items.map((f) => f.id);
+  const selectableIds = React.useMemo(() => items.map((f) => f.id), [items]);
   const selectedInGroup = selectableIds.filter((id) => selectedIds.has(id));
   const allSelected = selectableIds.length > 0 && selectedInGroup.length === selectableIds.length;
   const someSelected = selectedInGroup.length > 0 && !allSelected;
+
+  const parentRef = React.useRef<HTMLDivElement>(null);
+  const useVirtual = items.length > VIRTUALIZE_THRESHOLD;
+  const virtualizer = useVirtualizer({
+    count: items.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => ROW_ESTIMATE_PX,
+    overscan: 8,
+    enabled: useVirtual,
+  });
 
   return (
     <Card className={cn(toneRing)}>
@@ -1306,189 +1422,282 @@ function FollowupGroup({
       <CardContent className="pt-0">
         {items.length === 0 ? (
           <p className="text-sm text-muted-foreground py-2">{empty}</p>
+        ) : useVirtual ? (
+          <div
+            ref={parentRef}
+            className="max-h-[min(70vh,36rem)] overflow-y-auto overscroll-contain"
+          >
+            <ul
+              className="relative w-full"
+              style={{ height: `${virtualizer.getTotalSize()}px` }}
+            >
+              {virtualizer.getVirtualItems().map((virtualRow) => {
+                const f = items[virtualRow.index]!;
+                return (
+                  <li
+                    key={f.id}
+                    className="absolute left-0 top-0 w-full border-b"
+                    style={{
+                      height: `${virtualRow.size}px`,
+                      transform: `translateY(${virtualRow.start}px)`,
+                    }}
+                  >
+                    <FollowupRow
+                      f={f}
+                      bucket={bucket}
+                      lead={f.leadId ? getLeadById(f.leadId) : undefined}
+                      selected={selectedIds.has(f.id)}
+                      mutate={canMutate(f)}
+                      timeZone={timeZone}
+                      isViewToday={isViewToday}
+                      busy={busy}
+                      onToggleComplete={onToggleComplete}
+                      onRowNavigate={onRowNavigate}
+                      onToggleSelect={onToggleSelect}
+                      onRequestDelete={onRequestDelete}
+                      onRequestEdit={onRequestEdit}
+                      onRequestTryNow={onRequestTryNow}
+                      onRequestReschedule={onRequestReschedule}
+                    />
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         ) : (
           <ul className="divide-y">
-            {items.map((f) => {
-              const lead = f.leadId ? getLeadById(f.leadId) : undefined;
-              const done = Boolean(f.completedAt);
-              const mutate = canMutate(f);
-              const selected = selectedIds.has(f.id);
-              const showTryNow =
-                mutate &&
-                (bucket === "overdue" ||
-                  bucket === "today" ||
-                  bucket === "failed" ||
-                  isFollowupRetryable(f));
-              const isFailed = f.deliveryStatus === "failed";
-              const isRetrying = f.deliveryStatus === "needs_retry";
-              const due = formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
-              return (
-                <li
-                  key={f.id}
-                  className={cn(
-                    "flex items-center gap-3 py-2.5 -mx-1 px-1 rounded-md transition-colors",
-                    lead && "cursor-pointer hover:bg-muted/40",
-                    selected && "bg-muted/50",
-                  )}
-                  role={lead ? "button" : undefined}
-                  tabIndex={lead ? 0 : undefined}
-                  onClick={(e) => {
-                    if (
-                      (e.target as HTMLElement).closest(
-                        "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-trynow], [data-followup-reschedule]",
-                      )
-                    )
-                      return;
-                    if (f.leadId) onRowNavigate(f.leadId);
-                  }}
-                  onKeyDown={(e) => {
-                    if (!f.leadId) return;
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      onRowNavigate(f.leadId);
-                    }
-                  }}
-                >
-                  <Checkbox
-                    checked={selected}
-                    onCheckedChange={(v) => onToggleSelect(f.id, v === true)}
-                    aria-label={`Select ${f.title}`}
-                  />
-                  <Checkbox
-                    checked={done}
-                    onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
-                    aria-label={done ? `Mark ${f.title} incomplete` : `Mark ${f.title} complete`}
-                  />
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <span className="text-sm font-medium truncate">{f.title}</span>
-                      <Badge
-                        className={cn(
-                          "rounded-md border-transparent text-[10px]",
-                          PRIORITY_TONE[f.priority].className,
-                        )}
-                      >
-                        {PRIORITY_TONE[f.priority].label}
-                      </Badge>
-                      {isFailed ? (
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] gap-1 border-destructive/50 text-destructive"
-                        >
-                          <MailWarning className="h-2.5 w-2.5" />
-                          Send failed
-                        </Badge>
-                      ) : null}
-                      {isRetrying ? (
-                        <Badge
-                          variant="outline"
-                          className="text-[10px] gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400"
-                        >
-                          <RefreshCw className="h-2.5 w-2.5" />
-                          Retrying
-                        </Badge>
-                      ) : null}
-                      {f.auto && (
-                        <Badge variant="outline" className="text-[10px] gap-1">
-                          <Sparkles className="h-2.5 w-2.5" /> Auto
-                        </Badge>
-                      )}
-                    </div>
-                    {lead && (
-                      <Link
-                        href={`/leads/${lead.id}`}
-                        className="text-xs text-muted-foreground hover:text-primary truncate block mt-0.5"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        {lead.contactName} · {lead.companyName}
-                      </Link>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <UserChip userId={f.ownerId} size="xs" nameOnly />
-                    <span
-                      className={cn(
-                        "text-xs tabular-nums whitespace-nowrap",
-                        bucket === "overdue" || bucket === "failed"
-                          ? "text-destructive"
-                          : due.soon
-                            ? "text-amber-600 dark:text-amber-400"
-                            : "text-muted-foreground",
-                      )}
-                    >
-                      {due.label}
-                    </span>
-                    {showTryNow ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        data-followup-trynow
-                        disabled={busy}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          onRequestTryNow(f);
-                        }}
-                      >
-                        <RefreshCw className="h-3 w-3" />
-                        Try now
-                      </Button>
-                    ) : null}
-                    {mutate ? (
-                      <>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground"
-                          data-followup-reschedule
-                          aria-label="Reschedule followup"
-                          disabled={busy}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRequestReschedule(f);
-                          }}
-                        >
-                          <CalendarClock className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground"
-                          data-followup-edit
-                          aria-label="Edit followup"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRequestEdit(f);
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                        </Button>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                          data-followup-delete
-                          aria-label="Delete followup"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            onRequestDelete(f);
-                          }}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </>
-                    ) : null}
-                  </div>
-                </li>
-              );
-            })}
+            {items.map((f) => (
+              <li key={f.id}>
+                <FollowupRow
+                  f={f}
+                  bucket={bucket}
+                  lead={f.leadId ? getLeadById(f.leadId) : undefined}
+                  selected={selectedIds.has(f.id)}
+                  mutate={canMutate(f)}
+                  timeZone={timeZone}
+                  isViewToday={isViewToday}
+                  busy={busy}
+                  onToggleComplete={onToggleComplete}
+                  onRowNavigate={onRowNavigate}
+                  onToggleSelect={onToggleSelect}
+                  onRequestDelete={onRequestDelete}
+                  onRequestEdit={onRequestEdit}
+                  onRequestTryNow={onRequestTryNow}
+                  onRequestReschedule={onRequestReschedule}
+                />
+              </li>
+            ))}
           </ul>
         )}
       </CardContent>
     </Card>
   );
 }
+
+const FollowupRow = React.memo(function FollowupRow({
+  f,
+  bucket,
+  lead,
+  selected,
+  mutate,
+  timeZone,
+  isViewToday,
+  busy,
+  onToggleComplete,
+  onRowNavigate,
+  onToggleSelect,
+  onRequestDelete,
+  onRequestEdit,
+  onRequestTryNow,
+  onRequestReschedule,
+}: {
+  f: Followup;
+  bucket: FollowupDueBucket;
+  lead: Lead | undefined;
+  selected: boolean;
+  mutate: boolean;
+  timeZone: string;
+  isViewToday: boolean;
+  busy: boolean;
+  onToggleComplete: (id: string, completed: boolean) => void;
+  onRowNavigate: (leadId: string) => void;
+  onToggleSelect: (id: string, selected: boolean) => void;
+  onRequestDelete: (f: Followup) => void;
+  onRequestEdit: (f: Followup) => void;
+  onRequestTryNow: (f: Followup) => void;
+  onRequestReschedule: (f: Followup) => void;
+}) {
+  const done = Boolean(f.completedAt);
+  const showTryNow =
+    mutate &&
+    (bucket === "overdue" ||
+      bucket === "today" ||
+      bucket === "failed" ||
+      isFollowupRetryable(f));
+  const isFailed = f.deliveryStatus === "failed";
+  const isRetrying = f.deliveryStatus === "needs_retry";
+  const due = formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
+
+  return (
+    <div
+      className={cn(
+        "flex h-full items-center gap-3 py-2.5 -mx-1 px-1 rounded-md transition-colors",
+        lead && "cursor-pointer hover:bg-muted/40",
+        selected && "bg-muted/50",
+      )}
+      role={lead ? "button" : undefined}
+      tabIndex={lead ? 0 : undefined}
+      onClick={(e) => {
+        if (
+          (e.target as HTMLElement).closest(
+            "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-trynow], [data-followup-reschedule]",
+          )
+        )
+          return;
+        if (f.leadId) onRowNavigate(f.leadId);
+      }}
+      onKeyDown={(e) => {
+        if (!f.leadId) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onRowNavigate(f.leadId);
+        }
+      }}
+    >
+      <Checkbox
+        checked={selected}
+        onCheckedChange={(v) => onToggleSelect(f.id, v === true)}
+        aria-label={`Select ${f.title}`}
+      />
+      <Checkbox
+        checked={done}
+        onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
+        aria-label={done ? `Mark ${f.title} incomplete` : `Mark ${f.title} complete`}
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2 flex-wrap">
+          <span className="text-sm font-medium truncate">{f.title}</span>
+          <Badge
+            className={cn(
+              "rounded-md border-transparent text-[10px]",
+              PRIORITY_TONE[f.priority].className,
+            )}
+          >
+            {PRIORITY_TONE[f.priority].label}
+          </Badge>
+          {isFailed ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] gap-1 border-destructive/50 text-destructive"
+            >
+              <MailWarning className="h-2.5 w-2.5" />
+              Send failed
+            </Badge>
+          ) : null}
+          {isRetrying ? (
+            <Badge
+              variant="outline"
+              className="text-[10px] gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400"
+            >
+              <RefreshCw className="h-2.5 w-2.5" />
+              Retrying
+            </Badge>
+          ) : null}
+          {f.auto && (
+            <Badge variant="outline" className="text-[10px] gap-1">
+              <Sparkles className="h-2.5 w-2.5" /> Auto
+            </Badge>
+          )}
+        </div>
+        {lead && (
+          <Link
+            href={`/leads/${lead.id}`}
+            className="text-xs text-muted-foreground hover:text-primary truncate block mt-0.5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {lead.contactName} · {lead.companyName}
+          </Link>
+        )}
+      </div>
+      <div className="flex items-center gap-2 shrink-0">
+        <UserChip userId={f.ownerId} size="xs" nameOnly />
+        <span
+          className={cn(
+            "text-xs tabular-nums whitespace-nowrap",
+            bucket === "overdue" || bucket === "failed"
+              ? "text-destructive"
+              : due.soon
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground",
+          )}
+        >
+          {due.label}
+        </span>
+        {showTryNow ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-7 px-2 text-xs"
+            data-followup-trynow
+            disabled={busy}
+            onClick={(e) => {
+              e.stopPropagation();
+              onRequestTryNow(f);
+            }}
+          >
+            <RefreshCw className="h-3 w-3" />
+            Try now
+          </Button>
+        ) : null}
+        {mutate ? (
+          <>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              data-followup-reschedule
+              aria-label="Reschedule followup"
+              disabled={busy}
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestReschedule(f);
+              }}
+            >
+              <CalendarClock className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground"
+              data-followup-edit
+              aria-label="Edit followup"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestEdit(f);
+              }}
+            >
+              <Pencil className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-8 w-8 text-muted-foreground hover:text-destructive"
+              data-followup-delete
+              aria-label="Delete followup"
+              onClick={(e) => {
+                e.stopPropagation();
+                onRequestDelete(f);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </>
+        ) : null}
+      </div>
+    </div>
+  );
+});

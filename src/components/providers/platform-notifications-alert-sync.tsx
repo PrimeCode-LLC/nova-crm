@@ -3,7 +3,7 @@
 import * as React from "react";
 import { usePathname } from "next/navigation";
 import { toast } from "sonner";
-import { useWorkspaceInboxNotifications } from "@/hooks/use-workspace-inbox-notifications";
+import { useWorkspaceInboxNotifications } from "@/components/providers/workspace-inbox-notifications-provider";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 
 /**
