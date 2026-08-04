@@ -57,6 +57,7 @@ import {
   ChevronRight,
   Columns3,
   Filter,
+  Loader2,
   MoreHorizontal,
   Search,
   Plus,
@@ -146,6 +147,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
 
 /** Column filter token: leads with no outreach profile assigned. */
 const PROFILE_FILTER_NONE = "__none__";
@@ -605,6 +607,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [archiveOpen, setArchiveOpen] = React.useState(false);
   const [archiveLeadIds, setArchiveLeadIds] = React.useState<string[]>([]);
   const [archiveBusy, setArchiveBusy] = React.useState(false);
+  const [archiveProgressDone, setArchiveProgressDone] = React.useState(0);
   const [markLostOpen, setMarkLostOpen] = React.useState(false);
   const [markLostLeadIds, setMarkLostLeadIds] = React.useState<string[]>([]);
   const [markLostBusy, setMarkLostBusy] = React.useState(false);
@@ -633,6 +636,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         return;
       }
       setArchiveLeadIds(ids);
+      setArchiveProgressDone(0);
       setArchiveOpen(true);
     },
     [isDemo, canDeleteLeads],
@@ -661,22 +665,25 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
   const confirmArchive = React.useCallback(async () => {
     if (!archiveLeadIds.length) return;
+    const total = archiveLeadIds.length;
     setArchiveBusy(true);
+    setArchiveProgressDone(0);
     let removed = 0;
     for (const id of archiveLeadIds) {
       if (await deleteLead(id, { quiet: true })) removed += 1;
+      setArchiveProgressDone((done) => done + 1);
     }
     setArchiveBusy(false);
     if (removed > 0) {
-      const n = archiveLeadIds.length;
       toast.success(
         removed === 1 ? "Lead deleted" : `Deleted ${removed} lead${removed === 1 ? "" : "s"}`,
-        removed < n
-          ? { description: `${n - removed} could not be removed. Check permissions or try again.` }
+        removed < total
+          ? { description: `${total - removed} could not be removed. Check permissions or try again.` }
           : undefined,
       );
       setArchiveOpen(false);
       setArchiveLeadIds([]);
+      setArchiveProgressDone(0);
       setRowSelection({});
     } else {
       toast.error("Could not delete", {
@@ -1531,11 +1538,14 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         onOpenChange={(o) => {
           if (!archiveBusy) {
             setArchiveOpen(o);
-            if (!o) setArchiveLeadIds([]);
+            if (!o) {
+              setArchiveLeadIds([]);
+              setArchiveProgressDone(0);
+            }
           }
         }}
       >
-        <AlertDialogContent>
+        <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>
               {archiveLeadIds.length === 1
@@ -1548,6 +1558,57 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 : "These leads will be permanently removed from your workspace. Notes and activity for them will no longer appear. This cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {archiveBusy && archiveLeadIds.length > 0 ? (
+            <div className="space-y-3">
+              {archiveLeadIds.length > 1 ? (
+                <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-center">
+                  <div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {archiveLeadIds.length}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Total</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-semibold tabular-nums text-destructive">
+                      {archiveProgressDone}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Deleted</div>
+                  </div>
+                  <div>
+                    <div className="text-lg font-semibold tabular-nums">
+                      {Math.max(0, archiveLeadIds.length - archiveProgressDone)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Remaining</div>
+                  </div>
+                </div>
+              ) : null}
+              <Progress
+                value={
+                  archiveLeadIds.length > 0
+                    ? Math.round((archiveProgressDone / archiveLeadIds.length) * 100)
+                    : 0
+                }
+                className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
+              >
+                <ProgressLabel className="text-xs text-muted-foreground">
+                  {archiveProgressDone >= archiveLeadIds.length
+                    ? "Finishing…"
+                    : "Deleting leads…"}
+                </ProgressLabel>
+                <ProgressValue className="text-xs">
+                  {() =>
+                    archiveLeadIds.length > 1
+                      ? `${archiveProgressDone} / ${archiveLeadIds.length} · ${Math.round(
+                          (archiveProgressDone / archiveLeadIds.length) * 100,
+                        )}%`
+                      : `${Math.round(
+                          (archiveProgressDone / archiveLeadIds.length) * 100,
+                        )}%`
+                  }
+                </ProgressValue>
+              </Progress>
+            </div>
+          ) : null}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={archiveBusy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
@@ -1557,11 +1618,20 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 void confirmArchive();
               }}
             >
-              {archiveBusy
-                ? "Deleting…"
-                : archiveLeadIds.length === 1
-                  ? "Delete"
-                  : "Delete all"}
+              {archiveBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  {archiveLeadIds.length > 1
+                    ? `Deleting ${Math.round(
+                        (archiveProgressDone / Math.max(1, archiveLeadIds.length)) * 100,
+                      )}%`
+                    : "Deleting…"}
+                </>
+              ) : archiveLeadIds.length === 1 ? (
+                "Delete"
+              ) : (
+                "Delete all"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
