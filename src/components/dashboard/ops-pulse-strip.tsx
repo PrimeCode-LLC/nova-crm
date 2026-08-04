@@ -138,6 +138,10 @@ function buildProspectHints(metrics: DashboardWorkflowMetrics): HintPart[] {
       tone: metrics.prospectsNeedRouting > 0 ? "warn" : undefined,
     },
     {
+      text: `${metrics.prospectsNeedSequence} need sequence`,
+      tone: metrics.prospectsNeedSequence > 0 ? "warn" : undefined,
+    },
+    {
       text: `${metrics.prospectsReadyToPush} ready to push`,
       tone: metrics.prospectsReadyToPush > 0 ? "warn" : undefined,
     },

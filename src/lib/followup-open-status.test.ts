@@ -385,5 +385,7 @@ describe("prospect routing funnel metrics", () => {
     expect(metrics.prospectsNeedRouting).toBe(1);
     expect(metrics.prospectsReadyToPush).toBe(1);
     expect(metrics.prospectsPushed).toBe(1);
+    // No plans/followups → all three prospects still need a sequence.
+    expect(metrics.prospectsNeedSequence).toBe(3);
   });
 });

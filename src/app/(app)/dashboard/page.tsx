@@ -486,6 +486,7 @@ export default function DashboardPage() {
         { label: "Open sales leads", value: String(workflowMetrics.openSalesLeads) },
         { label: "Prospects", value: String(workflowMetrics.prospects) },
         { label: "Prospects need routing", value: String(workflowMetrics.prospectsNeedRouting) },
+        { label: "Prospects need sequence", value: String(workflowMetrics.prospectsNeedSequence) },
         { label: "Prospects ready to push", value: String(workflowMetrics.prospectsReadyToPush) },
         { label: "Prospects pushed", value: String(workflowMetrics.prospectsPushed) },
         { label: "Follow-ups due", value: String(workflowMetrics.followupsDue) },
@@ -847,11 +848,12 @@ export default function DashboardPage() {
                   <KpiCard
                     label="Prospects"
                     value={scopedProspects.length}
-                    hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsReadyToPush} ready to push · ${workflowMetrics.prospectsPushed} pushed`}
+                    hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsNeedSequence} need sequence · ${workflowMetrics.prospectsReadyToPush} ready to push · ${workflowMetrics.prospectsPushed} pushed`}
                     icon={UserRoundSearch}
                     href="/prospects"
                     tone={
                       workflowMetrics.prospectsNeedRouting > 0 ||
+                      workflowMetrics.prospectsNeedSequence > 0 ||
                       workflowMetrics.prospectsReadyToPush > 0
                         ? "warn"
                         : scopedProspects.length > 0

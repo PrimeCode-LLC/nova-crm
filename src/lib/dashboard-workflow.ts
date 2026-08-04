@@ -5,6 +5,7 @@ import {
   isFollowupDueThroughToday,
   isFollowupOverdue,
 } from "@/lib/followup-open-status";
+import { getLeadSequenceStatus } from "@/lib/lead-sequence-status";
 import type { Contact, Followup, FollowupPlan, Lead, LeadTask, PipelineStage } from "@/lib/types";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
@@ -57,6 +58,8 @@ export type DashboardWorkflowMetrics = {
   /** Prospects with a channel assigned but at least one assignment not pushed. */
   prospectsReadyToPush: number;
   prospectsPushed: number;
+  /** Prospects with no follow-up sequence built yet (`no_sequence`). */
+  prospectsNeedSequence: number;
   followupsDue: number;
   overdueFollowups: number;
   scheduledSteps: number;
@@ -164,6 +167,9 @@ export function computeDashboardWorkflowMetrics(input: {
     prospectsNeedRouting: prospects.filter(prospectNeedsRouting).length,
     prospectsReadyToPush: prospects.filter(prospectReadyToPush).length,
     prospectsPushed: prospects.filter((lead) => Boolean(lead.linkedSalesLeadId)).length,
+    prospectsNeedSequence: prospects.filter(
+      (lead) => getLeadSequenceStatus(lead, input.plans, input.followups) === "no_sequence",
+    ).length,
     followupsDue: dueFollowups.length,
     overdueFollowups: dueFollowups.filter((followup) =>
       isFollowupOverdue(followup, timeOpts),
