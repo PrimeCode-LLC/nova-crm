@@ -167,6 +167,10 @@ export type AssignProspectScheduleResult =
 /**
  * Choose a mailbox, auto-fix step dates to fit daily limits, and update
  * in-memory capacity so later prospects see this booking.
+ *
+ * When `candidateMailboxIds` is set, only those mailboxes are eligible for
+ * picking (e.g. owner-shared intersection). Capacity is still tracked across
+ * the full `states` array.
  */
 export function assignProspectSchedule(input: {
   states: readonly MailboxCapacityState[];
@@ -174,6 +178,7 @@ export function assignProspectSchedule(input: {
   roundRobinIndex: number;
   horizonDays?: number;
   timeZone?: string;
+  candidateMailboxIds?: readonly string[];
 }): AssignProspectScheduleResult {
   const zone = resolveOrgTimezone(input.timeZone);
   const states = cloneMailboxCapacityStates(input.states);
@@ -188,9 +193,28 @@ export function assignProspectSchedule(input: {
     };
   }
 
+  const candidateSet =
+    input.candidateMailboxIds == null
+      ? null
+      : new Set(input.candidateMailboxIds.filter(Boolean));
+  const pickStates =
+    candidateSet == null
+      ? states
+      : states.filter((s) => candidateSet.has(s.mailboxId));
+
+  if (pickStates.length === 0) {
+    return {
+      ok: false,
+      error: "No eligible mailboxes for this prospect",
+      unresolvedIds: included.map((s) => s.id),
+      nextStates: states,
+      nextRoundRobinIndex: input.roundRobinIndex,
+    };
+  }
+
   const preferredDayKey = scheduleDayKeyFromDate(included[0]!.scheduledAt, zone);
   const picked = pickMailboxForProspect({
-    states,
+    states: pickStates,
     preferredDayKey: preferredDayKey || scheduleDayKeyFromDate(new Date(), zone),
     roundRobinIndex: input.roundRobinIndex,
   });
@@ -222,13 +246,14 @@ export function assignProspectSchedule(input: {
     };
   }
 
-  const nextStates = states.map((s, i) =>
-    i === picked.index ? consumeCapacityForSteps(s, fixed.steps, zone) : s,
+  const pickedId = picked.state.mailboxId;
+  const nextStates = states.map((s) =>
+    s.mailboxId === pickedId ? consumeCapacityForSteps(s, fixed.steps, zone) : s,
   );
 
   return {
     ok: true,
-    mailboxId: picked.state.mailboxId,
+    mailboxId: pickedId,
     steps: fixed.steps,
     nextStates,
     nextRoundRobinIndex: input.roundRobinIndex + 1,

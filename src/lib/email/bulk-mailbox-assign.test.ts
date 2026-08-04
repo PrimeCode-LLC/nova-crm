@@ -163,4 +163,47 @@ describe("bulk mailbox assign", () => {
     if (result.ok) return;
     expect(result.unresolvedIds).toContain("s1");
   });
+
+  it("restricts picks to candidateMailboxIds while updating full capacity", () => {
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
+    const byDay = fillHorizon(today, 5, 5, 0);
+    let states: MailboxCapacityState[] = [
+      { mailboxId: "mb-a", limit: 5, byDay: structuredClone(byDay) },
+      { mailboxId: "mb-b", limit: 5, byDay: structuredClone(byDay) },
+    ];
+    const noon = new Date(`${today}T12:00:00.000Z`);
+    const scheduledAt = toDatetimeLocalValue(noon, TZ);
+
+    const result = assignProspectSchedule({
+      states,
+      steps: [{ id: "s1", scheduledAt, included: true }],
+      roundRobinIndex: 0,
+      timeZone: TZ,
+      candidateMailboxIds: ["mb-b"],
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mailboxId).toBe("mb-b");
+    expect(remainingOnDay(result.nextStates[0]!, today)).toBe(5);
+    expect(remainingOnDay(result.nextStates[1]!, today)).toBe(4);
+    states = result.nextStates;
+  });
+
+  it("fails when candidateMailboxIds match no states", () => {
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
+    const states: MailboxCapacityState[] = [
+      { mailboxId: "mb-a", limit: 5, byDay: dayState(today, 5, 0) },
+    ];
+    const noon = new Date(`${today}T12:00:00.000Z`);
+    const result = assignProspectSchedule({
+      states,
+      steps: [{ id: "s1", scheduledAt: toDatetimeLocalValue(noon, TZ), included: true }],
+      roundRobinIndex: 0,
+      timeZone: TZ,
+      candidateMailboxIds: ["mb-missing"],
+    });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error).toMatch(/No eligible mailboxes/);
+  });
 });

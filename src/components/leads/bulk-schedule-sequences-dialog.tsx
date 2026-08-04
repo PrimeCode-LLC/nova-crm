@@ -36,6 +36,11 @@ import {
   resolveDefaultScheduleMailboxPool,
 } from "@/lib/email/last-used-mailbox-prefs";
 import {
+  buildOwnerMailboxMatchGroups,
+  filterMailboxesSharedWithLeadOwner,
+  ownerSharedMailboxSkipReason,
+} from "@/lib/email/owner-shared-mailbox";
+import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
   openFollowupsForPlan,
@@ -114,6 +119,7 @@ export function BulkScheduleSequencesDialog({
     setFollowupEmailSchedule,
     currentUserId,
     organizationId,
+    getOwnerDisplayName,
   } = useWorkspace();
   const timeZone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
@@ -132,12 +138,21 @@ export function BulkScheduleSequencesDialog({
 
   const [phase, setPhase] = React.useState<"setup" | "running" | "done">("setup");
   const [selectedMailboxIds, setSelectedMailboxIds] = React.useState<string[]>([]);
+  const [preferOwnerShared, setPreferOwnerShared] = React.useState(true);
   const [includeSignature, setIncludeSignature] = React.useState(true);
   const [includeFooter, setIncludeFooter] = React.useState(true);
   const [rows, setRows] = React.useState<LeadRow[]>([]);
   const [progressIndex, setProgressIndex] = React.useState(0);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const cancelRef = React.useRef(false);
+
+  function ownerLabel(ownerId: string): string {
+    if (!ownerId.trim()) return "Open queue";
+    return (
+      getOwnerDisplayName(ownerId)?.trim() ||
+      (ownerId === currentUserId ? "You" : "Unknown owner")
+    );
+  }
 
   const classifyLead = React.useCallback(
     (leadId: string): { bucket: PreflightBucket; reason?: string } => {
@@ -182,14 +197,51 @@ export function BulkScheduleSequencesDialog({
     let ready = 0;
     let already = 0;
     let skipped = 0;
+    const readyOwnerIds: string[] = [];
     for (const id of leadIds) {
       const c = classifyLead(id);
-      if (c.bucket === "ready") ready += 1;
-      else if (c.bucket === "already_scheduled") already += 1;
+      if (c.bucket === "ready") {
+        ready += 1;
+        const lead = leads.find((l) => l.id === id);
+        readyOwnerIds.push(lead?.ownerId?.trim() || "");
+      } else if (c.bucket === "already_scheduled") already += 1;
       else skipped += 1;
     }
-    return { ready, already, skipped };
-  }, [leadIds, classifyLead]);
+    return { ready, already, skipped, readyOwnerIds };
+  }, [leadIds, classifyLead, leads]);
+
+  const selectedMailboxes = React.useMemo(
+    () => sendableMailboxes.filter((m) => selectedMailboxIds.includes(m.id)),
+    [sendableMailboxes, selectedMailboxIds],
+  );
+
+  const hasOtherOwners = React.useMemo(() => {
+    return preflight.readyOwnerIds.some(
+      (oid) => oid && oid !== currentUserId,
+    );
+  }, [preflight.readyOwnerIds, currentUserId]);
+
+  const ownerMatchGroups = React.useMemo(() => {
+    if (!preferOwnerShared || !hasOtherOwners) return [];
+    return buildOwnerMailboxMatchGroups({
+      leadOwnerIds: preflight.readyOwnerIds,
+      selectedMailboxes,
+      viewerUid: currentUserId,
+    });
+  }, [
+    preferOwnerShared,
+    hasOtherOwners,
+    preflight.readyOwnerIds,
+    selectedMailboxes,
+    currentUserId,
+  ]);
+
+  const ownerMatchBlockedCount = React.useMemo(() => {
+    if (!preferOwnerShared) return 0;
+    return ownerMatchGroups
+      .filter((g) => !g.isSelfOrOpen && g.sharedMailboxIds.length === 0)
+      .reduce((sum, g) => sum + g.leadCount, 0);
+  }, [preferOwnerShared, ownerMatchGroups]);
 
   React.useEffect(() => {
     if (!open) return;
@@ -197,6 +249,7 @@ export function BulkScheduleSequencesDialog({
     setPhase("setup");
     setIncludeSignature(true);
     setIncludeFooter(true);
+    setPreferOwnerShared(true);
     setLoadError(null);
     setProgressIndex(0);
     const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
@@ -327,11 +380,34 @@ export function BulkScheduleSequencesDialog({
         included: true,
       }));
 
+      let candidateMailboxIds: string[] | undefined;
+      if (preferOwnerShared) {
+        const shared = filterMailboxesSharedWithLeadOwner({
+          mailboxes: selected,
+          leadOwnerId: lead.ownerId,
+          viewerUid: currentUserId,
+        });
+        if (shared.length === 0) {
+          patchRow(leadId, {
+            status: "skipped",
+            detail: ownerSharedMailboxSkipReason(ownerLabel(lead.ownerId?.trim() || "")),
+          });
+          skipped += 1;
+          continue;
+        }
+        const ownerId = lead.ownerId?.trim() || "";
+        const needsRestrict = Boolean(ownerId && ownerId !== currentUserId);
+        if (needsRestrict) {
+          candidateMailboxIds = shared.map((m) => m.id);
+        }
+      }
+
       const assigned = assignProspectSchedule({
         states,
         steps: draftSteps,
         roundRobinIndex: rr,
         timeZone,
+        candidateMailboxIds,
       });
       rr = assigned.nextRoundRobinIndex;
       states = assigned.nextStates;
@@ -434,7 +510,8 @@ export function BulkScheduleSequencesDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             Queue email steps from existing active sequences across selected inboxes, using each
-            mailbox&apos;s daily send limit.
+            mailbox&apos;s daily send limit. When scheduling for other owners, prefer inboxes you
+            both can send from.
           </DialogDescription>
         </DialogHeader>
 
@@ -485,6 +562,72 @@ export function BulkScheduleSequencesDialog({
               </div>
             )}
 
+            {hasOtherOwners ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <div className="flex items-start gap-2">
+                  <Checkbox
+                    id="bulk-sched-prefer-owner"
+                    checked={preferOwnerShared}
+                    onCheckedChange={(v) => setPreferOwnerShared(v === true)}
+                    className="mt-0.5"
+                  />
+                  <div className="min-w-0 space-y-1">
+                    <label
+                      htmlFor="bulk-sched-prefer-owner"
+                      className="cursor-pointer text-sm font-medium leading-none"
+                    >
+                      Prefer owner-shared inboxes
+                    </label>
+                    <p className="text-[11px] text-muted-foreground">
+                      For leads you don&apos;t own, only use mailboxes that owner can also send
+                      from (assigned or their inbox shared with you).
+                    </p>
+                  </div>
+                </div>
+
+                {preferOwnerShared && ownerMatchGroups.length > 0 ? (
+                  <ul className="space-y-1.5 border-t pt-2 text-[11px]">
+                    {ownerMatchGroups.map((g) => {
+                      const name = ownerLabel(g.ownerId);
+                      const blocked = !g.isSelfOrOpen && g.sharedMailboxIds.length === 0;
+                      return (
+                        <li
+                          key={g.ownerId || "__open__"}
+                          className={cn(
+                            "flex items-baseline justify-between gap-2",
+                            blocked && "text-amber-700 dark:text-amber-400",
+                          )}
+                        >
+                          <span className="truncate">
+                            <span className="font-medium">{name}</span>
+                            <span className="text-muted-foreground">
+                              {" "}
+                              · {g.leadCount} lead{g.leadCount === 1 ? "" : "s"}
+                            </span>
+                          </span>
+                          <span className="shrink-0 text-muted-foreground">
+                            {g.isSelfOrOpen
+                              ? `${selectedMailboxes.length} mailbox${selectedMailboxes.length === 1 ? "" : "es"}`
+                              : blocked
+                                ? "no shared inbox"
+                                : `${g.sharedMailboxIds.length} shared`}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                ) : null}
+
+                {preferOwnerShared && ownerMatchBlockedCount > 0 ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    {ownerMatchBlockedCount} lead
+                    {ownerMatchBlockedCount === 1 ? "" : "s"} will be skipped — share send access
+                    in Settings → Email, or turn this off.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
             {signatureMailbox ? (
               <MailboxSignaturePreview
                 id="bulk-sched-include-signature"
@@ -514,12 +657,19 @@ export function BulkScheduleSequencesDialog({
                 disabled={
                   selectedMailboxIds.length === 0 ||
                   preflight.ready === 0 ||
-                  sendableMailboxes.length === 0
+                  sendableMailboxes.length === 0 ||
+                  (preferOwnerShared &&
+                    hasOtherOwners &&
+                    ownerMatchBlockedCount >= preflight.ready)
                 }
                 onClick={() => void runBatch()}
               >
                 <CalendarClock className="h-3.5 w-3.5" />
-                Schedule {preflight.ready} ready
+                Schedule{" "}
+                {preferOwnerShared && ownerMatchBlockedCount > 0
+                  ? Math.max(0, preflight.ready - ownerMatchBlockedCount)
+                  : preflight.ready}{" "}
+                ready
               </Button>
             </DialogFooter>
           </div>
