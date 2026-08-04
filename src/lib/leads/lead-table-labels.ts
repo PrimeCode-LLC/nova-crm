@@ -11,6 +11,7 @@ export const LEAD_TABLE_COLUMN_LABELS = {
   channel: "Channel",
   profileId: "Profile",
   stage: "Stage",
+  sequenceStatus: "Sequence",
   owner: "Owner",
   addedBy: "Added by",
   temperature: "Temp",

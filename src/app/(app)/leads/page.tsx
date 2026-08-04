@@ -71,7 +71,7 @@ function LeadsPageInner() {
                   </Button>
                 }
               />
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" className="w-56">
                 <DropdownMenuItem
                   onClick={() =>
                     setTableSession((s) => ({ key: s.key + 1, preset: "default" }))
@@ -92,6 +92,34 @@ function LeadsPageInner() {
                   }
                 >
                   Ready to outreach
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    setTableSession((s) => ({ key: s.key + 1, preset: "needs-sequence" }))
+                  }
+                >
+                  Needs sequence
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    setTableSession((s) => ({ key: s.key + 1, preset: "ready-to-schedule" }))
+                  }
+                >
+                  Ready to schedule
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    setTableSession((s) => ({ key: s.key + 1, preset: "active-outreach" }))
+                  }
+                >
+                  Active outreach
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    setTableSession((s) => ({ key: s.key + 1, preset: "sequence-finished" }))
+                  }
+                >
+                  Sequence finished
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>

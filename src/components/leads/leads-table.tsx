@@ -109,6 +109,13 @@ import {
   leadsToProspectExportRows,
 } from "@/lib/imports/prospect-export";
 import { LEAD_TABLE_COLUMN_LABELS as COL } from "@/lib/leads/lead-table-labels";
+import {
+  LEAD_SEQUENCE_STATUS_LABEL,
+  LEAD_SEQUENCE_STATUS_OPTIONS,
+  LEAD_SEQUENCE_STATUS_TONE,
+  buildLeadSequenceStatusMap,
+  type LeadSequenceStatus,
+} from "@/lib/lead-sequence-status";
 import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
 import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
 import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
@@ -315,7 +322,14 @@ function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
   );
 }
 
-export type LeadsTablePreset = "default" | "high-priority" | "ready-outreach";
+export type LeadsTablePreset =
+  | "default"
+  | "high-priority"
+  | "ready-outreach"
+  | "needs-sequence"
+  | "ready-to-schedule"
+  | "active-outreach"
+  | "sequence-finished";
 
 export type LeadsTableRef = {
   /**
@@ -332,6 +346,23 @@ function initialColumnFiltersForPreset(preset: LeadsTablePreset | undefined): Co
   }
   if (preset === "ready-outreach") {
     return [{ id: "qualityReady", value: true }];
+  }
+  if (preset === "needs-sequence") {
+    return [{ id: "sequenceStatus", value: ["no_sequence"] satisfies LeadSequenceStatus[] }];
+  }
+  if (preset === "ready-to-schedule") {
+    return [{ id: "sequenceStatus", value: ["needs_schedule"] satisfies LeadSequenceStatus[] }];
+  }
+  if (preset === "active-outreach") {
+    return [
+      {
+        id: "sequenceStatus",
+        value: ["needs_schedule", "scheduled"] satisfies LeadSequenceStatus[],
+      },
+    ];
+  }
+  if (preset === "sequence-finished") {
+    return [{ id: "sequenceStatus", value: ["completed"] satisfies LeadSequenceStatus[] }];
   }
   return [];
 }
@@ -411,6 +442,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     deleteLead,
     updateLeadStage,
     activeOrgMemberIds,
+    followupPlans,
+    followups,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const leadsChannelFilterOptions = useChannelOptions({ includeDisabled: true });
@@ -707,6 +740,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     inboxSyncedLeadIds,
     emailOpenedFilter,
   ]);
+
+  const sequenceStatusByLeadId = React.useMemo(
+    () => buildLeadSequenceStatusMap(leads, followupPlans, followups),
+    [leads, followupPlans, followups],
+  );
 
   const companyFilterOptions = React.useMemo(() => {
     const names = new Set<string>();
@@ -1012,6 +1050,28 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         !value?.length || value.includes(row.getValue<string>(id)),
     },
     {
+      id: "sequenceStatus",
+      accessorFn: (row) => sequenceStatusByLeadId.get(row.id) ?? "no_sequence",
+      header: COL.sequenceStatus,
+      cell: ({ row }) => {
+        const status =
+          sequenceStatusByLeadId.get(row.original.id) ?? ("no_sequence" as const);
+        return (
+          <Badge
+            variant="outline"
+            className={cn("rounded-md text-[10px] font-medium", LEAD_SEQUENCE_STATUS_TONE[status])}
+          >
+            {LEAD_SEQUENCE_STATUS_LABEL[status]}
+          </Badge>
+        );
+      },
+      filterFn: (row, _id, value: LeadSequenceStatus[]) => {
+        if (!value?.length) return true;
+        const status = sequenceStatusByLeadId.get(row.original.id) ?? "no_sequence";
+        return value.includes(status);
+      },
+    },
+    {
       id: "owner",
       accessorKey: "ownerId",
       header: COL.owner,
@@ -1229,7 +1289,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, getContactById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref]);
+  ], [router, openReassignForIds, openArchiveForIds, getProfileById, getContactById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref, sequenceStatusByLeadId]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -1316,6 +1376,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const industryFilter = (columnFilters.find((f) => f.id === "industry")?.value as string[]) ?? [];
   const emailStatusFilter =
     (columnFilters.find((f) => f.id === "email")?.value as EmailVerificationFilterBucket[]) ?? [];
+  const sequenceStatusFilter =
+    (columnFilters.find((f) => f.id === "sequenceStatus")?.value as LeadSequenceStatus[]) ?? [];
 
   function toggleStage(key: PipelineStage) {
     const next = stageFilter.includes(key)
@@ -1358,6 +1420,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       ? emailStatusFilter.filter((s) => s !== key)
       : [...emailStatusFilter, key];
     table.getColumn("email")?.setFilterValue(next.length ? next : undefined);
+  }
+  function toggleSequenceStatusFilter(key: LeadSequenceStatus) {
+    const next = sequenceStatusFilter.includes(key)
+      ? sequenceStatusFilter.filter((s) => s !== key)
+      : [...sequenceStatusFilter, key];
+    table.getColumn("sequenceStatus")?.setFilterValue(next.length ? next : undefined);
   }
 
   return (
@@ -1702,6 +1770,44 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 onCheckedChange={() => toggleChannel(c.key)}
               >
                 {c.label}
+              </DropdownMenuCheckboxItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                title="Filter by sequence and email scheduling status"
+              >
+                <CalendarClock className="h-3.5 w-3.5" />
+                Sequence
+                {sequenceStatusFilter.length > 0 && (
+                  <Badge variant="secondary" className="ml-1 h-4 px-1 text-[10px]">
+                    {sequenceStatusFilter.length}
+                  </Badge>
+                )}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            }
+          />
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                Sequence → schedule workflow
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
+            {LEAD_SEQUENCE_STATUS_OPTIONS.map((opt) => (
+              <DropdownMenuCheckboxItem
+                key={opt.key}
+                checked={sequenceStatusFilter.includes(opt.key)}
+                onCheckedChange={() => toggleSequenceStatusFilter(opt.key)}
+              >
+                {opt.label}
               </DropdownMenuCheckboxItem>
             ))}
           </DropdownMenuContent>
