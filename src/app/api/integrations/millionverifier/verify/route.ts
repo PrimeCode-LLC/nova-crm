@@ -5,6 +5,9 @@ import { verifyLeadsEmailsServer } from "@/lib/integrations/millionverifier/appl
 import { MILLION_VERIFIER_MAX_BATCH } from "@/lib/integrations/millionverifier/constants";
 import { hasMillionVerifierApiKeyServer } from "@/lib/integrations/millionverifier/secrets";
 
+/** Allow a full 50-email batch at concurrency 5 with MV timeouts up to 10s. */
+export const maxDuration = 300;
+
 const postSchema = z
   .object({
     leadIds: z.array(z.string().min(1)).min(1).max(MILLION_VERIFIER_MAX_BATCH),
