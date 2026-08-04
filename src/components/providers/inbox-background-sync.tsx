@@ -13,6 +13,7 @@ import {
 } from "@/lib/email/mail-data-owner-query";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 import type { MailInbound } from "@/lib/email-account-types";
+import { INBOX_HEADS_REFRESH_EVENT } from "@/lib/email/lead-reply-events";
 import {
   getActiveMailbox,
   isImapInboxConfigured,
@@ -49,11 +50,11 @@ export function InboxBackgroundSync() {
   const lastHeadsAtRef = React.useRef(0);
   const lastImapAtRef = React.useRef(0);
 
-  const hydrateFromServerHeads = React.useCallback(async () => {
+  const hydrateFromServerHeads = React.useCallback(async (opts?: { force?: boolean }) => {
     if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
     if (!emailServerSyncEnabled) return;
     if (syncingRef.current) return;
-    if (Date.now() - lastHeadsAtRef.current < HEADS_MIN_GAP_MS) return;
+    if (!opts?.force && Date.now() - lastHeadsAtRef.current < HEADS_MIN_GAP_MS) return;
 
     const st = useEmailAccountStore.getState();
     const configured = st.mailboxes.filter((m) => isImapInboxConfigured(m));
@@ -204,12 +205,17 @@ export function InboxBackgroundSync() {
         void runInboxRouteImap();
       }
     };
+    const onHeadsRefresh = () => {
+      void hydrateFromServerHeads({ force: true });
+    };
     document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener(INBOX_HEADS_REFRESH_EVENT, onHeadsRefresh);
 
     return () => {
       window.clearInterval(headsTimer);
       window.clearInterval(imapTimer);
       document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener(INBOX_HEADS_REFRESH_EVENT, onHeadsRefresh);
     };
   }, [
     isDemo,

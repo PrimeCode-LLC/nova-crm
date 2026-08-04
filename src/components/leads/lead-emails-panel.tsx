@@ -75,8 +75,11 @@ import {
 import type { MailTrackingSummary } from "@/lib/email/mail-tracking-types";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
+  LEAD_REPLY_RECEIVED_EVENT,
   LEAD_REPLY_SENT_EVENT,
+  takePendingLeadReplyReceived,
   takePendingLeadReplySent,
+  type LeadReplyReceivedDetail,
   type LeadReplySentDetail,
 } from "@/lib/email/lead-reply-events";
 import {
@@ -599,8 +602,65 @@ export function LeadEmailsPanel({
     loadStoredLeadMail,
   ]);
 
+  const syncConversationListsRef = React.useRef<
+    ((force: boolean, opts?: { silent?: boolean }) => Promise<void>) | null
+  >(null);
+  const replyRefreshAtRef = React.useRef(0);
+
+  const refreshAfterInboundReply = React.useCallback(() => {
+    const now = Date.now();
+    // Watcher event + Firestore lead stamp often fire together — coalesce.
+    if (now - replyRefreshAtRef.current < 2_500) return;
+    replyRefreshAtRef.current = now;
+    void loadStoredLeadMail();
+    // Silent force: pull fresh inbox heads so the reply joins the conversation list.
+    void syncConversationListsRef.current?.(true, { silent: true });
+  }, [loadStoredLeadMail]);
+
+  React.useEffect(() => {
+    function applyReplyReceived(detail: LeadReplyReceivedDetail) {
+      if (detail.leadId !== lead.id) return;
+      refreshAfterInboundReply();
+    }
+
+    const pending = takePendingLeadReplyReceived(lead.id);
+    if (pending) applyReplyReceived(pending);
+
+    function onReplyReceived(event: Event) {
+      const detail = (event as CustomEvent<LeadReplyReceivedDetail>).detail;
+      if (!detail) return;
+      applyReplyReceived(detail);
+    }
+
+    window.addEventListener(LEAD_REPLY_RECEIVED_EVENT, onReplyReceived);
+    return () => window.removeEventListener(LEAD_REPLY_RECEIVED_EVENT, onReplyReceived);
+  }, [lead.id, refreshAfterInboundReply]);
+
+  // Server/cron/Instantly can stamp the lead before client heads catch up — reload when reply fields change.
+  const replyFreshnessKey = [
+    lead.lastReplyAt ?? "",
+    lead.lastReplyMessageId ?? "",
+    lead.lastInboundEmailAt ?? "",
+    String(lead.emailMailCount ?? ""),
+    lead.replyReviewStatus ?? "",
+  ].join("|");
+  const replyFreshnessBootRef = React.useRef<{ leadId: string; key: string }>({
+    leadId: lead.id,
+    key: replyFreshnessKey,
+  });
+  React.useEffect(() => {
+    if (replyFreshnessBootRef.current.leadId !== lead.id) {
+      replyFreshnessBootRef.current = { leadId: lead.id, key: replyFreshnessKey };
+      return;
+    }
+    if (replyFreshnessBootRef.current.key === replyFreshnessKey) return;
+    replyFreshnessBootRef.current = { leadId: lead.id, key: replyFreshnessKey };
+    if (!lead.lastReplyAt && !lead.lastInboundEmailAt) return;
+    refreshAfterInboundReply();
+  }, [lead.id, lead.lastInboundEmailAt, lead.lastReplyAt, refreshAfterInboundReply, replyFreshnessKey]);
+
   const syncConversationLists = React.useCallback(
-    async (force: boolean) => {
+    async (force: boolean, opts?: { silent?: boolean }) => {
       if (workspace.isDemo || !emailServerHydrated) return;
       // Wait for lead-local store so we can skip IMAP when history is already persisted.
       if (!force && !storedReadyRef.current) return;
@@ -611,16 +671,16 @@ export function LeadEmailsPanel({
       const store = useEmailAccountStore.getState();
       const jobs: Array<{ mailbox: (typeof eligible)[number]; folder: "inbox" | "sent" }> = [];
       for (const mailbox of eligible) {
-        const hasInbox = (store.inboundByMailbox[mailbox.id]?.length ?? 0) > 0;
         const hasServerSent = store.sent.some(
           (message) => message.mailboxId === mailbox.id && message.uid != null,
         );
-        if (force || !hasInbox) jobs.push({ mailbox, folder: "inbox" });
+        // Always refresh INBOX heads so new replies appear even when the store already
+        // has older inbox rows (background sync). Sent stays one-shot unless forced.
+        jobs.push({ mailbox, folder: "inbox" });
         if (force || !hasServerSent) jobs.push({ mailbox, folder: "sent" });
       }
 
-      // Always refresh INBOX heads so new replies (incl. OOO) appear even when
-      // durable lead mail already has older outbound history. Sent can wait for Refresh.
+      // Sent can wait for Refresh when durable lead mail already has outbound history.
       if (!force && storedMessages.length > 0) {
         for (let i = jobs.length - 1; i >= 0; i--) {
           if (jobs[i]?.folder === "sent") jobs.splice(i, 1);
@@ -693,7 +753,9 @@ export function LeadEmailsPanel({
         Array.from({ length: Math.min(2, jobs.length) }, () => worker()),
       );
       setSyncingLists(false);
-      if (firstError && force) toast.error("Couldn’t refresh lead emails", { description: firstError });
+      if (firstError && force && !opts?.silent) {
+        toast.error("Couldn’t refresh lead emails", { description: firstError });
+      }
 
       let matched = relevantLeadMessages({
         lead,
@@ -808,6 +870,8 @@ export function LeadEmailsPanel({
       workspace.isDemo,
     ],
   );
+
+  syncConversationListsRef.current = syncConversationLists;
 
   React.useEffect(() => {
     if (!storedReadyRef.current && loadingStored) return;

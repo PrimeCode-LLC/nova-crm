@@ -3,6 +3,12 @@
 /** Browser event so Emails tab / timeline can refresh after AI approve & send. */
 export const LEAD_REPLY_SENT_EVENT = "crm:lead-reply-sent";
 
+/** Inbound reply stamped — Emails tab + heads hydrate should refresh immediately. */
+export const LEAD_REPLY_RECEIVED_EVENT = "crm:lead-reply-received";
+
+/** Force a cheap Firestore heads hydrate (no IMAP) across open tabs. */
+export const INBOX_HEADS_REFRESH_EVENT = "crm:inbox-heads-refresh";
+
 export type LeadReplySentDetail = {
   leadId: string;
   subject?: string;
@@ -17,8 +23,18 @@ export type LeadReplySentDetail = {
   referenceIds?: string[];
 };
 
+export type LeadReplyReceivedDetail = {
+  leadId: string;
+  /** Store key e.g. `mailboxId:in:messageId` when known from client watcher. */
+  replyMessageId?: string;
+  source?: "imap" | "instantly" | "manual" | "server";
+};
+
 /** Holds the latest send briefly so Emails tab can pick it up after mount. */
 let pendingLeadReplySent: LeadReplySentDetail | null = null;
+
+/** Holds the latest inbound stamp briefly so Emails tab can pick it up after mount. */
+let pendingLeadReplyReceived: LeadReplyReceivedDetail | null = null;
 
 export function dispatchLeadReplySent(detail: LeadReplySentDetail): void {
   pendingLeadReplySent = detail;
@@ -35,6 +51,28 @@ export function takePendingLeadReplySent(leadId: string): LeadReplySentDetail | 
   const detail = pendingLeadReplySent;
   pendingLeadReplySent = null;
   return detail;
+}
+
+export function dispatchLeadReplyReceived(detail: LeadReplyReceivedDetail): void {
+  pendingLeadReplyReceived = detail;
+  if (typeof window === "undefined") return;
+  window.setTimeout(() => {
+    window.dispatchEvent(new CustomEvent(LEAD_REPLY_RECEIVED_EVENT, { detail }));
+    window.dispatchEvent(new CustomEvent(INBOX_HEADS_REFRESH_EVENT));
+  }, 0);
+}
+
+/** Consume a pending inbound stamp for this lead (clears after read). */
+export function takePendingLeadReplyReceived(leadId: string): LeadReplyReceivedDetail | null {
+  if (!pendingLeadReplyReceived || pendingLeadReplyReceived.leadId !== leadId) return null;
+  const detail = pendingLeadReplyReceived;
+  pendingLeadReplyReceived = null;
+  return detail;
+}
+
+export function dispatchInboxHeadsRefresh(): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(INBOX_HEADS_REFRESH_EVENT));
 }
 
 export const REPLY_REGENERATE_DIRECTIONS = [

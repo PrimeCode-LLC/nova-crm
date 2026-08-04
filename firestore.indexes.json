@@ -693,6 +693,14 @@
         { "fieldPath": "organizationId", "order": "ASCENDING" },
         { "fieldPath": "messageId", "order": "ASCENDING" }
       ]
+    },
+    {
+      "collectionGroup": "leadMailMessages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "leadId", "order": "ASCENDING" },
+        { "fieldPath": "date", "order": "DESCENDING" }
+      ]
     }
   ],
   "fieldOverrides": [

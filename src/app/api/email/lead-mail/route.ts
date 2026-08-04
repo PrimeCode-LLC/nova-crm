@@ -22,11 +22,30 @@ async function assertLeadInOrg(organizationId: string, leadId: string) {
   if (String(data.organizationId ?? "") !== organizationId) {
     return { ok: false as const, status: 404, error: "Lead not found." };
   }
+  const contactEmails = new Set<string>();
+  const addEmail = (value: unknown) => {
+    const email = String(value ?? "")
+      .trim()
+      .toLowerCase();
+    if (email.includes("@")) contactEmails.add(email);
+  };
+  addEmail(data.contactEmail);
+  const contactId = String(data.contactId ?? "").trim();
+  if (contactId) {
+    try {
+      const contactSnap = await db.collection(COLLECTIONS.contacts).doc(contactId).get();
+      if (contactSnap.exists) {
+        const contact = contactSnap.data() as Record<string, unknown>;
+        addEmail(contact.email);
+        addEmail(contact.personalEmail);
+      }
+    } catch {
+      /* lead contactEmail alone is still enough for many leads */
+    }
+  }
   return {
     ok: true as const,
-    contactEmail: String(data.contactEmail ?? "")
-      .trim()
-      .toLowerCase(),
+    contactEmails: [...contactEmails],
   };
 }
 
@@ -105,13 +124,13 @@ export async function POST(req: Request) {
     return NextResponse.json({ ok: false, error: lead.error }, { status: lead.status });
   }
 
-  const contact = lead.contactEmail;
+  const contactSet = new Set(lead.contactEmails);
   const upserts: LeadMailUpsertInput[] = [];
 
   for (const msg of parsed.data.messages) {
-    if (contact) {
+    if (contactSet.size > 0) {
       const addresses = extractEmailAddresses(msg.from, msg.to, msg.cc);
-      if (!addresses.has(contact)) continue;
+      if (![...addresses].some((address) => contactSet.has(address))) continue;
     }
     const localId =
       msg.direction === "outbound"

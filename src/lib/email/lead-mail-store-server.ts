@@ -68,11 +68,7 @@ async function refreshLeadMailSummaryServer(input: {
   const db = getAdminDb();
   if (!db) return;
 
-  const snap = await db
-    .collection(COLLECTIONS.leadMailMessages)
-    .where("leadId", "==", input.leadId)
-    .limit(LEAD_MAIL_LIST_LIMIT)
-    .get();
+  const snap = await queryLeadMailByDateDesc(db, input.leadId, LEAD_MAIL_LIST_LIMIT);
 
   let emailMailCount = 0;
   let lastEmailAt: string | undefined;
@@ -103,6 +99,21 @@ async function refreshLeadMailSummaryServer(input: {
     );
 }
 
+/** Newest-first lead mail; falls back without orderBy if the composite index is still building. */
+async function queryLeadMailByDateDesc(
+  db: NonNullable<ReturnType<typeof getAdminDb>>,
+  leadId: string,
+  limit: number,
+) {
+  const base = db.collection(COLLECTIONS.leadMailMessages).where("leadId", "==", leadId);
+  try {
+    return await base.orderBy("date", "desc").limit(limit).get();
+  } catch {
+    const snap = await base.limit(limit).get();
+    return snap;
+  }
+}
+
 export async function listLeadMailMessagesServer(input: {
   organizationId: string;
   leadId: string;
@@ -112,11 +123,7 @@ export async function listLeadMailMessagesServer(input: {
   if (!db) return [];
 
   const limit = Math.max(1, Math.min(300, input.limit ?? LEAD_MAIL_LIST_LIMIT));
-  const snap = await db
-    .collection(COLLECTIONS.leadMailMessages)
-    .where("leadId", "==", input.leadId)
-    .limit(limit)
-    .get();
+  const snap = await queryLeadMailByDateDesc(db, input.leadId, limit);
 
   const rows: LeadMailMessage[] = [];
   for (const doc of snap.docs) {

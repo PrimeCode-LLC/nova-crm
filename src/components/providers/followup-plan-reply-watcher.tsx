@@ -13,8 +13,9 @@ import {
   cancelScheduledEmailsForFollowups,
   openFollowupsWithScheduledEmail,
 } from "@/lib/cancel-followup-scheduled-email-client";
+import { dispatchLeadReplyReceived } from "@/lib/email/lead-reply-events";
 import { buildReplyDetectedPatch, shouldOpenReplyReview } from "@/lib/leads/reply-review";
-import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-store";
+import { isImapInboxConfigured, useEmailAccountStore } from "@/stores/email-account-store";
 import { toast } from "sonner";
 
 const PROCESSED_KEY = "nova-followup-reply-processed";
@@ -70,7 +71,6 @@ export function FollowupPlanReplyWatcher() {
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const linkedLeadByMessageId = useEmailAccountStore((s) => s.linkedLeadByMessageId);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
-  const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const processedRef = React.useRef(readProcessed());
   const inFlightRef = React.useRef(new Set<string>());
@@ -89,65 +89,87 @@ export function FollowupPlanReplyWatcher() {
   React.useEffect(() => {
     if (!sessionHydrated || !currentUserId || isDemo) return;
 
-    const acct = getActiveMailbox({ mailboxes, activeMailboxId });
-    const mailboxEmail = acct.emailAddress?.trim().toLowerCase();
-    const messages = inboundByMailbox[acct.id] ?? [];
+    // Scan every mailbox with heads — "All mailboxes" must not miss replies on non-primary boxes.
+    const mailboxesToScan =
+      mailboxes.length > 0
+        ? mailboxes.filter((mb) => isImapInboxConfigured(mb) || (inboundByMailbox[mb.id]?.length ?? 0) > 0)
+        : [];
     const now = Date.now();
 
     type Candidate = {
       mid: string;
-      message: (typeof messages)[number];
+      mailboxId: string;
+      message: (typeof inboundByMailbox)[string][number];
       leadId: string;
       seen: boolean;
       auto: boolean;
     };
     const candidates: Candidate[] = [];
 
-    for (const message of messages) {
-      const mid = `${acct.id}:in:${message.id}`;
-      if (processedRef.current.has(mid) || inFlightRef.current.has(mid)) continue;
+    for (const acct of mailboxesToScan) {
+      const mailboxEmail = acct.emailAddress?.trim().toLowerCase();
+      const messages = inboundByMailbox[acct.id] ?? [];
 
-      const ageMs = now - Date.parse(message.date);
-      if (!Number.isFinite(ageMs) || ageMs > MAX_REPLY_AGE_MS) continue;
-      if (isDeliveryStatusNotification(message)) continue;
+      for (const message of messages) {
+        const mid = `${acct.id}:in:${message.id}`;
+        if (processedRef.current.has(mid) || inFlightRef.current.has(mid)) continue;
 
-      const manual = linkedLeadByMessageId[mid];
-      const fromAddr = extractEmailAddress(message.from);
-      const leadId =
-        manual ||
-        (fromAddr ? emailToLeadId.get(fromAddr) : undefined) ||
-        null;
-      if (!leadId) continue;
+        const ageMs = now - Date.parse(message.date);
+        if (!Number.isFinite(ageMs) || ageMs > MAX_REPLY_AGE_MS) continue;
+        if (isDeliveryStatusNotification(message)) continue;
 
-      const lead = leadById.get(leadId);
-      if (!lead) continue;
+        const manual = linkedLeadByMessageId[mid];
+        const fromAddr = extractEmailAddress(message.from);
+        const leadId =
+          manual ||
+          (fromAddr ? emailToLeadId.get(fromAddr) : undefined) ||
+          null;
+        if (!leadId) continue;
 
-      const auto = isLikelyAutoReply(message);
-      if (auto) {
-        if (
-          lead.lastAutoReplyMessageId === mid ||
-          (lead.lastAutoReplyAt &&
-            Number.isFinite(Date.parse(lead.lastAutoReplyAt)) &&
-            Date.parse(lead.lastAutoReplyAt) >= Date.parse(message.date))
-        ) {
+        const lead = leadById.get(leadId);
+        if (!lead) continue;
+
+        const auto = isLikelyAutoReply(message);
+        if (auto) {
+          if (
+            lead.lastAutoReplyMessageId === mid ||
+            (lead.lastAutoReplyAt &&
+              Number.isFinite(Date.parse(lead.lastAutoReplyAt)) &&
+              Date.parse(lead.lastAutoReplyAt) >= Date.parse(message.date))
+          ) {
+            processedRef.current.add(mid);
+            continue;
+          }
+          candidates.push({
+            mid,
+            mailboxId: acct.id,
+            message,
+            leadId,
+            seen: Boolean(message.seen),
+            auto: true,
+          });
+          continue;
+        }
+
+        if (lead.lastReplyMessageId === mid) {
           processedRef.current.add(mid);
           continue;
         }
-        candidates.push({ mid, message, leadId, seen: Boolean(message.seen), auto: true });
-        continue;
+
+        // Already matched From → lead via email index (company + personal).
+        // Only block mail that is from our own mailbox (sent copies in INBOX).
+        if (mailboxEmail && fromAddr === mailboxEmail) continue;
+
+        // Prefer unread; still allow a small seen backfill for sync-after-read.
+        candidates.push({
+          mid,
+          mailboxId: acct.id,
+          message,
+          leadId,
+          seen: Boolean(message.seen),
+          auto: false,
+        });
       }
-
-      if (lead.lastReplyMessageId === mid) {
-        processedRef.current.add(mid);
-        continue;
-      }
-
-      // Already matched From → lead via email index (company + personal).
-      // Only block mail that is from our own mailbox (sent copies in INBOX).
-      if (mailboxEmail && fromAddr === mailboxEmail) continue;
-
-      // Prefer unread; still allow a small seen backfill for sync-after-read.
-      candidates.push({ mid, message, leadId, seen: Boolean(message.seen), auto: false });
     }
 
     // Unread first, then newest.
@@ -212,7 +234,7 @@ export function FollowupPlanReplyWatcher() {
             clearSchedule: clearFollowupEmailSchedule,
             reason: "Lead replied by email",
             selfUid: currentUserId,
-            activeMailboxDataOwnerUid: acct.dataOwnerUid,
+            activeMailboxDataOwnerUid: mailboxes.find((mb) => mb.id === c.mailboxId)?.dataOwnerUid,
           });
           if (errors.length > 0) {
             toast.error("Could not cancel all scheduled followup emails", {
@@ -222,6 +244,7 @@ export function FollowupPlanReplyWatcher() {
           }
 
           const replyAt = new Date().toISOString();
+          let stamped = false;
           try {
             await patchLeadAsync(
               c.leadId,
@@ -232,12 +255,21 @@ export function FollowupPlanReplyWatcher() {
                 source: "imap",
               }),
             );
+            stamped = true;
           } catch {
             /* Reply pause/cancel already applied; review stamp can retry next sync. */
           }
 
           processedRef.current.add(c.mid);
           writeProcessed(processedRef.current);
+
+          if (stamped) {
+            dispatchLeadReplyReceived({
+              leadId: c.leadId,
+              replyMessageId: c.mid,
+              source: "imap",
+            });
+          }
 
           const openedReview = shouldOpenReplyReview(lead);
           if (openedReview) {
@@ -276,7 +308,6 @@ export function FollowupPlanReplyWatcher() {
     emailToLeadId,
     leadById,
     mailboxes,
-    activeMailboxId,
     pauseFollowupPlanForReply,
     clearFollowupEmailSchedule,
     cancelScheduled,
