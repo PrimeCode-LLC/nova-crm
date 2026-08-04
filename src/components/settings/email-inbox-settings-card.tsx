@@ -1781,10 +1781,24 @@ export function EmailInboxSettingsCard() {
                             onCheckedChange={(v) => updateMailbox(mb.id, { readReceipts: !!v })}
                           />
                           <Label htmlFor={`read-rcpt-${mb.id}`} className="text-xs cursor-pointer">
-                            Read receipts (future)
+                            Track opens
+                          </Label>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Switch
+                            id={`track-clicks-${mb.id}`}
+                            checked={Boolean(mb.trackClicks)}
+                            onCheckedChange={(v) => updateMailbox(mb.id, { trackClicks: !!v })}
+                          />
+                          <Label htmlFor={`track-clicks-${mb.id}`} className="text-xs cursor-pointer">
+                            Track link clicks
                           </Label>
                         </div>
                       </div>
+                      <p className="text-[10px] text-muted-foreground">
+                        Open and click tracking use a first-party pixel/redirect on your app domain.
+                        Off by default — opens are approximate (privacy clients and scanners inflate them).
+                      </p>
                       <div className="space-y-1.5">
                         <Label className="text-xs" htmlFor={`email-signature-${mb.id}`}>
                           Email signature

@@ -752,5 +752,10 @@ service cloud.firestore {
     match /prospectDraftReservations/{id} {
       allow read, write: if false;
     }
+
+    // Server-only engagement records for CRM SMTP open/click tracking.
+    match /mailTrackingMessages/{id} {
+      allow read, write: if false;
+    }
   }
 }

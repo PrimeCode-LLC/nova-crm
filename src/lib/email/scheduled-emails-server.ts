@@ -916,6 +916,13 @@ async function sendScheduledDoc(
     inReplyTo,
     referenceIds,
     attachments: parsedAttachments,
+    tracking: {
+      trackOpens: Boolean(mailbox.readReceipts),
+      trackClicks: Boolean(mailbox.trackClicks),
+      leadId: leadId || undefined,
+      followupId: followupIdEarly || undefined,
+      scheduledEmailId: docRef.id,
+    },
   });
 
   const now = new Date().toISOString();

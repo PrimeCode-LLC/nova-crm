@@ -31,8 +31,10 @@ export interface EmailAccountSettings {
   syncIntervalMinutes: number;
   /** Future: move thread to archive folder on send */
   archiveOnSend: boolean;
-  /** Future: track opens via pixel (off by default) */
+  /** Track opens via first-party pixel (off by default). */
   readReceipts: boolean;
+  /** Rewrite http(s) links through first-party click tracker (off by default). */
+  trackClicks: boolean;
   /**
    * Google Workspace / Microsoft Outlook: hosts autofilled; Custom: full SMTP/IMAP.
    * Existing mailboxes default to custom.
@@ -91,6 +93,7 @@ export const defaultEmailAccountSettings = (): EmailAccountSettings => ({
   syncIntervalMinutes: 15,
   archiveOnSend: false,
   readReceipts: false,
+  trackClicks: false,
   connectionType: "custom",
   dailySendLimit: null,
   sendGapSeconds: null,
@@ -250,6 +253,8 @@ export function defaultEmailMailboxSettings(partial?: Partial<EmailMailboxSettin
       restPartial.dailySendLimit === undefined ? base.dailySendLimit : restPartial.dailySendLimit,
     sendGapSeconds:
       restPartial.sendGapSeconds === undefined ? base.sendGapSeconds : restPartial.sendGapSeconds,
+    trackClicks:
+      restPartial.trackClicks === undefined ? base.trackClicks : Boolean(restPartial.trackClicks),
     ...(dataOwnerUid ? { dataOwnerUid } : {}),
   };
 }

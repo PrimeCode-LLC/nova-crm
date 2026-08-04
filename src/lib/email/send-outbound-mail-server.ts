@@ -9,6 +9,8 @@ import { resolveMailboxTransportAuthServer, googleAuthFailureMessage } from "@/l
 import type { OutboundAttachment } from "@/lib/email/outbound-attachments";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { recordMailboxTransportHealthServer } from "@/lib/email/inbox-heads-server";
+import { prepareTrackedHtml } from "@/lib/email/mail-tracking-server";
+import type { MailTrackingContext } from "@/lib/email/mail-tracking-types";
 
 function sanitizeOutboundMessageId(raw: string | undefined): string | undefined {
   const value = normalizeMessageId(raw);
@@ -37,6 +39,8 @@ export type SendOutboundMailInput = {
   inReplyTo?: string;
   referenceIds?: string[];
   attachments?: OutboundAttachment[];
+  /** First-party open/click tracking (off unless flags are set). */
+  tracking?: MailTrackingContext;
 };
 
 export async function sendOutboundMailServer(
@@ -115,6 +119,16 @@ export async function sendOutboundMailServer(
         }))
       : undefined;
 
+  const tracked = await prepareTrackedHtml({
+    html: input.html,
+    organizationId: input.organizationId,
+    mailboxId: input.mailboxId,
+    mailboxOwnerUid: input.uid,
+    messageId: outboundMessageId,
+    tracking: input.tracking,
+  });
+  const html = tracked.html;
+
   try {
     const rawMessage = await buildOutboundRawMail({
       from: fromHeader,
@@ -123,7 +137,7 @@ export async function sendOutboundMailServer(
       bcc: bccParsed.addresses.length > 0 ? bccParsed.addresses : undefined,
       subject,
       text: input.text || undefined,
-      html: input.html || undefined,
+      html: html || undefined,
       replyTo: input.replyTo?.trim() || undefined,
       messageId: outboundMessageId,
       inReplyTo,
@@ -142,7 +156,7 @@ export async function sendOutboundMailServer(
           bcc: bccParsed.addresses.length > 0 ? bccParsed.addresses : undefined,
           subject,
           text: input.text || undefined,
-          html: input.html || undefined,
+          html: html || undefined,
           replyTo: input.replyTo?.trim() || undefined,
           messageId: outboundMessageId,
           inReplyTo,

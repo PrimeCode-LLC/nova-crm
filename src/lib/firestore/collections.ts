@@ -93,6 +93,8 @@ export const COLLECTIONS = {
   leadMailMessages: "leadMailMessages",
   /** AI reply classification + next-step actions awaiting human verification. */
   replyActions: "replyActions",
+  /** Per-send open/click tracking records for CRM SMTP outbound mail. */
+  mailTrackingMessages: "mailTrackingMessages",
 } as const;
 
 /** Subcollections under `organizations/{orgId}/*` (server-managed). */
@@ -170,4 +172,5 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.contentPlans,
   COLLECTIONS.leadMailMessages,
   COLLECTIONS.replyActions,
+  COLLECTIONS.mailTrackingMessages,
 ] as const;

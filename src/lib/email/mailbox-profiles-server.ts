@@ -108,6 +108,7 @@ function profileToFirestore(mb: EmailMailboxSettings): Record<string, unknown> {
     syncIntervalMinutes: mb.syncIntervalMinutes,
     archiveOnSend: mb.archiveOnSend,
     readReceipts: mb.readReceipts,
+    trackClicks: Boolean(mb.trackClicks),
     connectionType: serializeConnectionType(mb.connectionType),
     dailySendLimit: mb.dailySendLimit == null ? null : Math.floor(mb.dailySendLimit),
     sendGapSeconds:
@@ -159,6 +160,7 @@ function firestoreToMailbox(
     syncIntervalMinutes: Math.max(5, Number(data.syncIntervalMinutes ?? 15)),
     archiveOnSend: Boolean(data.archiveOnSend),
     readReceipts: Boolean(data.readReceipts),
+    trackClicks: Boolean(data.trackClicks),
     connectionType: parseConnectionType(data.connectionType),
     dailySendLimit: parseDailySendLimit(data.dailySendLimit),
     sendGapSeconds: parseSendGapSeconds(data.sendGapSeconds),

@@ -39,8 +39,10 @@ const mailboxSchema = z.object({
   syncIntervalMinutes: z.number(),
   archiveOnSend: z.boolean(),
   readReceipts: z.boolean(),
+  trackClicks: z.boolean().optional().default(false),
   connectionType: z.enum(["google_workspace", "microsoft_outlook", "custom"]).optional().default("custom"),
   dailySendLimit: z.number().int().positive().nullable().optional().default(null),
+  sendGapSeconds: z.number().int().min(0).nullable().optional().default(null),
   assignedUserIds: z.array(z.string()).optional().default([]),
   dataOwnerUid: z.string().optional(),
 });
@@ -189,6 +191,8 @@ export async function PATCH(req: Request) {
       ...mailboxRest,
       connectionType: mailboxRest.connectionType ?? "custom",
       dailySendLimit: mailboxRest.dailySendLimit ?? null,
+      sendGapSeconds: mailboxRest.sendGapSeconds ?? null,
+      trackClicks: mailboxRest.trackClicks ?? false,
       assignedUserIds: mailboxRest.assignedUserIds ?? [],
     },
   });

@@ -2,9 +2,27 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { AlertTriangle, ArrowRight, Clapperboard, MailWarning, MessageSquareReply, Timer, ListTodo } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  ChevronRight,
+  Clapperboard,
+  MailWarning,
+  MessageSquareReply,
+  Timer,
+  ListTodo,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { UserChip } from "@/components/common/user-chip";
 import { cn } from "@/lib/utils";
 import type { Followup, FollowupPlan, Lead, LeadTask } from "@/lib/types";
@@ -29,6 +47,69 @@ type AttentionItem = {
   /** Sales owner for the related lead (or follow-up owner when unlinked). */
   ownerId?: string;
 };
+
+function AttentionRow({
+  item,
+  wall,
+  dense,
+  onNavigate,
+}: {
+  item: AttentionItem;
+  wall?: boolean;
+  dense?: boolean;
+  onNavigate?: () => void;
+}) {
+  const Icon = item.icon;
+  const rowClass = cn(
+    "flex items-center gap-3 px-3 py-2.5",
+    !wall && "transition-colors hover:bg-muted/40",
+  );
+  const body = (
+    <>
+      <Icon
+        className={
+          item.severity === "urgent"
+            ? "h-4 w-4 shrink-0 text-destructive"
+            : item.severity === "warning"
+              ? "h-4 w-4 shrink-0 text-amber-600"
+              : "h-4 w-4 shrink-0 text-muted-foreground"
+        }
+        aria-hidden
+      />
+      <span className="min-w-0 flex-1">
+        <span
+          className={cn(
+            "block truncate font-medium",
+            dense || wall ? "text-sm" : "text-xs",
+          )}
+        >
+          {item.label}
+        </span>
+        <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
+      </span>
+      {item.ownerId ? (
+        <UserChip
+          userId={item.ownerId}
+          size="xs"
+          className={cn("shrink-0", wall || dense ? "max-w-[9rem]" : "max-w-[7.5rem]")}
+        />
+      ) : null}
+      {!wall ? (
+        <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      ) : null}
+    </>
+  );
+
+  if (wall) {
+    return <div className={rowClass}>{body}</div>;
+  }
+
+  return (
+    <Link href={item.href} className={rowClass} onClick={onNavigate}>
+      {body}
+    </Link>
+  );
+}
 
 function withPerson(detail: string, lead: Lead | undefined): string {
   const company = lead?.companyName?.trim();
@@ -82,6 +163,7 @@ export function DashboardNeedsAttention({
   className?: string;
 }) {
   const [now] = React.useState(() => Date.now());
+  const [allOpen, setAllOpen] = React.useState(false);
   const timeZone = useOrgTimezone();
   const leadById = new Map(leads.map((lead) => [lead.id, lead]));
   const leadFor = (leadId: string | undefined) => (leadId ? leadById.get(leadId) : undefined);
@@ -251,81 +333,99 @@ export function DashboardNeedsAttention({
 
   const severityRank = { urgent: 0, warning: 1, info: 2 };
   const limit = wall ? 6 : 8;
-  const visible = items
-    .sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || a.time - b.time)
-    .slice(0, limit);
+  const sorted = [...items].sort(
+    (a, b) => severityRank[a.severity] - severityRank[b.severity] || a.time - b.time,
+  );
+  const visible = sorted.slice(0, limit);
+  const hasMore = sorted.length > limit;
+  const closeAll = () => setAllOpen(false);
 
   return (
-    <Card className={cn("min-h-0 shrink-0", wall && "flex h-full flex-col", className)}>
-      <CardHeader className={cn("pb-3", wall && "shrink-0")}>
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <CardTitle className="text-base">Needs attention</CardTitle>
-            <CardDescription className="mt-1">
-              Exceptions and work that should be handled next.
-            </CardDescription>
+    <>
+      <Card className={cn("min-h-0 shrink-0", wall && "flex h-full flex-col", className)}>
+        <CardHeader className={cn("pb-3", wall && "shrink-0")}>
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <CardTitle className="text-base">Needs attention</CardTitle>
+              <CardDescription className="mt-1">
+                Exceptions and work that should be handled next.
+              </CardDescription>
+            </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {sorted.length > 0 ? (
+                hasMore ? (
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="h-6 gap-1 rounded-full px-2.5 text-xs font-medium"
+                    onClick={() => setAllOpen(true)}
+                    aria-label={`See all ${sorted.length} items needing attention`}
+                  >
+                    {sorted.length}
+                    <ChevronRight className="h-3 w-3 opacity-70" />
+                  </Button>
+                ) : (
+                  <Badge variant="secondary">{sorted.length}</Badge>
+                )
+              ) : null}
+            </div>
           </div>
-          {items.length > 0 && <Badge variant="secondary">{items.length}</Badge>}
-        </div>
-      </CardHeader>
-      <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
-        {visible.length === 0 ? (
-          <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
-            Nothing needs attention right now.
-          </p>
-        ) : (
-          <ul className="divide-y rounded-md border">
-            {visible.map((item) => {
-              const Icon = item.icon;
-              const rowClass = cn(
-                "flex items-center gap-3 px-3 py-2.5",
-                !wall && "transition-colors hover:bg-muted/40",
-              );
-              const body = (
-                <>
-                  <Icon
-                    className={
-                      item.severity === "urgent"
-                        ? "h-4 w-4 shrink-0 text-destructive"
-                        : item.severity === "warning"
-                          ? "h-4 w-4 shrink-0 text-amber-600"
-                          : "h-4 w-4 shrink-0 text-muted-foreground"
-                    }
-                    aria-hidden
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className={cn("block truncate font-medium", wall ? "text-sm" : "text-xs")}>
-                      {item.label}
-                    </span>
-                    <span className="block truncate text-xs text-muted-foreground">{item.detail}</span>
-                  </span>
-                  {item.ownerId ? (
-                    <UserChip
-                      userId={item.ownerId}
-                      size="xs"
-                      className={cn("shrink-0", wall ? "max-w-[9rem]" : "max-w-[7.5rem]")}
-                    />
-                  ) : null}
-                  {!wall ? (
-                    <ArrowRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
-                  ) : null}
-                </>
-              );
-              return (
+        </CardHeader>
+        <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
+          {visible.length === 0 ? (
+            <p className="rounded-md border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">
+              Nothing needs attention right now.
+            </p>
+          ) : (
+            <ul className="divide-y rounded-md border">
+              {visible.map((item) => (
                 <li key={item.id}>
-                  {wall ? (
-                    <div className={rowClass}>{body}</div>
-                  ) : (
-                    <Link href={item.href} className={rowClass}>
-                      {body}
-                    </Link>
-                  )}
+                  <AttentionRow item={item} wall={wall} />
                 </li>
-              );
-            })}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
+              ))}
+            </ul>
+          )}
+          {hasMore ? (
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-2 w-full text-xs text-muted-foreground hover:text-foreground"
+              onClick={() => setAllOpen(true)}
+            >
+              See all {sorted.length} items
+              <ChevronRight className="h-3 w-3" />
+            </Button>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Dialog open={allOpen} onOpenChange={setAllOpen}>
+        <DialogContent
+          showCloseButton
+          className={cn(
+            "flex h-[min(92vh,40rem)] w-[min(98vw,36rem)] max-w-[min(98vw,36rem)] flex-col gap-0 overflow-hidden p-0",
+            "sm:max-w-[min(98vw,36rem)]",
+          )}
+        >
+          <DialogHeader className="shrink-0 space-y-1 border-b px-5 py-4 pr-12 text-left sm:px-6">
+            <DialogTitle className="text-base">Needs attention</DialogTitle>
+            <DialogDescription className="text-xs sm:text-sm">
+              {sorted.length} items · highest severity first
+            </DialogDescription>
+          </DialogHeader>
+          <ScrollArea className="min-h-0 flex-1">
+            <ul className="divide-y px-2 py-1 sm:px-3">
+              {sorted.map((item) => (
+                <li key={item.id}>
+                  <AttentionRow item={item} wall={wall} dense onNavigate={closeAll} />
+                </li>
+              ))}
+            </ul>
+          </ScrollArea>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }

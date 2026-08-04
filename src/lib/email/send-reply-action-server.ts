@@ -253,6 +253,11 @@ export async function sendReplyActionServer(input: {
     html: bodyToHtml(outboundBody),
     inReplyTo,
     referenceIds,
+    tracking: {
+      trackOpens: Boolean(mailbox.readReceipts),
+      trackClicks: Boolean(mailbox.trackClicks),
+      leadId: action.leadId,
+    },
   });
 
   if (!result.ok) {

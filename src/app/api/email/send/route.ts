@@ -102,6 +102,8 @@ export async function POST(req: Request) {
     }
 
     let connectionType: string | undefined;
+    let trackOpens = false;
+    let trackClicks = false;
     if (mailboxId) {
       const profile = await getMailboxProfileServer({
         organizationId: g.ctx.session.organizationId,
@@ -109,6 +111,8 @@ export async function POST(req: Request) {
         mailboxId,
       });
       connectionType = profile?.connectionType;
+      trackOpens = Boolean(profile?.readReceipts);
+      trackClicks = Boolean(profile?.trackClicks);
       const quota = await assertMailboxDailySendQuotaServer({
         organizationId: g.ctx.session.organizationId,
         uid: dataOwnerUid,
@@ -154,6 +158,11 @@ export async function POST(req: Request) {
       inReplyTo,
       referenceIds,
       attachments: parsedAttachments,
+      tracking: {
+        trackOpens,
+        trackClicks,
+        leadId,
+      },
     });
 
     if (!result.ok) {

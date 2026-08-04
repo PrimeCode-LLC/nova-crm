@@ -72,6 +72,8 @@ import {
   leadEmailMessageAt,
   type LeadEmailMessage,
 } from "@/lib/email/lead-email-conversations";
+import type { MailTrackingSummary } from "@/lib/email/mail-tracking-types";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
   LEAD_REPLY_SENT_EVENT,
   takePendingLeadReplySent,
@@ -368,6 +370,57 @@ export function LeadEmailsPanel({
     [liveMessages, storedMessages],
   );
   const conversations = React.useMemo(() => groupLeadEmailConversations(messages), [messages]);
+  const [trackingByMessageId, setTrackingByMessageId] = React.useState<
+    Record<string, MailTrackingSummary>
+  >({});
+
+  React.useEffect(() => {
+    if (workspace.isDemo) {
+      setTrackingByMessageId({});
+      return;
+    }
+    const ids = [
+      ...new Set(
+        conversations
+          .flatMap((c) => c.messages)
+          .filter((m) => m.direction === "sent")
+          .map((m) => normalizeMessageId(m.message.messageId))
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ].slice(0, 100);
+    if (ids.length === 0) {
+      setTrackingByMessageId({});
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await fetch("/api/email/tracking", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ messageIds: ids }),
+        });
+        const data = (await res.json()) as {
+          ok?: boolean;
+          byMessageId?: Record<string, MailTrackingSummary>;
+        };
+        if (!cancelled && res.ok && data.ok && data.byMessageId) {
+          setTrackingByMessageId(data.byMessageId);
+        }
+      } catch {
+        /* optional enrichment */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [conversations, workspace.isDemo]);
+
+  function trackingFor(message: LeadEmailMessage): MailTrackingSummary | undefined {
+    const id = normalizeMessageId(message.message.messageId);
+    return id ? trackingByMessageId[id] : undefined;
+  }
   const selected =
     conversations.find((conversation) =>
       conversation.messages.some((message) => message.key === selectedId),
@@ -1555,6 +1608,26 @@ export function LeadEmailsPanel({
                         {conversation.messages.length} message{conversation.messages.length === 1 ? "" : "s"}
                       </Badge>
                       {conversation.hasUnread ? <Badge className="h-5 text-[10px]">Unread</Badge> : null}
+                      {(() => {
+                        const outbound = conversation.messages.filter((m) => m.direction === "sent");
+                        const opened = outbound.some((m) => trackingFor(m)?.opened);
+                        const clicked = outbound.some((m) => trackingFor(m)?.clicked);
+                        if (!opened && !clicked) return null;
+                        return (
+                          <>
+                            {opened ? (
+                              <Badge variant="outline" className="h-5 text-[10px]">
+                                Opened
+                              </Badge>
+                            ) : null}
+                            {clicked ? (
+                              <Badge variant="outline" className="h-5 text-[10px]">
+                                Clicked
+                              </Badge>
+                            ) : null}
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 </button>
@@ -1745,6 +1818,16 @@ export function LeadEmailsPanel({
                           <Badge variant={row.direction === "inbound" ? "secondary" : "outline"} className="text-[10px]">
                             {row.direction === "inbound" ? "Received" : "Sent"}
                           </Badge>
+                          {row.direction === "sent" && trackingFor(row)?.opened ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Opened{trackingFor(row)!.openCount > 1 ? ` ×${trackingFor(row)!.openCount}` : ""}
+                            </Badge>
+                          ) : null}
+                          {row.direction === "sent" && trackingFor(row)?.clicked ? (
+                            <Badge variant="outline" className="text-[10px]">
+                              Clicked{trackingFor(row)!.clickCount > 1 ? ` ×${trackingFor(row)!.clickCount}` : ""}
+                            </Badge>
+                          ) : null}
                           {row.direction === "inbound" &&
                           isLikelyAutoReply({
                             subject: row.message.subject,
