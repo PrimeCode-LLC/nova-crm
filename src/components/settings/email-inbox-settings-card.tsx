@@ -50,6 +50,7 @@ import {
   Users,
 } from "lucide-react";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import { buildWorkspaceOwnerPickerOptions, ownerPickerTriggerLabel } from "@/lib/owner-scope";
 import {
   Select,
@@ -295,12 +296,21 @@ export function EmailInboxSettingsCard() {
     Record<string, { used: number; limit: number | null }>
   >({});
   /** `null` until live org members load (demo uses CRM users only). */
-  const [orgMembers, setOrgMembers] = React.useState<OrganizationMember[] | null>(null);
+  const membersQuery = useOrgMembers(!isDemo);
+  const orgMembers: OrganizationMember[] | null = isDemo
+    ? null
+    : (membersQuery.data ?? null);
 
   const ownedMailboxes = React.useMemo(
     () => mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId)),
     [mailboxes, currentUserId],
   );
+
+  React.useEffect(() => {
+    if (isDemo) {
+      setSendUsageByMailboxId({});
+    }
+  }, [isDemo]);
 
   const mailboxOverviewStats = React.useMemo(() => {
     let connected = 0;
@@ -357,27 +367,6 @@ export function EmailInboxSettingsCard() {
     }
     return map;
   }, [activeAssignableOptions, users, currentUserId, getOwnerDisplayName]);
-
-  React.useEffect(() => {
-    if (isDemo) {
-      setOrgMembers(null);
-      setSendUsageByMailboxId({});
-      return;
-    }
-    let cancelled = false;
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { members?: OrganizationMember[] };
-        if (!cancelled) setOrgMembers(data.members ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setOrgMembers(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isDemo]);
 
   React.useEffect(() => {
     if (typeof window === "undefined") return;

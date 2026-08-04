@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useBookableHosts } from "@/hooks/use-scheduling-queries";
 import { useEmailAccountStore, getActiveMailbox, isEmailAccountConfigured } from "@/stores/email-account-store";
 import {
   appendMailDataOwnerParam,
@@ -28,19 +29,6 @@ import type { MailInbound, MailInboundAttachment } from "@/lib/email-account-typ
 import { cn } from "@/lib/utils";
 
 type HostOption = { hostId: string; hostName: string };
-
-async function loadBookableHosts(currentUserId: string): Promise<HostOption[]> {
-  const res = await fetch("/api/scheduling/delegations?mode=bookable_hosts");
-  const data = (await res.json()) as {
-    ok?: boolean;
-    hosts?: { hostId: string; hostName: string }[];
-  };
-  const hosts = data.ok && Array.isArray(data.hosts) ? data.hosts : [];
-  return [
-    { hostId: currentUserId, hostName: "My calendar" },
-    ...hosts.filter((h) => h.hostId !== currentUserId),
-  ];
-}
 
 function icsBase64(ics: string): string {
   if (typeof Buffer !== "undefined") {
@@ -103,23 +91,23 @@ export function CalendarInviteBanner({
 
   const [busy, setBusy] = React.useState<"accept" | "decline" | "tentative" | null>(null);
   const [acceptOpen, setAcceptOpen] = React.useState(false);
-  const [hosts, setHosts] = React.useState<HostOption[]>([]);
   const [selectedHostIds, setSelectedHostIds] = React.useState<string[]>([]);
-  const [loadingHosts, setLoadingHosts] = React.useState(false);
+  const hostsQuery = useBookableHosts(acceptOpen && Boolean(currentUserId) && !isDemo);
+  const hosts: HostOption[] = React.useMemo(() => {
+    if (!currentUserId) return [];
+    const delegated = hostsQuery.data ?? [];
+    return [
+      { hostId: currentUserId, hostName: "My calendar" },
+      ...delegated
+        .filter((h) => h.hostId !== currentUserId)
+        .map((h) => ({ hostId: h.hostId, hostName: h.hostName })),
+    ];
+  }, [currentUserId, hostsQuery.data]);
+  const loadingHosts = acceptOpen && !isDemo && hostsQuery.isLoading;
 
   React.useEffect(() => {
     if (!acceptOpen || !currentUserId) return;
-    setLoadingHosts(true);
-    void loadBookableHosts(currentUserId)
-      .then((list) => {
-        setHosts(list);
-        setSelectedHostIds([currentUserId]);
-      })
-      .catch(() => {
-        setHosts([{ hostId: currentUserId, hostName: "My calendar" }]);
-        setSelectedHostIds([currentUserId]);
-      })
-      .finally(() => setLoadingHosts(false));
+    setSelectedHostIds([currentUserId]);
   }, [acceptOpen, currentUserId]);
 
   async function sendReplyIcs(input: {

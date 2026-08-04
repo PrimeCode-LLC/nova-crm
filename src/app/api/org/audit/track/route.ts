@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { after } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { recordAudit, type AuditEvent } from "@/lib/firestore/audit";
@@ -67,22 +68,30 @@ export async function POST(req: Request) {
   const leadName = typeof safeMeta.leadName === "string" ? safeMeta.leadName : undefined;
   const displayTarget = leadName ?? feature ?? path ?? "page";
 
-  await recordAudit(
-    withAuditActor(g.ctx.session, {
-      organizationId: g.ctx.session.organizationId,
-      actorUid: g.ctx.session.uid,
-      event: parsed.data.event as AuditEvent,
-      operation: "view",
-      tableName: "pages",
-      fieldName: leadName ? "lead" : "path",
-      message:
-        parsed.data.event === "feature.outreach_view"
-          ? `Opened email outreach${path ? ` (${displayTarget})` : ""}`
-          : `Visited ${displayTarget}`,
-      updatedValue: leadName ?? path ?? null,
-      meta: safeMeta,
-    }),
-  );
+  const organizationId = g.ctx.session.organizationId;
+  const session = g.ctx.session;
+  const event = parsed.data.event as AuditEvent;
+
+  after(() => {
+    void recordAudit(
+      withAuditActor(session, {
+        organizationId,
+        actorUid: session.uid,
+        event,
+        operation: "view",
+        tableName: "pages",
+        fieldName: leadName ? "lead" : "path",
+        message:
+          event === "feature.outreach_view"
+            ? `Opened email outreach${path ? ` (${displayTarget})` : ""}`
+            : `Visited ${displayTarget}`,
+        updatedValue: leadName ?? path ?? null,
+        meta: safeMeta,
+      }),
+    ).catch(() => {
+      /* best-effort audit */
+    });
+  });
 
   return NextResponse.json({ ok: true });
 }

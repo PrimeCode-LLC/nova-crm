@@ -24,6 +24,7 @@ import {
 } from "@/components/ui/select";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import {
@@ -115,38 +116,17 @@ export function NewLeadTaskDialog({
   const [taskType, setTaskType] = React.useState<LeadTaskType>("review");
   const [visibility, setVisibility] = React.useState<LeadTaskVisibility>("on_lead");
   const [dueDate, setDueDate] = React.useState("");
-  const [assigneeOptions, setAssigneeOptions] = React.useState<AssigneeOption[]>([]);
-  const [assigneesLoading, setAssigneesLoading] = React.useState(false);
-
-  React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-    if (isDemo) {
-      setAssigneeOptions(workspaceUsersAsOptions(users));
-      setAssigneesLoading(false);
-      return () => {
-        cancelled = true;
-      };
+  const membersQuery = useOrgMembers(open && !isDemo);
+  const assigneesLoading = open && !isDemo && membersQuery.isLoading;
+  const assigneeOptions = React.useMemo(() => {
+    if (!open) return [];
+    if (isDemo) return workspaceUsersAsOptions(users);
+    if (membersQuery.isError || !membersQuery.data) {
+      return membersQuery.isError ? workspaceUsersAsOptions(users) : [];
     }
-    setAssigneesLoading(true);
-    setAssigneeOptions([]);
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { members?: OrganizationMember[] };
-        const members = data.members ?? [];
-        if (!cancelled) setAssigneeOptions(activeMemberOptions(members, users));
-      })
-      .catch(() => {
-        if (!cancelled) setAssigneeOptions(workspaceUsersAsOptions(users));
-      })
-      .finally(() => {
-        if (!cancelled) setAssigneesLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [open, isDemo, users]);
+    const fromMembers = activeMemberOptions(membersQuery.data, users);
+    return fromMembers.length > 0 ? fromMembers : workspaceUsersAsOptions(users);
+  }, [open, isDemo, users, membersQuery.data, membersQuery.isError]);
 
   React.useEffect(() => {
     if (!open) return;

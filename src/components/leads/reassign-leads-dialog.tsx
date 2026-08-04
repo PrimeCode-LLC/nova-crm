@@ -21,6 +21,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
 import { isProspectRow, prospectPatchForSalesLeadSync } from "@/lib/prospects/prospect-access";
 import type { Lead, OrganizationMember, User } from "@/lib/types";
@@ -98,8 +99,23 @@ export function ReassignLeadsDialog({
   const [submitting, setSubmitting] = React.useState(false);
   const [progressDone, setProgressDone] = React.useState(0);
   const [progressTotal, setProgressTotal] = React.useState(0);
-  const [ownerOptions, setOwnerOptions] = React.useState<OwnerOption[]>([]);
-  const [ownersLoading, setOwnersLoading] = React.useState(false);
+  const membersQuery = useOrgMembers(open && !isDemo);
+  const ownersLoading = open && !isDemo && membersQuery.isLoading;
+  const ownerOptions = React.useMemo(() => {
+    if (!open) return [];
+    if (isDemo) return workspaceUsersAsOptions(users);
+    if (membersQuery.isError) return workspaceUsersAsOptions(users);
+    if (!membersQuery.data) return [];
+    const fromMembers = activeMemberOwnerOptions(membersQuery.data, users);
+    return fromMembers.length > 0 ? fromMembers : workspaceUsersAsOptions(users);
+  }, [open, isDemo, users, membersQuery.data, membersQuery.isError]);
+
+  React.useEffect(() => {
+    if (!open || isDemo || !membersQuery.isError) return;
+    toast.message("Could not load full team list", {
+      description: "Showing workspace users only. Try again or refresh.",
+    });
+  }, [open, isDemo, membersQuery.isError]);
 
   const targets = React.useMemo(
     () =>
@@ -122,56 +138,6 @@ export function ReassignLeadsDialog({
       setSubmitting(false);
     }
   }, [open, leadIds.join(",")]);
-
-  React.useEffect(() => {
-    if (!open) return;
-    let cancelled = false;
-
-    if (isDemo) {
-      setOwnerOptions(workspaceUsersAsOptions(users));
-      setOwnersLoading(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setOwnersLoading(true);
-    setOwnerOptions([]);
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) {
-          if (!cancelled) {
-            setOwnerOptions(workspaceUsersAsOptions(users));
-            toast.message("Could not load full team list", {
-              description: "Showing workspace users only. Try again or refresh.",
-            });
-          }
-          return;
-        }
-        const data = (await res.json()) as { members?: OrganizationMember[] };
-        const members = data.members ?? [];
-        if (cancelled) return;
-        const fromMembers = activeMemberOwnerOptions(members, users);
-        setOwnerOptions(
-          fromMembers.length > 0 ? fromMembers : workspaceUsersAsOptions(users),
-        );
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setOwnerOptions(workspaceUsersAsOptions(users));
-          toast.message("Could not load team list", {
-            description: "Showing workspace users only.",
-          });
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setOwnersLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [open, isDemo, users]);
 
   function displayOwnerName(ownerId: string): string {
     if (!ownerId.trim()) return "Open queue";

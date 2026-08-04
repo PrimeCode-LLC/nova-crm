@@ -13,7 +13,6 @@ import type {
   Lead,
   LeadTask,
   Note,
-  OrganizationMember,
   PermissionOverride,
   PipelineStage,
   Profile,
@@ -25,6 +24,7 @@ import type {
   OrgActivityEvent,
   OrgMemberRole,
 } from "@/lib/types";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import {
   createWorkspaceLookup,
   LIVE_SNAPSHOT,
@@ -380,6 +380,8 @@ export function WorkspaceModeProvider({
   const [contactsAdded, setContactsAdded] = React.useState<Contact[]>([]);
   const [leadsAdded, setLeadsAdded] = React.useState<Lead[]>([]);
   const [userPatches, setUserPatches] = React.useState<Record<string, Partial<Omit<User, "id">>>>({});
+  /** Preserves `users` array/object identity across unrelated snapshot rebuilds (leads, notes, etc.). */
+  const stableUsersMergedRef = React.useRef<User[]>([]);
   const [accountContactBumps, setAccountContactBumps] = React.useState<Record<string, number>>({});
 
   const [labelDelta, setLabelDelta] = React.useState<{
@@ -450,43 +452,34 @@ export function WorkspaceModeProvider({
     null,
   );
   const [delegatedMailboxHostIds, setDelegatedMailboxHostIds] = React.useState<string[]>([]);
+  const orgMembersQuery = useOrgMembers(Boolean(liveOrgId));
   React.useEffect(() => {
     if (!liveOrgId) {
       setOrgMemberLabels({});
       setActiveOrgMemberIds(null);
       return;
     }
-    let cancelled = false;
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { members?: OrganizationMember[] };
-        const members = data.members ?? [];
-        const next: Record<string, string> = {};
-        const activeIds = new Set<string>();
-        for (const m of members) {
-          const label =
-            m.displayName?.trim() ||
-            (m.email.includes("@") ? m.email.split("@")[0] : m.email) ||
-            m.uid;
-          next[m.uid] = label;
-          if (m.status === "active") activeIds.add(m.uid);
-        }
-        if (!cancelled) {
-          setOrgMemberLabels(next);
-          setActiveOrgMemberIds(activeIds);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setOrgMemberLabels({});
-          setActiveOrgMemberIds(null);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [liveOrgId]);
+    const members = orgMembersQuery.data;
+    if (!members) {
+      if (orgMembersQuery.isError) {
+        setOrgMemberLabels({});
+        setActiveOrgMemberIds(null);
+      }
+      return;
+    }
+    const next: Record<string, string> = {};
+    const activeIds = new Set<string>();
+    for (const m of members) {
+      const label =
+        m.displayName?.trim() ||
+        (m.email.includes("@") ? m.email.split("@")[0] : m.email) ||
+        m.uid;
+      next[m.uid] = label;
+      if (m.status === "active") activeIds.add(m.uid);
+    }
+    setOrgMemberLabels(next);
+    setActiveOrgMemberIds(activeIds);
+  }, [liveOrgId, orgMembersQuery.data, orgMembersQuery.isError]);
 
   React.useEffect(() => {
     if (mode !== "live" || !liveOrgId || !sessionHydrated) {
@@ -2354,10 +2347,17 @@ export function WorkspaceModeProvider({
       ...tenantBaseSnapshot.leads,
       ...leadsAdded.filter((l) => !leadIds.has(l.id)),
     ];
-    const usersMerged = tenantBaseSnapshot.users.map((u) => ({
-      ...u,
-      ...(userPatches[u.id] ?? {}),
-    }));
+    const nextUsers = tenantBaseSnapshot.users.map((u) => {
+      const patch = userPatches[u.id];
+      return patch ? { ...u, ...patch } : u;
+    });
+    const prevUsers = stableUsersMergedRef.current;
+    const usersMerged =
+      prevUsers.length === nextUsers.length &&
+      prevUsers.every((u, i) => u === nextUsers[i])
+        ? prevUsers
+        : nextUsers;
+    stableUsersMergedRef.current = usersMerged;
 
     const removedLabelIds = new Set(labelDelta.removedIds);
     const mergedLabelBase = tenantBaseSnapshot.crmLabels

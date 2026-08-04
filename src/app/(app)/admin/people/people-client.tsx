@@ -26,11 +26,13 @@ import { toastError } from "@/lib/error-logging/toast-error";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { fetchOrgMembers, orgMembersQueryKey } from "@/hooks/use-org-members";
 import {
   FeatureGrantsEditor,
   featureGrantsSummary,
 } from "@/components/admin/feature-grants-editor";
 import { Button } from "@/components/ui/button";
+import { useQueryClient } from "@tanstack/react-query";
 import { ROLES } from "@/lib/constants";
 import { canManageOrgUsers } from "@/lib/can-manage-org-users";
 import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
@@ -190,6 +192,7 @@ function PeoplePageClientInner({
 }) {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const queryClient = useQueryClient();
 
   const [members, setMembers] = React.useState<OrganizationMember[]>([]);
   const [invites, setInvites] = React.useState<OrganizationInvite[]>([]);
@@ -367,19 +370,20 @@ function PeoplePageClientInner({
   const refresh = React.useCallback(async () => {
     setRefreshing(true);
     try {
-      const [m, i] = await Promise.all([
-        fetch("/api/org/members", { cache: "no-store" }).then((r) => r.json()),
+      const [nextMembers, i] = await Promise.all([
+        fetchOrgMembers(),
         fetch("/api/org/invites", { cache: "no-store" }).then((r) => r.json()),
       ]);
-      setMembers((m.members ?? []) as OrganizationMember[]);
+      setMembers(nextMembers);
       setInvites((i.invites ?? []) as OrganizationInvite[]);
+      queryClient.setQueryData(orgMembersQueryKey, nextMembers);
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to load team");
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, []);
+  }, [queryClient]);
 
   // Fetch on mount - `refresh` does setState only after the network call returns,
   // which is the canonical "fetch on mount" effect pattern.

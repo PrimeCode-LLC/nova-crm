@@ -104,6 +104,23 @@ export async function listDelegationsForOrgServer(
   return snap.docs.map((d) => docToDelegation(d.id, d.data()));
 }
 
+/** Short TTL for bookable-host lists — hot path on lead detail / scheduling hub. */
+const BOOKABLE_HOSTS_CACHE_TTL_MS = 30_000;
+const bookableHostsCache = new Map<
+  string,
+  {
+    expiresAt: number;
+    value: { hostId: string; hostName: string; permissions: CalendarDelegatePermission[] }[];
+  }
+>();
+
+function invalidateBookableHostsCache(organizationId: string) {
+  const prefix = `${organizationId}:`;
+  for (const key of bookableHostsCache.keys()) {
+    if (key.startsWith(prefix)) bookableHostsCache.delete(key);
+  }
+}
+
 export async function createDelegationServer(input: {
   organizationId: string;
   hostId: string;
@@ -133,6 +150,7 @@ export async function createDelegationServer(input: {
   };
   const ref = await db.collection(COLLECTIONS.calendarDelegations).add(payload);
   const fresh = await ref.get();
+  invalidateBookableHostsCache(input.organizationId);
   return { delegation: docToDelegation(ref.id, fresh.data()!) };
 }
 
@@ -154,6 +172,7 @@ export async function deleteDelegationServer(input: {
     return { error: "Delegation not found" };
   }
   await ref.delete();
+  invalidateBookableHostsCache(input.organizationId);
   return { ok: true };
 }
 
@@ -206,18 +225,24 @@ export async function listDelegatedHostsForViewerServer(input: {
   action?: CalendarDelegatePermission;
 }): Promise<{ hostId: string; hostName: string; permissions: CalendarDelegatePermission[] }[]> {
   const action = input.action ?? "book";
+  const cacheKey = `${input.organizationId}:${input.viewerUid}:${action}`;
+  const cached = bookableHostsCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+
   const db = getAdminDb();
   if (!db) return [];
 
-  const orgUsers = await listOrgUsersServer(input.organizationId);
+  const [orgUsers, snap] = await Promise.all([
+    listOrgUsersServer(input.organizationId),
+    db
+      .collection(COLLECTIONS.calendarDelegations)
+      .where("organizationId", "==", input.organizationId)
+      .get(),
+  ]);
   const viewer = orgUsers.find((u) => u.id === input.viewerUid);
   if (!viewer) return [];
 
   const orgUserIds = new Set(orgUsers.map((u) => u.id));
-  const snap = await db
-    .collection(COLLECTIONS.calendarDelegations)
-    .where("organizationId", "==", input.organizationId)
-    .get();
 
   const byHost = new Map<
     string,
@@ -249,11 +274,23 @@ export async function listDelegatedHostsForViewerServer(input: {
     }
   }
 
-  return [...byHost.values()]
+  const value = [...byHost.values()]
     .map((h) => ({
       hostId: h.hostId,
       hostName: h.hostName,
       permissions: [...h.permissions],
     }))
     .sort((a, b) => a.hostName.localeCompare(b.hostName));
+
+  bookableHostsCache.set(cacheKey, {
+    expiresAt: Date.now() + BOOKABLE_HOSTS_CACHE_TTL_MS,
+    value,
+  });
+  if (bookableHostsCache.size > 500) {
+    const now = Date.now();
+    for (const [k, v] of bookableHostsCache) {
+      if (v.expiresAt <= now) bookableHostsCache.delete(k);
+    }
+  }
+  return value;
 }

@@ -66,7 +66,7 @@ import {
 } from "@/lib/content-calendar/capture-policy";
 import { CONTENT_STRATEGY_PACKS } from "@/lib/content-calendar/strategy-packs";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import type { OrganizationMember } from "@/lib/types";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import { displayKnowledgeLibraryName, libraryAllowsFeature } from "@/lib/ai/knowledge-library-ui";
 import { UserChip } from "@/components/common/user-chip";
 import { Switch } from "@/components/ui/switch";
@@ -261,7 +261,6 @@ export function ContentBrandsClient() {
   const [brandToDelete, setBrandToDelete] = React.useState<ContentBrand | null>(null);
   const [libraries, setLibraries] = React.useState<LibraryOption[]>([]);
   const [libQuery, setLibQuery] = React.useState("");
-  const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
 
   const isEditing = Boolean(editingBrand);
   const stepIndex = FORM_STEPS.findIndex((s) => s.id === formStep);
@@ -303,34 +302,21 @@ export function ContentBrandsClient() {
     })();
   }, []);
 
-  React.useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const json = (await res.json()) as { members?: OrganizationMember[] };
-        const list = (json.members ?? [])
-          .filter((m) => m.status === "active")
-          .map((m) => ({
-            uid: m.uid,
-            label: m.displayName?.trim() || m.email?.trim() || m.uid,
-          }));
-        if (!cancelled) setMembers(list);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMembers(
-            ws.users.map((u) => ({
-              uid: u.id,
-              label: u.displayName?.trim() || u.email?.trim() || u.id,
-            })),
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ws.users]);
+  const membersQuery = useOrgMembers(!ws.isDemo);
+  const members = React.useMemo(() => {
+    if (membersQuery.data?.length) {
+      return membersQuery.data
+        .filter((m) => m.status === "active")
+        .map((m) => ({
+          uid: m.uid,
+          label: m.displayName?.trim() || m.email?.trim() || m.uid,
+        }));
+    }
+    return ws.users.map((u) => ({
+      uid: u.id,
+      label: u.displayName?.trim() || u.email?.trim() || u.id,
+    }));
+  }, [membersQuery.data, ws.users]);
 
   const filteredLibraries = React.useMemo(() => {
     const contentLibs = libraries.filter((l) => libraryAllowsFeature(l, "content"));

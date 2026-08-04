@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import {
   createUserNotifications,
 } from "@/lib/notifications/create-user-notification";
@@ -454,28 +455,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     () => buildWorkspaceOwnerPickerOptions(ws.users, ws.currentUserId, ws.getOwnerDisplayName),
     [ws.users, ws.currentUserId, ws.getOwnerDisplayName],
   );
-  const [activeMemberOptions, setActiveMemberOptions] = React.useState<OwnerOption[] | null>(null);
-
-  React.useEffect(() => {
-    if (ws.isDemo) return;
-
-    let cancelled = false;
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const data = (await res.json()) as { members?: OrganizationMember[] };
-        if (cancelled) return;
-        const fromMembers = activeOrgMemberOwnerOptions(data.members ?? [], ws.users);
-        if (fromMembers.length > 0) setActiveMemberOptions(fromMembers);
-      })
-      .catch(() => {
-        /* keep CRM fallback */
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [ws.isDemo, ws.users]);
+  const orgMembersQuery = useOrgMembers(!ws.isDemo);
+  const activeMemberOptions = React.useMemo(() => {
+    if (ws.isDemo || !orgMembersQuery.data?.length) return null;
+    const fromMembers = activeOrgMemberOwnerOptions(orgMembersQuery.data, ws.users);
+    return fromMembers.length > 0 ? fromMembers : null;
+  }, [ws.isDemo, orgMembersQuery.data, ws.users]);
 
   const ownerOptions = ws.isDemo
     ? fallbackOwnerOptions

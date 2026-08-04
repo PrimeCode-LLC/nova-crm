@@ -10,6 +10,11 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScheduleMeetingDialog } from "@/components/scheduling/schedule-meeting-dialog";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useCalendarConnections } from "@/lib/scheduling/use-calendar-connections";
+import {
+  useBookableHosts,
+  useLeadMeetings,
+  useSchedulingLinks,
+} from "@/hooks/use-scheduling-queries";
 import type { Lead, Meeting, SchedulingLink } from "@/lib/types";
 import {
   demoDelegatedHosts,
@@ -26,36 +31,40 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
     isDemo,
     currentUserId,
   );
-  const [bookableHosts, setBookableHosts] = React.useState<
-    { hostId: string; hostName: string }[]
-  >([]);
-  const [links, setLinks] = React.useState<SchedulingLink[]>([]);
-  const [meetings, setMeetings] = React.useState<Meeting[]>([]);
-  const [hostId, setHostId] = React.useState(currentUserId);
-  const [bookOpen, setBookOpen] = React.useState(false);
+  const liveEnabled = !isDemo;
+  const hostsQuery = useBookableHosts(liveEnabled);
+  const linksQuery = useSchedulingLinks(currentUserId, liveEnabled);
+  const meetingsQuery = useLeadMeetings(lead.id, liveEnabled);
+
+  const demoHosts = React.useMemo(
+    () => (isDemo ? demoDelegatedHosts(users, currentUserId) : []),
+    [isDemo, users, currentUserId],
+  );
+  const demoLinks = React.useMemo(
+    () => (isDemo ? demoSchedulingLinks(users, currentUserId) : []),
+    [isDemo, users, currentUserId],
+  );
+  const demoLeadMeetings = React.useMemo(
+    () =>
+      isDemo ? demoMeetings(users).filter((m) => m.leadId === lead.id) : [],
+    [isDemo, users, lead.id],
+  );
+
+  const bookableHosts = isDemo ? demoHosts : (hostsQuery.data ?? []);
+  const links: SchedulingLink[] = isDemo
+    ? demoLinks
+    : (linksQuery.data?.items ?? []);
+  const [extraMeetings, setExtraMeetings] = React.useState<Meeting[]>([]);
+  const meetings: Meeting[] = isDemo
+    ? demoLeadMeetings
+    : [...(meetingsQuery.data ?? []), ...extraMeetings];
 
   React.useEffect(() => {
-    if (isDemo) {
-      const hosts = demoDelegatedHosts(users, currentUserId);
-      React.startTransition(() => {
-        setBookableHosts(hosts);
-        setLinks(demoSchedulingLinks(users, currentUserId));
-        setMeetings(demoMeetings(users).filter((m) => m.leadId === lead.id));
-      });
-      return;
-    }
-    void (async () => {
-      const [hRes, lRes, mRes] = await Promise.all([
-        fetch("/api/scheduling/delegations?mode=bookable_hosts"),
-        fetch(`/api/scheduling/links?hostId=${encodeURIComponent(currentUserId)}`),
-        fetch(`/api/scheduling/meetings?leadId=${encodeURIComponent(lead.id)}`),
-      ]);
-      const [hj, lj, mj] = await Promise.all([hRes.json(), lRes.json(), mRes.json()]);
-      if (hj.ok) setBookableHosts(hj.hosts ?? []);
-      if (lj.ok) setLinks(lj.items ?? []);
-      if (mj.ok) setMeetings(mj.items ?? []);
-    })();
-  }, [isDemo, users, currentUserId, lead.id]);
+    setExtraMeetings([]);
+  }, [lead.id]);
+
+  const [hostId, setHostId] = React.useState(currentUserId);
+  const [bookOpen, setBookOpen] = React.useState(false);
 
   const hostOptions = React.useMemo(() => {
     const me = users.find((u) => u.id === currentUserId);
@@ -170,7 +179,7 @@ export function LeadSchedulingPanel({ lead }: { lead: Lead }) {
         lead={lead}
         hostOptions={hostOptions}
         onHostChange={setHostId}
-        onBooked={(meeting) => setMeetings((prev) => [...prev, meeting])}
+        onBooked={(meeting) => setExtraMeetings((prev) => [...prev, meeting])}
       />
     </Card>
   );

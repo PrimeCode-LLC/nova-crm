@@ -74,13 +74,13 @@ import {
 } from "@/lib/content-calendar/platform-playbooks";
 import { contentLintSummary, lintContentVariant } from "@/lib/content-calendar/post-lint";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgMembers } from "@/hooks/use-org-members";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
 import {
   formatTimezoneDisplayLabel,
   isoFromDatetimeLocalInZone,
 } from "@/lib/org-timezone";
-import type { OrganizationMember } from "@/lib/types";
 
 /** Editable shape of one platform variant, with hashtags as raw text. */
 type VariantDraft = {
@@ -477,7 +477,21 @@ export function ContentItemDetailClient() {
   const [briefBusy, setBriefBusy] = React.useState(false);
   const [repurposeBusy, setRepurposeBusy] = React.useState<ContentPlatform | null>(null);
   const [adaptSource, setAdaptSource] = React.useState<ContentPlatform | null>(null);
-  const [members, setMembers] = React.useState<{ uid: string; label: string }[]>([]);
+  const membersQuery = useOrgMembers(!ws.isDemo);
+  const members = React.useMemo(() => {
+    if (membersQuery.data?.length) {
+      return membersQuery.data
+        .filter((m) => m.status === "active")
+        .map((m) => ({
+          uid: m.uid,
+          label: m.displayName?.trim() || m.email?.trim() || m.uid,
+        }));
+    }
+    return ws.users.map((u) => ({
+      uid: u.id,
+      label: u.displayName?.trim() || u.email?.trim() || u.id,
+    }));
+  }, [membersQuery.data, ws.users]);
   const [scheduleEditing, setScheduleEditing] = React.useState(false);
   const [scheduleDraft, setScheduleDraft] = React.useState("");
   const [scheduleBusy, setScheduleBusy] = React.useState(false);
@@ -498,35 +512,6 @@ export function ContentItemDetailClient() {
   function setDesignDraft(next: string) {
     updateEdits((prev) => ({ ...prev, design: next }));
   }
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/org/members", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok || cancelled) return;
-        const json = (await res.json()) as { members?: OrganizationMember[] };
-        const list = (json.members ?? [])
-          .filter((m) => m.status === "active")
-          .map((m) => ({
-            uid: m.uid,
-            label: m.displayName?.trim() || m.email?.trim() || m.uid,
-          }));
-        if (!cancelled) setMembers(list);
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setMembers(
-            ws.users.map((u) => ({
-              uid: u.id,
-              label: u.displayName?.trim() || u.email?.trim() || u.id,
-            })),
-          );
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [ws.users]);
 
   React.useEffect(() => {
     setScheduleEditing(false);

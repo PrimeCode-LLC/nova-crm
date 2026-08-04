@@ -50,6 +50,10 @@ import { AvailabilityScheduleEditor } from "@/components/scheduling/availability
 import { CalendarConnectionsPanel } from "@/components/scheduling/calendar-connections-panel";
 import { SchedulingCalendarView } from "@/components/scheduling/scheduling-calendar-view";
 import {
+  bookableHostsQueryKey,
+  useBookableHosts,
+} from "@/hooks/use-scheduling-queries";
+import {
   buildWorkspaceOwnerPickerOptions,
   ownerPickerTriggerLabel,
 } from "@/lib/owner-scope";
@@ -73,6 +77,7 @@ import { WEEKDAY_KEYS } from "@/lib/scheduling/defaults";
 import { DELEGATION_ROLE_PRESETS } from "@/lib/scheduling/delegation-presets";
 import { seedCalendarConnectionsCache } from "@/lib/scheduling/use-calendar-connections";
 import { cn } from "@/lib/utils";
+import { useQueryClient } from "@tanstack/react-query";
 
 const LOCATION_LABEL: Record<string, string> = {
   google_meet: "Google Meet",
@@ -109,6 +114,8 @@ function formatDelegationLabel(d: CalendarDelegation, users: readonly User[]): s
 export function SchedulingHub() {
   const { isDemo, users, currentUserId, organizationId } = useWorkspace();
   const { user: fbUser } = useAuth();
+  const queryClient = useQueryClient();
+  const hostsQuery = useBookableHosts(!isDemo);
   const [orgSlug, setOrgSlug] = React.useState(isDemo ? DEMO_ORG_SLUG : "");
   const [orgName, setOrgName] = React.useState("");
 
@@ -127,6 +134,11 @@ export function SchedulingHub() {
     if (!currentUserId) return;
     setViewHostId((prev) => (!prev ? currentUserId : prev));
   }, [currentUserId]);
+
+  React.useEffect(() => {
+    if (isDemo || !hostsQuery.data) return;
+    setBookableHosts(hostsQuery.data);
+  }, [isDemo, hostsQuery.data]);
   const [selectedLink, setSelectedLink] = React.useState<SchedulingLink | null>(null);
   const [createOpen, setCreateOpen] = React.useState(false);
   const [newTitle, setNewTitle] = React.useState("");
@@ -143,13 +155,14 @@ export function SchedulingHub() {
 
   const load = React.useCallback(async () => {
     if (isDemo) {
-      setLinks(demoSchedulingLinks(users, currentUserId));
-      setMeetings(demoMeetings(users));
-      setDelegations(demoDelegations(users));
+      const demoUsers = users;
+      setLinks(demoSchedulingLinks(demoUsers, currentUserId));
+      setMeetings(demoMeetings(demoUsers));
+      setDelegations(demoDelegations(demoUsers));
       setSchedule(demoAvailabilitySchedule(currentUserId));
       setBookableHosts(
-        demoDelegations(users).length
-          ? users
+        demoDelegations(demoUsers).length
+          ? demoUsers
               .filter((u) => u.roleId === "director")
               .map((u) => ({ hostId: u.id, hostName: u.displayName }))
           : [],
@@ -160,23 +173,21 @@ export function SchedulingHub() {
     }
     setLoading(true);
     try {
-      const [ctxRes, linksRes, meetingsRes, delegRes, availRes, hostsRes, connRes] =
+      const [ctxRes, linksRes, meetingsRes, delegRes, availRes, connRes] =
         await Promise.all([
           fetch("/api/scheduling/context"),
           fetch(`/api/scheduling/links?hostId=${encodeURIComponent(viewHostId)}`),
           fetch(`/api/scheduling/meetings?hostId=${encodeURIComponent(viewHostId)}`),
           fetch(`/api/scheduling/delegations?hostId=${encodeURIComponent(currentUserId)}`),
           fetch(`/api/scheduling/availability?hostId=${encodeURIComponent(currentUserId)}`),
-          fetch("/api/scheduling/delegations?mode=bookable_hosts"),
           fetch("/api/scheduling/calendar-connections"),
         ]);
-      const [ctx, lj, mj, dj, aj, hj, cj] = await Promise.all([
+      const [ctx, lj, mj, dj, aj, cj] = await Promise.all([
         ctxRes.json(),
         linksRes.json(),
         meetingsRes.json(),
         delegRes.json(),
         availRes.json(),
-        hostsRes.json(),
         connRes.json(),
       ]);
       if (ctx.ok) {
@@ -191,25 +202,31 @@ export function SchedulingHub() {
       if (mj.ok) setMeetings(mj.items ?? []);
       if (dj.ok) setDelegations(dj.items ?? []);
       if (aj.ok) setSchedule(aj.schedule ?? null);
-      if (hj.ok) setBookableHosts(hj.hosts ?? []);
       if (cj.ok) {
         const items = (cj.items ?? []) as { status?: string }[];
         setCalendarConnected(items.some((c) => c.status === "connected"));
         seedCalendarConnectionsCache(
-          isDemo,
+          false,
           currentUserId,
           cj.items ?? [],
           ctx.ok ? ctx.oauth : undefined,
         );
       }
+      void queryClient.invalidateQueries({ queryKey: bookableHostsQueryKey });
     } finally {
       setLoading(false);
     }
-  }, [isDemo, users, currentUserId, viewHostId]);
+  }, [isDemo, currentUserId, viewHostId, queryClient, users]);
 
   React.useEffect(() => {
+    if (isDemo) return;
     void load();
-  }, [load]);
+  }, [isDemo, currentUserId, viewHostId]); // eslint-disable-line react-hooks/exhaustive-deps -- omit `load`/`users` to avoid roster churn refetches
+
+  React.useEffect(() => {
+    if (!isDemo) return;
+    void load();
+  }, [isDemo, users, currentUserId, load]);
 
   async function handleCreateLink() {
     if (!newTitle.trim()) {

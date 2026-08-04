@@ -19,17 +19,36 @@ function asUserMinimal(id: string, raw: DocumentData): User {
   };
 }
 
+/** Short in-process TTL — Fluid Compute reuses instances; cuts repeated roster reads. */
+const ORG_USERS_CACHE_TTL_MS = 30_000;
+const orgUsersCache = new Map<string, { expiresAt: number; value: User[] }>();
+
 /** Active org roster for hierarchy checks (server-side). */
 export async function listOrgUsersServer(organizationId: string): Promise<User[]> {
+  const hit = orgUsersCache.get(organizationId);
+  if (hit && hit.expiresAt > Date.now()) return hit.value;
+
   const db = getAdminDb();
   if (!db) return [];
   const snap = await db
     .collection(COLLECTIONS.users)
     .where("organizationId", "==", organizationId)
     .get();
-  return snap.docs
+  const value = snap.docs
     .map((d) => asUserMinimal(d.id, d.data()))
     .filter((u) => u.status === "active");
+
+  orgUsersCache.set(organizationId, {
+    expiresAt: Date.now() + ORG_USERS_CACHE_TTL_MS,
+    value,
+  });
+  if (orgUsersCache.size > 200) {
+    const now = Date.now();
+    for (const [k, v] of orgUsersCache) {
+      if (v.expiresAt <= now) orgUsersCache.delete(k);
+    }
+  }
+  return value;
 }
 
 /** True when `viewerUid` is the target or a manager above them in the org chart. */
