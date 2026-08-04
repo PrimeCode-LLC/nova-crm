@@ -4,6 +4,8 @@ import {
   todayDateInputInZone,
   zonedWallTimeToUtc,
 } from "@/lib/org-timezone";
+import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
+import type { ChannelKey, Followup } from "@/lib/types";
 
 export type FollowupDueBucket = "overdue" | "today" | "thisWeek" | "later" | "failed";
 
@@ -70,6 +72,56 @@ export function isFollowupRetryable(f: {
 
 export function isFollowupDeliveryIssue(f: { deliveryStatus?: string }): boolean {
   return f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry";
+}
+
+/**
+ * Whether "Try now" can queue an outbound email (vs only bumping the due time).
+ * Ignores an existing scheduledEmailId so callers can cancel + re-queue ASAP.
+ */
+export function canTryNowScheduleEmail(
+  f: Pick<
+    Followup,
+    "messageBody" | "pausedAt" | "completedAt" | "channel" | "scheduledEmailId"
+  >,
+  leadChannel: ChannelKey,
+): boolean {
+  if (!f.messageBody?.trim() || f.pausedAt || f.completedAt) return false;
+  return canAutoScheduleFollowupEmail(
+    {
+      ...f,
+      scheduledEmailId: undefined,
+      completedAt: undefined,
+      pausedAt: undefined,
+    } as Followup,
+    leadChannel,
+  );
+}
+
+export type FollowupTryNowPlan =
+  | { kind: "retry" }
+  | { kind: "schedule"; requeue: boolean }
+  | { kind: "bump_due" };
+
+/** Decide how Try now should act for one open followup. */
+export function planFollowupTryNow(
+  f: Followup,
+  leadChannel: ChannelKey | undefined,
+): FollowupTryNowPlan {
+  if (isFollowupRetryable(f)) return { kind: "retry" };
+  if (leadChannel && canTryNowScheduleEmail(f, leadChannel)) {
+    return { kind: "schedule", requeue: Boolean(f.scheduledEmailId) };
+  }
+  return { kind: "bump_due" };
+}
+
+/** ASAP send time: at least ~90s out, staggered for bulk. */
+export function tryNowScheduleAtIso(index = 0, now = Date.now()): string {
+  return new Date(now + 90_000 + index * 60_000).toISOString();
+}
+
+/** Due bump when we cannot send email automatically. */
+export function tryNowDueAtIso(now = Date.now()): string {
+  return new Date(now + 60_000).toISOString();
 }
 
 /**

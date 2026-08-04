@@ -49,7 +49,21 @@ import {
 } from "@/lib/org-timezone";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
-import { getActiveMailbox, useEmailAccountStore } from "@/stores/email-account-store";
+import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
+import {
+  buildContactRecipientOptions,
+  defaultContactRecipientEmail,
+} from "@/lib/email/contact-recipient-options";
+import {
+  loadLastUsedMailboxPrefs,
+  rememberLastUsedMailbox,
+  resolveDefaultScheduleMailboxId,
+} from "@/lib/email/last-used-mailbox-prefs";
+import {
+  getActiveMailbox,
+  isEmailAccountConfigured,
+  useEmailAccountStore,
+} from "@/stores/email-account-store";
 import {
   buildWorkspaceOwnerPickerOptions,
   filterFollowupsByOwnerScope,
@@ -60,6 +74,9 @@ import {
   formatFollowupDueLabel,
   isFollowupDeliveryIssue,
   isFollowupRetryable,
+  planFollowupTryNow,
+  tryNowDueAtIso,
+  tryNowScheduleAtIso,
   type FollowupDueBucket,
 } from "@/lib/followup-due-display";
 import { Input } from "@/components/ui/input";
@@ -134,6 +151,7 @@ export default function FollowupsPage() {
     leads,
     users,
     currentUserId,
+    organizationId,
     addFollowup,
     setFollowupCompleted,
     removeFollowup,
@@ -141,6 +159,7 @@ export default function FollowupsPage() {
     clearFollowupEmailSchedule,
     setFollowupEmailSchedule,
     getOwnerDisplayName,
+    getContactById,
   } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<Followup | null>(null);
@@ -157,6 +176,8 @@ export default function FollowupsPage() {
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
   const setScheduled = useEmailAccountStore((s) => s.setScheduled);
+  const addScheduled = useEmailAccountStore((s) => s.addScheduled);
+  const globalEmailFooter = useEmailAccountStore((s) => s.globalEmailFooter);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
@@ -258,10 +279,20 @@ export default function FollowupsPage() {
     () => selectedFollowups.filter((f) => canMutateRow(f)),
     [selectedFollowups, canMutateRow],
   );
-  const selectedRetryable = React.useMemo(
-    () => selectedMutable.filter((f) => isFollowupRetryable(f)),
-    [selectedMutable],
-  );
+
+  const sendableMailbox = React.useMemo(() => {
+    const list = mailboxes.length > 0 ? mailboxes : [activeMailbox];
+    const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+    const defaultId = resolveDefaultScheduleMailboxId({
+      mailboxIds: list.map((mb) => mb.id),
+      lastUsedId: prefs.lastMailboxId,
+      activeMailboxId,
+    });
+    const picked = list.find((mb) => mb.id === defaultId) ?? list[0] ?? activeMailbox;
+    if (isDemo) return picked;
+    if (isEmailAccountConfigured(picked)) return picked;
+    return list.find((mb) => isEmailAccountConfigured(mb)) ?? null;
+  }, [mailboxes, activeMailbox, activeMailboxId, organizationId, currentUserId, isDemo]);
 
   function toggleBucket(next: BucketFilter) {
     setTab("open");
@@ -434,55 +465,177 @@ export default function FollowupsPage() {
     setSelectedIds(new Set());
   }
 
-  async function retryFollowups(targets: Followup[]) {
-    let ok = 0;
+  async function tryNowFollowups(targets: Followup[]) {
+    let scheduled = 0;
+    let retried = 0;
+    let bumped = 0;
     let skipped = 0;
+    let scheduleIndex = 0;
+    const now = Date.now();
+
     for (const f of targets) {
-      if (!isFollowupRetryable(f) || !f.scheduledEmailId) {
+      if (!canMutateRow(f)) {
         skipped += 1;
         continue;
       }
-      const result = await retryScheduledEmailClient({
-        scheduledEmailId: f.scheduledEmailId,
-        isDemo,
-        selfUid: currentUserId,
-        mailViewAsUid,
-        activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
-        retryDemo: (id) => {
-          setScheduled(
-            scheduledEmails.map((s) =>
-              s.id === id
-                ? {
-                    ...s,
-                    status: "pending" as const,
-                    scheduledAt: new Date(Date.now() + 60_000).toISOString(),
-                    error: undefined,
-                  }
-                : s,
-            ),
-          );
-        },
-      });
-      if ("error" in result) {
-        skipped += 1;
-        continue;
-      }
-      if (result.scheduledAt) {
-        setFollowupEmailSchedule(f.id, {
+      const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
+      const plan = planFollowupTryNow(f, lead?.channel);
+
+      if (plan.kind === "retry") {
+        if (!f.scheduledEmailId) {
+          skipped += 1;
+          continue;
+        }
+        const result = await retryScheduledEmailClient({
           scheduledEmailId: f.scheduledEmailId,
-          emailScheduledAt: result.scheduledAt,
+          isDemo,
+          selfUid: currentUserId,
+          mailViewAsUid,
+          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+          retryDemo: (id) => {
+            setScheduled(
+              scheduledEmails.map((s) =>
+                s.id === id
+                  ? {
+                      ...s,
+                      status: "pending" as const,
+                      scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+                      error: undefined,
+                    }
+                  : s,
+              ),
+            );
+          },
         });
+        if ("error" in result) {
+          skipped += 1;
+          continue;
+        }
+        if (result.scheduledAt) {
+          setFollowupEmailSchedule(f.id, {
+            scheduledEmailId: f.scheduledEmailId,
+            emailScheduledAt: result.scheduledAt,
+          });
+          updateFollowup(f.id, { dueAt: result.scheduledAt });
+        }
+        retried += 1;
+        continue;
       }
-      ok += 1;
+
+      if (plan.kind === "schedule") {
+        if (!lead || !sendableMailbox) {
+          // Fall back to due bump when we cannot send.
+          const dueAt = tryNowDueAtIso(now);
+          if (f.scheduledEmailId) {
+            const cancel = await cancelScheduledEmailClient({
+              scheduledEmailId: f.scheduledEmailId,
+              isDemo,
+              cancelDemo: cancelScheduled,
+              followupId: f.id,
+              selfUid: currentUserId,
+              mailViewAsUid,
+              activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+            });
+            if ("error" in cancel) {
+              skipped += 1;
+              continue;
+            }
+            clearFollowupEmailSchedule(f.id);
+          }
+          updateFollowup(f.id, { dueAt });
+          bumped += 1;
+          continue;
+        }
+
+        const contact = getContactById(lead.contactId);
+        const to = defaultContactRecipientEmail(
+          buildContactRecipientOptions(lead, contact),
+        );
+        if (!to) {
+          skipped += 1;
+          continue;
+        }
+
+        if (plan.requeue && f.scheduledEmailId) {
+          const cancel = await cancelScheduledEmailClient({
+            scheduledEmailId: f.scheduledEmailId,
+            isDemo,
+            cancelDemo: cancelScheduled,
+            followupId: f.id,
+            selfUid: currentUserId,
+            mailViewAsUid,
+            activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+          });
+          if ("error" in cancel) {
+            skipped += 1;
+            continue;
+          }
+          clearFollowupEmailSchedule(f.id);
+        }
+
+        const scheduledAtIso = tryNowScheduleAtIso(scheduleIndex, now);
+        scheduleIndex += 1;
+        const result = await scheduleFollowupEmailClient({
+          followupId: f.id,
+          leadId: lead.id,
+          mailbox: sendableMailbox,
+          to,
+          subject: f.emailSubject?.trim() || f.title,
+          body: f.messageBody ?? "",
+          includeSignature: true,
+          globalEmailFooter,
+          includeFooter: true,
+          scheduledAtIso,
+          isDemo,
+          addDemoScheduled: addScheduled,
+        });
+        if (!result.ok) {
+          skipped += 1;
+          continue;
+        }
+        setFollowupEmailSchedule(f.id, {
+          scheduledEmailId: result.scheduledEmailId,
+          emailScheduledAt: result.emailScheduledAt,
+        });
+        updateFollowup(f.id, { dueAt: result.emailScheduledAt });
+        rememberLastUsedMailbox(organizationId, currentUserId, sendableMailbox.id);
+        scheduled += 1;
+        continue;
+      }
+
+      // bump_due
+      if (f.scheduledEmailId) {
+        const cancel = await cancelScheduledEmailClient({
+          scheduledEmailId: f.scheduledEmailId,
+          isDemo,
+          cancelDemo: cancelScheduled,
+          followupId: f.id,
+          selfUid: currentUserId,
+          mailViewAsUid,
+          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+        });
+        if ("error" in cancel) {
+          skipped += 1;
+          continue;
+        }
+        clearFollowupEmailSchedule(f.id);
+      }
+      updateFollowup(f.id, { dueAt: tryNowDueAtIso(now) });
+      bumped += 1;
     }
-    if (ok > 0) {
-      toast.success(ok === 1 ? "Retry queued" : `${ok} retries queued`);
+
+    const parts: string[] = [];
+    if (scheduled > 0) parts.push(`${scheduled} queued to send`);
+    if (retried > 0) parts.push(`${retried} retried`);
+    if (bumped > 0) parts.push(`${bumped} due now`);
+    if (parts.length > 0) {
+      toast.success(parts.join(" · "));
     }
     if (skipped > 0) {
       toast.error(
         skipped === 1
-          ? "Could not retry 1 followup"
-          : `Could not retry ${skipped} followups`,
+          ? "Could not try 1 followup"
+          : `Could not try ${skipped} followups`,
       );
     }
     setSelectedIds(new Set());
@@ -506,30 +659,30 @@ export default function FollowupsPage() {
     }
   }
 
-  function requestBulkRetry() {
-    if (selectedRetryable.length === 0) {
-      toast.error("None of the selected followups can be retried.");
+  function requestBulkTryNow() {
+    if (selectedMutable.length === 0) {
+      toast.error("Nothing selected that you can update.");
       return;
     }
-    if (selectedRetryable.length > RETRY_CONFIRM_THRESHOLD) {
+    if (selectedMutable.length > RETRY_CONFIRM_THRESHOLD) {
       setRetryConfirmOpen(true);
       return;
     }
     void (async () => {
       setBulkBusy(true);
       try {
-        await retryFollowups(selectedRetryable);
+        await tryNowFollowups(selectedMutable);
       } finally {
         setBulkBusy(false);
       }
     })();
   }
 
-  async function confirmBulkRetry() {
+  async function confirmBulkTryNow() {
     setRetryConfirmOpen(false);
     setBulkBusy(true);
     try {
-      await retryFollowups(selectedRetryable);
+      await tryNowFollowups(selectedMutable);
     } finally {
       setBulkBusy(false);
     }
@@ -544,14 +697,14 @@ export default function FollowupsPage() {
     }
   }
 
-  async function handleSingleRetry(f: Followup) {
-    if (!isFollowupRetryable(f)) {
-      toast.error("No scheduled email linked to retry.");
+  async function handleSingleTryNow(f: Followup) {
+    if (!canMutateRow(f)) {
+      toast.error("You cannot update this followup.");
       return;
     }
     setBulkBusy(true);
     try {
-      await retryFollowups([f]);
+      await tryNowFollowups([f]);
     } finally {
       setBulkBusy(false);
     }
@@ -574,7 +727,7 @@ export default function FollowupsPage() {
     onToggleSelectAll: toggleSelectAll,
     timeZone,
     isViewToday,
-    onRequestRetry: handleSingleRetry,
+    onRequestTryNow: handleSingleTryNow,
     onRequestReschedule: handleSingleReschedule,
     busy: bulkBusy,
   };
@@ -944,12 +1097,11 @@ export default function FollowupsPage() {
               size="sm"
               variant="outline"
               className="h-8"
-              disabled={bulkBusy || selectedRetryable.length === 0}
-              onClick={requestBulkRetry}
+              disabled={bulkBusy || selectedMutable.length === 0}
+              onClick={requestBulkTryNow}
             >
               {bulkBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
-              Try again
-              {selectedRetryable.length > 0 ? ` (${selectedRetryable.length})` : ""}
+              Try now
             </Button>
             <Button
               type="button"
@@ -1011,16 +1163,17 @@ export default function FollowupsPage() {
       <AlertDialog open={retryConfirmOpen} onOpenChange={setRetryConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Retry {selectedRetryable.length} sends?</AlertDialogTitle>
+            <AlertDialogTitle>Try {selectedMutable.length} followups now?</AlertDialogTitle>
             <AlertDialogDescription>
-              This queues each failed or retrying email to send again shortly. Large batches may hit
+              Email-ready steps queue to send shortly (staggered). Failed sends are retried.
+              Reminders without outbound email get their due time set to now. Large batches may hit
               daily send limits.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={bulkBusy}>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={bulkBusy} onClick={() => void confirmBulkRetry()}>
-              Try again
+            <AlertDialogAction disabled={bulkBusy} onClick={() => void confirmBulkTryNow()}>
+              Try now
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1083,7 +1236,7 @@ function FollowupGroup({
   onToggleSelectAll,
   timeZone,
   isViewToday,
-  onRequestRetry,
+  onRequestTryNow,
   onRequestReschedule,
   busy,
 }: {
@@ -1104,7 +1257,7 @@ function FollowupGroup({
   onToggleSelectAll: (ids: string[], selected: boolean) => void;
   timeZone: string;
   isViewToday: boolean;
-  onRequestRetry: (f: Followup) => void;
+  onRequestTryNow: (f: Followup) => void;
   onRequestReschedule: (f: Followup) => void;
   busy: boolean;
 }) {
@@ -1156,7 +1309,12 @@ function FollowupGroup({
               const done = Boolean(f.completedAt);
               const mutate = canMutate(f);
               const selected = selectedIds.has(f.id);
-              const retryable = isFollowupRetryable(f);
+              const showTryNow =
+                mutate &&
+                (bucket === "overdue" ||
+                  bucket === "today" ||
+                  bucket === "failed" ||
+                  isFollowupRetryable(f));
               const isFailed = f.deliveryStatus === "failed";
               const isRetrying = f.deliveryStatus === "needs_retry";
               const due = formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
@@ -1173,7 +1331,7 @@ function FollowupGroup({
                   onClick={(e) => {
                     if (
                       (e.target as HTMLElement).closest(
-                        "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-retry], [data-followup-reschedule]",
+                        "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-trynow], [data-followup-reschedule]",
                       )
                     )
                       return;
@@ -1256,21 +1414,21 @@ function FollowupGroup({
                     >
                       {due.label}
                     </span>
-                    {mutate && retryable ? (
+                    {showTryNow ? (
                       <Button
                         type="button"
                         variant="outline"
                         size="sm"
                         className="h-7 px-2 text-xs"
-                        data-followup-retry
+                        data-followup-trynow
                         disabled={busy}
                         onClick={(e) => {
                           e.stopPropagation();
-                          onRequestRetry(f);
+                          onRequestTryNow(f);
                         }}
                       >
                         <RefreshCw className="h-3 w-3" />
-                        Try again
+                        Try now
                       </Button>
                     ) : null}
                     {mutate ? (

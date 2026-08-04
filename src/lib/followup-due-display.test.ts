@@ -4,6 +4,7 @@ import {
   formatFollowupDueLabel,
   isFollowupRetryable,
   nextWeekdayYmd,
+  planFollowupTryNow,
 } from "@/lib/followup-due-display";
 
 describe("formatFollowupDueLabel", () => {
@@ -61,5 +62,63 @@ describe("isFollowupRetryable", () => {
     expect(
       isFollowupRetryable({ deliveryStatus: "scheduled", scheduledEmailId: "s1" }),
     ).toBe(false);
+  });
+});
+
+describe("planFollowupTryNow", () => {
+  it("retries failed linked sends", () => {
+    expect(
+      planFollowupTryNow(
+        {
+          id: "f1",
+          title: "Email",
+          dueAt: "2026-08-01T12:00:00.000Z",
+          ownerId: "u1",
+          priority: "high",
+          auto: true,
+          deliveryStatus: "failed",
+          scheduledEmailId: "s1",
+          messageBody: "Hi",
+        },
+        "cold_email",
+      ),
+    ).toEqual({ kind: "retry" });
+  });
+
+  it("schedules email-ready steps ASAP", () => {
+    expect(
+      planFollowupTryNow(
+        {
+          id: "f1",
+          title: "Email",
+          dueAt: "2026-08-01T12:00:00.000Z",
+          ownerId: "u1",
+          priority: "high",
+          auto: true,
+          messageBody: "Hi there",
+          emailSubject: "Hello",
+          channel: "cold_email",
+        },
+        "cold_email",
+      ),
+    ).toEqual({ kind: "schedule", requeue: false });
+  });
+
+  it("bumps due for reminder-only channels", () => {
+    expect(
+      planFollowupTryNow(
+        {
+          id: "f1",
+          title: "LinkedIn",
+          dueAt: "2026-08-01T12:00:00.000Z",
+          ownerId: "u1",
+          priority: "medium",
+          auto: true,
+          messageBody: "Connect note",
+          channel: "linkedin_outbound",
+        },
+        "linkedin_outbound",
+      ),
+    ).toEqual({ kind: "bump_due" });
   });
 });
