@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
 import { AlertTriangle, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import type { Followup, Lead } from "@/lib/types";
@@ -15,7 +14,11 @@ import {
   scheduleFollowupEmailClient,
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
-import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
+import {
+  formatInstantInZone,
+  formatTimezoneDisplayLabel,
+  isoFromDatetimeLocalInZone,
+} from "@/lib/org-timezone";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
@@ -165,6 +168,7 @@ export function ScheduleFollowupEmailDialog({
         timeZone: scheduleTimezone,
         sendWindowStartHour: sendWindow.startHour,
         sendWindowEndHour: sendWindow.endHour,
+        spreadKey: followup.id,
       }),
     );
     setBody(followup.messageBody ?? "");
@@ -317,8 +321,8 @@ export function ScheduleFollowupEmailDialog({
       });
       toast.success(isDemo ? "Email scheduled (demo)" : "Email scheduled", {
         description: isDemo
-          ? `Will move to Sent after ${format(new Date(result.emailScheduledAt), "MMM d, h:mm a")}.`
-          : `Sending ${format(new Date(result.emailScheduledAt), "MMM d, yyyy 'at' h:mm a")}`,
+          ? `Will move to Sent after ${formatInstantInZone(result.emailScheduledAt, scheduleTimezone)}.`
+          : `Sending ${formatInstantInZone(result.emailScheduledAt, scheduleTimezone, { year: true })}`,
       });
       onOpenChange(false);
     } finally {

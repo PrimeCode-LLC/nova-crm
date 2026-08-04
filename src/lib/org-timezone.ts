@@ -168,6 +168,34 @@ export function datetimeLocalInZone(isoOrDate: string | Date, timeZone: string):
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
 }
 
+/**
+ * Absolute instant rendered as wall clock in `timeZone`, e.g. `Aug 4, 9:00 AM EDT`.
+ * Scheduled sends must use this instead of a bare date-fns `format()`, which would
+ * silently render the viewer's own clock and misreport the real send time.
+ */
+export function formatInstantInZone(
+  isoOrDate: string | Date,
+  timeZone?: string,
+  options?: { year?: boolean; zoneAbbr?: boolean },
+): string {
+  const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  if (Number.isNaN(date.getTime())) return "";
+  const zone = resolveOrgTimezone(timeZone);
+  try {
+    return new Intl.DateTimeFormat("en-US", {
+      timeZone: zone,
+      month: "short",
+      day: "numeric",
+      ...(options?.year ? { year: "numeric" as const } : {}),
+      hour: "numeric",
+      minute: "2-digit",
+      ...(options?.zoneAbbr === false ? {} : { timeZoneName: "short" as const }),
+    }).format(date);
+  } catch {
+    return "";
+  }
+}
+
 export function formatTimezoneLabel(tz: string): string {
   return tz.replace(/_/g, " ");
 }

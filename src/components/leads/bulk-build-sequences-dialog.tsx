@@ -27,6 +27,7 @@ import { ScriptTemplatePicker } from "@/components/ai/script-template-picker";
 import type { LeadFollowupAiContext } from "@/components/ai/suggest-followups-dialog";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import type {
   Followup,
   FollowupChannel,
@@ -127,6 +128,7 @@ export function BulkBuildSequencesDialog({
     leadTasks,
     crmLabels,
   } = useWorkspace();
+  const timeZone = useOrgTimezone();
 
   const [phase, setPhase] = React.useState<"setup" | "running" | "done">("setup");
   const [sequenceMode, setSequenceMode] = React.useState<FollowupSequenceMode>("full");
@@ -384,7 +386,10 @@ export function BulkBuildSequencesDialog({
       channel: it.channel,
       planId,
       aiGenerated: true,
-      dueAt: isoFromDateInput(dateInputForSequenceStep(i, { includeInitial })),
+      dueAt: isoFromDateInput(
+        dateInputForSequenceStep(i, { includeInitial, timeZone }),
+        timeZone,
+      ),
       ownerId,
       priority: it.priority,
       auto: false,

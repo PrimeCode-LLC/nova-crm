@@ -50,10 +50,27 @@ export function normalizeSendWindow(
 }
 
 /**
+ * Stable unit value in [0, 1) from an arbitrary key (FNV-1a).
+ * Deterministic so schedule previews do not jump between renders.
+ */
+function hashToUnit(key: string): number {
+  let h = 2166136261;
+  for (let i = 0; i < key.length; i += 1) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) / 4294967296;
+}
+
+/**
  * Next datetime-local wall clock in `timeZone` inside the soft send window.
  * If `preferIso` lands on a future calendar day, snaps that day to the window
  * (instead of noon due-dates). If the preferred day/window is already past,
  * walks forward day by day.
+ *
+ * `spreadKey` distributes the send across the window instead of pinning every
+ * email to the exact start hour, which would otherwise emit an identical
+ * timestamp for every prospect in a bulk batch.
  */
 export function defaultAudienceScheduleDatetimeLocal(input: {
   preferIso?: string;
@@ -61,18 +78,27 @@ export function defaultAudienceScheduleDatetimeLocal(input: {
   sendWindowStartHour?: number | null;
   sendWindowEndHour?: number | null;
   now?: Date;
+  /** Stable per-email key (e.g. follow-up id). Omit to pin to the window start. */
+  spreadKey?: string;
 }): string {
   const zone = resolveOrgTimezone(input.timeZone);
   const window = normalizeSendWindow(input.sendWindowStartHour, input.sendWindowEndHour);
   const now = input.now ?? new Date();
   const minMs = now.getTime() + 60_000;
 
+  const spreadKey = input.spreadKey?.trim();
+  const windowMinutes = Math.max(1, (window.endHour - window.startHour) * 60);
+  const spreadMinutes = spreadKey
+    ? Math.floor(hashToUnit(spreadKey) * windowMinutes)
+    : 0;
+
   const slotOnDay = (dayKey: string): Date | null => {
     const windowStart = zonedWallTimeToUtc(dayKey, window.startHour, 0, 0, 0, zone);
     const windowEnd = zonedWallTimeToUtc(dayKey, window.endHour, 0, 0, 0, zone);
     if (Number.isNaN(windowStart.getTime()) || Number.isNaN(windowEnd.getTime())) return null;
     if (minMs > windowEnd.getTime()) return null;
-    const ms = Math.max(minMs, windowStart.getTime());
+    const spread = windowStart.getTime() + spreadMinutes * 60_000;
+    const ms = Math.max(minMs, Math.min(spread, windowEnd.getTime()));
     if (ms > windowEnd.getTime()) return null;
     return new Date(ms);
   };

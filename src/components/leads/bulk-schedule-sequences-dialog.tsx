@@ -500,6 +500,7 @@ export function BulkScheduleSequencesDialog({
             timeZone: scheduleZone,
             sendWindowStartHour: sendWindow.startHour,
             sendWindowEndHour: sendWindow.endHour,
+            spreadKey: f.id,
           }),
           scheduleZone,
         ),

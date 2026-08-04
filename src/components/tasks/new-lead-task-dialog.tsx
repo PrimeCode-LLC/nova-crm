@@ -31,19 +31,12 @@ import {
   selectTriggerLabelById,
   selectTriggerLabelByKey,
 } from "@/lib/base-ui-select-label";
+import { isoFromDateInput, todayDateInputValue } from "@/lib/followup-date";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 
-function isoFromDateInput(dateStr: string): string | undefined {
+function dueAtFromDateInput(dateStr: string, timeZone: string): string | undefined {
   if (!dateStr.trim()) return undefined;
-  const d = new Date(`${dateStr}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? undefined : d.toISOString();
-}
-
-function todayInputValue(): string {
-  const d = new Date();
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}-${m}-${day}`;
+  return isoFromDateInput(dateStr, timeZone);
 }
 
 type AssigneeOption = { id: string; label: string };
@@ -108,6 +101,7 @@ export function NewLeadTaskDialog({
   fixedLeadId?: string;
 }) {
   const { isDemo, users } = useWorkspace();
+  const timeZone = useOrgTimezone();
   const { user: fbUser } = useAuth();
   const { data: liveUserDoc } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
@@ -217,7 +211,7 @@ export function NewLeadTaskDialog({
       visibility: vis,
       assigneeId,
       createdById: currentUserId,
-      dueAt: isoFromDateInput(dueDate),
+      dueAt: dueAtFromDateInput(dueDate, timeZone),
       createdAt: iso,
       contextCompany: linkedLead?.companyName,
       contextContact: linkedLead?.contactName,
@@ -341,7 +335,7 @@ export function NewLeadTaskDialog({
                   id="task-due"
                   type="date"
                   value={dueDate}
-                  min={todayInputValue()}
+                  min={todayDateInputValue(timeZone)}
                   onChange={(e) => setDueDate(e.target.value)}
                 />
               </div>

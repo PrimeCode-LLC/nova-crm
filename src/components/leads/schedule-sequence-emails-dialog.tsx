@@ -235,6 +235,7 @@ export function ScheduleSequenceEmailsDialog({
           timeZone: scheduleTimezone,
           sendWindowStartHour: sendWindow.startHour,
           sendWindowEndHour: sendWindow.endHour,
+          spreadKey: f.id,
         }),
         body: f.messageBody ?? "",
         included: true,

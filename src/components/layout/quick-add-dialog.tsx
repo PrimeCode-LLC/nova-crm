@@ -53,6 +53,8 @@ import type {
   RevenueRange,
 } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { isoFromDateInput, todayDateInputValue } from "@/lib/followup-date";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
@@ -127,11 +129,6 @@ function newEntityId(prefix: string): string {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Date.now()}`;
-}
-
-function isoFromDateInput(dateStr: string): string {
-  const d = new Date(`${dateStr}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
 // ── Account schema ──
@@ -1159,9 +1156,15 @@ function AccountFormBody({ onClose }: { onClose: () => void }) {
 
 function TaskFormBody({ onClose }: { onClose: () => void }) {
   const { leads, addFollowup, currentUserId, users } = useWorkspace();
+  const timeZone = useOrgTimezone();
   const form = useForm<TaskForm>({
     resolver: zodResolver(taskSchema),
-    defaultValues: { title: "", leadId: "", dueDate: new Date().toISOString().slice(0, 10), priority: "medium" },
+    defaultValues: {
+      title: "",
+      leadId: "",
+      dueDate: todayDateInputValue(timeZone),
+      priority: "medium",
+    },
   });
 
   function onSubmit(v: TaskForm) {
@@ -1179,7 +1182,7 @@ function TaskFormBody({ onClose }: { onClose: () => void }) {
       id: newEntityId("f"),
       leadId: (v.leadId ?? "").trim() || undefined,
       title,
-      dueAt: isoFromDateInput(v.dueDate),
+      dueAt: isoFromDateInput(v.dueDate, timeZone),
       ownerId,
       priority: v.priority as LeadPriority,
       auto: false,

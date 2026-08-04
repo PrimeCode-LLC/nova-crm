@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -32,6 +31,9 @@ import {
 import type { Followup, Lead } from "@/lib/types";
 import { CHANNEL_LIST, PRIORITY_TONE } from "@/lib/constants";
 import { fmtDate, fmtRelative } from "@/lib/format";
+import { formatInstantInZone } from "@/lib/org-timezone";
+import { isFollowupOverdue } from "@/lib/followup-open-status";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { cn } from "@/lib/utils";
 import { UserChip } from "@/components/common/user-chip";
 import {
@@ -172,6 +174,7 @@ function FollowupRow({
   retryingSend,
   stepIndex,
   leadChannel,
+  timeZone,
 }: {
   f: Followup;
   overdue: boolean;
@@ -186,6 +189,8 @@ function FollowupRow({
   retryingSend: boolean;
   stepIndex?: number;
   leadChannel: Lead["channel"];
+  /** Workspace zone so send times never render in the viewer's own clock. */
+  timeZone: string;
 }) {
   const [expanded, setExpanded] = React.useState(false);
   const chLabel = channelBadgeLabel(f.channel);
@@ -256,7 +261,7 @@ function FollowupRow({
                 Retrying
                 {f.deliveryAttempts ? ` (${f.deliveryAttempts})` : ""}
                 {f.nextRetryAt
-                  ? ` · ${format(new Date(f.nextRetryAt), "MMM d, h:mm a")}`
+                  ? ` · ${formatInstantInZone(f.nextRetryAt, timeZone)}`
                   : ""}
               </Badge>
             ) : null}
@@ -265,7 +270,7 @@ function FollowupRow({
                 <CalendarClock className="h-2.5 w-2.5" />
                 Scheduled
                 {f.emailScheduledAt
-                  ? ` ${format(new Date(f.emailScheduledAt), "MMM d, h:mm a")}`
+                  ? ` ${formatInstantInZone(f.emailScheduledAt, timeZone)}`
                   : ""}
               </Badge>
             )}
@@ -470,6 +475,7 @@ export function LeadFollowups({
     getContactById,
   } = useWorkspace();
 
+  const timeZone = useOrgTimezone();
   const contact = getContactById(lead.contactId);
   const hasLinkedIn = Boolean(
     (contact?.linkedin ?? lead.contactLinkedIn ?? "").trim(),
@@ -750,14 +756,18 @@ export function LeadFollowups({
   }
 
   function renderOpenRow(f: Followup, stepIndex?: number) {
-    const due = new Date(f.dueAt);
-    const overdue = due.getTime() < Date.now();
+    // A step with a pending send in the future is queued work, not late work.
+    const sendAhead =
+      f.emailScheduledAt != null &&
+      new Date(f.emailScheduledAt).getTime() > Date.now();
+    const overdue = !sendAhead && isFollowupOverdue(f, { timeZone });
     const mutate = canMutateRow(f);
     return (
       <FollowupRow
         key={f.id}
         f={f}
         overdue={overdue}
+        timeZone={timeZone}
         stepIndex={stepIndex}
         leadChannel={lead.channel}
         onComplete={(done) => setFollowupCompleted(f.id, done)}

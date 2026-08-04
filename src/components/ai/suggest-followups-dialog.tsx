@@ -52,6 +52,7 @@ import { PRIORITY_TONE } from "@/lib/constants";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
 import {
@@ -174,6 +175,7 @@ export function SuggestFollowupsDialog({
   initialUserPrompt?: string;
 }) {
   const channelOptions = useChannelOptions();
+  const timeZone = useOrgTimezone();
   const hasLinkedIn = leadHasLinkedIn(lead, aiContext.contact);
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
   const [sequenceMode, setSequenceMode] =
@@ -269,7 +271,7 @@ export function SuggestFollowupsDialog({
         key: `s-${i}`,
         included: true,
         // Cadence: Initial Day 0 → +3 BD → +5 BD → +7 BD (weekends skipped)
-        dueDate: dateInputForSequenceStep(i, { includeInitial }),
+        dueDate: dateInputForSequenceStep(i, { includeInitial, timeZone }),
       })),
     );
     setPhase("review");
@@ -379,7 +381,7 @@ export function SuggestFollowupsDialog({
       channel: it.channel,
       planId,
       aiGenerated: true,
-      dueAt: isoFromDateInput(it.dueDate),
+      dueAt: isoFromDateInput(it.dueDate, timeZone),
       ownerId,
       priority: it.priority,
       auto: false,
