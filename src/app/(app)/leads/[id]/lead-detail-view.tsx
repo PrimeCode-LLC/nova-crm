@@ -1441,11 +1441,12 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 <TabsContent value="tasks">
                   <LeadTasksPanel tasks={leadTasksForTab} lead={lead} />
                 </TabsContent>
-                <TabsContent value="emails">
+                <TabsContent value="emails" keepMounted>
                   <LeadEmailsPanel
                     lead={lead}
                     contactEmail={primaryEmail}
                     contactEmails={[companyEmail, personalEmail].filter(Boolean) as string[]}
+                    active={activeTab === "emails"}
                   />
                 </TabsContent>
               </div>

@@ -112,7 +112,9 @@ type ComposeMode = "compose" | "reply" | "replyAll" | "forward";
 
 /** Header-only sync is enough to match lead emails; bodies load when a thread is opened. */
 const LEAD_EMAIL_SYNC_LIMIT = 40;
+/** Manual Refresh can wait longer; auto open should fail fast. */
 const LEAD_EMAIL_SYNC_TIMEOUT_MS = 22_000;
+const LEAD_EMAIL_AUTO_SYNC_TIMEOUT_MS = 12_000;
 /** Cap body downloads during lead Emails tab sync so full threads land in DB without opening each conversation. */
 const LEAD_EMAIL_BODY_BACKFILL_LIMIT = 40;
 
@@ -292,11 +294,14 @@ export function LeadEmailsPanel({
   lead,
   contactEmail = lead.contactEmail,
   contactEmails,
+  /** When false (hidden tab), skip IMAP; durable store still prefetches. */
+  active = true,
 }: {
   lead: Lead;
   contactEmail?: string;
   /** Company + personal (and any other) emails for matching inbound/outbound. */
   contactEmails?: readonly string[];
+  active?: boolean;
 }) {
   const workspace = useWorkspace();
   const timeZone = useOrgTimezone();
@@ -376,49 +381,91 @@ export function LeadEmailsPanel({
   const [trackingByMessageId, setTrackingByMessageId] = React.useState<
     Record<string, MailTrackingSummary>
   >({});
+  const trackingRequestIdRef = React.useRef(0);
 
-  React.useEffect(() => {
+  const outboundTrackingMessageIds = React.useMemo(
+    () =>
+      [
+        ...new Set(
+          conversations
+            .flatMap((c) => c.messages)
+            .filter((m) => m.direction === "sent")
+            .map((m) => normalizeMessageId(m.message.messageId))
+            .filter((id): id is string => Boolean(id)),
+        ),
+      ].slice(0, 100),
+    [conversations],
+  );
+
+  const loadMailTracking = React.useCallback(async () => {
     if (workspace.isDemo) {
       setTrackingByMessageId({});
       return;
     }
-    const ids = [
-      ...new Set(
-        conversations
-          .flatMap((c) => c.messages)
-          .filter((m) => m.direction === "sent")
-          .map((m) => normalizeMessageId(m.message.messageId))
-          .filter((id): id is string => Boolean(id)),
-      ),
-    ].slice(0, 100);
+    const ids = outboundTrackingMessageIds;
     if (ids.length === 0) {
       setTrackingByMessageId({});
       return;
     }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await fetch("/api/email/tracking", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "same-origin",
-          body: JSON.stringify({ messageIds: ids }),
-        });
-        const data = (await res.json()) as {
-          ok?: boolean;
-          byMessageId?: Record<string, MailTrackingSummary>;
-        };
-        if (!cancelled && res.ok && data.ok && data.byMessageId) {
-          setTrackingByMessageId(data.byMessageId);
-        }
-      } catch {
-        /* optional enrichment */
+    const requestId = ++trackingRequestIdRef.current;
+    try {
+      const res = await fetch("/api/email/tracking", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ messageIds: ids }),
+      });
+      const data = (await res.json()) as {
+        ok?: boolean;
+        byMessageId?: Record<string, MailTrackingSummary>;
+      };
+      if (requestId !== trackingRequestIdRef.current) return;
+      if (res.ok && data.ok && data.byMessageId) {
+        setTrackingByMessageId(data.byMessageId);
       }
-    })();
-    return () => {
-      cancelled = true;
+    } catch {
+      /* optional enrichment */
+    }
+  }, [outboundTrackingMessageIds, workspace.isDemo]);
+
+  React.useEffect(() => {
+    void loadMailTracking();
+  }, [loadMailTracking]);
+
+  // Pixel opens stamp lead fields live; badges used to stay on the one-shot fetch above.
+  const openFreshnessKey = [
+    lead.lastEmailOpenedAt ?? "",
+    String(lead.emailOpenCount ?? ""),
+  ].join("|");
+  const openFreshnessBootRef = React.useRef<{ leadId: string; key: string }>({
+    leadId: lead.id,
+    key: openFreshnessKey,
+  });
+  React.useEffect(() => {
+    if (openFreshnessBootRef.current.leadId !== lead.id) {
+      openFreshnessBootRef.current = { leadId: lead.id, key: openFreshnessKey };
+      return;
+    }
+    if (openFreshnessBootRef.current.key === openFreshnessKey) return;
+    openFreshnessBootRef.current = { leadId: lead.id, key: openFreshnessKey };
+    if (!lead.lastEmailOpenedAt && !(lead.emailOpenCount && lead.emailOpenCount > 0)) return;
+    void loadMailTracking();
+  }, [lead.emailOpenCount, lead.id, lead.lastEmailOpenedAt, loadMailTracking, openFreshnessKey]);
+
+  // Re-opens / clicks don't restamp lead fields — light poll + visibility refetch while tab is open.
+  React.useEffect(() => {
+    if (!active || workspace.isDemo || outboundTrackingMessageIds.length === 0) return;
+    const TRACKING_POLL_MS = 45_000;
+    const timer = window.setInterval(() => void loadMailTracking(), TRACKING_POLL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void loadMailTracking();
     };
-  }, [conversations, workspace.isDemo]);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [active, loadMailTracking, outboundTrackingMessageIds.length, workspace.isDemo]);
 
   function trackingFor(message: LeadEmailMessage): MailTrackingSummary | undefined {
     const id = normalizeMessageId(message.message.messageId);
@@ -526,13 +573,13 @@ export function LeadEmailsPanel({
     [lead.id, workspace.isDemo],
   );
 
-  const loadStoredLeadMail = React.useCallback(async () => {
+  const loadStoredLeadMail = React.useCallback(async (opts?: { soft?: boolean }) => {
     if (workspace.isDemo) {
       storedReadyRef.current = true;
       setLoadingStored(false);
       return;
     }
-    setLoadingStored(true);
+    if (!opts?.soft) setLoadingStored(true);
     try {
       const response = await fetch(`/api/email/lead-mail?leadId=${encodeURIComponent(lead.id)}`, {
         credentials: "same-origin",
@@ -543,17 +590,21 @@ export function LeadEmailsPanel({
       };
       if (response.ok && data.ok && Array.isArray(data.messages)) {
         setStoredMessages(data.messages.map(leadMailToLeadEmailMessage));
+      } else if (!opts?.soft) {
+        setStoredMessages([]);
       }
     } catch {
-      /* fall back to live mailbox */
+      if (!opts?.soft) setStoredMessages([]);
     } finally {
       storedReadyRef.current = true;
-      setLoadingStored(false);
+      if (!opts?.soft) setLoadingStored(false);
     }
   }, [lead.id, workspace.isDemo]);
 
   React.useEffect(() => {
     storedReadyRef.current = false;
+    initialSyncKeyRef.current = "";
+    setStoredMessages([]);
     void loadStoredLeadMail();
   }, [loadStoredLeadMail]);
 
@@ -612,7 +663,7 @@ export function LeadEmailsPanel({
     // Watcher event + Firestore lead stamp often fire together — coalesce.
     if (now - replyRefreshAtRef.current < 2_500) return;
     replyRefreshAtRef.current = now;
-    void loadStoredLeadMail();
+    void loadStoredLeadMail({ soft: true });
     // Silent force: pull fresh inbox heads so the reply joins the conversation list.
     void syncConversationListsRef.current?.(true, { silent: true });
   }, [loadStoredLeadMail]);
@@ -665,8 +716,27 @@ export function LeadEmailsPanel({
       // Wait for lead-local store so we can skip IMAP when history is already persisted.
       if (!force && !storedReadyRef.current) return;
       const eligible = mailboxes.filter(isImapInboxConfigured);
-      const syncKey = eligible.map((mailbox) => mailbox.id).sort().join("|");
+      const syncKey = `${lead.id}|${eligible.map((mailbox) => mailbox.id).sort().join("|")}`;
       if (!force && initialSyncKeyRef.current === syncKey) return;
+
+      const hasStoredHistory =
+        storedMessages.length > 0 || (typeof lead.emailMailCount === "number" && lead.emailMailCount > 0);
+
+      // Durable lead mail is the fast path — don't block the tab on IMAP when history exists.
+      // Manual Refresh / reply force still hits the mailbox.
+      if (!force && hasStoredHistory) {
+        initialSyncKeyRef.current = syncKey;
+        const matched = relevantLeadMessages({
+          lead,
+          contactEmails: matchEmails,
+          inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+          sent: useEmailAccountStore.getState().sent,
+          linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+          crmSentFollowups,
+        });
+        if (matched.length > 0) void persistLeadMail(matched);
+        return;
+      }
 
       const store = useEmailAccountStore.getState();
       const jobs: Array<{ mailbox: (typeof eligible)[number]; folder: "inbox" | "sent" }> = [];
@@ -674,29 +744,138 @@ export function LeadEmailsPanel({
         const hasServerSent = store.sent.some(
           (message) => message.mailboxId === mailbox.id && message.uid != null,
         );
-        // Always refresh INBOX heads so new replies appear even when the store already
-        // has older inbox rows (background sync). Sent stays one-shot unless forced.
         jobs.push({ mailbox, folder: "inbox" });
         if (force || !hasServerSent) jobs.push({ mailbox, folder: "sent" });
       }
 
-      // Sent can wait for Refresh when durable lead mail already has outbound history.
-      if (!force && storedMessages.length > 0) {
-        for (let i = jobs.length - 1; i >= 0; i--) {
-          if (jobs[i]?.folder === "sent") jobs.splice(i, 1);
-        }
-      }
+      // Prefer the active mailbox so the first match paints sooner.
+      jobs.sort((a, b) => {
+        const aActive = a.mailbox.id === activeMailbox.id ? 0 : 1;
+        const bActive = b.mailbox.id === activeMailbox.id ? 0 : 1;
+        if (aActive !== bActive) return aActive - bActive;
+        if (a.folder !== b.folder) return a.folder === "inbox" ? -1 : 1;
+        return 0;
+      });
+
       if (!force) initialSyncKeyRef.current = syncKey;
       if (jobs.length === 0) return;
 
-      setSyncingLists(true);
+      const showBusy = !opts?.silent;
+      if (showBusy) setSyncingLists(true);
       let firstError = "";
-      const queue = [...jobs];
-      const worker = async () => {
-        while (queue.length > 0) {
-          const job = queue.shift();
-          if (!job) return;
-          const { mailbox, folder } = job;
+      const timeoutMs = force ? LEAD_EMAIL_SYNC_TIMEOUT_MS : LEAD_EMAIL_AUTO_SYNC_TIMEOUT_MS;
+      try {
+        const queue = [...jobs];
+        const worker = async () => {
+          while (queue.length > 0) {
+            const job = queue.shift();
+            if (!job) return;
+            const { mailbox, folder } = job;
+            try {
+              const forUid = resolveMailApiForUserUid({
+                mailViewAsUid,
+                activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
+                selfUid: workspace.currentUserId ?? "",
+              });
+              const url = appendMailDataOwnerParam(
+                "/api/email/imap-fetch",
+                forUid,
+                workspace.currentUserId ?? "",
+              );
+              const response = await fetch(url, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                credentials: "same-origin",
+                signal: AbortSignal.timeout(timeoutMs),
+                body: JSON.stringify({
+                  mailboxId: mailbox.id,
+                  folder,
+                  limit: LEAD_EMAIL_SYNC_LIMIT,
+                  offset: 0,
+                  headsOnly: true,
+                  imap: {
+                    host: mailbox.imap.host,
+                    port: mailbox.imap.port,
+                    secure: mailbox.imap.secure,
+                    user: mailbox.imap.user,
+                    pass: mailbox.imap.password,
+                  },
+                }),
+              });
+              const data = (await response.json()) as {
+                ok?: boolean;
+                error?: string;
+                messages?: MailInbound[];
+              };
+              if (!response.ok || !data.ok) throw new Error(data.error || "Could not refresh mail");
+              const rows = Array.isArray(data.messages) ? data.messages : [];
+              if (folder === "inbox") reconcileInboundHeadFromSync(mailbox.id, rows);
+              else reconcileSentHeadFromSync(mailbox.id, rows);
+            } catch (error) {
+              if (!firstError) {
+                firstError =
+                  error instanceof Error
+                    ? error.name === "TimeoutError" || error.name === "AbortError"
+                      ? "Mailbox check timed out - try Refresh or open Inbox."
+                      : error.message
+                    : "Could not refresh mail";
+              }
+            }
+          }
+        };
+        await Promise.all(Array.from({ length: Math.min(2, jobs.length) }, () => worker()));
+      } finally {
+        if (showBusy) setSyncingLists(false);
+      }
+
+      if (firstError && force && !opts?.silent) {
+        toast.error("Couldn’t refresh lead emails", { description: firstError });
+      }
+
+      // Body backfill + persist enrich in the background so the list isn't waiting on IMAP bodies.
+      void (async () => {
+        let matched = relevantLeadMessages({
+          lead,
+          contactEmails: matchEmails,
+          inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+          sent: useEmailAccountStore.getState().sent,
+          linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+          crmSentFollowups,
+        });
+
+        type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
+        const bodyJobsByKey = new Map<string, BodyJob>();
+        let bodyBudget = LEAD_EMAIL_BODY_BACKFILL_LIMIT;
+        const unsynced = matched
+          .filter((row) => {
+            if (row.mailboxId === "crm") return false;
+            if (row.message.bodySynced !== false) return false;
+            return row.message.uid != null;
+          })
+          .sort((a, b) => {
+            const ad = a.direction === "inbound" ? a.message.date : a.message.sentAt;
+            const bd = b.direction === "inbound" ? b.message.date : b.message.sentAt;
+            return bd.localeCompare(ad);
+          });
+        for (const row of unsynced) {
+          if (bodyBudget <= 0) break;
+          const uid = row.message.uid;
+          if (uid == null) continue;
+          const folder = row.direction === "inbound" ? "inbox" : "sent";
+          const key = `${row.mailboxId}:${folder}`;
+          const existing = bodyJobsByKey.get(key);
+          if (existing) {
+            if (existing.uids.includes(uid)) continue;
+            existing.uids.push(uid);
+          } else {
+            bodyJobsByKey.set(key, { mailboxId: row.mailboxId, folder, uids: [uid] });
+          }
+          bodyBudget -= 1;
+        }
+
+        for (const job of bodyJobsByKey.values()) {
+          const mailbox = mailboxes.find((m) => m.id === job.mailboxId);
+          if (!mailbox || !isImapInboxConfigured(mailbox)) continue;
           try {
             const forUid = resolveMailApiForUserUid({
               mailViewAsUid,
@@ -704,7 +883,7 @@ export function LeadEmailsPanel({
               selfUid: workspace.currentUserId ?? "",
             });
             const url = appendMailDataOwnerParam(
-              "/api/email/imap-fetch",
+              "/api/email/imap-fetch-bodies",
               forUid,
               workspace.currentUserId ?? "",
             );
@@ -715,10 +894,8 @@ export function LeadEmailsPanel({
               signal: AbortSignal.timeout(LEAD_EMAIL_SYNC_TIMEOUT_MS),
               body: JSON.stringify({
                 mailboxId: mailbox.id,
-                folder,
-                limit: LEAD_EMAIL_SYNC_LIMIT,
-                offset: 0,
-                headsOnly: true,
+                folder: job.folder,
+                uids: job.uids,
                 imap: {
                   host: mailbox.imap.host,
                   port: mailbox.imap.port,
@@ -730,130 +907,31 @@ export function LeadEmailsPanel({
             });
             const data = (await response.json()) as {
               ok?: boolean;
-              error?: string;
-              messages?: MailInbound[];
+              updates?: Array<{ uid: number } & Partial<MailInbound>>;
             };
-            if (!response.ok || !data.ok) throw new Error(data.error || "Could not refresh mail");
-            const rows = Array.isArray(data.messages) ? data.messages : [];
-            if (folder === "inbox") reconcileInboundHeadFromSync(mailbox.id, rows);
-            else reconcileSentHeadFromSync(mailbox.id, rows);
-          } catch (error) {
-            if (!firstError) {
-              firstError =
-                error instanceof Error
-                  ? error.name === "TimeoutError" || error.name === "AbortError"
-                    ? "Mailbox check timed out - try Refresh or open Inbox."
-                    : error.message
-                  : "Could not refresh mail";
-            }
+            if (!response.ok || !data.ok || !data.updates) continue;
+            if (job.folder === "inbox") mergeInboundBodies(mailbox.id, data.updates);
+            else mergeSentBodies(mailbox.id, data.updates);
+          } catch {
+            /* heads already persisted; body fill retries on open / next refresh */
           }
         }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(2, jobs.length) }, () => worker()),
-      );
-      setSyncingLists(false);
-      if (firstError && force && !opts?.silent) {
-        toast.error("Couldn’t refresh lead emails", { description: firstError });
-      }
 
-      let matched = relevantLeadMessages({
-        lead,
-        contactEmails: matchEmails,
-        inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
-        sent: useEmailAccountStore.getState().sent,
-        linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-        crmSentFollowups,
-      });
-
-      // Backfill full bodies for lead-matched heads so complete threads persist in DB.
-      type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
-      const bodyJobsByKey = new Map<string, BodyJob>();
-      let bodyBudget = LEAD_EMAIL_BODY_BACKFILL_LIMIT;
-      const unsynced = matched
-        .filter((row) => {
-          if (row.mailboxId === "crm") return false;
-          if (row.message.bodySynced !== false) return false;
-          return row.message.uid != null;
-        })
-        .sort((a, b) => {
-          const ad = a.direction === "inbound" ? a.message.date : a.message.sentAt;
-          const bd = b.direction === "inbound" ? b.message.date : b.message.sentAt;
-          return bd.localeCompare(ad);
-        });
-      for (const row of unsynced) {
-        if (bodyBudget <= 0) break;
-        const uid = row.message.uid;
-        if (uid == null) continue;
-        const folder = row.direction === "inbound" ? "inbox" : "sent";
-        const key = `${row.mailboxId}:${folder}`;
-        const existing = bodyJobsByKey.get(key);
-        if (existing) {
-          if (existing.uids.includes(uid)) continue;
-          existing.uids.push(uid);
-        } else {
-          bodyJobsByKey.set(key, { mailboxId: row.mailboxId, folder, uids: [uid] });
-        }
-        bodyBudget -= 1;
-      }
-
-      for (const job of bodyJobsByKey.values()) {
-        const mailbox = mailboxes.find((m) => m.id === job.mailboxId);
-        if (!mailbox || !isImapInboxConfigured(mailbox)) continue;
-        try {
-          const forUid = resolveMailApiForUserUid({
-            mailViewAsUid,
-            activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
-            selfUid: workspace.currentUserId ?? "",
+        if (bodyJobsByKey.size > 0) {
+          matched = relevantLeadMessages({
+            lead,
+            contactEmails: matchEmails,
+            inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+            sent: useEmailAccountStore.getState().sent,
+            linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+            crmSentFollowups,
           });
-          const url = appendMailDataOwnerParam(
-            "/api/email/imap-fetch-bodies",
-            forUid,
-            workspace.currentUserId ?? "",
-          );
-          const response = await fetch(url, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            signal: AbortSignal.timeout(LEAD_EMAIL_SYNC_TIMEOUT_MS),
-            body: JSON.stringify({
-              mailboxId: mailbox.id,
-              folder: job.folder,
-              uids: job.uids,
-              imap: {
-                host: mailbox.imap.host,
-                port: mailbox.imap.port,
-                secure: mailbox.imap.secure,
-                user: mailbox.imap.user,
-                pass: mailbox.imap.password,
-              },
-            }),
-          });
-          const data = (await response.json()) as {
-            ok?: boolean;
-            updates?: Array<{ uid: number } & Partial<MailInbound>>;
-          };
-          if (!response.ok || !data.ok || !data.updates) continue;
-          if (job.folder === "inbox") mergeInboundBodies(mailbox.id, data.updates);
-          else mergeSentBodies(mailbox.id, data.updates);
-        } catch {
-          /* heads already persisted; body fill retries on open / next refresh */
         }
-      }
-
-      if (bodyJobsByKey.size > 0) {
-        matched = relevantLeadMessages({
-          lead,
-          contactEmails: matchEmails,
-          inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
-          sent: useEmailAccountStore.getState().sent,
-          linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-          crmSentFollowups,
-        });
-      }
-      if (matched.length > 0) void persistLeadMail(matched);
+        if (matched.length > 0) void persistLeadMail(matched);
+      })();
     },
     [
+      activeMailbox.id,
       crmSentFollowups,
       emailServerHydrated,
       lead,
@@ -874,9 +952,10 @@ export function LeadEmailsPanel({
   syncConversationListsRef.current = syncConversationLists;
 
   React.useEffect(() => {
+    if (!active) return;
     if (!storedReadyRef.current && loadingStored) return;
     void Promise.resolve().then(() => syncConversationLists(false));
-  }, [loadingStored, syncConversationLists]);
+  }, [active, loadingStored, syncConversationLists]);
 
   React.useEffect(() => {
     if (!selected || workspace.isDemo) return;
@@ -1573,7 +1652,20 @@ export function LeadEmailsPanel({
       <Card>
         <CardHeader className="pb-2">
           <CardTitle className="flex items-center justify-between gap-3 text-sm">
-            <span>Recent email conversations</span>
+            <span className="inline-flex items-center gap-2">
+              <span>Recent email conversations</span>
+              {loadingStored ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading…
+                </span>
+              ) : syncingLists ? (
+                <span className="inline-flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Checking mailbox…
+                </span>
+              ) : null}
+            </span>
             <span className="flex items-center gap-2">
               <Badge variant="secondary">{conversations.length}</Badge>
               <Button
@@ -1583,7 +1675,10 @@ export function LeadEmailsPanel({
                 aria-label="Refresh lead emails"
                 title="Refresh lead emails"
                 disabled={syncingLists || workspace.isDemo}
-                onClick={() => void syncConversationLists(true)}
+                onClick={() => {
+                  void syncConversationLists(true);
+                  void loadMailTracking();
+                }}
               >
                 <RefreshCw className={syncingLists ? "h-3.5 w-3.5 animate-spin" : "h-3.5 w-3.5"} />
               </Button>
@@ -1607,28 +1702,40 @@ export function LeadEmailsPanel({
         <CardContent className="space-y-2">
           {conversations.length === 0 ? (
             <div className="rounded-lg border border-dashed px-4 py-8 text-center">
-              <Mail className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
-              <p className="text-sm font-medium">No recent linked emails</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Messages linked in Inbox or matching{" "}
-                {matchEmails.length > 0 ? matchEmails.join(" / ") : "the lead’s email"} appear here.
-              </p>
-              {loadingStored || syncingLists ? (
-                <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  {loadingStored ? "Loading saved conversations…" : "Checking mailbox for matches…"}
-                </p>
-              ) : null}
-              <div className="mt-4 flex justify-center">
-                <Button
-                  size="sm"
-                  disabled={!canComposeNew}
-                  onClick={openNewCompose}
-                >
-                  <PenLine className="h-3.5 w-3.5" />
-                  Compose email
-                </Button>
-              </div>
+              {loadingStored ? (
+                <>
+                  <Loader2 className="mx-auto mb-2 h-5 w-5 animate-spin text-muted-foreground" />
+                  <p className="text-sm font-medium">Loading saved conversations…</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Pulling durable email history for this contact.
+                  </p>
+                </>
+              ) : (
+                <>
+                  <Mail className="mx-auto mb-2 h-5 w-5 text-muted-foreground" />
+                  <p className="text-sm font-medium">No recent linked emails</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Messages linked in Inbox or matching{" "}
+                    {matchEmails.length > 0 ? matchEmails.join(" / ") : "the lead’s email"} appear here.
+                  </p>
+                  {syncingLists ? (
+                    <p className="mt-3 inline-flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Checking mailbox for matches in the background…
+                    </p>
+                  ) : null}
+                  <div className="mt-4 flex justify-center">
+                    <Button
+                      size="sm"
+                      disabled={!canComposeNew}
+                      onClick={openNewCompose}
+                    >
+                      <PenLine className="h-3.5 w-3.5" />
+                      Compose email
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             conversations.map((conversation) => {
