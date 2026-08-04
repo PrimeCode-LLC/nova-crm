@@ -12,9 +12,10 @@ import {
   getPaginationRowModel,
   getSortedRowModel,
   type PaginationState,
-  SortingState,
+  type SortingState,
+  type Table as TanStackTable,
   useReactTable,
-  ColumnFiltersState,
+  type ColumnFiltersState,
 } from "@tanstack/react-table";
 import {
   Table,
@@ -171,6 +172,103 @@ const EMAIL_OPENED_FILTER_OPENED = "opened";
 const EMAIL_OPENED_FILTER_NEVER = "never";
 const LEADS_TABLE_PAGE_SIZE = 10;
 const LEADS_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+
+function LeadsTableSelectHeader({ table }: { table: TanStackTable<Lead> }) {
+  const pageCount = table.getRowModel().rows.length;
+  const filteredCount = table.getFilteredRowModel().rows.length;
+  const allPageSelected = table.getIsAllPageRowsSelected();
+  const somePageSelected = table.getIsSomePageRowsSelected();
+  const allFilteredSelected = table.getIsAllRowsSelected();
+  const hasSelection = allFilteredSelected || table.getIsSomeRowsSelected();
+  const checkboxChecked = allFilteredSelected || allPageSelected;
+  const checkboxIndeterminate = !checkboxChecked && (somePageSelected || hasSelection);
+
+  const menu = (
+    <DropdownMenuContent align="start" className="min-w-52">
+      <DropdownMenuGroup>
+        <DropdownMenuLabel>Select</DropdownMenuLabel>
+      </DropdownMenuGroup>
+      <DropdownMenuGroup>
+        <DropdownMenuItem
+          disabled={pageCount === 0}
+          onClick={() => table.toggleAllPageRowsSelected(true)}
+        >
+          Current page
+          <span className="ml-auto text-muted-foreground tabular-nums">{pageCount}</span>
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={filteredCount === 0}
+          onClick={() => table.toggleAllRowsSelected(true)}
+        >
+          All results
+          <span className="ml-auto text-muted-foreground tabular-nums">{filteredCount}</span>
+        </DropdownMenuItem>
+      </DropdownMenuGroup>
+      {hasSelection ? (
+        <>
+          <DropdownMenuSeparator />
+          <DropdownMenuGroup>
+            <DropdownMenuItem onClick={() => table.toggleAllRowsSelected(false)}>
+              Clear selection
+            </DropdownMenuItem>
+          </DropdownMenuGroup>
+        </>
+      ) : null}
+    </DropdownMenuContent>
+  );
+
+  return (
+    <div className="flex items-center gap-0.5" onClick={(e) => e.stopPropagation()}>
+      {checkboxChecked || checkboxIndeterminate ? (
+        <>
+          <Checkbox
+            checked={checkboxChecked}
+            indeterminate={checkboxIndeterminate}
+            onCheckedChange={() => table.toggleAllRowsSelected(false)}
+            aria-label="Clear selection"
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  type="button"
+                  aria-label="Selection options"
+                  className="h-6 w-6"
+                >
+                  <ChevronDown className="h-3 w-3" />
+                </Button>
+              }
+            />
+            {menu}
+          </DropdownMenu>
+        </>
+      ) : (
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                variant="ghost"
+                size="sm"
+                type="button"
+                aria-label="Select rows"
+                className="h-6 gap-0.5 px-1"
+              >
+                <span
+                  aria-hidden
+                  className="flex size-4 shrink-0 rounded-[4px] border border-input dark:bg-input/30"
+                />
+                <ChevronDown className="h-3 w-3 opacity-70" />
+              </Button>
+            }
+          />
+          {menu}
+        </DropdownMenu>
+      )}
+    </div>
+  );
+}
 
 function LeadChannelCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
   const { patchLead, bumpLeadActivity, leads, getOwnerDisplayName } = useWorkspace();
@@ -778,45 +876,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const columns = React.useMemo<ColumnDef<Lead>[]>(() => [
     {
       id: "select",
-      header: ({ table }) => (
-        <div className="flex items-center gap-0.5">
-          <Checkbox
-            checked={table.getIsAllPageRowsSelected()}
-            indeterminate={
-              table.getIsSomePageRowsSelected() && !table.getIsAllPageRowsSelected()
-            }
-            onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)}
-            aria-label="Select current page"
-          />
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  type="button"
-                  aria-label="Selection options"
-                  className="h-6 w-6"
-                >
-                  <ChevronDown className="h-3 w-3" />
-                </Button>
-              }
-            />
-            <DropdownMenuContent align="start">
-              <DropdownMenuItem onClick={() => table.toggleAllPageRowsSelected(true)}>
-                Select current page
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => table.toggleAllRowsSelected(true)}>
-                Select all pages
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem onClick={() => table.toggleAllRowsSelected(false)}>
-                Clear selection
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      ),
+      header: ({ table }) => <LeadsTableSelectHeader table={table} />,
       cell: ({ row }) => (
         <Checkbox
           checked={row.getIsSelected()}
@@ -1368,6 +1428,13 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   }, [ownerScope, effectiveIntakeScope, inboxMailLeadFilter, emailOpenedFilter, globalFilter, columnFilters]);
 
   const selectedCount = Object.keys(rowSelection).length;
+  const filteredTotal = table.getFilteredRowModel().rows.length;
+  const allFilteredSelected = selectedCount > 0 && selectedCount >= filteredTotal && filteredTotal > 0;
+  const canSelectAllMatching =
+    selectedCount > 0 &&
+    !allFilteredSelected &&
+    table.getIsAllPageRowsSelected() &&
+    filteredTotal > selectedCount;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
   const channelFilter = (columnFilters.find((f) => f.id === "channel")?.value as string[]) ?? [];
   const profileFilter = (columnFilters.find((f) => f.id === "profileId")?.value as string[]) ?? [];
@@ -2038,8 +2105,21 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
 
       {/* Bulk actions bar */}
       {selectedCount > 0 && (
-        <div className="flex shrink-0 items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
+        <div className="flex shrink-0 flex-wrap items-center gap-2 rounded-md border bg-accent/40 px-3 py-2 text-sm">
           <span className="font-medium">{selectedCount} selected</span>
+          {canSelectAllMatching ? (
+            <Button
+              variant="link"
+              size="sm"
+              type="button"
+              className="h-auto px-0"
+              onClick={() => table.toggleAllRowsSelected(true)}
+            >
+              Select all {filteredTotal} matching
+            </Button>
+          ) : allFilteredSelected && filteredTotal > table.getState().pagination.pageSize ? (
+            <span className="text-muted-foreground">All matching results</span>
+          ) : null}
           <Button
             variant="outline"
             size="sm"
