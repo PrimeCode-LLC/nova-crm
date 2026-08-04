@@ -14,6 +14,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtCurrency, fmtDate, fmtRelative } from "@/lib/format";
 import { useLocalDeals } from "@/hooks/use-local-deals";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
@@ -27,6 +28,13 @@ export function DealDetailView({ dealId }: { dealId: string }) {
   );
 
   if (!deal) {
+    if (ws.workspaceLoading) {
+      return (
+        <PageBody>
+          <WorkspacePageSkeleton />
+        </PageBody>
+      );
+    }
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
         <p className="text-sm text-muted-foreground">Deal not found.</p>

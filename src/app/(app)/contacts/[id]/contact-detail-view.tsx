@@ -22,6 +22,7 @@ import { UserChip } from "@/components/common/user-chip";
 import { StageBadge } from "@/components/common/stage-badge";
 import { ChannelChip } from "@/components/common/channel-chip";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { initials, fmtRelative } from "@/lib/format";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
 
@@ -30,6 +31,13 @@ export function ContactDetailView({ contactId }: { contactId: string }) {
   const contact = ws.getContactById(contactId);
 
   if (!contact) {
+    if (ws.workspaceLoading) {
+      return (
+        <PageBody>
+          <WorkspacePageSkeleton />
+        </PageBody>
+      );
+    }
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
         <p className="text-sm text-muted-foreground">Contact not found.</p>

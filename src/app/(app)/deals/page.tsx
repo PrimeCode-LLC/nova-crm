@@ -19,6 +19,7 @@ import { StageBadge } from "@/components/common/stage-badge";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtCurrency, fmtDate } from "@/lib/format";
 import { Plus, Search, DollarSign, TrendingUp, Trophy, Target, ArrowUpDown } from "lucide-react";
 import { STAGES_BY_KEY } from "@/lib/constants";
@@ -171,7 +172,9 @@ export default function DealsPage() {
         }
       />
       <PageBody>
-        {listEmpty ? (
+        {ws.workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : listEmpty ? (
           <WorkspaceEmptyHint title="No deals in workspace" />
         ) : (
           <>

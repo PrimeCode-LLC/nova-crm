@@ -37,6 +37,7 @@ import {
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { ROLES, roleLabel } from "@/lib/constants";
@@ -308,6 +309,13 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
     : 0;
 
   if (!team) {
+    if (ws.workspaceLoading) {
+      return (
+        <PageBody>
+          <WorkspacePageSkeleton />
+        </PageBody>
+      );
+    }
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
         <p className="text-sm text-muted-foreground">Team not found.</p>

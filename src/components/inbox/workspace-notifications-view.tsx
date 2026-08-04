@@ -66,8 +66,14 @@ type TabFilter = "all" | "unread" | "mentions" | "assignments" | "alerts";
 
 export function WorkspaceNotificationsView() {
   const { users, isDemo } = useWorkspace();
-  const { notifications, markRead, markUnread, dismiss, markAllRead: markAllReadHook } =
-    useWorkspaceInboxNotifications();
+  const {
+    notifications,
+    markRead,
+    markUnread,
+    dismiss,
+    markAllRead: markAllReadHook,
+    loading: notificationsLoading,
+  } = useWorkspaceInboxNotifications();
   const forcedUnreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
 
   const [selected, setSelected] = React.useState<DemoNotification | null>(null);
@@ -196,7 +202,19 @@ export function WorkspaceNotificationsView() {
             </div>
           </div>
           <div className="flex-1 divide-y overflow-y-auto">
-            {filtered.length === 0 && (
+            {notificationsLoading ? (
+              <div className="space-y-3 p-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div key={i} className="flex items-start gap-3">
+                    <div className="h-8 w-8 shrink-0 animate-pulse rounded-full bg-muted" />
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="h-3 w-full animate-pulse rounded bg-muted" />
+                      <div className="h-2.5 w-24 animate-pulse rounded bg-muted" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : filtered.length === 0 ? (
               <div className="space-y-4 p-6">
                 <p className="text-center text-sm text-muted-foreground">
                   {normalizeListSearch(listSearchQuery)
@@ -207,8 +225,9 @@ export function WorkspaceNotificationsView() {
                   <WorkspaceEmptyHint title="No workspace notifications yet" />
                 )}
               </div>
-            )}
-            {filtered.map((n) => {
+            ) : null}
+            {!notificationsLoading &&
+              filtered.map((n) => {
               const Icon = KIND_ICONS[n.kind];
               const sender = users.find((u) => u.id === n.sender);
               const senderInitials =

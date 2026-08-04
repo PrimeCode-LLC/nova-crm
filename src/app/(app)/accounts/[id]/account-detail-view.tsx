@@ -25,6 +25,7 @@ import {
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { REVENUE_RANGES } from "@/lib/constants";
 import { fmtCurrency, fmtRelative, fmtDate } from "@/lib/format";
 import { EntityLabelPicker } from "@/components/crm/entity-label-picker";
@@ -38,6 +39,13 @@ export function AccountDetailView({ accountId }: { accountId: string }) {
   const account = ws.accounts.find((a) => a.id === accountId);
 
   if (!account) {
+    if (ws.workspaceLoading) {
+      return (
+        <PageBody>
+          <WorkspacePageSkeleton />
+        </PageBody>
+      );
+    }
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
         <p className="text-sm text-muted-foreground">Company not found.</p>

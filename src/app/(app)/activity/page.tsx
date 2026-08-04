@@ -114,6 +114,7 @@ export default function ActivityPage() {
   const {
     mode,
     isDemo,
+    workspaceLoading,
     organizationId,
     activityCounters,
     activityRecords,
@@ -160,7 +161,8 @@ export default function ActivityPage() {
     [mergedCounters],
   );
 
-  const workspaceEmpty = !isDemo && activityCounters.length === 0 && activityRecords.length === 0;
+  const workspaceEmpty =
+    !workspaceLoading && !isDemo && activityCounters.length === 0 && activityRecords.length === 0;
   const hasHistoryRows = sortedCounters.length > 0 || activityRecords.length > 0;
 
   const [tab, setTab] = React.useState<ActivityTab>("counters");
@@ -388,13 +390,19 @@ export default function ActivityPage() {
           />
         </div>
 
-        {workspaceEmpty && (
+        {workspaceLoading ? (
+          <div className="mb-4 space-y-3 rounded-lg border p-4">
+            <div className="h-4 w-40 animate-pulse rounded bg-muted" />
+            <div className="h-3 w-64 animate-pulse rounded bg-muted" />
+            <div className="h-24 w-full animate-pulse rounded bg-muted" />
+          </div>
+        ) : workspaceEmpty ? (
           <div className="mb-4">
             <WorkspaceEmptyHint title="No activity history yet" />
           </div>
-        )}
+        ) : null}
 
-        {hasHistoryRows && (
+        {!workspaceLoading && hasHistoryRows && (
           <Card className="mb-4 overflow-visible">
             <CardHeader className="py-3 px-4">
               <CardTitle className="text-sm flex items-center gap-2">

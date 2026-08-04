@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtDate, fmtRelative } from "@/lib/format";
 import type { LeadTask } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -32,7 +33,15 @@ const TYPE_LABEL: Record<LeadTask["taskType"], string> = {
 
 export default function TasksPage() {
   const ws = useWorkspace();
-  const { leadTasks, leads, currentUserId, addLeadTask, setLeadTaskCompleted, isDemo } = ws;
+  const {
+    leadTasks,
+    leads,
+    currentUserId,
+    addLeadTask,
+    setLeadTaskCompleted,
+    isDemo,
+    workspaceLoading,
+  } = ws;
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [tab, setTab] = React.useState<"inbox" | "sent" | "all">("inbox");
 
@@ -61,7 +70,9 @@ export default function TasksPage() {
         }
       />
       <PageBody>
-        {!isDemo && leadTasks.length === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && leadTasks.length === 0 ? (
           <WorkspaceEmptyHint title="No tasks yet" description="Create one to ping someone on your team." />
         ) : (
           <>

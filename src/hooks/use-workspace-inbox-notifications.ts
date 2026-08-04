@@ -50,6 +50,7 @@ export function useWorkspaceInboxNotifications() {
     leads,
     users,
     isDemo,
+    workspaceLoading,
     demoPersonaId,
     leadTasks,
     currentUserId,
@@ -71,6 +72,7 @@ export function useWorkspaceInboxNotifications() {
   const demoMarkAllRead = useDemoUserNotifications((s) => s.markAllRead);
 
   const [liveDurable, setLiveDurable] = React.useState<UserNotificationDoc[]>([]);
+  const [liveReady, setLiveReady] = React.useState(false);
   const [prefsTick, setPrefsTick] = React.useState(0);
 
   React.useEffect(() => {
@@ -96,8 +98,10 @@ export function useWorkspaceInboxNotifications() {
   React.useEffect(() => {
     if (isDemo || !organizationId || !currentUserId || !isFirebaseWebConfigured()) {
       setLiveDurable([]);
+      setLiveReady(true);
       return;
     }
+    setLiveReady(false);
     let unsub: (() => void) | undefined;
     try {
       const db = getFirebaseDb();
@@ -105,11 +109,18 @@ export function useWorkspaceInboxNotifications() {
         db,
         organizationId,
         currentUserId,
-        (rows) => setLiveDurable(rows),
-        (err) => console.error("[notifications] subscribe", err),
+        (rows) => {
+          setLiveDurable(rows);
+          setLiveReady(true);
+        },
+        (err) => {
+          console.error("[notifications] subscribe", err);
+          setLiveReady(true);
+        },
       );
     } catch (e) {
       console.error("[notifications] subscribe init", e);
+      setLiveReady(true);
     }
     return () => unsub?.();
   }, [isDemo, organizationId, currentUserId]);
@@ -245,6 +256,7 @@ export function useWorkspaceInboxNotifications() {
   return {
     notifications,
     unreadCount,
+    loading: workspaceLoading || (!isDemo && !liveReady),
     markRead,
     markUnread,
     dismiss,

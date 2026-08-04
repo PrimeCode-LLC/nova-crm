@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtCurrency, fmtNumber, fmtRelative } from "@/lib/format";
 import { COMPANY_SIZES, REVENUE_RANGES } from "@/lib/constants";
 import { UserChip } from "@/components/common/user-chip";
@@ -140,7 +141,7 @@ function SortableTableHead({
 
 export default function AccountsPage() {
   const router = useRouter();
-  const { accounts, isDemo, getUserById } = useWorkspace();
+  const { accounts, isDemo, workspaceLoading, getUserById } = useWorkspace();
   const { openQuickAdd } = useOpenQuickAdd();
   const [query, setQuery] = React.useState("");
   const [sortKey, setSortKey] = React.useState<SortKey | null>(null);
@@ -199,7 +200,9 @@ export default function AccountsPage() {
         }
       />
       <PageBody>
-        {!isDemo && accounts.length === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && accounts.length === 0 ? (
           <WorkspaceEmptyHint title="No companies in workspace" />
         ) : (
           <>

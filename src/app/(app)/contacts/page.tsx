@@ -19,6 +19,7 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtRelative, initials } from "@/lib/format";
 import { UserChip } from "@/components/common/user-chip";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
@@ -74,7 +75,7 @@ function telHref(phone: string) {
 
 export default function ContactsPage() {
   const router = useRouter();
-  const { contacts, accounts, users, isDemo } = useWorkspace();
+  const { contacts, accounts, users, isDemo, workspaceLoading } = useWorkspace();
   const { openQuickAdd } = useOpenQuickAdd();
   const [query, setQuery] = React.useState("");
   const q = query.trim().toLowerCase();
@@ -107,7 +108,9 @@ export default function ContactsPage() {
         }
       />
       <PageBody>
-        {!isDemo && contacts.length === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && contacts.length === 0 ? (
           <WorkspaceEmptyHint title="No contacts in workspace" />
         ) : (
           <>

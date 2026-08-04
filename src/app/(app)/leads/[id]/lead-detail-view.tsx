@@ -82,6 +82,7 @@ import { LeadTasksPanel } from "@/components/leads/lead-tasks";
 import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
 import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -494,6 +495,13 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
+    if (ws.workspaceLoading) {
+      return (
+        <PageBody>
+          <WorkspacePageSkeleton />
+        </PageBody>
+      );
+    }
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
         <p className="text-sm text-muted-foreground">This lead was not found in your current workspace.</p>

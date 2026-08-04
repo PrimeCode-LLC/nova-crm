@@ -34,6 +34,7 @@ import { KpiCard } from "@/components/common/kpi-card";
 import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
+import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
@@ -148,6 +149,7 @@ export default function FollowupsPage() {
   const {
     followups: allFollowups,
     isDemo,
+    workspaceLoading,
     leads,
     users,
     currentUserId,
@@ -744,7 +746,9 @@ export default function FollowupsPage() {
         }
       />
       <PageBody className={cn(selectedIds.size > 0 && tab === "open" && "pb-24")}>
-        {!isDemo && allFollowups.length === 0 ? (
+        {workspaceLoading ? (
+          <WorkspacePageSkeleton />
+        ) : !isDemo && allFollowups.length === 0 ? (
           <WorkspaceEmptyHint title="No followups in workspace" />
         ) : (
           <>
