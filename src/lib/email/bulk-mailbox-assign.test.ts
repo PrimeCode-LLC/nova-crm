@@ -206,4 +206,23 @@ describe("bulk mailbox assign", () => {
     if (result.ok) return;
     expect(result.error).toMatch(/No eligible mailboxes/);
   });
+
+  it("prefers preferredMailboxId when it has capacity", () => {
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
+    const states: MailboxCapacityState[] = [
+      { mailboxId: "mb-a", limit: 5, byDay: dayState(today, 5, 4) },
+      { mailboxId: "mb-b", limit: 5, byDay: dayState(today, 5, 0) },
+    ];
+    const noon = new Date(`${today}T12:00:00.000Z`);
+    const result = assignProspectSchedule({
+      states,
+      steps: [{ id: "s1", scheduledAt: toDatetimeLocalValue(noon, TZ), included: true }],
+      roundRobinIndex: 0,
+      timeZone: TZ,
+      preferredMailboxId: "mb-a",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.mailboxId).toBe("mb-a");
+  });
 });

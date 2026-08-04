@@ -108,6 +108,7 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     referenceIds: Array.isArray(data.referenceIds)
       ? data.referenceIds.map(String).filter(Boolean).slice(-50)
       : undefined,
+    forceNewThread: data.forceNewThread === true ? true : undefined,
     attempts: Number.isFinite(Number(data.attempts)) ? Math.max(0, Number(data.attempts)) : undefined,
     nextRetryAt:
       typeof data.nextRetryAt === "string" && data.nextRetryAt.trim()
@@ -169,6 +170,8 @@ export async function createScheduledEmailServer(input: {
   leadId?: string;
   inReplyTo?: string;
   referenceIds?: string[];
+  /** Start a new sequence thread (ignore prior non-fresh sent steps). */
+  forceNewThread?: boolean;
 }): Promise<{ ok: true; id: string } | { error: string }> {
   const ref = scheduledRef(input.organizationId, input.uid, `sch-${crypto.randomUUID()}`);
   if (!ref) return { error: "Database not configured" };
@@ -213,6 +216,7 @@ export async function createScheduledEmailServer(input: {
     ...(leadId ? { leadId } : {}),
     ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
     ...(input.referenceIds?.length ? { referenceIds: input.referenceIds.slice(-50) } : {}),
+    ...(input.forceNewThread ? { forceNewThread: true } : {}),
   });
 
   return { ok: true, id: ref.id };
@@ -511,6 +515,7 @@ function followupDocToThreadStep(id: string, data: Record<string, unknown>): Seq
       typeof data.emailScheduledAt === "string" ? data.emailScheduledAt : undefined,
     pausedAt: typeof data.pausedAt === "string" ? data.pausedAt : undefined,
     completedAt: typeof data.completedAt === "string" ? data.completedAt : undefined,
+    freshThread: data.freshThread === true ? true : undefined,
   };
 }
 
@@ -521,6 +526,7 @@ function followupDocToThreadStep(id: string, data: Record<string, unknown>): Seq
 async function resolveSequenceThreadingForFollowup(input: {
   followupId: string;
   existingInReplyTo?: string;
+  forceNewThread?: boolean;
 }): Promise<
   | { kind: "use_existing" }
   | { kind: "root" }
@@ -547,6 +553,9 @@ async function resolveSequenceThreadingForFollowup(input: {
       .where("planId", "==", planId)
       .get();
     const current = followupDocToThreadStep(snap.id, currentData);
+    if (input.forceNewThread && !current.freshThread) {
+      current.freshThread = true;
+    }
     const siblings = siblingsSnap.docs.map((doc) =>
       followupDocToThreadStep(doc.id, doc.data() as Record<string, unknown>),
     );
@@ -864,11 +873,13 @@ async function sendScheduledDoc(
   let referenceIds = Array.isArray(data.referenceIds)
     ? data.referenceIds.map(String).filter(Boolean).slice(-50)
     : undefined;
+  const forceNewThread = data.forceNewThread === true;
 
   if (followupIdEarly) {
     const thread = await resolveSequenceThreadingForFollowup({
       followupId: followupIdEarly,
       existingInReplyTo: inReplyTo,
+      forceNewThread,
     });
     if (thread.kind === "wait_for_prior") {
       await releaseScheduledClaim(docRef);

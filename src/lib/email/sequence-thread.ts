@@ -14,6 +14,11 @@ export type SequenceThreadStep = {
   emailScheduledAt?: string;
   pausedAt?: string;
   completedAt?: string;
+  /**
+   * When true, only other freshThread siblings participate in threading —
+   * prior sent steps without this flag are ignored (start-fresh schedule).
+   */
+  freshThread?: boolean;
 };
 
 export type SequenceThreadResolution =
@@ -60,7 +65,10 @@ export function resolveSequenceThreadContext(
   current: SequenceThreadStep,
   siblings: readonly SequenceThreadStep[],
 ): SequenceThreadResolution {
-  const earlier = siblings.filter((step) => step.id !== current.id && isEarlierStep(step, current));
+  const scoped = current.freshThread
+    ? siblings.filter((step) => step.id === current.id || Boolean(step.freshThread))
+    : siblings;
+  const earlier = scoped.filter((step) => step.id !== current.id && isEarlierStep(step, current));
 
   if (earlier.some(isAwaitingOutboundSend)) {
     return { kind: "wait_for_prior" };

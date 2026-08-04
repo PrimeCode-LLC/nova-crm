@@ -182,7 +182,12 @@ export async function persistFollowupSetCompleted(
 export async function persistFollowupEmailSchedule(
   db: Firestore,
   followupId: string,
-  schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+  schedule: {
+    scheduledEmailId: string;
+    emailScheduledAt: string;
+    /** When set, persists whether this step starts / joins a fresh thread. */
+    freshThread?: boolean;
+  } | null,
 ): Promise<void> {
   if (schedule) {
     await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
@@ -193,6 +198,11 @@ export async function persistFollowupEmailSchedule(
       cancelledAt: deleteField(),
       deliveryError: deleteField(),
       cancelReason: deleteField(),
+      ...(schedule.freshThread === true
+        ? { freshThread: true }
+        : schedule.freshThread === false
+          ? { freshThread: deleteField() }
+          : {}),
       updatedAt: serverTimestamp(),
     });
     return;

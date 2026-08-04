@@ -272,6 +272,7 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
       typeof raw.sentMessageId === "string" && raw.sentMessageId.trim()
         ? raw.sentMessageId.trim()
         : undefined,
+    freshThread: raw.freshThread === true ? true : undefined,
     failedAt: raw.failedAt ? firestoreValueToIso(raw.failedAt) : undefined,
     cancelledAt: raw.cancelledAt ? firestoreValueToIso(raw.cancelledAt) : undefined,
     deliveryError: typeof raw.deliveryError === "string" ? raw.deliveryError : undefined,

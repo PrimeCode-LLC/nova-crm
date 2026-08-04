@@ -148,6 +148,7 @@ export async function POST(req: Request) {
           .filter((value): value is string => Boolean(value))
           .slice(-50)
       : undefined,
+    forceNewThread: body.forceNewThread === true,
   });
 
   if ("error" in result) {

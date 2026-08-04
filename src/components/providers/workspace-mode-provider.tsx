@@ -175,7 +175,9 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     setFollowupCompleted: (id: string, completed: boolean) => void;
     setFollowupEmailSchedule: (
       id: string,
-      schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+      schedule:
+        | { scheduledEmailId: string; emailScheduledAt: string; freshThread?: boolean }
+        | null,
     ) => void;
     clearFollowupEmailSchedule: (id: string) => void;
     /** Apply server/demo delivery lifecycle fields to the local workspace snapshot. */
@@ -1216,7 +1218,9 @@ export function WorkspaceModeProvider({
   const setFollowupEmailSchedule = React.useCallback(
     (
       id: string,
-      schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+      schedule:
+        | { scheduledEmailId: string; emailScheduledAt: string; freshThread?: boolean }
+        | null,
     ) => {
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
@@ -1241,7 +1245,12 @@ export function WorkspaceModeProvider({
             ...s.followups,
             emailSchedule: {
               ...s.followups.emailSchedule,
-              [id]: schedule,
+              [id]: schedule
+                ? {
+                    scheduledEmailId: schedule.scheduledEmailId,
+                    emailScheduledAt: schedule.emailScheduledAt,
+                  }
+                : schedule,
             },
             patches: schedule
               ? {
@@ -1253,6 +1262,11 @@ export function WorkspaceModeProvider({
                     cancelledAt: undefined,
                     deliveryError: undefined,
                     cancelReason: undefined,
+                    ...(schedule.freshThread === true
+                      ? { freshThread: true }
+                      : schedule.freshThread === false
+                        ? { freshThread: undefined }
+                        : {}),
                   },
                 }
               : s.followups.patches,

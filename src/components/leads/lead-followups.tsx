@@ -596,11 +596,23 @@ export function LeadFollowups({
 
   function applyScheduleOptimistic(
     id: string,
-    schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+    schedule: {
+      scheduledEmailId: string;
+      emailScheduledAt: string;
+      freshThread?: boolean;
+    } | null,
   ) {
     setFollowupEmailSchedule(id, schedule);
     if (!isDemo) {
-      setOptimisticSchedule((prev) => ({ ...prev, [id]: schedule }));
+      setOptimisticSchedule((prev) => ({
+        ...prev,
+        [id]: schedule
+          ? {
+              scheduledEmailId: schedule.scheduledEmailId,
+              emailScheduledAt: schedule.emailScheduledAt,
+            }
+          : schedule,
+      }));
     }
   }
 

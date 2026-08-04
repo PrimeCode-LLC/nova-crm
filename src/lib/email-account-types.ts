@@ -200,6 +200,11 @@ export interface ScheduledEmail {
   /** RFC 5322 threading context for a scheduled reply. */
   inReplyTo?: string;
   referenceIds?: string[];
+  /**
+   * When true, send path ignores prior non-fresh sequence steps for In-Reply-To
+   * (paired with Followup.freshThread for start-fresh scheduling).
+   */
+  forceNewThread?: boolean;
   /** Send attempts so far (includes the latest failure). */
   attempts?: number;
   /** ISO when the next auto-retry should run (status stays pending). */

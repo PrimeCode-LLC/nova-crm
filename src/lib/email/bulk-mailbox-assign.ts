@@ -179,6 +179,8 @@ export function assignProspectSchedule(input: {
   horizonDays?: number;
   timeZone?: string;
   candidateMailboxIds?: readonly string[];
+  /** Prefer this mailbox when it is eligible and has capacity for the steps. */
+  preferredMailboxId?: string;
 }): AssignProspectScheduleResult {
   const zone = resolveOrgTimezone(input.timeZone);
   const states = cloneMailboxCapacityStates(input.states);
@@ -213,11 +215,36 @@ export function assignProspectSchedule(input: {
   }
 
   const preferredDayKey = scheduleDayKeyFromDate(included[0]!.scheduledAt, zone);
-  const picked = pickMailboxForProspect({
-    states: pickStates,
-    preferredDayKey: preferredDayKey || scheduleDayKeyFromDate(new Date(), zone),
-    roundRobinIndex: input.roundRobinIndex,
-  });
+  const preferredId = input.preferredMailboxId?.trim() || "";
+  let picked: { state: MailboxCapacityState; index: number } | null = null;
+
+  if (preferredId) {
+    const preferredState = pickStates.find((s) => s.mailboxId === preferredId);
+    if (preferredState) {
+      const trial = autoFixScheduleDates(
+        input.steps.map((s) => ({ ...s })),
+        preferredState.byDay,
+        preferredState.limit,
+        input.horizonDays ?? 60,
+        zone,
+      );
+      if (trial.unresolvedIds.length === 0) {
+        const stateIndex = states.findIndex((s) => s.mailboxId === preferredId);
+        picked = {
+          state: preferredState,
+          index: stateIndex >= 0 ? stateIndex : 0,
+        };
+      }
+    }
+  }
+
+  if (!picked) {
+    picked = pickMailboxForProspect({
+      states: pickStates,
+      preferredDayKey: preferredDayKey || scheduleDayKeyFromDate(new Date(), zone),
+      roundRobinIndex: input.roundRobinIndex,
+    });
+  }
   if (!picked) {
     return {
       ok: false,

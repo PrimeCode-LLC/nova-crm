@@ -814,6 +814,11 @@ export interface Followup {
   sentAt?: ISODate;
   /** RFC 5322 Message-ID of the outbound email (no angle brackets), for sequence threading. */
   sentMessageId?: string;
+  /**
+   * When true, send-time threading only chains to other freshThread steps in the
+   * same plan (start-fresh schedule). Cleared / false keeps the existing thread.
+   */
+  freshThread?: boolean;
   failedAt?: ISODate;
   cancelledAt?: ISODate;
   deliveryError?: string;

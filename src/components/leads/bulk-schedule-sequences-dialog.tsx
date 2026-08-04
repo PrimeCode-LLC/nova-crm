@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import {
   getActiveMailbox,
@@ -47,6 +48,11 @@ import {
   resolveFollowupChannel,
 } from "@/lib/followup-plans";
 import {
+  countContinuityPreflight,
+  resolvePriorSequenceSender,
+  type SequenceScheduleContinuityMode,
+} from "@/lib/email/sequence-schedule-continuity";
+import {
   scheduleFollowupEmailClient,
 } from "@/lib/schedule-followup-email-client";
 import { isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
@@ -60,6 +66,7 @@ import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { cn } from "@/lib/utils";
+import type { Followup } from "@/lib/types";
 
 function toScheduleIso(value: string, wallClockZone: string): string {
   const trimmed = value.trim();
@@ -139,6 +146,8 @@ export function BulkScheduleSequencesDialog({
   const [phase, setPhase] = React.useState<"setup" | "running" | "done">("setup");
   const [selectedMailboxIds, setSelectedMailboxIds] = React.useState<string[]>([]);
   const [preferOwnerShared, setPreferOwnerShared] = React.useState(true);
+  const [continuityMode, setContinuityMode] =
+    React.useState<SequenceScheduleContinuityMode>("continue");
   const [includeSignature, setIncludeSignature] = React.useState(true);
   const [includeFooter, setIncludeFooter] = React.useState(true);
   const [rows, setRows] = React.useState<LeadRow[]>([]);
@@ -220,11 +229,42 @@ export function BulkScheduleSequencesDialog({
     readyOwnerIds: [] as string[],
     readyLeadIds: [] as string[],
   });
+  const [continuityCounts, setContinuityCounts] = React.useState({
+    firstTouch: 0,
+    continuing: 0,
+    priorSenderKnown: 0,
+    priorSenderUnknown: 0,
+  });
 
   const selectedMailboxes = React.useMemo(
     () => sendableMailboxes.filter((m) => selectedMailboxIds.includes(m.id)),
     [sendableMailboxes, selectedMailboxIds],
   );
+
+  const priorSenderOutsidePool = React.useMemo(() => {
+    if (continuityMode !== "continue" || continuityCounts.continuing === 0) return 0;
+    let count = 0;
+    const selectedSet = new Set(selectedMailboxIds);
+    for (const leadId of preflight.readyLeadIds) {
+      const plan = getActiveFollowupPlanForLead(followupPlansRef.current, leadId);
+      if (!plan) continue;
+      const planSteps = followupsRef.current.filter((f) => f.planId === plan.id);
+      const prior = resolvePriorSequenceSender({
+        planFollowups: planSteps,
+        scheduledEmails: scheduled,
+        mailboxes: sendableMailboxes,
+      });
+      if (prior && !selectedSet.has(prior.mailboxId)) count += 1;
+    }
+    return count;
+  }, [
+    continuityMode,
+    continuityCounts.continuing,
+    preflight.readyLeadIds,
+    selectedMailboxIds,
+    scheduled,
+    sendableMailboxes,
+  ]);
 
   const hasOtherOwners = React.useMemo(() => {
     return preflight.readyOwnerIds.some(
@@ -286,6 +326,7 @@ export function BulkScheduleSequencesDialog({
     setIncludeSignature(true);
     setIncludeFooter(true);
     setPreferOwnerShared(true);
+    setContinuityMode("continue");
     setLoadError(null);
     setProgressIndex(0);
     setRunTotal(0);
@@ -297,6 +338,26 @@ export function BulkScheduleSequencesDialog({
     setSelectedMailboxIds(defaults);
     const snap = computePreflight(leadIds);
     setPreflight(snap);
+    const planFollowupsByLeadId = new Map<string, Followup[]>();
+    for (const id of snap.readyLeadIds) {
+      const plan = getActiveFollowupPlanForLead(followupPlansRef.current, id);
+      if (!plan) {
+        planFollowupsByLeadId.set(id, []);
+        continue;
+      }
+      planFollowupsByLeadId.set(
+        id,
+        followupsRef.current.filter((f) => f.planId === plan.id),
+      );
+    }
+    setContinuityCounts(
+      countContinuityPreflight({
+        readyLeadIds: snap.readyLeadIds,
+        planFollowupsByLeadId,
+        scheduledEmails: scheduled,
+        mailboxes: sendableMailboxesRef.current,
+      }),
+    );
     setRows(
       snap.readyLeadIds.map((id) => {
         const lead = leadsRef.current.find((l) => l.id === id);
@@ -416,6 +477,7 @@ export function BulkScheduleSequencesDialog({
       const plan = getActiveFollowupPlanForLead(followupPlansRef.current, leadId)!;
       const contact = getContactByIdRef.current(lead.contactId);
       const to = defaultContactRecipientEmail(buildContactRecipientOptions(lead, contact));
+      const planSteps = followupsRef.current.filter((f) => f.planId === plan.id);
       const schedulable = openFollowupsForPlan(followupsRef.current, plan.id)
         .filter((f) => canAutoScheduleFollowupEmail(f, lead.channel))
         .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
@@ -466,12 +528,29 @@ export function BulkScheduleSequencesDialog({
         }
       }
 
+      const startFresh = continuityMode === "start_fresh";
+      const priorSender =
+        !startFresh
+          ? resolvePriorSequenceSender({
+              planFollowups: planSteps,
+              scheduledEmails: scheduled,
+              mailboxes: sendableMailboxesRef.current,
+            })
+          : null;
+      const preferPrior =
+        priorSender &&
+        selected.some((m) => m.id === priorSender.mailboxId) &&
+        (candidateMailboxIds == null || candidateMailboxIds.includes(priorSender.mailboxId))
+          ? priorSender.mailboxId
+          : undefined;
+
       const assigned = assignProspectSchedule({
         states,
         steps: draftSteps,
         roundRobinIndex: rr,
         timeZone,
         candidateMailboxIds,
+        preferredMailboxId: preferPrior,
       });
       rr = assigned.nextRoundRobinIndex;
       states = assigned.nextStates;
@@ -492,6 +571,9 @@ export function BulkScheduleSequencesDialog({
         continue;
       }
 
+      const senderChanged =
+        Boolean(priorSender) && priorSender!.mailboxId !== assigned.mailboxId;
+
       let okCount = 0;
       let lastError = "";
       for (const step of assigned.steps.filter((s) => s.included)) {
@@ -509,6 +591,7 @@ export function BulkScheduleSequencesDialog({
           includeFooter,
           scheduledAtIso: toScheduleIso(step.scheduledAt, timeZone),
           isDemo,
+          forceNewThread: startFresh,
           addDemoScheduled: addScheduled,
         });
         if (!result.ok) {
@@ -518,6 +601,7 @@ export function BulkScheduleSequencesDialog({
         setFollowupEmailSchedule(followup.id, {
           scheduledEmailId: result.scheduledEmailId,
           emailScheduledAt: result.emailScheduledAt,
+          freshThread: startFresh,
         });
         okCount += 1;
       }
@@ -531,11 +615,19 @@ export function BulkScheduleSequencesDialog({
         continue;
       }
 
+      const continuityNote = startFresh
+        ? " · new thread"
+        : priorSender
+          ? senderChanged
+            ? " · same thread · different sender"
+            : " · same thread"
+          : "";
+
       patchRow(leadId, {
         status: "success",
         detail: `${okCount} email${okCount === 1 ? "" : "s"} · ${mailboxOptionLabel(mailbox)}${
           okCount < schedulable.length ? " (partial)" : ""
-        }`,
+        }${continuityNote}`,
       });
       success += 1;
     }
@@ -601,7 +693,90 @@ export function BulkScheduleSequencesDialog({
                   ) : null}
                 </p>
               )}
+              {continuityCounts.continuing > 0 || continuityCounts.firstTouch > 0 ? (
+                <p className="text-muted-foreground">
+                  <span className="tabular-nums">{continuityCounts.continuing}</span> will
+                  continue existing threads
+                  {" · "}
+                  <span className="tabular-nums">{continuityCounts.firstTouch}</span>{" "}
+                  first-touch
+                </p>
+              ) : null}
             </div>
+
+            {continuityCounts.continuing > 0 ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <Label className="text-xs">For leads with prior sent steps</Label>
+                <RadioGroup
+                  value={continuityMode}
+                  onValueChange={(v) =>
+                    setContinuityMode(v as SequenceScheduleContinuityMode)
+                  }
+                  className="grid gap-2"
+                >
+                  <label
+                    htmlFor="bulk-sched-continue"
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors",
+                      continuityMode === "continue"
+                        ? "border-primary bg-primary/5"
+                        : "border-border/60 hover:bg-muted/40",
+                    )}
+                  >
+                    <RadioGroupItem
+                      value="continue"
+                      id="bulk-sched-continue"
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 space-y-0.5">
+                      <span className="block font-medium leading-none">
+                        Continue conversation
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        Same thread. Prefer the mailbox that sent earlier steps when it is
+                        in your pool.
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    htmlFor="bulk-sched-fresh"
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors",
+                      continuityMode === "start_fresh"
+                        ? "border-primary bg-primary/5"
+                        : "border-border/60 hover:bg-muted/40",
+                    )}
+                  >
+                    <RadioGroupItem
+                      value="start_fresh"
+                      id="bulk-sched-fresh"
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 space-y-0.5">
+                      <span className="block font-medium leading-none">Start fresh</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        New thread from the selected pool — use for a new campaign or
+                        sender.
+                      </span>
+                    </span>
+                  </label>
+                </RadioGroup>
+                {continuityMode === "continue" && continuityCounts.priorSenderUnknown > 0 ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    Prior sender unknown for {continuityCounts.priorSenderUnknown} lead
+                    {continuityCounts.priorSenderUnknown === 1 ? "" : "s"} (e.g. Instantly) —
+                    will use the selected pool while staying in the same thread.
+                  </p>
+                ) : null}
+                {continuityMode === "continue" && priorSenderOutsidePool > 0 ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    Prior sender is outside the selected pool for {priorSenderOutsidePool}{" "}
+                    lead{priorSenderOutsidePool === 1 ? "" : "s"} — those will use another
+                    mailbox in the same thread.
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
 
             {sendableMailboxes.length === 0 ? (
               <p className="text-sm text-destructive">

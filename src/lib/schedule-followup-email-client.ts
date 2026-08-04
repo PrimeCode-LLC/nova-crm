@@ -33,6 +33,8 @@ export type ScheduleFollowupEmailInput = {
   includeFooter?: boolean;
   scheduledAtIso: string;
   isDemo: boolean;
+  /** When true, remaining steps start a new thread (ignore prior sent steps). */
+  forceNewThread?: boolean;
   addDemoScheduled: (row: {
     mailboxId: string;
     from: string;
@@ -45,6 +47,7 @@ export type ScheduleFollowupEmailInput = {
     scheduledAt: string;
     followupId: string;
     leadId: string;
+    forceNewThread?: boolean;
   }) => string;
 };
 
@@ -94,6 +97,7 @@ export async function scheduleFollowupEmailClient(
       scheduledAt: emailScheduledAt,
       followupId: input.followupId,
       leadId: input.leadId,
+      ...(input.forceNewThread ? { forceNewThread: true } : {}),
     });
     return { ok: true, scheduledEmailId: id, emailScheduledAt };
   }
@@ -124,6 +128,7 @@ export async function scheduleFollowupEmailClient(
         scheduledAt: emailScheduledAt,
         followupId: input.followupId,
         leadId: input.leadId,
+        ...(input.forceNewThread ? { forceNewThread: true } : {}),
       }),
     });
     const data = (await res.json()) as {

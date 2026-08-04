@@ -32,6 +32,11 @@ import {
   projectStepCapacity,
   type MailboxDayLoadClient,
 } from "@/lib/email/mailbox-schedule-capacity";
+import {
+  planHasPriorSentEmailSteps,
+  resolvePriorSequenceSender,
+  type SequenceScheduleContinuityMode,
+} from "@/lib/email/sequence-schedule-continuity";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { ContactRecipientSelect } from "@/components/leads/contact-recipient-select";
@@ -56,6 +61,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
   Select,
   SelectContent,
@@ -63,6 +69,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 function mailboxOptionLabel(mb: EmailMailboxSettings): string {
   const label = mb.label?.trim();
@@ -97,10 +104,20 @@ export function ScheduleSequenceEmailsDialog({
   lead: Lead;
   onScheduled: (
     followupId: string,
-    schedule: { scheduledEmailId: string; emailScheduledAt: string },
+    schedule: {
+      scheduledEmailId: string;
+      emailScheduledAt: string;
+      freshThread?: boolean;
+    },
   ) => void;
 }) {
-  const { isDemo, getContactById, currentUserId, organizationId } = useWorkspace();
+  const {
+    isDemo,
+    getContactById,
+    currentUserId,
+    organizationId,
+    followups: allFollowups,
+  } = useWorkspace();
   const contact = getContactById(lead.contactId);
   const recipientOptions = React.useMemo(
     () => buildContactRecipientOptions(lead, contact),
@@ -117,9 +134,33 @@ export function ScheduleSequenceEmailsDialog({
     return [getActiveMailbox({ mailboxes, activeMailboxId })];
   }, [mailboxes, activeMailboxId]);
 
+  const planFollowups = React.useMemo(() => {
+    const planId = followups.find((f) => f.planId)?.planId;
+    if (!planId) return followups;
+    const fromWorkspace = allFollowups.filter((f) => f.planId === planId);
+    return fromWorkspace.length > 0 ? fromWorkspace : followups;
+  }, [followups, allFollowups]);
+
+  const hasPriorSent = React.useMemo(
+    () => planHasPriorSentEmailSteps(planFollowups),
+    [planFollowups],
+  );
+
+  const priorSender = React.useMemo(
+    () =>
+      resolvePriorSequenceSender({
+        planFollowups,
+        scheduledEmails: scheduled,
+        mailboxes: mailboxOptions,
+      }),
+    [planFollowups, scheduled, mailboxOptions],
+  );
+
   const [mailboxId, setMailboxId] = React.useState("");
   const [to, setTo] = React.useState("");
   const [steps, setSteps] = React.useState<StepDraft[]>([]);
+  const [continuityMode, setContinuityMode] =
+    React.useState<SequenceScheduleContinuityMode>("continue");
   const [includeSignature, setIncludeSignature] = React.useState(true);
   const [includeFooter, setIncludeFooter] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
@@ -167,15 +208,23 @@ export function ScheduleSequenceEmailsDialog({
   React.useEffect(() => {
     if (!open) return;
     const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
-    const defaultId = resolveDefaultScheduleMailboxId({
-      mailboxIds: mailboxOptions.map((mb) => mb.id),
-      lastUsedId: prefs.lastMailboxId,
-      activeMailboxId,
-    });
+    const priorId =
+      hasPriorSent && priorSender?.mailboxId &&
+      mailboxOptions.some((m) => m.id === priorSender.mailboxId)
+        ? priorSender.mailboxId
+        : "";
+    const defaultId =
+      priorId ||
+      resolveDefaultScheduleMailboxId({
+        mailboxIds: mailboxOptions.map((mb) => mb.id),
+        lastUsedId: prefs.lastMailboxId,
+        activeMailboxId,
+      });
     setMailboxId(defaultId);
     setTo(defaultContactRecipientEmail(recipientOptions));
     setIncludeSignature(true);
     setIncludeFooter(true);
+    setContinuityMode("continue");
     setSteps(
       schedulable.map((f) => ({
         followupId: f.id,
@@ -203,6 +252,8 @@ export function ScheduleSequenceEmailsDialog({
     sendWindow.endHour,
     organizationId,
     currentUserId,
+    hasPriorSent,
+    priorSender?.mailboxId,
   ]);
 
   React.useEffect(() => {
@@ -333,6 +384,7 @@ export function ScheduleSequenceEmailsDialog({
     }
 
     setSubmitting(true);
+    const startFresh = hasPriorSent && continuityMode === "start_fresh";
     let okCount = 0;
     try {
       for (const step of selected) {
@@ -348,6 +400,7 @@ export function ScheduleSequenceEmailsDialog({
           includeFooter,
           scheduledAtIso: isoFromDatetimeLocalInZone(step.scheduledAt, scheduleTimezone),
           isDemo,
+          forceNewThread: startFresh,
           addDemoScheduled: addScheduled,
         });
         if (!result.ok) {
@@ -357,6 +410,7 @@ export function ScheduleSequenceEmailsDialog({
         onScheduled(step.followupId, {
           scheduledEmailId: result.scheduledEmailId,
           emailScheduledAt: result.emailScheduledAt,
+          freshThread: startFresh,
         });
         okCount += 1;
       }
@@ -418,6 +472,81 @@ export function ScheduleSequenceEmailsDialog({
               <p className="text-[11px] text-muted-foreground">
                 Could not refresh capacity: {loadError}
               </p>
+            ) : null}
+            {hasPriorSent ? (
+              <div className="space-y-2 rounded-md border p-3">
+                <Label className="text-xs">Thread &amp; sender</Label>
+                <RadioGroup
+                  value={continuityMode}
+                  onValueChange={(v) =>
+                    setContinuityMode(v as SequenceScheduleContinuityMode)
+                  }
+                  className="grid gap-2"
+                >
+                  <label
+                    htmlFor="seq-sched-continue"
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors",
+                      continuityMode === "continue"
+                        ? "border-primary bg-primary/5"
+                        : "border-border/60 hover:bg-muted/40",
+                    )}
+                  >
+                    <RadioGroupItem
+                      value="continue"
+                      id="seq-sched-continue"
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 space-y-0.5">
+                      <span className="block font-medium leading-none">
+                        Continue conversation
+                      </span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        Same thread as earlier steps
+                        {priorSender?.fromEmail
+                          ? ` · prefer ${priorSender.fromEmail}`
+                          : ""}
+                        .
+                      </span>
+                    </span>
+                  </label>
+                  <label
+                    htmlFor="seq-sched-fresh"
+                    className={cn(
+                      "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors",
+                      continuityMode === "start_fresh"
+                        ? "border-primary bg-primary/5"
+                        : "border-border/60 hover:bg-muted/40",
+                    )}
+                  >
+                    <RadioGroupItem
+                      value="start_fresh"
+                      id="seq-sched-fresh"
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 space-y-0.5">
+                      <span className="block font-medium leading-none">Start fresh</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        New thread — use for a new campaign or different sender.
+                      </span>
+                    </span>
+                  </label>
+                </RadioGroup>
+                {continuityMode === "continue" &&
+                priorSender &&
+                mailboxId &&
+                mailboxId !== priorSender.mailboxId ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    Selected mailbox differs from the prior sender ({priorSender.fromEmail}).
+                    Replies may look odd in the same thread.
+                  </p>
+                ) : null}
+                {continuityMode === "continue" && !priorSender ? (
+                  <p className="text-[11px] text-amber-700 dark:text-amber-400">
+                    Prior sender unknown — using the selected mailbox in the same thread.
+                  </p>
+                ) : null}
+              </div>
             ) : null}
             <div className="space-y-1.5">
               <Label htmlFor="seq-schedule-from">From</Label>
