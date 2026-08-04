@@ -89,8 +89,8 @@ export function RescheduleFollowupsDialog({
     if (!previewIso) return;
     setBusy(true);
     try {
-      await onConfirm(previewIso);
       onOpenChange(false);
+      await onConfirm(previewIso);
     } finally {
       setBusy(false);
     }

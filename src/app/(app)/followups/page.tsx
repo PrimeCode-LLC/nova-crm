@@ -105,6 +105,10 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  BulkFollowupProgressDialog,
+  type BulkFollowupProgress,
+} from "@/components/followups/bulk-followup-progress-dialog";
 
 const NewFollowupDialog = dynamic(
   () => import("@/components/followups/new-followup-dialog").then((m) => ({ default: m.NewFollowupDialog })),
@@ -180,6 +184,7 @@ export default function FollowupsPage() {
   const [rescheduleOpen, setRescheduleOpen] = React.useState(false);
   const [retryConfirmOpen, setRetryConfirmOpen] = React.useState(false);
   const [bulkBusy, setBulkBusy] = React.useState(false);
+  const [bulkProgress, setBulkProgress] = React.useState<BulkFollowupProgress | null>(null);
   const [completedVisible, setCompletedVisible] = React.useState(COMPLETED_PAGE_SIZE);
   const [laterCollapsed, setLaterCollapsed] = React.useState(true);
 
@@ -493,32 +498,42 @@ export default function FollowupsPage() {
     updateFollowup(id, patch);
   }
 
-  async function applyDueAtToFollowups(targets: Followup[], dueAt: string) {
+  async function applyDueAtToFollowups(
+    targets: Followup[],
+    dueAt: string,
+    onProgress?: (done: number, total: number) => void,
+  ) {
     let ok = 0;
     let failedCount = 0;
-    for (const f of targets) {
-      if (!canMutateRow(f)) {
-        failedCount += 1;
-        continue;
-      }
-      if (f.scheduledEmailId) {
-        const result = await cancelScheduledEmailClient({
-          scheduledEmailId: f.scheduledEmailId,
-          isDemo,
-          cancelDemo: cancelScheduled,
-          followupId: f.id,
-          selfUid: currentUserId,
-          mailViewAsUid,
-          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
-        });
-        if ("error" in result) {
+    const total = targets.length;
+    for (let i = 0; i < targets.length; i++) {
+      const f = targets[i]!;
+      try {
+        if (!canMutateRow(f)) {
           failedCount += 1;
           continue;
         }
-        clearFollowupEmailSchedule(f.id);
+        if (f.scheduledEmailId) {
+          const result = await cancelScheduledEmailClient({
+            scheduledEmailId: f.scheduledEmailId,
+            isDemo,
+            cancelDemo: cancelScheduled,
+            followupId: f.id,
+            selfUid: currentUserId,
+            mailViewAsUid,
+            activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+          });
+          if ("error" in result) {
+            failedCount += 1;
+            continue;
+          }
+          clearFollowupEmailSchedule(f.id);
+        }
+        updateFollowup(f.id, { dueAt });
+        ok += 1;
+      } finally {
+        onProgress?.(i + 1, total);
       }
-      updateFollowup(f.id, { dueAt });
-      ok += 1;
     }
     if (ok > 0) {
       toast.success(
@@ -535,69 +550,105 @@ export default function FollowupsPage() {
     setSelectedIds(new Set());
   }
 
-  async function tryNowFollowups(targets: Followup[]) {
+  async function tryNowFollowups(
+    targets: Followup[],
+    onProgress?: (done: number, total: number) => void,
+  ) {
     let scheduled = 0;
     let retried = 0;
     let bumped = 0;
     let skipped = 0;
     let scheduleIndex = 0;
     const now = Date.now();
+    const total = targets.length;
 
-    for (const raw of targets) {
-      if (!canMutateRow(raw)) {
-        skipped += 1;
-        continue;
-      }
-      const f = await hydrateFollowupMessageBody(raw);
-      const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
-      const plan = planFollowupTryNow(f, lead?.channel);
-
-      if (plan.kind === "retry") {
-        if (!f.scheduledEmailId) {
+    for (let i = 0; i < targets.length; i++) {
+      const raw = targets[i]!;
+      try {
+        if (!canMutateRow(raw)) {
           skipped += 1;
           continue;
         }
-        const result = await retryScheduledEmailClient({
-          scheduledEmailId: f.scheduledEmailId,
-          isDemo,
-          selfUid: currentUserId,
-          mailViewAsUid,
-          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
-          retryDemo: (id) => {
-            setScheduled(
-              scheduledEmails.map((s) =>
-                s.id === id
-                  ? {
-                      ...s,
-                      status: "pending" as const,
-                      scheduledAt: new Date(Date.now() + 60_000).toISOString(),
-                      error: undefined,
-                    }
-                  : s,
-              ),
-            );
-          },
-        });
-        if ("error" in result) {
-          skipped += 1;
-          continue;
-        }
-        if (result.scheduledAt) {
-          setFollowupEmailSchedule(f.id, {
+        const f = await hydrateFollowupMessageBody(raw);
+        const lead = f.leadId ? ws.getLeadById(f.leadId) : undefined;
+        const plan = planFollowupTryNow(f, lead?.channel);
+
+        if (plan.kind === "retry") {
+          if (!f.scheduledEmailId) {
+            skipped += 1;
+            continue;
+          }
+          const result = await retryScheduledEmailClient({
             scheduledEmailId: f.scheduledEmailId,
-            emailScheduledAt: result.scheduledAt,
+            isDemo,
+            selfUid: currentUserId,
+            mailViewAsUid,
+            activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+            retryDemo: (id) => {
+              setScheduled(
+                scheduledEmails.map((s) =>
+                  s.id === id
+                    ? {
+                        ...s,
+                        status: "pending" as const,
+                        scheduledAt: new Date(Date.now() + 60_000).toISOString(),
+                        error: undefined,
+                      }
+                    : s,
+                ),
+              );
+            },
           });
-          updateFollowup(f.id, { dueAt: result.scheduledAt });
+          if ("error" in result) {
+            skipped += 1;
+            continue;
+          }
+          if (result.scheduledAt) {
+            setFollowupEmailSchedule(f.id, {
+              scheduledEmailId: f.scheduledEmailId,
+              emailScheduledAt: result.scheduledAt,
+            });
+            updateFollowup(f.id, { dueAt: result.scheduledAt });
+          }
+          retried += 1;
+          continue;
         }
-        retried += 1;
-        continue;
-      }
 
-      if (plan.kind === "schedule") {
-        if (!lead || !sendableMailbox) {
-          // Fall back to due bump when we cannot send.
-          const dueAt = tryNowDueAtIso(now);
-          if (f.scheduledEmailId) {
+        if (plan.kind === "schedule") {
+          if (!lead || !sendableMailbox) {
+            // Fall back to due bump when we cannot send.
+            const dueAt = tryNowDueAtIso(now);
+            if (f.scheduledEmailId) {
+              const cancel = await cancelScheduledEmailClient({
+                scheduledEmailId: f.scheduledEmailId,
+                isDemo,
+                cancelDemo: cancelScheduled,
+                followupId: f.id,
+                selfUid: currentUserId,
+                mailViewAsUid,
+                activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
+              });
+              if ("error" in cancel) {
+                skipped += 1;
+                continue;
+              }
+              clearFollowupEmailSchedule(f.id);
+            }
+            updateFollowup(f.id, { dueAt });
+            bumped += 1;
+            continue;
+          }
+
+          const contact = getContactById(lead.contactId);
+          const to = defaultContactRecipientEmail(
+            buildContactRecipientOptions(lead, contact),
+          );
+          if (!to) {
+            skipped += 1;
+            continue;
+          }
+
+          if (plan.requeue && f.scheduledEmailId) {
             const cancel = await cancelScheduledEmailClient({
               scheduledEmailId: f.scheduledEmailId,
               isDemo,
@@ -613,21 +664,39 @@ export default function FollowupsPage() {
             }
             clearFollowupEmailSchedule(f.id);
           }
-          updateFollowup(f.id, { dueAt });
-          bumped += 1;
+
+          const scheduledAtIso = tryNowScheduleAtIso(scheduleIndex, now);
+          scheduleIndex += 1;
+          const result = await scheduleFollowupEmailClient({
+            followupId: f.id,
+            leadId: lead.id,
+            mailbox: sendableMailbox,
+            to,
+            subject: f.emailSubject?.trim() || f.title,
+            body: f.messageBody ?? "",
+            includeSignature: true,
+            globalEmailFooter,
+            includeFooter: true,
+            scheduledAtIso,
+            isDemo,
+            addDemoScheduled: addScheduled,
+          });
+          if (!result.ok) {
+            skipped += 1;
+            continue;
+          }
+          setFollowupEmailSchedule(f.id, {
+            scheduledEmailId: result.scheduledEmailId,
+            emailScheduledAt: result.emailScheduledAt,
+          });
+          updateFollowup(f.id, { dueAt: result.emailScheduledAt });
+          rememberLastUsedMailbox(organizationId, currentUserId, sendableMailbox.id);
+          scheduled += 1;
           continue;
         }
 
-        const contact = getContactById(lead.contactId);
-        const to = defaultContactRecipientEmail(
-          buildContactRecipientOptions(lead, contact),
-        );
-        if (!to) {
-          skipped += 1;
-          continue;
-        }
-
-        if (plan.requeue && f.scheduledEmailId) {
+        // bump_due
+        if (f.scheduledEmailId) {
           const cancel = await cancelScheduledEmailClient({
             scheduledEmailId: f.scheduledEmailId,
             isDemo,
@@ -643,56 +712,11 @@ export default function FollowupsPage() {
           }
           clearFollowupEmailSchedule(f.id);
         }
-
-        const scheduledAtIso = tryNowScheduleAtIso(scheduleIndex, now);
-        scheduleIndex += 1;
-        const result = await scheduleFollowupEmailClient({
-          followupId: f.id,
-          leadId: lead.id,
-          mailbox: sendableMailbox,
-          to,
-          subject: f.emailSubject?.trim() || f.title,
-          body: f.messageBody ?? "",
-          includeSignature: true,
-          globalEmailFooter,
-          includeFooter: true,
-          scheduledAtIso,
-          isDemo,
-          addDemoScheduled: addScheduled,
-        });
-        if (!result.ok) {
-          skipped += 1;
-          continue;
-        }
-        setFollowupEmailSchedule(f.id, {
-          scheduledEmailId: result.scheduledEmailId,
-          emailScheduledAt: result.emailScheduledAt,
-        });
-        updateFollowup(f.id, { dueAt: result.emailScheduledAt });
-        rememberLastUsedMailbox(organizationId, currentUserId, sendableMailbox.id);
-        scheduled += 1;
-        continue;
+        updateFollowup(f.id, { dueAt: tryNowDueAtIso(now) });
+        bumped += 1;
+      } finally {
+        onProgress?.(i + 1, total);
       }
-
-      // bump_due
-      if (f.scheduledEmailId) {
-        const cancel = await cancelScheduledEmailClient({
-          scheduledEmailId: f.scheduledEmailId,
-          isDemo,
-          cancelDemo: cancelScheduled,
-          followupId: f.id,
-          selfUid: currentUserId,
-          mailViewAsUid,
-          activeMailboxDataOwnerUid: activeMailbox.dataOwnerUid,
-        });
-        if ("error" in cancel) {
-          skipped += 1;
-          continue;
-        }
-        clearFollowupEmailSchedule(f.id);
-      }
-      updateFollowup(f.id, { dueAt: tryNowDueAtIso(now) });
-      bumped += 1;
     }
 
     const parts: string[] = [];
@@ -714,19 +738,40 @@ export default function FollowupsPage() {
 
   async function handleBulkMarkDone() {
     if (selectedMutable.length === 0) return;
+    const targets = selectedMutable;
+    const total = targets.length;
+    const showProgress = total > 1;
     setBulkBusy(true);
+    if (showProgress) {
+      setBulkProgress({
+        title: "Marking followups done",
+        statusLabel: "Updating…",
+        done: 0,
+        total,
+      });
+    }
     try {
-      for (const f of selectedMutable) {
-        setFollowupCompleted(f.id, true);
+      for (let i = 0; i < targets.length; i++) {
+        setFollowupCompleted(targets[i]!.id, true);
+        if (showProgress) {
+          setBulkProgress({
+            title: "Marking followups done",
+            statusLabel: i + 1 >= total ? "Finishing…" : "Updating…",
+            done: i + 1,
+            total,
+          });
+          if (i % 8 === 7) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0));
+          }
+        }
       }
       toast.success(
-        selectedMutable.length === 1
-          ? "Marked complete"
-          : `${selectedMutable.length} marked complete`,
+        total === 1 ? "Marked complete" : `${total} marked complete`,
       );
       setSelectedIds(new Set());
     } finally {
       setBulkBusy(false);
+      setBulkProgress(null);
     }
   }
 
@@ -743,21 +788,80 @@ export default function FollowupsPage() {
   }
 
   async function confirmBulkTryNow() {
+    const targets = selectedEmailMutable;
+    const total = targets.length;
+    const skipped = selectedNonEmailCount;
     setRetryConfirmOpen(false);
     setBulkBusy(true);
+    setBulkProgress({
+      title:
+        total === 1 ? "Trying email followup" : `Trying ${total} email followups`,
+      statusLabel:
+        skipped > 0
+          ? `Queuing emails… (${skipped} LinkedIn/other skipped)`
+          : "Queuing emails…",
+      done: 0,
+      total,
+    });
     try {
-      await tryNowFollowups(selectedEmailMutable);
+      await tryNowFollowups(targets, (done, t) => {
+        setBulkProgress({
+          title:
+            t === 1 ? "Trying email followup" : `Trying ${t} email followups`,
+          statusLabel:
+            done >= t
+              ? "Finishing…"
+              : skipped > 0
+                ? `Queuing emails… (${skipped} LinkedIn/other skipped)`
+                : "Queuing emails…",
+          done,
+          total: t,
+        });
+      });
     } finally {
       setBulkBusy(false);
+      setBulkProgress(null);
     }
   }
 
   async function handleBulkReschedule(dueAt: string) {
+    const targets = selectedEmailMutable;
+    const total = targets.length;
+    const skipped = selectedNonEmailCount;
+    if (total === 0) return;
     setBulkBusy(true);
+    setBulkProgress({
+      title:
+        total === 1
+          ? "Rescheduling email followup"
+          : `Rescheduling ${total} email followups`,
+      statusLabel:
+        skipped > 0
+          ? `Updating due dates… (${skipped} LinkedIn/other skipped)`
+          : "Updating due dates…",
+      done: 0,
+      total,
+    });
     try {
-      await applyDueAtToFollowups(selectedEmailMutable, dueAt);
+      await applyDueAtToFollowups(targets, dueAt, (done, t) => {
+        setBulkProgress({
+          title:
+            t === 1
+              ? "Rescheduling email followup"
+              : `Rescheduling ${t} email followups`,
+          statusLabel:
+            done >= t
+              ? "Finishing…"
+              : skipped > 0
+                ? `Updating due dates… (${skipped} LinkedIn/other skipped)`
+                : "Updating due dates…",
+          done,
+          total: t,
+        });
+      });
     } finally {
       setBulkBusy(false);
+      setBulkProgress(null);
     }
   }
 
@@ -1264,6 +1368,8 @@ export default function FollowupsPage() {
           </div>
         </div>
       ) : null}
+
+      <BulkFollowupProgressDialog progress={bulkProgress} />
 
       <AlertDialog open={deleteTarget != null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
         <AlertDialogContent>
