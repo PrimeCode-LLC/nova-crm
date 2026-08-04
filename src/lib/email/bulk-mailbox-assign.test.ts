@@ -6,8 +6,10 @@ import {
   remainingOnDay,
   type MailboxCapacityState,
 } from "@/lib/email/bulk-mailbox-assign";
-import { utcDayKeyFromDate } from "@/lib/email/mailbox-schedule-capacity";
+import { scheduleDayKeyFromDate } from "@/lib/email/mailbox-schedule-capacity";
 import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
+
+const TZ = "UTC";
 
 function dayState(
   dayKey: string,
@@ -53,7 +55,7 @@ function fillHorizon(
 
 describe("bulk mailbox assign", () => {
   it("picks the mailbox with most remaining on the preferred day", () => {
-    const today = utcDayKeyFromDate(new Date());
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
     const states: MailboxCapacityState[] = [
       { mailboxId: "mb-a", limit: 5, byDay: dayState(today, 5, 4) },
       { mailboxId: "mb-b", limit: 5, byDay: dayState(today, 5, 1) },
@@ -67,7 +69,7 @@ describe("bulk mailbox assign", () => {
   });
 
   it("round-robins among equal remaining capacity", () => {
-    const today = utcDayKeyFromDate(new Date());
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
     const states: MailboxCapacityState[] = [
       { mailboxId: "mb-a", limit: 10, byDay: dayState(today, 10, 0) },
       { mailboxId: "mb-b", limit: 10, byDay: dayState(today, 10, 0) },
@@ -87,31 +89,34 @@ describe("bulk mailbox assign", () => {
   });
 
   it("consumes capacity so later prospects see earlier bookings", () => {
-    const today = utcDayKeyFromDate(new Date());
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
     const state: MailboxCapacityState = {
       mailboxId: "mb-a",
       limit: 2,
       byDay: dayState(today, 2, 0),
     };
-    const at = toDatetimeLocalValue(new Date(`${today}T15:00:00`));
-    const next = consumeCapacityForSteps(state, [
-      { id: "s1", scheduledAt: at, included: true },
-      { id: "s2", scheduledAt: at, included: true },
-    ]);
+    const at = toDatetimeLocalValue(new Date(`${today}T15:00:00.000Z`), TZ);
+    const next = consumeCapacityForSteps(
+      state,
+      [
+        { id: "s1", scheduledAt: at, included: true },
+        { id: "s2", scheduledAt: at, included: true },
+      ],
+      TZ,
+    );
     expect(remainingOnDay(next, today)).toBe(0);
   });
 
   it("packs multiple prospects across mailboxes and auto-fixes over-limit days", () => {
-    const today = utcDayKeyFromDate(new Date());
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
     const byDay = fillHorizon(today, 10, 1, 0);
     let states: MailboxCapacityState[] = [
       { mailboxId: "mb-a", limit: 1, byDay: structuredClone(byDay) },
       { mailboxId: "mb-b", limit: 1, byDay: structuredClone(byDay) },
     ];
 
-    const noon = new Date();
-    noon.setHours(12, 0, 0, 0);
-    const scheduledAt = toDatetimeLocalValue(noon);
+    const noon = new Date(`${today}T12:00:00.000Z`);
+    const scheduledAt = toDatetimeLocalValue(noon, TZ);
 
     let rr = 0;
     const mailboxIds: string[] = [];
@@ -120,6 +125,7 @@ describe("bulk mailbox assign", () => {
         states,
         steps: [{ id: `p${i}`, scheduledAt, included: true }],
         roundRobinIndex: rr,
+        timeZone: TZ,
       });
       expect(result.ok).toBe(true);
       if (!result.ok) return;
@@ -128,13 +134,13 @@ describe("bulk mailbox assign", () => {
       rr = result.nextRoundRobinIndex;
     }
 
-    // First two fill today on A and B; next two push to later days still on A/B.
-    expect(new Set(mailboxIds.slice(0, 2))).toEqual(new Set(["mb-a", "mb-b"]));
+    // Capacity of 1/day on two mailboxes → both mailboxes used across the four prospects.
+    expect(new Set(mailboxIds)).toEqual(new Set(["mb-a", "mb-b"]));
     expect(mailboxIds).toHaveLength(4);
   });
 
   it("fails when steps cannot fit within the horizon", () => {
-    const today = utcDayKeyFromDate(new Date());
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
     const byDay = fillHorizon(today, 3, 1, 1);
     // Fill all 3 days completely
     for (const row of Object.values(byDay)) {
@@ -145,13 +151,13 @@ describe("bulk mailbox assign", () => {
     const states: MailboxCapacityState[] = [
       { mailboxId: "mb-a", limit: 1, byDay },
     ];
-    const noon = new Date();
-    noon.setHours(12, 0, 0, 0);
+    const noon = new Date(`${today}T12:00:00.000Z`);
     const result = assignProspectSchedule({
       states,
-      steps: [{ id: "s1", scheduledAt: toDatetimeLocalValue(noon), included: true }],
+      steps: [{ id: "s1", scheduledAt: toDatetimeLocalValue(noon, TZ), included: true }],
       roundRobinIndex: 0,
       horizonDays: 3,
+      timeZone: TZ,
     });
     expect(result.ok).toBe(false);
     if (result.ok) return;

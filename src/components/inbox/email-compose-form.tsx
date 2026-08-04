@@ -42,6 +42,8 @@ type EmailComposeFormProps = {
   scheduledAt?: string;
   onScheduledAtChange?: (value: string) => void;
   minimumScheduledAt?: string;
+  /** Shown next to the schedule picker (e.g. workspace timezone). */
+  scheduleTimezoneLabel?: string;
   onSend: () => void;
   onScheduleSend?: () => void;
   compact?: boolean;
@@ -75,6 +77,7 @@ export function EmailComposeForm({
   scheduledAt = "",
   onScheduledAtChange,
   minimumScheduledAt,
+  scheduleTimezoneLabel,
   onSend,
   onScheduleSend,
   compact = false,
@@ -249,7 +252,7 @@ export function EmailComposeForm({
             {scheduleEnabled ? (
               <div className="space-y-1.5">
                 <Label htmlFor="compose-scheduled-at" className="text-xs">
-                  Send on
+                  Send on{scheduleTimezoneLabel ? ` · ${scheduleTimezoneLabel}` : ""}
                 </Label>
                 <Input
                   id="compose-scheduled-at"

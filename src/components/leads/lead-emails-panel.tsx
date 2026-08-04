@@ -33,6 +33,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import {
+  formatTimezoneDisplayLabel,
+  isoFromDatetimeLocalInZone,
+} from "@/lib/org-timezone";
+import {
+  defaultScheduleDatetimeLocal as defaultScheduleInZone,
+  toDatetimeLocalValue,
+} from "@/lib/schedule-followup-email-client";
 import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
 import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
 import { useQualityOutreachGate } from "@/components/leads/use-quality-outreach-gate";
@@ -141,15 +150,8 @@ function bodyToHtml(body: string): string {
     .join("");
 }
 
-function defaultScheduleDatetimeLocal(): string {
-  const date = new Date(Date.now() + 60 * 60 * 1000);
-  date.setSeconds(0, 0);
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  const hour = String(date.getHours()).padStart(2, "0");
-  const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hour}:${minute}`;
+function defaultScheduleDatetimeLocal(timeZone: string): string {
+  return defaultScheduleInZone(undefined, timeZone);
 }
 
 function sentAsInbound(message: MailSent): MailInbound {
@@ -292,6 +294,8 @@ export function LeadEmailsPanel({
   contactEmails?: readonly string[];
 }) {
   const workspace = useWorkspace();
+  const timeZone = useOrgTimezone();
+  const timezoneLabel = formatTimezoneDisplayLabel(timeZone);
   const matchEmails = React.useMemo(
     () => leadContactEmails(lead, contactEmail, ...(contactEmails ?? [])),
     [lead, contactEmail, contactEmails],
@@ -386,7 +390,9 @@ export function LeadEmailsPanel({
   const [aiBusy, setAiBusy] = React.useState(false);
   const [composeReviewOpen, setComposeReviewOpen] = React.useState(false);
   const [scheduleEnabled, setScheduleEnabled] = React.useState(false);
-  const [scheduledAt, setScheduledAt] = React.useState(defaultScheduleDatetimeLocal);
+  const [scheduledAt, setScheduledAt] = React.useState(() =>
+    defaultScheduleDatetimeLocal(timeZone),
+  );
   const [draftId, setDraftId] = React.useState<string | undefined>();
   const [includeSignature, setIncludeSignature] = React.useState(true);
   const [includeFooter, setIncludeFooter] = React.useState(true);
@@ -878,7 +884,7 @@ export function LeadEmailsPanel({
     setReferenceIds([]);
     setAttachments([]);
     setScheduleEnabled(false);
-    setScheduledAt(defaultScheduleDatetimeLocal());
+    setScheduledAt(defaultScheduleDatetimeLocal(timeZone));
     setDraftId(undefined);
     setIncludeSignature(true);
     setIncludeFooter(Boolean(globalEmailFooter.trim()));
@@ -954,7 +960,7 @@ export function LeadEmailsPanel({
       setReferenceIds([]);
       setAttachments([]);
       setScheduleEnabled(false);
-      setScheduledAt(defaultScheduleDatetimeLocal());
+      setScheduledAt(defaultScheduleDatetimeLocal(timeZone));
       setDraftId(undefined);
       setIncludeSignature(true);
       setIncludeFooter(Boolean(globalEmailFooter.trim()));
@@ -1026,7 +1032,7 @@ export function LeadEmailsPanel({
     }
     if (mode !== "forward") setAttachments([]);
     setScheduleEnabled(false);
-    setScheduledAt(defaultScheduleDatetimeLocal());
+    setScheduledAt(defaultScheduleDatetimeLocal(timeZone));
     setDraftId(undefined);
     setComposeMode(mode);
   }
@@ -1269,7 +1275,7 @@ export function LeadEmailsPanel({
       toast.error("Configure SMTP in Settings → Email first.");
       return;
     }
-    const date = new Date(scheduledAt);
+    const date = new Date(isoFromDatetimeLocalInZone(scheduledAt, timeZone));
     if (Number.isNaN(date.getTime()) || date.getTime() < Date.now() + 60_000) {
       toast.error("Schedule time must be at least 1 minute in the future.");
       return;
@@ -1640,11 +1646,12 @@ export function LeadEmailsPanel({
             scheduleEnabled={scheduleEnabled}
             onScheduleEnabledChange={(checked) => {
               setScheduleEnabled(checked);
-              if (checked && !scheduledAt) setScheduledAt(defaultScheduleDatetimeLocal());
+              if (checked && !scheduledAt) setScheduledAt(defaultScheduleDatetimeLocal(timeZone));
             }}
             scheduledAt={scheduledAt}
             onScheduledAtChange={setScheduledAt}
-            minimumScheduledAt={defaultScheduleDatetimeLocal()}
+            minimumScheduledAt={toDatetimeLocalValue(new Date(Date.now() + 60_000), timeZone)}
+            scheduleTimezoneLabel={timezoneLabel}
             onSend={() => void sendNow()}
             onScheduleSend={() => void scheduleSend()}
           />
@@ -1825,11 +1832,12 @@ export function LeadEmailsPanel({
                     scheduleEnabled={scheduleEnabled}
                     onScheduleEnabledChange={(checked) => {
                       setScheduleEnabled(checked);
-                      if (checked && !scheduledAt) setScheduledAt(defaultScheduleDatetimeLocal());
+                      if (checked && !scheduledAt) setScheduledAt(defaultScheduleDatetimeLocal(timeZone));
                     }}
                     scheduledAt={scheduledAt}
                     onScheduledAtChange={setScheduledAt}
-                    minimumScheduledAt={defaultScheduleDatetimeLocal()}
+                    minimumScheduledAt={toDatetimeLocalValue(new Date(Date.now() + 60_000), timeZone)}
+                    scheduleTimezoneLabel={timezoneLabel}
                     onSend={() => void sendNow()}
                     onScheduleSend={() => void scheduleSend()}
                   />

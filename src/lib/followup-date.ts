@@ -17,10 +17,9 @@ function formatDateInput(d: Date, timeZone?: string): string {
 function startOfCalendarDay(d: Date, timeZone?: string): Date {
   const zone = resolveOrgTimezone(timeZone);
   const key = zonedDayKey(d, zone);
-  // Use a Date at local interpretation of the ymd for business-day arithmetic
-  // (day-of-week stepping). Wall-clock storage still goes through isoFromDateInput.
-  const [y, m, day] = key.split("-").map(Number);
-  return new Date(y!, m! - 1, day!);
+  // UTC noon of the org calendar day keeps getDay() stable for Mon–Fri checks
+  // across common offsets without depending on the host local timezone.
+  return new Date(`${key}T12:00:00.000Z`);
 }
 
 function isWeekend(d: Date): boolean {

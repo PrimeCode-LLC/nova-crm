@@ -1,6 +1,13 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
 import { FieldValue } from "firebase-admin/firestore";
+import { addUtcDayKey } from "@/lib/email/mailbox-schedule-capacity";
+import {
+  resolveOrgTimezone,
+  zonedDayKey,
+  zonedWallTimeToUtc,
+} from "@/lib/org-timezone";
+import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 
@@ -29,16 +36,22 @@ function scheduledRoot(organizationId: string, uid: string) {
     .collection(SCHEDULED_COLLECTION);
 }
 
-/** UTC calendar day key `yyyy-mm-dd`. */
-export function utcSendDayKey(date = new Date()): string {
-  return date.toISOString().slice(0, 10);
+/**
+ * Calendar day key for send quotas in the given IANA zone (defaults to UTC).
+ * Prefer passing the org workspace timezone.
+ */
+export function sendDayKey(date: Date = new Date(), timeZone?: string): string {
+  const zone = resolveOrgTimezone(timeZone, { fallback: "UTC" });
+  return zonedDayKey(date, zone);
+}
+
+/** @deprecated Prefer sendDayKey with org timezone. */
+export function utcSendDayKey(date = new Date(), timeZone?: string): string {
+  return sendDayKey(date, timeZone ?? "UTC");
 }
 
 export function addUtcDayKeys(dayKey: string, days: number): string {
-  const d = new Date(`${dayKey}T00:00:00.000Z`);
-  if (Number.isNaN(d.getTime())) return dayKey;
-  d.setUTCDate(d.getUTCDate() + days);
-  return d.toISOString().slice(0, 10);
+  return addUtcDayKey(dayKey, days);
 }
 
 function normalizeDailyLimit(dailySendLimit: number | null | undefined): number | null {
@@ -53,8 +66,11 @@ export async function getMailboxSendCountForDayServer(input: {
   uid: string;
   mailboxId: string;
   dayKey?: string;
+  timeZone?: string;
 }): Promise<number> {
-  const dayKey = input.dayKey ?? utcSendDayKey();
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const dayKey = input.dayKey ?? sendDayKey(new Date(), zone);
   const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
   if (!ref) return 0;
   const snap = await ref.get();
@@ -63,9 +79,8 @@ export async function getMailboxSendCountForDayServer(input: {
 }
 
 /**
- * Counts pending/processing scheduled emails for a mailbox, bucketed by UTC day.
- * Filters by mailboxId in the query when the composite index is available;
- * falls back to status+scheduledAt + in-memory filter if the index is not ready.
+ * Counts pending/processing scheduled emails for a mailbox, bucketed by org calendar day.
+ * Query range uses zoned day boundaries; buckets use the same timezone.
  */
 export async function countPendingScheduledByUtcDayServer(input: {
   organizationId: string;
@@ -73,20 +88,27 @@ export async function countPendingScheduledByUtcDayServer(input: {
   mailboxId: string;
   fromDayKey: string;
   toDayKey: string;
+  timeZone?: string;
 }): Promise<Record<string, number>> {
   const root = scheduledRoot(input.organizationId, input.uid);
   const out: Record<string, number> = {};
   if (!root || !input.mailboxId.trim()) return out;
 
-  const fromIso = `${input.fromDayKey}T00:00:00.000Z`;
-  const toExclusive = addUtcDayKeys(input.toDayKey, 1);
-  const toIso = `${toExclusive}T00:00:00.000Z`;
-  if (Number.isNaN(new Date(fromIso).getTime()) || Number.isNaN(new Date(toIso).getTime())) {
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const fromStart = zonedWallTimeToUtc(input.fromDayKey, 0, 0, 0, 0, zone);
+  const toExclusiveKey = addUtcDayKeys(input.toDayKey, 1);
+  const toExclusive = zonedWallTimeToUtc(toExclusiveKey, 0, 0, 0, 0, zone);
+  if (Number.isNaN(fromStart.getTime()) || Number.isNaN(toExclusive.getTime())) {
     return out;
   }
+  const fromIso = fromStart.toISOString();
+  const toIso = toExclusive.toISOString();
 
   const bump = (scheduledAt: string) => {
-    const dayKey = utcSendDayKey(new Date(scheduledAt));
+    const d = new Date(scheduledAt);
+    if (Number.isNaN(d.getTime())) return;
+    const dayKey = sendDayKey(d, zone);
     if (!dayKey || dayKey < input.fromDayKey || dayKey > input.toDayKey) return;
     out[dayKey] = (out[dayKey] ?? 0) + 1;
   };
@@ -130,7 +152,7 @@ export type MailboxDayLoad = {
   dayKey: string;
   sent: number;
   pending: number;
-  /** sent + pending already booked on this UTC day */
+  /** sent + pending already booked on this org calendar day */
   booked: number;
   limit: number | null;
   remaining: number | null;
@@ -141,19 +163,23 @@ export async function getMailboxDayLoadsServer(input: {
   uid: string;
   mailboxId: string;
   dailySendLimit: number | null | undefined;
-  /** Inclusive UTC day; defaults to today. */
+  /** Inclusive org day; defaults to today in org timezone. */
   fromDayKey?: string;
-  /** Inclusive UTC day; defaults to today + 59. */
+  /** Inclusive org day; defaults to today + 59. */
   toDayKey?: string;
+  timeZone?: string;
 }): Promise<{
   limit: number | null;
   fromDayKey: string;
   toDayKey: string;
   days: MailboxDayLoad[];
   byDay: Record<string, MailboxDayLoad>;
+  timeZone: string;
 }> {
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
   const limit = normalizeDailyLimit(input.dailySendLimit);
-  const fromDayKey = input.fromDayKey ?? utcSendDayKey();
+  const fromDayKey = input.fromDayKey ?? sendDayKey(new Date(), zone);
   const toDayKey = input.toDayKey ?? addUtcDayKeys(fromDayKey, 59);
   const pendingByDay = await countPendingScheduledByUtcDayServer({
     organizationId: input.organizationId,
@@ -161,9 +187,10 @@ export async function getMailboxDayLoadsServer(input: {
     mailboxId: input.mailboxId,
     fromDayKey,
     toDayKey,
+    timeZone: zone,
   });
 
-  const todayKey = utcSendDayKey();
+  const todayKey = sendDayKey(new Date(), zone);
   const sentToday =
     todayKey >= fromDayKey && todayKey <= toDayKey
       ? await getMailboxSendCountForDayServer({
@@ -171,6 +198,7 @@ export async function getMailboxDayLoadsServer(input: {
           uid: input.uid,
           mailboxId: input.mailboxId,
           dayKey: todayKey,
+          timeZone: zone,
         })
       : 0;
 
@@ -186,26 +214,30 @@ export async function getMailboxDayLoadsServer(input: {
     byDay[key] = row;
   }
 
-  return { limit, fromDayKey, toDayKey, days, byDay };
+  return { limit, fromDayKey, toDayKey, days, byDay, timeZone: zone };
 }
 
 export type MailboxQuotaCheck =
   | { ok: true; used: number; limit: number | null; remaining: number | null }
   | { ok: false; error: string; used: number; limit: number; status: 429 };
 
-/** Rejects when `dailySendLimit` is set and today's count is already at/above the limit. */
+/** Rejects when `dailySendLimit` is set and today's (org-local) count is already at/above the limit. */
 export async function assertMailboxDailySendQuotaServer(input: {
   organizationId: string;
   uid: string;
   mailboxId: string;
   dailySendLimit: number | null | undefined;
+  timeZone?: string;
 }): Promise<MailboxQuotaCheck> {
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
   const limit = normalizeDailyLimit(input.dailySendLimit);
   const used = input.mailboxId
     ? await getMailboxSendCountForDayServer({
         organizationId: input.organizationId,
         uid: input.uid,
         mailboxId: input.mailboxId,
+        timeZone: zone,
       })
     : 0;
 
@@ -215,7 +247,7 @@ export async function assertMailboxDailySendQuotaServer(input: {
   if (used >= limit) {
     return {
       ok: false,
-      error: `Daily send limit reached (${used}/${limit}). Try again after midnight UTC.`,
+      error: `Daily send limit reached (${used}/${limit}). Try again after midnight (${zone}).`,
       used,
       limit,
       status: 429,
@@ -225,7 +257,7 @@ export async function assertMailboxDailySendQuotaServer(input: {
 }
 
 /**
- * Soft schedule-time check: blocks when that UTC day is already at/over capacity
+ * Soft schedule-time check: blocks when that org calendar day is already at/over capacity
  * (successful sends today + pending/processing scheduled for that day).
  */
 export async function assertMailboxScheduleDayQuotaServer(input: {
@@ -234,6 +266,7 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
   mailboxId: string;
   dailySendLimit: number | null | undefined;
   scheduledAt: Date | string;
+  timeZone?: string;
 }): Promise<
   | { ok: true; dayKey: string; used: number; limit: number | null; remaining: number | null }
   | {
@@ -246,22 +279,26 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
       status: 429;
     }
 > {
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
   const limit = normalizeDailyLimit(input.dailySendLimit);
   const scheduledDate =
     input.scheduledAt instanceof Date ? input.scheduledAt : new Date(input.scheduledAt);
-  const dayKey = utcSendDayKey(scheduledDate);
+  const dayKey = sendDayKey(scheduledDate, zone);
+  const todayKey = sendDayKey(new Date(), zone);
 
   if (limit == null || !input.mailboxId.trim()) {
     return { ok: true, dayKey, used: 0, limit: null, remaining: null };
   }
 
   const [sent, pendingByDay] = await Promise.all([
-    dayKey === utcSendDayKey()
+    dayKey === todayKey
       ? getMailboxSendCountForDayServer({
           organizationId: input.organizationId,
           uid: input.uid,
           mailboxId: input.mailboxId,
           dayKey,
+          timeZone: zone,
         })
       : Promise.resolve(0),
     countPendingScheduledByUtcDayServer({
@@ -270,6 +307,7 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
       mailboxId: input.mailboxId,
       fromDayKey: dayKey,
       toDayKey: dayKey,
+      timeZone: zone,
     }),
   ]);
   const pending = pendingByDay[dayKey] ?? 0;
@@ -277,7 +315,7 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
   if (used >= limit) {
     return {
       ok: false,
-      error: `Daily send limit full for ${dayKey} UTC (${used}/${limit} booked). Pick another day or mailbox.`,
+      error: `Daily send limit full for ${dayKey} (${used}/${limit} booked). Pick another day or mailbox.`,
       dayKey,
       used,
       limit,
@@ -292,9 +330,12 @@ export async function getMailboxLastSentAtServer(input: {
   organizationId: string;
   uid: string;
   mailboxId: string;
+  timeZone?: string;
 }): Promise<string | undefined> {
   if (!input.mailboxId.trim()) return undefined;
-  const dayKey = utcSendDayKey();
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const dayKey = sendDayKey(new Date(), zone);
   const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
   if (!ref) return undefined;
   const snap = await ref.get();
@@ -307,9 +348,12 @@ export async function incrementMailboxSendCountServer(input: {
   organizationId: string;
   uid: string;
   mailboxId: string;
+  timeZone?: string;
 }): Promise<void> {
   if (!input.mailboxId.trim()) return;
-  const dayKey = utcSendDayKey();
+  const zone =
+    input.timeZone ?? (await getOrgTimezoneServer(input.organizationId));
+  const dayKey = sendDayKey(new Date(), zone);
   const ref = sendStatsRef(input.organizationId, input.uid, input.mailboxId, dayKey);
   if (!ref) return;
   const now = new Date().toISOString();
@@ -317,6 +361,7 @@ export async function incrementMailboxSendCountServer(input: {
     {
       count: FieldValue.increment(1),
       dayKey,
+      timeZone: zone,
       lastSentAt: now,
       updatedAt: now,
     },

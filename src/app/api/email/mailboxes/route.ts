@@ -10,7 +10,8 @@ import {
 } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, mailboxReadOnlyForClient } from "@/lib/email/mailbox-data-owner-server";
 import { mergeOwnAndAssignedMailboxes } from "@/lib/email/merge-own-and-assigned-mailboxes";
-import { getMailboxSendCountForDayServer, utcSendDayKey } from "@/lib/email/mailbox-send-quota-server";
+import { getMailboxSendCountForDayServer, sendDayKey } from "@/lib/email/mailbox-send-quota-server";
+import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 import { normalizeCrmEmailKey } from "@/lib/crm-dedup-keys";
 
 const mailboxSchema = z.object({
@@ -78,7 +79,8 @@ export async function GET(req: Request) {
 
   const includeUsage = new URL(req.url).searchParams.get("includeUsage") === "1";
 
-  const dayKey = utcSendDayKey();
+  const timeZone = await getOrgTimezoneServer(organizationId);
+  const dayKey = sendDayKey(new Date(), timeZone);
   const sendUsageByMailboxId: Record<string, { dayKey: string; used: number; limit: number | null }> = {};
   if (includeUsage) {
     await Promise.all(
@@ -89,6 +91,7 @@ export async function GET(req: Request) {
           uid: ownerUid,
           mailboxId: mb.id,
           dayKey,
+          timeZone,
         });
         sendUsageByMailboxId[mb.id] = {
           dayKey,

@@ -67,6 +67,7 @@ import { UpdateContactEmailDialog } from "@/components/leads/update-contact-emai
 import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
 import { rerouteFollowupSequenceClient } from "@/lib/email/reroute-followup-sequence-client";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   getPausedFollowupPlanForLead,
   mergeFollowupPlans,
@@ -198,6 +199,7 @@ function tabFromSearchParams(searchParams: ReturnType<typeof useSearchParams>): 
 
 export function LeadDetailView({ leadId }: { leadId: string }) {
   const ws = useWorkspace();
+  const timeZone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
   const router = useRouter();
   const pathname = usePathname();
@@ -646,6 +648,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       plan: pausedBouncePlan,
       followups,
       isDemo: ws.isDemo,
+      timeZone,
       globalEmailFooter,
       addDemoScheduled: (row) => addScheduled(row),
       cancelSchedule: async (scheduledEmailId) => {

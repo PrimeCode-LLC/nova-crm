@@ -4,8 +4,9 @@ import {
   addUtcDayKeys,
   countPendingScheduledByUtcDayServer,
   getMailboxSendCountForDayServer,
-  utcSendDayKey,
+  sendDayKey,
 } from "@/lib/email/mailbox-send-quota-server";
+import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
 import {
   buildMailboxUtilizationRow,
@@ -114,7 +115,8 @@ export async function buildOrgMailboxUtilizationServer(input: {
   organizationId: string;
 }): Promise<MailboxUtilizationRow[]> {
   const users = await listOrgUsersServer(input.organizationId);
-  const todayKey = utcSendDayKey();
+  const timeZone = await getOrgTimezoneServer(input.organizationId);
+  const todayKey = sendDayKey(new Date(), timeZone);
   const weekDayKeys: string[] = [];
   for (let i = 6; i >= 0; i--) {
     weekDayKeys.push(addUtcDayKeys(todayKey, -i));
@@ -146,6 +148,7 @@ export async function buildOrgMailboxUtilizationServer(input: {
             mailboxId: mb.id,
             fromDayKey: todayKey,
             toDayKey: pendingToDayKey,
+            timeZone,
           }),
         ]);
 
@@ -156,6 +159,7 @@ export async function buildOrgMailboxUtilizationServer(input: {
             uid: user.id,
             mailboxId: mb.id,
             dayKey: todayKey,
+            timeZone,
           }));
 
         const pendingToday = pendingByDay[todayKey] ?? 0;

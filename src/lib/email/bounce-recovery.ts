@@ -2,6 +2,7 @@ import {
   dateInputForSequenceStep,
   isoFromDateInput,
 } from "@/lib/followup-date";
+import { datetimeLocalInZone, resolveOrgTimezone } from "@/lib/org-timezone";
 import type { Contact, Followup, Lead } from "@/lib/types";
 
 export type BounceRecoveryAction =
@@ -69,30 +70,40 @@ export function resolveFailoverToEmail(contact: Pick<Contact, "email" | "persona
 /**
  * Recompute dueAt ISO timestamps for remaining steps using the standard cadence
  * (Day 0 → +3 BD → +5 BD → +7 BD…), starting from `from` (default: today).
+ * Pass org `timeZone` so noon-of-day dueAts align with the workspace.
  */
 export function computeRerouteDueAts(
   stepCount: number,
   from: Date = new Date(),
+  timeZone?: string,
 ): string[] {
   const out: string[] = [];
   for (let i = 0; i < stepCount; i++) {
-    out.push(isoFromDateInput(dateInputForSequenceStep(i, { includeInitial: true, from })));
+    out.push(
+      isoFromDateInput(
+        dateInputForSequenceStep(i, { includeInitial: true, from, timeZone }),
+        timeZone,
+      ),
+    );
   }
   return out;
 }
 
-/** Local datetime-local string for queueing, at least 1 minute ahead. */
-export function scheduleLocalFromDueAt(dueAtIso: string, stepIndex: number): string {
+/**
+ * Datetime-local wall clock in `timeZone` for queueing, at least 1 minute ahead.
+ * Convert with `isoFromDatetimeLocalInZone` before storing.
+ */
+export function scheduleLocalFromDueAt(
+  dueAtIso: string,
+  stepIndex: number,
+  timeZone?: string,
+): string {
+  const zone = resolveOrgTimezone(timeZone);
   const min = new Date(Date.now() + 60_000 + stepIndex * 60_000);
   const preferred = new Date(dueAtIso);
   const use =
     !Number.isNaN(preferred.getTime()) && preferred.getTime() >= min.getTime() ? preferred : min;
-  const y = use.getFullYear();
-  const m = String(use.getMonth() + 1).padStart(2, "0");
-  const day = String(use.getDate()).padStart(2, "0");
-  const h = String(use.getHours()).padStart(2, "0");
-  const minPart = String(use.getMinutes()).padStart(2, "0");
-  return `${y}-${m}-${day}T${h}:${minPart}`;
+  return datetimeLocalInZone(use, zone);
 }
 
 export function leadHasLinkedIn(lead: Pick<Lead, "contactLinkedIn">, contact?: Pick<Contact, "linkedin"> | null): boolean {

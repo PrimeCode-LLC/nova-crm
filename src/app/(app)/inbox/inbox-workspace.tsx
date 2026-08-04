@@ -56,6 +56,15 @@ import { cn } from "@/lib/utils";
 import { fmtRelative } from "@/lib/format";
 import { format } from "date-fns";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import {
+  formatTimezoneDisplayLabel,
+  isoFromDatetimeLocalInZone,
+} from "@/lib/org-timezone";
+import {
+  defaultScheduleDatetimeLocal as defaultScheduleDatetimeLocalInZone,
+  toDatetimeLocalValue,
+} from "@/lib/schedule-followup-email-client";
 import {
   Select,
   SelectContent,
@@ -429,6 +438,8 @@ export default function InboxWorkspace() {
     mailboxViewableUserIds,
     getOwnerDisplayName,
   } = useWorkspace();
+  const timeZone = useOrgTimezone();
+  const timezoneLabel = formatTimezoneDisplayLabel(timeZone);
 
   /** Legacy deep links from the old combined Inbox screen. */
   React.useEffect(() => {
@@ -1491,14 +1502,7 @@ export default function InboxWorkspace() {
   ]);
 
   function defaultScheduleDatetimeLocal(): string {
-    const d = new Date(Date.now() + 60 * 60 * 1000);
-    d.setSeconds(0, 0);
-    const y = d.getFullYear();
-    const mo = String(d.getMonth() + 1).padStart(2, "0");
-    const da = String(d.getDate()).padStart(2, "0");
-    const h = String(d.getHours()).padStart(2, "0");
-    const mi = String(d.getMinutes()).padStart(2, "0");
-    return `${y}-${mo}-${da}T${h}:${mi}`;
+    return defaultScheduleDatetimeLocalInZone(undefined, timeZone);
   }
 
   function openCompose(preset?: Partial<MailDraft> & { threadMailboxId?: string }) {
@@ -1817,7 +1821,7 @@ export default function InboxWorkspace() {
       toast.error("Pick a date and time");
       return;
     }
-    const scheduledDate = new Date(composeScheduledAt);
+    const scheduledDate = new Date(isoFromDatetimeLocalInZone(composeScheduledAt, timeZone));
     if (Number.isNaN(scheduledDate.getTime())) {
       toast.error("Invalid schedule time");
       return;
@@ -5474,7 +5478,8 @@ export default function InboxWorkspace() {
             }}
             scheduledAt={composeScheduledAt}
             onScheduledAtChange={setComposeScheduledAt}
-            minimumScheduledAt={defaultScheduleDatetimeLocal()}
+            minimumScheduledAt={toDatetimeLocalValue(new Date(Date.now() + 60_000), timeZone)}
+            scheduleTimezoneLabel={timezoneLabel}
             onSend={() => void handleSend()}
             onScheduleSend={() => void handleScheduleSend()}
           />

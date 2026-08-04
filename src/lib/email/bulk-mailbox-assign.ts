@@ -3,10 +3,11 @@ import {
   autoFixScheduleDates,
   buildDemoMailboxDayLoads,
   fetchMailboxScheduleLoad,
-  utcDayKeyFromDate,
+  scheduleDayKeyFromDate,
   type MailboxDayLoadClient,
   type MailboxScheduleLoadResponse,
 } from "@/lib/email/mailbox-schedule-capacity";
+import { resolveOrgTimezone } from "@/lib/org-timezone";
 
 export type MailboxCapacityState = {
   mailboxId: string;
@@ -116,13 +117,15 @@ export function pickMailboxForProspect(input: {
 export function consumeCapacityForSteps(
   state: MailboxCapacityState,
   steps: readonly AssignableScheduleStep[],
+  timeZone?: string,
 ): MailboxCapacityState {
+  const zone = resolveOrgTimezone(timeZone);
   const byDay = cloneByDay(state.byDay);
   const limit = state.limit;
 
   for (const step of steps) {
     if (!step.included || !step.scheduledAt) continue;
-    const dayKey = utcDayKeyFromDate(step.scheduledAt);
+    const dayKey = scheduleDayKeyFromDate(step.scheduledAt, zone);
     if (!dayKey) continue;
     const prev = byDay[dayKey] ?? {
       dayKey,
@@ -170,7 +173,9 @@ export function assignProspectSchedule(input: {
   steps: readonly AssignableScheduleStep[];
   roundRobinIndex: number;
   horizonDays?: number;
+  timeZone?: string;
 }): AssignProspectScheduleResult {
+  const zone = resolveOrgTimezone(input.timeZone);
   const states = cloneMailboxCapacityStates(input.states);
   const included = input.steps.filter((s) => s.included && s.scheduledAt);
   if (included.length === 0) {
@@ -183,10 +188,10 @@ export function assignProspectSchedule(input: {
     };
   }
 
-  const preferredDayKey = utcDayKeyFromDate(included[0]!.scheduledAt);
+  const preferredDayKey = scheduleDayKeyFromDate(included[0]!.scheduledAt, zone);
   const picked = pickMailboxForProspect({
     states,
-    preferredDayKey: preferredDayKey || utcDayKeyFromDate(new Date()),
+    preferredDayKey: preferredDayKey || scheduleDayKeyFromDate(new Date(), zone),
     roundRobinIndex: input.roundRobinIndex,
   });
   if (!picked) {
@@ -204,6 +209,7 @@ export function assignProspectSchedule(input: {
     picked.state.byDay,
     picked.state.limit,
     input.horizonDays ?? 60,
+    zone,
   );
 
   if (fixed.unresolvedIds.length > 0) {
@@ -217,7 +223,7 @@ export function assignProspectSchedule(input: {
   }
 
   const nextStates = states.map((s, i) =>
-    i === picked.index ? consumeCapacityForSteps(s, fixed.steps) : s,
+    i === picked.index ? consumeCapacityForSteps(s, fixed.steps, zone) : s,
   );
 
   return {
@@ -234,10 +240,12 @@ export async function loadMailboxCapacityStates(input: {
   isDemo: boolean;
   scheduled: ScheduledEmail[];
   horizonDays?: number;
+  timeZone?: string;
 }): Promise<
   | { ok: true; states: MailboxCapacityState[] }
   | { ok: false; error: string }
 > {
+  const zone = resolveOrgTimezone(input.timeZone);
   const states: MailboxCapacityState[] = [];
   for (const mb of input.mailboxes) {
     if (input.isDemo) {
@@ -246,6 +254,7 @@ export async function loadMailboxCapacityStates(input: {
         mailboxId: mb.id,
         dailySendLimit: mb.dailySendLimit,
         horizonDays: input.horizonDays,
+        timeZone: zone,
       });
       states.push(capacityStateFromLoad(demo));
       continue;

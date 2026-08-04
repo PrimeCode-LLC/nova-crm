@@ -21,6 +21,8 @@ import {
   getEmailAccountMetaServer,
   getMailboxProfileServer,
 } from "@/lib/email/mailbox-profiles-server";
+import { isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
+import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 
 function escapeHtml(s: string) {
   return s
@@ -158,7 +160,8 @@ export async function rerouteFollowupSequenceServer(
     if ("ok" in cancel && cancel.ok) cancelledScheduled += 1;
   }
 
-  const dueAts = computeRerouteDueAts(steps.length);
+  const timeZone = await getOrgTimezoneServer(input.organizationId);
+  const dueAts = computeRerouteDueAts(steps.length, new Date(), timeZone);
   const includeSignature = input.includeSignature !== false;
   const includeFooter = input.includeFooter !== false;
   const meta = includeFooter
@@ -190,8 +193,8 @@ export async function rerouteFollowupSequenceServer(
       .map((l) => `<p>${escapeHtml(l) || "<br/>"}</p>`)
       .join("");
 
-    const local = scheduleLocalFromDueAt(dueAt, i);
-    const scheduledAtIso = new Date(local).toISOString();
+    const local = scheduleLocalFromDueAt(dueAt, i, timeZone);
+    const scheduledAtIso = isoFromDatetimeLocalInZone(local, timeZone);
 
     const created = await createScheduledEmailServer({
       organizationId: input.organizationId,

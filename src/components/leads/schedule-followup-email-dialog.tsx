@@ -22,7 +22,8 @@ import {
   autoFixScheduleDates,
   buildDemoMailboxDayLoads,
   fetchMailboxScheduleLoad,
-  formatUtcDayLabel,
+  formatDatetimeLocalPreview,
+  formatScheduleDayLabel,
   projectStepCapacity,
   type MailboxDayLoadClient,
 } from "@/lib/email/mailbox-schedule-capacity";
@@ -164,6 +165,7 @@ export function ScheduleFollowupEmailDialog({
           scheduled,
           mailboxId,
           dailySendLimit: account.dailySendLimit,
+          timeZone: timezone,
         });
         if (!cancelled) {
           setLoadByDay(demo.byDay);
@@ -188,7 +190,7 @@ export function ScheduleFollowupEmailDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, mailboxId, isDemo, scheduled, account.dailySendLimit, account.dataOwnerUid]);
+  }, [open, mailboxId, isDemo, scheduled, account.dailySendLimit, account.dataOwnerUid, timezone]);
 
   const capacity = React.useMemo(
     () =>
@@ -196,8 +198,9 @@ export function ScheduleFollowupEmailDialog({
         steps: [{ id: "single", scheduledAt, included: Boolean(scheduledAt) }],
         byDay: loadByDay,
         limit: loadLimit,
+        timeZone: timezone,
       }),
-    [scheduledAt, loadByDay, loadLimit],
+    [scheduledAt, loadByDay, loadLimit, timezone],
   );
 
   const info = capacity.byStepId.single;
@@ -208,6 +211,8 @@ export function ScheduleFollowupEmailDialog({
       [{ id: "single", scheduledAt, included: true }],
       loadByDay,
       loadLimit,
+      60,
+      timezone,
     );
     const next = result.steps[0]?.scheduledAt;
     if (!next || (!result.changed && result.unresolvedIds.length === 0)) {
@@ -292,7 +297,7 @@ export function ScheduleFollowupEmailDialog({
                 <AlertTitle>Daily send limit full</AlertTitle>
                 <AlertDescription className="text-amber-900/90 dark:text-amber-100/90">
                   <p>
-                    {info?.dayKey ? `${formatUtcDayLabel(info.dayKey)} UTC` : "That day"} is at
+                    {info?.dayKey ? formatScheduleDayLabel(info.dayKey, timezone) : "That day"} is at
                     capacity for {mailboxOptionLabel(account)}
                     {loadLimit != null && info
                       ? ` (${info.booked}/${loadLimit} booked)`
@@ -337,7 +342,7 @@ export function ScheduleFollowupEmailDialog({
                 <p className="text-[11px] text-muted-foreground">
                   Sends via {account.emailAddress.trim()}
                   {account.displayName?.trim() ? ` (${account.displayName.trim()})` : ""}
-                  {loadLimit != null ? ` · limit ${loadLimit}/UTC day` : ""}
+                  {loadLimit != null ? ` · limit ${loadLimit}/day` : ""}
                 </p>
               ) : null}
             </div>
@@ -381,7 +386,7 @@ export function ScheduleFollowupEmailDialog({
                 id="followup-schedule-at"
                 type="datetime-local"
                 value={scheduledAt}
-                min={toDatetimeLocalValue(new Date(Date.now() + 60_000))}
+                min={toDatetimeLocalValue(new Date(Date.now() + 60_000), timezone)}
                 onChange={(e) => setScheduledAt(e.target.value)}
                 className={
                   overLimit
@@ -398,11 +403,11 @@ export function ScheduleFollowupEmailDialog({
                       : "text-[10px] text-muted-foreground"
                   }
                 >
-                  {format(new Date(scheduledAt), "MMM d, yyyy 'at' h:mm a")} · {timezoneLabel}
+                  {formatDatetimeLocalPreview(scheduledAt, timezone)} · {timezoneLabel}
                   {loadLimit != null && info ? (
                     <>
                       {" "}
-                      · UTC {info.dayKey}
+                      · {formatScheduleDayLabel(info.dayKey, timezone)}
                       {overLimit
                         ? ` · over limit (${info.booked}/${loadLimit} booked)`
                         : info.remainingBefore != null

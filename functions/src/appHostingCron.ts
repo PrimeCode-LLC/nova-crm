@@ -86,3 +86,23 @@ export const syncInboxImapHeads = onSchedule(
     console.log(JSON.stringify({ level: "info", message: "Inbox IMAP cron ok", result }));
   },
 );
+
+/**
+ * Hourly tick: App Hosting only notifies capturers when it is ~09:00 in each
+ * organization's workspace timezone (see processContentCaptureRemindersServer).
+ */
+export const sendContentCaptureReminders = onSchedule(
+  {
+    ...cronScheduleOptions,
+    schedule: "every 1 hours",
+  },
+  async () => {
+    const result = await callAppHostingCron(
+      "/api/cron/content-capture-reminders",
+      "Content capture reminders cron",
+    );
+    console.log(
+      JSON.stringify({ level: "info", message: "Content capture reminders cron ok", result }),
+    );
+  },
+);

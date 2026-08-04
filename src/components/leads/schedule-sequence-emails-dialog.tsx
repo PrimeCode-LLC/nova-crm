@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { format } from "date-fns";
 import { AlertTriangle, CalendarClock } from "lucide-react";
 import { toast } from "sonner";
 import type { Followup, Lead } from "@/lib/types";
@@ -23,7 +22,8 @@ import {
   autoFixScheduleDates,
   buildDemoMailboxDayLoads,
   fetchMailboxScheduleLoad,
-  formatUtcDayLabel,
+  formatDatetimeLocalPreview,
+  formatScheduleDayLabel,
   projectStepCapacity,
   type MailboxDayLoadClient,
 } from "@/lib/email/mailbox-schedule-capacity";
@@ -192,6 +192,7 @@ export function ScheduleSequenceEmailsDialog({
           scheduled,
           mailboxId,
           dailySendLimit: account.dailySendLimit,
+          timeZone: timezone,
         });
         if (!cancelled) {
           setLoadByDay(demo.byDay);
@@ -219,7 +220,7 @@ export function ScheduleSequenceEmailsDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, mailboxId, isDemo, scheduled, account.dailySendLimit, account.dataOwnerUid]);
+  }, [open, mailboxId, isDemo, scheduled, account.dailySendLimit, account.dataOwnerUid, timezone]);
 
   const capacity = React.useMemo(
     () =>
@@ -231,8 +232,9 @@ export function ScheduleSequenceEmailsDialog({
         })),
         byDay: loadByDay,
         limit: loadLimit,
+        timeZone: timezone,
       }),
-    [steps, loadByDay, loadLimit],
+    [steps, loadByDay, loadLimit, timezone],
   );
 
   const overLimit = capacity.overLimitStepIds.length > 0;
@@ -250,6 +252,8 @@ export function ScheduleSequenceEmailsDialog({
       })),
       loadByDay,
       loadLimit,
+      60,
+      timezone,
     );
     if (!result.changed && result.unresolvedIds.length === 0) {
       toast.message("Dates already fit within the daily limit");
@@ -354,7 +358,7 @@ export function ScheduleSequenceEmailsDialog({
                 <AlertDescription className="text-amber-900/90 dark:text-amber-100/90">
                   <p>
                     {capacity.overLimitDayKeys
-                      .map((d) => `${formatUtcDayLabel(d)} UTC`)
+                      .map((d) => formatScheduleDayLabel(d, timezone))
                       .join(", ")}{" "}
                     {capacity.overLimitDayKeys.length === 1 ? "is" : "are"} at capacity for{" "}
                     {mailboxOptionLabel(account)}
@@ -402,7 +406,7 @@ export function ScheduleSequenceEmailsDialog({
               </Select>
               {loadLimit != null && !loadLoading ? (
                 <p className="text-[11px] text-muted-foreground">
-                  Daily limit {loadLimit} (UTC day). Capacity updates when you change the mailbox or
+                  Daily limit {loadLimit} (workspace day). Capacity updates when you change the mailbox or
                   dates.
                 </p>
               ) : null}
@@ -476,7 +480,7 @@ export function ScheduleSequenceEmailsDialog({
                         <Input
                           type="datetime-local"
                           value={s.scheduledAt}
-                          min={toDatetimeLocalValue(new Date(Date.now() + 60_000))}
+                          min={toDatetimeLocalValue(new Date(Date.now() + 60_000), timezone)}
                           onChange={(e) => updateStep(s.followupId, { scheduledAt: e.target.value })}
                           className={
                             stepOver
@@ -493,12 +497,12 @@ export function ScheduleSequenceEmailsDialog({
                                 : "text-[10px] text-muted-foreground"
                             }
                           >
-                            {format(new Date(s.scheduledAt), "MMM d, yyyy 'at' h:mm a")} ·{" "}
+                            {formatDatetimeLocalPreview(s.scheduledAt, timezone)} ·{" "}
                             {timezoneLabel}
                             {loadLimit != null && info ? (
                               <>
                                 {" "}
-                                · UTC {info.dayKey}
+                                · {formatScheduleDayLabel(info.dayKey, timezone)}
                                 {stepOver
                                   ? ` · over limit (${info.booked}/${loadLimit} booked)`
                                   : info.remainingBefore != null

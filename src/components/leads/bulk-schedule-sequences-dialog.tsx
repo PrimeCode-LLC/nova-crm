@@ -45,6 +45,8 @@ import {
   defaultScheduleDatetimeLocal,
   scheduleFollowupEmailClient,
 } from "@/lib/schedule-followup-email-client";
+import { isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { cn } from "@/lib/utils";
@@ -99,6 +101,7 @@ export function BulkScheduleSequencesDialog({
     currentUserId,
     organizationId,
   } = useWorkspace();
+  const timeZone = useOrgTimezone();
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -235,6 +238,7 @@ export function BulkScheduleSequencesDialog({
       mailboxes: selected,
       isDemo,
       scheduled,
+      timeZone,
     });
     if (!loaded.ok) {
       setLoadError(loaded.error);
@@ -286,7 +290,7 @@ export function BulkScheduleSequencesDialog({
 
       const draftSteps = schedulable.map((f) => ({
         id: f.id,
-        scheduledAt: defaultScheduleDatetimeLocal(f.dueAt),
+        scheduledAt: defaultScheduleDatetimeLocal(f.dueAt, timeZone),
         included: true,
       }));
 
@@ -294,6 +298,7 @@ export function BulkScheduleSequencesDialog({
         states,
         steps: draftSteps,
         roundRobinIndex: rr,
+        timeZone,
       });
       rr = assigned.nextRoundRobinIndex;
       states = assigned.nextStates;
@@ -329,7 +334,7 @@ export function BulkScheduleSequencesDialog({
           includeSignature,
           globalEmailFooter,
           includeFooter,
-          scheduledAtIso: new Date(step.scheduledAt).toISOString(),
+          scheduledAtIso: isoFromDatetimeLocalInZone(step.scheduledAt, timeZone),
           isDemo,
           addDemoScheduled: addScheduled,
         });

@@ -9,8 +9,9 @@ import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
 import {
   addUtcDayKeys,
   getMailboxDayLoadsServer,
-  utcSendDayKey,
+  sendDayKey,
 } from "@/lib/email/mailbox-send-quota-server";
+import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 
 export async function GET(req: Request) {
   const g = await guardTenantApi();
@@ -50,7 +51,8 @@ export async function GET(req: Request) {
     return NextResponse.json({ ok: false, error: "Mailbox not found." }, { status: 404 });
   }
 
-  const fromDayKey = utcSendDayKey();
+  const timeZone = await getOrgTimezoneServer(g.ctx.session.organizationId);
+  const fromDayKey = sendDayKey(new Date(), timeZone);
   const toDayKey = addUtcDayKeys(fromDayKey, horizonDays - 1);
   const loads = await getMailboxDayLoadsServer({
     organizationId: g.ctx.session.organizationId,
@@ -59,6 +61,7 @@ export async function GET(req: Request) {
     dailySendLimit: profile.dailySendLimit,
     fromDayKey,
     toDayKey,
+    timeZone,
   });
 
   return NextResponse.json({
@@ -68,6 +71,7 @@ export async function GET(req: Request) {
     fromDayKey: loads.fromDayKey,
     toDayKey: loads.toDayKey,
     byDay: loads.byDay,
+    timeZone: loads.timeZone,
     mailboxReadOnly: mailboxReadOnlyForClient(resolved),
   });
 }

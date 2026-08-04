@@ -7,6 +7,7 @@ import {
   type MailboxUtilizationRow,
   type MailboxUtilizationSummary,
 } from "@/lib/email/mailbox-utilization";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
 export type MailboxUtilizationScope = "org" | "mine";
@@ -24,6 +25,7 @@ export function useMailboxUtilization(opts: {
   isDemo: boolean;
   currentUserId: string;
 }) {
+  const timeZone = useOrgTimezone();
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const sent = useEmailAccountStore((s) => s.sent);
   const scheduled = useEmailAccountStore((s) => s.scheduled);
@@ -43,8 +45,9 @@ export function useMailboxUtilization(opts: {
       sent,
       scheduled,
       currentUserId: opts.currentUserId,
+      timeZone,
     });
-  }, [opts.isDemo, opts.enabled, opts.currentUserId, mailboxes, sent, scheduled]);
+  }, [opts.isDemo, opts.enabled, opts.currentUserId, mailboxes, sent, scheduled, timeZone]);
 
   React.useEffect(() => {
     if (!opts.enabled) {

@@ -89,9 +89,16 @@ describe("isReroutableFollowup", () => {
 
 describe("computeRerouteDueAts", () => {
   it("returns one dueAt per step", () => {
-    const from = new Date("2026-07-20T12:00:00"); // Monday
-    const dues = computeRerouteDueAts(3, from);
+    const from = new Date("2026-07-20T12:00:00Z"); // Monday
+    const dues = computeRerouteDueAts(3, from, "UTC");
     expect(dues).toHaveLength(3);
     expect(dues[0]).toContain("2026-07-20");
+  });
+
+  it("anchors noon in the given org timezone", () => {
+    const from = new Date("2026-07-20T12:00:00Z");
+    const dues = computeRerouteDueAts(1, from, "America/New_York");
+    // Noon EDT = 16:00Z
+    expect(dues[0]).toBe("2026-07-20T16:00:00.000Z");
   });
 });

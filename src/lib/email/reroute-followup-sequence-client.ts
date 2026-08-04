@@ -3,6 +3,7 @@ import {
   isReroutableFollowup,
   scheduleLocalFromDueAt,
 } from "@/lib/email/bounce-recovery";
+import { isoFromDatetimeLocalInZone, resolveOrgTimezone } from "@/lib/org-timezone";
 import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import type { Followup, FollowupPlan } from "@/lib/types";
@@ -14,6 +15,8 @@ export type RerouteSequenceClientInput = {
   plan: FollowupPlan;
   followups: readonly Followup[];
   isDemo: boolean;
+  /** IANA workspace timezone for due/send wall clocks. */
+  timeZone?: string;
   globalEmailFooter?: string;
   includeSignature?: boolean;
   includeFooter?: boolean;
@@ -79,7 +82,8 @@ export async function rerouteFollowupSequenceClient(
     input.setFollowupEmailSchedule(step.id, null);
   }
 
-  const dueAts = computeRerouteDueAts(steps.length);
+  const timeZone = resolveOrgTimezone(input.timeZone);
+  const dueAts = computeRerouteDueAts(steps.length, new Date(), timeZone);
   await input.resumePlan({
     planId: input.plan.id,
     leadId: input.leadId,
@@ -98,8 +102,8 @@ export async function rerouteFollowupSequenceClient(
     const subject = step.emailSubject?.trim() || step.title;
     if (!body) continue;
 
-    const local = scheduleLocalFromDueAt(dueAt, i);
-    const scheduledAtIso = new Date(local).toISOString();
+    const local = scheduleLocalFromDueAt(dueAt, i, timeZone);
+    const scheduledAtIso = isoFromDatetimeLocalInZone(local, timeZone);
     const result = await scheduleFollowupEmailClient({
       followupId: step.id,
       leadId: input.leadId,

@@ -1,5 +1,6 @@
 import type { EmailMailboxSettings, MailSent, ScheduledEmail } from "@/lib/email-account-types";
-import { addUtcDayKey, utcDayKeyFromDate } from "@/lib/email/mailbox-schedule-capacity";
+import { addUtcDayKey, scheduleDayKeyFromDate } from "@/lib/email/mailbox-schedule-capacity";
+import { resolveOrgTimezone } from "@/lib/org-timezone";
 
 export type MailboxUtilizationStatus =
   | "hot"
@@ -214,8 +215,10 @@ export function buildDemoMailboxUtilization(input: {
   scheduled: readonly ScheduledEmail[];
   /** Fallback owner when mailbox has no dataOwnerUid. */
   currentUserId: string;
+  timeZone?: string;
 }): MailboxUtilizationRow[] {
-  const todayKey = utcDayKeyFromDate(new Date());
+  const zone = resolveOrgTimezone(input.timeZone);
+  const todayKey = scheduleDayKeyFromDate(new Date(), zone);
   const weekStart = addUtcDayKey(todayKey, -6);
   const weekEnd = addUtcDayKey(todayKey, 6);
 
@@ -225,7 +228,7 @@ export function buildDemoMailboxUtilization(input: {
     let sentWeek = 0;
     for (const m of input.sent) {
       if (m.mailboxId !== mb.id) continue;
-      const day = utcDayKeyFromDate(m.sentAt);
+      const day = scheduleDayKeyFromDate(m.sentAt, zone);
       if (!day) continue;
       if (day === todayKey) sentToday += 1;
       if (day >= weekStart && day <= todayKey) sentWeek += 1;
@@ -236,7 +239,7 @@ export function buildDemoMailboxUtilization(input: {
     for (const row of input.scheduled) {
       if (row.mailboxId !== mb.id) continue;
       if (row.status !== "pending" && row.status !== "processing") continue;
-      const day = utcDayKeyFromDate(row.scheduledAt);
+      const day = scheduleDayKeyFromDate(row.scheduledAt, zone);
       if (!day) continue;
       if (day === todayKey) pendingToday += 1;
       if (day >= todayKey && day <= weekEnd) pendingWeek += 1;
