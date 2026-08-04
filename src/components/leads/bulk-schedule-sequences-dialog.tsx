@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CalendarClock, CheckCircle2, Loader2, XCircle } from "lucide-react";
+import { CalendarClock, CheckCircle2, Circle, Loader2, MinusCircle, XCircle } from "lucide-react";
 import { toast } from "sonner";
 import {
   Dialog,
@@ -143,8 +143,26 @@ export function BulkScheduleSequencesDialog({
   const [includeFooter, setIncludeFooter] = React.useState(true);
   const [rows, setRows] = React.useState<LeadRow[]>([]);
   const [progressIndex, setProgressIndex] = React.useState(0);
+  const [runTotal, setRunTotal] = React.useState(0);
   const [loadError, setLoadError] = React.useState<string | null>(null);
   const cancelRef = React.useRef(false);
+  const wasOpenRef = React.useRef(false);
+  const listRef = React.useRef<HTMLUListElement | null>(null);
+
+  // Keep latest workspace data in refs so the batch loop and open-init
+  // don't reset UI when followups/leads update mid-run.
+  const leadsRef = React.useRef(leads);
+  const followupsRef = React.useRef(followups);
+  const followupPlansRef = React.useRef(followupPlans);
+  const getContactByIdRef = React.useRef(getContactById);
+  const sendableMailboxesRef = React.useRef(sendableMailboxes);
+  const onCompleteRef = React.useRef(onComplete);
+  leadsRef.current = leads;
+  followupsRef.current = followups;
+  followupPlansRef.current = followupPlans;
+  getContactByIdRef.current = getContactById;
+  sendableMailboxesRef.current = sendableMailboxes;
+  onCompleteRef.current = onComplete;
 
   function ownerLabel(ownerId: string): string {
     if (!ownerId.trim()) return "Open queue";
@@ -156,20 +174,20 @@ export function BulkScheduleSequencesDialog({
 
   const classifyLead = React.useCallback(
     (leadId: string): { bucket: PreflightBucket; reason?: string } => {
-      const lead = leads.find((l) => l.id === leadId);
+      const lead = leadsRef.current.find((l) => l.id === leadId);
       if (!lead) return { bucket: "skipped", reason: "Lead not found" };
       if (lead.doNotContact) return { bucket: "skipped", reason: "Do not contact" };
 
-      const plan = getActiveFollowupPlanForLead(followupPlans, leadId);
+      const plan = getActiveFollowupPlanForLead(followupPlansRef.current, leadId);
       if (!plan) return { bucket: "skipped", reason: "No active sequence" };
 
-      const contact = getContactById(lead.contactId);
+      const contact = getContactByIdRef.current(lead.contactId);
       const recipient = defaultContactRecipientEmail(
         buildContactRecipientOptions(lead, contact),
       );
       if (!recipient) return { bucket: "skipped", reason: "No recipient email" };
 
-      const openSteps = openFollowupsForPlan(followups, plan.id);
+      const openSteps = openFollowupsForPlan(followupsRef.current, plan.id);
       const readySteps = openSteps.filter((f) => canAutoScheduleFollowupEmail(f, lead.channel));
       if (readySteps.length > 0) return { bucket: "ready" };
 
@@ -190,25 +208,18 @@ export function BulkScheduleSequencesDialog({
       }
       return { bucket: "skipped", reason: "No email steps to schedule" };
     },
-    [leads, followupPlans, followups, getContactById],
+    [],
   );
 
-  const preflight = React.useMemo(() => {
-    let ready = 0;
-    let already = 0;
-    let skipped = 0;
-    const readyOwnerIds: string[] = [];
-    for (const id of leadIds) {
-      const c = classifyLead(id);
-      if (c.bucket === "ready") {
-        ready += 1;
-        const lead = leads.find((l) => l.id === id);
-        readyOwnerIds.push(lead?.ownerId?.trim() || "");
-      } else if (c.bucket === "already_scheduled") already += 1;
-      else skipped += 1;
-    }
-    return { ready, already, skipped, readyOwnerIds };
-  }, [leadIds, classifyLead, leads]);
+  // Snapshot preflight when the dialog opens so the setup counts stay stable
+  // while scheduling updates followup state in the background.
+  const [preflight, setPreflight] = React.useState({
+    ready: 0,
+    already: 0,
+    skipped: 0,
+    readyOwnerIds: [] as string[],
+    readyLeadIds: [] as string[],
+  });
 
   const selectedMailboxes = React.useMemo(
     () => sendableMailboxes.filter((m) => selectedMailboxIds.includes(m.id)),
@@ -243,8 +254,33 @@ export function BulkScheduleSequencesDialog({
       .reduce((sum, g) => sum + g.leadCount, 0);
   }, [preferOwnerShared, ownerMatchGroups]);
 
+  function computePreflight(ids: string[]) {
+    let ready = 0;
+    let already = 0;
+    let skipped = 0;
+    const readyOwnerIds: string[] = [];
+    const readyLeadIds: string[] = [];
+    for (const id of ids) {
+      const c = classifyLead(id);
+      if (c.bucket === "ready") {
+        ready += 1;
+        readyLeadIds.push(id);
+        const lead = leadsRef.current.find((l) => l.id === id);
+        readyOwnerIds.push(lead?.ownerId?.trim() || "");
+      } else if (c.bucket === "already_scheduled") already += 1;
+      else skipped += 1;
+    }
+    return { ready, already, skipped, readyOwnerIds, readyLeadIds };
+  }
+
+  // Only reset when the dialog opens (false → true). Do not reset when
+  // leads/followups change mid-run — that was bouncing users back to setup
+  // with a live-climbing "already scheduled" counter.
   React.useEffect(() => {
-    if (!open) return;
+    const justOpened = open && !wasOpenRef.current;
+    wasOpenRef.current = open;
+    if (!justOpened) return;
+
     cancelRef.current = false;
     setPhase("setup");
     setIncludeSignature(true);
@@ -252,15 +288,18 @@ export function BulkScheduleSequencesDialog({
     setPreferOwnerShared(true);
     setLoadError(null);
     setProgressIndex(0);
+    setRunTotal(0);
     const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
     const defaults = resolveDefaultScheduleMailboxPool({
-      mailboxIds: sendableMailboxes.map((m) => m.id),
+      mailboxIds: sendableMailboxesRef.current.map((m) => m.id),
       lastPoolIds: prefs.lastMailboxPoolIds,
     });
     setSelectedMailboxIds(defaults);
+    const snap = computePreflight(leadIds);
+    setPreflight(snap);
     setRows(
-      leadIds.map((id) => {
-        const lead = leads.find((l) => l.id === id);
+      snap.readyLeadIds.map((id) => {
+        const lead = leadsRef.current.find((l) => l.id === id);
         return {
           leadId: id,
           label: lead ? leadLabel(lead) : id,
@@ -268,7 +307,8 @@ export function BulkScheduleSequencesDialog({
         };
       }),
     );
-  }, [open, leadIds, leads, sendableMailboxes, organizationId, currentUserId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally open-transition only
+  }, [open, leadIds, organizationId, currentUserId]);
 
   function toggleMailbox(id: string, checked: boolean) {
     setSelectedMailboxIds((prev) => {
@@ -281,21 +321,45 @@ export function BulkScheduleSequencesDialog({
     setRows((prev) => prev.map((r) => (r.leadId === leadId ? { ...r, ...patch } : r)));
   }
 
+  React.useEffect(() => {
+    if (phase !== "running") return;
+    const el = listRef.current?.querySelector('[data-status="running"]');
+    el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+  }, [phase, progressIndex]);
+
   async function runBatch() {
-    const selected = sendableMailboxes.filter((m) => selectedMailboxIds.includes(m.id));
+    const selected = sendableMailboxesRef.current.filter((m) =>
+      selectedMailboxIds.includes(m.id),
+    );
     if (selected.length === 0) {
       toast.error("Select at least one mailbox");
       return;
     }
-    if (preflight.ready === 0) {
+
+    // Re-classify at start so we schedule current-ready only, then freeze that list.
+    const snap = computePreflight(leadIds);
+    setPreflight(snap);
+    if (snap.ready === 0) {
       toast.error("No prospects are ready to schedule");
       return;
     }
 
+    const queue = snap.readyLeadIds;
     cancelRef.current = false;
     setPhase("running");
     setProgressIndex(0);
+    setRunTotal(queue.length);
     setLoadError(null);
+    setRows(
+      queue.map((id) => {
+        const lead = leadsRef.current.find((l) => l.id === id);
+        return {
+          leadId: id,
+          label: lead ? leadLabel(lead) : id,
+          status: "pending" as const,
+        };
+      }),
+    );
     rememberLastUsedMailboxPool(
       organizationId,
       currentUserId,
@@ -322,23 +386,23 @@ export function BulkScheduleSequencesDialog({
     let failed = 0;
     const mailboxById = new Map(selected.map((m) => [m.id, m]));
 
-    for (let i = 0; i < leadIds.length; i++) {
+    for (let i = 0; i < queue.length; i++) {
       if (cancelRef.current) {
-        for (let j = i; j < leadIds.length; j++) {
-          patchRow(leadIds[j]!, { status: "skipped", detail: "Cancelled" });
+        for (let j = i; j < queue.length; j++) {
+          patchRow(queue[j]!, { status: "skipped", detail: "Cancelled" });
           skipped += 1;
         }
         break;
       }
 
-      const leadId = leadIds[i]!;
+      const leadId = queue[i]!;
       setProgressIndex(i + 1);
       patchRow(leadId, { status: "running", detail: undefined });
 
       const classified = classifyLead(leadId);
       if (classified.bucket !== "ready") {
         patchRow(leadId, {
-          status: classified.bucket === "already_scheduled" ? "skipped" : "skipped",
+          status: "skipped",
           detail:
             classified.bucket === "already_scheduled"
               ? "Already scheduled"
@@ -348,11 +412,11 @@ export function BulkScheduleSequencesDialog({
         continue;
       }
 
-      const lead = leads.find((l) => l.id === leadId)!;
-      const plan = getActiveFollowupPlanForLead(followupPlans, leadId)!;
-      const contact = getContactById(lead.contactId);
+      const lead = leadsRef.current.find((l) => l.id === leadId)!;
+      const plan = getActiveFollowupPlanForLead(followupPlansRef.current, leadId)!;
+      const contact = getContactByIdRef.current(lead.contactId);
       const to = defaultContactRecipientEmail(buildContactRecipientOptions(lead, contact));
-      const schedulable = openFollowupsForPlan(followups, plan.id)
+      const schedulable = openFollowupsForPlan(followupsRef.current, plan.id)
         .filter((f) => canAutoScheduleFollowupEmail(f, lead.channel))
         .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
 
@@ -484,7 +548,7 @@ export function BulkScheduleSequencesDialog({
         : undefined,
     );
     if (failed === 0 && success > 0) {
-      onComplete?.();
+      onCompleteRef.current?.();
     }
   }
 
@@ -496,6 +560,8 @@ export function BulkScheduleSequencesDialog({
   const successCount = rows.filter((r) => r.status === "success").length;
   const skippedCount = rows.filter((r) => r.status === "skipped").length;
   const failedCount = rows.filter((r) => r.status === "failed").length;
+  const progressPct =
+    runTotal > 0 ? Math.min(100, Math.round((progressIndex / runTotal) * 100)) : 0;
 
   const signatureMailbox =
     sendableMailboxes.find((m) => m.id === selectedMailboxIds[0]) ?? sendableMailboxes[0];
@@ -509,9 +575,11 @@ export function BulkScheduleSequencesDialog({
             Schedule sequences
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Queue email steps from existing active sequences across selected inboxes, using each
-            mailbox&apos;s daily send limit. When scheduling for other owners, prefer inboxes you
-            both can send from.
+            {phase === "setup"
+              ? "Queue email steps from existing active sequences across selected inboxes, using each mailbox's daily send limit. When scheduling for other owners, prefer inboxes you both can send from."
+              : phase === "running"
+                ? "Queuing email steps across your selected inboxes. You can stop after the current prospect."
+                : "All selected prospects have been processed."}
           </DialogDescription>
         </DialogHeader>
 
@@ -519,11 +587,20 @@ export function BulkScheduleSequencesDialog({
           <div className="space-y-4 py-1">
             <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs space-y-1">
               <p>
-                <span className="font-medium">{preflight.ready}</span> ready to schedule
+                <span className="font-medium tabular-nums">{preflight.ready}</span> ready to
+                schedule
               </p>
-              <p className="text-muted-foreground">
-                {preflight.already} already scheduled · {preflight.skipped} skipped
-              </p>
+              {(preflight.already > 0 || preflight.skipped > 0) && (
+                <p className="text-muted-foreground">
+                  {preflight.already > 0 ? (
+                    <span className="tabular-nums">{preflight.already} already scheduled</span>
+                  ) : null}
+                  {preflight.already > 0 && preflight.skipped > 0 ? " · " : null}
+                  {preflight.skipped > 0 ? (
+                    <span className="tabular-nums">{preflight.skipped} skipped</span>
+                  ) : null}
+                </p>
+              )}
             </div>
 
             {sendableMailboxes.length === 0 ? (
@@ -533,7 +610,7 @@ export function BulkScheduleSequencesDialog({
             ) : (
               <div className="space-y-2">
                 <Label className="text-xs">Mailboxes</Label>
-                <ul className="space-y-2 rounded-md border p-2">
+                <ul className="max-h-48 space-y-2 overflow-y-auto rounded-md border p-2">
                   {sendableMailboxes.map((mb) => {
                     const checked = selectedMailboxIds.includes(mb.id);
                     return (
@@ -677,40 +754,95 @@ export function BulkScheduleSequencesDialog({
 
         {phase === "running" || phase === "done" ? (
           <div className="space-y-3 py-1">
-            <p className="text-xs text-muted-foreground">
-              {phase === "running"
-                ? `Scheduling ${progressIndex} / ${leadIds.length}…`
-                : `Done · ${successCount} scheduled · ${skippedCount} skipped · ${failedCount} failed`}
-            </p>
-            <ul className="max-h-64 space-y-1.5 overflow-y-auto rounded-md border p-2">
+            <div className="space-y-2 rounded-md border bg-muted/30 px-3 py-2.5">
+              <div className="flex items-baseline justify-between gap-2 text-xs">
+                <p className="font-medium">
+                  {phase === "running" ? (
+                    <>
+                      Scheduling{" "}
+                      <span className="tabular-nums">
+                        {progressIndex} / {runTotal}
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      Done ·{" "}
+                      <span className="tabular-nums text-emerald-600 dark:text-emerald-400">
+                        {successCount} scheduled
+                      </span>
+                      {skippedCount > 0 ? (
+                        <span className="text-muted-foreground">
+                          {" "}
+                          · {skippedCount} skipped
+                        </span>
+                      ) : null}
+                      {failedCount > 0 ? (
+                        <span className="text-destructive"> · {failedCount} failed</span>
+                      ) : null}
+                    </>
+                  )}
+                </p>
+                {phase === "running" ? (
+                  <p className="tabular-nums text-muted-foreground">
+                    {successCount} done
+                    {failedCount > 0 ? ` · ${failedCount} failed` : ""}
+                  </p>
+                ) : null}
+              </div>
+              <div
+                className="h-1.5 overflow-hidden rounded-full bg-muted"
+                role="progressbar"
+                aria-valuenow={progressPct}
+                aria-valuemin={0}
+                aria-valuemax={100}
+              >
+                <div
+                  className={cn(
+                    "h-full rounded-full transition-[width] duration-300 ease-out",
+                    phase === "done" && failedCount === 0
+                      ? "bg-emerald-500"
+                      : phase === "done" && failedCount > 0
+                        ? "bg-amber-500"
+                        : "bg-primary",
+                  )}
+                  style={{ width: `${phase === "done" ? 100 : progressPct}%` }}
+                />
+              </div>
+            </div>
+
+            <ul
+              ref={listRef}
+              className="max-h-64 space-y-1 overflow-y-auto rounded-md border p-2"
+            >
               {rows.map((row) => (
                 <li
                   key={row.leadId}
-                  className="flex items-start gap-2 rounded px-1.5 py-1 text-xs"
+                  data-status={row.status}
+                  className={cn(
+                    "flex items-start gap-2 rounded px-1.5 py-1 text-xs",
+                    row.status === "running" && "bg-primary/5",
+                    row.status === "pending" && "opacity-60",
+                  )}
                 >
-                  {row.status === "running" || row.status === "pending" ? (
-                    <Loader2
-                      className={cn(
-                        "mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground",
-                        row.status === "running" && "animate-spin text-primary",
-                      )}
-                    />
+                  {row.status === "running" ? (
+                    <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin text-primary" />
+                  ) : row.status === "pending" ? (
+                    <Circle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground/50" />
                   ) : row.status === "success" ? (
                     <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                  ) : row.status === "skipped" ? (
+                    <MinusCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   ) : (
-                    <XCircle
-                      className={cn(
-                        "mt-0.5 h-3.5 w-3.5 shrink-0",
-                        row.status === "skipped"
-                          ? "text-muted-foreground"
-                          : "text-destructive",
-                      )}
-                    />
+                    <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-destructive" />
                   )}
                   <div className="min-w-0 flex-1">
                     <p className="truncate font-medium">{row.label}</p>
                     {row.detail ? (
                       <p className="text-[11px] text-muted-foreground">{row.detail}</p>
+                    ) : row.status === "pending" ? (
+                      <p className="text-[11px] text-muted-foreground">Waiting…</p>
+                    ) : row.status === "running" ? (
+                      <p className="text-[11px] text-muted-foreground">Scheduling…</p>
                     ) : null}
                   </div>
                 </li>
@@ -728,7 +860,7 @@ export function BulkScheduleSequencesDialog({
                   Stop after current
                 </Button>
               ) : (
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                <Button type="button" onClick={() => onOpenChange(false)}>
                   Close
                 </Button>
               )}
