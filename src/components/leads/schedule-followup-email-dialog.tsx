@@ -12,12 +12,17 @@ import {
   useEmailAccountStore,
 } from "@/stores/email-account-store";
 import {
-  defaultScheduleDatetimeLocal,
   scheduleFollowupEmailClient,
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
 import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import {
+  defaultAudienceScheduleDatetimeLocal,
+  resolveLeadScheduleTimezone,
+  resolveLeadSendWindow,
+} from "@/lib/email/audience-schedule";
+import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import {
   autoFixScheduleDates,
   buildDemoMailboxDayLoads,
@@ -123,7 +128,25 @@ export function ScheduleFollowupEmailDialog({
   }, [mailboxOptions, mailboxId, mailboxes, activeMailboxId]);
 
   const timezone = useOrgTimezone();
-  const timezoneLabel = formatTimezoneDisplayLabel(timezone);
+  const prospecting = useProspectingStrategyData();
+  const scheduleTimezone = React.useMemo(
+    () =>
+      resolveLeadScheduleTimezone({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+        orgTimezone: timezone,
+      }),
+    [lead.strategyId, prospecting.strategies, timezone],
+  );
+  const sendWindow = React.useMemo(
+    () =>
+      resolveLeadSendWindow({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+      }),
+    [lead.strategyId, prospecting.strategies],
+  );
+  const timezoneLabel = formatTimezoneDisplayLabel(scheduleTimezone);
 
   React.useEffect(() => {
     if (!open || !followup) return;
@@ -136,7 +159,14 @@ export function ScheduleFollowupEmailDialog({
     setMailboxId(defaultId);
     setTo(defaultContactRecipientEmail(recipientOptions));
     setSubject(followup.emailSubject?.trim() || followup.title || "");
-    setScheduledAt(defaultScheduleDatetimeLocal(followup.dueAt, timezone));
+    setScheduledAt(
+      defaultAudienceScheduleDatetimeLocal({
+        preferIso: followup.dueAt,
+        timeZone: scheduleTimezone,
+        sendWindowStartHour: sendWindow.startHour,
+        sendWindowEndHour: sendWindow.endHour,
+      }),
+    );
     setBody(followup.messageBody ?? "");
     setIncludeSignature(true);
     setIncludeFooter(true);
@@ -147,6 +177,9 @@ export function ScheduleFollowupEmailDialog({
     recipientOptions,
     mailboxOptions,
     activeMailboxId,
+    scheduleTimezone,
+    sendWindow.startHour,
+    sendWindow.endHour,
     timezone,
     organizationId,
     currentUserId,
@@ -195,12 +228,20 @@ export function ScheduleFollowupEmailDialog({
   const capacity = React.useMemo(
     () =>
       projectStepCapacity({
-        steps: [{ id: "single", scheduledAt, included: Boolean(scheduledAt) }],
+        steps: [
+          {
+            id: "single",
+            scheduledAt: scheduledAt
+              ? isoFromDatetimeLocalInZone(scheduledAt, scheduleTimezone)
+              : "",
+            included: Boolean(scheduledAt),
+          },
+        ],
         byDay: loadByDay,
         limit: loadLimit,
         timeZone: timezone,
       }),
-    [scheduledAt, loadByDay, loadLimit, timezone],
+    [scheduledAt, loadByDay, loadLimit, timezone, scheduleTimezone],
   );
 
   const info = capacity.byStepId.single;
@@ -208,14 +249,20 @@ export function ScheduleFollowupEmailDialog({
 
   function handleAutoFix() {
     const result = autoFixScheduleDates(
-      [{ id: "single", scheduledAt, included: true }],
+      [
+        {
+          id: "single",
+          scheduledAt: isoFromDatetimeLocalInZone(scheduledAt, scheduleTimezone),
+          included: true,
+        },
+      ],
       loadByDay,
       loadLimit,
       60,
       timezone,
     );
-    const next = result.steps[0]?.scheduledAt;
-    if (!next || (!result.changed && result.unresolvedIds.length === 0)) {
+    const nextIso = result.steps[0]?.scheduledAt;
+    if (!nextIso || (!result.changed && result.unresolvedIds.length === 0)) {
       toast.message("Date already fits within the daily limit");
       return;
     }
@@ -225,7 +272,7 @@ export function ScheduleFollowupEmailDialog({
       });
       return;
     }
-    setScheduledAt(next);
+    setScheduledAt(toDatetimeLocalValue(new Date(nextIso), scheduleTimezone));
     toast.success("Moved to the next free day");
   }
 
@@ -255,7 +302,7 @@ export function ScheduleFollowupEmailDialog({
         includeSignature,
         globalEmailFooter,
         includeFooter,
-        scheduledAtIso: isoFromDatetimeLocalInZone(scheduledAt, timezone),
+        scheduledAtIso: isoFromDatetimeLocalInZone(scheduledAt, scheduleTimezone),
         isDemo,
         addDemoScheduled: addScheduled,
       });
@@ -386,7 +433,7 @@ export function ScheduleFollowupEmailDialog({
                 id="followup-schedule-at"
                 type="datetime-local"
                 value={scheduledAt}
-                min={toDatetimeLocalValue(new Date(Date.now() + 60_000), timezone)}
+                min={toDatetimeLocalValue(new Date(Date.now() + 60_000), scheduleTimezone)}
                 onChange={(e) => setScheduledAt(e.target.value)}
                 className={
                   overLimit
@@ -403,7 +450,7 @@ export function ScheduleFollowupEmailDialog({
                       : "text-[10px] text-muted-foreground"
                   }
                 >
-                  {formatDatetimeLocalPreview(scheduledAt, timezone)} · {timezoneLabel}
+                  {formatDatetimeLocalPreview(scheduledAt, scheduleTimezone)} · {timezoneLabel}
                   {loadLimit != null && info ? (
                     <>
                       {" "}

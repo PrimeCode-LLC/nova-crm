@@ -42,14 +42,28 @@ import {
   resolveFollowupChannel,
 } from "@/lib/followup-plans";
 import {
-  defaultScheduleDatetimeLocal,
   scheduleFollowupEmailClient,
 } from "@/lib/schedule-followup-email-client";
 import { isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import {
+  defaultAudienceScheduleDatetimeLocal,
+  resolveLeadScheduleTimezone,
+  resolveLeadSendWindow,
+} from "@/lib/email/audience-schedule";
+import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { cn } from "@/lib/utils";
+
+function toScheduleIso(value: string, wallClockZone: string): string {
+  const trimmed = value.trim();
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed)) {
+    const d = new Date(trimmed);
+    return Number.isNaN(d.getTime()) ? isoFromDatetimeLocalInZone(trimmed, wallClockZone) : d.toISOString();
+  }
+  return isoFromDatetimeLocalInZone(trimmed, wallClockZone);
+}
 
 type RowStatus = "pending" | "running" | "success" | "skipped" | "failed";
 
@@ -102,6 +116,7 @@ export function BulkScheduleSequencesDialog({
     organizationId,
   } = useWorkspace();
   const timeZone = useOrgTimezone();
+  const prospecting = useProspectingStrategyData();
 
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -288,9 +303,27 @@ export function BulkScheduleSequencesDialog({
         .filter((f) => canAutoScheduleFollowupEmail(f, lead.channel))
         .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
 
+      const scheduleZone = resolveLeadScheduleTimezone({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+        orgTimezone: timeZone,
+      });
+      const sendWindow = resolveLeadSendWindow({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+      });
+
       const draftSteps = schedulable.map((f) => ({
         id: f.id,
-        scheduledAt: defaultScheduleDatetimeLocal(f.dueAt, timeZone),
+        scheduledAt: isoFromDatetimeLocalInZone(
+          defaultAudienceScheduleDatetimeLocal({
+            preferIso: f.dueAt,
+            timeZone: scheduleZone,
+            sendWindowStartHour: sendWindow.startHour,
+            sendWindowEndHour: sendWindow.endHour,
+          }),
+          scheduleZone,
+        ),
         included: true,
       }));
 
@@ -334,7 +367,7 @@ export function BulkScheduleSequencesDialog({
           includeSignature,
           globalEmailFooter,
           includeFooter,
-          scheduledAtIso: isoFromDatetimeLocalInZone(step.scheduledAt, timeZone),
+          scheduledAtIso: toScheduleIso(step.scheduledAt, timeZone),
           isDemo,
           addDemoScheduled: addScheduled,
         });

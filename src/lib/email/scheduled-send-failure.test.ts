@@ -4,9 +4,11 @@ import {
   classifyScheduledSendError,
   nextRetryAtIso,
   nextUtcMidnightIso,
+  nextZonedDayStartIso,
   normalizeSendGapSeconds,
   scheduledSendRetryDelayMs,
 } from "@/lib/email/scheduled-send-failure";
+import { zonedDayKey } from "@/lib/org-timezone";
 import { resolveSequenceThreadContext, type SequenceThreadStep } from "@/lib/email/sequence-thread";
 
 describe("classifyScheduledSendError", () => {
@@ -48,12 +50,22 @@ describe("scheduledSendRetryDelayMs / nextRetryAtIso", () => {
     expect(new Date(next).getTime()).toBe(now.getTime() + 10 * 60_000);
   });
 
-  it("defers quota past UTC midnight", () => {
+  it("defers quota past UTC midnight (legacy helper)", () => {
     const now = new Date("2026-07-21T22:15:00.000Z");
     const next = nextUtcMidnightIso(now);
     expect(new Date(next).getTime()).toBeGreaterThanOrEqual(
       Date.UTC(2026, 6, 22, 0, 0, 0),
     );
+  });
+
+  it("defers quota to next org-local midnight, not UTC evening", () => {
+    // 3pm EDT Jul 21 — UTC midnight same calendar evening would be 8pm EDT (wrong).
+    const now = new Date("2026-07-21T19:00:00.000Z");
+    const next = nextZonedDayStartIso(now, "America/New_York");
+    const nextDate = new Date(next);
+    expect(zonedDayKey(nextDate, "America/New_York")).toBe("2026-07-22");
+    // Must be after local midnight Jul 22 (04:00 UTC), not 00:00 UTC Jul 22 (8pm EDT Jul 21).
+    expect(nextDate.getTime()).toBeGreaterThanOrEqual(Date.UTC(2026, 6, 22, 4, 0, 0));
   });
 
   it("caps max attempts constant", () => {

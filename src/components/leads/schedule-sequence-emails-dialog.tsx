@@ -11,12 +11,17 @@ import {
   useEmailAccountStore,
 } from "@/stores/email-account-store";
 import {
-  defaultScheduleDatetimeLocal,
   scheduleFollowupEmailClient,
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
 import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import {
+  defaultAudienceScheduleDatetimeLocal,
+  resolveLeadScheduleTimezone,
+  resolveLeadSendWindow,
+} from "@/lib/email/audience-schedule";
+import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
 import {
   autoFixScheduleDates,
@@ -131,7 +136,25 @@ export function ScheduleSequenceEmailsDialog({
   }, [mailboxOptions, mailboxId, mailboxes, activeMailboxId]);
 
   const timezone = useOrgTimezone();
-  const timezoneLabel = formatTimezoneDisplayLabel(timezone);
+  const prospecting = useProspectingStrategyData();
+  const scheduleTimezone = React.useMemo(
+    () =>
+      resolveLeadScheduleTimezone({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+        orgTimezone: timezone,
+      }),
+    [lead.strategyId, prospecting.strategies, timezone],
+  );
+  const sendWindow = React.useMemo(
+    () =>
+      resolveLeadSendWindow({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+      }),
+    [lead.strategyId, prospecting.strategies],
+  );
+  const timezoneLabel = formatTimezoneDisplayLabel(scheduleTimezone);
 
   const schedulable = React.useMemo(
     () =>
@@ -158,7 +181,12 @@ export function ScheduleSequenceEmailsDialog({
         followupId: f.id,
         title: f.title,
         subject: f.emailSubject?.trim() || f.title,
-        scheduledAt: defaultScheduleDatetimeLocal(f.dueAt, timezone),
+        scheduledAt: defaultAudienceScheduleDatetimeLocal({
+          preferIso: f.dueAt,
+          timeZone: scheduleTimezone,
+          sendWindowStartHour: sendWindow.startHour,
+          sendWindowEndHour: sendWindow.endHour,
+        }),
         body: f.messageBody ?? "",
         included: true,
       })),
@@ -170,7 +198,9 @@ export function ScheduleSequenceEmailsDialog({
     mailboxOptions,
     activeMailboxId,
     schedulable,
-    timezone,
+    scheduleTimezone,
+    sendWindow.startHour,
+    sendWindow.endHour,
     organizationId,
     currentUserId,
   ]);
@@ -227,14 +257,16 @@ export function ScheduleSequenceEmailsDialog({
       projectStepCapacity({
         steps: steps.map((s) => ({
           id: s.followupId,
-          scheduledAt: s.scheduledAt,
+          scheduledAt: s.scheduledAt
+            ? isoFromDatetimeLocalInZone(s.scheduledAt, scheduleTimezone)
+            : "",
           included: s.included,
         })),
         byDay: loadByDay,
         limit: loadLimit,
         timeZone: timezone,
       }),
-    [steps, loadByDay, loadLimit, timezone],
+    [steps, loadByDay, loadLimit, timezone, scheduleTimezone],
   );
 
   const overLimit = capacity.overLimitStepIds.length > 0;
@@ -247,7 +279,7 @@ export function ScheduleSequenceEmailsDialog({
     const result = autoFixScheduleDates(
       steps.map((s) => ({
         id: s.followupId,
-        scheduledAt: s.scheduledAt,
+        scheduledAt: isoFromDatetimeLocalInZone(s.scheduledAt, scheduleTimezone),
         included: s.included,
       })),
       loadByDay,
@@ -262,7 +294,11 @@ export function ScheduleSequenceEmailsDialog({
     setSteps((prev) =>
       prev.map((s) => {
         const fixed = result.steps.find((r) => r.id === s.followupId);
-        return fixed ? { ...s, scheduledAt: fixed.scheduledAt } : s;
+        if (!fixed) return s;
+        return {
+          ...s,
+          scheduledAt: toDatetimeLocalValue(new Date(fixed.scheduledAt), scheduleTimezone),
+        };
       }),
     );
     if (result.unresolvedIds.length > 0) {
@@ -310,7 +346,7 @@ export function ScheduleSequenceEmailsDialog({
           includeSignature,
           globalEmailFooter,
           includeFooter,
-          scheduledAtIso: isoFromDatetimeLocalInZone(step.scheduledAt, timezone),
+          scheduledAtIso: isoFromDatetimeLocalInZone(step.scheduledAt, scheduleTimezone),
           isDemo,
           addDemoScheduled: addScheduled,
         });
@@ -480,7 +516,7 @@ export function ScheduleSequenceEmailsDialog({
                         <Input
                           type="datetime-local"
                           value={s.scheduledAt}
-                          min={toDatetimeLocalValue(new Date(Date.now() + 60_000), timezone)}
+                          min={toDatetimeLocalValue(new Date(Date.now() + 60_000), scheduleTimezone)}
                           onChange={(e) => updateStep(s.followupId, { scheduledAt: e.target.value })}
                           className={
                             stepOver
@@ -497,7 +533,7 @@ export function ScheduleSequenceEmailsDialog({
                                 : "text-[10px] text-muted-foreground"
                             }
                           >
-                            {formatDatetimeLocalPreview(s.scheduledAt, timezone)} ·{" "}
+                            {formatDatetimeLocalPreview(s.scheduledAt, scheduleTimezone)} ·{" "}
                             {timezoneLabel}
                             {loadLimit != null && info ? (
                               <>

@@ -122,6 +122,16 @@ export type ProspectingStrategy = {
   /** Recommended industry mix for the day. */
   industryAllocations?: StrategyIndustryAllocation[];
   dailyTargetDefault: number;
+  /**
+   * IANA timezone for outbound email scheduling (audience / prospect clock).
+   * When unset, schedule UIs fall back to the organization timezone.
+   * Ops dashboards and mailbox daily quotas still use the org timezone.
+   */
+  audienceTimezone?: string;
+  /** Soft send-window start hour (0–23) in audienceTimezone. Default 9. */
+  sendWindowStartHour?: number;
+  /** Soft send-window end hour (1–24, exclusive) in audienceTimezone. Default 12. */
+  sendWindowEndHour?: number;
   /** Integer version bumped on publish. */
   version: number;
   createdBy: string;

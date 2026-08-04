@@ -48,8 +48,18 @@ import { selectTriggerLabelById, capitalizeSelectToken } from "@/lib/base-ui-sel
 import { COMPANY_SIZES, COMPANY_SIZE_LABELS, REVENUE_RANGES } from "@/lib/constants";
 import type { CompanySize, RevenueRange } from "@/lib/types";
 import { downloadJson, slugifyPackId } from "@/lib/prospecting-strategy/pack";
+import {
+  buildTimezoneOptions,
+  formatTimezoneDisplayLabel,
+} from "@/lib/scheduling/timezone-options";
+import {
+  DEFAULT_SEND_WINDOW_END_HOUR,
+  DEFAULT_SEND_WINDOW_START_HOUR,
+} from "@/lib/email/audience-schedule";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 
 const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
+const ORG_TZ_VALUE = "__org__";
 
 const DAILY_TARGET_FIELDS: {
   key: keyof StrategyDailyTargets;
@@ -109,9 +119,15 @@ export default function StrategyDetailPage() {
   const ws = useWorkspace();
   const data = useProspectingStrategyData();
   const strategy = data.strategies.find((s) => s.id === id);
+  const orgTimezone = useOrgTimezone();
 
   const [draft, setDraft] = React.useState<ProspectingStrategy | null>(null);
   const [saving, setSaving] = React.useState(false);
+
+  const audienceTimezoneOptions = React.useMemo(
+    () => buildTimezoneOptions(draft?.audienceTimezone || orgTimezone),
+    [draft?.audienceTimezone, orgTimezone],
+  );
 
   React.useEffect(() => {
     if (strategy) setDraft(structuredClone(strategy));
@@ -561,6 +577,89 @@ A qualified prospect must answer:
                       )
                     }
                     placeholder="Higher = listed first (e.g. 100)"
+                  />
+                </div>
+                <div className="sm:col-span-2 space-y-1.5">
+                  <Label htmlFor="strategy-audience-tz">Audience timezone (email scheduling)</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Outbound sequence emails default to this clock (e.g. Australia/Sydney for an AU
+                    campaign). Leave as organization timezone for same-market teams. Dashboards and
+                    daily send limits still use the workspace timezone (
+                    {formatTimezoneDisplayLabel(orgTimezone)}).
+                  </p>
+                  <Select
+                    value={draft.audienceTimezone?.trim() ? draft.audienceTimezone : ORG_TZ_VALUE}
+                    onValueChange={(v) => {
+                      const nextTz: string | undefined =
+                        !v || v === ORG_TZ_VALUE ? undefined : v;
+                      setDraft((d) => (d ? { ...d, audienceTimezone: nextTz } : d));
+                    }}
+                  >
+                    <SelectTrigger id="strategy-audience-tz" className="w-full">
+                      <SelectValue placeholder="Use organization timezone" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ORG_TZ_VALUE}>
+                        Use organization timezone ({formatTimezoneDisplayLabel(orgTimezone)})
+                      </SelectItem>
+                      {audienceTimezoneOptions.map((tz) => (
+                        <SelectItem key={tz} value={tz}>
+                          {formatTimezoneDisplayLabel(tz)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="strategy-send-start">Preferred send window start</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Audience-local hour (0–23). Default {DEFAULT_SEND_WINDOW_START_HOUR}.
+                  </p>
+                  <Input
+                    id="strategy-send-start"
+                    type="number"
+                    min={0}
+                    max={23}
+                    value={draft.sendWindowStartHour ?? DEFAULT_SEND_WINDOW_START_HOUR}
+                    onChange={(e) =>
+                      setDraft((d) =>
+                        d
+                          ? {
+                              ...d,
+                              sendWindowStartHour: Math.min(
+                                23,
+                                Math.max(0, Number(e.target.value) || 0),
+                              ),
+                            }
+                          : d,
+                      )
+                    }
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="strategy-send-end">Preferred send window end</Label>
+                  <p className="text-xs text-muted-foreground">
+                    Exclusive end hour (1–24). Default {DEFAULT_SEND_WINDOW_END_HOUR} (noon).
+                  </p>
+                  <Input
+                    id="strategy-send-end"
+                    type="number"
+                    min={1}
+                    max={24}
+                    value={draft.sendWindowEndHour ?? DEFAULT_SEND_WINDOW_END_HOUR}
+                    onChange={(e) =>
+                      setDraft((d) =>
+                        d
+                          ? {
+                              ...d,
+                              sendWindowEndHour: Math.min(
+                                24,
+                                Math.max(1, Number(e.target.value) || 1),
+                              ),
+                            }
+                          : d,
+                      )
+                    }
                   />
                 </div>
                 <div className="sm:col-span-2 flex items-center gap-2 text-xs text-muted-foreground">

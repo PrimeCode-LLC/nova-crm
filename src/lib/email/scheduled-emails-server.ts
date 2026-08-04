@@ -27,9 +27,10 @@ import {
   SCHEDULED_SEND_MAX_ATTEMPTS,
   classifyScheduledSendError,
   nextRetryAtIso,
-  nextUtcMidnightIso,
+  nextZonedDayStartIso,
   normalizeSendGapSeconds,
 } from "@/lib/email/scheduled-send-failure";
+import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/firestore/tenant-write";
@@ -799,7 +800,8 @@ async function sendScheduledDoc(
   });
   if (!quota.ok) {
     const now = new Date().toISOString();
-    const deferAt = nextUtcMidnightIso(new Date(now));
+    const orgTimeZone = await getOrgTimezoneServer(organizationId);
+    const deferAt = nextZonedDayStartIso(new Date(now), orgTimeZone);
     await docRef.update({
       status: "pending",
       scheduledAt: deferAt,

@@ -1,3 +1,10 @@
+import { addUtcDayKey } from "@/lib/email/mailbox-schedule-capacity";
+import {
+  resolveOrgTimezone,
+  zonedDayKey,
+  zonedWallTimeToUtc,
+} from "@/lib/org-timezone";
+
 /** Max auto-retries for transient SMTP / network failures before permanent fail. */
 export const SCHEDULED_SEND_MAX_ATTEMPTS = 3;
 
@@ -83,13 +90,26 @@ export function nextRetryAtIso(attemptAfterFailure: number, now = new Date()): s
   return new Date(now.getTime() + scheduledSendRetryDelayMs(attemptAfterFailure)).toISOString();
 }
 
-/** Next UTC midnight after `from` (exclusive of current day). */
-export function nextUtcMidnightIso(from = new Date()): string {
-  const d = new Date(from);
-  d.setUTCHours(24, 0, 0, 0);
-  // Spread quota-deferred work slightly so they don't all fire at 00:00:00Z.
+/**
+ * Start of the next calendar day in `timeZone` after `from`, plus light jitter
+ * so quota-deferred sends don't all fire on the same second.
+ * Used when a mailbox daily limit is hit — must match org/mailbox quota day keys
+ * (never raw UTC midnight, which is ~evening for US zones).
+ */
+export function nextZonedDayStartIso(
+  from: Date = new Date(),
+  timeZone?: string,
+): string {
+  const zone = resolveOrgTimezone(timeZone, { fallback: "UTC" });
+  const nextKey = addUtcDayKey(zonedDayKey(from, zone), 1);
+  const start = zonedWallTimeToUtc(nextKey, 0, 0, 0, 0, zone);
   const jitterMs = Math.floor(Math.random() * 5 * 60_000);
-  return new Date(d.getTime() + jitterMs).toISOString();
+  return new Date(start.getTime() + jitterMs).toISOString();
+}
+
+/** @deprecated Prefer nextZonedDayStartIso with the org / mailbox timezone. */
+export function nextUtcMidnightIso(from = new Date()): string {
+  return nextZonedDayStartIso(from, "UTC");
 }
 
 export function normalizeSendGapSeconds(value: number | null | undefined): number {

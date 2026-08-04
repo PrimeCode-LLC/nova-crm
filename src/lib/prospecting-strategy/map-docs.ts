@@ -215,6 +215,18 @@ export function mapProspectingStrategy(id: string, raw: Record<string, unknown>)
       typeof raw.dailyTargetDefault === "number" && Number.isFinite(raw.dailyTargetDefault)
         ? raw.dailyTargetDefault
         : 150,
+    audienceTimezone: (() => {
+      const tz = optStr(raw.audienceTimezone);
+      return tz || undefined;
+    })(),
+    sendWindowStartHour:
+      typeof raw.sendWindowStartHour === "number" && Number.isFinite(raw.sendWindowStartHour)
+        ? Math.min(23, Math.max(0, Math.floor(raw.sendWindowStartHour)))
+        : undefined,
+    sendWindowEndHour:
+      typeof raw.sendWindowEndHour === "number" && Number.isFinite(raw.sendWindowEndHour)
+        ? Math.min(24, Math.max(1, Math.floor(raw.sendWindowEndHour)))
+        : undefined,
     version: typeof raw.version === "number" ? raw.version : 1,
     createdBy: String(raw.createdBy ?? ""),
     updatedBy: String(raw.updatedBy ?? ""),
