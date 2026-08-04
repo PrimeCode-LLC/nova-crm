@@ -113,6 +113,10 @@ function buildEmailHints(metrics: DashboardWorkflowMetrics): HintPart[] {
   if (metrics.retryingDeliveries > 0) {
     emailHints.push({ text: `${metrics.retryingDeliveries} retrying`, tone: "warn" });
   }
+  emailHints.push({
+    text: `${metrics.opensInRange} opened`,
+    tone: metrics.opensInRange > 0 ? "success" : undefined,
+  });
   if (metrics.bouncedEmailsInRange > 0 || metrics.openBounceReviewTasks > 0) {
     emailHints.push({
       text: `${metrics.bouncedEmailsInRange} bounced`,

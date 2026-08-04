@@ -65,6 +65,7 @@ import {
   Tag,
   CalendarClock,
   Mail,
+  MailOpen,
   MailWarning,
   Sparkles,
   UserCog,
@@ -157,6 +158,10 @@ const INDUSTRY_FILTER_NONE = "__no_industry__";
 const INBOX_MAIL_LEAD_FILTER_ALL = "all";
 const INBOX_MAIL_LEAD_FILTER_SYNCED = "synced";
 const INBOX_MAIL_LEAD_FILTER_NONE = "none";
+
+const EMAIL_OPENED_FILTER_ALL = "all";
+const EMAIL_OPENED_FILTER_OPENED = "opened";
+const EMAIL_OPENED_FILTER_NEVER = "never";
 const LEADS_TABLE_PAGE_SIZE = 10;
 const LEADS_TABLE_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 
@@ -457,6 +462,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   const [bulkTagLeadIds, setBulkTagLeadIds] = React.useState<string[]>([]);
   const [prospectAssignedToMe, setProspectAssignedToMe] = React.useState(false);
   const [inboxMailLeadFilter, setInboxMailLeadFilter] = React.useState<string>(INBOX_MAIL_LEAD_FILTER_ALL);
+  const [emailOpenedFilter, setEmailOpenedFilter] = React.useState<string>(EMAIL_OPENED_FILTER_ALL);
 
   const effectiveIntakeScope = lockedIntakeScope ?? intakeScope;
   const salesLeadTableReadOnly = lockedIntakeScope === "sales_lead";
@@ -634,6 +640,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     return "Inbox mail (any)";
   }, [inboxMailLeadFilter]);
 
+  const emailOpenedFilterTriggerLabel = React.useMemo(() => {
+    if (emailOpenedFilter === EMAIL_OPENED_FILTER_OPENED) return "Opened";
+    if (emailOpenedFilter === EMAIL_OPENED_FILTER_NEVER) return "Never opened";
+    return "Opens (any)";
+  }, [emailOpenedFilter]);
+
   const ownerScopeDeps = React.useMemo(
     () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
     [currentUserId, users, getUserById, getOwnerDisplayName],
@@ -678,6 +690,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     } else if (inboxMailLeadFilter === INBOX_MAIL_LEAD_FILTER_NONE) {
       rows = rows.filter((l) => !inboxSyncedLeadIds.has(l.id));
     }
+    if (emailOpenedFilter === EMAIL_OPENED_FILTER_OPENED) {
+      rows = rows.filter((l) => Boolean(l.lastEmailOpenedAt));
+    } else if (emailOpenedFilter === EMAIL_OPENED_FILTER_NEVER) {
+      rows = rows.filter((l) => !l.lastEmailOpenedAt);
+    }
     return rows;
   }, [
     afterIdleFilter,
@@ -688,6 +705,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     effectiveIntakeScope,
     inboxMailLeadFilter,
     inboxSyncedLeadIds,
+    emailOpenedFilter,
   ]);
 
   const companyFilterOptions = React.useMemo(() => {
@@ -1287,7 +1305,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
   React.useEffect(() => {
     setRowSelection({});
     setPagination((prev) => ({ ...prev, pageIndex: 0 }));
-  }, [ownerScope, effectiveIntakeScope, inboxMailLeadFilter, globalFilter, columnFilters]);
+  }, [ownerScope, effectiveIntakeScope, inboxMailLeadFilter, emailOpenedFilter, globalFilter, columnFilters]);
 
   const selectedCount = Object.keys(rowSelection).length;
   const stageFilter = (columnFilters.find((f) => f.id === "stage")?.value as string[]) ?? [];
@@ -1809,6 +1827,27 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             <SelectItem value={INBOX_MAIL_LEAD_FILTER_ALL}>Inbox mail (any)</SelectItem>
             <SelectItem value={INBOX_MAIL_LEAD_FILTER_SYNCED}>With inbox mail</SelectItem>
             <SelectItem value={INBOX_MAIL_LEAD_FILTER_NONE}>Without inbox mail</SelectItem>
+          </SelectContent>
+        </Select>
+
+        <Select
+          value={emailOpenedFilter}
+          onValueChange={(v) => {
+            if (v) setEmailOpenedFilter(v);
+          }}
+        >
+          <SelectTrigger
+            size="sm"
+            className="w-[min(180px,48vw)] min-w-0 gap-1.5"
+            title="Filter by tracked email opens"
+          >
+            <MailOpen className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+            <SelectValue placeholder="Opens">{emailOpenedFilterTriggerLabel}</SelectValue>
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={EMAIL_OPENED_FILTER_ALL}>Opens (any)</SelectItem>
+            <SelectItem value={EMAIL_OPENED_FILTER_OPENED}>Opened</SelectItem>
+            <SelectItem value={EMAIL_OPENED_FILTER_NEVER}>Never opened</SelectItem>
           </SelectContent>
         </Select>
 

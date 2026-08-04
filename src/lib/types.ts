@@ -628,6 +628,13 @@ export interface Lead {
   lastAutoReplyAt?: ISODate;
   lastAutoReplyMessageId?: string;
   /**
+   * Latest first-party email open (tracking pixel) for this lead.
+   * Stamped on first open per tracked message; used by dashboard + list filters.
+   */
+  lastEmailOpenedAt?: ISODate;
+  /** Count of uniquely opened tracked messages (increments on first open per message). */
+  emailOpenCount?: number;
+  /**
    * Soft prompt after a reply: promote prospect → sales lead and/or move stage to `replied`.
    * Set to `pending` on reply; cleared via accept (`accepted`) or dismiss (`dismissed`).
    */
@@ -868,6 +875,7 @@ export type TimelineEventType =
   | "email_sent"
   | "email_replied"
   | "email_auto_replied"
+  | "email_opened"
   | "email_bounced"
   | "note_added"
   | "followup_created"

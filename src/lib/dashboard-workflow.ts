@@ -69,6 +69,8 @@ export type DashboardWorkflowMetrics = {
   bouncedEmailsInRange: number;
   /** Open review tasks created from hard bounces (find valid email). */
   openBounceReviewTasks: number;
+  /** Leads with a first-party email open (`lastEmailOpenedAt`) in the selected range. */
+  opensInRange: number;
   activeSequences: number;
   remainingSequenceSteps: number;
   pausedOnReply: number;
@@ -187,6 +189,10 @@ export function computeDashboardWorkflowMetrics(input: {
     ).length,
     bouncedEmailsInRange,
     openBounceReviewTasks,
+    opensInRange: input.leads.filter((lead) => {
+      const openedAt = validTime(lead.lastEmailOpenedAt);
+      return openedAt !== undefined && openedAt >= start;
+    }).length,
     activeSequences: activePlanIds.size,
     remainingSequenceSteps: openUnpausedFollowups.filter(
       (followup) => Boolean(followup.planId && activePlanIds.has(followup.planId)),

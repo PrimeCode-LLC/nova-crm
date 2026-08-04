@@ -1,7 +1,10 @@
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue, type Firestore } from "firebase-admin/firestore";
 import { randomUUID } from "node:crypto";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { stripUndefined } from "@/lib/firestore/strip-undefined";
 import { injectMailTracking } from "@/lib/email/mail-tracking-inject";
 import { mailTrackingAvailable } from "@/lib/email/mail-tracking-token";
 import type {
@@ -80,6 +83,65 @@ export async function prepareTrackedHtml(input: {
   return { html: prepared.html, trackingId };
 }
 
+type FirstOpenMeta = {
+  organizationId: string;
+  leadId: string;
+  messageId?: string;
+  mailboxId?: string;
+  now: string;
+};
+
+/** Best-effort lead denorm + timeline for the first open of a tracked message. */
+async function stampLeadEmailOpened(
+  db: Firestore,
+  meta: FirstOpenMeta,
+  trackingId: string,
+): Promise<void> {
+  const leadRef = db.collection(COLLECTIONS.leads).doc(meta.leadId);
+  const leadSnap = await leadRef.get();
+  if (!leadSnap.exists) return;
+  const leadData = leadSnap.data() as Record<string, unknown>;
+  if (String(leadData.organizationId ?? "") !== meta.organizationId) return;
+
+  const rawOwner = leadData.ownerId;
+  const leadOwnerId =
+    (typeof rawOwner === "string" && rawOwner.trim()) || "system";
+  const actorId = leadOwnerId;
+  const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
+
+  await leadRef.set(
+    {
+      lastEmailOpenedAt: meta.now,
+      emailOpenCount: FieldValue.increment(1),
+      lastActivityAt: meta.now,
+      updatedAt: meta.now,
+    },
+    { merge: true },
+  );
+
+  const teId = `te-${randomUUID()}`;
+  await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+    stampForCreate(
+      meta.organizationId,
+      stripUndefined({
+        leadId: meta.leadId,
+        leadOwnerId,
+        leadOwnerManagerIds,
+        type: "email_opened",
+        actorId,
+        summary: "Email opened",
+        payload: {
+          trackingId,
+          ...(meta.messageId ? { messageId: meta.messageId } : {}),
+          ...(meta.mailboxId ? { mailboxId: meta.mailboxId } : {}),
+        },
+        createdAt: meta.now,
+      }),
+      actorId,
+    ),
+  );
+}
+
 export async function recordMailTrackingOpen(input: {
   trackingId: string;
   userAgent?: string | null;
@@ -90,6 +152,7 @@ export async function recordMailTrackingOpen(input: {
   const db = getAdminDb();
   if (!db) return { ok: false };
   const ref = db.collection(COLLECTIONS.mailTrackingMessages).doc(input.trackingId);
+  let firstOpenMeta: FirstOpenMeta | null = null;
   try {
     await db.runTransaction(async (tx) => {
       const snap = await tx.get(ref);
@@ -97,18 +160,48 @@ export async function recordMailTrackingOpen(input: {
       const data = snap.data() as Record<string, unknown>;
       if (!data.trackOpens) return;
       const now = new Date().toISOString();
+      const isFirstOpen = !data.firstOpenedAt;
       const patch: Record<string, unknown> = {
         openCount: FieldValue.increment(1),
         lastOpenedAt: now,
         updatedAt: now,
       };
-      if (!data.firstOpenedAt) patch.firstOpenedAt = now;
+      if (isFirstOpen) patch.firstOpenedAt = now;
       tx.update(ref, patch);
+
+      if (isFirstOpen) {
+        const leadId =
+          typeof data.leadId === "string" ? data.leadId.trim() : "";
+        const organizationId =
+          typeof data.organizationId === "string" ? data.organizationId.trim() : "";
+        if (leadId && organizationId) {
+          firstOpenMeta = {
+            organizationId,
+            leadId,
+            ...(typeof data.messageId === "string" && data.messageId
+              ? { messageId: data.messageId }
+              : {}),
+            ...(typeof data.mailboxId === "string" && data.mailboxId
+              ? { mailboxId: data.mailboxId }
+              : {}),
+            now,
+          };
+        }
+      }
     });
-    return { ok: true };
   } catch {
     return { ok: false };
   }
+
+  // Lead denorm + timeline must not break the tracking pixel response.
+  if (firstOpenMeta) {
+    try {
+      await stampLeadEmailOpened(db, firstOpenMeta, input.trackingId);
+    } catch {
+      /* best-effort */
+    }
+  }
+  return { ok: true };
 }
 
 export async function resolveMailTrackingClick(input: {

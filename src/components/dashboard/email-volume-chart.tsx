@@ -67,8 +67,9 @@ export function EmailVolumeChart({
           <div>
             <CardTitle className="text-sm font-semibold">Email volume</CardTitle>
             <CardDescription className="text-xs">
-              Sent · replies · bounces · {fmtNumber(totals.sent)} sent ·{" "}
-              {fmtNumber(totals.replies)} replies · {fmtNumber(totals.bounces)} bounced
+              Sent · opens · replies · bounces · {fmtNumber(totals.sent)} sent ·{" "}
+              {fmtNumber(totals.opens)} opened · {fmtNumber(totals.replies)} replies ·{" "}
+              {fmtNumber(totals.bounces)} bounced
             </CardDescription>
           </div>
           {!compact ? (
@@ -114,6 +115,10 @@ export function EmailVolumeChart({
                   <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.4} />
                   <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
                 </linearGradient>
+                <linearGradient id="opsOpens" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="0%" stopColor="var(--chart-3)" stopOpacity={0.35} />
+                  <stop offset="100%" stopColor="var(--chart-3)" stopOpacity={0} />
+                </linearGradient>
                 <linearGradient id="opsReplies" x1="0" y1="0" x2="0" y2="1">
                   <stop offset="0%" stopColor="var(--chart-2)" stopOpacity={0.35} />
                   <stop offset="100%" stopColor="var(--chart-2)" stopOpacity={0} />
@@ -158,6 +163,15 @@ export function EmailVolumeChart({
               />
               <Area
                 type="monotone"
+                dataKey="opens"
+                name="Opens"
+                stroke="var(--chart-3)"
+                strokeWidth={2}
+                fill="url(#opsOpens)"
+                isAnimationActive={!compact}
+              />
+              <Area
+                type="monotone"
                 dataKey="replies"
                 name="Replies"
                 stroke="var(--chart-2)"
@@ -181,6 +195,10 @@ export function EmailVolumeChart({
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-1)" }} />{" "}
             Sent
+          </span>
+          <span className="flex items-center gap-1.5">
+            <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-3)" }} />{" "}
+            Opens
           </span>
           <span className="flex items-center gap-1.5">
             <span className="h-2 w-2 shrink-0 rounded-sm" style={{ background: "var(--chart-2)" }} />{" "}

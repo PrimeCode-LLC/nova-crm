@@ -139,6 +139,13 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       typeof raw.lastAutoReplyMessageId === "string"
         ? raw.lastAutoReplyMessageId
         : undefined,
+    lastEmailOpenedAt: raw.lastEmailOpenedAt
+      ? firestoreValueToIso(raw.lastEmailOpenedAt)
+      : undefined,
+    emailOpenCount:
+      typeof raw.emailOpenCount === "number" && Number.isFinite(raw.emailOpenCount)
+        ? raw.emailOpenCount
+        : undefined,
     replyReviewStatus:
       raw.replyReviewStatus === "pending" ||
       raw.replyReviewStatus === "dismissed" ||

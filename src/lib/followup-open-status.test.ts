@@ -11,8 +11,11 @@ import {
 } from "@/lib/dashboard-workflow";
 import {
   buildActionBoard,
+  buildEmailVolumeSeries,
   buildFollowupScheduleByDay,
+  buildOpsActivityFeed,
   collectEmailBounceTimes,
+  emailVolumeTotals,
 } from "@/lib/dashboard-ops-analytics";
 import type { Contact, Followup, Lead, LeadTask, TimelineEvent } from "@/lib/types";
 
@@ -134,6 +137,104 @@ describe("computeDashboardWorkflowMetrics overdue", () => {
     expect(metrics.overdueFollowups).toBe(1);
     expect(metrics.followupsDue).toBe(2); // overdue + today
     expect(metrics.failedDeliveries).toBe(1);
+  });
+
+  it("counts opensInRange from lastEmailOpenedAt", () => {
+    const now = new Date("2026-07-29T15:00:00.000Z");
+    const lead = (partial: Partial<Lead> & Pick<Lead, "id">): Lead =>
+      ({
+        accountId: "a1",
+        contactId: "c1",
+        channel: "cold_email",
+        stage: "new",
+        temperature: "cold",
+        priority: "medium",
+        ownerId: "u1",
+        contactName: "Ada",
+        companyName: "Acme",
+        touches: 0,
+        isIdle: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        ...partial,
+      }) as Lead;
+
+    const metrics = computeDashboardWorkflowMetrics({
+      leads: [
+        lead({ id: "in-range", lastEmailOpenedAt: "2026-07-28T10:00:00.000Z" }),
+        lead({ id: "out-of-range", lastEmailOpenedAt: "2026-06-01T10:00:00.000Z" }),
+        lead({ id: "never" }),
+      ],
+      followups: [],
+      plans: [],
+      tasks: [],
+      currentUserId: "u1",
+      range: "7d",
+      now,
+    });
+
+    expect(metrics.opensInRange).toBe(1);
+  });
+});
+
+describe("buildOpsActivityFeed email_opened", () => {
+  it("includes email_opened timeline events", () => {
+    const feed = buildOpsActivityFeed({
+      timelineByLead: {
+        lead1: [
+          {
+            id: "te-1",
+            type: "email_opened",
+            actorId: "u1",
+            summary: "Email opened",
+            createdAt: "2026-07-28T10:00:00.000Z",
+          } as TimelineEvent,
+        ],
+      },
+      limit: 10,
+    });
+    expect(feed).toHaveLength(1);
+    expect(feed[0]?.type).toBe("email_opened");
+    expect(feed[0]?.leadId).toBe("lead1");
+  });
+});
+
+describe("buildEmailVolumeSeries opens", () => {
+  it("buckets lastEmailOpenedAt into the opens series", () => {
+    const now = new Date("2026-07-29T15:00:00.000Z");
+    const lead = (partial: Partial<Lead> & Pick<Lead, "id">): Lead =>
+      ({
+        accountId: "a1",
+        contactId: "c1",
+        channel: "cold_email",
+        stage: "new",
+        temperature: "cold",
+        priority: "medium",
+        ownerId: "u1",
+        contactName: "Ada",
+        companyName: "Acme",
+        touches: 0,
+        isIdle: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+        ...partial,
+      }) as Lead;
+
+    const points = buildEmailVolumeSeries({
+      followups: [],
+      leads: [
+        lead({ id: "opened", lastEmailOpenedAt: "2026-07-28T10:00:00.000Z" }),
+        lead({ id: "old", lastEmailOpenedAt: "2026-06-01T10:00:00.000Z" }),
+        lead({ id: "never" }),
+      ],
+      period: "week",
+      now,
+      timeZone: "UTC",
+    });
+
+    const totals = emailVolumeTotals(points);
+    expect(totals.opens).toBe(1);
+    expect(totals.sent).toBe(0);
   });
 });
 

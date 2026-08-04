@@ -20,6 +20,7 @@ import {
   Users,
   Workflow,
   Rss,
+  Eye,
   EyeOff,
 } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -34,6 +35,7 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   email_sent: Send,
   email_replied: MessageSquareReply,
   email_auto_replied: MessageSquareReply,
+  email_opened: Eye,
   followup_created: Mail,
   followup_completed: CheckCircle2,
   followup_plan_paused: Mail,

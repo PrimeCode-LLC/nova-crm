@@ -496,6 +496,7 @@ export default function DashboardPage() {
         { label: "Replies in range", value: String(workflowMetrics.repliesInRange) },
         { label: "Replies pending review", value: String(workflowMetrics.repliesPendingReview) },
         { label: "Emails sent in range", value: String(workflowMetrics.sentInRange) },
+        { label: "Emails opened in range", value: String(workflowMetrics.opensInRange) },
         { label: "Emails scheduled", value: String(workflowMetrics.scheduledSteps) },
         { label: "Emails need schedule", value: String(workflowMetrics.readyUnscheduledSteps) },
         { label: "Email failures", value: String(workflowMetrics.failedDeliveries) },
@@ -914,6 +915,10 @@ export default function DashboardPage() {
                     hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.readyUnscheduledSteps} need schedule · ${workflowMetrics.failedDeliveries} failed${
                       workflowMetrics.retryingDeliveries > 0
                         ? ` · ${workflowMetrics.retryingDeliveries} retrying`
+                        : ""
+                    }${
+                      workflowMetrics.opensInRange > 0
+                        ? ` · ${workflowMetrics.opensInRange} opened`
                         : ""
                     }${
                       workflowMetrics.bouncedEmailsInRange > 0 ||

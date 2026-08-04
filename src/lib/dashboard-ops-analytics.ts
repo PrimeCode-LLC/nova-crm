@@ -34,6 +34,7 @@ export type EmailVolumePoint = {
   label: string;
   key: string;
   sent: number;
+  opens: number;
   replies: number;
   bounces: number;
 };
@@ -186,6 +187,7 @@ export function buildEmailVolumeSeries(input: {
   const now = input.now ?? new Date();
   const zone = resolveOrgTimezone(input.timeZone);
   const sent = input.followups.filter((f) => f.deliveryStatus === "sent" && validTime(f.sentAt) !== undefined);
+  const opens = input.leads.filter((l) => validTime(l.lastEmailOpenedAt) !== undefined);
   const replies = input.leads.filter((l) => validTime(l.lastReplyAt) !== undefined);
   const bounceTimes = collectEmailBounceTimes({
     contacts: input.contacts,
@@ -207,6 +209,10 @@ export function buildEmailVolumeSeries(input: {
         label: hourLabel(h),
         sent: sent.filter((f) => {
           const t = validTime(f.sentAt)!;
+          return t >= bs && t < be;
+        }).length,
+        opens: opens.filter((l) => {
+          const t = validTime(l.lastEmailOpenedAt)!;
           return t >= bs && t < be;
         }).length,
         replies: replies.filter((l) => {
@@ -238,6 +244,10 @@ export function buildEmailVolumeSeries(input: {
           : String(Number(key.slice(8, 10))),
       sent: sent.filter((f) => {
         const t = validTime(f.sentAt)!;
+        return t >= bs && t < be;
+      }).length,
+      opens: opens.filter((l) => {
+        const t = validTime(l.lastEmailOpenedAt)!;
         return t >= bs && t < be;
       }).length,
       replies: replies.filter((l) => {
@@ -475,6 +485,7 @@ const FEED_TYPES = new Set<TimelineEventType>([
   "email_sent",
   "email_replied",
   "email_auto_replied",
+  "email_opened",
   "followup_created",
   "followup_completed",
   "followup_plan_paused",
@@ -637,15 +648,17 @@ export function buildActionBoard(input: {
 
 export function emailVolumeTotals(points: readonly EmailVolumePoint[]): {
   sent: number;
+  opens: number;
   replies: number;
   bounces: number;
 } {
   return points.reduce(
     (acc, p) => ({
       sent: acc.sent + p.sent,
+      opens: acc.opens + p.opens,
       replies: acc.replies + p.replies,
       bounces: acc.bounces + p.bounces,
     }),
-    { sent: 0, replies: 0, bounces: 0 },
+    { sent: 0, opens: 0, replies: 0, bounces: 0 },
   );
 }
