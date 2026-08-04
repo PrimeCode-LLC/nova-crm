@@ -18,9 +18,13 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
-import { isoFromDateInput, todayDateInputValue } from "@/lib/followup-date";
+import { todayDateInputValue } from "@/lib/followup-date";
 import { channelMixForFollowupChannel } from "@/lib/followup-plans";
-import { zonedDayKey } from "@/lib/org-timezone";
+import {
+  datetimeLocalInZone,
+  isoFromDatetimeLocalInZone,
+  zonedDayKey,
+} from "@/lib/org-timezone";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -44,22 +48,39 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+/** Default wall-clock time when creating a reminder (matches prior noon-of-day storage). */
+const DEFAULT_DUE_TIME = "12:00";
+
 function defaultFollowupTitle(lead: Lead | undefined): string {
   return lead ? `Follow up with ${lead.contactName}` : "";
 }
 
-function ymdFromIso(value: unknown, timeZone: string): string {
+function isoFromUnknown(value: unknown): string {
   if (value == null || value === "") return "";
-  const iso =
-    typeof value === "string"
-      ? value
-      : value instanceof Date
-        ? value.toISOString()
-        : firestoreValueToIso(value);
+  if (typeof value === "string") return value;
+  if (value instanceof Date) return value.toISOString();
+  return firestoreValueToIso(value);
+}
+
+function ymdFromIso(value: unknown, timeZone: string): string {
+  const iso = isoFromUnknown(value);
   if (!iso.trim()) return "";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return "";
   return zonedDayKey(d, timeZone);
+}
+
+function hmFromIso(value: unknown, timeZone: string): string {
+  const iso = isoFromUnknown(value);
+  if (!iso.trim()) return DEFAULT_DUE_TIME;
+  const local = datetimeLocalInZone(iso, timeZone);
+  const hm = local.split("T")[1];
+  return hm && /^\d{2}:\d{2}$/.test(hm) ? hm : DEFAULT_DUE_TIME;
+}
+
+function dueAtFromDateAndTime(dueDate: string, dueTime: string, timeZone: string): string {
+  const hm = /^\d{1,2}:\d{2}$/.test(dueTime.trim()) ? dueTime.trim() : DEFAULT_DUE_TIME;
+  return isoFromDatetimeLocalInZone(`${dueDate}T${hm}`, timeZone);
 }
 
 function leadMatchesActivityDate(lead: Lead, ymd: string, timeZone: string): boolean {
@@ -112,6 +133,7 @@ export function NewFollowupDialog({
   const [emailSubject, setEmailSubject] = React.useState("");
   const [channel, setChannel] = React.useState<FollowupChannel | "">("");
   const [dueDate, setDueDate] = React.useState(() => todayDateInputValue(timeZone));
+  const [dueTime, setDueTime] = React.useState(DEFAULT_DUE_TIME);
   const [priority, setPriority] = React.useState<LeadPriority>("medium");
   const [leadOwnerScope, setLeadOwnerScope] = React.useState("all-owners");
   const [leadActivityDate, setLeadActivityDate] = React.useState("");
@@ -161,6 +183,7 @@ export function NewFollowupDialog({
         setEmailSubject(editFollowup.emailSubject ?? "");
         setChannel(editFollowup.channel ?? "");
         setDueDate(ymdFromIso(editFollowup.dueAt, timeZone) || todayDateInputValue(timeZone));
+        setDueTime(hmFromIso(editFollowup.dueAt, timeZone));
         setPriority(editFollowup.priority);
         setLeadOwnerScope("all-owners");
         setLeadActivityDate("");
@@ -176,6 +199,7 @@ export function NewFollowupDialog({
       setEmailSubject("");
       setChannel("");
       setDueDate(todayDateInputValue(timeZone));
+      setDueTime(DEFAULT_DUE_TIME);
       setPriority("medium");
       setLeadOwnerScope("all-owners");
       setLeadActivityDate("");
@@ -270,6 +294,13 @@ export function NewFollowupDialog({
       return;
     }
 
+    if (!dueDate) {
+      toast.error("Pick a due date.");
+      return;
+    }
+
+    const dueAt = dueAtFromDateAndTime(dueDate, dueTime, timeZone);
+
     if (isEdit && editFollowup && onUpdate) {
       const patch: Partial<FollowupEditableFields> = {
         title: t,
@@ -277,7 +308,7 @@ export function NewFollowupDialog({
         messageBody: messageBody.trim(),
         emailSubject: emailSubject.trim(),
         channel: channel || undefined,
-        dueAt: isoFromDateInput(dueDate, timeZone),
+        dueAt,
         priority,
         ownerId: editFollowup.ownerId,
       };
@@ -305,7 +336,7 @@ export function NewFollowupDialog({
       messageBody: messageBody.trim() || undefined,
       emailSubject: emailSubject.trim() || undefined,
       channel: channel || undefined,
-      dueAt: isoFromDateInput(dueDate, timeZone),
+      dueAt,
       ownerId: selectedLead.ownerId ?? currentUserId,
       priority,
       auto: false,
@@ -323,7 +354,7 @@ export function NewFollowupDialog({
             <DialogTitle>{isEdit ? "Edit reminder" : "Add reminder"}</DialogTitle>
             <DialogDescription>
               {isEdit
-                ? "Update the reminder details. Changing due date or message cancels any pending scheduled email."
+                ? "Update the reminder details. Changing due date, time, or message cancels any pending scheduled email."
                 : "Create a one-off reminder linked to this lead."}
             </DialogDescription>
           </DialogHeader>
@@ -508,24 +539,33 @@ export function NewFollowupDialog({
                 />
               </div>
               <div className="grid gap-2">
-                <Label>Priority</Label>
-                <Select
-                  value={priority}
-                  onValueChange={(v) => {
-                    if (v) setPriority(v as LeadPriority);
-                  }}
-                >
-                  <SelectTrigger>
-                    <SelectValue>{PRIORITY_TONE[priority]?.label ?? undefined}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="low">Low</SelectItem>
-                    <SelectItem value="medium">Medium</SelectItem>
-                    <SelectItem value="high">High</SelectItem>
-                    <SelectItem value="urgent">Urgent</SelectItem>
-                  </SelectContent>
-                </Select>
+                <Label htmlFor="followup-due-time">Due time</Label>
+                <Input
+                  id="followup-due-time"
+                  type="time"
+                  value={dueTime}
+                  onChange={(e) => setDueTime(e.target.value)}
+                />
               </div>
+            </div>
+            <div className="grid gap-2">
+              <Label>Priority</Label>
+              <Select
+                value={priority}
+                onValueChange={(v) => {
+                  if (v) setPriority(v as LeadPriority);
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue>{PRIORITY_TONE[priority]?.label ?? undefined}</SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="low">Low</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="urgent">Urgent</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter className={isEdit ? "sm:justify-between" : undefined}>
