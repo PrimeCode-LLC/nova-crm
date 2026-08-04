@@ -75,7 +75,11 @@ export function shouldOfferEmailVerify(status: EmailVerificationStatus): boolean
 }
 
 /** Filter buckets for prospects/leads table (bulk workflows). */
-export type EmailVerificationFilterBucket = "verified" | "risky" | "other";
+export type EmailVerificationFilterBucket =
+  | "verified"
+  | "risky"
+  | "not_verified"
+  | "invalid";
 
 export const EMAIL_VERIFICATION_FILTER_OPTIONS: Array<{
   value: EmailVerificationFilterBucket;
@@ -83,7 +87,8 @@ export const EMAIL_VERIFICATION_FILTER_OPTIONS: Array<{
 }> = [
   { value: "verified", label: "Verified" },
   { value: "risky", label: "Risky (catch-all)" },
-  { value: "other", label: "Other (not verified / invalid)" },
+  { value: "not_verified", label: "Not verified" },
+  { value: "invalid", label: "Invalid" },
 ];
 
 export function emailVerificationFilterBucket(
@@ -91,7 +96,8 @@ export function emailVerificationFilterBucket(
 ): EmailVerificationFilterBucket {
   if (status === "verified") return "verified";
   if (status === "catch_all") return "risky";
-  return "other";
+  if (status === "bounced") return "invalid";
+  return "not_verified";
 }
 
 export function emailVerificationBadgeClass(status: EmailVerificationStatus): string {

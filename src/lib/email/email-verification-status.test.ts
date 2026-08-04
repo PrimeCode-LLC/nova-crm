@@ -88,7 +88,7 @@ describe("emailVerificationFilterBucket", () => {
   it("maps statuses into filter buckets", () => {
     expect(emailVerificationFilterBucket("verified")).toBe("verified");
     expect(emailVerificationFilterBucket("catch_all")).toBe("risky");
-    expect(emailVerificationFilterBucket("not_verified")).toBe("other");
-    expect(emailVerificationFilterBucket("bounced")).toBe("other");
+    expect(emailVerificationFilterBucket("not_verified")).toBe("not_verified");
+    expect(emailVerificationFilterBucket("bounced")).toBe("invalid");
   });
 });
