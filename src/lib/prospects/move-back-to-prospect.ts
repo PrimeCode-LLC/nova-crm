@@ -41,10 +41,10 @@ export function moveBackBlockedReason(
   }
   if (!MOVE_BACK_SAFE_STAGES.includes(lead.stage)) {
     const label = STAGES_BY_KEY[lead.stage]?.label ?? lead.stage;
-    return `This lead is at ${label}. Archive it instead of moving it back to prospect.`;
+    return `This lead is at ${label}. Delete it instead of moving it back to prospect.`;
   }
   if (opts?.hasDeal) {
-    return "This lead has a deal attached. Archive it instead of moving it back.";
+    return "This lead has a deal attached. Delete it instead of moving it back.";
   }
   return null;
 }

@@ -2077,11 +2077,10 @@ export function WorkspaceModeProvider({
     async (leadId: string, options?: { quiet?: boolean }): Promise<boolean> => {
       const quiet = options?.quiet === true;
       const snap = snapshotRef.current;
-      const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole;
-      const allowed = role === "owner" || role === "admin";
-      if (!allowed) {
+      const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? "member";
+      if (!roleAtLeast(role, "manager")) {
         if (!quiet) {
-          toast.error("Only organization owners and admins can delete leads.");
+          toast.error("Only organization owners, admins, and managers can delete leads.");
         }
         return false;
       }
@@ -2485,10 +2484,8 @@ export function WorkspaceModeProvider({
     const viewer =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId) ??
       (userDoc && fbUser?.uid ? ({ ...userDoc, id: fbUser.uid } as User) : undefined);
-    const canDeleteLeads =
-      viewerRole === "owner" ||
-      viewerRole === "admin" ||
-      canAction(viewer, "leads.archive");
+    /** Permanent lead delete — org owner / admin / manager only (matches Firestore rules). */
+    const canDeleteLeads = roleAtLeast(viewerRole, "manager");
     const canEditLead = (lead: Lead) => canEditProspectDerivedLead(lead, viewerRole);
     const reportIds = viewer
       ? collectDescendantUserIds(viewer.id, snapshotWithIdle.users)

@@ -338,7 +338,7 @@ service cloud.firestore {
           || resource.data.get('prospectSourceId', '') == ''
           || isOrgAtLeast('admin')
         );
-      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('manager');
     }
 
     match /notes/{id} {

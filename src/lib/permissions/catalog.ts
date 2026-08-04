@@ -399,9 +399,9 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
     group: "leads_prospects",
   },
   "leads.archive": {
-    label: "Archive leads",
-    description: "Archive or soft-delete leads",
-    group: "leads_prospects",
+    label: "Delete leads",
+    description: "Permanently delete leads from the workspace (no undo)",
+    group: "danger",
   },
   "leads.export": {
     label: "Export leads",

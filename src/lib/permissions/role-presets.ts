@@ -99,7 +99,6 @@ const FRONTLINE_ACTIONS: ActionKey[] = [
 const TEAM_LEAD_ACTIONS: ActionKey[] = [
   ...FRONTLINE_ACTIONS,
   "leads.reassign",
-  "leads.archive",
   "leads.bulk_edit",
   "leads.export",
   "prospects.assign_channels",
@@ -116,6 +115,8 @@ const TEAM_LEAD_ACTIONS: ActionKey[] = [
 
 const MANAGER_ACTIONS: ActionKey[] = [
   ...TEAM_LEAD_ACTIONS,
+  /** Permanent lead delete — managers+ only (org owners/admins also via org role gate). */
+  "leads.archive",
   "intake.delete_posts",
   "intake.bulk_dismiss",
   "intake.configure_filters",

@@ -4,7 +4,7 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 
 /**
  * Deletes a lead document and decrements the parent account's `leadCount`.
- * Call only when Firestore rules allow delete (org owner or admin).
+ * Call only when Firestore rules allow delete (org owner, admin, or manager).
  */
 export async function persistLeadDeleteClient(
   db: Firestore,

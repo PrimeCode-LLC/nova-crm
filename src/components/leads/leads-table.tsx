@@ -623,13 +623,13 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         toast.info("Demo workspace", {
           description:
             ids.length === 1
-              ? "Archiving is disabled in sample data."
-              : "Bulk archive is disabled in sample data.",
+              ? "Deleting is disabled in sample data."
+              : "Bulk delete is disabled in sample data.",
         });
         return;
       }
       if (!canDeleteLeads) {
-        toast.error("Only organization owners and admins can archive leads.");
+        toast.error("Only organization owners, admins, and managers can delete leads.");
         return;
       }
       setArchiveLeadIds(ids);
@@ -670,7 +670,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     if (removed > 0) {
       const n = archiveLeadIds.length;
       toast.success(
-        removed === 1 ? "Lead archived" : `Archived ${removed} lead${removed === 1 ? "" : "s"}`,
+        removed === 1 ? "Lead deleted" : `Deleted ${removed} lead${removed === 1 ? "" : "s"}`,
         removed < n
           ? { description: `${n - removed} could not be removed. Check permissions or try again.` }
           : undefined,
@@ -679,7 +679,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       setArchiveLeadIds([]);
       setRowSelection({});
     } else {
-      toast.error("Could not archive", {
+      toast.error("Could not delete", {
         description: "None of the selected leads could be removed. Try again or contact an admin.",
       });
     }
@@ -1316,7 +1316,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                       openArchiveForIds([id]);
                     }}
                   >
-                    Archive
+                    Delete
                   </DropdownMenuItem>
                 </>
               ) : null}
@@ -1538,12 +1538,14 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {archiveLeadIds.length === 1 ? "Archive this lead?" : `Archive ${archiveLeadIds.length} leads?`}
+              {archiveLeadIds.length === 1
+                ? "Delete this lead permanently?"
+                : `Delete ${archiveLeadIds.length} leads permanently?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {archiveLeadIds.length === 1
-                ? "This removes the lead from your workspace. Notes and activity for it will no longer appear."
-                : "These leads will be removed from your workspace. Notes and activity for them will no longer appear."}
+                ? "This permanently removes the lead from your workspace. Notes and activity for it will no longer appear. This cannot be undone."
+                : "These leads will be permanently removed from your workspace. Notes and activity for them will no longer appear. This cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1555,7 +1557,11 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
                 void confirmArchive();
               }}
             >
-              {archiveBusy ? "Archiving…" : archiveLeadIds.length === 1 ? "Archive" : "Archive all"}
+              {archiveBusy
+                ? "Deleting…"
+                : archiveLeadIds.length === 1
+                  ? "Delete"
+                  : "Delete all"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2195,17 +2201,19 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           >
             <XCircle className="h-3.5 w-3.5" /> Mark as Lost
           </Button>
-          <Button
-            variant="destructive"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              openArchiveForIds(ids);
-            }}
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Archive
-          </Button>
+          {canDeleteLeads ? (
+            <Button
+              variant="destructive"
+              size="sm"
+              type="button"
+              onClick={() => {
+                const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                openArchiveForIds(ids);
+              }}
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Delete
+            </Button>
+          ) : null}
         </div>
       )}
 

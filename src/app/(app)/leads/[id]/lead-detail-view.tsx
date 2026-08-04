@@ -797,8 +797,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this lead?</AlertDialogTitle>
             <AlertDialogDescription>
-              This removes {lead.contactName} at {lead.companyName} from your workspace. Notes and activity
-              for this lead will no longer appear. Only organization owners and admins can do this.
+              This permanently removes {lead.contactName} at {lead.companyName} from your workspace. Notes and activity
+              for this lead will no longer appear. This cannot be undone. Only organization owners, admins, and managers can do this.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
