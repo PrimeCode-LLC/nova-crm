@@ -4,6 +4,8 @@ import * as React from "react";
 import Link from "next/link";
 import {
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   MailWarning,
   Pencil,
   RefreshCw,
@@ -107,7 +109,7 @@ export function FollowupGroup({
   return (
     <Card className={cn(toneRing)}>
       <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex items-start justify-between gap-3">
           <div className="flex items-start gap-3 min-w-0">
             {items.length > 0 ? (
               <Checkbox
@@ -152,6 +154,35 @@ export function FollowupGroup({
               ) : null}
             </div>
           </div>
+          {items.length > 0 ? (
+            <div className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={safePageIndex <= 0}
+                aria-label={`Previous ${title} page`}
+                onClick={() => setPageIndex(safePageIndex - 1)}
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </Button>
+              <span className="min-w-[4.5rem] text-center tabular-nums">
+                {safePageIndex + 1} / {totalPages}
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="icon"
+                className="h-7 w-7"
+                disabled={safePageIndex >= totalPages - 1}
+                aria-label={`Next ${title} page`}
+                onClick={() => setPageIndex(safePageIndex + 1)}
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ) : null}
         </div>
       </CardHeader>
       <CardContent className="pt-0">

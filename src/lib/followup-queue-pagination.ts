@@ -3,9 +3,9 @@ import type { FollowupChannelFilter } from "@/lib/followup-plans";
 export const FOLLOWUP_PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
 export type FollowupPageSize = (typeof FOLLOWUP_PAGE_SIZE_OPTIONS)[number];
 
-export const FOLLOWUP_DEFAULT_PAGE_SIZE: FollowupPageSize = 20;
+export const FOLLOWUP_DEFAULT_PAGE_SIZE: FollowupPageSize = 10;
 
-const PAGE_SIZE_STORAGE_KEY = "followups-page-size";
+const PAGE_SIZE_STORAGE_KEY = "followups-page-size-v2";
 const CHANNEL_FILTER_STORAGE_KEY = "followups-channel-filter";
 
 export function isFollowupPageSize(value: number): value is FollowupPageSize {
