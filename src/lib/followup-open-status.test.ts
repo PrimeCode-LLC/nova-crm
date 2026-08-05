@@ -348,7 +348,13 @@ describe("prospect routing funnel metrics", () => {
     const ready = prospect({
       id: "ready",
       prospectChannelAssignments: [
-        { id: "a1", channel: "cold_email", assigneeId: "u2", assignedAt: "2026-01-02T00:00:00.000Z" },
+        {
+          id: "a1",
+          channel: "cold_email",
+          assigneeId: "u2",
+          assignedById: "u1",
+          assignedAt: "2026-01-02T00:00:00.000Z",
+        },
       ],
     });
     const pushed = prospect({
@@ -359,6 +365,7 @@ describe("prospect routing funnel metrics", () => {
           id: "a1",
           channel: "cold_email",
           assigneeId: "u2",
+          assignedById: "u1",
           assignedAt: "2026-01-02T00:00:00.000Z",
           pushedAt: "2026-01-03T00:00:00.000Z",
         },

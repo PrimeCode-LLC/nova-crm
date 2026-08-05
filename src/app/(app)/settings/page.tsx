@@ -629,8 +629,12 @@ function SettingsPage() {
                   to change the shared workspace clock and send policy. The header clock always
                   follows that setting.
                 </p>
-                <Button asChild size="sm">
-                  <Link href="/admin/organization">Open Organization settings</Link>
+                <Button
+                  size="sm"
+                  nativeButton={false}
+                  render={<Link href="/admin/organization" />}
+                >
+                  Open Organization settings
                 </Button>
               </CardContent>
             </Card>
