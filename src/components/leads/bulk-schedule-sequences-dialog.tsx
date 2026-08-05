@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -56,13 +57,25 @@ import {
 import {
   scheduleFollowupEmailClient,
 } from "@/lib/schedule-followup-email-client";
-import { isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
+import {
+  formatInstantInZone,
+  isoFromDatetimeLocalInZone,
+  todayDateInputInZone,
+} from "@/lib/org-timezone";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
   resolveLeadScheduleTimezone,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
+import {
+  isBulkScheduleStartInFuture,
+  resolveBulkScheduleStartIso,
+  shiftSequenceStepsToStart,
+  type BulkScheduleStartPreset,
+  type BulkScheduleTimingMode,
+} from "@/lib/email/bulk-schedule-timing";
+import { defaultCustomDueInputs } from "@/lib/followup-due-display";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
@@ -99,6 +112,12 @@ function mailboxOptionLabel(mb: EmailMailboxSettings): string {
   if (name) return name;
   return "Mailbox";
 }
+
+const START_PRESETS: { id: BulkScheduleStartPreset; label: string }[] = [
+  { id: "tomorrow9", label: "Tomorrow 9 AM" },
+  { id: "nextMonday9", label: "Next Monday 9 AM" },
+  { id: "custom", label: "Pick date & time…" },
+];
 
 function leadLabel(lead: { contactName?: string; companyName?: string; id: string }): string {
   const name = lead.contactName?.trim();
@@ -149,6 +168,10 @@ export function BulkScheduleSequencesDialog({
   const [preferOwnerShared, setPreferOwnerShared] = React.useState(true);
   const [continuityMode, setContinuityMode] =
     React.useState<SequenceScheduleContinuityMode>("continue");
+  const [timingMode, setTimingMode] = React.useState<BulkScheduleTimingMode>("auto");
+  const [startPreset, setStartPreset] = React.useState<BulkScheduleStartPreset>("tomorrow9");
+  const [customStartDate, setCustomStartDate] = React.useState("");
+  const [customStartTime, setCustomStartTime] = React.useState("09:00");
   const [includeSignature, setIncludeSignature] = React.useState(true);
   const [includeFooter, setIncludeFooter] = React.useState(true);
   const [rows, setRows] = React.useState<LeadRow[]>([]);
@@ -328,6 +351,11 @@ export function BulkScheduleSequencesDialog({
     setIncludeFooter(true);
     setPreferOwnerShared(true);
     setContinuityMode("continue");
+    setTimingMode("auto");
+    setStartPreset("tomorrow9");
+    const customDefaults = defaultCustomDueInputs(timeZone);
+    setCustomStartDate(customDefaults.dueDate);
+    setCustomStartTime(customDefaults.dueTime);
     setLoadError(null);
     setProgressIndex(0);
     setRunTotal(0);
@@ -395,6 +423,20 @@ export function BulkScheduleSequencesDialog({
     );
     if (selected.length === 0) {
       toast.error("Select at least one mailbox");
+      return;
+    }
+
+    const startIso =
+      timingMode === "start_on"
+        ? resolveBulkScheduleStartIso({
+            preset: startPreset,
+            timeZone,
+            customDate: customStartDate,
+            customTime: customStartTime,
+          })
+        : "";
+    if (timingMode === "start_on" && !isBulkScheduleStartInFuture(startIso)) {
+      toast.error("Pick a start time at least one minute from now");
       return;
     }
 
@@ -493,20 +535,23 @@ export function BulkScheduleSequencesDialog({
         strategies: prospecting.strategies,
       });
 
-      const draftSteps = schedulable.map((f) => ({
-        id: f.id,
-        scheduledAt: isoFromDatetimeLocalInZone(
-          defaultAudienceScheduleDatetimeLocal({
-            preferIso: f.dueAt,
-            timeZone: scheduleZone,
-            sendWindowStartHour: sendWindow.startHour,
-            sendWindowEndHour: sendWindow.endHour,
-            spreadKey: f.id,
-          }),
-          scheduleZone,
-        ),
-        included: true,
-      }));
+      const draftSteps =
+        startIso
+          ? shiftSequenceStepsToStart(schedulable, startIso)
+          : schedulable.map((f) => ({
+              id: f.id,
+              scheduledAt: isoFromDatetimeLocalInZone(
+                defaultAudienceScheduleDatetimeLocal({
+                  preferIso: f.dueAt,
+                  timeZone: scheduleZone,
+                  sendWindowStartHour: sendWindow.startHour,
+                  sendWindowEndHour: sendWindow.endHour,
+                  spreadKey: f.id,
+                }),
+                scheduleZone,
+              ),
+              included: true,
+            }));
 
       let candidateMailboxIds: string[] | undefined;
       if (preferOwnerShared) {
@@ -661,6 +706,22 @@ export function BulkScheduleSequencesDialog({
   const signatureMailbox =
     sendableMailboxes.find((m) => m.id === selectedMailboxIds[0]) ?? sendableMailboxes[0];
 
+  const startOnIso = React.useMemo(() => {
+    if (timingMode !== "start_on") return "";
+    return resolveBulkScheduleStartIso({
+      preset: startPreset,
+      timeZone,
+      customDate: customStartDate,
+      customTime: customStartTime,
+    });
+  }, [timingMode, startPreset, timeZone, customStartDate, customStartTime]);
+
+  const startOnLabel = startOnIso
+    ? formatInstantInZone(startOnIso, timeZone, { year: true })
+    : "";
+  const startOnValid = Boolean(startOnIso) && isBulkScheduleStartInFuture(startOnIso);
+  const minStartDate = todayDateInputInZone(timeZone);
+
   return (
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
@@ -780,6 +841,124 @@ export function BulkScheduleSequencesDialog({
                 ) : null}
               </div>
             ) : null}
+
+            <div className="space-y-2 rounded-md border p-3">
+              <Label className="text-xs">When should emails go out?</Label>
+              <RadioGroup
+                value={timingMode}
+                onValueChange={(v) => setTimingMode(v as BulkScheduleTimingMode)}
+                className="grid gap-2"
+              >
+                <label
+                  htmlFor="bulk-sched-timing-auto"
+                  className={cn(
+                    "flex cursor-pointer items-start gap-2 rounded-md border px-2.5 py-2 text-sm transition-colors",
+                    timingMode === "auto"
+                      ? "border-primary bg-primary/5"
+                      : "border-border/60 hover:bg-muted/40",
+                  )}
+                >
+                  <RadioGroupItem
+                    value="auto"
+                    id="bulk-sched-timing-auto"
+                    className="mt-0.5"
+                  />
+                  <span className="min-w-0 space-y-0.5">
+                    <span className="block font-medium leading-none">Auto</span>
+                    <span className="block text-[11px] text-muted-foreground">
+                      Use each step&apos;s due date, snap into the send window, and shift
+                      days if a mailbox is full.
+                    </span>
+                  </span>
+                </label>
+                <div
+                  className={cn(
+                    "rounded-md border px-2.5 py-2 text-sm transition-colors",
+                    timingMode === "start_on"
+                      ? "border-primary bg-primary/5"
+                      : "border-border/60 hover:bg-muted/40",
+                  )}
+                >
+                  <label
+                    htmlFor="bulk-sched-timing-start"
+                    className="flex cursor-pointer items-start gap-2"
+                  >
+                    <RadioGroupItem
+                      value="start_on"
+                      id="bulk-sched-timing-start"
+                      className="mt-0.5"
+                    />
+                    <span className="min-w-0 space-y-0.5">
+                      <span className="block font-medium leading-none">Start on a date</span>
+                      <span className="block text-[11px] text-muted-foreground">
+                        First email at this time. Later steps keep their spacing.
+                      </span>
+                    </span>
+                  </label>
+                  {timingMode === "start_on" ? (
+                    <div className="mt-2 space-y-2 pl-6">
+                      <div className="flex flex-wrap gap-2">
+                        {START_PRESETS.map((p) => (
+                          <Button
+                            key={p.id}
+                            type="button"
+                            size="sm"
+                            variant={startPreset === p.id ? "default" : "outline"}
+                            className="h-8 text-xs"
+                            onClick={() => setStartPreset(p.id)}
+                          >
+                            {p.label}
+                          </Button>
+                        ))}
+                      </div>
+                      {startPreset === "custom" ? (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div className="grid gap-1">
+                            <Label htmlFor="bulk-sched-start-date" className="text-[11px]">
+                              Date
+                            </Label>
+                            <Input
+                              id="bulk-sched-start-date"
+                              type="date"
+                              min={minStartDate}
+                              value={customStartDate}
+                              onChange={(e) => setCustomStartDate(e.target.value)}
+                              className="h-8"
+                            />
+                          </div>
+                          <div className="grid gap-1">
+                            <Label htmlFor="bulk-sched-start-time" className="text-[11px]">
+                              Time
+                            </Label>
+                            <Input
+                              id="bulk-sched-start-time"
+                              type="time"
+                              value={customStartTime}
+                              onChange={(e) => setCustomStartTime(e.target.value)}
+                              className="h-8"
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                      <p
+                        className={cn(
+                          "text-[11px] tabular-nums",
+                          startOnValid
+                            ? "text-muted-foreground"
+                            : "text-amber-700 dark:text-amber-400",
+                        )}
+                      >
+                        {startOnValid
+                          ? `${preflight.ready} sequence${preflight.ready === 1 ? "" : "s"} → first email ${startOnLabel} · later steps keep their gaps`
+                          : startOnLabel
+                            ? "Start time must be at least one minute from now."
+                            : "Choose a valid date and time."}
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+              </RadioGroup>
+            </div>
 
             {sendableMailboxes.length === 0 ? (
               <p className="text-sm text-destructive">
@@ -913,6 +1092,7 @@ export function BulkScheduleSequencesDialog({
                   selectedMailboxIds.length === 0 ||
                   preflight.ready === 0 ||
                   sendableMailboxes.length === 0 ||
+                  (timingMode === "start_on" && !startOnValid) ||
                   (preferOwnerShared &&
                     hasOtherOwners &&
                     ownerMatchBlockedCount >= preflight.ready)
