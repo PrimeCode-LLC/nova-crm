@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mergeLeadEmailMessages, sentToLeadMailUpsert } from "@/lib/email/lead-mail-map";
+import { mergeLeadEmailMessages, sentNeedsAttachmentBackfill, sentToLeadMailUpsert } from "@/lib/email/lead-mail-map";
 import type { LeadEmailMessage } from "@/lib/email/lead-email-conversations";
 import type { MailSent } from "@/lib/email-account-types";
 
@@ -73,5 +73,29 @@ describe("mergeLeadEmailMessages", () => {
     expect(merged[0].message.body).toContain("attached the proposal");
     expect(merged[0].message.uid).toBe(44);
     expect(merged[0].message.attachments?.[0]?.filename).toBe("Nutrioz-proposal.pdf");
+  });
+
+  it("flags stored CRM sends with a Message-ID and no attachment metadata for IMAP backfill", () => {
+    const row: LeadEmailMessage = {
+      key: "mb1:out:abc@stellixsoft.com",
+      mailboxId: "mb1",
+      direction: "sent",
+      message: sentMessage({
+        id: "abc@stellixsoft.com",
+        body: "I have attached a founder-level proposal.",
+        messageId: "abc@stellixsoft.com",
+        attachments: [],
+      }),
+    };
+    expect(sentNeedsAttachmentBackfill(row)).toBe(true);
+    expect(
+      sentNeedsAttachmentBackfill({
+        ...row,
+        message: {
+          ...row.message,
+          attachments: [{ filename: "proposal.pdf", mimeType: "application/pdf", sizeBytes: 10 }],
+        },
+      }),
+    ).toBe(false);
   });
 });

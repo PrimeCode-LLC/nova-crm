@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Forward, Loader2, Mail, PenLine, RefreshCw, Reply, ReplyAll, Send, UserRound } from "lucide-react";
+import { Forward, Loader2, Mail, Paperclip, PenLine, RefreshCw, Reply, ReplyAll, Send, UserRound } from "lucide-react";
 import { toast } from "sonner";
 
 import { EmailComposeForm } from "@/components/inbox/email-compose-form";
@@ -92,6 +92,7 @@ import {
 import {
   leadMailToLeadEmailMessage,
   mergeLeadEmailMessages,
+  sentNeedsAttachmentBackfill,
 } from "@/lib/email/lead-mail-map";
 import type { LeadMailMessage } from "@/lib/email/lead-mail-types";
 import { appendMailDataOwnerParam, resolveMailApiForUserUid } from "@/lib/email/mail-data-owner-query";
@@ -180,9 +181,59 @@ function leadMailAttachmentResolver(input: {
   };
 }
 
+function applyImapBodyUpdatesToStoredRow(
+  row: LeadEmailMessage,
+  mailboxId: string,
+  folder: "inbox" | "sent",
+  updates: Array<{ uid: number } & Partial<MailInbound>>,
+): LeadEmailMessage {
+  if (row.mailboxId !== mailboxId) return row;
+  if (folder === "inbox" && row.direction !== "inbound") return row;
+  if (folder === "sent" && row.direction !== "sent") return row;
+  const uid = row.message.uid;
+  if (uid == null || uid <= 0) return row;
+  const update = updates.find((item) => item.uid === uid);
+  if (!update) return row;
+  if (row.direction === "inbound") {
+    return {
+      ...row,
+      message: {
+        ...row.message,
+        preview: update.preview ?? row.message.preview,
+        bodyText: update.bodyText ?? row.message.bodyText,
+        ...(update.bodyHtml || row.message.bodyHtml ? { bodyHtml: update.bodyHtml ?? row.message.bodyHtml } : {}),
+        bodySynced: update.bodySynced ?? true,
+        cc: update.cc ?? row.message.cc,
+        replyTo: update.replyTo ?? row.message.replyTo,
+        attachments: update.attachments ?? row.message.attachments,
+        messageId: update.messageId ?? row.message.messageId,
+        inReplyTo: update.inReplyTo ?? row.message.inReplyTo,
+        referenceIds: update.referenceIds ?? row.message.referenceIds,
+      },
+    };
+  }
+  return {
+    ...row,
+    message: {
+      ...row.message,
+      preview: update.preview ?? row.message.preview,
+      body: update.bodyText ?? row.message.body,
+      ...(update.bodyHtml || row.message.bodyHtml ? { bodyHtml: update.bodyHtml ?? row.message.bodyHtml } : {}),
+      bodySynced: update.bodySynced ?? true,
+      cc: update.cc ?? row.message.cc,
+      replyTo: update.replyTo ?? row.message.replyTo,
+      attachments: update.attachments ?? row.message.attachments,
+      messageId: update.messageId ?? row.message.messageId,
+      inReplyTo: update.inReplyTo ?? row.message.inReplyTo,
+      referenceIds: update.referenceIds ?? row.message.referenceIds,
+    },
+  };
+}
+
 function leadEmailNeedsBodyFetch(row: LeadEmailMessage): boolean {
   if (row.mailboxId === "crm") return false;
-  if (row.message.uid == null) return false;
+  const uid = row.message.uid;
+  if (uid == null || uid <= 0) return false;
   const subject = row.message.subject;
   const bodyText = row.direction === "inbound" ? row.message.bodyText : row.message.body;
   const stub = isSubjectOnlyMailBody({
@@ -191,11 +242,7 @@ function leadEmailNeedsBodyFetch(row: LeadEmailMessage): boolean {
     bodyHtml: row.message.bodyHtml,
   });
   if (row.message.bodySynced === false || stub) return true;
-  return (
-    row.direction === "sent" &&
-    row.message.uid > 0 &&
-    row.message.attachments === undefined
-  );
+  return row.message.attachments === undefined;
 }
 
 function messageSnippet(message: LeadEmailMessage): string {
@@ -470,6 +517,8 @@ export function LeadEmailsPanel({
   const [loadingStored, setLoadingStored] = React.useState(!workspace.isDemo);
   const storedReadyRef = React.useRef(false);
   const initialSyncKeyRef = React.useRef("");
+  const attachmentBackfillAttemptedRef = React.useRef(new Set<string>());
+  const attachmentBackfillInflightRef = React.useRef(new Set<string>());
   const liveMessages = React.useMemo(
     () =>
       relevantLeadMessages({
@@ -691,6 +740,107 @@ export function LeadEmailsPanel({
     [lead.id, workspace.isDemo],
   );
 
+  const backfillSentAttachmentsFromImap = React.useCallback(
+    async (rows: LeadEmailMessage[]) => {
+      if (workspace.isDemo) return;
+      const byMailbox = new Map<string, string[]>();
+      for (const row of rows) {
+        if (!sentNeedsAttachmentBackfill(row)) continue;
+        const messageId = normalizeMessageId(row.message.messageId);
+        if (!messageId) continue;
+        const attemptKey = `${row.mailboxId}:${messageId}`;
+        if (
+          attachmentBackfillAttemptedRef.current.has(attemptKey) ||
+          attachmentBackfillInflightRef.current.has(attemptKey)
+        ) {
+          continue;
+        }
+        attachmentBackfillInflightRef.current.add(attemptKey);
+        const list = byMailbox.get(row.mailboxId) ?? [];
+        list.push(messageId);
+        byMailbox.set(row.mailboxId, list);
+      }
+      if (byMailbox.size === 0) return;
+
+      for (const [mailboxId, messageIds] of byMailbox) {
+        const mailbox = mailboxes.find((item) => item.id === mailboxId);
+        const requestedKeys = [...new Set(messageIds)].map((messageId) => `${mailboxId}:${messageId}`);
+        if (!mailbox || !isImapInboxConfigured(mailbox)) {
+          for (const key of requestedKeys) attachmentBackfillInflightRef.current.delete(key);
+          continue;
+        }
+        try {
+          const forUid = resolveMailApiForUserUid({
+            mailViewAsUid,
+            activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
+            selfUid: workspace.currentUserId ?? "",
+          });
+          const url = appendMailDataOwnerParam(
+            "/api/email/imap-sent-attachments",
+            forUid,
+            workspace.currentUserId ?? "",
+          );
+          const response = await fetch(url, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            credentials: "same-origin",
+            signal: AbortSignal.timeout(LEAD_EMAIL_SYNC_TIMEOUT_MS),
+            body: JSON.stringify({
+              mailboxId,
+              leadId: lead.id,
+              messageIds: [...new Set(messageIds)].slice(0, 20),
+              imap: {
+                host: mailbox.imap.host,
+                port: mailbox.imap.port,
+                secure: mailbox.imap.secure,
+                user: mailbox.imap.user,
+                pass: mailbox.imap.password,
+              },
+            }),
+          });
+          const data = (await response.json()) as {
+            ok?: boolean;
+            updates?: Array<{
+              messageId: string;
+              uid: number;
+              attachments?: MailInbound["attachments"];
+            }>;
+          };
+          for (const key of requestedKeys) {
+            attachmentBackfillInflightRef.current.delete(key);
+            if (response.ok) attachmentBackfillAttemptedRef.current.add(key);
+          }
+          if (!response.ok || !data.ok || !Array.isArray(data.updates) || data.updates.length === 0) {
+            continue;
+          }
+          const byMessageId = new Map(
+            data.updates.map((update) => [normalizeMessageId(update.messageId) || update.messageId, update]),
+          );
+          setStoredMessages((prev) =>
+            prev.map((row) => {
+              if (row.direction !== "sent" || row.mailboxId !== mailboxId) return row;
+              const messageId = normalizeMessageId(row.message.messageId);
+              if (!messageId) return row;
+              const update = byMessageId.get(messageId);
+              if (!update) return row;
+              return {
+                ...row,
+                message: {
+                  ...row.message,
+                  ...(update.uid > 0 ? { uid: update.uid } : {}),
+                  attachments: update.attachments ?? [],
+                },
+              };
+            }),
+          );
+        } catch {
+          for (const key of requestedKeys) attachmentBackfillInflightRef.current.delete(key);
+        }
+      }
+    },
+    [lead.id, mailViewAsUid, mailboxes, workspace.currentUserId, workspace.isDemo],
+  );
+
   const loadStoredLeadMail = React.useCallback(async (opts?: { soft?: boolean }) => {
     if (workspace.isDemo) {
       storedReadyRef.current = true;
@@ -722,6 +872,8 @@ export function LeadEmailsPanel({
   React.useEffect(() => {
     storedReadyRef.current = false;
     initialSyncKeyRef.current = "";
+    attachmentBackfillAttemptedRef.current = new Set();
+    attachmentBackfillInflightRef.current = new Set();
     setStoredMessages([]);
     void loadStoredLeadMail();
   }, [loadStoredLeadMail]);
@@ -853,6 +1005,7 @@ export function LeadEmailsPanel({
           crmSentFollowups: crmSentFollowupsHydrated,
         });
         if (matched.length > 0) void persistLeadMail(matched);
+        void backfillSentAttachmentsFromImap(mergeLeadEmailMessages(storedMessages, matched));
         return;
       }
 
@@ -952,14 +1105,17 @@ export function LeadEmailsPanel({
 
       // Body backfill + persist enrich in the background so the list isn't waiting on IMAP bodies.
       void (async () => {
-        let matched = relevantLeadMessages({
-          lead,
-          contactEmails: matchEmails,
-          inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
-          sent: useEmailAccountStore.getState().sent,
-          linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-          crmSentFollowups: crmSentFollowupsHydrated,
-        });
+        let matched = mergeLeadEmailMessages(
+          storedMessages,
+          relevantLeadMessages({
+            lead,
+            contactEmails: matchEmails,
+            inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+            sent: useEmailAccountStore.getState().sent,
+            linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+            crmSentFollowups: crmSentFollowupsHydrated,
+          }),
+        );
 
         type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
         const bodyJobsByKey = new Map<string, BodyJob>();
@@ -1026,26 +1182,33 @@ export function LeadEmailsPanel({
             if (!response.ok || !data.ok || !data.updates) continue;
             if (job.folder === "inbox") mergeInboundBodies(mailbox.id, data.updates);
             else mergeSentBodies(mailbox.id, data.updates);
+            setStoredMessages((prev) =>
+              prev.map((row) => applyImapBodyUpdatesToStoredRow(row, mailbox.id, job.folder, data.updates ?? [])),
+            );
           } catch {
             /* heads already persisted; body fill retries on open / next refresh */
           }
         }
 
         if (bodyJobsByKey.size > 0) {
-          matched = relevantLeadMessages({
-            lead,
-            contactEmails: matchEmails,
-            inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
-            sent: useEmailAccountStore.getState().sent,
-            linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-            crmSentFollowups: crmSentFollowupsHydrated,
-          });
+          matched = mergeLeadEmailMessages(
+            storedMessages,
+            relevantLeadMessages({
+              lead,
+              contactEmails: matchEmails,
+              inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
+              sent: useEmailAccountStore.getState().sent,
+              linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
+              crmSentFollowups: crmSentFollowupsHydrated,
+            }),
+          );
         }
         if (matched.length > 0) void persistLeadMail(matched);
       })();
     },
     [
       activeMailbox.id,
+      backfillSentAttachmentsFromImap,
       crmSentFollowupsHydrated,
       emailServerHydrated,
       lead,
@@ -1057,7 +1220,7 @@ export function LeadEmailsPanel({
       persistLeadMail,
       reconcileInboundHeadFromSync,
       reconcileSentHeadFromSync,
-      storedMessages.length,
+      storedMessages,
       workspace.currentUserId,
       workspace.isDemo,
     ],
@@ -1070,6 +1233,22 @@ export function LeadEmailsPanel({
     if (!storedReadyRef.current && loadingStored) return;
     void Promise.resolve().then(() => syncConversationLists(false));
   }, [active, loadingStored, syncConversationLists]);
+
+  const attachmentBackfillKey = React.useMemo(
+    () =>
+      messages
+        .filter(sentNeedsAttachmentBackfill)
+        .map((row) => `${row.mailboxId}:${normalizeMessageId(row.message.messageId) || ""}`)
+        .filter((key) => !key.endsWith(":"))
+        .sort()
+        .join("|"),
+    [messages],
+  );
+
+  React.useEffect(() => {
+    if (!active || workspace.isDemo || loadingStored || !attachmentBackfillKey) return;
+    void backfillSentAttachmentsFromImap(messages);
+  }, [active, attachmentBackfillKey, backfillSentAttachmentsFromImap, loadingStored, messages, workspace.isDemo]);
 
   React.useEffect(() => {
     if (!selected || workspace.isDemo) return;
@@ -1135,6 +1314,14 @@ export function LeadEmailsPanel({
       if (cancelled || !data.updates) return;
       if (job.folder === "inbox") mergeInboundBodies(mailbox.id, data.updates);
       else mergeSentBodies(mailbox.id, data.updates);
+      setStoredMessages((prev) =>
+        prev.map((row) => applyImapBodyUpdatesToStoredRow(row, mailbox.id, job.folder, data.updates ?? [])),
+      );
+      void persistLeadMail(
+        selected.messages.map((row) =>
+          applyImapBodyUpdatesToStoredRow(row, mailbox.id, job.folder, data.updates ?? []),
+        ),
+      );
     };
 
     void Promise.resolve()
@@ -1789,7 +1976,9 @@ export function LeadEmailsPanel({
                 title="Refresh lead emails"
                 disabled={syncingLists || workspace.isDemo}
                 onClick={() => {
+                  attachmentBackfillAttemptedRef.current = new Set();
                   void syncConversationLists(true);
+                  void backfillSentAttachmentsFromImap(messages);
                   void loadMailTracking();
                 }}
               >
@@ -1891,6 +2080,12 @@ export function LeadEmailsPanel({
                       <Badge variant="outline" className="h-5 text-[10px]">
                         {conversation.messages.length} message{conversation.messages.length === 1 ? "" : "s"}
                       </Badge>
+                      {conversation.messages.some((message) => (message.message.attachments?.length ?? 0) > 0) ? (
+                        <Badge variant="outline" className="h-5 gap-1 text-[10px]">
+                          <Paperclip className="h-3 w-3" />
+                          Attachment
+                        </Badge>
+                      ) : null}
                       {conversation.hasUnread ? <Badge className="h-5 text-[10px]">Unread</Badge> : null}
                       {(() => {
                         const outbound = conversation.messages.filter((m) => m.direction === "sent");

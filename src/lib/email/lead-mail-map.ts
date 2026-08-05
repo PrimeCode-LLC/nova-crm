@@ -192,6 +192,13 @@ function mergeIdentityKey(row: LeadEmailMessage): string {
   return row.key;
 }
 
+/** CRM smtp_send rows often have a Message-ID but no IMAP uid or attachment metadata. */
+export function sentNeedsAttachmentBackfill(row: LeadEmailMessage): boolean {
+  if (row.direction !== "sent" || row.mailboxId === "crm") return false;
+  if ((row.message.attachments?.length ?? 0) > 0) return false;
+  return Boolean(normalizeMessageId(row.message.messageId));
+}
+
 /** Merge stored + live messages; prefer body-synced / richer body for the same provider key. */
 export function mergeLeadEmailMessages(
   primary: LeadEmailMessage[],
