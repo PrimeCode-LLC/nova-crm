@@ -122,6 +122,7 @@ export function BulkBuildSequencesDialog({
     getAccountById,
     getCampaignById,
     getProfileById,
+    organizationSendPolicy,
     deals,
     timelineByLead,
     touchpoints,
@@ -131,6 +132,7 @@ export function BulkBuildSequencesDialog({
   const timeZone = useOrgTimezone();
 
   const [phase, setPhase] = React.useState<"setup" | "running" | "done">("setup");
+  const [capacityHint, setCapacityHint] = React.useState<string | null>(null);
   const [sequenceMode, setSequenceMode] = React.useState<FollowupSequenceMode>("full");
   const [channelMix, setChannelMix] = React.useState<FollowupChannelMix>("multi_channel");
   const [userPrompt, setUserPrompt] = React.useState("");
@@ -207,6 +209,36 @@ export function BulkBuildSequencesDialog({
     setSelectedScript(null);
     setProgressIndex(0);
     setRunTotal(0);
+    setCapacityHint(null);
+    void (async () => {
+      try {
+        const res = await fetch("/api/email/org-capacity?horizonDays=14");
+        const data = (await res.json()) as {
+          ok?: boolean;
+          ceiling?: number | null;
+          remainingByDay?: Record<string, number>;
+          fromDayKey?: string;
+        };
+        if (!data.ok) return;
+        const firstTouches = ids.length;
+        const remainingToday =
+          data.fromDayKey && data.remainingByDay
+            ? data.remainingByDay[data.fromDayKey]
+            : undefined;
+        const ceiling = data.ceiling ?? organizationSendPolicy.dailyCeiling;
+        if (ceiling != null && remainingToday != null && firstTouches > remainingToday) {
+          setCapacityHint(
+            `${firstTouches} first-touch emails vs ${remainingToday} org slots left today (cap ${ceiling}/day). Extra steps will spill to later working days when you schedule.`,
+          );
+        } else if (ceiling != null && firstTouches > ceiling) {
+          setCapacityHint(
+            `${firstTouches} sequences vs org cap ${ceiling}/day. Scheduling will spread overflow across later working days.`,
+          );
+        }
+      } catch {
+        /* ignore */
+      }
+    })();
     setRows(
       ids.map((id) => {
         const lead = leadsRef.current.find((l) => l.id === id);
@@ -608,6 +640,11 @@ export function BulkBuildSequencesDialog({
                 maxLength={500}
               />
             </div>
+            {capacityHint ? (
+              <p className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-800 dark:text-amber-300">
+                {capacityHint}
+              </p>
+            ) : null}
             <DialogFooter className="gap-2 sm:justify-between">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancel

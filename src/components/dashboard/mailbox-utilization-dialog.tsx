@@ -120,8 +120,8 @@ export function MailboxUtilizationDialog({
 
   const capacityLabel =
     stats.totalCapacityToday != null
-      ? `${fmtNumber(stats.totalSentToday)} / ${fmtNumber(stats.totalCapacityToday)}`
-      : fmtNumber(stats.totalSentToday);
+      ? `${fmtNumber(stats.totalSentToday)} sent + ${fmtNumber(stats.totalPendingToday)} queued / ${fmtNumber(stats.totalCapacityToday)}`
+      : `${fmtNumber(stats.totalSentToday)} sent + ${fmtNumber(stats.totalPendingToday)} queued`;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -156,7 +156,7 @@ export function MailboxUtilizationDialog({
             <StatChip label="Needs attention" value={stats.needsAttention} tone="danger" />
             <StatChip label="Well utilized" value={stats.wellUtilized} tone="ok" />
             <StatChip label="Unassigned" value={stats.unassigned} tone="warn" />
-            <StatChip label="Sent today / capacity" value={capacityLabel} tone="muted" />
+            <StatChip label="Sent + queued / capacity" value={capacityLabel} tone="muted" />
           </div>
         </DialogHeader>
 

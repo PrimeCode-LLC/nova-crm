@@ -17,6 +17,11 @@ import { QuickAddLauncherProvider } from "@/components/layout/quick-add-launcher
 import { ModuleRouteGate } from "@/components/permissions/module-route-gate";
 import { WORKSPACE_MODE_COOKIE, parseWorkspaceMode } from "@/lib/workspace-mode";
 import { DEMO_PERSONA_COOKIE, parseDemoPersonaId } from "@/lib/demo-persona";
+import {
+  DEFAULT_ORG_SEND_POLICY,
+  resolveOrgSendPolicy,
+} from "@/lib/email/org-send-policy";
+import type { OrgEmailSendPolicy } from "@/lib/types";
 
 export default async function AppLayout({
   children,
@@ -43,12 +48,14 @@ export default async function AppLayout({
 
   let organizationName: string | undefined;
   let organizationTimezone: string | undefined;
+  let organizationSendPolicy: OrgEmailSendPolicy = DEFAULT_ORG_SEND_POLICY;
   if (session.organizationId) {
     try {
       const org = await getOrganizationServer(session.organizationId);
       if (org?.name?.trim()) organizationName = org.name.trim();
       const tz = org?.settings.timezone?.trim();
       if (tz) organizationTimezone = tz;
+      organizationSendPolicy = resolveOrgSendPolicy(org?.settings.sendPolicy);
     } catch {
       /* ignore */
     }
@@ -60,6 +67,7 @@ export default async function AppLayout({
       initialDemoPersonaId={initialDemoPersonaId}
       organizationName={organizationName}
       organizationTimezone={organizationTimezone}
+      organizationSendPolicy={organizationSendPolicy}
     >
       <TeamChatUnreadProvider deferSubscriptions>
         <WorkspaceInboxNotificationsProvider>

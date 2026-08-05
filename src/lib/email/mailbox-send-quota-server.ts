@@ -8,6 +8,7 @@ import {
   zonedWallTimeToUtc,
 } from "@/lib/org-timezone";
 import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
+import { assertOrgScheduleDayCeilingServer } from "@/lib/email/org-send-ledger-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 
@@ -288,6 +289,22 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
   const todayKey = sendDayKey(new Date(), zone);
 
   if (limit == null || !input.mailboxId.trim()) {
+    const orgOnly = await assertOrgScheduleDayCeilingServer({
+      organizationId: input.organizationId,
+      scheduledAt: scheduledDate,
+      timeZone: zone,
+    });
+    if (!orgOnly.ok) {
+      return {
+        ok: false,
+        error: orgOnly.error,
+        dayKey: orgOnly.dayKey,
+        used: orgOnly.used,
+        limit: orgOnly.ceiling,
+        remaining: 0,
+        status: 429,
+      };
+    }
     return { ok: true, dayKey, used: 0, limit: null, remaining: null };
   }
 
@@ -319,6 +336,22 @@ export async function assertMailboxScheduleDayQuotaServer(input: {
       dayKey,
       used,
       limit,
+      remaining: 0,
+      status: 429,
+    };
+  }
+  const orgCeiling = await assertOrgScheduleDayCeilingServer({
+    organizationId: input.organizationId,
+    scheduledAt: scheduledDate,
+    timeZone: zone,
+  });
+  if (!orgCeiling.ok) {
+    return {
+      ok: false,
+      error: orgCeiling.error,
+      dayKey: orgCeiling.dayKey,
+      used: orgCeiling.used,
+      limit: orgCeiling.ceiling,
       remaining: 0,
       status: 429,
     };

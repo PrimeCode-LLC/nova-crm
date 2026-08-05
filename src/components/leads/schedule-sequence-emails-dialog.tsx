@@ -18,7 +18,6 @@ import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/or
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
-  resolveLeadScheduleTimezone,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
@@ -118,6 +117,8 @@ export function ScheduleSequenceEmailsDialog({
     currentUserId,
     organizationId,
     followups: allFollowups,
+    updateFollowup,
+    organizationSendPolicy,
   } = useWorkspace();
   const contact = getContactById(lead.contactId);
   const recipientOptions = React.useMemo(
@@ -179,15 +180,7 @@ export function ScheduleSequenceEmailsDialog({
 
   const timezone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
-  const scheduleTimezone = React.useMemo(
-    () =>
-      resolveLeadScheduleTimezone({
-        strategyId: lead.strategyId,
-        strategies: prospecting.strategies,
-        orgTimezone: timezone,
-      }),
-    [lead.strategyId, prospecting.strategies, timezone],
-  );
+  const scheduleTimezone = timezone;
   const sendWindow = React.useMemo(
     () =>
       resolveLeadSendWindow({
@@ -237,10 +230,11 @@ export function ScheduleSequenceEmailsDialog({
           subject: f.emailSubject?.trim() || f.title,
           scheduledAt: defaultAudienceScheduleDatetimeLocal({
             preferIso: f.dueAt,
-            timeZone: scheduleTimezone,
+            timeZone: timezone,
             sendWindowStartHour: sendWindow.startHour,
             sendWindowEndHour: sendWindow.endHour,
             spreadKey: f.id,
+            sendPolicy: organizationSendPolicy,
           }),
           body: f.messageBody ?? "",
           included: true,
@@ -264,6 +258,8 @@ export function ScheduleSequenceEmailsDialog({
     currentUserId,
     hasPriorSent,
     priorSender?.mailboxId,
+    organizationSendPolicy,
+    timezone,
   ]);
 
   React.useEffect(() => {
@@ -347,6 +343,7 @@ export function ScheduleSequenceEmailsDialog({
       loadLimit,
       60,
       timezone,
+      { sendPolicy: organizationSendPolicy },
     );
     if (!result.changed && result.unresolvedIds.length === 0) {
       toast.message("Dates already fit within the daily limit");
@@ -422,6 +419,7 @@ export function ScheduleSequenceEmailsDialog({
           emailScheduledAt: result.emailScheduledAt,
           freshThread: startFresh,
         });
+        updateFollowup(step.followupId, { dueAt: result.emailScheduledAt });
         okCount += 1;
       }
       if (okCount > 0) {

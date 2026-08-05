@@ -7,6 +7,7 @@ import {
   type MailboxDayLoadClient,
   type MailboxScheduleLoadResponse,
 } from "@/lib/email/mailbox-schedule-capacity";
+import type { OrgEmailSendPolicy } from "@/lib/email/org-send-policy";
 import { resolveOrgTimezone } from "@/lib/org-timezone";
 
 export type MailboxCapacityState = {
@@ -155,6 +156,7 @@ export type AssignProspectScheduleResult =
       steps: AssignableScheduleStep[];
       nextStates: MailboxCapacityState[];
       nextRoundRobinIndex: number;
+      nextOrgRemainingByDay?: Record<string, number>;
     }
   | {
       ok: false;
@@ -162,6 +164,7 @@ export type AssignProspectScheduleResult =
       unresolvedIds: string[];
       nextStates: MailboxCapacityState[];
       nextRoundRobinIndex: number;
+      nextOrgRemainingByDay?: Record<string, number>;
     };
 
 /**
@@ -181,6 +184,9 @@ export function assignProspectSchedule(input: {
   candidateMailboxIds?: readonly string[];
   /** Prefer this mailbox when it is eligible and has capacity for the steps. */
   preferredMailboxId?: string;
+  sendPolicy?: OrgEmailSendPolicy | null;
+  orgCeiling?: number | null;
+  orgRemainingByDay?: Record<string, number>;
 }): AssignProspectScheduleResult {
   const zone = resolveOrgTimezone(input.timeZone);
   const states = cloneMailboxCapacityStates(input.states);
@@ -227,6 +233,11 @@ export function assignProspectSchedule(input: {
         preferredState.limit,
         input.horizonDays ?? 60,
         zone,
+        {
+          sendPolicy: input.sendPolicy,
+          orgCeiling: input.orgCeiling,
+          orgRemainingByDay: input.orgRemainingByDay,
+        },
       );
       if (trial.unresolvedIds.length === 0) {
         const stateIndex = states.findIndex((s) => s.mailboxId === preferredId);
@@ -261,6 +272,11 @@ export function assignProspectSchedule(input: {
     picked.state.limit,
     input.horizonDays ?? 60,
     zone,
+    {
+      sendPolicy: input.sendPolicy,
+      orgCeiling: input.orgCeiling,
+      orgRemainingByDay: input.orgRemainingByDay,
+    },
   );
 
   if (fixed.unresolvedIds.length > 0) {
@@ -270,6 +286,7 @@ export function assignProspectSchedule(input: {
       unresolvedIds: fixed.unresolvedIds,
       nextStates: states,
       nextRoundRobinIndex: input.roundRobinIndex + 1,
+      nextOrgRemainingByDay: input.orgRemainingByDay,
     };
   }
 
@@ -284,6 +301,7 @@ export function assignProspectSchedule(input: {
     steps: fixed.steps,
     nextStates,
     nextRoundRobinIndex: input.roundRobinIndex + 1,
+    nextOrgRemainingByDay: fixed.orgRemainingByDay ?? input.orgRemainingByDay,
   };
 }
 

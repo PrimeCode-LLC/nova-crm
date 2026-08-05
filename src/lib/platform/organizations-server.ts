@@ -20,14 +20,16 @@ import type {
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { parseIntakeFilterDefaults } from "@/lib/intake/intake-filter-defaults";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
+import { parseOrgSendPolicy } from "@/lib/email/org-send-policy";
 
 const TRIAL_DAYS = 14;
 
 /** Firestore rejects `undefined`; omit empty optional strings. */
-function settingsForFirestore(s: OrganizationSettings): Record<string, string> {
-  const out: Record<string, string> = {};
+function settingsForFirestore(s: OrganizationSettings): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
   if (s.billingEmail?.trim()) out.billingEmail = s.billingEmail.trim();
   if (s.timezone?.trim()) out.timezone = s.timezone.trim();
+  if (s.sendPolicy) out.sendPolicy = s.sendPolicy;
   if (s.operatorNotes?.trim()) out.operatorNotes = s.operatorNotes.trim();
   if (s.inboundWebhookSecret?.trim()) {
     out.inboundWebhookSecret = s.inboundWebhookSecret.trim();
@@ -123,6 +125,7 @@ function docToOrg(id: string, data: DocumentData): Organization {
     billingEmail:
       typeof raw.billingEmail === "string" ? raw.billingEmail : undefined,
     timezone: typeof raw.timezone === "string" ? raw.timezone : undefined,
+    sendPolicy: parseOrgSendPolicy(raw.sendPolicy),
     operatorNotes:
       typeof raw.operatorNotes === "string" ? raw.operatorNotes : undefined,
     inboundWebhookSecret:

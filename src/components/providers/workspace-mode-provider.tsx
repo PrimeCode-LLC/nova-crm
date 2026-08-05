@@ -23,6 +23,7 @@ import type {
   Deal,
   OrgActivityEvent,
   OrgMemberRole,
+  OrgEmailSendPolicy,
 } from "@/lib/types";
 import { useOrgMembers } from "@/hooks/use-org-members";
 import {
@@ -92,6 +93,10 @@ import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { toast } from "sonner";
 import { toastError } from "@/lib/error-logging/toast-error";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import {
+  DEFAULT_ORG_SEND_POLICY,
+  resolveOrgSendPolicy,
+} from "@/lib/email/org-send-policy";
 import { setWorkspaceModeCookie } from "@/app/(app)/actions/workspace-mode";
 import { setDemoPersonaCookie } from "@/app/(app)/actions/demo-persona";
 import {
@@ -144,6 +149,8 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
      * Use `resolveOrgTimezone(organizationTimezone)` for the effective zone.
      */
     organizationTimezone?: string;
+    /** Org email working hours + optional daily ceiling for auto/bulk scheduling. */
+    organizationSendPolicy: OrgEmailSendPolicy;
     /** Live mode: Firestore workspace listeners hit an error (partial data may be stale). */
     liveFirestoreError: Error | null;
     /** Live mode: listener for the signed-in user document failed. */
@@ -290,6 +297,7 @@ export function WorkspaceModeProvider({
   initialDemoPersonaId,
   organizationName: organizationNameProp,
   organizationTimezone: organizationTimezoneProp,
+  organizationSendPolicy: organizationSendPolicyProp,
   children,
 }: {
   initialMode: WorkspaceMode;
@@ -298,6 +306,7 @@ export function WorkspaceModeProvider({
   organizationName?: string | null;
   /** Optional sticky org IANA timezone from Organization.settings.timezone. */
   organizationTimezone?: string | null;
+  organizationSendPolicy?: OrgEmailSendPolicy | null;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -309,6 +318,9 @@ export function WorkspaceModeProvider({
   const organizationName =
     organizationNameProp?.trim() || "Workspace";
   const organizationTimezone = organizationTimezoneProp?.trim() || undefined;
+  const organizationSendPolicy = resolveOrgSendPolicy(
+    organizationSendPolicyProp ?? DEFAULT_ORG_SEND_POLICY,
+  );
 
   const [intentPlaybook, setIntentPlaybookState] = React.useState<IntentPlaybook>(() =>
     defaultIntentPlaybook(),
@@ -2526,6 +2538,7 @@ export function WorkspaceModeProvider({
       organizationId: liveOrgId,
       organizationName,
       organizationTimezone,
+      organizationSendPolicy,
       intentPlaybook,
       setIntentPlaybook,
       liveFirestoreError: mode === "live" ? liveFs.error : null,
@@ -2600,6 +2613,7 @@ export function WorkspaceModeProvider({
     liveOrgId,
     organizationName,
     organizationTimezone,
+    organizationSendPolicy,
     intentPlaybook,
     setIntentPlaybook,
     liveFs.error,

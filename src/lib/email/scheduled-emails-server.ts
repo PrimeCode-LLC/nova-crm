@@ -35,6 +35,7 @@ import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { incrementOrgSendLedgerServer } from "@/lib/email/org-send-ledger-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
@@ -191,34 +192,52 @@ export async function createScheduledEmailServer(input: {
   const now = new Date().toISOString();
   const followupId = input.followupId?.trim() || "";
   const leadId = input.leadId?.trim() || "";
-  await ref.set({
+  const reserved = await incrementOrgSendLedgerServer({
     organizationId: input.organizationId,
-    uid: input.uid,
-    mailboxId: input.mailboxId,
-    from: input.from,
-    displayName: input.displayName ?? "",
-    replyTo: input.replyTo ?? "",
-    to: input.to,
-    cc: input.cc ?? "",
-    bcc: input.bcc ?? "",
-    subject: input.subject,
-    body: input.text,
-    text: input.text,
-    html: input.html,
-    attachments: serializeOutboundAttachments(parsedAttachments),
-    scheduledAt: scheduledDate.toISOString(),
-    status: "pending",
-    createdAt: now,
-    updatedAt: now,
-    ...(input.scheduledByUserId?.trim()
-      ? { scheduledByUserId: input.scheduledByUserId.trim() }
-      : {}),
-    ...(followupId ? { followupId } : {}),
-    ...(leadId ? { leadId } : {}),
-    ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
-    ...(input.referenceIds?.length ? { referenceIds: input.referenceIds.slice(-50) } : {}),
-    ...(input.forceNewThread ? { forceNewThread: true } : {}),
+    scheduledAt: scheduledDate,
+    delta: 1,
   });
+  if (!reserved.ok) {
+    return { error: reserved.error };
+  }
+
+  try {
+    await ref.set({
+      organizationId: input.organizationId,
+      uid: input.uid,
+      mailboxId: input.mailboxId,
+      from: input.from,
+      displayName: input.displayName ?? "",
+      replyTo: input.replyTo ?? "",
+      to: input.to,
+      cc: input.cc ?? "",
+      bcc: input.bcc ?? "",
+      subject: input.subject,
+      body: input.text,
+      text: input.text,
+      html: input.html,
+      attachments: serializeOutboundAttachments(parsedAttachments),
+      scheduledAt: scheduledDate.toISOString(),
+      status: "pending",
+      createdAt: now,
+      updatedAt: now,
+      ...(input.scheduledByUserId?.trim()
+        ? { scheduledByUserId: input.scheduledByUserId.trim() }
+        : {}),
+      ...(followupId ? { followupId } : {}),
+      ...(leadId ? { leadId } : {}),
+      ...(input.inReplyTo ? { inReplyTo: input.inReplyTo } : {}),
+      ...(input.referenceIds?.length ? { referenceIds: input.referenceIds.slice(-50) } : {}),
+      ...(input.forceNewThread ? { forceNewThread: true } : {}),
+    });
+  } catch {
+    await incrementOrgSendLedgerServer({
+      organizationId: input.organizationId,
+      scheduledAt: scheduledDate,
+      delta: -1,
+    });
+    return { error: "Could not create scheduled email." };
+  }
 
   return { ok: true, id: ref.id };
 }
@@ -330,6 +349,14 @@ export async function cancelScheduledEmailServer(input: {
     cancelReason: reason,
     updatedAt: now,
   });
+  const scheduledAtRaw = data.scheduledAt;
+  if (typeof scheduledAtRaw === "string" && scheduledAtRaw.trim()) {
+    await incrementOrgSendLedgerServer({
+      organizationId: input.organizationId,
+      scheduledAt: scheduledAtRaw,
+      delta: -1,
+    });
+  }
   if (followupId) {
     await updateFollowupDeliveryState(followupId, {
       deliveryStatus: "cancelled",

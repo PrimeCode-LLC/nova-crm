@@ -7,6 +7,7 @@ import {
   resolveScheduleTimezone,
 } from "@/lib/email/audience-schedule";
 import { zonedDayKey } from "@/lib/org-timezone";
+import { DEFAULT_ORG_SEND_POLICY } from "@/lib/email/org-send-policy";
 
 describe("resolveScheduleTimezone", () => {
   it("prefers valid audience timezone over org", () => {
@@ -47,6 +48,18 @@ describe("defaultAudienceScheduleDatetimeLocal", () => {
       now,
     });
     expect(local).toBe("2026-07-23T09:00");
+  });
+
+  it("skips weekend days when org send policy is applied", () => {
+    const now = new Date("2026-08-07T22:30:00.000Z"); // Friday 6:30pm EDT
+    const local = defaultAudienceScheduleDatetimeLocal({
+      timeZone: "America/New_York",
+      sendWindowStartHour: 9,
+      sendWindowEndHour: 17,
+      sendPolicy: DEFAULT_ORG_SEND_POLICY,
+      now,
+    });
+    expect(local.startsWith("2026-08-10T")).toBe(true);
   });
 
   it("skips today's closed window and picks tomorrow morning", () => {

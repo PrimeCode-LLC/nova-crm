@@ -65,9 +65,12 @@ import {
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
-  resolveLeadScheduleTimezone,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
+import {
+  formatScheduleDayLabel,
+  scheduleDayKeyFromDate,
+} from "@/lib/email/mailbox-schedule-capacity";
 import {
   isBulkScheduleStartInFuture,
   resolveBulkScheduleStartIso,
@@ -144,9 +147,11 @@ export function BulkScheduleSequencesDialog({
     followupPlans,
     getContactById,
     setFollowupEmailSchedule,
+    updateFollowup,
     currentUserId,
     organizationId,
     getOwnerDisplayName,
+    organizationSendPolicy,
   } = useWorkspace();
   const timeZone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
@@ -163,7 +168,20 @@ export function BulkScheduleSequencesDialog({
     return list.filter((mb) => isEmailAccountConfigured(mb));
   }, [mailboxes, activeMailboxId, isDemo]);
 
-  const [phase, setPhase] = React.useState<"setup" | "running" | "done">("setup");
+  const [phase, setPhase] = React.useState<"setup" | "preview" | "running" | "done">("setup");
+  const [previewByDay, setPreviewByDay] = React.useState<{ day: string; count: number }[]>([]);
+  const [previewByMailbox, setPreviewByMailbox] = React.useState<
+    { mailboxId: string; label: string; count: number }[]
+  >([]);
+  const [previewReady, setPreviewReady] = React.useState(false);
+  const previewPlansRef = React.useRef<
+    {
+      leadId: string;
+      mailboxId: string;
+      steps: { id: string; scheduledAt: string; included: boolean }[];
+      startFresh: boolean;
+    }[]
+  >([]);
   const [selectedMailboxIds, setSelectedMailboxIds] = React.useState<string[]>([]);
   const [preferOwnerShared, setPreferOwnerShared] = React.useState(true);
   const [continuityMode, setContinuityMode] =
@@ -417,7 +435,7 @@ export function BulkScheduleSequencesDialog({
     el?.scrollIntoView({ block: "nearest", behavior: "smooth" });
   }, [phase, progressIndex]);
 
-  async function runBatch() {
+  async function runBatch(mode: "preview" | "commit" = "commit") {
     const selected = sendableMailboxesRef.current.filter((m) =>
       selectedMailboxIds.includes(m.id),
     );
@@ -450,10 +468,14 @@ export function BulkScheduleSequencesDialog({
 
     const queue = snap.readyLeadIds;
     cancelRef.current = false;
-    setPhase("running");
+    setPhase(mode === "preview" ? "preview" : "running");
     setProgressIndex(0);
     setRunTotal(queue.length);
     setLoadError(null);
+    if (mode === "preview") {
+      previewPlansRef.current = [];
+      setPreviewReady(false);
+    }
     setRows(
       queue.map((id) => {
         const lead = leadsRef.current.find((l) => l.id === id);
@@ -481,6 +503,25 @@ export function BulkScheduleSequencesDialog({
       setPhase("setup");
       toast.error(loaded.error);
       return;
+    }
+
+    let orgRemainingByDay: Record<string, number> | undefined;
+    let orgCeiling: number | null = organizationSendPolicy.dailyCeiling;
+    if (!isDemo) {
+      try {
+        const capRes = await fetch("/api/email/org-capacity?horizonDays=60");
+        const capData = (await capRes.json()) as {
+          ok?: boolean;
+          ceiling?: number | null;
+          remainingByDay?: Record<string, number>;
+        };
+        if (capData.ok) {
+          orgCeiling = capData.ceiling ?? orgCeiling;
+          orgRemainingByDay = capData.remainingByDay;
+        }
+      } catch {
+        /* client assignment still proceeds; server enforces ceiling */
+      }
     }
 
     let states: MailboxCapacityState[] = loaded.states;
@@ -525,11 +566,6 @@ export function BulkScheduleSequencesDialog({
         .filter((f) => canAutoScheduleFollowupEmail(f, lead.channel))
         .sort((a, b) => a.dueAt.localeCompare(b.dueAt));
 
-      const scheduleZone = resolveLeadScheduleTimezone({
-        strategyId: lead.strategyId,
-        strategies: prospecting.strategies,
-        orgTimezone: timeZone,
-      });
       const sendWindow = resolveLeadSendWindow({
         strategyId: lead.strategyId,
         strategies: prospecting.strategies,
@@ -543,12 +579,13 @@ export function BulkScheduleSequencesDialog({
               scheduledAt: isoFromDatetimeLocalInZone(
                 defaultAudienceScheduleDatetimeLocal({
                   preferIso: f.dueAt,
-                  timeZone: scheduleZone,
+                  timeZone,
                   sendWindowStartHour: sendWindow.startHour,
                   sendWindowEndHour: sendWindow.endHour,
                   spreadKey: f.id,
+                  sendPolicy: organizationSendPolicy,
                 }),
-                scheduleZone,
+                timeZone,
               ),
               included: true,
             }));
@@ -598,9 +635,13 @@ export function BulkScheduleSequencesDialog({
         timeZone,
         candidateMailboxIds,
         preferredMailboxId: preferPrior,
+        sendPolicy: organizationSendPolicy,
+        orgCeiling,
+        orgRemainingByDay,
       });
       rr = assigned.nextRoundRobinIndex;
       states = assigned.nextStates;
+      if (assigned.nextOrgRemainingByDay) orgRemainingByDay = assigned.nextOrgRemainingByDay;
 
       if (!assigned.ok) {
         patchRow(leadId, {
@@ -620,6 +661,26 @@ export function BulkScheduleSequencesDialog({
 
       const senderChanged =
         Boolean(priorSender) && priorSender!.mailboxId !== assigned.mailboxId;
+
+      if (mode === "preview") {
+        previewPlansRef.current.push({
+          leadId,
+          mailboxId: assigned.mailboxId,
+          steps: assigned.steps,
+          startFresh,
+        });
+        const firstAt = assigned.steps.find((s) => s.included)?.scheduledAt;
+        patchRow(leadId, {
+          status: "success",
+          detail: `${assigned.steps.filter((s) => s.included).length} email${
+            assigned.steps.filter((s) => s.included).length === 1 ? "" : "s"
+          } · ${mailboxOptionLabel(mailbox)}${
+            firstAt ? ` · first ${formatInstantInZone(firstAt, timeZone)}` : ""
+          }`,
+        });
+        success += 1;
+        continue;
+      }
 
       let okCount = 0;
       let lastError = "";
@@ -651,6 +712,7 @@ export function BulkScheduleSequencesDialog({
           emailScheduledAt: result.emailScheduledAt,
           freshThread: startFresh,
         });
+        updateFollowup(followup.id, { dueAt: result.emailScheduledAt });
         okCount += 1;
       }
 
@@ -678,6 +740,44 @@ export function BulkScheduleSequencesDialog({
         }${continuityNote}`,
       });
       success += 1;
+    }
+
+    if (mode === "preview") {
+      const counts = new Map<string, number>();
+      for (const plan of previewPlansRef.current) {
+        for (const step of plan.steps) {
+          if (!step.included) continue;
+          const day = scheduleDayKeyFromDate(step.scheduledAt, timeZone);
+          if (!day) continue;
+          counts.set(day, (counts.get(day) ?? 0) + 1);
+        }
+      }
+      setPreviewByDay(
+        [...counts.entries()]
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([day, count]) => ({ day, count })),
+      );
+      const mailboxCounts = new Map<string, number>();
+      for (const plan of previewPlansRef.current) {
+        const n = plan.steps.filter((s) => s.included).length;
+        if (n === 0) continue;
+        mailboxCounts.set(plan.mailboxId, (mailboxCounts.get(plan.mailboxId) ?? 0) + n);
+      }
+      setPreviewByMailbox(
+        [...mailboxCounts.entries()]
+          .map(([mailboxId, count]) => {
+            const mailbox = mailboxById.get(mailboxId);
+            return {
+              mailboxId,
+              label: mailbox ? mailboxOptionLabel(mailbox) : mailboxId,
+              count,
+            };
+          })
+          .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label)),
+      );
+      setPreviewReady(true);
+      setPhase("preview");
+      return;
     }
 
     setPhase("done");
@@ -733,6 +833,8 @@ export function BulkScheduleSequencesDialog({
           <DialogDescription className="text-xs">
             {phase === "setup"
               ? "Queue email steps from existing active sequences across selected inboxes, using each mailbox's daily send limit. When scheduling for other owners, prefer inboxes you both can send from."
+              : phase === "preview"
+                ? "Review where emails will land before they are queued. Overflow moves to the next working day with capacity."
               : phase === "running"
                 ? "Queuing email steps across your selected inboxes. You can stop after the current prospect."
                 : "All selected prospects have been processed."}
@@ -1097,14 +1199,64 @@ export function BulkScheduleSequencesDialog({
                     hasOtherOwners &&
                     ownerMatchBlockedCount >= preflight.ready)
                 }
-                onClick={() => void runBatch()}
+                onClick={() => void runBatch("preview")}
               >
                 <CalendarClock className="h-3.5 w-3.5" />
-                Schedule{" "}
+                Review{" "}
                 {preferOwnerShared && ownerMatchBlockedCount > 0
                   ? Math.max(0, preflight.ready - ownerMatchBlockedCount)
                   : preflight.ready}{" "}
                 ready
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : null}
+
+        {phase === "preview" ? (
+          <div className="space-y-3 py-1">
+            <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs space-y-1">
+              <p className="font-medium">Planned send days</p>
+              {previewByDay.length === 0 ? (
+                <p className="text-muted-foreground">No emails could be placed.</p>
+              ) : (
+                previewByDay.map((row) => (
+                  <p key={row.day} className="tabular-nums">
+                    {formatScheduleDayLabel(row.day, timeZone)} · {row.count} email
+                    {row.count === 1 ? "" : "s"}
+                  </p>
+                ))
+              )}
+              {previewByMailbox.length > 0 ? (
+                <div className="space-y-1 border-t pt-1.5">
+                  <p className="font-medium">Inbox fill</p>
+                  {previewByMailbox.map((row) => (
+                    <p key={row.mailboxId} className="tabular-nums">
+                      {row.label} · {row.count} email{row.count === 1 ? "" : "s"}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+            <ul className="max-h-56 space-y-1 overflow-y-auto rounded-md border p-2">
+              {rows.map((row) => (
+                <li key={row.leadId} className="rounded px-1.5 py-1 text-xs">
+                  <p className="truncate font-medium">{row.label}</p>
+                  {row.detail ? (
+                    <p className="text-[11px] text-muted-foreground">{row.detail}</p>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+            <DialogFooter className="gap-2 sm:justify-between">
+              <Button type="button" variant="outline" onClick={() => setPhase("setup")}>
+                Back
+              </Button>
+              <Button
+                type="button"
+                disabled={!previewReady || previewPlansRef.current.length === 0}
+                onClick={() => void runBatch("commit")}
+              >
+                Confirm schedule
               </Button>
             </DialogFooter>
           </div>

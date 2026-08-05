@@ -1,5 +1,10 @@
 import type { ScheduledEmail } from "@/lib/email-account-types";
 import {
+  isOrgWorkingDay,
+  resolveOrgSendPolicy,
+  type OrgEmailSendPolicy,
+} from "@/lib/email/org-send-policy";
+import {
   datetimeLocalInZone,
   isoFromDatetimeLocalInZone,
   resolveOrgTimezone,
@@ -261,17 +266,46 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
   limit: number | null,
   horizonDays = 60,
   timeZone?: string,
-): { steps: T[]; changed: boolean; unresolvedIds: string[] } {
-  if (limit == null) {
+  options?: {
+    sendPolicy?: OrgEmailSendPolicy | null;
+    orgCeiling?: number | null;
+    orgRemainingByDay?: Record<string, number>;
+  },
+): {
+  steps: T[];
+  changed: boolean;
+  unresolvedIds: string[];
+  orgRemainingByDay?: Record<string, number>;
+} {
+  const zone = resolveOrgTimezone(timeZone);
+  const policy = options?.sendPolicy ? resolveOrgSendPolicy(options.sendPolicy) : null;
+  const orgCeiling =
+    options?.orgCeiling == null || !Number.isFinite(options.orgCeiling) || options.orgCeiling <= 0
+      ? null
+      : Math.floor(options.orgCeiling);
+  const orgRemaining: Record<string, number> | null =
+    orgCeiling == null
+      ? null
+      : { ...(options?.orgRemainingByDay ?? {}) };
+
+  if (limit == null && orgCeiling == null && !policy) {
     return { steps, changed: false, unresolvedIds: [] };
   }
 
-  const zone = resolveOrgTimezone(timeZone);
   const remaining: Record<string, number> = {};
   const todayKey = scheduleDayKeyFromDate(new Date(), zone);
   const endKey = addUtcDayKey(todayKey, horizonDays - 1);
   for (let key = todayKey; key <= endKey; key = addUtcDayKey(key, 1)) {
-    remaining[key] = byDay[key]?.remaining ?? limit;
+    const working = !policy || isOrgWorkingDay(key, policy, zone);
+    if (!working) {
+      remaining[key] = 0;
+      if (orgRemaining) orgRemaining[key] = 0;
+      continue;
+    }
+    remaining[key] = limit == null ? Number.POSITIVE_INFINITY : (byDay[key]?.remaining ?? limit);
+    if (orgRemaining && orgRemaining[key] == null) {
+      orgRemaining[key] = orgCeiling!;
+    }
   }
 
   const next = steps.map((s) => ({ ...s }));
@@ -316,13 +350,15 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
       const dayKey = scheduleDayKeyFromDate(probe, zone);
       if (!dayKey || dayKey > endKey) break;
       const slots = remaining[dayKey] ?? 0;
-      if (slots > 0) {
+      const orgSlots = orgRemaining ? (orgRemaining[dayKey] ?? 0) : Number.POSITIVE_INFINITY;
+      if (slots > 0 && orgSlots > 0) {
         const localValue = toDatetimeLocalValue(probe, zone);
         if (localValue !== step.scheduledAt) {
           step.scheduledAt = localValue;
           changed = true;
         }
         remaining[dayKey] = slots - 1;
+        if (orgRemaining) orgRemaining[dayKey] = orgSlots - 1;
         minTime = probe.getTime() + 60_000;
         placed = true;
         break;
@@ -339,5 +375,5 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
     return updated ? { ...s, scheduledAt: updated.scheduledAt } : s;
   });
 
-  return { steps: merged, changed, unresolvedIds };
+  return { steps: merged, changed, unresolvedIds, orgRemainingByDay: orgRemaining ?? undefined };
 }

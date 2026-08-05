@@ -233,7 +233,8 @@ export function MailboxUtilizationPanel({
               ) : null}
               {summary.totalCapacityToday != null ? (
                 <Badge variant="outline" className="h-5 px-1.5 text-[10px] font-normal tabular-nums">
-                  {fmtNumber(summary.totalSentToday)}/{fmtNumber(summary.totalCapacityToday)} today
+                  {fmtNumber(summary.totalSentToday + summary.totalPendingToday)}/
+                  {fmtNumber(summary.totalCapacityToday)} booked today
                 </Badge>
               ) : null}
             </div>

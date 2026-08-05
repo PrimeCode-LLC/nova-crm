@@ -41,6 +41,7 @@ export type MailboxUtilizationSummary = {
   wellUtilized: number;
   unassigned: number;
   totalSentToday: number;
+  totalPendingToday: number;
   totalCapacityToday: number | null;
 };
 
@@ -154,6 +155,7 @@ export function summarizeMailboxUtilization(
     wellUtilized: active.filter((r) => r.status === "healthy" || r.status === "hot").length,
     unassigned: active.filter((r) => r.status === "unassigned").length,
     totalSentToday: active.reduce((sum, r) => sum + r.sentToday, 0),
+    totalPendingToday: active.reduce((sum, r) => sum + r.pendingToday, 0),
     totalCapacityToday: hasAnyLimit ? totalCapacityToday : null,
   };
 }

@@ -22,7 +22,6 @@ import {
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
-  resolveLeadScheduleTimezone,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
@@ -96,7 +95,8 @@ export function ScheduleFollowupEmailDialog({
     schedule: { scheduledEmailId: string; emailScheduledAt: string },
   ) => void;
 }) {
-  const { isDemo, getContactById, currentUserId, organizationId } = useWorkspace();
+  const { isDemo, getContactById, currentUserId, organizationId, organizationSendPolicy } =
+    useWorkspace();
   const contact = getContactById(lead.contactId);
   const recipientOptions = React.useMemo(
     () => buildContactRecipientOptions(lead, contact),
@@ -133,15 +133,7 @@ export function ScheduleFollowupEmailDialog({
 
   const timezone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
-  const scheduleTimezone = React.useMemo(
-    () =>
-      resolveLeadScheduleTimezone({
-        strategyId: lead.strategyId,
-        strategies: prospecting.strategies,
-        orgTimezone: timezone,
-      }),
-    [lead.strategyId, prospecting.strategies, timezone],
-  );
+  const scheduleTimezone = timezone;
   const sendWindow = React.useMemo(
     () =>
       resolveLeadSendWindow({
@@ -170,10 +162,11 @@ export function ScheduleFollowupEmailDialog({
       setScheduledAt(
         defaultAudienceScheduleDatetimeLocal({
           preferIso: hydrated.dueAt,
-          timeZone: scheduleTimezone,
+          timeZone: timezone,
           sendWindowStartHour: sendWindow.startHour,
           sendWindowEndHour: sendWindow.endHour,
           spreadKey: hydrated.id,
+          sendPolicy: organizationSendPolicy,
         }),
       );
       setBody(hydrated.messageBody ?? "");
@@ -273,6 +266,7 @@ export function ScheduleFollowupEmailDialog({
       loadLimit,
       60,
       timezone,
+      { sendPolicy: organizationSendPolicy },
     );
     const nextIso = result.steps[0]?.scheduledAt;
     if (!nextIso || (!result.changed && result.unresolvedIds.length === 0)) {

@@ -1,5 +1,11 @@
 import { addUtcDayKey } from "@/lib/email/mailbox-schedule-capacity";
 import {
+  intersectSendWindowWithPolicy,
+  isOrgWorkingDay,
+  resolveOrgSendPolicy,
+  type OrgEmailSendPolicy,
+} from "@/lib/email/org-send-policy";
+import {
   isValidIanaTimezone,
   resolveOrgTimezone,
   zonedDayKey,
@@ -80,9 +86,13 @@ export function defaultAudienceScheduleDatetimeLocal(input: {
   now?: Date;
   /** Stable per-email key (e.g. follow-up id). Omit to pin to the window start. */
   spreadKey?: string;
+  /** Org working-hours policy. When set, non-working days are skipped. */
+  sendPolicy?: OrgEmailSendPolicy | null;
 }): string {
   const zone = resolveOrgTimezone(input.timeZone);
-  const window = normalizeSendWindow(input.sendWindowStartHour, input.sendWindowEndHour);
+  const policy = input.sendPolicy ? resolveOrgSendPolicy(input.sendPolicy) : null;
+  const baseWindow = normalizeSendWindow(input.sendWindowStartHour, input.sendWindowEndHour);
+  const window = policy ? intersectSendWindowWithPolicy(baseWindow, policy) : baseWindow;
   const now = input.now ?? new Date();
   const minMs = now.getTime() + 60_000;
 
@@ -93,6 +103,7 @@ export function defaultAudienceScheduleDatetimeLocal(input: {
     : 0;
 
   const slotOnDay = (dayKey: string): Date | null => {
+    if (policy && !isOrgWorkingDay(dayKey, policy, zone)) return null;
     const windowStart = zonedWallTimeToUtc(dayKey, window.startHour, 0, 0, 0, zone);
     const windowEnd = zonedWallTimeToUtc(dayKey, window.endHour, 0, 0, 0, zone);
     if (Number.isNaN(windowStart.getTime()) || Number.isNaN(windowEnd.getTime())) return null;
@@ -113,7 +124,7 @@ export function defaultAudienceScheduleDatetimeLocal(input: {
   }
 
   const todayKey = zonedDayKey(now, zone);
-  for (let offset = 0; offset < 14; offset += 1) {
+  for (let offset = 0; offset < 21; offset += 1) {
     const dayKey = addUtcDayKey(todayKey, offset);
     const slot = slotOnDay(dayKey);
     if (slot) return toDatetimeLocalValue(slot, zone);

@@ -118,6 +118,8 @@ export const ORG_SUBCOLLECTIONS = {
   integrationSecrets: "integrationSecrets",
   /** Org-scoped CRM Role Catalog (`WorkspaceRoleDoc`). */
   roles: "roles",
+  /** Org-wide daily email send ledger (`{dayKey}` → booked count). */
+  sendLedger: "sendLedger",
 } as const;
 
 /**

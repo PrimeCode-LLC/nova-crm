@@ -724,6 +724,10 @@ service cloud.firestore {
         allow read: if signedIn() && orgId == callerOrgId() && isOrgAtLeast('admin');
         allow write: if false;
       }
+
+      match /sendLedger/{dayKey} {
+        allow read, write: if false;
+      }
     }
 
     match /platformAdmins/{id} {

@@ -49,6 +49,7 @@ import {
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 import { WallDisplaySettingsCard } from "@/components/settings/wall-display-settings-card";
+import { OrgSendPolicySettings } from "@/components/settings/org-send-policy-settings";
 import { InstantlyIntegrationCard } from "@/components/integrations/instantly-integration-card";
 import { MillionVerifierIntegrationCard } from "@/components/integrations/millionverifier-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
@@ -285,15 +286,13 @@ function SettingsPage() {
   }, []);
 
   const [orgName, setOrgName] = React.useState("Nova Inc.");
-  const [orgTimezone, setOrgTimezone] = React.useState("UTC+5 (PKT)");
 
   React.useEffect(() => {
     try {
       const raw = typeof window !== "undefined" ? localStorage.getItem(LS_ACCOUNT) : null;
       if (!raw) return;
-      const j = JSON.parse(raw) as { orgName?: string; timezone?: string };
+      const j = JSON.parse(raw) as { orgName?: string };
       if (j.orgName?.trim()) setOrgName(j.orgName.trim());
-      if (j.timezone?.trim()) setOrgTimezone(j.timezone.trim());
     } catch {
       /* ignore */
     }
@@ -337,18 +336,6 @@ function SettingsPage() {
       toast.success("Profile saved");
     } finally {
       setSavingProfile(false);
-    }
-  }
-
-  function handleSaveAccount() {
-    try {
-      localStorage.setItem(
-        LS_ACCOUNT,
-        JSON.stringify({ orgName: orgName.trim(), timezone: orgTimezone.trim() }),
-      );
-      toast.success("Account settings saved");
-    } catch {
-      toast.error("Could not save (storage blocked).");
     }
   }
 
@@ -646,23 +633,11 @@ function SettingsPage() {
               <CardHeader>
                 <CardTitle className="text-sm">Workspace settings</CardTitle>
                 <CardDescription className="text-xs">
-                  Manage your organization name and preferences.
+                  Organization name, timezone, and email working hours for auto-scheduling.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Organization name</Label>
-                  <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} className="h-9" />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs">Default timezone</Label>
-                  <Input value={orgTimezone} onChange={(e) => setOrgTimezone(e.target.value)} className="h-9" />
-                </div>
-                <div className="flex justify-end">
-                  <Button size="sm" onClick={handleSaveAccount}>
-                    Save changes
-                  </Button>
-                </div>
+              <CardContent>
+                <OrgSendPolicySettings orgName={orgName} onOrgNameChange={setOrgName} />
               </CardContent>
             </Card>
           </TabsContent>

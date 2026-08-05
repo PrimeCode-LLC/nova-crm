@@ -138,6 +138,12 @@ export type OrganizationStatus = "trial" | "active" | "suspended";
 
 export type SaaSPlanId = "free" | "pro" | "enterprise";
 
+export type OrgEmailSendPolicy = {
+  weekly: WeeklyAvailability;
+  weekdayOnly: boolean;
+  dailyCeiling: number | null;
+};
+
 export interface OrganizationSettings {
   billingEmail?: string;
   /**
@@ -146,6 +152,8 @@ export interface OrganizationSettings {
    * When unset, the app falls back to each user's browser timezone.
    */
   timezone?: string;
+  /** Org working hours + optional daily send ceiling for auto/bulk email scheduling. */
+  sendPolicy?: OrgEmailSendPolicy;
   /** Internal notes for operators (not shown to tenant users). */
   operatorNotes?: string;
   /** Per-tenant secret for `POST /api/integrations/webhook/lead` (never returned to browsers). */
