@@ -1,24 +1,12 @@
 "use client";
 
 import * as React from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import { toast } from "sonner";
-import {
-  DEFAULT_ORG_SEND_POLICY,
-  resolveOrgSendPolicy,
-  type OrgEmailSendPolicy,
-} from "@/lib/email/org-send-policy";
+import { DEFAULT_ORG_SEND_POLICY, resolveOrgSendPolicy } from "@/lib/email/org-send-policy";
 import { WEEKDAY_KEYS } from "@/lib/scheduling/defaults";
-import { formatTimezoneDisplayLabel } from "@/lib/scheduling/timezone-options";
-import type { AvailabilityTimeSlot, WeekdayKey } from "@/lib/types";
-import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useOrgTimezone } from "@/hooks/use-org-timezone";
-import { Loader2 } from "lucide-react";
+import type { AvailabilityTimeSlot, OrgEmailSendPolicy, WeekdayKey } from "@/lib/types";
 
 const DAY_LABEL: Record<WeekdayKey, string> = {
   monday: "Mon",
@@ -30,140 +18,58 @@ const DAY_LABEL: Record<WeekdayKey, string> = {
   sunday: "Sun",
 };
 
-export function OrgSendPolicySettings({
-  orgName,
-  onOrgNameChange,
+export function OrgSendPolicyFields({
+  value,
+  onChange,
+  disabled,
 }: {
-  orgName: string;
-  onOrgNameChange: (name: string) => void;
+  value: OrgEmailSendPolicy;
+  onChange: (next: OrgEmailSendPolicy) => void;
+  disabled?: boolean;
 }) {
-  const router = useRouter();
-  const { isDemo } = useWorkspace();
-  const timeZone = useOrgTimezone();
-  const [policy, setPolicy] = React.useState<OrgEmailSendPolicy>(DEFAULT_ORG_SEND_POLICY);
-  const [ceilingInput, setCeilingInput] = React.useState("");
-  const [loading, setLoading] = React.useState(true);
-  const [saving, setSaving] = React.useState(false);
-
-  React.useEffect(() => {
-    void (async () => {
-      try {
-        const res = await fetch("/api/org/settings");
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          name?: string;
-          sendPolicy?: OrgEmailSendPolicy;
-        };
-        if (data.name?.trim()) onOrgNameChange(data.name.trim());
-        const next = resolveOrgSendPolicy(data.sendPolicy);
-        setPolicy(next);
-        setCeilingInput(next.dailyCeiling != null ? String(next.dailyCeiling) : "");
-      } catch {
-        /* ignore */
-      } finally {
-        setLoading(false);
-      }
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- load once
-  }, []);
+  const policy = resolveOrgSendPolicy(value);
+  const ceilingInput =
+    policy.dailyCeiling != null ? String(policy.dailyCeiling) : "";
 
   function setDayEnabled(day: WeekdayKey, enabled: boolean) {
-    setPolicy((prev) => ({
-      ...prev,
+    onChange({
+      ...policy,
       weekly: {
-        ...prev.weekly,
+        ...policy.weekly,
         [day]: enabled ? [{ start: "09:00", end: "17:00" }] : [],
       },
-    }));
-  }
-
-  function setDaySlot(day: WeekdayKey, patch: Partial<AvailabilityTimeSlot>) {
-    setPolicy((prev) => {
-      const current = prev.weekly[day]?.[0] ?? { start: "09:00", end: "17:00" };
-      return {
-        ...prev,
-        weekly: {
-          ...prev.weekly,
-          [day]: [{ ...current, ...patch }],
-        },
-      };
     });
   }
 
-  async function handleSave() {
-    if (isDemo) {
-      toast.info("Workspace send hours are not saved in Demo mode.");
-      return;
-    }
-    const ceilingRaw = ceilingInput.trim();
-    const dailyCeiling =
-      ceilingRaw === ""
-        ? null
-        : Number.isFinite(Number(ceilingRaw)) && Number(ceilingRaw) > 0
-          ? Math.floor(Number(ceilingRaw))
-          : null;
-    setSaving(true);
-    try {
-      const res = await fetch("/api/org/settings", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: orgName.trim(),
-          settings: {
-            sendPolicy: {
-              ...policy,
-              weekdayOnly: true,
-              dailyCeiling,
-            },
-          },
-        }),
-      });
-      const data = (await res.json()) as { ok?: boolean; error?: unknown };
-      if (!res.ok || !data.ok) {
-        toast.error("Could not save workspace settings");
-        return;
-      }
-      toast.success("Workspace settings saved");
-      setSavedTimezone(timezone.trim());
-      clearLegacyAccountTimezone();
-      router.refresh();
-    } catch {
-      toast.error("Could not save workspace settings");
-    } finally {
-      setSaving(false);
-    }
+  function setDaySlot(day: WeekdayKey, patch: Partial<AvailabilityTimeSlot>) {
+    const current = policy.weekly[day]?.[0] ?? { start: "09:00", end: "17:00" };
+    onChange({
+      ...policy,
+      weekly: {
+        ...policy.weekly,
+        [day]: [{ ...current, ...patch }],
+      },
+    });
   }
 
-  if (loading) {
-    return (
-      <div className="flex items-center gap-2 py-6 text-xs text-muted-foreground">
-        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        Loading workspace settings…
-      </div>
-    );
+  function setCeiling(raw: string) {
+    const trimmed = raw.trim();
+    const dailyCeiling =
+      trimmed === ""
+        ? null
+        : Number.isFinite(Number(trimmed)) && Number(trimmed) > 0
+          ? Math.floor(Number(trimmed))
+          : null;
+    onChange({ ...policy, dailyCeiling, weekdayOnly: true });
   }
 
   return (
     <div className="space-y-4">
-      <div className="space-y-1.5">
-        <Label className="text-xs">Organization name</Label>
-        <Input value={orgName} onChange={(e) => onOrgNameChange(e.target.value)} className="h-9" />
-      </div>
-      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-        Workspace timezone is{" "}
-        <span className="font-medium text-foreground">{formatTimezoneDisplayLabel(timeZone)}</span>
-        . Dashboards, due dates, the header clock, and email scheduling all use this zone. Change it
-        in{" "}
-        <Link href="/admin/organization" className="font-medium text-foreground underline">
-          Organization settings
-        </Link>
-        .
-      </div>
       <div className="space-y-2">
         <Label className="text-xs">Email working hours</Label>
-        <p className="text-[11px] text-muted-foreground">
-          Auto and bulk sequence scheduling stay inside these hours and skip closed days, using the
-          workspace timezone above.
+        <p className="text-xs text-muted-foreground">
+          Auto and bulk sequence scheduling stay inside these hours and skip closed days,
+          using the workspace timezone above.
         </p>
         <div className="space-y-2 rounded-md border p-3">
           {WEEKDAY_KEYS.map((day) => {
@@ -175,6 +81,7 @@ export function OrgSendPolicySettings({
                   checked={enabled}
                   onCheckedChange={(v) => setDayEnabled(day, v)}
                   id={`send-day-${day}`}
+                  disabled={disabled}
                 />
                 <Label htmlFor={`send-day-${day}`} className="w-10 text-xs">
                   {DAY_LABEL[day]}
@@ -182,7 +89,7 @@ export function OrgSendPolicySettings({
                 <Input
                   type="time"
                   className="h-8 w-[7.5rem]"
-                  disabled={!enabled}
+                  disabled={disabled || !enabled}
                   value={slot?.start ?? "09:00"}
                   onChange={(e) => setDaySlot(day, { start: e.target.value })}
                 />
@@ -190,7 +97,7 @@ export function OrgSendPolicySettings({
                 <Input
                   type="time"
                   className="h-8 w-[7.5rem]"
-                  disabled={!enabled}
+                  disabled={disabled || !enabled}
                   value={slot?.end ?? "17:00"}
                   onChange={(e) => setDaySlot(day, { end: e.target.value })}
                 />
@@ -200,26 +107,28 @@ export function OrgSendPolicySettings({
         </div>
       </div>
       <div className="space-y-1.5">
-        <Label className="text-xs">Organization daily send ceiling (optional)</Label>
+        <Label className="text-xs" htmlFor="org-daily-ceiling">
+          Organization daily send ceiling (optional)
+        </Label>
         <Input
+          id="org-daily-ceiling"
           type="number"
           min={1}
           placeholder="No org-wide cap"
           value={ceilingInput}
-          onChange={(e) => setCeilingInput(e.target.value)}
+          disabled={disabled}
+          onChange={(e) => setCeiling(e.target.value)}
           className="h-9"
         />
-        <p className="text-[11px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Caps sent + queued emails per org day across every inbox. Leave blank to use mailbox
           limits only.
         </p>
       </div>
-      <div className="flex justify-end">
-        <Button size="sm" onClick={() => void handleSave()} disabled={saving || !orgName.trim()}>
-          {saving ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : null}
-          Save changes
-        </Button>
-      </div>
     </div>
   );
+}
+
+export function emptySendPolicyDraft(): OrgEmailSendPolicy {
+  return resolveOrgSendPolicy(DEFAULT_ORG_SEND_POLICY);
 }

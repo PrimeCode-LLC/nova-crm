@@ -33,6 +33,7 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
 import type { ChannelKey, Lead, Deal, Followup, LeadTask, User } from "@/lib/types";
 import { getMemberServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
+import { resolveOrgTimezone } from "@/lib/org-timezone";
 import {
   getCachedDashboardBriefServer,
   saveDashboardBriefServer,
@@ -143,7 +144,9 @@ export async function POST(req: Request) {
   };
 
   const org = await getOrganizationServer(orgId);
-  const rangeOpts = { timeZone: org?.settings.timezone };
+  const rangeOpts = {
+    timeZone: resolveOrgTimezone(org?.settings.timezone, { fallback: "UTC" }),
+  };
 
   let leads = bundle.leads;
   if (channelScope.length) leads = leads.filter((l) => channelScope.includes(l.channel));

@@ -11,8 +11,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { OrgMemberRole } from "@/lib/types";
+import type { OrgEmailSendPolicy, OrgMemberRole } from "@/lib/types";
 import { WorkspaceTimezoneField } from "@/components/settings/workspace-timezone-field";
+import {
+  emptySendPolicyDraft,
+  OrgSendPolicyFields,
+} from "@/components/settings/org-send-policy-settings";
+import { resolveOrgSendPolicy } from "@/lib/email/org-send-policy";
 import { clearLegacyAccountTimezone } from "@/lib/scheduling/workspace-timezone";
 
 type OrganizationSettingsPayload = {
@@ -26,6 +31,7 @@ type OrganizationSettingsPayload = {
   billingEmail: string;
   /** Sticky IANA zone, or "" for browser fallback. */
   timezone: string;
+  sendPolicy: OrgEmailSendPolicy;
   updatedAt: string;
 } | null;
 
@@ -44,13 +50,14 @@ export function OrganizationSettingsClient({
     organization?.billingEmail ?? "",
   );
   const [timezone, setTimezone] = React.useState(organization?.timezone ?? "");
+  const [sendPolicy, setSendPolicy] = React.useState<OrgEmailSendPolicy>(
+    organization?.sendPolicy ?? emptySendPolicyDraft(),
+  );
   const [submitting, setSubmitting] = React.useState(false);
 
   const [joinConfigured, setJoinConfigured] = React.useState(false);
   const [joinUrl, setJoinUrl] = React.useState<string | null>(null);
   const [joinBusy, setJoinBusy] = React.useState(false);
-  const savedTimezone = organization?.timezone ?? "";
-
   React.useEffect(() => {
     if (!canEdit || !organization) return;
     let cancelled = false;
@@ -74,6 +81,7 @@ export function OrganizationSettingsClient({
     setName(organization.name);
     setBillingEmail(organization.billingEmail);
     setTimezone(organization.timezone);
+    setSendPolicy(resolveOrgSendPolicy(organization.sendPolicy));
   }, [organization?.id, organization?.updatedAt]);
 
   const seatLabel =
@@ -87,7 +95,11 @@ export function OrganizationSettingsClient({
 
     const payload: {
       name?: string;
-      settings?: { billingEmail?: string; timezone?: string };
+      settings?: {
+        billingEmail?: string;
+        timezone?: string;
+        sendPolicy?: OrgEmailSendPolicy;
+      };
     } = {};
     if (name.trim() !== organization.name) {
       payload.name = name.trim();
@@ -96,12 +108,21 @@ export function OrganizationSettingsClient({
     const prevBilling = (organization.billingEmail ?? "").trim();
     const nextTimezone = timezone.trim();
     const prevTimezone = (organization.timezone ?? "").trim();
-    const settings: { billingEmail?: string; timezone?: string } = {};
+    const nextPolicy = resolveOrgSendPolicy({ ...sendPolicy, weekdayOnly: true });
+    const prevPolicy = resolveOrgSendPolicy(organization.sendPolicy);
+    const settings: {
+      billingEmail?: string;
+      timezone?: string;
+      sendPolicy?: OrgEmailSendPolicy;
+    } = {};
     if (nextBilling !== prevBilling) {
       settings.billingEmail = nextBilling;
     }
     if (nextTimezone !== prevTimezone) {
       settings.timezone = nextTimezone;
+    }
+    if (JSON.stringify(nextPolicy) !== JSON.stringify(prevPolicy)) {
+      settings.sendPolicy = nextPolicy;
     }
     if (Object.keys(settings).length > 0) {
       payload.settings = settings;
@@ -184,7 +205,7 @@ export function OrganizationSettingsClient({
         title="Organization settings"
         description={
           organization
-            ? `Display and billing preferences for ${organization.name}.`
+            ? `Timezone, working hours, and billing for ${organization.name}.`
             : "Workspace settings."
         }
       />
@@ -240,8 +261,7 @@ export function OrganizationSettingsClient({
           <CardHeader className="pb-3">
             <CardTitle className="text-base">Editable fields</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Workspace display name, billing contact, and the timezone used for
-              follow-ups, dashboards, and email send times.
+              Workspace display name, billing contact, timezone, and email send hours.
             </p>
           </CardHeader>
           <CardContent>
@@ -250,7 +270,7 @@ export function OrganizationSettingsClient({
                 No workspace loaded. Complete onboarding or sign in again.
               </p>
             ) : (
-              <form onSubmit={(e) => void onSubmit(e)} className="max-w-lg space-y-4">
+              <form onSubmit={(e) => void onSubmit(e)} className="max-w-xl space-y-4">
                 <div className="space-y-1.5">
                   <Label className="text-xs" htmlFor="org-name">
                     Workspace name
@@ -291,8 +311,11 @@ export function OrganizationSettingsClient({
                   label="Workspace timezone"
                   value={timezone}
                   onChange={setTimezone}
-                  savedTimezone={savedTimezone}
-                  side="organization"
+                  disabled={!canEdit}
+                />
+                <OrgSendPolicyFields
+                  value={sendPolicy}
+                  onChange={setSendPolicy}
                   disabled={!canEdit}
                 />
                 {canEdit && (

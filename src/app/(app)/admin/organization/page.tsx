@@ -3,6 +3,7 @@ import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
+import { resolveOrgSendPolicy } from "@/lib/email/org-send-policy";
 import { OrganizationSettingsClient } from "./settings-client";
 
 export const dynamic = "force-dynamic";
@@ -33,6 +34,7 @@ export default async function OrganizationSettingsPage() {
               primaryEmail: org.primaryEmail ?? null,
               billingEmail: org.settings.billingEmail ?? "",
               timezone: org.settings.timezone ?? "",
+              sendPolicy: resolveOrgSendPolicy(org.settings.sendPolicy),
               updatedAt: org.updatedAt,
             }
           : null

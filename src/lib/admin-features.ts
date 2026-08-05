@@ -126,7 +126,7 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
   },
   organization: {
     label: "Organization",
-    description: "Company profile and workspace settings",
+    description: "Company profile, timezone, working hours, and workspace settings",
     cluster: "company",
     minWorkspaceRole: "manager",
     minOrgRole: "admin",

@@ -6,8 +6,6 @@ export const LS_ACCOUNT_SETTINGS = "nova-crm-settings-account-v1";
 /** Select value for “use each person’s browser clock” (stored as empty string). */
 export const BROWSER_TZ_VALUE = "__browser__";
 
-export type WorkspaceTimezoneSide = "account" | "organization";
-
 export function normalizeWorkspaceTimezone(tz?: string | null): string {
   return tz?.trim() ?? "";
 }

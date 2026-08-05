@@ -49,7 +49,6 @@ import {
 import { toast } from "sonner";
 import { EmailInboxSettingsCard } from "@/components/settings/email-inbox-settings-card";
 import { WallDisplaySettingsCard } from "@/components/settings/wall-display-settings-card";
-import { OrgSendPolicySettings } from "@/components/settings/org-send-policy-settings";
 import { InstantlyIntegrationCard } from "@/components/integrations/instantly-integration-card";
 import { MillionVerifierIntegrationCard } from "@/components/integrations/millionverifier-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
@@ -64,7 +63,6 @@ import {
 import { resolveWallPrefsUserId } from "@/lib/wall-preferences";
 
 const LS_PROFILE = "nova-crm-settings-profile-v1";
-const LS_ACCOUNT = "nova-crm-settings-account-v1";
 const LS_DENSITY = "nova-crm-settings-density-v1";
 
 const DEFAULT_NOTIFICATIONS = DEFAULT_USER_NOTIFICATION_SETTINGS;
@@ -280,19 +278,6 @@ function SettingsPage() {
     try {
       const d = typeof window !== "undefined" ? localStorage.getItem(LS_DENSITY) : null;
       if (d === "compact" || d === "comfortable") setDensity(d);
-    } catch {
-      /* ignore */
-    }
-  }, []);
-
-  const [orgName, setOrgName] = React.useState("Nova Inc.");
-
-  React.useEffect(() => {
-    try {
-      const raw = typeof window !== "undefined" ? localStorage.getItem(LS_ACCOUNT) : null;
-      if (!raw) return;
-      const j = JSON.parse(raw) as { orgName?: string };
-      if (j.orgName?.trim()) setOrgName(j.orgName.trim());
     } catch {
       /* ignore */
     }
@@ -633,12 +618,20 @@ function SettingsPage() {
               <CardHeader>
                 <CardTitle className="text-sm">Workspace settings</CardTitle>
                 <CardDescription className="text-xs">
-                  Organization name and email working hours. Timezone is managed in Organization
-                  settings.
+                  Name, timezone, email working hours, and daily send limits live with the rest of
+                  the company profile.
                 </CardDescription>
               </CardHeader>
-              <CardContent>
-                <OrgSendPolicySettings orgName={orgName} onOrgNameChange={setOrgName} />
+              <CardContent className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  Open{" "}
+                  <span className="font-medium text-foreground">Configuration → Organization</span>{" "}
+                  to change the shared workspace clock and send policy. The header clock always
+                  follows that setting.
+                </p>
+                <Button asChild size="sm">
+                  <Link href="/admin/organization">Open Organization settings</Link>
+                </Button>
               </CardContent>
             </Card>
           </TabsContent>

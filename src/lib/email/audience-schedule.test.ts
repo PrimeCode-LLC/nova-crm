@@ -10,13 +10,10 @@ import { zonedDayKey } from "@/lib/org-timezone";
 import { DEFAULT_ORG_SEND_POLICY } from "@/lib/email/org-send-policy";
 
 describe("resolveScheduleTimezone", () => {
-  it("prefers valid audience timezone over org", () => {
+  it("always uses the organization timezone", () => {
     expect(resolveScheduleTimezone("Australia/Sydney", "America/New_York")).toBe(
-      "Australia/Sydney",
+      "America/New_York",
     );
-  });
-
-  it("falls back to org when audience unset or invalid", () => {
     expect(resolveScheduleTimezone(undefined, "America/New_York")).toBe("America/New_York");
     expect(resolveScheduleTimezone("Not/AZone", "America/New_York")).toBe("America/New_York");
   });

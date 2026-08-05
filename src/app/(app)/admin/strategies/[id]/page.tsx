@@ -48,10 +48,7 @@ import { selectTriggerLabelById, capitalizeSelectToken } from "@/lib/base-ui-sel
 import { COMPANY_SIZES, COMPANY_SIZE_LABELS, REVENUE_RANGES } from "@/lib/constants";
 import type { CompanySize, RevenueRange } from "@/lib/types";
 import { downloadJson, slugifyPackId } from "@/lib/prospecting-strategy/pack";
-import {
-  buildTimezoneOptions,
-  formatTimezoneDisplayLabel,
-} from "@/lib/scheduling/timezone-options";
+import { formatTimezoneDisplayLabel } from "@/lib/scheduling/timezone-options";
 import {
   DEFAULT_SEND_WINDOW_END_HOUR,
   DEFAULT_SEND_WINDOW_START_HOUR,
@@ -59,7 +56,6 @@ import {
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 
 const REVENUE_KEYS = Object.keys(REVENUE_RANGES) as RevenueRange[];
-const ORG_TZ_VALUE = "__org__";
 
 const DAILY_TARGET_FIELDS: {
   key: keyof StrategyDailyTargets;
@@ -123,11 +119,6 @@ export default function StrategyDetailPage() {
 
   const [draft, setDraft] = React.useState<ProspectingStrategy | null>(null);
   const [saving, setSaving] = React.useState(false);
-
-  const audienceTimezoneOptions = React.useMemo(
-    () => buildTimezoneOptions(draft?.audienceTimezone || orgTimezone),
-    [draft?.audienceTimezone, orgTimezone],
-  );
 
   React.useEffect(() => {
     if (strategy) setDraft(structuredClone(strategy));
@@ -580,40 +571,24 @@ A qualified prospect must answer:
                   />
                 </div>
                 <div className="sm:col-span-2 space-y-1.5">
-                  <Label htmlFor="strategy-audience-tz">Audience timezone (email scheduling)</Label>
-                  <p className="text-xs text-muted-foreground">
-                    Outbound sequence emails default to this clock (e.g. Australia/Sydney for an AU
-                    campaign). Leave as organization timezone for same-market teams. Dashboards and
-                    daily send limits still use the workspace timezone (
-                    {formatTimezoneDisplayLabel(orgTimezone)}).
+                  <Label>Email scheduling timezone</Label>
+                  <p className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    Sequences use the workspace timezone{" "}
+                    <span className="font-medium text-foreground">
+                      {formatTimezoneDisplayLabel(orgTimezone)}
+                    </span>
+                    . Change it in{" "}
+                    <Link href="/admin/organization" className="font-medium text-foreground underline">
+                      Organization settings
+                    </Link>
+                    .
                   </p>
-                  <Select
-                    value={draft.audienceTimezone?.trim() ? draft.audienceTimezone : ORG_TZ_VALUE}
-                    onValueChange={(v) => {
-                      const nextTz: string | undefined =
-                        !v || v === ORG_TZ_VALUE ? undefined : v;
-                      setDraft((d) => (d ? { ...d, audienceTimezone: nextTz } : d));
-                    }}
-                  >
-                    <SelectTrigger id="strategy-audience-tz" className="w-full">
-                      <SelectValue placeholder="Use organization timezone" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={ORG_TZ_VALUE}>
-                        Use organization timezone ({formatTimezoneDisplayLabel(orgTimezone)})
-                      </SelectItem>
-                      {audienceTimezoneOptions.map((tz) => (
-                        <SelectItem key={tz} value={tz}>
-                          {formatTimezoneDisplayLabel(tz)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
                 </div>
                 <div className="space-y-1.5">
                   <Label htmlFor="strategy-send-start">Preferred send window start</Label>
                   <p className="text-xs text-muted-foreground">
-                    Audience-local hour (0–23). Default {DEFAULT_SEND_WINDOW_START_HOUR}.
+                    Hour in the workspace timezone (0–23). Default {DEFAULT_SEND_WINDOW_START_HOUR}.
+                    Intersected with org working hours.
                   </p>
                   <Input
                     id="strategy-send-start"
@@ -639,7 +614,8 @@ A qualified prospect must answer:
                 <div className="space-y-1.5">
                   <Label htmlFor="strategy-send-end">Preferred send window end</Label>
                   <p className="text-xs text-muted-foreground">
-                    Exclusive end hour (1–24). Default {DEFAULT_SEND_WINDOW_END_HOUR} (noon).
+                    Exclusive end hour in the workspace timezone (1–24). Default{" "}
+                    {DEFAULT_SEND_WINDOW_END_HOUR} (noon).
                   </p>
                   <Input
                     id="strategy-send-end"

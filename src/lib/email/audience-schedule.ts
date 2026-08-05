@@ -6,14 +6,13 @@ import {
   type OrgEmailSendPolicy,
 } from "@/lib/email/org-send-policy";
 import {
-  isValidIanaTimezone,
   resolveOrgTimezone,
   zonedDayKey,
   zonedWallTimeToUtc,
 } from "@/lib/org-timezone";
 import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
 
-/** Default soft send window in audience-local hours (inclusive start, exclusive end). */
+/** Default soft send window in workspace-timezone hours (inclusive start, exclusive end). */
 export const DEFAULT_SEND_WINDOW_START_HOUR = 9;
 export const DEFAULT_SEND_WINDOW_END_HOUR = 12;
 
@@ -23,15 +22,13 @@ export type AudienceSendWindow = {
 };
 
 /**
- * Prefer strategy audience timezone when set; otherwise org / browser fallback.
- * Quota and ops dashboards keep using org timezone separately.
+ * Email schedule placement always uses the workspace timezone.
+ * Strategy `audienceTimezone` is legacy and ignored.
  */
 export function resolveScheduleTimezone(
-  audienceTimezone: string | null | undefined,
+  _audienceTimezone: string | null | undefined,
   orgTimezone?: string | null,
 ): string {
-  const audience = audienceTimezone?.trim();
-  if (audience && isValidIanaTimezone(audience)) return audience;
   return resolveOrgTimezone(orgTimezone);
 }
 
