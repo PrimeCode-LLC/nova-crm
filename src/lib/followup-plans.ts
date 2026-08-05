@@ -105,6 +105,39 @@ export function isFollowupEmailChannel(
   return !REMIND_ONLY_CHANNELS.has(resolveFollowupChannel(f.channel, leadChannel));
 }
 
+export type FollowupQueueKind = "email" | "linkedin" | "other";
+export type FollowupChannelFilter = "all" | "email" | "linkedin";
+
+/** Lead channel used when a followup has no lead, matching the Followups queue fallback. */
+export function resolveFollowupLeadChannel(
+  f: Pick<Followup, "channel">,
+  leadChannel: ChannelKey | undefined,
+): ChannelKey {
+  if (leadChannel) return leadChannel;
+  if (f.channel && f.channel !== "other") return f.channel;
+  return "cold_email";
+}
+
+/** Queue grouping for the Followups screen (Email / LinkedIn / other). */
+export function followupQueueKind(
+  f: Pick<Followup, "channel">,
+  leadChannel: ChannelKey,
+): FollowupQueueKind {
+  const resolved = resolveFollowupChannel(f.channel, leadChannel);
+  if (resolved === "linkedin_outbound" || resolved === "linkedin_1to1") return "linkedin";
+  if (isFollowupEmailChannel(f, leadChannel)) return "email";
+  return "other";
+}
+
+export function matchesFollowupChannelFilter(
+  f: Pick<Followup, "channel">,
+  leadChannel: ChannelKey,
+  filter: FollowupChannelFilter,
+): boolean {
+  if (filter === "all") return true;
+  return followupQueueKind(f, leadChannel) === filter;
+}
+
 /** True when this step can be auto-scheduled as outbound email. */
 export function canAutoScheduleFollowupEmail(
   f: Followup,

@@ -4,7 +4,10 @@ import {
   buildChannelMixHint,
   channelMixForFollowupChannel,
   defaultFollowupChannelMix,
+  followupQueueKind,
   isFollowupEmailChannel,
+  matchesFollowupChannelFilter,
+  resolveFollowupLeadChannel,
 } from "@/lib/followup-plans";
 import type { Lead } from "@/lib/types";
 
@@ -33,6 +36,35 @@ describe("followup channel mix", () => {
     expect(isFollowupEmailChannel({ channel: "cold_email" }, "linkedin_outbound")).toBe(true);
     expect(isFollowupEmailChannel({ channel: "other" }, "linkedin_outbound")).toBe(false);
     expect(isFollowupEmailChannel({ channel: "other" }, "cold_email")).toBe(true);
+  });
+
+  it("classifies queue kind for Email / LinkedIn / other tabs", () => {
+    expect(followupQueueKind({ channel: "cold_email" }, "linkedin_outbound")).toBe("email");
+    expect(followupQueueKind({ channel: "personalized_email" }, "cold_email")).toBe("email");
+    expect(followupQueueKind({ channel: "linkedin_outbound" }, "cold_email")).toBe("linkedin");
+    expect(followupQueueKind({ channel: "linkedin_1to1" }, "cold_email")).toBe("linkedin");
+    expect(followupQueueKind({ channel: "upwork" }, "cold_email")).toBe("other");
+    expect(followupQueueKind({ channel: "job_apply" }, "cold_email")).toBe("other");
+    expect(followupQueueKind({ channel: "other" }, "linkedin_outbound")).toBe("linkedin");
+    expect(followupQueueKind({ channel: "other" }, "upwork")).toBe("other");
+    expect(followupQueueKind({ channel: undefined }, "cold_email")).toBe("email");
+  });
+
+  it("falls back to the followup or cold_email channel when the lead is missing", () => {
+    expect(resolveFollowupLeadChannel({ channel: "linkedin_1to1" }, undefined)).toBe("linkedin_1to1");
+    expect(resolveFollowupLeadChannel({ channel: "other" }, undefined)).toBe("cold_email");
+    expect(resolveFollowupLeadChannel({ channel: undefined }, undefined)).toBe("cold_email");
+    expect(resolveFollowupLeadChannel({ channel: "other" }, "upwork")).toBe("upwork");
+  });
+
+  it("matches channel filter tabs", () => {
+    expect(matchesFollowupChannelFilter({ channel: "cold_email" }, "cold_email", "all")).toBe(true);
+    expect(matchesFollowupChannelFilter({ channel: "cold_email" }, "cold_email", "email")).toBe(true);
+    expect(matchesFollowupChannelFilter({ channel: "cold_email" }, "cold_email", "linkedin")).toBe(false);
+    expect(matchesFollowupChannelFilter({ channel: "linkedin_outbound" }, "cold_email", "linkedin")).toBe(true);
+    expect(matchesFollowupChannelFilter({ channel: "upwork" }, "cold_email", "email")).toBe(false);
+    expect(matchesFollowupChannelFilter({ channel: "upwork" }, "cold_email", "linkedin")).toBe(false);
+    expect(matchesFollowupChannelFilter({ channel: "upwork" }, "cold_email", "all")).toBe(true);
   });
 
   it("defaults to multi_channel when LinkedIn is present", () => {

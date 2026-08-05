@@ -10,11 +10,11 @@ import {
   CheckCircle2,
   Clock,
   Loader2,
-  MailWarning,
+  Mail,
+  Network,
   Pencil,
   Plus,
   RefreshCw,
-  Sparkles,
   Trash2,
   Users,
   X,
@@ -26,20 +26,18 @@ import {
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { KpiCard } from "@/components/common/kpi-card";
-import { UserChip } from "@/components/common/user-chip";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
-import { PRIORITY_TONE } from "@/lib/constants";
 import { fmtRelative } from "@/lib/format";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { Followup, Lead } from "@/lib/types";
+import type { Followup } from "@/lib/types";
 import { canMutateFollowup } from "@/lib/can-mutate-followup";
 import { isFollowupActionable } from "@/lib/followup-open-status";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
@@ -52,7 +50,13 @@ import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-emai
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
 import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
-import { isFollowupEmailChannel } from "@/lib/followup-plans";
+import {
+  followupQueueKind,
+  isFollowupEmailChannel,
+  matchesFollowupChannelFilter,
+  resolveFollowupLeadChannel,
+  type FollowupChannelFilter,
+} from "@/lib/followup-plans";
 import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
@@ -74,17 +78,15 @@ import {
   OWNER_SCOPE_PREFIX,
 } from "@/lib/owner-scope";
 import {
-  formatFollowupDueLabel,
   isFollowupDeliveryIssue,
-  isFollowupRetryable,
   planFollowupTryNow,
   tryNowDueAtIso,
   tryNowScheduleAtIso,
-  type FollowupDueBucket,
 } from "@/lib/followup-due-display";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { useVirtualizer } from "@tanstack/react-virtual";
+import { FollowupGroup } from "@/components/followups/followup-group";
+import { ListPaginationBar } from "@/components/followups/list-pagination-bar";
 import {
   Select,
   SelectContent,
@@ -95,6 +97,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  FOLLOWUP_DEFAULT_PAGE_SIZE,
+  readFollowupChannelFilter,
+  readFollowupPageSize,
+  writeFollowupChannelFilter,
+  writeFollowupPageSize,
+  type FollowupPageSize,
+} from "@/lib/followup-queue-pagination";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -123,9 +133,16 @@ const RescheduleFollowupsDialog = dynamic(
   { ssr: false },
 );
 
-const COMPLETED_PAGE_SIZE = 100;
-const VIRTUALIZE_THRESHOLD = 40;
-const ROW_ESTIMATE_PX = 64;
+function emptyBucketCopy(
+  channelFilter: FollowupChannelFilter,
+  allCopy: string,
+  emailCopy: string,
+  linkedinCopy: string,
+): string {
+  if (channelFilter === "email") return emailCopy;
+  if (channelFilter === "linkedin") return linkedinCopy;
+  return allCopy;
+}
 
 /**
  * Buckets relative to a chosen calendar day (org/browser TZ) and the ISO week
@@ -185,8 +202,9 @@ export default function FollowupsPage() {
   const [retryConfirmOpen, setRetryConfirmOpen] = React.useState(false);
   const [bulkBusy, setBulkBusy] = React.useState(false);
   const [bulkProgress, setBulkProgress] = React.useState<BulkFollowupProgress | null>(null);
-  const [completedVisible, setCompletedVisible] = React.useState(COMPLETED_PAGE_SIZE);
-  const [laterCollapsed, setLaterCollapsed] = React.useState(true);
+  const [channelFilter, setChannelFilter] = React.useState<FollowupChannelFilter>("all");
+  const [pageSize, setPageSize] = React.useState<FollowupPageSize>(FOLLOWUP_DEFAULT_PAGE_SIZE);
+  const [completedPageIndex, setCompletedPageIndex] = React.useState(0);
 
   const cancelScheduled = useEmailAccountStore((s) => s.cancelScheduled);
   const scheduledEmails = useEmailAccountStore((s) => s.scheduled);
@@ -228,6 +246,29 @@ export default function FollowupsPage() {
     [allFollowups, ownerScope, ownerScopeDeps],
   );
 
+  const followupLeadChannel = React.useCallback(
+    (f: Followup) =>
+      resolveFollowupLeadChannel(f, f.leadId ? getLeadById(f.leadId)?.channel : undefined),
+    [getLeadById],
+  );
+
+  React.useEffect(() => {
+    setChannelFilter(readFollowupChannelFilter());
+    setPageSize(readFollowupPageSize());
+  }, []);
+
+  const handleChannelFilterChange = React.useCallback((next: string) => {
+    if (next !== "all" && next !== "email" && next !== "linkedin") return;
+    setChannelFilter(next);
+    writeFollowupChannelFilter(next);
+  }, []);
+
+  const handlePageSizeChange = React.useCallback((next: FollowupPageSize) => {
+    setPageSize(next);
+    writeFollowupPageSize(next);
+    setCompletedPageIndex(0);
+  }, []);
+
   const todayYmd = todayDateInputInZone(timeZone);
   const anchorDay = React.useMemo(
     () => zonedWallTimeToUtc(viewDateYmd, 12, 0, 0, 0, timeZone),
@@ -248,7 +289,7 @@ export default function FollowupsPage() {
     [currentUserId, viewer, ws],
   );
 
-  const open = React.useMemo(
+  const openAll = React.useMemo(
     () =>
       followups.filter((f) => {
         if (f.completedAt) return false;
@@ -258,16 +299,49 @@ export default function FollowupsPage() {
       }),
     [followups],
   );
-  const done = React.useMemo(
+  const doneAll = React.useMemo(
     () =>
       followups
         .filter((f) => f.completedAt)
         .sort((a, b) => (b.completedAt ?? "").localeCompare(a.completedAt ?? "")),
     [followups],
   );
+
+  const channelOpenCounts = React.useMemo(() => {
+    let email = 0;
+    let linkedin = 0;
+    for (const f of openAll) {
+      const kind = followupQueueKind(f, followupLeadChannel(f));
+      if (kind === "email") email += 1;
+      else if (kind === "linkedin") linkedin += 1;
+    }
+    return { all: openAll.length, email, linkedin };
+  }, [openAll, followupLeadChannel]);
+
+  const open = React.useMemo(
+    () =>
+      channelFilter === "all"
+        ? openAll
+        : openAll.filter((f) => matchesFollowupChannelFilter(f, followupLeadChannel(f), channelFilter)),
+    [openAll, channelFilter, followupLeadChannel],
+  );
+  const done = React.useMemo(
+    () =>
+      channelFilter === "all"
+        ? doneAll
+        : doneAll.filter((f) => matchesFollowupChannelFilter(f, followupLeadChannel(f), channelFilter)),
+    [doneAll, channelFilter, followupLeadChannel],
+  );
+
+  const completedTotalPages = Math.max(1, Math.ceil(done.length / pageSize));
+  const safeCompletedPageIndex = Math.min(completedPageIndex, completedTotalPages - 1);
   const doneVisible = React.useMemo(
-    () => done.slice(0, completedVisible),
-    [done, completedVisible],
+    () =>
+      done.slice(
+        safeCompletedPageIndex * pageSize,
+        safeCompletedPageIndex * pageSize + pageSize,
+      ),
+    [done, safeCompletedPageIndex, pageSize],
   );
 
   const failed = React.useMemo(
@@ -326,15 +400,15 @@ export default function FollowupsPage() {
 
   React.useEffect(() => {
     setSelectedIds(new Set());
-  }, [tab, bucketFilter, ownerScope, viewDateYmd]);
+  }, [tab, bucketFilter, ownerScope, viewDateYmd, channelFilter]);
 
   React.useEffect(() => {
-    setCompletedVisible(COMPLETED_PAGE_SIZE);
-  }, [ownerScope, tab]);
+    setCompletedPageIndex(0);
+  }, [ownerScope, tab, channelFilter, viewDateYmd]);
 
   React.useEffect(() => {
-    if (later.length > VIRTUALIZE_THRESHOLD) setLaterCollapsed(true);
-  }, [viewDateYmd, ownerScope]); // eslint-disable-line react-hooks/exhaustive-deps -- reset collapse on agenda/owner change only
+    setCompletedPageIndex((prev) => Math.min(prev, Math.max(0, completedTotalPages - 1)));
+  }, [completedTotalPages]);
 
   const selectedFollowups = React.useMemo(
     () => open.filter((f) => selectedIds.has(f.id)),
@@ -345,14 +419,8 @@ export default function FollowupsPage() {
     [selectedFollowups, canMutateRow],
   );
   const selectedEmailMutable = React.useMemo(() => {
-    return selectedMutable.filter((f) => {
-      const lead = f.leadId ? getLeadById(f.leadId) : undefined;
-      const leadChannel =
-        lead?.channel ??
-        (f.channel && f.channel !== "other" ? f.channel : "cold_email");
-      return isFollowupEmailChannel(f, leadChannel);
-    });
-  }, [selectedMutable, getLeadById]);
+    return selectedMutable.filter((f) => isFollowupEmailChannel(f, followupLeadChannel(f)));
+  }, [selectedMutable, followupLeadChannel]);
   const selectedNonEmailCount = selectedMutable.length - selectedEmailMutable.length;
 
   const sendableMailbox = React.useMemo(() => {
@@ -917,6 +985,8 @@ export default function FollowupsPage() {
     onRequestTryNow: handleSingleTryNow,
     onRequestReschedule: handleSingleReschedule,
     busy: bulkBusy,
+    pageSize,
+    onPageSizeChange: handlePageSizeChange,
   };
 
   return (
@@ -974,6 +1044,33 @@ export default function FollowupsPage() {
                     onChange={(e) => setViewDateYmd(e.target.value || todayYmd)}
                   />
                 </div>
+                <div className="grid gap-1.5">
+                  <Label className="text-xs text-muted-foreground">Channel</Label>
+                  <Tabs value={channelFilter} onValueChange={handleChannelFilterChange}>
+                    <TabsList>
+                      <TabsTrigger value="all">
+                        All
+                        <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                          {channelOpenCounts.all}
+                        </Badge>
+                      </TabsTrigger>
+                      <TabsTrigger value="email">
+                        <Mail className="h-3.5 w-3.5" />
+                        Email
+                        <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                          {channelOpenCounts.email}
+                        </Badge>
+                      </TabsTrigger>
+                      <TabsTrigger value="linkedin">
+                        <Network className="h-3.5 w-3.5" />
+                        LinkedIn
+                        <Badge variant="secondary" className="ml-1.5 h-4 px-1 text-[10px]">
+                          {channelOpenCounts.linkedin}
+                        </Badge>
+                      </TabsTrigger>
+                    </TabsList>
+                  </Tabs>
+                </div>
                 <div className="grid min-w-0 gap-1.5 sm:min-w-[11rem]">
                   <Label className="text-xs text-muted-foreground">Owner</Label>
                   <Select value={ownerScope} onValueChange={(v) => setOwnerScope(v ?? "all-owners")}>
@@ -1012,6 +1109,11 @@ export default function FollowupsPage() {
             {allFollowups.length > 0 && followups.length === 0 ? (
               <p className="mb-4 text-sm text-muted-foreground">
                 No followups match this owner filter. Try &ldquo;All owners&rdquo; or pick a teammate.
+              </p>
+            ) : followups.length > 0 && open.length === 0 && done.length === 0 && channelFilter !== "all" ? (
+              <p className="mb-4 text-sm text-muted-foreground">
+                No {channelFilter === "email" ? "email" : "LinkedIn"} followups match the current filters.
+                Try the All channel tab.
               </p>
             ) : null}
 
@@ -1103,12 +1205,18 @@ export default function FollowupsPage() {
                   return (
                     <div id="followups-bucket-failed">
                       <FollowupGroup
+                        key={`failed-${channelFilter}-${ownerScope}-${viewDateYmd}`}
                         title="Failed sends"
                         description="Delivery failed or waiting for retry."
                         tone="rose"
                         bucket="failed"
                         items={failedItems}
-                        empty="No failed sends."
+                        empty={emptyBucketCopy(
+                          channelFilter,
+                          "No failed sends.",
+                          "No failed email sends.",
+                          "No failed LinkedIn followups.",
+                        )}
                         {...groupProps}
                       />
                     </div>
@@ -1117,12 +1225,18 @@ export default function FollowupsPage() {
                 {showGroup("overdue") && (
                   <div id="followups-bucket-overdue">
                     <FollowupGroup
+                      key={`overdue-${channelFilter}-${ownerScope}-${viewDateYmd}`}
                       title="Overdue"
                       description="Past due (highest priority)."
                       tone="rose"
                       bucket="overdue"
                       items={overdue}
-                      empty="Nothing overdue. Nice."
+                      empty={emptyBucketCopy(
+                        channelFilter,
+                        "Nothing overdue. Nice.",
+                        "No overdue email followups.",
+                        "No overdue LinkedIn followups.",
+                      )}
                       {...groupProps}
                     />
                   </div>
@@ -1130,6 +1244,7 @@ export default function FollowupsPage() {
                 {showGroup("today") && (
                   <div id="followups-bucket-today">
                     <FollowupGroup
+                      key={`today-${channelFilter}-${ownerScope}-${viewDateYmd}`}
                       title={dueAnchorBucketTitle}
                       description={
                         isViewToday
@@ -1140,7 +1255,17 @@ export default function FollowupsPage() {
                       bucket="today"
                       items={today}
                       empty={
-                        isViewToday ? "Nothing due today." : `Nothing due on ${format(anchorDay, "MMM d")}.`
+                        channelFilter === "email"
+                          ? isViewToday
+                            ? "No email followups due today."
+                            : `No email followups due on ${format(anchorDay, "MMM d")}.`
+                          : channelFilter === "linkedin"
+                            ? isViewToday
+                              ? "No LinkedIn followups due today."
+                              : `No LinkedIn followups due on ${format(anchorDay, "MMM d")}.`
+                            : isViewToday
+                              ? "Nothing due today."
+                              : `Nothing due on ${format(anchorDay, "MMM d")}.`
                       }
                       {...groupProps}
                     />
@@ -1149,53 +1274,39 @@ export default function FollowupsPage() {
                 {showGroup("thisWeek") && (
                   <div id="followups-bucket-week">
                     <FollowupGroup
+                      key={`week-${channelFilter}-${ownerScope}-${viewDateYmd}`}
                       title="This week"
                       description="Coming up in the next 7 days."
                       tone="neutral"
                       bucket="thisWeek"
                       items={thisWeek}
-                      empty="No followups this week."
+                      empty={emptyBucketCopy(
+                        channelFilter,
+                        "No followups this week.",
+                        "No email followups this week.",
+                        "No LinkedIn followups this week.",
+                      )}
                       {...groupProps}
                     />
                   </div>
                 )}
                 {bucketFilter === "all" && (
                   <div id="followups-bucket-later">
-                    {later.length > VIRTUALIZE_THRESHOLD && laterCollapsed ? (
-                      <Card>
-                        <CardHeader className="pb-2">
-                          <CardTitle className="text-sm">
-                            Later
-                            <Badge variant="secondary" className="ml-2 h-4 px-1 text-[10px]">
-                              {later.length}
-                            </Badge>
-                          </CardTitle>
-                          <CardDescription className="text-xs">
-                            Scheduled further out — collapsed for speed.
-                          </CardDescription>
-                        </CardHeader>
-                        <CardContent className="pt-0">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setLaterCollapsed(false)}
-                          >
-                            Show {later.length} later followups
-                          </Button>
-                        </CardContent>
-                      </Card>
-                    ) : (
-                      <FollowupGroup
-                        title="Later"
-                        description="Scheduled further out."
-                        tone="neutral"
-                        bucket="later"
-                        items={later}
-                        empty="Nothing scheduled further out."
-                        {...groupProps}
-                      />
-                    )}
+                    <FollowupGroup
+                      key={`later-${channelFilter}-${ownerScope}-${viewDateYmd}`}
+                      title="Later"
+                      description="Scheduled further out."
+                      tone="neutral"
+                      bucket="later"
+                      items={later}
+                      empty={emptyBucketCopy(
+                        channelFilter,
+                        "Nothing scheduled further out.",
+                        "No email followups scheduled further out.",
+                        "No LinkedIn followups scheduled further out.",
+                      )}
+                      {...groupProps}
+                    />
                   </div>
                 )}
               </TabsContent>
@@ -1290,21 +1401,24 @@ export default function FollowupsPage() {
                     })}
                     {done.length === 0 && (
                       <div className="p-6 text-center text-sm text-muted-foreground">
-                        Nothing completed yet.
+                        {emptyBucketCopy(
+                          channelFilter,
+                          "Nothing completed yet.",
+                          "No completed email followups.",
+                          "No completed LinkedIn followups.",
+                        )}
                       </div>
                     )}
-                    {done.length > doneVisible.length ? (
-                      <div className="p-3 flex justify-center">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() =>
-                            setCompletedVisible((n) => n + COMPLETED_PAGE_SIZE)
-                          }
-                        >
-                          Show more ({done.length - doneVisible.length} remaining)
-                        </Button>
+                    {done.length > 0 ? (
+                      <div className="px-4 pb-3">
+                        <ListPaginationBar
+                          total={done.length}
+                          pageIndex={safeCompletedPageIndex}
+                          pageSize={pageSize}
+                          onPageIndexChange={setCompletedPageIndex}
+                          onPageSizeChange={handlePageSizeChange}
+                          itemLabel={done.length === 1 ? "followup" : "followups"}
+                        />
                       </div>
                     ) : null}
                   </CardContent>
@@ -1457,377 +1571,3 @@ export default function FollowupsPage() {
     </>
   );
 }
-
-function FollowupGroup({
-  title,
-  description,
-  tone,
-  bucket,
-  items,
-  empty,
-  getLeadById,
-  onToggleComplete,
-  onRowNavigate,
-  canMutate,
-  onRequestDelete,
-  onRequestEdit,
-  selectedIds,
-  onToggleSelect,
-  onToggleSelectAll,
-  timeZone,
-  isViewToday,
-  onRequestTryNow,
-  onRequestReschedule,
-  busy,
-}: {
-  title: string;
-  description: string;
-  tone: "rose" | "amber" | "neutral";
-  bucket: FollowupDueBucket;
-  items: Followup[];
-  empty: string;
-  getLeadById: (id: string) => Lead | undefined;
-  onToggleComplete: (id: string, completed: boolean) => void;
-  onRowNavigate: (leadId: string) => void;
-  canMutate: (f: Followup) => boolean;
-  onRequestDelete: (f: Followup) => void;
-  onRequestEdit: (f: Followup) => void;
-  selectedIds: Set<string>;
-  onToggleSelect: (id: string, selected: boolean) => void;
-  onToggleSelectAll: (ids: string[], selected: boolean) => void;
-  timeZone: string;
-  isViewToday: boolean;
-  onRequestTryNow: (f: Followup) => void;
-  onRequestReschedule: (f: Followup) => void;
-  busy: boolean;
-}) {
-  const toneRing =
-    tone === "rose"
-      ? "border-destructive/30 bg-destructive/5"
-      : tone === "amber"
-        ? "border-warning/30 bg-warning/5"
-        : "";
-
-  const selectableIds = React.useMemo(() => items.map((f) => f.id), [items]);
-  const selectedInGroup = selectableIds.filter((id) => selectedIds.has(id));
-  const allSelected = selectableIds.length > 0 && selectedInGroup.length === selectableIds.length;
-  const someSelected = selectedInGroup.length > 0 && !allSelected;
-
-  const parentRef = React.useRef<HTMLDivElement>(null);
-  const useVirtual = items.length > VIRTUALIZE_THRESHOLD;
-  const virtualizer = useVirtualizer({
-    count: items.length,
-    getScrollElement: () => parentRef.current,
-    estimateSize: () => ROW_ESTIMATE_PX,
-    overscan: 8,
-    enabled: useVirtual,
-  });
-
-  return (
-    <Card className={cn(toneRing)}>
-      <CardHeader className="pb-2">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-start gap-3 min-w-0">
-            {items.length > 0 ? (
-              <Checkbox
-                className="mt-0.5"
-                checked={allSelected}
-                indeterminate={someSelected}
-                onCheckedChange={(v) => onToggleSelectAll(selectableIds, v === true)}
-                aria-label={`Select all in ${title}`}
-              />
-            ) : null}
-            <div className="min-w-0">
-              <CardTitle className="text-sm">
-                {title}
-                <Badge variant="secondary" className="ml-2 h-4 px-1 text-[10px]">
-                  {items.length}
-                </Badge>
-              </CardTitle>
-              <CardDescription className="text-xs">{description}</CardDescription>
-            </div>
-          </div>
-        </div>
-      </CardHeader>
-      <CardContent className="pt-0">
-        {items.length === 0 ? (
-          <p className="text-sm text-muted-foreground py-2">{empty}</p>
-        ) : useVirtual ? (
-          <div
-            ref={parentRef}
-            className="max-h-[min(70vh,36rem)] overflow-y-auto overscroll-contain"
-          >
-            <ul
-              className="relative w-full"
-              style={{ height: `${virtualizer.getTotalSize()}px` }}
-            >
-              {virtualizer.getVirtualItems().map((virtualRow) => {
-                const f = items[virtualRow.index]!;
-                return (
-                  <li
-                    key={f.id}
-                    className="absolute left-0 top-0 w-full border-b"
-                    style={{
-                      height: `${virtualRow.size}px`,
-                      transform: `translateY(${virtualRow.start}px)`,
-                    }}
-                  >
-                    <FollowupRow
-                      f={f}
-                      bucket={bucket}
-                      lead={f.leadId ? getLeadById(f.leadId) : undefined}
-                      selected={selectedIds.has(f.id)}
-                      mutate={canMutate(f)}
-                      timeZone={timeZone}
-                      isViewToday={isViewToday}
-                      busy={busy}
-                      onToggleComplete={onToggleComplete}
-                      onRowNavigate={onRowNavigate}
-                      onToggleSelect={onToggleSelect}
-                      onRequestDelete={onRequestDelete}
-                      onRequestEdit={onRequestEdit}
-                      onRequestTryNow={onRequestTryNow}
-                      onRequestReschedule={onRequestReschedule}
-                    />
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ) : (
-          <ul className="divide-y">
-            {items.map((f) => (
-              <li key={f.id}>
-                <FollowupRow
-                  f={f}
-                  bucket={bucket}
-                  lead={f.leadId ? getLeadById(f.leadId) : undefined}
-                  selected={selectedIds.has(f.id)}
-                  mutate={canMutate(f)}
-                  timeZone={timeZone}
-                  isViewToday={isViewToday}
-                  busy={busy}
-                  onToggleComplete={onToggleComplete}
-                  onRowNavigate={onRowNavigate}
-                  onToggleSelect={onToggleSelect}
-                  onRequestDelete={onRequestDelete}
-                  onRequestEdit={onRequestEdit}
-                  onRequestTryNow={onRequestTryNow}
-                  onRequestReschedule={onRequestReschedule}
-                />
-              </li>
-            ))}
-          </ul>
-        )}
-      </CardContent>
-    </Card>
-  );
-}
-
-const FollowupRow = React.memo(function FollowupRow({
-  f,
-  bucket,
-  lead,
-  selected,
-  mutate,
-  timeZone,
-  isViewToday,
-  busy,
-  onToggleComplete,
-  onRowNavigate,
-  onToggleSelect,
-  onRequestDelete,
-  onRequestEdit,
-  onRequestTryNow,
-  onRequestReschedule,
-}: {
-  f: Followup;
-  bucket: FollowupDueBucket;
-  lead: Lead | undefined;
-  selected: boolean;
-  mutate: boolean;
-  timeZone: string;
-  isViewToday: boolean;
-  busy: boolean;
-  onToggleComplete: (id: string, completed: boolean) => void;
-  onRowNavigate: (leadId: string) => void;
-  onToggleSelect: (id: string, selected: boolean) => void;
-  onRequestDelete: (f: Followup) => void;
-  onRequestEdit: (f: Followup) => void;
-  onRequestTryNow: (f: Followup) => void;
-  onRequestReschedule: (f: Followup) => void;
-}) {
-  const done = Boolean(f.completedAt);
-  const showTryNow =
-    mutate &&
-    (bucket === "overdue" ||
-      bucket === "today" ||
-      bucket === "failed" ||
-      isFollowupRetryable(f));
-  const isFailed = f.deliveryStatus === "failed";
-  const isRetrying = f.deliveryStatus === "needs_retry";
-  const due = formatFollowupDueLabel(f.dueAt, bucket, timeZone, { isViewToday });
-
-  return (
-    <div
-      className={cn(
-        "flex h-full items-center gap-3 py-2.5 -mx-1 px-1 rounded-md transition-colors",
-        lead && "cursor-pointer hover:bg-muted/40",
-        selected && "bg-muted/50",
-      )}
-      role={lead ? "button" : undefined}
-      tabIndex={lead ? 0 : undefined}
-      onClick={(e) => {
-        if (
-          (e.target as HTMLElement).closest(
-            "[data-slot=checkbox], a, [data-followup-delete], [data-followup-edit], [data-followup-trynow], [data-followup-reschedule]",
-          )
-        )
-          return;
-        if (f.leadId) onRowNavigate(f.leadId);
-      }}
-      onKeyDown={(e) => {
-        if (!f.leadId) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onRowNavigate(f.leadId);
-        }
-      }}
-    >
-      <Checkbox
-        checked={selected}
-        onCheckedChange={(v) => onToggleSelect(f.id, v === true)}
-        aria-label={`Select ${f.title}`}
-      />
-      <Checkbox
-        checked={done}
-        onCheckedChange={(v) => onToggleComplete(f.id, v === true)}
-        aria-label={done ? `Mark ${f.title} incomplete` : `Mark ${f.title} complete`}
-      />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium truncate">{f.title}</span>
-          <Badge
-            className={cn(
-              "rounded-md border-transparent text-[10px]",
-              PRIORITY_TONE[f.priority].className,
-            )}
-          >
-            {PRIORITY_TONE[f.priority].label}
-          </Badge>
-          {isFailed ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] gap-1 border-destructive/50 text-destructive"
-            >
-              <MailWarning className="h-2.5 w-2.5" />
-              Send failed
-            </Badge>
-          ) : null}
-          {isRetrying ? (
-            <Badge
-              variant="outline"
-              className="text-[10px] gap-1 border-amber-500/50 text-amber-700 dark:text-amber-400"
-            >
-              <RefreshCw className="h-2.5 w-2.5" />
-              Retrying
-            </Badge>
-          ) : null}
-          {f.auto && (
-            <Badge variant="outline" className="text-[10px] gap-1">
-              <Sparkles className="h-2.5 w-2.5" /> Auto
-            </Badge>
-          )}
-        </div>
-        {lead && (
-          <Link
-            href={`/leads/${lead.id}`}
-            className="text-xs text-muted-foreground hover:text-primary truncate block mt-0.5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {lead.contactName} · {lead.companyName}
-          </Link>
-        )}
-      </div>
-      <div className="flex items-center gap-2 shrink-0">
-        <UserChip userId={f.ownerId} size="xs" nameOnly />
-        <span
-          className={cn(
-            "text-xs tabular-nums whitespace-nowrap",
-            bucket === "overdue" || bucket === "failed"
-              ? "text-destructive"
-              : due.soon
-                ? "text-amber-600 dark:text-amber-400"
-                : "text-muted-foreground",
-          )}
-        >
-          {due.label}
-        </span>
-        {showTryNow ? (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            data-followup-trynow
-            disabled={busy}
-            onClick={(e) => {
-              e.stopPropagation();
-              onRequestTryNow(f);
-            }}
-          >
-            <RefreshCw className="h-3 w-3" />
-            Try now
-          </Button>
-        ) : null}
-        {mutate ? (
-          <>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
-              data-followup-reschedule
-              aria-label="Reschedule followup"
-              disabled={busy}
-              onClick={(e) => {
-                e.stopPropagation();
-                onRequestReschedule(f);
-              }}
-            >
-              <CalendarClock className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground"
-              data-followup-edit
-              aria-label="Edit followup"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRequestEdit(f);
-              }}
-            >
-              <Pencil className="h-3.5 w-3.5" />
-            </Button>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="h-8 w-8 text-muted-foreground hover:text-destructive"
-              data-followup-delete
-              aria-label="Delete followup"
-              onClick={(e) => {
-                e.stopPropagation();
-                onRequestDelete(f);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-            </Button>
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-});
