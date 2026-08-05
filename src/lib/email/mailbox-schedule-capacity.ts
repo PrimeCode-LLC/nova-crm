@@ -1,12 +1,14 @@
 import type { ScheduledEmail } from "@/lib/email-account-types";
 import {
   isOrgWorkingDay,
+  orgPolicyHourWindow,
   resolveOrgSendPolicy,
   type OrgEmailSendPolicy,
 } from "@/lib/email/org-send-policy";
 import {
   datetimeLocalInZone,
   isoFromDatetimeLocalInZone,
+  isNaiveDatetimeLocal,
   resolveOrgTimezone,
   zonedDayKey,
   zonedWallTimeToUtc,
@@ -30,13 +32,6 @@ export type MailboxScheduleLoadResponse = {
   toDayKey: string;
   byDay: Record<string, MailboxDayLoadClient>;
 };
-
-/** True when `value` looks like a datetime-local / naive wall clock (no offset). */
-function isNaiveDatetimeLocal(value: string): boolean {
-  const trimmed = value.trim();
-  if (!trimmed.includes("T")) return false;
-  return !/[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed);
-}
 
 /**
  * Calendar day key (YYYY-MM-DD) in the org (or given) timezone.
@@ -343,6 +338,47 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
         zone,
       );
       probe = preferred.getTime() >= minTime ? preferred : new Date(minTime);
+    }
+
+    if (policy) {
+      const { startHour, endHour } = orgPolicyHourWindow(policy);
+      for (let i = 0; i < horizonDays + 2; i += 1) {
+        const dayKey = scheduleDayKeyFromDate(probe, zone);
+        if (!dayKey) break;
+        if (!isOrgWorkingDay(dayKey, policy, zone)) {
+          probe = zonedWallTimeToUtc(
+            addUtcDayKey(dayKey, 1),
+            Math.max(startHour, hours),
+            minutes,
+            0,
+            0,
+            zone,
+          );
+          continue;
+        }
+        const windowStart = zonedWallTimeToUtc(dayKey, startHour, 0, 0, 0, zone);
+        const windowEnd = zonedWallTimeToUtc(dayKey, endHour, 0, 0, 0, zone);
+        if (probe.getTime() < windowStart.getTime()) {
+          const snapped = zonedWallTimeToUtc(
+            dayKey,
+            Math.max(startHour, hours),
+            minutes,
+            0,
+            0,
+            zone,
+          );
+          probe = snapped.getTime() >= windowStart.getTime() ? snapped : windowStart;
+        }
+        if (probe.getTime() >= minTime && probe.getTime() < windowEnd.getTime()) break;
+        probe = zonedWallTimeToUtc(
+          addUtcDayKey(dayKey, 1),
+          Math.max(startHour, hours),
+          minutes,
+          0,
+          0,
+          zone,
+        );
+      }
     }
 
     let placed = false;

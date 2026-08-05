@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   datetimeLocalInZone,
   endOfZonedDay,
+  formatInstantInZone,
   isoFromDateInputInZone,
   isoFromDatetimeLocalInZone,
   isValidIanaTimezone,
@@ -74,6 +75,12 @@ describe("zoned day boundaries EST vs Karachi", () => {
     const iso = isoFromDatetimeLocalInZone("2026-07-29T09:00", "America/New_York");
     expect(new Date(iso).toISOString()).toBe("2026-07-29T13:00:00.000Z"); // EDT = UTC-4
     expect(datetimeLocalInZone(iso, "America/New_York")).toBe("2026-07-29T09:00");
+  });
+
+  it("formats naive datetime-local as org wall clock, not the browser zone", () => {
+    const label = formatInstantInZone("2026-08-05T09:08", "America/New_York");
+    expect(label).toMatch(/9:08\sAM/);
+    expect(label).not.toMatch(/12:08\sAM/);
   });
 });
 

@@ -160,9 +160,24 @@ export function isoFromDatetimeLocalInZone(value: string, timeZone: string): str
   return Number.isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
 }
 
+/** True when `value` looks like a datetime-local / naive wall clock (no offset). */
+export function isNaiveDatetimeLocal(value: string): boolean {
+  const trimmed = value.trim();
+  if (!trimmed.includes("T")) return false;
+  return !/[zZ]|[+-]\d{2}:?\d{2}$/.test(trimmed);
+}
+
+function instantFromIsoOrNaive(isoOrDate: string | Date, timeZone: string): Date {
+  if (isoOrDate instanceof Date) return isoOrDate;
+  if (isNaiveDatetimeLocal(isoOrDate)) {
+    return new Date(isoFromDatetimeLocalInZone(isoOrDate, timeZone));
+  }
+  return new Date(isoOrDate);
+}
+
 /** Format an instant as `datetime-local` wall clock in `timeZone`. */
 export function datetimeLocalInZone(isoOrDate: string | Date, timeZone: string): string {
-  const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
+  const date = instantFromIsoOrNaive(isoOrDate, timeZone);
   if (Number.isNaN(date.getTime())) return "";
   const p = getZonedParts(date, timeZone);
   return `${p.year}-${pad2(p.month)}-${pad2(p.day)}T${pad2(p.hour)}:${pad2(p.minute)}`;
@@ -172,15 +187,16 @@ export function datetimeLocalInZone(isoOrDate: string | Date, timeZone: string):
  * Absolute instant rendered as wall clock in `timeZone`, e.g. `Aug 4, 9:00 AM EDT`.
  * Scheduled sends must use this instead of a bare date-fns `format()`, which would
  * silently render the viewer's own clock and misreport the real send time.
+ * Naive `YYYY-MM-DDTHH:mm` strings are wall clock in `timeZone`, not the browser zone.
  */
 export function formatInstantInZone(
   isoOrDate: string | Date,
   timeZone?: string,
   options?: { year?: boolean; zoneAbbr?: boolean },
 ): string {
-  const date = typeof isoOrDate === "string" ? new Date(isoOrDate) : isoOrDate;
-  if (Number.isNaN(date.getTime())) return "";
   const zone = resolveOrgTimezone(timeZone);
+  const date = instantFromIsoOrNaive(isoOrDate, zone);
+  if (Number.isNaN(date.getTime())) return "";
   try {
     return new Intl.DateTimeFormat("en-US", {
       timeZone: zone,

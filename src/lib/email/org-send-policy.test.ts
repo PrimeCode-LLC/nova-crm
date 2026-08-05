@@ -89,6 +89,35 @@ describe("capacity spill skips weekends", () => {
     expect(placedDay).toBe(monday);
   });
 
+  it("does not leave overflow probes outside working hours", () => {
+    const zone = TZ;
+    const today = "2026-08-05";
+    const byDay = {
+      [today]: {
+        dayKey: today,
+        sent: 0,
+        pending: 0,
+        booked: 0,
+        limit: 10,
+        remaining: 10,
+      },
+    };
+    const beforeOpen = new Date("2026-08-05T08:30:00.000Z"); // 4:30am EDT
+    const result = autoFixScheduleDates(
+      [{ id: "s1", scheduledAt: toDatetimeLocalValue(beforeOpen, zone), included: true }],
+      byDay,
+      10,
+      7,
+      zone,
+      { sendPolicy: DEFAULT_ORG_SEND_POLICY },
+    );
+    expect(result.unresolvedIds).toEqual([]);
+    const local = result.steps[0]!.scheduledAt;
+    const hour = Number(local.slice(11, 13));
+    expect(hour).toBeGreaterThanOrEqual(9);
+    expect(hour).toBeLessThan(17);
+  });
+
   it("honours an org-wide daily ceiling across mailboxes", () => {
     const today = scheduleDayKeyFromDate(new Date("2026-08-05T15:00:00.000Z"), TZ);
     const byDay: MailboxCapacityState["byDay"] = {};
