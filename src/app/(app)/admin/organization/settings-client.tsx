@@ -11,21 +11,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import type { OrgMemberRole } from "@/lib/types";
-import {
-  buildTimezoneOptions,
-  formatTimezoneDisplayLabel,
-  getBrowserTimezone,
-} from "@/lib/scheduling/timezone-options";
-
-const BROWSER_TZ_VALUE = "__browser__";
+import { WorkspaceTimezoneField } from "@/components/settings/workspace-timezone-field";
+import { clearLegacyAccountTimezone } from "@/lib/scheduling/workspace-timezone";
 
 type OrganizationSettingsPayload = {
   id: string;
@@ -61,12 +49,7 @@ export function OrganizationSettingsClient({
   const [joinConfigured, setJoinConfigured] = React.useState(false);
   const [joinUrl, setJoinUrl] = React.useState<string | null>(null);
   const [joinBusy, setJoinBusy] = React.useState(false);
-
-  const timezoneOptions = React.useMemo(
-    () => buildTimezoneOptions(timezone || undefined),
-    [timezone],
-  );
-  const browserTz = React.useMemo(() => getBrowserTimezone(), []);
+  const savedTimezone = organization?.timezone ?? "";
 
   React.useEffect(() => {
     if (!canEdit || !organization) return;
@@ -145,6 +128,7 @@ export function OrganizationSettingsClient({
         throw new Error(msg);
       }
       toast.success("Organization settings saved.");
+      clearLegacyAccountTimezone();
       router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed to save");
@@ -302,37 +286,15 @@ export function OrganizationSettingsClient({
                     workspace.
                   </p>
                 </div>
-                <div className="space-y-1.5">
-                  <Label className="text-xs" htmlFor="org-timezone">
-                    Workspace timezone
-                  </Label>
-                  <Select
-                    value={timezone.trim() ? timezone : BROWSER_TZ_VALUE}
-                    onValueChange={(v) =>
-                      setTimezone(v === BROWSER_TZ_VALUE || v == null ? "" : v)
-                    }
-                    disabled={!canEdit}
-                  >
-                    <SelectTrigger id="org-timezone" className="w-full">
-                      <SelectValue placeholder="Use browser timezone" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={BROWSER_TZ_VALUE}>
-                        Use my browser timezone ({formatTimezoneDisplayLabel(browserTz)})
-                      </SelectItem>
-                      {timezoneOptions.map((tz) => (
-                        <SelectItem key={tz} value={tz}>
-                          {formatTimezoneDisplayLabel(tz)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-xs text-muted-foreground">
-                    When set, everyone shares this zone for due dates, overdue, and
-                    scheduled sends (e.g. America/New York for EST teams). Leave on
-                    browser timezone if each person should use their device clock.
-                  </p>
-                </div>
+                <WorkspaceTimezoneField
+                  id="org-timezone"
+                  label="Workspace timezone"
+                  value={timezone}
+                  onChange={setTimezone}
+                  savedTimezone={savedTimezone}
+                  side="organization"
+                  disabled={!canEdit}
+                />
                 {canEdit && (
                   <div className="pt-1">
                     <Button type="submit" disabled={submitting}>

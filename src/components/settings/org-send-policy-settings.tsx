@@ -1,18 +1,12 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
 import {
   DEFAULT_ORG_SEND_POLICY,
@@ -20,12 +14,10 @@ import {
   type OrgEmailSendPolicy,
 } from "@/lib/email/org-send-policy";
 import { WEEKDAY_KEYS } from "@/lib/scheduling/defaults";
-import {
-  buildTimezoneOptions,
-  formatTimezoneDisplayLabel,
-} from "@/lib/scheduling/timezone-options";
+import { formatTimezoneDisplayLabel } from "@/lib/scheduling/timezone-options";
 import type { AvailabilityTimeSlot, WeekdayKey } from "@/lib/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
+import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { Loader2 } from "lucide-react";
 
 const DAY_LABEL: Record<WeekdayKey, string> = {
@@ -46,16 +38,12 @@ export function OrgSendPolicySettings({
   onOrgNameChange: (name: string) => void;
 }) {
   const router = useRouter();
-  const { organizationTimezone, isDemo } = useWorkspace();
-  const [timezone, setTimezone] = React.useState(
-    organizationTimezone?.trim() || "America/New_York",
-  );
+  const { isDemo } = useWorkspace();
+  const timeZone = useOrgTimezone();
   const [policy, setPolicy] = React.useState<OrgEmailSendPolicy>(DEFAULT_ORG_SEND_POLICY);
   const [ceilingInput, setCeilingInput] = React.useState("");
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
-
-  const tzOptions = React.useMemo(() => buildTimezoneOptions(timezone), [timezone]);
 
   React.useEffect(() => {
     void (async () => {
@@ -64,11 +52,9 @@ export function OrgSendPolicySettings({
         if (!res.ok) return;
         const data = (await res.json()) as {
           name?: string;
-          timezone?: string;
           sendPolicy?: OrgEmailSendPolicy;
         };
         if (data.name?.trim()) onOrgNameChange(data.name.trim());
-        if (data.timezone?.trim()) setTimezone(data.timezone.trim());
         const next = resolveOrgSendPolicy(data.sendPolicy);
         setPolicy(next);
         setCeilingInput(next.dailyCeiling != null ? String(next.dailyCeiling) : "");
@@ -124,7 +110,6 @@ export function OrgSendPolicySettings({
         body: JSON.stringify({
           name: orgName.trim(),
           settings: {
-            timezone,
             sendPolicy: {
               ...policy,
               weekdayOnly: true,
@@ -139,6 +124,8 @@ export function OrgSendPolicySettings({
         return;
       }
       toast.success("Workspace settings saved");
+      setSavedTimezone(timezone.trim());
+      clearLegacyAccountTimezone();
       router.refresh();
     } catch {
       toast.error("Could not save workspace settings");
@@ -162,33 +149,21 @@ export function OrgSendPolicySettings({
         <Label className="text-xs">Organization name</Label>
         <Input value={orgName} onChange={(e) => onOrgNameChange(e.target.value)} className="h-9" />
       </div>
-      <div className="space-y-1.5">
-        <Label className="text-xs">Organization timezone</Label>
-        <Select
-          value={timezone}
-          onValueChange={(value) => {
-            if (value) setTimezone(value);
-          }}
-        >
-          <SelectTrigger className="h-9 w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {tzOptions.map((tz) => (
-              <SelectItem key={tz} value={tz}>
-                {formatTimezoneDisplayLabel(tz)}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-[11px] text-muted-foreground">
-          Dashboards, daily limits, and auto-scheduling use this clock.
-        </p>
+      <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+        Workspace timezone is{" "}
+        <span className="font-medium text-foreground">{formatTimezoneDisplayLabel(timeZone)}</span>
+        . Dashboards, due dates, the header clock, and email scheduling all use this zone. Change it
+        in{" "}
+        <Link href="/admin/organization" className="font-medium text-foreground underline">
+          Organization settings
+        </Link>
+        .
       </div>
       <div className="space-y-2">
         <Label className="text-xs">Email working hours</Label>
         <p className="text-[11px] text-muted-foreground">
-          Auto and bulk sequence scheduling stay inside these hours and skip closed days.
+          Auto and bulk sequence scheduling stay inside these hours and skip closed days, using the
+          workspace timezone above.
         </p>
         <div className="space-y-2 rounded-md border p-3">
           {WEEKDAY_KEYS.map((day) => {

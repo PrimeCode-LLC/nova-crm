@@ -633,7 +633,8 @@ function SettingsPage() {
               <CardHeader>
                 <CardTitle className="text-sm">Workspace settings</CardTitle>
                 <CardDescription className="text-xs">
-                  Organization name, timezone, and email working hours for auto-scheduling.
+                  Organization name and email working hours. Timezone is managed in Organization
+                  settings.
                 </CardDescription>
               </CardHeader>
               <CardContent>
