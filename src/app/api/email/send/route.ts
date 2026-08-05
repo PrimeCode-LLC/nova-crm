@@ -4,6 +4,7 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { getMailboxSecretsServer } from "@/lib/email/mailbox-secrets-server";
 import { getMailboxProfileServer } from "@/lib/email/mailbox-profiles-server";
 import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
+import { outboundAttachmentsToLeadMail } from "@/lib/email/lead-mail-attachments";
 import { parseOutboundAttachments } from "@/lib/email/outbound-attachments";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import {
@@ -195,6 +196,7 @@ export async function POST(req: Request) {
         messageId: result.messageId,
         inReplyTo: inReplyTo || undefined,
         referenceIds,
+        attachments: outboundAttachmentsToLeadMail(parsedAttachments),
         source: "smtp_send",
       });
     }

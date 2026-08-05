@@ -1,7 +1,10 @@
-import type { MailInbound, MailSent } from "@/lib/email-account-types";
+import type { MailInbound, MailInboundAttachment, MailSent } from "@/lib/email-account-types";
 import type { LeadEmailMessage } from "@/lib/email/lead-email-conversations";
+import { pickLeadMailAttachments } from "@/lib/email/lead-mail-attachments";
 import { leadMailProviderKey } from "@/lib/email/lead-mail-ids";
+import { isSubjectOnlyMailBody } from "@/lib/email/mail-body-stub";
 import type { LeadMailMessage, LeadMailUpsertInput } from "@/lib/email/lead-mail-types";
+import { normalizeMessageId } from "@/lib/email/thread-inbound";
 
 export function leadMailToLeadEmailMessage(row: LeadMailMessage): LeadEmailMessage {
   if (row.direction === "inbound") {
@@ -23,6 +26,7 @@ export function leadMailToLeadEmailMessage(row: LeadMailMessage): LeadEmailMessa
       ...(row.messageId ? { messageId: row.messageId } : {}),
       ...(row.inReplyTo ? { inReplyTo: row.inReplyTo } : {}),
       ...(row.referenceIds?.length ? { referenceIds: row.referenceIds } : {}),
+      ...(row.attachments ? { attachments: row.attachments } : {}),
       bodySynced: row.bodySynced,
     };
     return {
@@ -53,6 +57,7 @@ export function leadMailToLeadEmailMessage(row: LeadMailMessage): LeadEmailMessa
     ...(row.messageId ? { messageId: row.messageId } : {}),
     ...(row.inReplyTo ? { inReplyTo: row.inReplyTo } : {}),
     ...(row.referenceIds?.length ? { referenceIds: row.referenceIds } : {}),
+    ...(row.attachments ? { attachments: row.attachments } : {}),
   };
   return {
     key: row.providerKey,
@@ -92,6 +97,7 @@ export function inboundToLeadMailUpsert(
     messageId: message.messageId,
     inReplyTo: message.inReplyTo,
     referenceIds: message.referenceIds,
+    attachments: message.attachments ?? [],
     source,
   };
 }
@@ -127,8 +133,63 @@ export function sentToLeadMailUpsert(
     messageId: message.messageId,
     inReplyTo: message.inReplyTo,
     referenceIds: message.referenceIds,
+    attachments: message.attachments ?? [],
     source,
   };
+}
+
+function messageAttachments(row: LeadEmailMessage): MailInboundAttachment[] | undefined {
+  return row.message.attachments;
+}
+
+function withMergedMailExtras(winner: LeadEmailMessage, loser: LeadEmailMessage): LeadEmailMessage {
+  const attachments = pickLeadMailAttachments(messageAttachments(winner), messageAttachments(loser));
+  const uid = winner.message.uid || loser.message.uid;
+  if (winner.direction === "inbound" && loser.direction === "inbound") {
+    return {
+      ...winner,
+      message: {
+        ...winner.message,
+        ...(uid != null ? { uid } : {}),
+        ...(attachments !== undefined ? { attachments } : {}),
+        replyTo: winner.message.replyTo || loser.message.replyTo,
+        cc: winner.message.cc || loser.message.cc,
+        messageId: winner.message.messageId || loser.message.messageId,
+        inReplyTo: winner.message.inReplyTo || loser.message.inReplyTo,
+        referenceIds: winner.message.referenceIds?.length
+          ? winner.message.referenceIds
+          : loser.message.referenceIds,
+      },
+    };
+  }
+  if (winner.direction === "sent" && loser.direction === "sent") {
+    return {
+      ...winner,
+      message: {
+        ...winner.message,
+        ...(uid != null ? { uid } : {}),
+        ...(attachments !== undefined ? { attachments } : {}),
+        replyTo: winner.message.replyTo || loser.message.replyTo,
+        cc: winner.message.cc || loser.message.cc,
+        bcc: winner.message.bcc || loser.message.bcc,
+        messageId: winner.message.messageId || loser.message.messageId,
+        inReplyTo: winner.message.inReplyTo || loser.message.inReplyTo,
+        referenceIds: winner.message.referenceIds?.length
+          ? winner.message.referenceIds
+          : loser.message.referenceIds,
+      },
+    };
+  }
+  return winner;
+}
+
+function mergeIdentityKey(row: LeadEmailMessage): string {
+  const mid = normalizeMessageId(row.message.messageId);
+  if (mid) {
+    const dir = row.direction === "inbound" ? "in" : "out";
+    return `${row.mailboxId}:${dir}:mid:${mid}`;
+  }
+  return row.key;
 }
 
 /** Merge stored + live messages; prefer body-synced / richer body for the same provider key. */
@@ -138,20 +199,30 @@ export function mergeLeadEmailMessages(
 ): LeadEmailMessage[] {
   const byKey = new Map<string, LeadEmailMessage>();
   const score = (row: LeadEmailMessage): number => {
-    const body =
-      row.direction === "inbound"
-        ? row.message.bodyText || row.message.preview || ""
-        : row.message.body || row.message.preview || "";
-    const synced =
-      row.direction === "inbound"
-        ? row.message.bodySynced !== false
-        : row.message.bodySynced !== false;
-    return (synced ? 100_000 : 0) + body.length;
+    const subject = row.message.subject;
+    const bodyText = row.direction === "inbound" ? row.message.bodyText : row.message.body;
+    const bodyHtml = row.message.bodyHtml;
+    const stub = isSubjectOnlyMailBody({ subject, bodyText, bodyHtml });
+    const body = stub ? "" : bodyText || row.message.preview || "";
+    const synced = row.message.bodySynced !== false && !stub;
+    const attachmentBonus = row.message.attachments?.some((att) => att.contentBase64)
+      ? 5_000
+      : row.message.attachments?.length
+        ? 500
+        : 0;
+    return (synced ? 100_000 : 0) + body.length + attachmentBonus;
   };
 
   for (const row of [...secondary, ...primary]) {
-    const prev = byKey.get(row.key);
-    if (!prev || score(row) >= score(prev)) byKey.set(row.key, row);
+    const key = mergeIdentityKey(row);
+    const prev = byKey.get(key);
+    if (!prev) {
+      byKey.set(key, row);
+      continue;
+    }
+    const winner = score(row) >= score(prev) ? row : prev;
+    const loser = winner === row ? prev : row;
+    byKey.set(key, withMergedMailExtras(winner, loser));
   }
   return [...byKey.values()];
 }

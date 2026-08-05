@@ -19,7 +19,11 @@ export async function GET(req: Request, ctx: RouteCtx) {
   }
 
   const ua = req.headers.get("user-agent");
-  await recordMailTrackingOpen({ trackingId: payload.id, userAgent: ua });
+  await recordMailTrackingOpen({
+    trackingId: payload.id,
+    userAgent: ua,
+    recipientId: payload.r,
+  });
 
   return new NextResponse(TRACKING_PIXEL_GIF, {
     status: 200,

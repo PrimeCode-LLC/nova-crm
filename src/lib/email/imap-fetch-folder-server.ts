@@ -216,7 +216,7 @@ export async function fetchImapFolderServer(
             if (parsed.referenceIds?.length) referenceIds = parsed.referenceIds;
             if (parsed.cc.trim()) cc = parsed.cc;
             if (parsed.replyTo) replyTo = parsed.replyTo;
-            if (parsed.attachments.length > 0) attachments = parsed.attachments;
+            attachments = parsed.attachments;
             if (parsed.listUnsubscribe) listUnsubscribe = parsed.listUnsubscribe;
             bodySynced = true;
           } catch {
@@ -224,9 +224,9 @@ export async function fetchImapFolderServer(
             bodyText = "";
             bodySynced = false;
           }
-        } else if (inBodyTier) {
-          bodySynced = true;
         } else {
+          // Header-only, or body-tier fetch returned no RFC822 — do not fake a
+          // synced body from the subject (that blocks later Sent-folder retries).
           bodySynced = false;
         }
 
@@ -246,7 +246,7 @@ export async function fetchImapFolderServer(
           preview,
           bodyText: bodySynced ? bodyText || preview : "",
           bodyHtml,
-          ...(attachments && attachments.length > 0 ? { attachments } : {}),
+          ...(attachments ? { attachments } : {}),
           messageId,
           inReplyTo,
           referenceIds: referenceIds.length > 0 ? referenceIds : undefined,

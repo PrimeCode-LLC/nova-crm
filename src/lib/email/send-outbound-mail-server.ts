@@ -9,7 +9,10 @@ import { resolveMailboxTransportAuthServer, googleAuthFailureMessage } from "@/l
 import type { OutboundAttachment } from "@/lib/email/outbound-attachments";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { recordMailboxTransportHealthServer } from "@/lib/email/inbox-heads-server";
-import { prepareTrackedHtml } from "@/lib/email/mail-tracking-server";
+import {
+  collectOutboundTrackingRecipients,
+  prepareTrackedHtml,
+} from "@/lib/email/mail-tracking-server";
 import type { MailTrackingContext } from "@/lib/email/mail-tracking-types";
 
 function sanitizeOutboundMessageId(raw: string | undefined): string | undefined {
@@ -119,6 +122,11 @@ export async function sendOutboundMailServer(
         }))
       : undefined;
 
+  const trackingRecipients = collectOutboundTrackingRecipients({
+    to: toParsed.addresses,
+    cc: ccParsed.addresses,
+    bcc: bccParsed.addresses,
+  });
   const tracked = await prepareTrackedHtml({
     html: input.html,
     organizationId: input.organizationId,
@@ -126,8 +134,12 @@ export async function sendOutboundMailServer(
     mailboxOwnerUid: input.uid,
     messageId: outboundMessageId,
     tracking: input.tracking,
+    recipients: trackingRecipients,
   });
   const html = tracked.html;
+  const personalizedCopies = tracked.htmlByRecipient;
+  const fanOutRecipients =
+    personalizedCopies && trackingRecipients.length > 1 ? trackingRecipients : null;
 
   try {
     const rawMessage = await buildOutboundRawMail({
@@ -148,24 +160,47 @@ export async function sendOutboundMailServer(
     const sentInfo = await runWithSmtpTransporter(
       host,
       { port: input.smtp.port, secure: input.smtp.secure, user, pass, accessToken },
-      async (transporter) =>
-        transporter.sendMail({
-          from: fromHeader,
-          to: toParsed.addresses,
-          cc: ccParsed.addresses.length > 0 ? ccParsed.addresses : undefined,
-          bcc: bccParsed.addresses.length > 0 ? bccParsed.addresses : undefined,
-          subject,
-          text: input.text || undefined,
-          html: html || undefined,
-          replyTo: input.replyTo?.trim() || undefined,
-          messageId: outboundMessageId,
-          inReplyTo,
-          references: references.length > 0 ? references : undefined,
-          attachments: mailAttachments,
-        }),
+      async (transporter) => {
+        if (!fanOutRecipients) {
+          return transporter.sendMail({
+            from: fromHeader,
+            to: toParsed.addresses,
+            cc: ccParsed.addresses.length > 0 ? ccParsed.addresses : undefined,
+            bcc: bccParsed.addresses.length > 0 ? bccParsed.addresses : undefined,
+            subject,
+            text: input.text || undefined,
+            html: html || undefined,
+            replyTo: input.replyTo?.trim() || undefined,
+            messageId: outboundMessageId,
+            inReplyTo,
+            references: references.length > 0 ? references : undefined,
+            attachments: mailAttachments,
+          });
+        }
+
+        let lastInfo: Awaited<ReturnType<typeof transporter.sendMail>> | undefined;
+        for (const recipient of fanOutRecipients) {
+          lastInfo = await transporter.sendMail({
+            from: fromHeader,
+            to: toParsed.addresses,
+            cc: ccParsed.addresses.length > 0 ? ccParsed.addresses : undefined,
+            subject,
+            text: input.text || undefined,
+            html: personalizedCopies?.[recipient.email] || html || undefined,
+            replyTo: input.replyTo?.trim() || undefined,
+            messageId: outboundMessageId,
+            inReplyTo,
+            references: references.length > 0 ? references : undefined,
+            attachments: mailAttachments,
+            envelope: { from, to: recipient.email },
+          });
+        }
+        return lastInfo;
+      },
     );
-    const messageId =
-      sentInfo && typeof sentInfo === "object" && "messageId" in sentInfo
+    const messageId = fanOutRecipients
+      ? normalizeMessageId(outboundMessageId)
+      : sentInfo && typeof sentInfo === "object" && "messageId" in sentInfo
         ? normalizeMessageId(String(sentInfo.messageId ?? ""))
         : normalizeMessageId(outboundMessageId);
 

@@ -1,3 +1,5 @@
+import type { MailInboundAttachment } from "@/lib/email-account-types";
+
 /** Durable per-lead email messages (system of record for the Emails tab). */
 
 export type LeadMailDirection = "inbound" | "outbound";
@@ -38,6 +40,7 @@ export type LeadMailMessage = {
   messageId?: string;
   inReplyTo?: string;
   referenceIds?: string[];
+  attachments?: MailInboundAttachment[];
   source: LeadMailSource;
   createdAt: string;
   updatedAt: string;
@@ -65,6 +68,7 @@ export type LeadMailUpsertInput = {
   messageId?: string;
   inReplyTo?: string;
   referenceIds?: string[];
+  attachments?: MailInboundAttachment[];
   source: LeadMailSource;
 };
 

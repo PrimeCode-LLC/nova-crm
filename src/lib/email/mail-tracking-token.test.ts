@@ -41,6 +41,15 @@ describe("mail-tracking-token", () => {
     expect(payload).toMatchObject({ v: 1, t: "o", id: "trk-1" });
   });
 
+  it("round-trips recipient ids on open tokens", () => {
+    const token = signMailTrackingToken({ t: "o", id: "trk-1", r: "ab12cd34" });
+    expect(verifyMailTrackingToken(token!)).toMatchObject({
+      t: "o",
+      id: "trk-1",
+      r: "ab12cd34",
+    });
+  });
+
   it("requires link id for click tokens", () => {
     const token = signMailTrackingToken({ t: "c", id: "trk-1", l: "ab12" });
     const payload = verifyMailTrackingToken(token!);
@@ -92,6 +101,40 @@ describe("injectMailTracking", () => {
     expect(result.html).toContain("https://track.example.com/api/t/c/");
     expect(result.html).toContain('src="https://track.example.com/api/t/o/');
     expect(result.html).not.toContain('href="https://example.com/x"');
+  });
+
+  it("personalizes tokens per recipient while reusing link ids", () => {
+    const html = `<p>Hi <a href="https://example.com/x">here</a></p>`;
+    const base = injectMailTracking({
+      html,
+      trackingId: "trk-1",
+      trackOpens: true,
+      trackClicks: true,
+    });
+    const first = injectMailTracking({
+      html,
+      trackingId: "trk-1",
+      trackOpens: true,
+      trackClicks: true,
+      recipientId: "rec-a",
+      links: base.links,
+    });
+    const second = injectMailTracking({
+      html,
+      trackingId: "trk-1",
+      trackOpens: true,
+      trackClicks: true,
+      recipientId: "rec-b",
+      links: base.links,
+    });
+    expect(first.html).not.toBe(second.html);
+    const openToken = first.html.match(/\/api\/t\/o\/([^"']+)/)?.[1];
+    expect(openToken).toBeTruthy();
+    expect(verifyMailTrackingToken(decodeURIComponent(openToken!))).toMatchObject({
+      t: "o",
+      id: "trk-1",
+      r: "rec-a",
+    });
   });
 
   it("skips mailto and hash links", () => {

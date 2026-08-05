@@ -183,4 +183,49 @@ describe("recordMailTrackingOpen", () => {
       [...db.rows.keys()].filter((key) => key.startsWith(`${COLLECTIONS.timelineEvents}/`)),
     ).toHaveLength(1);
   });
+
+  it("attributes opens to the recipient encoded in the token", async () => {
+    db.rows.set(`${COLLECTIONS.mailTrackingMessages}/trk-2`, {
+      organizationId: "org-1",
+      leadId: "lead-1",
+      messageId: "<msg-2@x>",
+      mailboxId: "mb-1",
+      trackOpens: true,
+      openCount: 0,
+      recipients: [
+        { id: "rec-to", email: "sd@nutrioz.com", role: "to", openCount: 0, clickCount: 0 },
+        { id: "rec-cc", email: "barry@mailtechnext.com", role: "cc", openCount: 0, clickCount: 0 },
+      ],
+    });
+    db.rows.set(`${COLLECTIONS.leads}/lead-1`, {
+      organizationId: "org-1",
+      ownerId: "u1",
+      emailOpenCount: 0,
+    });
+
+    await recordMailTrackingOpen({
+      trackingId: "trk-2",
+      userAgent: "Mozilla/5.0",
+      recipientId: "rec-cc",
+    });
+    await recordMailTrackingOpen({
+      trackingId: "trk-2",
+      userAgent: "Mozilla/5.0",
+      recipientId: "rec-to",
+    });
+
+    const tracking = db.rows.get(`${COLLECTIONS.mailTrackingMessages}/trk-2`)!;
+    expect(tracking.openCount).toBe(2);
+    const recipients = tracking.recipients as Array<{ id: string; openCount: number; email: string }>;
+    expect(recipients.find((row) => row.id === "rec-cc")?.openCount).toBe(1);
+    expect(recipients.find((row) => row.id === "rec-to")?.openCount).toBe(1);
+
+    const timeline = [...db.rows.values()].filter((row) => row.type === "email_opened");
+    expect(timeline).toHaveLength(2);
+    expect(timeline.map((row) => row.summary)).toEqual([
+      "Email opened by barry@mailtechnext.com",
+      "Email opened by sd@nutrioz.com",
+    ]);
+    expect(db.rows.get(`${COLLECTIONS.leads}/lead-1`)?.emailOpenCount).toBe(1);
+  });
 });

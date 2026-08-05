@@ -5,6 +5,26 @@ export type MailTrackingLink = {
   url: string;
 };
 
+export type MailTrackingRecipientRole = "to" | "cc" | "bcc";
+
+export type MailTrackingRecipientInput = {
+  email: string;
+  role: MailTrackingRecipientRole;
+};
+
+export type MailTrackingRecipientEngagement = {
+  /** Short id encoded in open/click tokens (not the email address). */
+  id: string;
+  email: string;
+  role: MailTrackingRecipientRole;
+  openCount: number;
+  clickCount: number;
+  firstOpenedAt?: string;
+  lastOpenedAt?: string;
+  firstClickedAt?: string;
+  lastClickedAt?: string;
+};
+
 export type MailTrackingMessage = {
   id: string;
   organizationId: string;
@@ -17,6 +37,7 @@ export type MailTrackingMessage = {
   trackOpens: boolean;
   trackClicks: boolean;
   links: MailTrackingLink[];
+  recipients?: MailTrackingRecipientEngagement[];
   openCount: number;
   clickCount: number;
   firstOpenedAt?: string;
@@ -37,6 +58,7 @@ export type MailTrackingSummary = {
   clicked: boolean;
   firstOpenedAt?: string;
   firstClickedAt?: string;
+  recipients?: MailTrackingRecipientEngagement[];
 };
 
 export type MailTrackingContext = {

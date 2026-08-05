@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { isSubjectOnlyMailBody, shouldKeepPreviousMailBody } from "@/lib/email/mail-body-stub";
+import { parseStoredLeadMailAttachments, pickLeadMailAttachments } from "@/lib/email/lead-mail-attachments";
 import {
   LEAD_MAIL_BODY_HTML_MAX,
   LEAD_MAIL_BODY_TEXT_MAX,
@@ -55,6 +57,9 @@ function parseStoredLeadMail(id: string, data: Record<string, unknown>): LeadMai
     ...(data.messageId ? { messageId: String(data.messageId) } : {}),
     ...(data.inReplyTo ? { inReplyTo: String(data.inReplyTo) } : {}),
     ...(referenceIds?.length ? { referenceIds } : {}),
+    ...(Array.isArray(data.attachments)
+      ? { attachments: parseStoredLeadMailAttachments(data.attachments) ?? [] }
+      : {}),
     source: (String(data.source ?? "imap") as LeadMailMessage["source"]),
     createdAt: String(data.createdAt ?? data.updatedAt ?? new Date(0).toISOString()),
     updatedAt: String(data.updatedAt ?? data.createdAt ?? new Date(0).toISOString()),
@@ -198,11 +203,30 @@ export async function upsertLeadMailMessagesServer(input: {
         ? parseStoredLeadMail(existing.id, existing.data() as Record<string, unknown>)
         : null;
 
-      const incomingBodySynced = msg.bodySynced !== false && Boolean(msg.bodyText?.trim() || msg.bodyHtml?.trim());
-      const keepPrevBody =
-        prev?.bodySynced &&
-        !incomingBodySynced &&
-        Boolean(prev.bodyText.trim() || prev.bodyHtml?.trim());
+      const incomingBodySynced =
+        msg.bodySynced !== false &&
+        Boolean(msg.bodyText?.trim() || msg.bodyHtml?.trim()) &&
+        !isSubjectOnlyMailBody({
+          subject: msg.subject || prev?.subject,
+          bodyText: msg.bodyText,
+          bodyHtml: msg.bodyHtml,
+        });
+      const keepPrevBody = shouldKeepPreviousMailBody({
+        prev: prev
+          ? {
+              subject: prev.subject,
+              bodyText: prev.bodyText,
+              bodyHtml: prev.bodyHtml,
+              bodySynced: prev.bodySynced,
+            }
+          : undefined,
+        incoming: {
+          subject: msg.subject,
+          bodyText: msg.bodyText,
+          bodyHtml: msg.bodyHtml,
+          bodySynced: msg.bodySynced,
+        },
+      });
 
       const bodyText = clampText(
         keepPrevBody ? prev!.bodyText : (msg.bodyText ?? prev?.bodyText ?? ""),
@@ -210,10 +234,19 @@ export async function upsertLeadMailMessagesServer(input: {
       );
       const bodyHtmlRaw = keepPrevBody ? prev!.bodyHtml : (msg.bodyHtml ?? prev?.bodyHtml);
       const bodyHtml = bodyHtmlRaw ? clampText(bodyHtmlRaw, LEAD_MAIL_BODY_HTML_MAX) : undefined;
-      const bodySynced = keepPrevBody ? true : incomingBodySynced || Boolean(bodyText.trim() || bodyHtml?.trim());
+      const bodySynced = keepPrevBody
+        ? true
+        : incomingBodySynced ||
+          (Boolean(bodyText.trim() || bodyHtml?.trim()) &&
+            !isSubjectOnlyMailBody({
+              subject: msg.subject || prev?.subject,
+              bodyText,
+              bodyHtml,
+            }));
       const preview =
         clampText(msg.preview || bodyText || msg.subject || prev?.preview || "", LEAD_MAIL_PREVIEW_MAX) ||
         msg.subject.slice(0, LEAD_MAIL_PREVIEW_MAX);
+      const attachments = pickLeadMailAttachments(msg.attachments, prev?.attachments);
 
       const doc: LeadMailMessage = {
         id,
@@ -249,6 +282,7 @@ export async function upsertLeadMailMessagesServer(input: {
         ...((msg.referenceIds?.length ? msg.referenceIds : prev?.referenceIds)?.length
           ? { referenceIds: msg.referenceIds?.length ? msg.referenceIds : prev?.referenceIds }
           : {}),
+        ...(attachments !== undefined ? { attachments } : {}),
         source: msg.source || prev?.source || "imap",
         createdAt: prev?.createdAt || now,
         updatedAt: now,

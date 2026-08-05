@@ -1,3 +1,4 @@
+import type { MailInboundAttachment } from "@/lib/email-account-types";
 import { upsertLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";
 import { leadMailProviderKey } from "@/lib/email/lead-mail-ids";
 import type { LeadMailSource } from "@/lib/email/lead-mail-types";
@@ -21,6 +22,7 @@ export async function persistOutboundLeadMailServer(input: {
   messageId?: string;
   inReplyTo?: string;
   referenceIds?: string[];
+  attachments?: MailInboundAttachment[];
   source: LeadMailSource;
 }): Promise<void> {
   const leadId = input.leadId?.trim();
@@ -60,6 +62,7 @@ export async function persistOutboundLeadMailServer(input: {
           messageId,
           inReplyTo: normalizeMessageId(input.inReplyTo),
           referenceIds: input.referenceIds,
+          attachments: input.attachments ?? [],
           source: input.source,
         },
       ],

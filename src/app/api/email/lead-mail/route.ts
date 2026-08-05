@@ -92,6 +92,18 @@ const upsertMessageSchema = z.object({
   messageId: z.string().max(500).optional(),
   inReplyTo: z.string().max(500).optional(),
   referenceIds: z.array(z.string().max(500)).max(50).optional(),
+  attachments: z
+    .array(
+      z.object({
+        filename: z.string().min(1).max(300),
+        mimeType: z.string().max(200).optional(),
+        sizeBytes: z.number().finite().nonnegative().optional(),
+        contentBase64: z.string().max(400_000).optional(),
+        isCalendarInvite: z.boolean().optional(),
+      }),
+    )
+    .max(5)
+    .optional(),
 });
 
 const postSchema = z.object({
@@ -162,6 +174,13 @@ export async function POST(req: Request) {
       referenceIds: msg.referenceIds
         ?.map((id) => normalizeMessageId(id))
         .filter((id): id is string => Boolean(id)),
+      attachments: msg.attachments?.map((att) => ({
+        filename: att.filename,
+        mimeType: att.mimeType || "application/octet-stream",
+        sizeBytes: att.sizeBytes ?? 0,
+        ...(att.contentBase64 ? { contentBase64: att.contentBase64 } : {}),
+        ...(att.isCalendarInvite ? { isCalendarInvite: true } : {}),
+      })),
       source: "client_sync",
     });
   }

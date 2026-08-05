@@ -11,8 +11,13 @@ import {
   MailReaderBody,
   mailReaderContentFromInbound,
   mailReaderContentFromSent,
+  type MailAttachmentResolver,
 } from "@/components/inbox/mail-reader-dialog";
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
+import {
+  MailAddressLineWithEngagement,
+  MailEngagementBadges,
+} from "@/components/leads/mail-engagement-status";
 import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-preview";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -45,7 +50,7 @@ import {
 import { resolveLeadQuality } from "@/lib/intent/compute-quality-score";
 import { labelNamesForLead } from "@/lib/intent/apply-quality-score";
 import { useQualityOutreachGate } from "@/components/leads/use-quality-outreach-gate";
-import type { MailInbound, MailSent } from "@/lib/email-account-types";
+import type { EmailMailboxSettings, MailInbound, MailSent } from "@/lib/email-account-types";
 import type { Followup, Lead } from "@/lib/types";
 import { isLikelyAutoReply } from "@/lib/followup-plan-reply";
 import { leadContactEmails } from "@/lib/followup-plans";
@@ -73,6 +78,8 @@ import {
   type LeadEmailMessage,
 } from "@/lib/email/lead-email-conversations";
 import type { MailTrackingSummary } from "@/lib/email/mail-tracking-types";
+import { isSubjectOnlyMailBody } from "@/lib/email/mail-body-stub";
+import { hydrateFollowupsMessageBodies } from "@/lib/firestore/fetch-followup-message-body-client";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
   LEAD_REPLY_RECEIVED_EVENT,
@@ -122,6 +129,73 @@ function messageBody(message: LeadEmailMessage): string {
   return message.direction === "inbound"
     ? message.message.bodyText || message.message.preview || ""
     : message.message.body || message.message.preview || "";
+}
+
+function leadMailAttachmentResolver(input: {
+  row: LeadEmailMessage;
+  mailboxes: EmailMailboxSettings[];
+  mailViewAsUid?: string | null;
+  selfUid: string;
+}): MailAttachmentResolver | undefined {
+  const uid = input.row.message.uid;
+  if (uid == null || uid <= 0 || input.row.mailboxId === "crm") return undefined;
+  const mailbox = input.mailboxes.find((item) => item.id === input.row.mailboxId);
+  if (!mailbox || !isImapInboxConfigured(mailbox)) return undefined;
+  return async (att, index) => {
+    const forUid = resolveMailApiForUserUid({
+      mailViewAsUid: input.mailViewAsUid,
+      activeMailboxDataOwnerUid: mailbox.dataOwnerUid,
+      selfUid: input.selfUid,
+    });
+    const url = appendMailDataOwnerParam("/api/email/imap-attachment", forUid, input.selfUid);
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        mailboxId: mailbox.id,
+        folder: input.row.direction === "inbound" ? "inbox" : "sent",
+        uid,
+        filename: att.filename,
+        index,
+        imap: {
+          host: mailbox.imap.host,
+          port: mailbox.imap.port,
+          secure: mailbox.imap.secure,
+          user: mailbox.imap.user,
+          pass: mailbox.imap.password,
+        },
+      }),
+    });
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      throw new Error(data?.error || "Could not load attachment");
+    }
+    const blob = await response.blob();
+    return {
+      blob,
+      filename: att.filename,
+      mimeType: blob.type || att.mimeType || "application/octet-stream",
+    };
+  };
+}
+
+function leadEmailNeedsBodyFetch(row: LeadEmailMessage): boolean {
+  if (row.mailboxId === "crm") return false;
+  if (row.message.uid == null) return false;
+  const subject = row.message.subject;
+  const bodyText = row.direction === "inbound" ? row.message.bodyText : row.message.body;
+  const stub = isSubjectOnlyMailBody({
+    subject,
+    bodyText,
+    bodyHtml: row.message.bodyHtml,
+  });
+  if (row.message.bodySynced === false || stub) return true;
+  return (
+    row.direction === "sent" &&
+    row.message.uid > 0 &&
+    row.message.attachments === undefined
+  );
 }
 
 function messageSnippet(message: LeadEmailMessage): string {
@@ -228,16 +302,24 @@ function relevantLeadMessages(input: {
     const mid = followup.sentMessageId?.trim().toLowerCase();
     if (mid && seenMessageIds.has(mid)) continue;
     const id = `crm-sent-${followup.id}`;
+    const subject = followup.emailSubject?.trim() || followup.title;
+    const body = followup.messageBody?.trim() || "";
     const synthetic: MailSent = {
       id,
       mailboxId: "crm",
       from: input.fallbackFromEmail?.trim() || "",
       to: primaryTo,
-      subject: followup.emailSubject?.trim() || followup.title,
-      body: followup.messageBody?.trim() || "",
+      subject,
+      body,
       sentAt: followup.sentAt,
       messageId: followup.sentMessageId,
-      preview: (followup.messageBody?.trim() || followup.title).slice(0, 240),
+      preview: (body || followup.title).slice(0, 240),
+      bodySynced:
+        Boolean(body) &&
+        !isSubjectOnlyMailBody({
+          subject,
+          bodyText: body,
+        }),
     };
     rows.push({ key: id, mailboxId: "crm", direction: "sent", message: synthetic });
     if (mid) seenMessageIds.add(mid);
@@ -266,6 +348,7 @@ function leadEmailMessageToPersistPayload(row: LeadEmailMessage) {
       messageId: row.message.messageId,
       inReplyTo: row.message.inReplyTo,
       referenceIds: row.message.referenceIds,
+      attachments: row.message.attachments,
     };
   }
   return {
@@ -287,6 +370,7 @@ function leadEmailMessageToPersistPayload(row: LeadEmailMessage) {
     messageId: row.message.messageId,
     inReplyTo: row.message.inReplyTo,
     referenceIds: row.message.referenceIds,
+    attachments: row.message.attachments,
   };
 }
 
@@ -317,6 +401,40 @@ export function LeadEmailsPanel({
         (f) => f.leadId === lead.id && f.deliveryStatus === "sent" && Boolean(f.sentAt),
       ),
     [workspace.followups, lead.id],
+  );
+  const [hydratedFollowupBodies, setHydratedFollowupBodies] = React.useState<Record<string, string>>(
+    {},
+  );
+  React.useEffect(() => {
+    setHydratedFollowupBodies({});
+  }, [lead.id]);
+  React.useEffect(() => {
+    if (!active || workspace.isDemo) return;
+    const toFetch = crmSentFollowups.filter(
+      (f) => f.hasMessageBody && !f.messageBody?.trim() && hydratedFollowupBodies[f.id] === undefined,
+    );
+    if (toFetch.length === 0) return;
+    let cancelled = false;
+    void hydrateFollowupsMessageBodies(toFetch).then((rows) => {
+      if (cancelled) return;
+      setHydratedFollowupBodies((prev) => {
+        const next = { ...prev };
+        for (const row of rows) next[row.id] = row.messageBody?.trim() || "";
+        return next;
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [active, crmSentFollowups, hydratedFollowupBodies, workspace.isDemo]);
+  const crmSentFollowupsHydrated = React.useMemo(
+    () =>
+      crmSentFollowups.map((f) => {
+        if (f.messageBody?.trim()) return f;
+        const body = hydratedFollowupBodies[f.id];
+        return body ? { ...f, messageBody: body, hasMessageBody: undefined } : f;
+      }),
+    [crmSentFollowups, hydratedFollowupBodies],
   );
   const mailboxes = useEmailAccountStore((state) => state.mailboxes);
   const activeMailboxId = useEmailAccountStore((state) => state.activeMailboxId);
@@ -360,12 +478,12 @@ export function LeadEmailsPanel({
         inboundByMailbox,
         sent,
         linkedLeadByMessageId,
-        crmSentFollowups,
+        crmSentFollowups: crmSentFollowupsHydrated,
         fallbackFromEmail: activeMailbox.emailAddress,
       }),
     [
       activeMailbox.emailAddress,
-      crmSentFollowups,
+      crmSentFollowupsHydrated,
       inboundByMailbox,
       lead,
       linkedLeadByMessageId,
@@ -732,7 +850,7 @@ export function LeadEmailsPanel({
           inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
           sent: useEmailAccountStore.getState().sent,
           linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-          crmSentFollowups,
+          crmSentFollowups: crmSentFollowupsHydrated,
         });
         if (matched.length > 0) void persistLeadMail(matched);
         return;
@@ -840,18 +958,14 @@ export function LeadEmailsPanel({
           inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
           sent: useEmailAccountStore.getState().sent,
           linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-          crmSentFollowups,
+          crmSentFollowups: crmSentFollowupsHydrated,
         });
 
         type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
         const bodyJobsByKey = new Map<string, BodyJob>();
         let bodyBudget = LEAD_EMAIL_BODY_BACKFILL_LIMIT;
         const unsynced = matched
-          .filter((row) => {
-            if (row.mailboxId === "crm") return false;
-            if (row.message.bodySynced !== false) return false;
-            return row.message.uid != null;
-          })
+          .filter((row) => leadEmailNeedsBodyFetch(row))
           .sort((a, b) => {
             const ad = a.direction === "inbound" ? a.message.date : a.message.sentAt;
             const bd = b.direction === "inbound" ? b.message.date : b.message.sentAt;
@@ -924,7 +1038,7 @@ export function LeadEmailsPanel({
             inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
             sent: useEmailAccountStore.getState().sent,
             linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-            crmSentFollowups,
+            crmSentFollowups: crmSentFollowupsHydrated,
           });
         }
         if (matched.length > 0) void persistLeadMail(matched);
@@ -932,7 +1046,7 @@ export function LeadEmailsPanel({
     },
     [
       activeMailbox.id,
-      crmSentFollowups,
+      crmSentFollowupsHydrated,
       emailServerHydrated,
       lead,
       mailViewAsUid,
@@ -964,8 +1078,7 @@ export function LeadEmailsPanel({
     type BodyJob = { mailboxId: string; folder: "inbox" | "sent"; uids: number[] };
     const jobsByKey = new Map<string, BodyJob>();
     for (const row of selected.messages) {
-      if (row.message.bodySynced !== false) continue;
-      if (row.mailboxId === "crm") continue;
+      if (!leadEmailNeedsBodyFetch(row)) continue;
       const uid = row.message.uid;
       if (uid == null) continue;
       const folder = row.direction === "inbound" ? "inbox" : "sent";
@@ -1037,7 +1150,7 @@ export function LeadEmailsPanel({
           inboundByMailbox: useEmailAccountStore.getState().inboundByMailbox,
           sent: useEmailAccountStore.getState().sent,
           linkedLeadByMessageId: useEmailAccountStore.getState().linkedLeadByMessageId,
-          crmSentFollowups,
+          crmSentFollowups: crmSentFollowupsHydrated,
         });
         const keys = new Set(selected.messages.map((m) => m.key));
         const toPersist = refreshed.filter((m) => keys.has(m.key));
@@ -1054,7 +1167,7 @@ export function LeadEmailsPanel({
     };
   }, [
     bodyLoadAttempt,
-    crmSentFollowups,
+    crmSentFollowupsHydrated,
     lead,
     mailViewAsUid,
     mailboxes,
@@ -1784,11 +1897,26 @@ export function LeadEmailsPanel({
                         const opened = outbound.some((m) => trackingFor(m)?.opened);
                         const clicked = outbound.some((m) => trackingFor(m)?.clicked);
                         if (!opened && !clicked) return null;
+                        const openerEmails = [
+                          ...new Set(
+                            outbound.flatMap(
+                              (m) =>
+                                trackingFor(m)?.recipients?.filter((row) => row.openCount > 0).map((row) => row.email) ??
+                                [],
+                            ),
+                          ),
+                        ];
+                        const openedLabel =
+                          openerEmails.length === 1
+                            ? `Opened by ${openerEmails[0]}`
+                            : openerEmails.length > 1
+                              ? `Opened by ${openerEmails.length}`
+                              : "Opened";
                         return (
                           <>
                             {opened ? (
-                              <Badge variant="outline" className="h-5 text-[10px]">
-                                Opened
+                              <Badge variant="outline" className="h-5 max-w-[220px] truncate text-[10px]" title={openerEmails.join(", ")}>
+                                {openedLabel}
                               </Badge>
                             ) : null}
                             {clicked ? (
@@ -1953,7 +2081,7 @@ export function LeadEmailsPanel({
                 {selected.messages.map((row) => {
                   const content =
                     row.direction === "inbound"
-                      ? mailReaderContentFromInbound(row.message)
+                      ? mailReaderContentFromInbound(row.message, { mailboxId: row.mailboxId })
                       : mailReaderContentFromSent(row.message);
                   const date = leadEmailMessageAt(row);
                   const rowMailbox =
@@ -1979,25 +2107,20 @@ export function LeadEmailsPanel({
                       <div className="flex flex-wrap items-start justify-between gap-3 border-b bg-muted/15 px-4 py-3">
                         <div className="min-w-0">
                           <p className="truncate text-sm font-medium">{headline}</p>
-                          <p className="mt-0.5 break-all text-[11px] text-muted-foreground">
-                            From {fromDisplay || "Unknown"} · To {toDisplay || "Unknown"}
-                            {row.message.cc ? ` · Cc ${row.message.cc}` : ""}
-                            {"bcc" in row.message && row.message.bcc ? ` · Bcc ${row.message.bcc}` : ""}
-                          </p>
+                          <MailAddressLineWithEngagement
+                            from={fromDisplay || "Unknown"}
+                            to={toDisplay || "Unknown"}
+                            cc={row.message.cc || undefined}
+                            bcc={"bcc" in row.message ? row.message.bcc || undefined : undefined}
+                            tracking={row.direction === "sent" ? trackingFor(row) : undefined}
+                          />
                         </div>
                         <div className="flex shrink-0 items-center gap-2">
                           <Badge variant={row.direction === "inbound" ? "secondary" : "outline"} className="text-[10px]">
                             {row.direction === "inbound" ? "Received" : "Sent"}
                           </Badge>
-                          {row.direction === "sent" && trackingFor(row)?.opened ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              Opened{trackingFor(row)!.openCount > 1 ? ` ×${trackingFor(row)!.openCount}` : ""}
-                            </Badge>
-                          ) : null}
-                          {row.direction === "sent" && trackingFor(row)?.clicked ? (
-                            <Badge variant="outline" className="text-[10px]">
-                              Clicked{trackingFor(row)!.clickCount > 1 ? ` ×${trackingFor(row)!.clickCount}` : ""}
-                            </Badge>
+                          {row.direction === "sent" ? (
+                            <MailEngagementBadges tracking={trackingFor(row)} />
                           ) : null}
                           {row.direction === "inbound" &&
                           isLikelyAutoReply({
@@ -2016,6 +2139,12 @@ export function LeadEmailsPanel({
                         className="p-4"
                         bodyLoading={loadingBodies}
                         onRetryBody={() => setBodyLoadAttempt((n) => n + 1)}
+                        resolveAttachment={leadMailAttachmentResolver({
+                          row,
+                          mailboxes,
+                          mailViewAsUid,
+                          selfUid: workspace.currentUserId ?? "",
+                        })}
                       />
                     </article>
                   );

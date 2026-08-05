@@ -7,6 +7,8 @@ export type MailTrackingTokenPayload = {
   id: string;
   /** Link id when t === "c" */
   l?: string;
+  /** Recipient tracking id when the send was personalized */
+  r?: string;
   /** Unix seconds expiry */
   exp: number;
 };
@@ -70,6 +72,7 @@ export function signMailTrackingToken(
     t: input.t,
     id: input.id,
     ...(input.l ? { l: input.l } : {}),
+    ...(input.r ? { r: input.r } : {}),
     exp: input.exp ?? nowSec + DEFAULT_TTL_SECONDS,
   };
   const body = b64url(Buffer.from(JSON.stringify(payload), "utf8"));
@@ -107,11 +110,13 @@ export function verifyMailTrackingToken(
   if (typeof obj.exp !== "number" || !Number.isFinite(obj.exp)) return null;
   if (obj.exp < nowSec) return null;
   if (obj.t === "c" && (typeof obj.l !== "string" || !obj.l.trim())) return null;
+  if (obj.r !== undefined && (typeof obj.r !== "string" || !obj.r.trim())) return null;
   return {
     v: 1,
     t: obj.t,
     id: obj.id.trim(),
     ...(typeof obj.l === "string" && obj.l.trim() ? { l: obj.l.trim() } : {}),
+    ...(typeof obj.r === "string" && obj.r.trim() ? { r: obj.r.trim() } : {}),
     exp: obj.exp,
   };
 }

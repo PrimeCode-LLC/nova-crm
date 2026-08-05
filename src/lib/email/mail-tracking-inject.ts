@@ -42,23 +42,45 @@ export function injectMailTracking(input: {
   trackingId: string;
   trackOpens: boolean;
   trackClicks: boolean;
+  /** When set, open/click tokens are attributed to this recipient id. */
+  recipientId?: string;
+  /** Reuse stable link ids so every recipient copy tracks the same destinations. */
+  links?: MailTrackingLink[];
 }): InjectMailTrackingResult {
   let html = input.html;
-  const links: MailTrackingLink[] = [];
+  const reuseLinks = Array.isArray(input.links);
+  const links: MailTrackingLink[] = reuseLinks ? [...(input.links ?? [])] : [];
+  let linkIndex = 0;
+  const recipientId = input.recipientId?.trim() || undefined;
 
   if (input.trackClicks && html.trim()) {
     html = html.replace(HREF_RE, (full, quote: string, href: string) => {
       if (!shouldRewriteHref(href)) return full;
-      const linkId = newLinkId();
-      const token = signMailTrackingToken({ t: "c", id: input.trackingId, l: linkId });
+      let link: MailTrackingLink | undefined;
+      if (reuseLinks) {
+        link = links[linkIndex++];
+        if (!link?.id) return full;
+      } else {
+        link = { id: newLinkId(), url: href.trim() };
+        links.push(link);
+      }
+      const token = signMailTrackingToken({
+        t: "c",
+        id: input.trackingId,
+        l: link.id,
+        ...(recipientId ? { r: recipientId } : {}),
+      });
       if (!token) return full;
-      links.push({ id: linkId, url: href.trim() });
       return `href=${quote}${clickTrackingUrl(token)}${quote}`;
     });
   }
 
   if (input.trackOpens && html.trim()) {
-    const token = signMailTrackingToken({ t: "o", id: input.trackingId });
+    const token = signMailTrackingToken({
+      t: "o",
+      id: input.trackingId,
+      ...(recipientId ? { r: recipientId } : {}),
+    });
     if (token) {
       const pixel = `<img src="${openTrackingUrl(token)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />`;
       if (/<\/body>/i.test(html)) {

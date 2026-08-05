@@ -16,6 +16,7 @@ import {
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
+import { outboundAttachmentsToLeadMail } from "@/lib/email/lead-mail-attachments";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 import {
@@ -998,6 +999,7 @@ async function sendScheduledDoc(
         messageId,
         inReplyTo,
         referenceIds,
+        attachments: outboundAttachmentsToLeadMail(parsedAttachments),
         source: followupId ? "crm_followup" : "scheduled",
       });
       try {

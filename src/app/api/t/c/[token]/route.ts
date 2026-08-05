@@ -19,6 +19,7 @@ export async function GET(req: Request, ctx: RouteCtx) {
     trackingId: payload.id,
     linkId: payload.l,
     userAgent: req.headers.get("user-agent"),
+    recipientId: payload.r,
   });
 
   if (!result.ok) {

@@ -174,8 +174,7 @@ export async function fetchImapBodiesServer(
           }
           const preview = parsed.preview || subjFallback;
           const bodyText = parsed.bodyText || preview;
-          const attachments =
-            parsed.attachments.length > 0 ? parsed.attachments : undefined;
+          const attachments = parsed.attachments;
           updates.push({
             uid: row.uid,
             preview,

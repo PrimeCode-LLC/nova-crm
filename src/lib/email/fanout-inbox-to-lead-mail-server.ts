@@ -39,6 +39,7 @@ function applyBodyUpdate(head: MailInbound, body: ImapBodyUpdate): MailInbound {
     ...(body.messageId ? { messageId: body.messageId } : {}),
     ...(body.inReplyTo ? { inReplyTo: body.inReplyTo } : {}),
     ...(body.referenceIds?.length ? { referenceIds: body.referenceIds } : {}),
+    ...(body.attachments !== undefined ? { attachments: body.attachments } : {}),
     bodySynced: body.bodySynced,
   };
 }
@@ -392,6 +393,11 @@ function bodyUpdateToMailInbound(
     preview: update.preview || base.preview || subject,
     bodyText: update.bodyText || base.bodyText,
     ...(update.bodyHtml || base.bodyHtml ? { bodyHtml: update.bodyHtml || base.bodyHtml } : {}),
+    ...(update.attachments !== undefined
+      ? { attachments: update.attachments }
+      : base.attachments !== undefined
+        ? { attachments: base.attachments }
+        : {}),
     bodySynced: update.bodySynced,
   };
 }
