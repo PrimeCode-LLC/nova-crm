@@ -163,4 +163,58 @@ describe("capacity spill skips weekends", () => {
     const secondDay = scheduleDayKeyFromDate(second.steps[0]!.scheduledAt, TZ);
     expect(secondDay > today).toBe(true);
   });
+
+  it("preserves gaps when an earlier step spills past later drafts", () => {
+    const zone = TZ;
+    // autoFix uses Date.now() for todayKey — fill the next 10 working-capable days.
+    const today = scheduleDayKeyFromDate(new Date(), zone);
+    const byDay: Record<
+      string,
+      {
+        dayKey: string;
+        sent: number;
+        pending: number;
+        booked: number;
+        limit: number;
+        remaining: number;
+      }
+    > = {};
+    for (let i = 0; i < 30; i += 1) {
+      const key = addUtcDayKey(today, i);
+      const full = i < 10;
+      byDay[key] = {
+        dayKey: key,
+        sent: 0,
+        pending: full ? 1 : 0,
+        booked: full ? 1 : 0,
+        limit: 1,
+        remaining: full ? 0 : 1,
+      };
+    }
+    const firstDay = today;
+    const secondDay = addUtcDayKey(today, 3);
+    const firstAt = toDatetimeLocalValue(new Date(`${firstDay}T13:00:00.000Z`), zone);
+    const secondAt = toDatetimeLocalValue(new Date(`${secondDay}T13:00:00.000Z`), zone);
+    const result = autoFixScheduleDates(
+      [
+        { id: "s1", scheduledAt: firstAt, included: true },
+        { id: "s2", scheduledAt: secondAt, included: true },
+      ],
+      byDay,
+      1,
+      40,
+      zone,
+      { sendPolicy: DEFAULT_ORG_SEND_POLICY },
+    );
+    expect(result.unresolvedIds).toEqual([]);
+    const d1 = scheduleDayKeyFromDate(result.steps[0]!.scheduledAt, zone);
+    const d2 = scheduleDayKeyFromDate(result.steps[1]!.scheduledAt, zone);
+    expect(d1 >= addUtcDayKey(today, 10)).toBe(true);
+    // Must not collapse s2 onto the same day as spilled s1 (+60s bug).
+    expect(d2 > d1).toBe(true);
+    const gapDays =
+      (Date.parse(`${d2}T12:00:00.000Z`) - Date.parse(`${d1}T12:00:00.000Z`)) /
+      (24 * 60 * 60 * 1000);
+    expect(gapDays).toBeGreaterThanOrEqual(3);
+  });
 });

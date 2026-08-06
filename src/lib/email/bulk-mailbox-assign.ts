@@ -8,7 +8,12 @@ import {
   type MailboxScheduleLoadResponse,
 } from "@/lib/email/mailbox-schedule-capacity";
 import type { OrgEmailSendPolicy } from "@/lib/email/org-send-policy";
-import { resolveOrgTimezone } from "@/lib/org-timezone";
+import {
+  isoFromDatetimeLocalInZone,
+  isNaiveDatetimeLocal,
+  resolveOrgTimezone,
+} from "@/lib/org-timezone";
+import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
 
 export type MailboxCapacityState = {
   mailboxId: string;
@@ -302,6 +307,218 @@ export function assignProspectSchedule(input: {
     nextStates,
     nextRoundRobinIndex: input.roundRobinIndex + 1,
     nextOrgRemainingByDay: fixed.orgRemainingByDay ?? input.orgRemainingByDay,
+  };
+}
+
+export type BulkProspectAssignInput = {
+  key: string;
+  steps: readonly AssignableScheduleStep[];
+  candidateMailboxIds?: readonly string[];
+  preferredMailboxId?: string;
+};
+
+export type BulkProspectAssignResult =
+  | {
+      key: string;
+      ok: true;
+      mailboxId: string;
+      steps: AssignableScheduleStep[];
+    }
+  | {
+      key: string;
+      ok: false;
+      error: string;
+      unresolvedIds: string[];
+    };
+
+function stepInstantMs(scheduledAt: string, timeZone: string): number {
+  const iso = isNaiveDatetimeLocal(scheduledAt)
+    ? isoFromDatetimeLocalInZone(scheduledAt, timeZone)
+    : scheduledAt;
+  return new Date(iso).getTime();
+}
+
+function anchorStepsAfterFirst(input: {
+  steps: readonly AssignableScheduleStep[];
+  placedFirst: AssignableScheduleStep;
+  timeZone: string;
+}): AssignableScheduleStep[] {
+  const zone = resolveOrgTimezone(input.timeZone);
+  const included = input.steps.filter((s) => s.included && s.scheduledAt);
+  if (included.length === 0) return [];
+  const sorted = [...included].sort(
+    (a, b) => a.scheduledAt.localeCompare(b.scheduledAt) || a.id.localeCompare(b.id),
+  );
+  const firstDraft = sorted[0]!;
+  const firstDraftMs = stepInstantMs(firstDraft.scheduledAt, zone);
+  const firstPlacedMs = stepInstantMs(input.placedFirst.scheduledAt, zone);
+  if (Number.isNaN(firstDraftMs) || Number.isNaN(firstPlacedMs)) {
+    return sorted.slice(1).map((s) => ({ ...s }));
+  }
+  return sorted.slice(1).map((s) => {
+    const draftMs = stepInstantMs(s.scheduledAt, zone);
+    if (Number.isNaN(draftMs)) return { ...s };
+    const gap = Math.max(60_000, draftMs - firstDraftMs);
+    return {
+      ...s,
+      scheduledAt: toDatetimeLocalValue(new Date(firstPlacedMs + gap), zone),
+      included: true,
+    };
+  });
+}
+
+/**
+ * Assign many prospects with first-email priority:
+ * 1) place every sequence's first email (fills earliest capacity first)
+ * 2) place remaining steps on the same mailbox, keeping gaps from the placed first send
+ */
+export function assignBulkProspectSchedules(input: {
+  states: readonly MailboxCapacityState[];
+  prospects: readonly BulkProspectAssignInput[];
+  horizonDays?: number;
+  timeZone?: string;
+  sendPolicy?: OrgEmailSendPolicy | null;
+  orgCeiling?: number | null;
+  orgRemainingByDay?: Record<string, number>;
+}): {
+  results: BulkProspectAssignResult[];
+  nextStates: MailboxCapacityState[];
+  nextOrgRemainingByDay?: Record<string, number>;
+} {
+  const zone = resolveOrgTimezone(input.timeZone);
+  let states = cloneMailboxCapacityStates(input.states);
+  let orgRemainingByDay = input.orgRemainingByDay;
+  let rr = 0;
+
+  const firstPlaced = new Map<
+    string,
+    { mailboxId: string; step: AssignableScheduleStep; allSteps: AssignableScheduleStep[] }
+  >();
+  const failed = new Map<string, BulkProspectAssignResult & { ok: false }>();
+
+  for (const prospect of input.prospects) {
+    const included = prospect.steps.filter((s) => s.included && s.scheduledAt);
+    if (included.length === 0) {
+      failed.set(prospect.key, {
+        key: prospect.key,
+        ok: false,
+        error: "No steps to schedule",
+        unresolvedIds: [],
+      });
+      continue;
+    }
+    const sorted = [...included].sort(
+      (a, b) => a.scheduledAt.localeCompare(b.scheduledAt) || a.id.localeCompare(b.id),
+    );
+    const first = { ...sorted[0]!, included: true };
+    const assigned = assignProspectSchedule({
+      states,
+      steps: [first],
+      roundRobinIndex: rr,
+      horizonDays: input.horizonDays,
+      timeZone: zone,
+      candidateMailboxIds: prospect.candidateMailboxIds,
+      preferredMailboxId: prospect.preferredMailboxId,
+      sendPolicy: input.sendPolicy,
+      orgCeiling: input.orgCeiling,
+      orgRemainingByDay,
+    });
+    rr = assigned.nextRoundRobinIndex;
+    states = assigned.nextStates;
+    if (assigned.nextOrgRemainingByDay) orgRemainingByDay = assigned.nextOrgRemainingByDay;
+    if (!assigned.ok) {
+      failed.set(prospect.key, {
+        key: prospect.key,
+        ok: false,
+        error: assigned.error,
+        unresolvedIds: assigned.unresolvedIds,
+      });
+      continue;
+    }
+    const placed = assigned.steps.find((s) => s.included && s.id === first.id) ?? assigned.steps[0]!;
+    firstPlaced.set(prospect.key, {
+      mailboxId: assigned.mailboxId,
+      step: placed,
+      allSteps: sorted.map((s) => ({ ...s })),
+    });
+  }
+
+  const results: BulkProspectAssignResult[] = [];
+  for (const prospect of input.prospects) {
+    const earlyFail = failed.get(prospect.key);
+    if (earlyFail) {
+      results.push(earlyFail);
+      continue;
+    }
+    const head = firstPlaced.get(prospect.key);
+    if (!head) {
+      results.push({
+        key: prospect.key,
+        ok: false,
+        error: "No steps to schedule",
+        unresolvedIds: [],
+      });
+      continue;
+    }
+
+    const rest = anchorStepsAfterFirst({
+      steps: head.allSteps,
+      placedFirst: head.step,
+      timeZone: zone,
+    });
+    if (rest.length === 0) {
+      results.push({
+        key: prospect.key,
+        ok: true,
+        mailboxId: head.mailboxId,
+        steps: [head.step],
+      });
+      continue;
+    }
+
+    const assignedRest = assignProspectSchedule({
+      states,
+      steps: rest,
+      roundRobinIndex: rr,
+      horizonDays: input.horizonDays,
+      timeZone: zone,
+      candidateMailboxIds: prospect.candidateMailboxIds,
+      preferredMailboxId: head.mailboxId,
+      sendPolicy: input.sendPolicy,
+      orgCeiling: input.orgCeiling,
+      orgRemainingByDay,
+    });
+    rr = assignedRest.nextRoundRobinIndex;
+    states = assignedRest.nextStates;
+    if (assignedRest.nextOrgRemainingByDay) orgRemainingByDay = assignedRest.nextOrgRemainingByDay;
+
+    if (!assignedRest.ok) {
+      results.push({
+        key: prospect.key,
+        ok: false,
+        error: assignedRest.error,
+        unresolvedIds: assignedRest.unresolvedIds,
+      });
+      continue;
+    }
+
+    const byId = new Map<string, AssignableScheduleStep>();
+    byId.set(head.step.id, head.step);
+    for (const step of assignedRest.steps) {
+      if (step.included) byId.set(step.id, step);
+    }
+    results.push({
+      key: prospect.key,
+      ok: true,
+      mailboxId: head.mailboxId,
+      steps: head.allSteps.map((s) => byId.get(s.id) ?? { ...s, included: false }),
+    });
+  }
+
+  return {
+    results,
+    nextStates: states,
+    nextOrgRemainingByDay: orgRemainingByDay,
   };
 }
 

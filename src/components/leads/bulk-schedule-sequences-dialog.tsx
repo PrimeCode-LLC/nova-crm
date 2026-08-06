@@ -24,9 +24,8 @@ import {
 } from "@/stores/email-account-store";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import {
-  assignProspectSchedule,
+  assignBulkProspectSchedules,
   loadMailboxCapacityStates,
-  type MailboxCapacityState,
 } from "@/lib/email/bulk-mailbox-assign";
 import {
   buildContactRecipientOptions,
@@ -527,14 +526,26 @@ export function BulkScheduleSequencesDialog({
       }
     }
 
-    let states: MailboxCapacityState[] = loaded.states;
-    let rr = 0;
     let success = 0;
     let skipped = 0;
     let failed = 0;
     let emailsScheduled = 0;
     const successLeadIds: string[] = [];
     const mailboxById = new Map(selected.map((m) => [m.id, m]));
+
+    type PreparedProspect = {
+      leadId: string;
+      lead: (typeof leadsRef.current)[number];
+      to: string;
+      schedulable: ReturnType<typeof openFollowupsForPlan>;
+      draftSteps: { id: string; scheduledAt: string; included: true }[];
+      candidateMailboxIds?: string[];
+      preferPrior?: string;
+      priorSender: ReturnType<typeof resolvePriorSequenceSender> | null;
+      startFresh: boolean;
+    };
+
+    const prepared: PreparedProspect[] = [];
 
     for (let i = 0; i < queue.length; i++) {
       if (cancelRef.current) {
@@ -592,7 +603,7 @@ export function BulkScheduleSequencesDialog({
                 }),
                 timeZone,
               ),
-              included: true,
+              included: true as const,
             }));
 
       let candidateMailboxIds: string[] | undefined;
@@ -633,25 +644,54 @@ export function BulkScheduleSequencesDialog({
           ? priorSender.mailboxId
           : undefined;
 
-      const assigned = assignProspectSchedule({
-        states,
-        steps: draftSteps,
-        roundRobinIndex: rr,
-        timeZone,
+      prepared.push({
+        leadId,
+        lead,
+        to,
+        schedulable,
+        draftSteps,
         candidateMailboxIds,
-        preferredMailboxId: preferPrior,
-        sendPolicy: organizationSendPolicy,
-        orgCeiling,
-        orgRemainingByDay,
+        preferPrior,
+        priorSender,
+        startFresh,
       });
-      rr = assigned.nextRoundRobinIndex;
-      states = assigned.nextStates;
-      if (assigned.nextOrgRemainingByDay) orgRemainingByDay = assigned.nextOrgRemainingByDay;
+    }
 
-      if (!assigned.ok) {
+    const bulk = assignBulkProspectSchedules({
+      states: loaded.states,
+      prospects: prepared.map((p) => ({
+        key: p.leadId,
+        steps: p.draftSteps,
+        candidateMailboxIds: p.candidateMailboxIds,
+        preferredMailboxId: p.preferPrior,
+      })),
+      timeZone,
+      sendPolicy: organizationSendPolicy,
+      orgCeiling,
+      orgRemainingByDay,
+    });
+
+    const assignedByLead = new Map(bulk.results.map((r) => [r.key, r]));
+
+    for (let i = 0; i < prepared.length; i++) {
+      if (cancelRef.current) {
+        for (let j = i; j < prepared.length; j++) {
+          patchRow(prepared[j]!.leadId, { status: "skipped", detail: "Cancelled" });
+          skipped += 1;
+        }
+        break;
+      }
+
+      const prospect = prepared[i]!;
+      const leadId = prospect.leadId;
+      setProgressIndex(i + 1);
+      patchRow(leadId, { status: "running", detail: undefined });
+
+      const assigned = assignedByLead.get(leadId);
+      if (!assigned || !assigned.ok) {
         patchRow(leadId, {
           status: "failed",
-          detail: assigned.error,
+          detail: assigned && !assigned.ok ? assigned.error : "Could not assign",
         });
         failed += 1;
         continue;
@@ -664,6 +704,7 @@ export function BulkScheduleSequencesDialog({
         continue;
       }
 
+      const { lead, to, schedulable, priorSender, startFresh } = prospect;
       const senderChanged =
         Boolean(priorSender) && priorSender!.mailboxId !== assigned.mailboxId;
 
@@ -855,7 +896,7 @@ export function BulkScheduleSequencesDialog({
             {phase === "setup"
               ? "Queue email steps from existing active sequences across selected inboxes, using each mailbox's daily send limit. When scheduling for other owners, prefer inboxes you both can send from."
               : phase === "preview"
-                ? "Review where emails will land before they are queued. Overflow moves to the next working day with capacity."
+                ? "Review where emails will land before they are queued. First emails fill earliest capacity; later steps keep their gaps. Overflow moves to the next working day with capacity."
               : phase === "running"
                 ? "Queuing email steps across your selected inboxes. You can stop after the current prospect."
                 : "All selected prospects have been processed."}

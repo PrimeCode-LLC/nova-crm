@@ -1,12 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  assignBulkProspectSchedules,
   assignProspectSchedule,
   consumeCapacityForSteps,
   pickMailboxForProspect,
   remainingOnDay,
   type MailboxCapacityState,
 } from "@/lib/email/bulk-mailbox-assign";
-import { scheduleDayKeyFromDate } from "@/lib/email/mailbox-schedule-capacity";
+import { addUtcDayKey, scheduleDayKeyFromDate } from "@/lib/email/mailbox-schedule-capacity";
 import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
 
 const TZ = "UTC";
@@ -224,5 +225,36 @@ describe("bulk mailbox assign", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.mailboxId).toBe("mb-a");
+  });
+
+  it("packs first emails across prospects before follow-ups", () => {
+    const today = scheduleDayKeyFromDate(new Date(), TZ);
+    const byDay = fillHorizon(today, 20, 2, 0);
+    const states: MailboxCapacityState[] = [
+      { mailboxId: "mb-a", limit: 2, byDay: structuredClone(byDay) },
+    ];
+    const day0 = toDatetimeLocalValue(new Date(`${today}T15:00:00.000Z`), TZ);
+    const day3 = toDatetimeLocalValue(
+      new Date(`${addUtcDayKey(today, 3)}T15:00:00.000Z`),
+      TZ,
+    );
+    const { results } = assignBulkProspectSchedules({
+      states,
+      timeZone: TZ,
+      prospects: [0, 1, 2, 3].map((i) => ({
+        key: `p${i}`,
+        steps: [
+          { id: `p${i}-s1`, scheduledAt: day0, included: true },
+          { id: `p${i}-s2`, scheduledAt: day3, included: true },
+        ],
+      })),
+    });
+    expect(results.every((r) => r.ok)).toBe(true);
+    const firstDays = results
+      .filter((r): r is Extract<(typeof results)[number], { ok: true }> => r.ok)
+      .map((r) => scheduleDayKeyFromDate(r.steps[0]!.scheduledAt, TZ));
+    // With limit 2/day, four first emails need today + next day — not blocked by follow-ups.
+    expect(firstDays.filter((d) => d === today)).toHaveLength(2);
+    expect(firstDays.some((d) => d > today)).toBe(true);
   });
 });

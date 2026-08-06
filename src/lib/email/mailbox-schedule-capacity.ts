@@ -253,7 +253,8 @@ function advanceZonedCalendarDay(
 
 /**
  * Move over-limit steps to the next org-calendar day with free capacity.
- * Preserves wall-clock time-of-day in `timeZone` and relative order.
+ * Preserves wall-clock time-of-day in `timeZone`, relative order, and the
+ * original gaps between consecutive steps when an earlier step spills forward.
  */
 export function autoFixScheduleDates<T extends { id: string; scheduledAt: string; included: boolean }>(
   steps: T[],
@@ -311,6 +312,8 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
   let changed = false;
   const unresolvedIds: string[] = [];
   let minTime = Date.now() + 60_000;
+  let prevOriginalMs: number | null = null;
+  let prevPlacedMs: number | null = null;
 
   for (const step of included) {
     const originalIso = isNaiveDatetimeLocal(step.scheduledAt)
@@ -325,7 +328,17 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
     const minutes = Number(mRaw);
     if (!datePart || !Number.isFinite(hours) || !Number.isFinite(minutes)) continue;
 
+    const originalMs = original.getTime();
     let probe = original;
+    // When an earlier step spilled forward, keep this step's original gap after it
+    // instead of collapsing to +60s (which stacks a whole sequence onto one/two days).
+    if (prevOriginalMs != null && prevPlacedMs != null) {
+      const originalGapMs = Math.max(60_000, originalMs - prevOriginalMs);
+      const anchored = new Date(prevPlacedMs + originalGapMs);
+      if (anchored.getTime() > probe.getTime()) {
+        probe = anchored;
+      }
+    }
     if (probe.getTime() < minTime) {
       const minWall = datetimeLocalInZone(new Date(minTime), zone);
       const [minDate] = minWall.split("T");
@@ -395,6 +408,8 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
         }
         remaining[dayKey] = slots - 1;
         if (orgRemaining) orgRemaining[dayKey] = orgSlots - 1;
+        prevOriginalMs = originalMs;
+        prevPlacedMs = probe.getTime();
         minTime = probe.getTime() + 60_000;
         placed = true;
         break;
