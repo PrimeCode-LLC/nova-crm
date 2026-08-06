@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { shouldOfferReplyIntelligenceRun } from "@/lib/email/reply-intelligence-run-visibility";
+import {
+  shouldHighlightMissingReplyNextStep,
+  shouldOfferReplyIntelligenceRun,
+} from "@/lib/email/reply-intelligence-run-visibility";
 import type { Lead } from "@/lib/types";
 
 function baseLead(overrides: Partial<Lead> = {}): Lead {
@@ -26,10 +29,8 @@ function baseLead(overrides: Partial<Lead> = {}): Lead {
 }
 
 describe("shouldOfferReplyIntelligenceRun", () => {
-  it("offers when a reply exists but classify never ran", () => {
-    expect(
-      shouldOfferReplyIntelligenceRun(baseLead({ lastReplyAt: "2026-08-01T12:00:00.000Z" })),
-    ).toBe(true);
+  it("offers on any open lead without a pending action", () => {
+    expect(shouldOfferReplyIntelligenceRun(baseLead())).toBe(true);
   });
 
   it("hides while a pending reply action is active", () => {
@@ -46,33 +47,21 @@ describe("shouldOfferReplyIntelligenceRun", () => {
     ).toBe(false);
   });
 
-  it("offers again after dismiss", () => {
+  it("hides for do-not-contact", () => {
+    expect(shouldOfferReplyIntelligenceRun(baseLead({ doNotContact: true }))).toBe(false);
+  });
+});
+
+describe("shouldHighlightMissingReplyNextStep", () => {
+  it("highlights when reply signal exists but next step is missing", () => {
     expect(
-      shouldOfferReplyIntelligenceRun(
-        baseLead({
-          lastReplyAt: "2026-08-01T12:00:00.000Z",
-          replyActionStatus: "dismissed",
-          replyClass: "neutral",
-          nextAction: "Neutral · potential 40: Nurture",
-        }),
+      shouldHighlightMissingReplyNextStep(
+        baseLead({ lastReplyAt: "2026-08-01T12:00:00.000Z" }),
       ),
     ).toBe(true);
   });
 
-  it("hides after an accepted/sent resolution with a next action", () => {
-    expect(
-      shouldOfferReplyIntelligenceRun(
-        baseLead({
-          lastReplyAt: "2026-08-01T12:00:00.000Z",
-          replyActionStatus: "sent",
-          replyClass: "positive",
-          nextAction: "Reply sent — wait for their response",
-        }),
-      ),
-    ).toBe(false);
-  });
-
-  it("hides when there is no reply signal", () => {
-    expect(shouldOfferReplyIntelligenceRun(baseLead())).toBe(false);
+  it("does not highlight without a reply signal", () => {
+    expect(shouldHighlightMissingReplyNextStep(baseLead())).toBe(false);
   });
 });

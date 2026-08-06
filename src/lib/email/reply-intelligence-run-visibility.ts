@@ -1,34 +1,30 @@
 import type { Lead } from "@/lib/types";
 
-/** True when a reply exists but reply intelligence is not actively pending. */
+/**
+ * Show a manual "detect reply → next step" control unless a pending
+ * reply-intelligence action is already attached and visible on this lead.
+ */
 export function shouldOfferReplyIntelligenceRun(lead: Lead): boolean {
-  const hasReplySignal = Boolean(
-    lead.lastReplyAt ||
-      lead.lastInboundEmailAt ||
-      lead.lastAutoReplyAt ||
-      lead.replyReviewStatus === "pending",
-  );
-  if (!hasReplySignal) return false;
+  if (lead.doNotContact) return false;
 
   const pending =
     Boolean(lead.pendingReplyActionId?.trim()) && lead.replyActionStatus === "pending";
   if (pending) return false;
 
-  // Already classified and resolved (accepted / sent) with a next action — don't nag.
-  if (
-    lead.replyClass &&
-    (lead.replyActionStatus === "accepted" || lead.replyActionStatus === "sent") &&
-    Boolean(lead.nextAction?.trim())
-  ) {
-    return false;
-  }
+  return true;
+}
 
-  // Missed classify, dismissed, expired, or empty next step after a reply.
-  return (
-    !lead.replyClass ||
-    lead.replyActionStatus === "dismissed" ||
-    lead.replyActionStatus === "expired" ||
-    !lead.nextAction?.trim() ||
-    lead.replyReviewStatus === "pending"
+/** Stronger empty-state banner when a reply signal exists but NBA is missing. */
+export function shouldHighlightMissingReplyNextStep(lead: Lead): boolean {
+  if (!shouldOfferReplyIntelligenceRun(lead)) return false;
+  const hasReplySignal = Boolean(
+    lead.lastReplyAt ||
+      lead.lastInboundEmailAt ||
+      lead.lastAutoReplyAt ||
+      lead.replyReviewStatus === "pending" ||
+      lead.replyClass ||
+      (lead.emailMailCount ?? 0) > 0,
   );
+  if (!hasReplySignal) return false;
+  return !lead.nextAction?.trim() || !lead.pendingReplyActionId?.trim();
 }

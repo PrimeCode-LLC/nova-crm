@@ -5,28 +5,36 @@ import { Loader2, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { shouldOfferReplyIntelligenceRun } from "@/lib/email/reply-intelligence-run-visibility";
+import {
+  shouldHighlightMissingReplyNextStep,
+  shouldOfferReplyIntelligenceRun,
+} from "@/lib/email/reply-intelligence-run-visibility";
 import type { Lead } from "@/lib/types";
 
-export { shouldOfferReplyIntelligenceRun };
+export { shouldOfferReplyIntelligenceRun, shouldHighlightMissingReplyNextStep };
 
 export function LeadReplyIntelligenceTrigger({
   lead,
   canEdit,
   onOpenEmails,
-  variant = "banner",
+  variant = "auto",
 }: {
   lead: Lead;
-  canEdit: boolean;
+  /** Kept for callers; button is available to anyone who can open the record. */
+  canEdit?: boolean;
   onOpenEmails?: () => void;
-  variant?: "banner" | "inline";
+  variant?: "auto" | "banner" | "inline";
 }) {
-  const { patchLeadAsync } = useWorkspace();
+  const { applyLeadLocalPatch } = useWorkspace();
   const [busy, setBusy] = React.useState(false);
 
-  if (!canEdit || lead.doNotContact || !shouldOfferReplyIntelligenceRun(lead)) {
+  if (!shouldOfferReplyIntelligenceRun(lead)) {
     return null;
   }
+
+  const highlight = shouldHighlightMissingReplyNextStep(lead);
+  const resolvedVariant =
+    variant === "auto" ? (highlight ? "banner" : "inline") : variant;
 
   async function onRun() {
     setBusy(true);
@@ -44,6 +52,7 @@ export function LeadReplyIntelligenceTrigger({
         actionId?: string;
         nextAction?: string;
         replyClass?: string;
+        mode?: "reattached" | "classified";
       };
 
       if (!response.ok || !data.ok) {
@@ -55,7 +64,8 @@ export function LeadReplyIntelligenceTrigger({
         return;
       }
 
-      await patchLeadAsync(lead.id, {
+      // Server already wrote Firestore; hydrate local session without edit-permission gate.
+      applyLeadLocalPatch(lead.id, {
         ...(data.actionId
           ? {
               pendingReplyActionId: data.actionId,
@@ -68,9 +78,15 @@ export function LeadReplyIntelligenceTrigger({
           : {}),
       });
 
-      toast.success("Next step generated", {
-        description: "Review the reply intelligence suggestion on this lead.",
-      });
+      toast.success(
+        data.mode === "reattached" ? "Next step restored" : "Next step generated",
+        {
+          description:
+            data.mode === "reattached"
+              ? "Reply intelligence was already available — attached it to this record."
+              : "Review the suggestion and draft on this lead.",
+        },
+      );
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       toast.error("Could not generate next step", { description: msg });
@@ -79,12 +95,14 @@ export function LeadReplyIntelligenceTrigger({
     }
   }
 
-  if (variant === "inline") {
+  if (resolvedVariant === "inline") {
     return (
-      <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void onRun()}>
-        {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-        {busy ? "Generating…" : "Generate next step"}
-      </Button>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <Button type="button" size="sm" variant="outline" disabled={busy} onClick={() => void onRun()}>
+          {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {busy ? "Checking…" : "Detect reply & next step"}
+        </Button>
+      </div>
     );
   }
 
@@ -93,17 +111,17 @@ export function LeadReplyIntelligenceTrigger({
       <div className="flex items-start gap-2">
         <Sparkles className="h-4 w-4 text-amber-700 dark:text-amber-400 shrink-0 mt-0.5" />
         <div className="flex-1 min-w-0 space-y-1">
-          <p className="text-sm font-medium">Reply intelligence</p>
+          <p className="text-sm font-medium">Missing next step</p>
           <p className="text-xs text-muted-foreground leading-relaxed">
-            A reply is on this lead, but no AI next step is ready. Run reply intelligence to
-            classify it and generate the next step.
+            Reply intelligence may already have this reply, but this record has no next step yet.
+            Click to detect the reply and attach the suggestion (and draft when available).
           </p>
         </div>
       </div>
       <div className="flex flex-wrap items-center gap-2 pl-6">
         <Button type="button" size="sm" disabled={busy} onClick={() => void onRun()}>
           {busy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
-          {busy ? "Generating…" : "Generate next step"}
+          {busy ? "Checking…" : "Detect reply & next step"}
         </Button>
         {onOpenEmails ? (
           <Button type="button" size="sm" variant="ghost" disabled={busy} onClick={onOpenEmails}>

@@ -128,6 +128,8 @@ function DashboardWallPageInner() {
   const [pinSetupError, setPinSetupError] = React.useState<string | null>(null);
   const [armedHash, setArmedHash] = React.useState<string | null>(() => readStoredWallPinHash());
   const [lockOpen, setLockOpen] = React.useState(() => Boolean(readStoredWallPinHash()));
+  /** Prevents the entry PIN setup from flashing while we navigate off the wall page. */
+  const [isExiting, setIsExiting] = React.useState(false);
   const armedRef = React.useRef(Boolean(readStoredWallPinHash()));
   const lockOpenRef = React.useRef(Boolean(readStoredWallPinHash()));
   const lastAttemptLogAtRef = React.useRef(0);
@@ -385,6 +387,8 @@ function DashboardWallPageInner() {
   }
 
   async function onUnlockSuccess() {
+    // Mark exiting first so clearing the armed PIN does not briefly show the setup gate.
+    setIsExiting(true);
     emitWallActivity("wall_exited", "Wall display unlocked and exited");
     clearStoredWallPinHash();
     setArmedHash(null);
@@ -396,7 +400,7 @@ function DashboardWallPageInner() {
     } catch {
       /* ignore */
     }
-    router.push(buildDashboardHref(range));
+    router.replace(buildDashboardHref(range));
   }
 
   if (workspaceLoading) {
@@ -418,7 +422,7 @@ function DashboardWallPageInner() {
     );
   }
 
-  const showSetupGate = !isFullscreen && !armedHash && !lockOpen;
+  const showSetupGate = !isExiting && !isFullscreen && !armedHash && !lockOpen;
 
   return (
     <div

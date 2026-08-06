@@ -42,5 +42,7 @@ export async function POST(req: Request) {
     providerKey: result.providerKey,
     nextAction: result.nextAction,
     replyClass: result.replyClass,
+    mode: result.mode,
+    targetLeadId: result.targetLeadId,
   });
 }

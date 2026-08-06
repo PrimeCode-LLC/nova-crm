@@ -278,6 +278,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     /** Like `patchLead` but awaits the Firestore write (live mode). Throws on permission or network errors. */
     patchLeadAsync: (leadId: string, patch: Partial<Lead>) => Promise<void>;
     /**
+     * Session-only lead patch after the server already persisted (no Firestore write,
+     * no prospect-derived edit gate). Use for hydrate-from-API flows.
+     */
+    applyLeadLocalPatch: (leadId: string, patch: Partial<Lead>) => void;
+    /**
      * Bulk owner reassignment via Firestore write batches (live) or a single session update (demo).
      * Prefer this over looping `patchLeadAsync` for large selections.
      */
@@ -1892,6 +1897,13 @@ export function WorkspaceModeProvider({
     [],
   );
 
+  const applyLeadLocalPatch = React.useCallback(
+    (leadId: string, patch: Partial<Lead>) => {
+      applyLeadPatchToSession(leadId, patch, new Date().toISOString());
+    },
+    [applyLeadPatchToSession],
+  );
+
   const patchLeadAsync = React.useCallback(
     async (leadId: string, patch: Partial<Lead>) => {
       const viewerRole: OrgMemberRole =
@@ -2921,6 +2933,7 @@ export function WorkspaceModeProvider({
       addOrgActivityEvent,
       patchLead,
       patchLeadAsync,
+      applyLeadLocalPatch,
       bulkReassignOwners,
       patchAccount,
       patchContact,
@@ -3003,6 +3016,7 @@ export function WorkspaceModeProvider({
     addOrgActivityEvent,
     patchLead,
     patchLeadAsync,
+    applyLeadLocalPatch,
     bulkReassignOwners,
     patchAccount,
     patchContact,

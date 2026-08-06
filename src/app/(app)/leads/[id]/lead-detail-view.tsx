@@ -66,6 +66,7 @@ import { LeadFollowups } from "@/components/leads/lead-followups";
 import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-banner";
 import { LeadReplyActionBanner } from "@/components/leads/lead-reply-action-banner";
 import { LeadReplyIntelligenceTrigger } from "@/components/leads/lead-reply-intelligence-trigger";
+import { shouldHighlightMissingReplyNextStep } from "@/lib/email/reply-intelligence-run-visibility";
 import { LeadContactEmailActionBanner } from "@/components/leads/lead-contact-email-action-banner";
 import { UpdateContactEmailDialog } from "@/components/leads/update-contact-email-dialog";
 import { SwitchLeadContactDialog } from "@/components/leads/switch-lead-contact-dialog";
@@ -1412,6 +1413,17 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       </Button>
                     </div>
                   ) : null}
+                  {!lead.doNotContact &&
+                  !needsEmailFix &&
+                  !suggestedNewEmail &&
+                  !shouldHighlightMissingReplyNextStep(lead) ? (
+                    <LeadReplyIntelligenceTrigger
+                      lead={lead}
+                      canEdit={canEditLead}
+                      onOpenEmails={() => onTabChange("emails")}
+                      variant="inline"
+                    />
+                  ) : null}
                 </div>
                 <Button
                   type="button"
@@ -1496,11 +1508,14 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     lead={lead}
                     onOpenEmails={() => onTabChange("emails")}
                   />
-                  <LeadReplyIntelligenceTrigger
-                    lead={lead}
-                    canEdit={canEditLead}
-                    onOpenEmails={() => onTabChange("emails")}
-                  />
+                  {shouldHighlightMissingReplyNextStep(lead) ? (
+                    <LeadReplyIntelligenceTrigger
+                      lead={lead}
+                      canEdit={canEditLead}
+                      onOpenEmails={() => onTabChange("emails")}
+                      variant="banner"
+                    />
+                  ) : null}
                   <LeadReplyReviewBanner lead={lead} />
                   {!canEditLead && prospectSourceId && lead.intakeKind !== "prospect" ? (
                     <p className="rounded-md border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
