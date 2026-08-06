@@ -254,9 +254,16 @@ export function mergeFollowupPlans(
   followups: readonly Followup[],
 ): FollowupPlan[] {
   const synth = synthesizePlansFromFollowups(followups, stored);
+  const followupsByPlan = new Map<string, Followup[]>();
+  for (const f of followups) {
+    if (!f.planId) continue;
+    const list = followupsByPlan.get(f.planId);
+    if (list) list.push(f);
+    else followupsByPlan.set(f.planId, [f]);
+  }
   const reconciled = stored.map((plan) => {
     if (plan.status !== "active") return plan;
-    const steps = followupsForPlan(followups, plan.id);
+    const steps = followupsByPlan.get(plan.id) ?? [];
     if (steps.length === 0 || steps.some((step) => !step.completedAt && step.deliveryStatus !== "sent")) {
       return plan;
     }

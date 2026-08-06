@@ -141,7 +141,8 @@ export function OwnerOpsBoard({
   wallPrefs?: WallPreferences;
 }) {
   const wallSettings = wallPrefs ?? defaultWallPreferences();
-  const { meetings } = useDashboardMeetings(true, orgMeetingsScope);
+  const needMeetings = Boolean(widgets.pulse || widgets.actionBoard || wall);
+  const { meetings } = useDashboardMeetings(needMeetings, orgMeetingsScope);
   const meetingsToday = React.useMemo(() => {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -299,7 +300,6 @@ export function OwnerOpsBoard({
                 leads={leads}
                 contacts={contacts}
                 tasks={tasks}
-                timelineByLead={timelineByLead}
                 fill
               />
             </div>
@@ -450,7 +450,6 @@ export function OwnerOpsBoard({
                       leads={leads}
                       contacts={contacts}
                       tasks={tasks}
-                      timelineByLead={timelineByLead}
                     />
                   ) : null}
                   {widgets.followupSchedule ? (

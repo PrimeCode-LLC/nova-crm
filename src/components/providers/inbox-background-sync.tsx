@@ -194,7 +194,14 @@ export function InboxBackgroundSync() {
     const hasImap = mailboxes.some((m) => isImapInboxConfigured(m));
     if (!hasImap) return;
 
-    void hydrateFromServerHeads();
+    let cancelled = false;
+    // On dashboard, give Firestore (followups/leads → chart cards) a head start
+    // before the 19-mailbox inbound-heads read (often 90–100s).
+    const onDashboard = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+    const bootstrapDelayMs = onDashboard ? 3_000 : 0;
+    const bootstrapTimer = window.setTimeout(() => {
+      if (!cancelled) void hydrateFromServerHeads();
+    }, bootstrapDelayMs);
 
     const headsTimer = window.setInterval(() => void hydrateFromServerHeads(), HEADS_POLL_MS);
     const imapTimer = window.setInterval(() => void runInboxRouteImap(), INBOX_IMAP_MIN_MS);
@@ -212,6 +219,8 @@ export function InboxBackgroundSync() {
     window.addEventListener(INBOX_HEADS_REFRESH_EVENT, onHeadsRefresh);
 
     return () => {
+      cancelled = true;
+      window.clearTimeout(bootstrapTimer);
       window.clearInterval(headsTimer);
       window.clearInterval(imapTimer);
       document.removeEventListener("visibilitychange", onVisible);
@@ -226,6 +235,7 @@ export function InboxBackgroundSync() {
     activeMailboxId,
     mailViewAsUid,
     mailboxes,
+    pathname,
     hydrateFromServerHeads,
     runInboxRouteImap,
   ]);

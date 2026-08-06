@@ -9,6 +9,9 @@ import { buildFollowupScheduleByDay } from "@/lib/dashboard-ops-analytics";
 import { cn } from "@/lib/utils";
 import type { Followup } from "@/lib/types";
 
+/** Skip Recharts animation when series input is large (keeps main thread free). */
+const ANIMATE_UNDER = 800;
+
 export function FollowupScheduleChart({
   followups,
   compact,
@@ -23,9 +26,10 @@ export function FollowupScheduleChart({
 }) {
   const orgTimeZone = useOrgTimezone();
   const timeZone = timeZoneProp ?? orgTimeZone;
+  const deferredFollowups = React.useDeferredValue(followups);
   const data = React.useMemo(
-    () => buildFollowupScheduleByDay({ followups, timeZone }),
-    [followups, timeZone],
+    () => buildFollowupScheduleByDay({ followups: deferredFollowups, timeZone }),
+    [deferredFollowups, timeZone],
   );
   const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });
   const monthLabel = new Date().toLocaleDateString(undefined, { month: "long", year: "numeric" });
@@ -41,6 +45,7 @@ export function FollowupScheduleChart({
       ),
     [data],
   );
+  const animate = !compact && deferredFollowups.length < ANIMATE_UNDER;
 
   return (
     <Card className={cn("min-w-0", fill && "flex h-full min-h-0 flex-col")}>
@@ -94,9 +99,27 @@ export function FollowupScheduleChart({
                   fontSize: 12,
                 }}
               />
-              <Bar dataKey="completed" name="Done" stackId="a" fill="var(--success)" isAnimationActive={!compact} />
-              <Bar dataKey="scheduled" name="Scheduled" stackId="a" fill="var(--chart-1)" isAnimationActive={!compact} />
-              <Bar dataKey="overdue" name="Overdue" stackId="a" fill="var(--destructive)" isAnimationActive={!compact} />
+              <Bar
+                dataKey="completed"
+                name="Done"
+                stackId="a"
+                fill="var(--success)"
+                isAnimationActive={animate}
+              />
+              <Bar
+                dataKey="scheduled"
+                name="Scheduled"
+                stackId="a"
+                fill="var(--chart-1)"
+                isAnimationActive={animate}
+              />
+              <Bar
+                dataKey="overdue"
+                name="Overdue"
+                stackId="a"
+                fill="var(--destructive)"
+                isAnimationActive={animate}
+              />
             </BarChart>
           ) : null}
         </div>

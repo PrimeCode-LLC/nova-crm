@@ -24,6 +24,12 @@ export function useMailboxUtilization(opts: {
   enabled: boolean;
   isDemo: boolean;
   currentUserId: string;
+  /**
+   * Delay the utilization fetch so dashboard core Firestore (followups/leads)
+   * and chart cards can connect first. Utilization is often 60–100s and saturates
+   * the same backend path.
+   */
+  deferMs?: number;
 }) {
   const timeZone = useOrgTimezone();
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
@@ -67,9 +73,10 @@ export function useMailboxUtilization(opts: {
     }
 
     let cancelled = false;
+    const deferMs = opts.deferMs ?? 0;
     setState((s) => ({ ...s, loading: true, error: null }));
 
-    void (async () => {
+    const run = async () => {
       try {
         const res = await fetch("/api/email/mailboxes/utilization");
         const data = (await res.json()) as {
@@ -107,12 +114,36 @@ export function useMailboxUtilization(opts: {
           error: "Could not reach the server",
         });
       }
-    })();
+    };
+
+    let idleId: number | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+    if (deferMs <= 0) {
+      void run();
+    } else if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      timeoutId = setTimeout(() => {
+        idleId = window.requestIdleCallback(
+          () => {
+            if (!cancelled) void run();
+          },
+          { timeout: 4_000 },
+        );
+      }, deferMs);
+    } else {
+      timeoutId = setTimeout(() => {
+        if (!cancelled) void run();
+      }, deferMs);
+    }
 
     return () => {
       cancelled = true;
+      if (timeoutId !== undefined) clearTimeout(timeoutId);
+      if (idleId !== undefined && typeof window !== "undefined" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleId);
+      }
     };
-  }, [opts.enabled, opts.isDemo, demoRows]);
+  }, [opts.enabled, opts.isDemo, opts.deferMs, demoRows]);
 
   return state;
 }

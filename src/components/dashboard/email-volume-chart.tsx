@@ -13,7 +13,7 @@ import {
 } from "@/lib/dashboard-ops-analytics";
 import { fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { Contact, Followup, Lead, LeadTask, TimelineEvent } from "@/lib/types";
+import type { Contact, Followup, Lead, LeadTask } from "@/lib/types";
 
 const PERIODS: { key: EmailVolumePeriod; label: string }[] = [
   { key: "today", label: "Today" },
@@ -21,12 +21,14 @@ const PERIODS: { key: EmailVolumePeriod; label: string }[] = [
   { key: "month", label: "Month" },
 ];
 
+/** Skip Recharts animation when series input is large (keeps main thread free). */
+const ANIMATE_UNDER = 800;
+
 export function EmailVolumeChart({
   followups,
   leads,
   contacts,
   tasks,
-  timelineByLead,
   compact,
   fill,
   timeZone: timeZoneProp,
@@ -35,7 +37,6 @@ export function EmailVolumeChart({
   leads: Lead[];
   contacts?: Contact[];
   tasks?: LeadTask[];
-  timelineByLead?: Record<string, TimelineEvent[]>;
   compact?: boolean;
   /** Grow to fill the parent's height instead of a fixed chart height. */
   fill?: boolean;
@@ -44,21 +45,28 @@ export function EmailVolumeChart({
   const orgTimeZone = useOrgTimezone();
   const timeZone = timeZoneProp ?? orgTimeZone;
   const [period, setPeriod] = React.useState<EmailVolumePeriod>("week");
+  // Defer heavy bucketing so KPI strip / pulse stay responsive while followups sync in.
+  const deferredFollowups = React.useDeferredValue(followups);
+  const deferredLeads = React.useDeferredValue(leads);
+  const deferredContacts = React.useDeferredValue(contacts);
+  const deferredTasks = React.useDeferredValue(tasks);
   const data = React.useMemo(
     () =>
       buildEmailVolumeSeries({
-        followups,
-        leads,
+        followups: deferredFollowups,
+        leads: deferredLeads,
         period,
-        contacts,
-        tasks,
-        timelineByLead,
+        contacts: deferredContacts,
+        tasks: deferredTasks,
         timeZone,
       }),
-    [followups, leads, period, contacts, tasks, timelineByLead, timeZone],
+    [deferredFollowups, deferredLeads, period, deferredContacts, deferredTasks, timeZone],
   );
   const totals = React.useMemo(() => emailVolumeTotals(data), [data]);
   const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });
+  const animate =
+    !compact &&
+    deferredFollowups.length + deferredLeads.length < ANIMATE_UNDER;
 
   return (
     <Card className={cn("min-w-0", fill && "flex h-full min-h-0 flex-col")}>
@@ -159,7 +167,7 @@ export function EmailVolumeChart({
                 stroke="var(--chart-1)"
                 strokeWidth={2}
                 fill="url(#opsSent)"
-                isAnimationActive={!compact}
+                isAnimationActive={animate}
               />
               <Area
                 type="monotone"
@@ -168,7 +176,7 @@ export function EmailVolumeChart({
                 stroke="var(--chart-3)"
                 strokeWidth={2}
                 fill="url(#opsOpens)"
-                isAnimationActive={!compact}
+                isAnimationActive={animate}
               />
               <Area
                 type="monotone"
@@ -177,7 +185,7 @@ export function EmailVolumeChart({
                 stroke="var(--chart-2)"
                 strokeWidth={2}
                 fill="url(#opsReplies)"
-                isAnimationActive={!compact}
+                isAnimationActive={animate}
               />
               <Area
                 type="monotone"
@@ -186,7 +194,7 @@ export function EmailVolumeChart({
                 stroke="var(--destructive)"
                 strokeWidth={2}
                 fill="url(#opsBounces)"
-                isAnimationActive={!compact}
+                isAnimationActive={animate}
               />
             </AreaChart>
           ) : null}

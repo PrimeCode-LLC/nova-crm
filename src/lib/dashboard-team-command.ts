@@ -75,6 +75,36 @@ function inWindow(iso: string | undefined, start: number, end: number): boolean 
   return t !== undefined && t >= start && t < end;
 }
 
+function emptyRawMetrics(userId: string): RawMetrics {
+  return {
+    userId,
+    prospectsAdded: 0,
+    qualifiedProspects: 0,
+    qualitySum: 0,
+    qualityScored: 0,
+    qualityWeighted: 0,
+    strategyAttributed: 0,
+    salesLeadsAdded: 0,
+    emailsSent: 0,
+    replies: 0,
+    followupsCompleted: 0,
+    scheduled: 0,
+    failed: 0,
+    pipelineAdded: 0,
+    closedValue: 0,
+    wonCount: 0,
+  };
+}
+
+function ensureMetrics(map: Map<string, RawMetrics>, userId: string): RawMetrics {
+  let row = map.get(userId);
+  if (!row) {
+    row = emptyRawMetrics(userId);
+    map.set(userId, row);
+  }
+  return row;
+}
+
 function computeWindowMetrics(
   input: {
     users: readonly User[];
@@ -89,106 +119,103 @@ function computeWindowMetrics(
 ): RawMetrics[] {
   const { users, leads, deals, followups, outreachThreshold } = input;
   const activeUsers = users.filter((u) => u.status === "active" && u.roleId !== "director");
+  const activeIds = new Set(activeUsers.map((u) => u.id));
+  const byUser = new Map<string, RawMetrics>();
+  for (const u of activeUsers) {
+    byUser.set(u.id, emptyRawMetrics(u.id));
+  }
 
-  return activeUsers.map((u) => {
-    const myProspects = leads.filter(
-      (l) =>
-        l.intakeKind === "prospect" &&
-        (l.createdById === u.id || l.scraperId === u.id || l.prospectOwnerId === u.id) &&
-        inWindow(l.createdAt, start, end),
-    );
-    const scored = myProspects.filter((l) => typeof l.qualityScore === "number");
-    const qualitySum = scored.reduce((s, l) => s + (l.qualityScore ?? 0), 0);
-    const qualifiedProspects = myProspects.filter((l) => (l.qualityScore ?? 0) >= outreachThreshold).length;
-    const qualityWeighted = scored.reduce((s, l) => s + (l.qualityScore ?? 0) / 100, 0);
-    const strategyAttributed = myProspects.filter((l) => Boolean(l.strategyId)).length;
+  const allOpenDealLeadIds = new Set(
+    deals.filter((d) => !["won", "lost"].includes(d.stage)).map((d) => d.leadId),
+  );
 
-    // Open sales leads only - lost/won are terminal and already surface under Won
-    // (or shouldn't inflate "Leads" when the Leads page hides them as closed).
-    const salesLeadsAdded = leads.filter(
-      (l) =>
-        isSalesLead(l) &&
-        l.ownerId === u.id &&
-        !["won", "lost"].includes(l.stage) &&
-        inWindow(l.createdAt, start, end),
-    ).length;
+  for (const l of leads) {
+    if (l.intakeKind === "prospect") {
+      if (!inWindow(l.createdAt, start, end)) continue;
+      const attrIds = new Set<string>();
+      if (l.createdById) attrIds.add(l.createdById);
+      if (l.scraperId) attrIds.add(l.scraperId);
+      if (l.prospectOwnerId) attrIds.add(l.prospectOwnerId);
+      for (const id of attrIds) {
+        if (!activeIds.has(id)) continue;
+        const m = ensureMetrics(byUser, id);
+        m.prospectsAdded += 1;
+        if (typeof l.qualityScore === "number") {
+          m.qualityScored += 1;
+          m.qualitySum += l.qualityScore;
+          m.qualityWeighted += l.qualityScore / 100;
+        }
+        if ((l.qualityScore ?? 0) >= outreachThreshold) m.qualifiedProspects += 1;
+        if (l.strategyId) m.strategyAttributed += 1;
+      }
+      continue;
+    }
 
-    const emailsSent = followups.filter(
-      (f) => f.ownerId === u.id && f.deliveryStatus === "sent" && inWindow(f.sentAt, start, end),
-    ).length;
-    const replies = leads.filter((l) => l.ownerId === u.id && inWindow(l.lastReplyAt, start, end)).length;
+    if (!l.ownerId || !activeIds.has(l.ownerId)) continue;
+    const m = ensureMetrics(byUser, l.ownerId);
 
-    const followupsCompleted = followups.filter(
-      (f) =>
-        f.ownerId === u.id &&
-        ((f.deliveryStatus === "sent" && inWindow(f.sentAt, start, end)) ||
-          inWindow(f.completedAt, start, end)),
-    ).length;
-    const scheduled = followups.filter(
-      (f) =>
-        f.ownerId === u.id &&
-        !f.completedAt &&
-        !f.pausedAt &&
-        (f.deliveryStatus === "scheduled" || Boolean(f.scheduledEmailId)),
-    ).length;
-    const failed = followups.filter(
-      (f) =>
-        f.ownerId === u.id &&
-        !f.completedAt &&
-        (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry"),
-    ).length;
+    if (
+      isSalesLead(l) &&
+      !["won", "lost"].includes(l.stage) &&
+      inWindow(l.createdAt, start, end)
+    ) {
+      m.salesLeadsAdded += 1;
+      if ((l.estimatedValue ?? 0) > 0 && !allOpenDealLeadIds.has(l.id)) {
+        m.pipelineAdded += l.estimatedValue ?? 0;
+      }
+    }
 
-    // Period score must only reward pipeline created inside the selected window.
-    // Existing open pipeline remains useful elsewhere on the dashboard, but including it
-    // here makes a "24h" score look active even when no pipeline was added that day.
-    const allOpenDealLeadIds = new Set(
-      deals.filter((d) => !["won", "lost"].includes(d.stage)).map((d) => d.leadId),
-    );
-    const newOpenDeals = deals.filter(
-      (d) =>
-        d.ownerId === u.id &&
-        !["won", "lost"].includes(d.stage) &&
-        inWindow(d.createdAt, start, end),
-    );
-    const newLeadEstimates = leads.filter(
-      (l) =>
-        isSalesLead(l) &&
-        l.ownerId === u.id &&
-        !["won", "lost"].includes(l.stage) &&
-        !allOpenDealLeadIds.has(l.id) &&
-        (l.estimatedValue ?? 0) > 0 &&
-        inWindow(l.createdAt, start, end),
-    );
-    const pipelineAdded =
-      newOpenDeals.reduce((sum, deal) => sum + deal.value, 0) +
-      newLeadEstimates.reduce((sum, lead) => sum + (lead.estimatedValue ?? 0), 0);
-    const wonDeals = deals.filter(
-      (d) =>
-        d.ownerId === u.id &&
-        d.stage === "won" &&
-        inWindow(d.updatedAt ?? d.createdAt, start, end),
-    );
-    const closedValue = wonDeals.reduce((s, d) => s + d.value, 0);
+    if (inWindow(l.lastReplyAt, start, end)) {
+      m.replies += 1;
+    }
+  }
 
-    return {
-      userId: u.id,
-      prospectsAdded: myProspects.length,
-      qualifiedProspects,
-      qualitySum,
-      qualityScored: scored.length,
-      qualityWeighted,
-      strategyAttributed,
-      salesLeadsAdded,
-      emailsSent,
-      replies,
-      followupsCompleted,
-      scheduled,
-      failed,
-      pipelineAdded,
-      closedValue,
-      wonCount: wonDeals.length,
-    };
-  });
+  for (const f of followups) {
+    if (!f.ownerId || !activeIds.has(f.ownerId)) continue;
+    const m = ensureMetrics(byUser, f.ownerId);
+
+    if (f.deliveryStatus === "sent" && inWindow(f.sentAt, start, end)) {
+      m.emailsSent += 1;
+    }
+
+    if (
+      (f.deliveryStatus === "sent" && inWindow(f.sentAt, start, end)) ||
+      inWindow(f.completedAt, start, end)
+    ) {
+      m.followupsCompleted += 1;
+    }
+
+    if (
+      !f.completedAt &&
+      !f.pausedAt &&
+      (f.deliveryStatus === "scheduled" || Boolean(f.scheduledEmailId))
+    ) {
+      m.scheduled += 1;
+    }
+
+    if (
+      !f.completedAt &&
+      (f.deliveryStatus === "failed" || f.deliveryStatus === "needs_retry")
+    ) {
+      m.failed += 1;
+    }
+  }
+
+  for (const d of deals) {
+    if (!d.ownerId || !activeIds.has(d.ownerId)) continue;
+    const m = ensureMetrics(byUser, d.ownerId);
+
+    if (!["won", "lost"].includes(d.stage) && inWindow(d.createdAt, start, end)) {
+      m.pipelineAdded += d.value;
+    }
+
+    if (d.stage === "won" && inWindow(d.updatedAt ?? d.createdAt, start, end)) {
+      m.closedValue += d.value;
+      m.wonCount += 1;
+    }
+  }
+
+  return activeUsers.map((u) => byUser.get(u.id) ?? emptyRawMetrics(u.id));
 }
 
 /**

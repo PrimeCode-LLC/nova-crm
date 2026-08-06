@@ -626,20 +626,33 @@ export function useLiveWorkspaceFirestore(
       return new Error(lines.join(" | "));
     };
 
-    const applySnapshot = <K extends keyof LiveWorkspaceFirestoreState>(
-      listenerKey: string,
-      dataKey: K,
-      value: LiveWorkspaceFirestoreState[K],
-    ) => {
-      listenerErrorsRef.current.delete(listenerKey);
+    /** Coalesce bursty onSnapshot updates into one React commit per microtask. */
+    let pendingPatch: Partial<LiveWorkspaceFirestoreState> = {};
+    let pendingCore: Partial<LiveWorkspaceCoreReady> = {};
+    let flushScheduled = false;
+    let snapshotBatchCancelled = false;
+
+    const flushPendingSnapshots = () => {
+      flushScheduled = false;
+      if (snapshotBatchCancelled) return;
+      const patch = pendingPatch;
+      const core = pendingCore;
+      pendingPatch = {};
+      pendingCore = {};
+      if (Object.keys(patch).length === 0 && Object.keys(core).length === 0) {
+        // Error-only flush still needs to refresh the banner.
+        setState((prev) => ({
+          ...prev,
+          error: firstAggregateError(),
+          loading: !coreLoadingComplete(prev.coreReady),
+        }));
+        return;
+      }
       setState((prev) => {
-        const nextCore = { ...prev.coreReady };
-        if (isCoreKey(String(dataKey))) {
-          nextCore[String(dataKey) as LiveWorkspaceCoreKey] = true;
-        }
+        const nextCore = { ...prev.coreReady, ...core };
         return {
           ...prev,
-          [dataKey]: value,
+          ...patch,
           coreReady: nextCore,
           loading: !coreLoadingComplete(nextCore),
           error: firstAggregateError(),
@@ -647,21 +660,32 @@ export function useLiveWorkspaceFirestore(
       });
     };
 
+    const scheduleSnapshotFlush = () => {
+      if (flushScheduled || snapshotBatchCancelled) return;
+      flushScheduled = true;
+      queueMicrotask(flushPendingSnapshots);
+    };
+
+    const applySnapshot = <K extends keyof LiveWorkspaceFirestoreState>(
+      listenerKey: string,
+      dataKey: K,
+      value: LiveWorkspaceFirestoreState[K],
+    ) => {
+      listenerErrorsRef.current.delete(listenerKey);
+      pendingPatch[dataKey] = value;
+      if (isCoreKey(String(dataKey))) {
+        pendingCore[String(dataKey) as LiveWorkspaceCoreKey] = true;
+      }
+      scheduleSnapshotFlush();
+    };
+
     const applyListenerError = (listenerKey: string, err: Error) => {
       listenerErrorsRef.current.set(listenerKey, err);
-      setState((prev) => {
-        const nextCore = { ...prev.coreReady };
-        const baseKey = listenerKey.split(":")[0] ?? listenerKey;
-        if (isCoreKey(baseKey)) {
-          nextCore[baseKey] = true;
-        }
-        return {
-          ...prev,
-          coreReady: nextCore,
-          loading: !coreLoadingComplete(nextCore),
-          error: firstAggregateError(),
-        };
-      });
+      const baseKey = listenerKey.split(":")[0] ?? listenerKey;
+      if (isCoreKey(baseKey)) {
+        pendingCore[baseKey] = true;
+      }
+      scheduleSnapshotFlush();
     };
 
     const pushUnsub = (group: WorkspaceListenerGroup, unsub: Unsubscribe) => {
@@ -978,6 +1002,20 @@ export function useLiveWorkspaceFirestore(
         return;
       }
 
+      if (group === "timeline") {
+        // Capped recent events for dashboard activity feed — avoids notes/touchpoints fan-out.
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "timelineEvents",
+          COLLECTIONS.timelineEvents,
+          asTimelineEvent,
+          "leadOwnerManagerIds",
+          "leadOwnerId",
+          { orderByField: "createdAt", limitCount: TIMELINE_EVENTS_LIVE_LIMIT },
+        );
+        return;
+      }
+
       if (group === "leadDetail") {
         const noteSlices = new Map<string, Note[]>();
         const mergeNoteSlices = () => {
@@ -1045,15 +1083,7 @@ export function useLiveWorkspaceFirestore(
           "leadOwnerManagerIds",
           "leadOwnerId",
         );
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "timelineEvents",
-          COLLECTIONS.timelineEvents,
-          asTimelineEvent,
-          "leadOwnerManagerIds",
-          "leadOwnerId",
-          { orderByField: "createdAt", limitCount: TIMELINE_EVENTS_LIVE_LIMIT },
-        );
+        // Timeline lives in the `timeline` group (always requested with leadDetail).
         return;
       }
 
@@ -1133,6 +1163,7 @@ export function useLiveWorkspaceFirestore(
     attachGroup("core");
 
     return () => {
+      snapshotBatchCancelled = true;
       listenerErrorsRef.current.clear();
       sessionRef.current = null;
       attachedGroupsRef.current.clear();

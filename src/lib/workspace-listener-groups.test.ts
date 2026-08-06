@@ -18,14 +18,16 @@ describe("groupsForPathname", () => {
     );
     expect(groupsForPathname("/leads")).not.toContain("leadDetail");
     expect(groupsForPathname("/leads/abc")).toEqual(
-      expect.arrayContaining(["directory", "deals", "plans", "leadDetail", "campaigns"]),
+      expect.arrayContaining(["directory", "deals", "plans", "timeline", "leadDetail", "campaigns"]),
     );
   });
 
-  it("maps dashboard to heavy groups", () => {
-    expect(groupsForPathname("/dashboard")).toEqual(
-      expect.arrayContaining(["deals", "plans", "leadDetail", "activity", "campaigns"]),
+  it("maps dashboard to ops groups without unbounded leadDetail", () => {
+    const groups = groupsForPathname("/dashboard");
+    expect(groups).toEqual(
+      expect.arrayContaining(["deals", "plans", "timeline", "activity", "campaigns"]),
     );
+    expect(groups).not.toContain("leadDetail");
   });
 
   it("maps inbox to directory and plans", () => {

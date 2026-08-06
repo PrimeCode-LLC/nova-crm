@@ -5,7 +5,7 @@ import {
   isFollowupDueThroughToday,
   isFollowupOverdue,
 } from "@/lib/followup-open-status";
-import { getLeadSequenceStatus } from "@/lib/lead-sequence-status";
+import { countLeadsWithSequenceStatus } from "@/lib/lead-sequence-status";
 import type { Contact, Followup, FollowupPlan, Lead, LeadTask, PipelineStage } from "@/lib/types";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 import { BOUNCE_REVIEW_TASK_TITLE } from "@/lib/email/detect-hard-bounce";
@@ -167,9 +167,12 @@ export function computeDashboardWorkflowMetrics(input: {
     prospectsNeedRouting: prospects.filter(prospectNeedsRouting).length,
     prospectsReadyToPush: prospects.filter(prospectReadyToPush).length,
     prospectsPushed: prospects.filter((lead) => Boolean(lead.linkedSalesLeadId)).length,
-    prospectsNeedSequence: prospects.filter(
-      (lead) => getLeadSequenceStatus(lead, input.plans, input.followups) === "no_sequence",
-    ).length,
+    prospectsNeedSequence: countLeadsWithSequenceStatus(
+      prospects,
+      input.plans,
+      input.followups,
+      "no_sequence",
+    ),
     followupsDue: dueFollowups.length,
     overdueFollowups: dueFollowups.filter((followup) =>
       isFollowupOverdue(followup, timeOpts),

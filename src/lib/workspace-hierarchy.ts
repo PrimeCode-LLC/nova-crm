@@ -2,7 +2,9 @@ import type { User, Lead, TimelineEvent, Followup } from "./types";
 import type { WorkspaceSnapshot } from "./workspace-dataset";
 import { filterLeadTasksForViewer } from "./lead-task-visibility";
 import {
-  prospectVisibleToViewer,
+  isProspectRow,
+  prospectAssigneeIdsFromAssignments,
+  prospectOwnerIdOf,
   salesLeadVisibleViaSharedOwnership,
 } from "./prospects/prospect-access";
 
@@ -11,15 +13,24 @@ export function collectDescendantUserIds(
   rootManagerId: string,
   users: readonly User[],
 ): Set<string> {
+  const childrenByManager = new Map<string, string[]>();
+  for (const u of users) {
+    if (!u.managerId) continue;
+    const list = childrenByManager.get(u.managerId);
+    if (list) list.push(u.id);
+    else childrenByManager.set(u.managerId, [u.id]);
+  }
+
   const ids = new Set<string>();
   const queue = [rootManagerId];
   while (queue.length) {
-    const mid = queue.shift()!;
-    for (const u of users) {
-      if (u.managerId === mid && !ids.has(u.id)) {
-        ids.add(u.id);
-        queue.push(u.id);
-      }
+    const mid = queue.pop()!;
+    const kids = childrenByManager.get(mid);
+    if (!kids) continue;
+    for (const id of kids) {
+      if (ids.has(id)) continue;
+      ids.add(id);
+      queue.push(id);
     }
   }
   return ids;
@@ -59,16 +70,38 @@ export function memberCrmOwnerIdsForFirestore(
   return Array.from(leadOwnerIdsVisibleToViewer(viewer, orgUsers)).slice(0, 30);
 }
 
-/** Whether `lead` should appear for `viewer` given the org roster (live workspace). */
+/**
+ * Whether `lead` should appear for `viewer` given the org roster (live workspace).
+ * Pass `visibleOwnerIds` when filtering many leads to avoid rebuilding the org-chart set per row.
+ */
 export function leadVisibleForLiveViewer(
   lead: Lead,
   viewer: User,
   orgUsers: readonly User[],
+  visibleOwnerIds?: Set<string>,
 ): boolean {
   if (seesAllLeadsInTenant(viewer)) return true;
 
+  const ownerIds = visibleOwnerIds ?? leadOwnerIdsVisibleToViewer(viewer, orgUsers);
+
   if (lead.intakeKind === "prospect") {
-    return prospectVisibleToViewer(lead, viewer, orgUsers);
+    if (!isProspectRow(lead)) return true;
+
+    const assigneeIds = lead.prospectAssigneeIds?.length
+      ? lead.prospectAssigneeIds
+      : prospectAssigneeIdsFromAssignments(lead.prospectChannelAssignments);
+
+    if (assigneeIds.includes(viewer.id)) return true;
+    if (salesLeadVisibleViaSharedOwnership(lead, viewer.id)) return true;
+
+    const ownerId = prospectOwnerIdOf(lead);
+    if (!ownerId) return false;
+    if (ownerIds.has(ownerId)) return true;
+
+    if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
+      return lead.scraperId === viewer.id;
+    }
+    return false;
   }
 
   if (salesLeadVisibleViaSharedOwnership(lead, viewer.id)) return true;
@@ -76,7 +109,7 @@ export function leadVisibleForLiveViewer(
   /** Unassigned leads are only visible to owners, admins, and directors. */
   if (!lead.ownerId?.trim()) return false;
 
-  if (leadOwnerIdsVisibleToViewer(viewer, orgUsers).has(lead.ownerId)) return true;
+  if (ownerIds.has(lead.ownerId)) return true;
 
   if (viewer.roleId === "data_scraper" || viewer.roleId === "prospecting") {
     return lead.scraperId === viewer.id;
@@ -143,7 +176,10 @@ export function applyLiveHierarchyScope(
   const dirIds = directoryUserIdsForLive(viewer, orgUsers);
   const users = dirIds === null ? snapshot.users : snapshot.users.filter((u) => dirIds.has(u.id));
 
-  const leads = snapshot.leads.filter((l) => leadVisibleForLiveViewer(l, viewer, orgUsers));
+  const visibleOwnerIds = leadOwnerIdsVisibleToViewer(viewer, orgUsers);
+  const leads = snapshot.leads.filter((l) =>
+    leadVisibleForLiveViewer(l, viewer, orgUsers, visibleOwnerIds),
+  );
   const visibleLeadIds = new Set(leads.map((l) => l.id));
   const visibleAccountIds = new Set(leads.map((l) => l.accountId));
 

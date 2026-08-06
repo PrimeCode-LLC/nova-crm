@@ -133,13 +133,16 @@ export function ScheduledEmailSendSync() {
 
     if (!emailServerHydrated) return;
 
-    void runLive();
+    // Defer first process-due so dashboard Firestore (chart cards) can connect —
+    // this route often runs 20–30s and saturates local Next + backend I/O.
+    const bootstrapTimer = window.setTimeout(() => void runLive(), 4_000);
     const id = window.setInterval(() => void runLive(), POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void runLive();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => {
+      window.clearTimeout(bootstrapTimer);
       window.clearInterval(id);
       document.removeEventListener("visibilitychange", onVisible);
     };

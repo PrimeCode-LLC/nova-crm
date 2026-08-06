@@ -15,23 +15,32 @@ export type WallScene = {
 
 const DEFAULT_DWELL_MS = 15_000;
 const DEFAULT_RESUME_IDLE_MS = 8_000;
-const TICK_MS = 50;
 
 function ProgressBar({
-  progress,
+  durationMs,
   paused,
+  cycleKey,
 }: {
-  progress: number;
+  durationMs: number;
   paused: boolean;
+  /** Bump to restart the CSS animation (new scene / dwell change). */
+  cycleKey: number;
 }) {
   return (
     <div className="relative h-1 overflow-hidden rounded-full bg-muted/70">
       <div
+        key={cycleKey}
         className={cn(
-          "h-full rounded-full bg-gradient-to-r from-primary/80 to-primary transition-[width] ease-linear",
-          paused ? "opacity-50 duration-300" : "duration-75",
+          "h-full origin-left rounded-full bg-gradient-to-r from-primary/80 to-primary will-change-transform",
+          paused && "opacity-50",
         )}
-        style={{ width: `${progress * 100}%` }}
+        style={{
+          animationName: "wall-progress",
+          animationDuration: `${durationMs}ms`,
+          animationTimingFunction: "linear",
+          animationFillMode: "forwards",
+          animationPlayState: paused ? "paused" : "running",
+        }}
       />
     </div>
   );
@@ -54,13 +63,15 @@ export function WallSceneCarousel({
 }) {
   const count = scenes.length;
   const [index, setIndex] = React.useState(0);
-  const [progress, setProgress] = React.useState(0);
   const [paused, setPaused] = React.useState(false);
+  const [cycleKey, setCycleKey] = React.useState(0);
   const pauseUntilRef = React.useRef(0);
-  const elapsedRef = React.useRef(0);
   const indexRef = React.useRef(0);
-  const dwellMsRef = React.useRef(dwellMs);
-  const resumeIdleMsRef = React.useRef(resumeIdleMs);
+  const dwellMsRef = React.useRef(Math.max(3_000, dwellMs));
+  const resumeIdleMsRef = React.useRef(Math.max(1_000, resumeIdleMs));
+  /** Elapsed ms in the current scene before the latest pause (for resume timeout). */
+  const elapsedBeforePauseRef = React.useRef(0);
+  const sceneStartedAtRef = React.useRef(0);
 
   React.useEffect(() => {
     dwellMsRef.current = Math.max(3_000, dwellMs);
@@ -76,8 +87,9 @@ export function WallSceneCarousel({
 
   // Reset progress when dwell length changes so the bar stays honest.
   React.useEffect(() => {
-    elapsedRef.current = 0;
-    setProgress(0);
+    elapsedBeforePauseRef.current = 0;
+    sceneStartedAtRef.current = performance.now();
+    setCycleKey((k) => k + 1);
   }, [dwellMs]);
 
   // If a scene is removed, clamp the active index.
@@ -85,8 +97,9 @@ export function WallSceneCarousel({
     if (count === 0) return;
     if (index >= count) {
       setIndex(0);
-      elapsedRef.current = 0;
-      setProgress(0);
+      elapsedBeforePauseRef.current = 0;
+      sceneStartedAtRef.current = performance.now();
+      setCycleKey((k) => k + 1);
     }
   }, [count, index]);
 
@@ -95,40 +108,69 @@ export function WallSceneCarousel({
       if (count === 0) return;
       const normalized = ((next % count) + count) % count;
       setIndex(normalized);
-      elapsedRef.current = 0;
-      setProgress(0);
+      elapsedBeforePauseRef.current = 0;
+      sceneStartedAtRef.current = performance.now();
+      setCycleKey((k) => k + 1);
     },
     [count],
   );
 
   const pauseBriefly = React.useCallback(() => {
-    pauseUntilRef.current = Date.now() + resumeIdleMsRef.current;
-    setPaused((was) => (was ? was : true));
+    const now = Date.now();
+    const wasPaused = now < pauseUntilRef.current;
+    if (!wasPaused) {
+      // Capture how far we were into the dwell before pausing.
+      const running = performance.now() - sceneStartedAtRef.current;
+      elapsedBeforePauseRef.current = Math.min(
+        dwellMsRef.current,
+        elapsedBeforePauseRef.current + Math.max(0, running),
+      );
+      setPaused(true);
+    }
+    pauseUntilRef.current = now + resumeIdleMsRef.current;
   }, []);
 
+  // Advance scenes with a single timeout (no 50ms React progress ticks).
   React.useEffect(() => {
     if (count <= 1) return;
 
-    const id = window.setInterval(() => {
-      const now = Date.now();
-      const shouldPause = now < pauseUntilRef.current;
-      setPaused((was) => (was === shouldPause ? was : shouldPause));
-      if (shouldPause) return;
+    let timeoutId = 0;
+    let pollId = 0;
 
-      elapsedRef.current += TICK_MS;
-      const ratio = Math.min(1, elapsedRef.current / dwellMsRef.current);
-      setProgress(ratio);
-
-      if (elapsedRef.current >= dwellMsRef.current) {
+    const scheduleAdvance = (delayMs: number) => {
+      window.clearTimeout(timeoutId);
+      sceneStartedAtRef.current = performance.now();
+      timeoutId = window.setTimeout(() => {
         const next = (indexRef.current + 1) % count;
         setIndex(next);
-        elapsedRef.current = 0;
-        setProgress(0);
-      }
-    }, TICK_MS);
+        elapsedBeforePauseRef.current = 0;
+        sceneStartedAtRef.current = performance.now();
+        setCycleKey((k) => k + 1);
+      }, Math.max(0, delayMs));
+    };
 
-    return () => window.clearInterval(id);
-  }, [count]);
+    const remaining = () =>
+      Math.max(0, dwellMsRef.current - elapsedBeforePauseRef.current);
+
+    if (paused) {
+      // Poll pause expiry lightly — only setState when actually resuming.
+      pollId = window.setInterval(() => {
+        if (Date.now() >= pauseUntilRef.current) {
+          setPaused(false);
+        }
+      }, 250);
+      return () => {
+        window.clearInterval(pollId);
+        window.clearTimeout(timeoutId);
+      };
+    }
+
+    scheduleAdvance(remaining());
+    return () => {
+      window.clearTimeout(timeoutId);
+      window.clearInterval(pollId);
+    };
+  }, [count, index, paused, cycleKey]);
 
   React.useEffect(() => {
     if (count <= 1) return;
@@ -149,8 +191,12 @@ export function WallSceneCarousel({
 
   if (count === 0) return null;
 
-  const scene = scenes[Math.min(index, count - 1)] ?? scenes[0];
-  const bar = showProgressBar ? <ProgressBar progress={progress} paused={paused} /> : null;
+  const safeIndex = Math.min(index, count - 1);
+  const scene = scenes[safeIndex] ?? scenes[0];
+  const dwell = Math.max(3_000, dwellMs);
+  const bar = showProgressBar ? (
+    <ProgressBar durationMs={dwell} paused={paused} cycleKey={cycleKey} />
+  ) : null;
 
   return (
     <div
@@ -165,21 +211,13 @@ export function WallSceneCarousel({
           progressBarPosition === "top" && bar && "mt-3",
         )}
       >
-        {scenes.map((s, i) => {
-          const active = i === index;
-          return (
-            <div
-              key={s.id}
-              aria-hidden={!active}
-              className={cn(
-                "absolute inset-0 flex min-h-0 flex-col overflow-hidden transition-opacity duration-[400ms] ease-out",
-                active ? "z-10 opacity-100" : "z-0 opacity-0 pointer-events-none",
-              )}
-            >
-              {s.content}
-            </div>
-          );
-        })}
+        {/* Mount only the active scene — inactive boards must not stay alive off-screen. */}
+        <div
+          key={scene.id}
+          className="absolute inset-0 flex min-h-0 flex-col overflow-hidden"
+        >
+          {scene.content}
+        </div>
       </div>
 
       <div className="mt-3 shrink-0 space-y-2">
@@ -187,7 +225,7 @@ export function WallSceneCarousel({
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              {index + 1} / {count}
+              {safeIndex + 1} / {count}
               <span className="mx-1.5 text-border">·</span>
               {scene.label}
             </p>
@@ -206,10 +244,10 @@ export function WallSceneCarousel({
                 key={s.id}
                 type="button"
                 aria-label={`Show ${s.label}`}
-                aria-current={i === index ? "true" : undefined}
+                aria-current={i === safeIndex ? "true" : undefined}
                 className={cn(
                   "h-2 rounded-full transition-all duration-300",
-                  i === index
+                  i === safeIndex
                     ? "w-6 bg-foreground"
                     : "w-2 bg-muted-foreground/35 hover:bg-muted-foreground/55",
                 )}

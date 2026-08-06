@@ -150,6 +150,16 @@
   }
 }
 
+/* Wall mode scene progress (CSS-driven — avoids React state every frame). */
+@keyframes wall-progress {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
 /* Scrollbar polish */
 @layer utilities {
   .scrollbar-thin::-webkit-scrollbar {

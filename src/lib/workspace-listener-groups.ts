@@ -8,6 +8,9 @@ export const WORKSPACE_LISTENER_GROUPS = [
   "directory",
   "deals",
   "plans",
+  /** Capped timeline feed only — use on dashboard instead of full leadDetail. */
+  "timeline",
+  /** Notes + touchpoints + timeline (lead/account detail routes). */
   "leadDetail",
   "activity",
   "campaigns",
@@ -73,7 +76,11 @@ export function groupsForPathname(pathname: string): WorkspaceListenerGroup[] {
     groups.push("plans");
   }
 
-  if (isLeadDetail || isDashboard) {
+  // Capped timeline for dashboard activity feed and lead detail; notes/touchpoints stay on leadDetail only.
+  if (isDashboard || isLeadDetail) {
+    groups.push("timeline");
+  }
+  if (isLeadDetail) {
     groups.push("leadDetail");
   }
 

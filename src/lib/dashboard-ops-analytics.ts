@@ -1,5 +1,4 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
-import { computeUserOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { isSalesLead } from "@/lib/dashboard-workflow";
 import { isFollowupActionable, isFollowupOverdue } from "@/lib/followup-open-status";
 import {
@@ -107,10 +106,6 @@ function isBounceReviewTask(task: LeadTask): boolean {
   return task.taskType === "review" && task.title === BOUNCE_REVIEW_TASK_TITLE;
 }
 
-function countInWindow(times: readonly number[], startMs: number, endMs: number): number {
-  return times.filter((t) => t >= startMs && t < endMs).length;
-}
-
 /** Bounce event timestamps for the email-volume series (timeline → contacts → tasks). */
 export function collectEmailBounceTimes(input: {
   contacts?: readonly Contact[];
@@ -174,6 +169,18 @@ export function showOwnerOpsDashboard(
   return false;
 }
 
+function findBucketIndex(sortedStarts: readonly number[], endExclusive: number, t: number): number {
+  if (t < sortedStarts[0]! || t >= endExclusive) return -1;
+  let lo = 0;
+  let hi = sortedStarts.length - 1;
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (sortedStarts[mid]! <= t) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
 export function buildEmailVolumeSeries(input: {
   followups: readonly Followup[];
   leads: readonly Lead[];
@@ -186,79 +193,83 @@ export function buildEmailVolumeSeries(input: {
 }): EmailVolumePoint[] {
   const now = input.now ?? new Date();
   const zone = resolveOrgTimezone(input.timeZone);
-  const sent = input.followups.filter((f) => f.deliveryStatus === "sent" && validTime(f.sentAt) !== undefined);
-  const opens = input.leads.filter((l) => validTime(l.lastEmailOpenedAt) !== undefined);
-  const replies = input.leads.filter((l) => validTime(l.lastReplyAt) !== undefined);
-  const bounceTimes = collectEmailBounceTimes({
-    contacts: input.contacts,
-    tasks: input.tasks,
-    timelineByLead: input.timelineByLead,
-  });
+
+  type BucketMeta = { key: string; label: string; start: number; end: number };
+  const buckets: BucketMeta[] = [];
 
   if (input.period === "today") {
     const todayKey = zonedDayKey(now, zone);
-    const points: EmailVolumePoint[] = [];
     for (let h = 0; h < 24; h++) {
-      const bs = zonedWallTimeToUtc(todayKey, h, 0, 0, 0, zone).getTime();
-      const be =
+      const start = zonedWallTimeToUtc(todayKey, h, 0, 0, 0, zone).getTime();
+      const end =
         h === 23
           ? zonedWallTimeToUtc(todayKey, 23, 59, 59, 999, zone).getTime() + 1
           : zonedWallTimeToUtc(todayKey, h + 1, 0, 0, 0, zone).getTime();
-      points.push({
-        key: `${h}`,
-        label: hourLabel(h),
-        sent: sent.filter((f) => {
-          const t = validTime(f.sentAt)!;
-          return t >= bs && t < be;
-        }).length,
-        opens: opens.filter((l) => {
-          const t = validTime(l.lastEmailOpenedAt)!;
-          return t >= bs && t < be;
-        }).length,
-        replies: replies.filter((l) => {
-          const t = validTime(l.lastReplyAt)!;
-          return t >= bs && t < be;
-        }).length,
-        bounces: countInWindow(bounceTimes, bs, be),
+      buckets.push({ key: `${h}`, label: hourLabel(h), start, end });
+    }
+  } else {
+    const days = input.period === "week" ? 7 : 30;
+    for (let i = days - 1; i >= 0; i--) {
+      const anchor = new Date(now.getTime() - i * 86_400_000);
+      const key = dayKey(anchor, zone);
+      const nextAnchor = new Date(anchor.getTime() + 86_400_000);
+      const start = startOfZonedDay(anchor, zone).getTime();
+      const end = startOfZonedDay(nextAnchor, zone).getTime();
+      const labelDate = zonedWallTimeToUtc(key, 12, 0, 0, 0, zone);
+      buckets.push({
+        key,
+        label:
+          input.period === "week"
+            ? labelDate.toLocaleDateString("en-US", { weekday: "short", timeZone: zone })
+            : String(Number(key.slice(8, 10))),
+        start,
+        end,
       });
     }
-    return points;
   }
 
-  const days = input.period === "week" ? 7 : 30;
-  const points: EmailVolumePoint[] = [];
-  for (let i = days - 1; i >= 0; i--) {
-    const anchor = new Date(now.getTime() - i * 86_400_000);
-    const key = dayKey(anchor, zone);
-    const nextAnchor = new Date(anchor.getTime() + 86_400_000);
-    const nextKey = dayKey(nextAnchor, zone);
-    const bs = startOfZonedDay(anchor, zone).getTime();
-    const be = startOfZonedDay(nextAnchor, zone).getTime();
-    // Prefer label from the zoned calendar day (handles DST edge cases better than local).
-    const labelDate = zonedWallTimeToUtc(key, 12, 0, 0, 0, zone);
-    points.push({
-      key,
-      label:
-        input.period === "week"
-          ? labelDate.toLocaleDateString("en-US", { weekday: "short", timeZone: zone })
-          : String(Number(key.slice(8, 10))),
-      sent: sent.filter((f) => {
-        const t = validTime(f.sentAt)!;
-        return t >= bs && t < be;
-      }).length,
-      opens: opens.filter((l) => {
-        const t = validTime(l.lastEmailOpenedAt)!;
-        return t >= bs && t < be;
-      }).length,
-      replies: replies.filter((l) => {
-        const t = validTime(l.lastReplyAt)!;
-        return t >= bs && t < be;
-      }).length,
-      bounces: countInWindow(bounceTimes, bs, be),
-    });
-    void nextKey;
+  const windowEnd = buckets[buckets.length - 1]!.end;
+  const starts = buckets.map((b) => b.start);
+  const sent = new Array<number>(buckets.length).fill(0);
+  const opens = new Array<number>(buckets.length).fill(0);
+  const replies = new Array<number>(buckets.length).fill(0);
+  const bounces = new Array<number>(buckets.length).fill(0);
+
+  const bump = (arr: number[], t: number | undefined) => {
+    if (t === undefined) return;
+    const idx = findBucketIndex(starts, windowEnd, t);
+    if (idx >= 0) arr[idx]! += 1;
+  };
+
+  for (const f of input.followups) {
+    if (f.deliveryStatus !== "sent") continue;
+    bump(sent, validTime(f.sentAt));
   }
-  return points;
+  for (const l of input.leads) {
+    bump(opens, validTime(l.lastEmailOpenedAt));
+    bump(replies, validTime(l.lastReplyAt));
+  }
+  // Prefer contacts/tasks for chart series — timeline is capped (~400) and incomplete for month views.
+  // When either array is provided (even empty), skip timeline so we don't mix incomplete sources.
+  for (const t of collectEmailBounceTimes({
+    contacts: input.contacts,
+    tasks: input.tasks,
+    timelineByLead:
+      input.contacts !== undefined || input.tasks !== undefined
+        ? undefined
+        : input.timelineByLead,
+  })) {
+    bump(bounces, t);
+  }
+
+  return buckets.map((b, i) => ({
+    key: b.key,
+    label: b.label,
+    sent: sent[i]!,
+    opens: opens[i]!,
+    replies: replies[i]!,
+    bounces: bounces[i]!,
+  }));
 }
 
 /** Calendar month schedule: open follow-ups by due day + completed/sent in month. */
@@ -274,60 +285,66 @@ export function buildFollowupScheduleByDay(input: {
   const month = parts[1]!; // 1-12
   const daysInMonth = new Date(year, month, 0).getDate();
   const dayStartToday = startOfZonedDay(now, zone).getTime();
-  const points: FollowupSchedulePoint[] = [];
 
+  const monthStartYmd = `${year}-${String(month).padStart(2, "0")}-01`;
+  const nextMonthYmd = `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, "0")}-01`;
+  const monthStart = zonedWallTimeToUtc(monthStartYmd, 0, 0, 0, 0, zone).getTime();
+  const monthEnd = zonedWallTimeToUtc(nextMonthYmd, 0, 0, 0, 0, zone).getTime();
+
+  const dayStarts: number[] = [];
   for (let day = 1; day <= daysInMonth; day++) {
     const ymd = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-    const dayStart = zonedWallTimeToUtc(ymd, 0, 0, 0, 0, zone).getTime();
-    const nextDay = day === daysInMonth
-      ? zonedWallTimeToUtc(
-          `${month === 12 ? year + 1 : year}-${String(month === 12 ? 1 : month + 1).padStart(2, "0")}-01`,
-          0,
-          0,
-          0,
-          0,
-          zone,
-        ).getTime()
-      : zonedWallTimeToUtc(
-          `${year}-${String(month).padStart(2, "0")}-${String(day + 1).padStart(2, "0")}`,
-          0,
-          0,
-          0,
-          0,
-          zone,
-        ).getTime();
-    let scheduled = 0;
-    let overdue = 0;
-    let completed = 0;
+    dayStarts.push(zonedWallTimeToUtc(ymd, 0, 0, 0, 0, zone).getTime());
+  }
 
-    for (const f of input.followups) {
-      const due = validTime(f.dueAt);
-      const sent = validTime(f.sentAt);
-      const done = validTime(f.completedAt);
+  const scheduled = new Array<number>(daysInMonth).fill(0);
+  const overdue = new Array<number>(daysInMonth).fill(0);
+  const completed = new Array<number>(daysInMonth).fill(0);
 
-      if (f.deliveryStatus === "sent" && sent !== undefined && sent >= dayStart && sent < nextDay) {
-        completed += 1;
+  const dayIndex = (t: number): number => {
+    if (t < monthStart || t >= monthEnd) return -1;
+    return findBucketIndex(dayStarts, monthEnd, t);
+  };
+
+  for (const f of input.followups) {
+    const sent = validTime(f.sentAt);
+    const done = validTime(f.completedAt);
+
+    if (f.deliveryStatus === "sent" && sent !== undefined) {
+      const idx = dayIndex(sent);
+      if (idx >= 0) {
+        completed[idx]! += 1;
         continue;
       }
-      if (done !== undefined && done >= dayStart && done < nextDay) {
-        completed += 1;
+    }
+    if (done !== undefined) {
+      const idx = dayIndex(done);
+      if (idx >= 0) {
+        completed[idx]! += 1;
         continue;
       }
-
-      if (!isFollowupActionable(f)) continue;
-      if (due === undefined || due < dayStart || due >= nextDay) continue;
-
-      // Calendar overdue (before zoned start of today) — matches Follow-ups page + KPI.
-      if (due < dayStartToday) overdue += 1;
-      else scheduled += 1;
     }
 
+    if (!isFollowupActionable(f)) continue;
+    const due = validTime(f.dueAt);
+    if (due === undefined) continue;
+    const idx = dayIndex(due);
+    if (idx < 0) continue;
+
+    // Calendar overdue (before zoned start of today) — matches Follow-ups page + KPI.
+    if (due < dayStartToday) overdue[idx]! += 1;
+    else scheduled[idx]! += 1;
+  }
+
+  const points: FollowupSchedulePoint[] = [];
+  for (let day = 1; day <= daysInMonth; day++) {
+    const i = day - 1;
     points.push({
       day,
       label: String(day),
-      scheduled,
-      overdue,
-      completed,
+      scheduled: scheduled[i]!,
+      overdue: overdue[i]!,
+      completed: completed[i]!,
     });
   }
 
@@ -350,63 +367,115 @@ export function buildOpsScorecardRows(input: {
     timeZone: input.timeZone,
   }).getTime();
   const activeUsers = input.users.filter((u) => u.status === "active" && u.roleId !== "director");
+  const activeIds = new Set(activeUsers.map((u) => u.id));
+
+  type Acc = {
+    prospectsAdded: number;
+    salesLeadsAdded: number;
+    emailsSent: number;
+    replies: number;
+    followupsCompleted: number;
+    tasksCompleted: number;
+    closedValue: number;
+  };
+  const empty = (): Acc => ({
+    prospectsAdded: 0,
+    salesLeadsAdded: 0,
+    emailsSent: 0,
+    replies: 0,
+    followupsCompleted: 0,
+    tasksCompleted: 0,
+    closedValue: 0,
+  });
+  const byUser = new Map<string, Acc>();
+  for (const u of activeUsers) byUser.set(u.id, empty());
+
+  for (const l of input.leads) {
+    if (l.intakeKind === "prospect") {
+      if ((validTime(l.createdAt) ?? 0) < start) continue;
+      const attrIds = new Set<string>();
+      if (l.createdById) attrIds.add(l.createdById);
+      if (l.scraperId) attrIds.add(l.scraperId);
+      if (l.prospectOwnerId) attrIds.add(l.prospectOwnerId);
+      for (const id of attrIds) {
+        if (!activeIds.has(id)) continue;
+        byUser.get(id)!.prospectsAdded += 1;
+      }
+      continue;
+    }
+    if (!l.ownerId || !activeIds.has(l.ownerId)) continue;
+    const row = byUser.get(l.ownerId)!;
+    if (
+      isSalesLead(l) &&
+      !["won", "lost"].includes(l.stage) &&
+      (validTime(l.createdAt) ?? 0) >= start
+    ) {
+      row.salesLeadsAdded += 1;
+    }
+    if ((validTime(l.lastReplyAt) ?? 0) >= start) {
+      row.replies += 1;
+    }
+  }
+
+  for (const f of input.followups) {
+    if (!f.ownerId || !activeIds.has(f.ownerId)) continue;
+    const row = byUser.get(f.ownerId)!;
+    if (f.deliveryStatus === "sent" && (validTime(f.sentAt) ?? 0) >= start) {
+      row.emailsSent += 1;
+    }
+    if (
+      (f.deliveryStatus === "sent" && (validTime(f.sentAt) ?? 0) >= start) ||
+      (validTime(f.completedAt) ?? 0) >= start
+    ) {
+      row.followupsCompleted += 1;
+    }
+  }
+
+  for (const t of input.tasks) {
+    if (!t.assigneeId || !activeIds.has(t.assigneeId)) continue;
+    if ((validTime(t.completedAt) ?? 0) >= start) {
+      byUser.get(t.assigneeId)!.tasksCompleted += 1;
+    }
+  }
+
+  for (const d of input.deals) {
+    if (!d.ownerId || !activeIds.has(d.ownerId)) continue;
+    if (
+      d.stage === "won" &&
+      (validTime(d.updatedAt) ?? validTime(d.createdAt) ?? 0) >= start
+    ) {
+      byUser.get(d.ownerId)!.closedValue += d.value;
+    }
+  }
+
+  const openDeals = input.deals.filter((d) => !["won", "lost"].includes(d.stage));
+  const leadIdsWithOpenDeal = new Set(openDeals.map((d) => d.leadId));
+  const openPipelineByUser = new Map<string, number>();
+  for (const d of openDeals) {
+    if (!d.ownerId || !activeIds.has(d.ownerId)) continue;
+    openPipelineByUser.set(d.ownerId, (openPipelineByUser.get(d.ownerId) ?? 0) + d.value);
+  }
+  for (const l of input.leads) {
+    if (!l.ownerId || !activeIds.has(l.ownerId)) continue;
+    if (["won", "lost"].includes(l.stage) || leadIdsWithOpenDeal.has(l.id)) continue;
+    const estimate = l.estimatedValue ?? 0;
+    if (estimate <= 0) continue;
+    openPipelineByUser.set(l.ownerId, (openPipelineByUser.get(l.ownerId) ?? 0) + estimate);
+  }
 
   return activeUsers
     .map((u) => {
-      const prospectsAdded = input.leads.filter(
-        (l) =>
-          l.intakeKind === "prospect" &&
-          (l.createdById === u.id || l.scraperId === u.id || l.prospectOwnerId === u.id) &&
-          (validTime(l.createdAt) ?? 0) >= start,
-      ).length;
-      const salesLeadsAdded = input.leads.filter(
-        (l) =>
-          isSalesLead(l) &&
-          l.ownerId === u.id &&
-          !["won", "lost"].includes(l.stage) &&
-          (validTime(l.createdAt) ?? 0) >= start,
-      ).length;
-      const emailsSent = input.followups.filter(
-        (f) =>
-          f.ownerId === u.id &&
-          f.deliveryStatus === "sent" &&
-          (validTime(f.sentAt) ?? 0) >= start,
-      ).length;
-      const ownedLeads = input.leads.filter((l) => l.ownerId === u.id);
-      const replies = ownedLeads.filter((l) => (validTime(l.lastReplyAt) ?? 0) >= start).length;
-      const followupsCompleted = input.followups.filter(
-        (f) =>
-          f.ownerId === u.id &&
-          ((f.deliveryStatus === "sent" && (validTime(f.sentAt) ?? 0) >= start) ||
-            (validTime(f.completedAt) ?? 0) >= start),
-      ).length;
-      const tasksCompleted = input.tasks.filter(
-        (t) => t.assigneeId === u.id && (validTime(t.completedAt) ?? 0) >= start,
-      ).length;
-      const openPipeline = computeUserOpenPipelineMetrics(
-        u.id,
-        input.leads as Lead[],
-        input.deals as Deal[],
-      ).total;
-      const closedValue = input.deals
-        .filter(
-          (d) =>
-            d.ownerId === u.id &&
-            d.stage === "won" &&
-            (validTime(d.updatedAt) ?? validTime(d.createdAt) ?? 0) >= start,
-        )
-        .reduce((s, d) => s + d.value, 0);
-
+      const row = byUser.get(u.id)!;
       return {
         userId: u.id,
-        prospectsAdded,
-        salesLeadsAdded,
-        emailsSent,
-        replies,
-        followupsCompleted,
-        tasksCompleted,
-        openPipeline,
-        closedValue,
+        prospectsAdded: row.prospectsAdded,
+        salesLeadsAdded: row.salesLeadsAdded,
+        emailsSent: row.emailsSent,
+        replies: row.replies,
+        followupsCompleted: row.followupsCompleted,
+        tasksCompleted: row.tasksCompleted,
+        openPipeline: openPipelineByUser.get(u.id) ?? 0,
+        closedValue: row.closedValue,
       };
     })
     .filter(
