@@ -55,6 +55,10 @@ export async function GET(req: Request) {
   const forUser = url.searchParams.get("forUser");
   const includeSecrets = url.searchParams.get("includeSecrets") === "1";
   const includeUsage = url.searchParams.get("includeUsage") === "1";
+  // Default lite: boot hydrate should not pull per-message maps (main-thread freeze risk).
+  // Pass includeMaps=1 when Inbox / lead linking needs the full meta doc.
+  const includeMaps = url.searchParams.get("includeMaps") === "1";
+  const lite = !includeMaps;
 
   const resolved = await resolveMailboxDataOwnerUid({
     organizationId: g.ctx.session.organizationId,
@@ -76,7 +80,7 @@ export async function GET(req: Request) {
       uid: dataOwnerUid,
       includeSecrets,
     }),
-    getEmailAccountMetaServer({ organizationId, uid: dataOwnerUid }),
+    getEmailAccountMetaServer({ organizationId, uid: dataOwnerUid, lite }),
     mergeAssigned
       ? listMailboxesAssignedToViewerServer({ organizationId, viewerUid })
       : Promise.resolve([]),

@@ -76,6 +76,15 @@ export interface EmailAccountStore {
     mailboxReadOnly?: boolean;
     mailboxAccountReadOnly?: boolean;
   }) => void;
+  /** Merge deferred per-message maps without resetting mailbox list / inbound cache. */
+  hydrateMessageMaps: (payload: {
+    linkedLeadByMessageId?: Record<string, string>;
+    labelsByMessageId?: Record<string, string[]>;
+    flagByMessageId?: Record<string, MailFlagId>;
+    mailLabels?: MailLabel[];
+    blockedSenderDomains?: string[];
+    globalEmailFooter?: string;
+  }) => void;
   addBlockedSenderDomain: (domain: string) => void;
   removeBlockedSenderDomain: (domain: string) => void;
   setGlobalEmailFooter: (footer: string) => void;
@@ -270,6 +279,21 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
       mailboxDataReadOnly: Boolean(payload.mailboxAccountReadOnly ?? payload.mailboxReadOnly),
       inboxWriteDisabled: Boolean(payload.mailboxReadOnly),
     });
+  },
+  hydrateMessageMaps: (payload) => {
+    set((s) => ({
+      linkedLeadByMessageId: payload.linkedLeadByMessageId ?? s.linkedLeadByMessageId,
+      labelsByMessageId: payload.labelsByMessageId ?? s.labelsByMessageId,
+      flagByMessageId: payload.flagByMessageId ?? s.flagByMessageId,
+      mailLabels: payload.mailLabels ?? s.mailLabels,
+      blockedSenderDomains: payload.blockedSenderDomains
+        ? [...new Set(payload.blockedSenderDomains.map(normalizeBlockedSenderDomain).filter(Boolean))]
+        : s.blockedSenderDomains,
+      globalEmailFooter:
+        typeof payload.globalEmailFooter === "string"
+          ? payload.globalEmailFooter
+          : s.globalEmailFooter,
+    }));
   },
   addBlockedSenderDomain: (domain) => {
     if (get().mailboxDataReadOnly) return;

@@ -5,9 +5,33 @@ import { listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-serve
 import { readInboxHeadsServer } from "@/lib/email/inbox-heads-server";
 import type { MailInbound } from "@/lib/email-account-types";
 
+/** Cap parallel Firestore head reads so 19 mailboxes do not saturate Admin SDK. */
+const HEADS_READ_CONCURRENCY = 3;
+
+async function mapPool<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await worker(items[i]);
+    }
+  });
+  await Promise.all(runners);
+  return results;
+}
+
 /**
  * Reads cron-persisted IMAP inbox heads for the mailbox owner (or view-as owner).
  * Used by the client to hydrate Zustand without opening an IMAP connection.
+ *
+ * Query params:
+ * - mailboxId: single mailbox (preferred off-Inbox)
+ * - limit: max messages per mailbox in the response (newest first)
  */
 export async function GET(req: Request) {
   const started = Date.now();
@@ -18,6 +42,9 @@ export async function GET(req: Request) {
     const url = new URL(req.url);
     const forUser = url.searchParams.get("forUser");
     const mailboxIdFilter = (url.searchParams.get("mailboxId") ?? "").trim();
+    const limitRaw = Number(url.searchParams.get("limit") ?? "");
+    const messageLimit =
+      Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(Math.floor(limitRaw), 800) : null;
 
     const resolved = await resolveMailboxDataOwnerUid({
       organizationId: g.ctx.session.organizationId,
@@ -44,22 +71,25 @@ export async function GET(req: Request) {
       { messages: MailInbound[]; syncedAt: string | null; mailboxTotal: number }
     > = {};
 
-    await Promise.all(
-      targets.map(async (mb) => {
-        const heads = await readInboxHeadsServer({
-          organizationId: g.ctx.session.organizationId,
-          uid: resolved.dataOwnerUid,
-          mailboxId: mb.id,
-        });
-        byMailbox[mb.id] = heads;
-      }),
-    );
+    await mapPool(targets, HEADS_READ_CONCURRENCY, async (mb) => {
+      const heads = await readInboxHeadsServer({
+        organizationId: g.ctx.session.organizationId,
+        uid: resolved.dataOwnerUid,
+        mailboxId: mb.id,
+      });
+      const messages =
+        messageLimit && heads.messages.length > messageLimit
+          ? heads.messages.slice(0, messageLimit)
+          : heads.messages;
+      byMailbox[mb.id] = { ...heads, messages };
+    });
 
     console.log(
       JSON.stringify({
         level: "info",
         msg: "inbound-heads read",
         mailboxes: targets.length,
+        limit: messageLimit,
         ms: Date.now() - started,
       }),
     );

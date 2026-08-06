@@ -14,7 +14,9 @@ import {
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 import type { MailInbound } from "@/lib/email-account-types";
 import { INBOX_HEADS_REFRESH_EVENT } from "@/lib/email/lead-reply-events";
+import { BACKGROUND_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
 import {
+  ALL_MAILBOXES_ID,
   getActiveMailbox,
   isImapInboxConfigured,
   useEmailAccountStore,
@@ -29,10 +31,19 @@ const HEADS_MIN_GAP_MS = 30_000;
 /** Skip background IMAP if we just ran. */
 const IMAP_MIN_GAP_MS = 90_000;
 
+function isInboxPath(pathname: string) {
+  return pathname === "/inbox" || pathname.startsWith("/inbox/");
+}
+
+function isDashboardPath(pathname: string) {
+  return pathname === "/dashboard" || pathname.startsWith("/dashboard/");
+}
+
 /**
  * Keeps the Inbox badge / email store fresh without every open tab hammering IMAP.
  *
- * - Always: hydrate from cron-persisted Firestore heads (`/api/email/inbound-heads`).
+ * - Off Inbox: hydrate only the active mailbox (never all 19 × 800 heads).
+ * - On Inbox: hydrate all configured mailboxes, with a per-mailbox message cap.
  * - Only on `/inbox`: optional IMAP envelope refresh (headsOnly) for the active mailbox.
  */
 export function InboxBackgroundSync() {
@@ -60,18 +71,33 @@ export function InboxBackgroundSync() {
     const configured = st.mailboxes.filter((m) => isImapInboxConfigured(m));
     if (configured.length === 0) return;
 
-    syncingRef.current = true;
     const acct = getActiveMailbox(st);
     const before = snapshotUnreadMailUids(st.inboundByMailbox[acct.id] ?? []);
     const isBootstrap = !bootstrappedRef.current;
+    const onInbox = isInboxPath(pathname);
 
+    // Critical: never fan out to every mailbox off-Inbox (was 19 × ~800 → 60–116s + UI freeze).
+    let path = "/api/email/inbound-heads";
+    if (onInbox) {
+      path += `?limit=${BACKGROUND_IMAP_HEAD_LIMIT}`;
+    } else {
+      const mailboxId =
+        st.activeMailboxId !== ALL_MAILBOXES_ID && configured.some((m) => m.id === st.activeMailboxId)
+          ? st.activeMailboxId
+          : configured[0]?.id;
+      if (!mailboxId) return;
+      path += `?mailboxId=${encodeURIComponent(mailboxId)}&limit=${BACKGROUND_IMAP_HEAD_LIMIT}`;
+    }
+
+    syncingRef.current = true;
     try {
       const forUid = resolveMailApiForUserUid({
         mailViewAsUid,
         activeMailboxDataOwnerUid: acct.dataOwnerUid,
         selfUid: currentUserId,
       });
-      const url = appendMailDataOwnerParam("/api/email/inbound-heads", forUid, currentUserId);
+
+      const url = appendMailDataOwnerParam(path, forUid, currentUserId);
       const res = await fetch(url, { credentials: "same-origin", cache: "no-store" });
       const data = (await res.json()) as {
         ok?: boolean;
@@ -108,7 +134,6 @@ export function InboxBackgroundSync() {
         const added = diffAddedUnreadUids(before, after);
         if (added.length > 0) {
           playAlertSound("mail");
-          const onInbox = pathname === "/inbox" || pathname.startsWith("/inbox/");
           if (!onInbox && document.visibilityState !== "hidden") {
             toast.message(
               added.length === 1 ? "New email" : `${added.length} new emails`,
@@ -147,8 +172,7 @@ export function InboxBackgroundSync() {
   const runInboxRouteImap = React.useCallback(async () => {
     if (isDemo || !sessionHydrated || !currentUserId || !emailServerHydrated) return;
     if (!emailServerSyncEnabled) return;
-    const onInbox = pathname === "/inbox" || pathname.startsWith("/inbox/");
-    if (!onInbox) return;
+    if (!isInboxPath(pathname)) return;
     if (syncingRef.current) return;
     if (Date.now() - lastImapAtRef.current < IMAP_MIN_GAP_MS) return;
 
@@ -195,10 +219,8 @@ export function InboxBackgroundSync() {
     if (!hasImap) return;
 
     let cancelled = false;
-    // On dashboard, give Firestore (followups/leads → chart cards) a head start
-    // before the 19-mailbox inbound-heads read (often 90–100s).
-    const onDashboard = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
-    const bootstrapDelayMs = onDashboard ? 5_000 : 0;
+    // Give Firestore CRM listeners a clear head start before any heads read.
+    const bootstrapDelayMs = isDashboardPath(pathname) ? 12_000 : isInboxPath(pathname) ? 0 : 4_000;
     const bootstrapTimer = window.setTimeout(() => {
       if (!cancelled) void hydrateFromServerHeads();
     }, bootstrapDelayMs);

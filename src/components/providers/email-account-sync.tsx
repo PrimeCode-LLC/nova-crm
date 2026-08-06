@@ -10,6 +10,8 @@ import type { MailFlagId } from "@/lib/email/mail-flags";
 
 /** Fail open so Settings/Inbox are not stuck on "Loading…" forever when Firestore is slow. */
 const MAILBOXES_FETCH_TIMEOUT_MS = 90_000;
+/** Per-message maps are huge; load after boot so dashboard stays interactive. */
+const MESSAGE_MAPS_DEFER_MS = 8_000;
 
 /**
  * Loads saved SMTP/IMAP mailboxes from Firestore after login (live workspace).
@@ -18,6 +20,7 @@ const MAILBOXES_FETCH_TIMEOUT_MS = 90_000;
 export function EmailAccountSync() {
   const { isDemo, sessionHydrated, currentUserId } = useWorkspace();
   const hydrateFromServer = useEmailAccountStore((s) => s.hydrateFromServer);
+  const hydrateMessageMaps = useEmailAccountStore((s) => s.hydrateMessageMaps);
   const setEmailServerSyncEnabled = useEmailAccountStore((s) => s.setEmailServerSyncEnabled);
   const setEmailServerHydrated = useEmailAccountStore((s) => s.setEmailServerHydrated);
   const resetForDemoMode = useEmailAccountStore((s) => s.resetForDemoMode);
@@ -25,6 +28,7 @@ export function EmailAccountSync() {
   const setMailViewAsUid = useEmailAccountStore((s) => s.setMailViewAsUid);
   const wasDemoRef = React.useRef(false);
   const prevUserIdRef = React.useRef<string | undefined>(undefined);
+  const mapsLoadedRef = React.useRef(false);
 
   React.useEffect(() => {
     if (prevUserIdRef.current !== undefined && prevUserIdRef.current !== currentUserId) {
@@ -50,8 +54,11 @@ export function EmailAccountSync() {
     const controller = new AbortController();
     const timeoutId = window.setTimeout(() => controller.abort(), MAILBOXES_FETCH_TIMEOUT_MS);
 
+    mapsLoadedRef.current = false;
+
     void (async () => {
       try {
+        // Lite hydrate: mailbox list + light meta only (no per-message maps).
         const url = appendMailDataOwnerParam("/api/email/mailboxes", mailViewAsUid, currentUserId);
         const res = await fetch(url, {
           credentials: "same-origin",
@@ -135,10 +142,47 @@ export function EmailAccountSync() {
       }
     })();
 
+    // Deferred full maps (lead links / labels / flags) — needed on Inbox + lead email panels.
+    const mapsTimer = window.setTimeout(() => {
+      if (cancelled || mapsLoadedRef.current) return;
+      void (async () => {
+        try {
+          const base = appendMailDataOwnerParam(
+            "/api/email/mailboxes/meta",
+            mailViewAsUid,
+            currentUserId,
+          );
+          const res = await fetch(base, { credentials: "same-origin", cache: "no-store" });
+          const data = (await res.json()) as {
+            ok?: boolean;
+            linkedLeadByMessageId?: Record<string, string>;
+            labelsByMessageId?: Record<string, string[]>;
+            flagByMessageId?: Record<string, string>;
+            mailLabels?: { id: string; name: string; color: string }[];
+            blockedSenderDomains?: string[];
+            globalEmailFooter?: string;
+          };
+          if (cancelled || !res.ok || !data.ok) return;
+          mapsLoadedRef.current = true;
+          hydrateMessageMaps({
+            linkedLeadByMessageId: data.linkedLeadByMessageId,
+            labelsByMessageId: data.labelsByMessageId,
+            flagByMessageId: data.flagByMessageId as Record<string, MailFlagId> | undefined,
+            mailLabels: data.mailLabels,
+            blockedSenderDomains: data.blockedSenderDomains,
+            globalEmailFooter: data.globalEmailFooter,
+          });
+        } catch {
+          /* best-effort */
+        }
+      })();
+    }, MESSAGE_MAPS_DEFER_MS);
+
     return () => {
       cancelled = true;
       controller.abort();
       window.clearTimeout(timeoutId);
+      window.clearTimeout(mapsTimer);
     };
   }, [
     isDemo,
@@ -146,6 +190,7 @@ export function EmailAccountSync() {
     currentUserId,
     mailViewAsUid,
     hydrateFromServer,
+    hydrateMessageMaps,
     resetForDemoMode,
     setEmailServerHydrated,
     setEmailServerSyncEnabled,

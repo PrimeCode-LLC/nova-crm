@@ -44,13 +44,17 @@ const cronScheduleOptions = {
 };
 
 /**
- * Wakes App Hosting to run due RSS scrapers (respects per-feed interval + enabled flag in Firestore).
- * Tick is every 15 minutes - matches the minimum minute interval in scraper settings.
+ * Stagger heavy App Hosting cron traffic so IMAP + scheduled-send + scrapers
+ * never pile onto the same minute (shared maxInstances: 3 pool).
+ * - IMAP heads: :00,:05,:10,...
+ * - Scheduled send: :02,:07,:12,...
+ * - Scrapers: :07,:22,:37,:52 (avoids :00/:15/:30/:45 pile-ups with the 5-min jobs)
+ * Scraper tick remains ~every 15 minutes (matches minimum feed interval in settings).
  */
 export const runDueScrapers = onSchedule(
   {
     ...cronScheduleOptions,
-    schedule: "every 15 minutes",
+    schedule: "7-59/15 * * * *",
   },
   async () => {
     const result = await callAppHostingCron("/api/cron/scrapers/run", "Scraper cron");
@@ -62,7 +66,7 @@ export const runDueScrapers = onSchedule(
 export const sendDueScheduledEmails = onSchedule(
   {
     ...cronScheduleOptions,
-    schedule: "every 5 minutes",
+    schedule: "2-59/5 * * * *",
   },
   async () => {
     const result = await callAppHostingCron(
@@ -77,7 +81,7 @@ export const sendDueScheduledEmails = onSchedule(
 export const syncInboxImapHeads = onSchedule(
   {
     ...cronScheduleOptions,
-    schedule: "every 5 minutes",
+    schedule: "*/5 * * * *",
     timeoutSeconds: 540,
     memory: "1GiB" as const,
   },

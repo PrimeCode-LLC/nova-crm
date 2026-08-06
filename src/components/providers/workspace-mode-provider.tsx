@@ -6,6 +6,7 @@ import type { WorkspaceMode } from "@/lib/workspace-mode";
 import type { WorkspaceListenerGroup } from "@/lib/workspace-listener-groups";
 import {
   CORE_WORKSPACE_GROUPS,
+  expireUnusedWorkspaceGroups,
   groupsForPathname,
   mergeWorkspaceGroups,
   workspaceGroupsKey,
@@ -344,42 +345,82 @@ export function WorkspaceModeProvider({
   const [demoSnapshot, setDemoSnapshot] = React.useState<WorkspaceSnapshot | null>(null);
   const snapshotRef = React.useRef<WorkspaceSnapshot>(LIVE_SNAPSHOT);
 
-  /** Sticky Firestore listener groups for this session (union of routes visited + dialogs). */
+  /** Route + dialog listener groups; non-core entries expire after a grace period off-route. */
   const [requestedGroups, setRequestedGroups] = React.useState<Set<WorkspaceListenerGroup>>(
     () => mergeWorkspaceGroups(CORE_WORKSPACE_GROUPS, groupsForPathname(pathname)),
   );
   const requestedGroupsKey = workspaceGroupsKey(requestedGroups);
+  const lastNeededAtRef = React.useRef(new Map<WorkspaceListenerGroup, number>());
+
+  const touchGroups = React.useCallback((groups: readonly WorkspaceListenerGroup[], now = Date.now()) => {
+    for (const g of groups) {
+      if (g === "core") continue;
+      lastNeededAtRef.current.set(g, now);
+    }
+  }, []);
+
+  const pruneExpiredGroups = React.useCallback((stillNeeded: ReadonlySet<WorkspaceListenerGroup>) => {
+    setRequestedGroups((prev) => {
+      const next = expireUnusedWorkspaceGroups({
+        current: prev,
+        lastNeededAt: lastNeededAtRef.current,
+        stillNeeded,
+        now: Date.now(),
+      });
+      if (next.size === prev.size && [...next].every((g) => prev.has(g))) return prev;
+      for (const g of prev) {
+        if (!next.has(g)) lastNeededAtRef.current.delete(g);
+      }
+      return next;
+    });
+  }, []);
 
   React.useEffect(() => {
     const routeGroups = groupsForPathname(pathname);
-    if (routeGroups.length === 0) return;
-    setRequestedGroups((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const g of routeGroups) {
-        if (!next.has(g)) {
-          next.add(g);
-          changed = true;
+    const now = Date.now();
+    touchGroups(routeGroups, now);
+    if (routeGroups.length > 0) {
+      setRequestedGroups((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const g of routeGroups) {
+          if (!next.has(g)) {
+            next.add(g);
+            changed = true;
+          }
         }
-      }
-      return changed ? next : prev;
-    });
-  }, [pathname]);
+        return changed ? next : prev;
+      });
+    }
+    pruneExpiredGroups(new Set(routeGroups));
+  }, [pathname, touchGroups, pruneExpiredGroups]);
 
-  const requestWorkspaceGroups = React.useCallback((groups: readonly WorkspaceListenerGroup[]) => {
-    if (groups.length === 0) return;
-    setRequestedGroups((prev) => {
-      let changed = false;
-      const next = new Set(prev);
-      for (const g of groups) {
-        if (!next.has(g)) {
-          next.add(g);
-          changed = true;
+  // Periodic prune so groups expire even if the user stays on a shell route.
+  React.useEffect(() => {
+    const id = window.setInterval(() => {
+      pruneExpiredGroups(new Set(groupsForPathname(pathname)));
+    }, 60_000);
+    return () => window.clearInterval(id);
+  }, [pathname, pruneExpiredGroups]);
+
+  const requestWorkspaceGroups = React.useCallback(
+    (groups: readonly WorkspaceListenerGroup[]) => {
+      if (groups.length === 0) return;
+      touchGroups(groups);
+      setRequestedGroups((prev) => {
+        let changed = false;
+        const next = new Set(prev);
+        for (const g of groups) {
+          if (!next.has(g)) {
+            next.add(g);
+            changed = true;
+          }
         }
-      }
-      return changed ? next : prev;
-    });
-  }, []);
+        return changed ? next : prev;
+      });
+    },
+    [touchGroups],
+  );
 
   const organizationName =
     organizationNameProp?.trim() || "Workspace";

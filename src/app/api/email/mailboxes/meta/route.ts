@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { setEmailAccountMetaServer } from "@/lib/email/mailbox-profiles-server";
+import {
+  getEmailAccountMetaServer,
+  setEmailAccountMetaServer,
+} from "@/lib/email/mailbox-profiles-server";
+import { resolveMailboxDataOwnerUid } from "@/lib/email/mailbox-data-owner-server";
 
 const schema = z.object({
   activeMailboxId: z.string().optional(),
@@ -18,8 +22,40 @@ const schema = z.object({
     )
     .optional(),
   labelsByMessageId: z.record(z.string(), z.array(z.string())).optional(),
-  flagByMessageId: z.record(z.string(), z.enum(["orange", "red", "purple", "blue", "yellow", "green", "gray"])).optional(),
+  flagByMessageId: z
+    .record(z.string(), z.enum(["orange", "red", "purple", "blue", "yellow", "green", "gray"]))
+    .optional(),
 });
+
+/** Full meta (including per-message maps) for deferred client hydrate after lite boot. */
+export async function GET(req: Request) {
+  const g = await guardTenantApi();
+  if (!g.ok) return g.response;
+
+  const url = new URL(req.url);
+  const forUser = url.searchParams.get("forUser");
+  const resolved = await resolveMailboxDataOwnerUid({
+    organizationId: g.ctx.session.organizationId,
+    viewerUid: g.ctx.session.uid,
+    viewerRole: g.ctx.role,
+    forUserParam: forUser,
+  });
+  if (!resolved.ok) {
+    return NextResponse.json({ ok: false, error: resolved.error }, { status: resolved.status });
+  }
+
+  const meta = await getEmailAccountMetaServer({
+    organizationId: g.ctx.session.organizationId,
+    uid: resolved.dataOwnerUid,
+    lite: false,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    dataOwnerUid: resolved.dataOwnerUid,
+    ...meta,
+  });
+}
 
 export async function PATCH(req: Request) {
   const g = await guardTenantApi();

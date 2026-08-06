@@ -487,13 +487,14 @@ function asOrgActivityEvent(id: string, raw: Record<string, unknown>): OrgActivi
 /**
  * Real-time tenant CRM documents for live workspace mode.
  *
- * Listener groups attach on first request and stay attached for the session
- * (sticky). Full teardown only on org / viewer / scope change or unmount.
+ * Listener groups attach on first request. Non-core groups detach when dropped
+ * from `requestedGroups` (caller applies a grace period). Full teardown only on
+ * org / viewer / scope change or unmount.
  *
  * @param narrowToMemberCrm When true, queries only rows the signed-in user owns / is assigned to
  *   (list rules cannot use hierarchy get(); managers open report docs via get by id).
  * @param _viewerForMemberScope Kept for call-site compatibility; list queries use viewerUid only.
- * @param requestedGroups Sticky set of listener groups to attach (always includes core).
+ * @param requestedGroups Listener groups to keep attached (always includes core).
  */
 export function useLiveWorkspaceFirestore(
   organizationId: string | undefined,
@@ -512,6 +513,7 @@ export function useLiveWorkspaceFirestore(
     viewerUid: string | undefined;
     narrowToMemberCrm: boolean;
     attachGroup: (group: WorkspaceListenerGroup) => void;
+    detachGroup: (group: WorkspaceListenerGroup) => void;
   } | null>(null);
 
   const groupsKey = workspaceGroupsKey(requestedGroups);
@@ -1164,11 +1166,22 @@ export function useLiveWorkspaceFirestore(
       }
     };
 
+    const detachGroup = (group: WorkspaceListenerGroup) => {
+      if (group === "core") return;
+      if (!attachedGroupsRef.current.has(group)) return;
+      const unsubs = groupUnsubsRef.current.get(group) ?? [];
+      for (const u of unsubs) u();
+      groupUnsubsRef.current.delete(group);
+      attachedGroupsRef.current.delete(group);
+      // Leave snapshot data in React state (stale OK); re-attach refreshes it.
+    };
+
     sessionRef.current = {
       organizationId,
       viewerUid,
       narrowToMemberCrm,
       attachGroup,
+      detachGroup,
     };
 
     // Attach whatever groups are already requested for this session.
@@ -1188,16 +1201,22 @@ export function useLiveWorkspaceFirestore(
       }
       groupUnsubsRef.current.clear();
     };
-    // groupsKey intentionally omitted: sticky attach is handled by the second effect.
+    // groupsKey intentionally omitted: attach/detach is handled by the second effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId, viewerUid, narrowToMemberCrm]);
 
-  // Sticky attach: when new groups are requested, subscribe without tearing down existing ones.
+  // Attach newly requested groups; detach groups no longer in the requested set.
   React.useEffect(() => {
     const session = sessionRef.current;
     if (!session) return;
     for (const g of requestedGroups) {
       session.attachGroup(g);
+    }
+    for (const g of [...attachedGroupsRef.current]) {
+      if (g === "core") continue;
+      if (!requestedGroups.has(g)) {
+        session.detachGroup(g);
+      }
     }
   }, [groupsKey, requestedGroups]);
 

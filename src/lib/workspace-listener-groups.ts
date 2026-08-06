@@ -1,6 +1,7 @@
 /**
- * Named Firestore listener groups for route-scoped, sticky subscriptions.
- * Groups attach on first need and stay attached for the session.
+ * Named Firestore listener groups for route-scoped subscriptions.
+ * Groups attach on first need; non-core groups expire after a grace period
+ * off-route so long sessions do not accumulate every listener forever.
  */
 
 export const WORKSPACE_LISTENER_GROUPS = [
@@ -22,6 +23,23 @@ export type WorkspaceListenerGroup = (typeof WORKSPACE_LISTENER_GROUPS)[number];
 export const CORE_WORKSPACE_GROUPS: ReadonlySet<WorkspaceListenerGroup> = new Set([
   "core",
 ]);
+
+/**
+ * Non-core groups that may be detached after {@link LISTENER_GROUP_GRACE_MS}
+ * without being needed by the current route (or an explicit request).
+ */
+export const DETACHABLE_WORKSPACE_GROUPS: ReadonlySet<WorkspaceListenerGroup> = new Set([
+  "directory",
+  "deals",
+  "plans",
+  "timeline",
+  "leadDetail",
+  "activity",
+  "campaigns",
+]);
+
+/** Keep listeners warm through quick back-and-forth navigation (re-subscribe re-reads). */
+export const LISTENER_GROUP_GRACE_MS = 5 * 60_000;
 
 /**
  * Map a pathname to the listener groups that route needs.
@@ -108,4 +126,35 @@ export function mergeWorkspaceGroups(
 
 export function workspaceGroupsKey(groups: ReadonlySet<WorkspaceListenerGroup>): string {
   return [...groups].sort().join(",");
+}
+
+/**
+ * Drop detachable groups whose last-needed timestamp is older than the grace window
+ * and that are not in `stillNeeded`. Always keeps `core`.
+ */
+export function expireUnusedWorkspaceGroups(input: {
+  current: ReadonlySet<WorkspaceListenerGroup>;
+  lastNeededAt: ReadonlyMap<WorkspaceListenerGroup, number>;
+  stillNeeded: ReadonlySet<WorkspaceListenerGroup>;
+  now: number;
+  graceMs?: number;
+}): Set<WorkspaceListenerGroup> {
+  const graceMs = input.graceMs ?? LISTENER_GROUP_GRACE_MS;
+  const next = new Set<WorkspaceListenerGroup>(CORE_WORKSPACE_GROUPS);
+  for (const g of input.current) {
+    if (g === "core") continue;
+    if (input.stillNeeded.has(g)) {
+      next.add(g);
+      continue;
+    }
+    if (!DETACHABLE_WORKSPACE_GROUPS.has(g)) {
+      next.add(g);
+      continue;
+    }
+    const last = input.lastNeededAt.get(g);
+    if (last === undefined || input.now - last < graceMs) {
+      next.add(g);
+    }
+  }
+  return next;
 }

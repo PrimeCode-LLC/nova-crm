@@ -131,8 +131,8 @@ export function MailboxUtilizationPanel({
     enabled: true,
     isDemo,
     currentUserId,
-    // Let followups/leads + chart cards claim bandwidth before this 60–100s call.
-    deferMs: 5_000,
+    // Utilization often takes 60s+ and saturates Admin SDK — keep it far off the boot path.
+    deferMs: 45_000,
   });
   const scope = scopeProp ?? apiScope;
   const isMine = scope === "mine";

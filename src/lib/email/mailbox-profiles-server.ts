@@ -194,38 +194,45 @@ function firestoreToMailbox(
 export async function getEmailAccountMetaServer(input: {
   organizationId: string;
   uid: string;
+  /**
+   * Skip per-message maps (often huge). Used for boot hydrate so dashboard
+   * does not download / JSON-parse linkedLead / labels / flags maps.
+   */
+  lite?: boolean;
 }): Promise<EmailAccountMeta> {
+  const empty: EmailAccountMeta = {
+    activeMailboxId: "",
+    linkedLeadByMessageId: {},
+    blockedSenderDomains: [],
+    globalEmailFooter: "",
+    mailLabels: [],
+    labelsByMessageId: {},
+    flagByMessageId: {},
+  };
   const ref = metaRef(input.organizationId, input.uid);
-  if (!ref) {
-    return {
-      activeMailboxId: "",
-      linkedLeadByMessageId: {},
-      blockedSenderDomains: [],
-      globalEmailFooter: "",
-      mailLabels: [],
-      labelsByMessageId: {},
-      flagByMessageId: {},
-    };
-  }
-  const snap = await ref.get();
-  if (!snap.exists) {
-    return {
-      activeMailboxId: "",
-      linkedLeadByMessageId: {},
-      blockedSenderDomains: [],
-      globalEmailFooter: "",
-      mailLabels: [],
-      labelsByMessageId: {},
-      flagByMessageId: {},
-    };
-  }
+  if (!ref) return empty;
+
+  const db = getAdminDb();
+  if (!db) return empty;
+
+  // Field mask avoids pulling megabyte-scale message maps on every app open.
+  // DocumentReference has no .select(); use Firestore#getAll fieldMask.
+  const snap = input.lite
+    ? (
+        await db.getAll(ref, {
+          fieldMask: [
+            "activeMailboxId",
+            "blockedSenderDomains",
+            "globalEmailFooter",
+            "mailLabels",
+          ],
+        })
+      )[0]
+    : await ref.get();
+  if (!snap?.exists) return empty;
+
   const data = snap.data() as Record<string, unknown>;
   const active = String(data.activeMailboxId ?? "").trim();
-  const links = data.linkedLeadByMessageId;
-  const linkedLeadByMessageId =
-    links && typeof links === "object" && !Array.isArray(links)
-      ? (links as Record<string, string>)
-      : {};
   const blockedRaw = data.blockedSenderDomains;
   const blockedSenderDomains = Array.isArray(blockedRaw)
     ? blockedRaw.map((d) => String(d).trim().toLowerCase()).filter(Boolean)
@@ -233,6 +240,22 @@ export async function getEmailAccountMetaServer(input: {
   const globalEmailFooter =
     typeof data.globalEmailFooter === "string" ? data.globalEmailFooter : "";
   const mailLabels = parseMailLabelsFromFirestore(data.mailLabels);
+
+  if (input.lite) {
+    return {
+      ...empty,
+      activeMailboxId: active,
+      blockedSenderDomains,
+      globalEmailFooter,
+      mailLabels,
+    };
+  }
+
+  const links = data.linkedLeadByMessageId;
+  const linkedLeadByMessageId =
+    links && typeof links === "object" && !Array.isArray(links)
+      ? (links as Record<string, string>)
+      : {};
   const labelsByMessageId = parseLabelsByMessageIdFromFirestore(data.labelsByMessageId);
   const flagByMessageId = parseFlagByMessageIdFromFirestore(data.flagByMessageId);
   return {
