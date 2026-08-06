@@ -69,6 +69,9 @@ const ICONS: Partial<Record<string, React.ComponentType<{ className?: string }>>
   wall_exit_denied: ShieldAlert,
   wall_exit_attempt: ShieldAlert,
   wall_exited: ShieldCheck,
+  leads_sequences_built: Workflow,
+  leads_sequences_scheduled: CalendarPlus,
+  leads_deleted: Trash2,
 };
 
 function feedHref(item: OpsFeedItem): string | undefined {

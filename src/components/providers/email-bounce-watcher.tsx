@@ -118,7 +118,8 @@ async function ensureBounceBody(input: {
  * (contact bounced, review task, pause sequence) via the idempotent server API.
  */
 export function EmailBounceWatcher() {
-  const { isDemo, sessionHydrated, currentUserId, leads, contacts } = useWorkspace();
+  const { isDemo, sessionHydrated, currentUserId, leads, contacts, requestWorkspaceGroups } =
+    useWorkspace();
   const inboundByMailbox = useEmailAccountStore((s) => s.inboundByMailbox);
   const mailboxes = useEmailAccountStore((s) => s.mailboxes);
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
@@ -127,6 +128,10 @@ export function EmailBounceWatcher() {
   const processedRef = React.useRef(readProcessed());
   const inFlightRef = React.useRef(new Set<string>());
   const nextRetryAtRef = React.useRef(new Map<string, number>());
+
+  React.useEffect(() => {
+    requestWorkspaceGroups(["directory"]);
+  }, [requestWorkspaceGroups]);
 
   React.useEffect(() => {
     if (!sessionHydrated || !currentUserId || isDemo || !emailServerHydrated) return;

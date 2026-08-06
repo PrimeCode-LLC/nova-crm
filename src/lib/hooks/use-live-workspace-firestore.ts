@@ -40,6 +40,11 @@ import type {
 } from "@/lib/types";
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
+import type { WorkspaceListenerGroup } from "@/lib/workspace-listener-groups";
+import {
+  CORE_WORKSPACE_GROUPS,
+  workspaceGroupsKey,
+} from "@/lib/workspace-listener-groups";
 
 /** Cap history listeners so WebChannel does not load unbounded org history into every client. */
 const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
@@ -466,26 +471,77 @@ function asOrgActivityEvent(id: string, raw: Record<string, unknown>): OrgActivi
 /**
  * Real-time tenant CRM documents for live workspace mode.
  *
+ * Listener groups attach on first request and stay attached for the session
+ * (sticky). Full teardown only on org / viewer / scope change or unmount.
+ *
  * @param narrowToMemberCrm When true, queries only rows the signed-in user owns / is assigned to
  *   (list rules cannot use hierarchy get(); managers open report docs via get by id).
  * @param _viewerForMemberScope Kept for call-site compatibility; list queries use viewerUid only.
+ * @param requestedGroups Sticky set of listener groups to attach (always includes core).
  */
 export function useLiveWorkspaceFirestore(
   organizationId: string | undefined,
   viewerUid: string | undefined,
   narrowToMemberCrm: boolean,
   _viewerForMemberScope?: User | null,
+  requestedGroups: ReadonlySet<WorkspaceListenerGroup> = CORE_WORKSPACE_GROUPS,
 ): LiveWorkspaceFirestoreState {
   const [state, setState] = React.useState<LiveWorkspaceFirestoreState>(empty);
   /** One entry per listener; cleared on that listener’s success so the banner can recover after transient errors. */
   const listenerErrorsRef = React.useRef(new Map<string, Error>());
+  const attachedGroupsRef = React.useRef(new Set<WorkspaceListenerGroup>());
+  const groupUnsubsRef = React.useRef(new Map<WorkspaceListenerGroup, Unsubscribe[]>());
+  const sessionRef = React.useRef<{
+    organizationId: string;
+    viewerUid: string | undefined;
+    narrowToMemberCrm: boolean;
+    attachGroup: (group: WorkspaceListenerGroup) => void;
+  } | null>(null);
 
+  const groupsKey = workspaceGroupsKey(requestedGroups);
+
+  // Tear down / rebuild subscription session when org, viewer, or member scope changes.
   React.useEffect(() => {
-    if (!organizationId || !isFirebaseWebConfigured()) {
-      listenerErrorsRef.current.clear();
+    attachedGroupsRef.current.clear();
+    for (const unsubs of groupUnsubsRef.current.values()) {
+      for (const u of unsubs) u();
+    }
+    groupUnsubsRef.current.clear();
+    sessionRef.current = null;
+    listenerErrorsRef.current.clear();
+
+    if (!isFirebaseWebConfigured()) {
       setState({
         loading: false,
         coreReady: { users: true, leads: true, followups: true },
+        error: null,
+        users: [],
+        leads: [],
+        accounts: [],
+        contacts: [],
+        deals: [],
+        notes: [],
+        followups: [],
+        followupPlans: [],
+        leadTasks: [],
+        touchpoints: [],
+        timelineEvents: [],
+        activityCounters: [],
+        activityRecords: [],
+        orgActivityEvents: [],
+        profiles: [],
+        campaigns: [],
+        crmLabels: [],
+      });
+      return;
+    }
+
+    // Wait for organizationId (userDoc still hydrating). Marking core ready with
+    // empty arrays here caused a false "No leads / empty workspace" flash.
+    if (!organizationId) {
+      setState({
+        loading: true,
+        coreReady: coreReadyEmpty,
         error: null,
         users: [],
         leads: [],
@@ -512,7 +568,6 @@ export function useLiveWorkspaceFirestore(
     try {
       db = getFirebaseDb();
     } catch (e) {
-      listenerErrorsRef.current.clear();
       setState({
         loading: false,
         coreReady: { users: true, leads: true, followups: true },
@@ -538,20 +593,27 @@ export function useLiveWorkspaceFirestore(
       return;
     }
 
-    listenerErrorsRef.current.clear();
     setState((s) => ({
       ...s,
       loading: true,
       coreReady: coreReadyEmpty,
       error: null,
+      accounts: [],
+      contacts: [],
+      deals: [],
+      notes: [],
+      followupPlans: [],
+      touchpoints: [],
+      timelineEvents: [],
+      activityCounters: [],
+      activityRecords: [],
+      orgActivityEvents: [],
+      profiles: [],
+      campaigns: [],
     }));
 
     const memberScope = Boolean(narrowToMemberCrm && viewerUid);
     const uid = viewerUid ?? "";
-    /**
-     * List rules only allow ownerId / activity user == signed-in uid (no hierarchy get()).
-     * `ownerId in [reports]` is rejected by Firestore list rules.
-     */
     const listOwnerId = uid;
 
     const firstAggregateError = (): Error | null => {
@@ -588,7 +650,6 @@ export function useLiveWorkspaceFirestore(
     const applyListenerError = (listenerKey: string, err: Error) => {
       listenerErrorsRef.current.set(listenerKey, err);
       setState((prev) => {
-        // Treat errors on core collections as "received" so the UI can leave the skeleton.
         const nextCore = { ...prev.coreReady };
         const baseKey = listenerKey.split(":")[0] ?? listenerKey;
         if (isCoreKey(baseKey)) {
@@ -603,96 +664,14 @@ export function useLiveWorkspaceFirestore(
       });
     };
 
-    const unsubs: Unsubscribe[] = [];
-
-    const qUsers = query(
-      collection(db, COLLECTIONS.users),
-      where("organizationId", "==", organizationId),
-    );
-    unsubs.push(
-      onSnapshot(
-        qUsers,
-        (snap) => {
-          const users = snap.docs.map((d) => asUser(d.id, d.data() as Record<string, unknown>));
-          applySnapshot("users", "users", users);
-        },
-        (err) => applyListenerError("users", err),
-      ),
-    );
-
-    const leadSlices = new Map<string, Lead[]>();
-
-    const mergeLeadSlices = () => {
-      const byId = new Map<string, Lead>();
-      for (const slice of leadSlices.values()) {
-        for (const lead of slice) {
-          byId.set(lead.id, lead);
-        }
-      }
-      applySnapshot("leads", "leads", Array.from(byId.values()));
+    const pushUnsub = (group: WorkspaceListenerGroup, unsub: Unsubscribe) => {
+      const list = groupUnsubsRef.current.get(group) ?? [];
+      list.push(unsub);
+      groupUnsubsRef.current.set(group, list);
     };
-
-    const subscribeLeads = (key: string, q: ReturnType<typeof query>) => {
-      unsubs.push(
-        onSnapshot(
-          q,
-          (snap) => {
-            leadSlices.set(
-              key,
-              snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>)),
-            );
-            mergeLeadSlices();
-          },
-          (err) => applyListenerError(`leads:${key}`, err),
-        ),
-      );
-    };
-
-    if (memberScope) {
-      subscribeLeads(
-        "owner",
-        query(
-          collection(db, COLLECTIONS.leads),
-          where("organizationId", "==", organizationId),
-          where("ownerId", "==", listOwnerId),
-        ),
-      );
-      subscribeLeads(
-        "managers",
-        query(
-          collection(db, COLLECTIONS.leads),
-          where("organizationId", "==", organizationId),
-          where("ownerManagerIds", "array-contains", uid),
-        ),
-      );
-
-      // Channel assignees still get a dedicated query for assigned prospect work.
-      subscribeLeads(
-        "prospectAssignee",
-        query(
-          collection(db, COLLECTIONS.leads),
-          where("organizationId", "==", organizationId),
-          where("intakeKind", "==", "prospect"),
-          where("prospectAssigneeIds", "array-contains", uid),
-        ),
-      );
-
-      subscribeLeads(
-        "sharedOwner",
-        query(
-          collection(db, COLLECTIONS.leads),
-          where("organizationId", "==", organizationId),
-          where("sharedOwnerIds", "array-contains", uid),
-        ),
-      );
-    } else {
-      subscribeLeads(
-        "all",
-        query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId)),
-      );
-    }
 
     const subscribeOwnedByOwnerOrManager = <K extends keyof LiveWorkspaceFirestoreState>(
+      group: WorkspaceListenerGroup,
       dataKey: K,
       collectionName: string,
       mapDoc: (id: string, raw: Record<string, unknown>) => LiveWorkspaceFirestoreState[K] extends (infer R)[]
@@ -701,7 +680,6 @@ export function useLiveWorkspaceFirestore(
       managerField: "ownerManagerIds" | "leadOwnerManagerIds" | "userManagerIds",
       ownerField: "ownerId" | "leadOwnerId" | "userId",
       opts?: {
-        /** When set with limitCount, prefers recent docs (requires composite indexes). */
         orderByField?: string;
         limitCount?: number;
       },
@@ -714,7 +692,8 @@ export function useLiveWorkspaceFirestore(
         return next;
       };
       if (!memberScope) {
-        unsubs.push(
+        pushUnsub(
+          group,
           onSnapshot(
             query(
               collection(db, collectionName),
@@ -750,7 +729,8 @@ export function useLiveWorkspaceFirestore(
         );
       };
       const sub = (key: string, constraints: QueryConstraint[]) => {
-        unsubs.push(
+        pushUnsub(
+          group,
           onSnapshot(
             query(collection(db, collectionName), ...withCap(constraints)),
             (snap) => {
@@ -776,211 +756,403 @@ export function useLiveWorkspaceFirestore(
       ]);
     };
 
-    subscribeOwnedByOwnerOrManager("accounts", COLLECTIONS.accounts, asAccount, "ownerManagerIds", "ownerId");
-    subscribeOwnedByOwnerOrManager("contacts", COLLECTIONS.contacts, asContact, "ownerManagerIds", "ownerId");
-    subscribeOwnedByOwnerOrManager("deals", COLLECTIONS.deals, asDeal, "ownerManagerIds", "ownerId");
-    subscribeOwnedByOwnerOrManager("followups", COLLECTIONS.followups, asFollowup, "ownerManagerIds", "ownerId");
-    subscribeOwnedByOwnerOrManager("profiles", COLLECTIONS.profiles, asProfile, "ownerManagerIds", "ownerId");
-    subscribeOwnedByOwnerOrManager(
-      "touchpoints",
-      COLLECTIONS.touchpoints,
-      asTouchpoint,
-      "leadOwnerManagerIds",
-      "leadOwnerId",
-    );
-    subscribeOwnedByOwnerOrManager(
-      "timelineEvents",
-      COLLECTIONS.timelineEvents,
-      asTimelineEvent,
-      "leadOwnerManagerIds",
-      "leadOwnerId",
-      { orderByField: "createdAt", limitCount: TIMELINE_EVENTS_LIVE_LIMIT },
-    );
-    subscribeOwnedByOwnerOrManager(
-      "activityCounters",
-      COLLECTIONS.activityCounters,
-      asActivityCounterRow,
-      "userManagerIds",
-      "userId",
-    );
-    subscribeOwnedByOwnerOrManager(
-      "activityRecords",
-      COLLECTIONS.activityRecords,
-      asActivityRecord,
-      "userManagerIds",
-      "userId",
-      { orderByField: "occurredAt", limitCount: ACTIVITY_RECORDS_LIVE_LIMIT },
-    );
+    const attachGroup = (group: WorkspaceListenerGroup) => {
+      if (attachedGroupsRef.current.has(group)) return;
+      attachedGroupsRef.current.add(group);
 
-    // Split note listeners so rules can prove each result set.
-    const noteSlices = new Map<string, Note[]>();
-    const mergeNoteSlices = () => {
-      const byId = new Map<string, Note>();
-      for (const slice of noteSlices.values()) {
-        for (const note of slice) {
-          byId.set(note.id, note);
-        }
-      }
-      applySnapshot("notes", "notes", Array.from(byId.values()));
-    };
-    const subscribeNotes = (key: string, q: ReturnType<typeof query>) => {
-      unsubs.push(
-        onSnapshot(
-          q,
-          (snap) => {
-            noteSlices.set(
-              key,
-              snap.docs.map((d) => asNote(d.id, d.data() as Record<string, unknown>)),
-            );
-            mergeNoteSlices();
-          },
-          (err) => applyListenerError(`notes:${key}`, err),
-        ),
-      );
-    };
-    if (memberScope) {
-      subscribeNotes(
-        "author",
-        query(
-          collection(db, COLLECTIONS.notes),
+      if (group === "core") {
+        const qUsers = query(
+          collection(db, COLLECTIONS.users),
           where("organizationId", "==", organizationId),
-          where("authorId", "==", listOwnerId),
-        ),
-      );
-      subscribeNotes(
-        "leadOwner",
-        query(
-          collection(db, COLLECTIONS.notes),
-          where("organizationId", "==", organizationId),
-          where("leadOwnerId", "==", listOwnerId),
-        ),
-      );
-      subscribeNotes(
-        "managers",
-        query(
-          collection(db, COLLECTIONS.notes),
-          where("organizationId", "==", organizationId),
-          where("leadOwnerManagerIds", "array-contains", uid),
-        ),
-      );
-    } else {
-      subscribeNotes(
-        "all",
-        query(collection(db, COLLECTIONS.notes), where("organizationId", "==", organizationId)),
-      );
-    }
+        );
+        pushUnsub(
+          group,
+          onSnapshot(
+            qUsers,
+            (snap) => {
+              const users = snap.docs.map((d) => asUser(d.id, d.data() as Record<string, unknown>));
+              applySnapshot("users", "users", users);
+            },
+            (err) => applyListenerError("users", err),
+          ),
+        );
 
-    subscribeOwnedByOwnerOrManager(
-      "followupPlans",
-      COLLECTIONS.followupPlans,
-      asFollowupPlan,
-      "ownerManagerIds",
-      "ownerId",
-    );
-
-    const leadTaskSlices = new Map<string, LeadTask[]>();
-    const mergeLeadTaskSlices = () => {
-      const byId = new Map<string, LeadTask>();
-      for (const slice of leadTaskSlices.values()) {
-        for (const task of slice) {
-          byId.set(task.id, task);
-        }
-      }
-      applySnapshot("leadTasks", "leadTasks", Array.from(byId.values()));
-    };
-    const subscribeLeadTasks = (key: string, q: ReturnType<typeof query>) => {
-      unsubs.push(
-        onSnapshot(
-          q,
-          (snap) => {
-            leadTaskSlices.set(
-              key,
-              snap.docs.map((d) => asLeadTask(d.id, d.data() as Record<string, unknown>)),
-            );
-            mergeLeadTaskSlices();
-          },
-          (err) => applyListenerError(`leadTasks:${key}`, err),
-        ),
-      );
-    };
-    if (memberScope) {
-      subscribeLeadTasks(
-        "assignee",
-        query(
-          collection(db, COLLECTIONS.leadTasks),
-          where("organizationId", "==", organizationId),
-          where("assigneeId", "==", listOwnerId),
-        ),
-      );
-      subscribeLeadTasks(
-        "createdBy",
-        query(
-          collection(db, COLLECTIONS.leadTasks),
-          where("organizationId", "==", organizationId),
-          where("createdById", "==", listOwnerId),
-        ),
-      );
-    } else {
-      subscribeLeadTasks(
-        "all",
-        query(collection(db, COLLECTIONS.leadTasks), where("organizationId", "==", organizationId)),
-      );
-    }
-
-    const qOrgActivity = query(
-      collection(db, COLLECTIONS.orgActivityEvents),
-      where("organizationId", "==", organizationId),
-      orderBy("createdAt", "desc"),
-      limit(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
-    );
-    unsubs.push(
-      onSnapshot(
-        qOrgActivity,
-        (snap) => {
-          const orgActivityEvents = snap.docs.map((d) =>
-            asOrgActivityEvent(d.id, d.data() as Record<string, unknown>),
+        const leadSlices = new Map<string, Lead[]>();
+        const mergeLeadSlices = () => {
+          const byId = new Map<string, Lead>();
+          for (const slice of leadSlices.values()) {
+            for (const lead of slice) {
+              byId.set(lead.id, lead);
+            }
+          }
+          applySnapshot("leads", "leads", Array.from(byId.values()));
+        };
+        const subscribeLeads = (key: string, q: ReturnType<typeof query>) => {
+          pushUnsub(
+            group,
+            onSnapshot(
+              q,
+              (snap) => {
+                leadSlices.set(
+                  key,
+                  snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>)),
+                );
+                mergeLeadSlices();
+              },
+              (err) => applyListenerError(`leads:${key}`, err),
+            ),
           );
-          applySnapshot("orgActivityEvents", "orgActivityEvents", orgActivityEvents);
-        },
-        (err) => applyListenerError("orgActivityEvents", err),
-      ),
-    );
+        };
+        if (memberScope) {
+          subscribeLeads(
+            "owner",
+            query(
+              collection(db, COLLECTIONS.leads),
+              where("organizationId", "==", organizationId),
+              where("ownerId", "==", listOwnerId),
+            ),
+          );
+          subscribeLeads(
+            "managers",
+            query(
+              collection(db, COLLECTIONS.leads),
+              where("organizationId", "==", organizationId),
+              where("ownerManagerIds", "array-contains", uid),
+            ),
+          );
+          subscribeLeads(
+            "prospectAssignee",
+            query(
+              collection(db, COLLECTIONS.leads),
+              where("organizationId", "==", organizationId),
+              where("intakeKind", "==", "prospect"),
+              where("prospectAssigneeIds", "array-contains", uid),
+            ),
+          );
+          subscribeLeads(
+            "sharedOwner",
+            query(
+              collection(db, COLLECTIONS.leads),
+              where("organizationId", "==", organizationId),
+              where("sharedOwnerIds", "array-contains", uid),
+            ),
+          );
+        } else {
+          subscribeLeads(
+            "all",
+            query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId)),
+          );
+        }
 
-    const qCampaigns = query(
-      collection(db, COLLECTIONS.campaigns),
-      where("organizationId", "==", organizationId),
-    );
-    unsubs.push(
-      onSnapshot(
-        qCampaigns,
-        (snap) => {
-          const campaigns = snap.docs.map((d) => asCampaign(d.id, d.data() as Record<string, unknown>));
-          applySnapshot("campaigns", "campaigns", campaigns);
-        },
-        (err) => applyListenerError("campaigns", err),
-      ),
-    );
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "followups",
+          COLLECTIONS.followups,
+          asFollowup,
+          "ownerManagerIds",
+          "ownerId",
+        );
 
-    const qLabels = query(
-      collection(db, COLLECTIONS.labels),
-      where("organizationId", "==", organizationId),
-    );
-    unsubs.push(
-      onSnapshot(
-        qLabels,
-        (snap) => {
-          const crmLabels = snap.docs.map((d) => asCrmLabel(d.id, d.data() as Record<string, unknown>));
-          applySnapshot("crmLabels", "crmLabels", crmLabels);
-        },
-        (err) => applyListenerError("crmLabels", err),
-      ),
-    );
+        const leadTaskSlices = new Map<string, LeadTask[]>();
+        const mergeLeadTaskSlices = () => {
+          const byId = new Map<string, LeadTask>();
+          for (const slice of leadTaskSlices.values()) {
+            for (const task of slice) {
+              byId.set(task.id, task);
+            }
+          }
+          applySnapshot("leadTasks", "leadTasks", Array.from(byId.values()));
+        };
+        const subscribeLeadTasks = (key: string, q: ReturnType<typeof query>) => {
+          pushUnsub(
+            group,
+            onSnapshot(
+              q,
+              (snap) => {
+                leadTaskSlices.set(
+                  key,
+                  snap.docs.map((d) => asLeadTask(d.id, d.data() as Record<string, unknown>)),
+                );
+                mergeLeadTaskSlices();
+              },
+              (err) => applyListenerError(`leadTasks:${key}`, err),
+            ),
+          );
+        };
+        if (memberScope) {
+          subscribeLeadTasks(
+            "assignee",
+            query(
+              collection(db, COLLECTIONS.leadTasks),
+              where("organizationId", "==", organizationId),
+              where("assigneeId", "==", listOwnerId),
+            ),
+          );
+          subscribeLeadTasks(
+            "createdBy",
+            query(
+              collection(db, COLLECTIONS.leadTasks),
+              where("organizationId", "==", organizationId),
+              where("createdById", "==", listOwnerId),
+            ),
+          );
+        } else {
+          subscribeLeadTasks(
+            "all",
+            query(
+              collection(db, COLLECTIONS.leadTasks),
+              where("organizationId", "==", organizationId),
+            ),
+          );
+        }
+
+        const qLabels = query(
+          collection(db, COLLECTIONS.labels),
+          where("organizationId", "==", organizationId),
+        );
+        pushUnsub(
+          group,
+          onSnapshot(
+            qLabels,
+            (snap) => {
+              const crmLabels = snap.docs.map((d) =>
+                asCrmLabel(d.id, d.data() as Record<string, unknown>),
+              );
+              applySnapshot("crmLabels", "crmLabels", crmLabels);
+            },
+            (err) => applyListenerError("crmLabels", err),
+          ),
+        );
+        return;
+      }
+
+      if (group === "directory") {
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "accounts",
+          COLLECTIONS.accounts,
+          asAccount,
+          "ownerManagerIds",
+          "ownerId",
+        );
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "contacts",
+          COLLECTIONS.contacts,
+          asContact,
+          "ownerManagerIds",
+          "ownerId",
+        );
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "profiles",
+          COLLECTIONS.profiles,
+          asProfile,
+          "ownerManagerIds",
+          "ownerId",
+        );
+        return;
+      }
+
+      if (group === "deals") {
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "deals",
+          COLLECTIONS.deals,
+          asDeal,
+          "ownerManagerIds",
+          "ownerId",
+        );
+        return;
+      }
+
+      if (group === "plans") {
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "followupPlans",
+          COLLECTIONS.followupPlans,
+          asFollowupPlan,
+          "ownerManagerIds",
+          "ownerId",
+        );
+        return;
+      }
+
+      if (group === "leadDetail") {
+        const noteSlices = new Map<string, Note[]>();
+        const mergeNoteSlices = () => {
+          const byId = new Map<string, Note>();
+          for (const slice of noteSlices.values()) {
+            for (const note of slice) {
+              byId.set(note.id, note);
+            }
+          }
+          applySnapshot("notes", "notes", Array.from(byId.values()));
+        };
+        const subscribeNotes = (key: string, q: ReturnType<typeof query>) => {
+          pushUnsub(
+            group,
+            onSnapshot(
+              q,
+              (snap) => {
+                noteSlices.set(
+                  key,
+                  snap.docs.map((d) => asNote(d.id, d.data() as Record<string, unknown>)),
+                );
+                mergeNoteSlices();
+              },
+              (err) => applyListenerError(`notes:${key}`, err),
+            ),
+          );
+        };
+        if (memberScope) {
+          subscribeNotes(
+            "author",
+            query(
+              collection(db, COLLECTIONS.notes),
+              where("organizationId", "==", organizationId),
+              where("authorId", "==", listOwnerId),
+            ),
+          );
+          subscribeNotes(
+            "leadOwner",
+            query(
+              collection(db, COLLECTIONS.notes),
+              where("organizationId", "==", organizationId),
+              where("leadOwnerId", "==", listOwnerId),
+            ),
+          );
+          subscribeNotes(
+            "managers",
+            query(
+              collection(db, COLLECTIONS.notes),
+              where("organizationId", "==", organizationId),
+              where("leadOwnerManagerIds", "array-contains", uid),
+            ),
+          );
+        } else {
+          subscribeNotes(
+            "all",
+            query(collection(db, COLLECTIONS.notes), where("organizationId", "==", organizationId)),
+          );
+        }
+
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "touchpoints",
+          COLLECTIONS.touchpoints,
+          asTouchpoint,
+          "leadOwnerManagerIds",
+          "leadOwnerId",
+        );
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "timelineEvents",
+          COLLECTIONS.timelineEvents,
+          asTimelineEvent,
+          "leadOwnerManagerIds",
+          "leadOwnerId",
+          { orderByField: "createdAt", limitCount: TIMELINE_EVENTS_LIVE_LIMIT },
+        );
+        return;
+      }
+
+      if (group === "activity") {
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "activityCounters",
+          COLLECTIONS.activityCounters,
+          asActivityCounterRow,
+          "userManagerIds",
+          "userId",
+        );
+        subscribeOwnedByOwnerOrManager(
+          group,
+          "activityRecords",
+          COLLECTIONS.activityRecords,
+          asActivityRecord,
+          "userManagerIds",
+          "userId",
+          { orderByField: "occurredAt", limitCount: ACTIVITY_RECORDS_LIVE_LIMIT },
+        );
+        const qOrgActivity = query(
+          collection(db, COLLECTIONS.orgActivityEvents),
+          where("organizationId", "==", organizationId),
+          orderBy("createdAt", "desc"),
+          limit(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
+        );
+        pushUnsub(
+          group,
+          onSnapshot(
+            qOrgActivity,
+            (snap) => {
+              const orgActivityEvents = snap.docs.map((d) =>
+                asOrgActivityEvent(d.id, d.data() as Record<string, unknown>),
+              );
+              applySnapshot("orgActivityEvents", "orgActivityEvents", orgActivityEvents);
+            },
+            (err) => applyListenerError("orgActivityEvents", err),
+          ),
+        );
+        return;
+      }
+
+      if (group === "campaigns") {
+        const qCampaigns = query(
+          collection(db, COLLECTIONS.campaigns),
+          where("organizationId", "==", organizationId),
+        );
+        pushUnsub(
+          group,
+          onSnapshot(
+            qCampaigns,
+            (snap) => {
+              const campaigns = snap.docs.map((d) =>
+                asCampaign(d.id, d.data() as Record<string, unknown>),
+              );
+              applySnapshot("campaigns", "campaigns", campaigns);
+            },
+            (err) => applyListenerError("campaigns", err),
+          ),
+        );
+      }
+    };
+
+    sessionRef.current = {
+      organizationId,
+      viewerUid,
+      narrowToMemberCrm,
+      attachGroup,
+    };
+
+    // Attach whatever groups are already requested for this session.
+    for (const g of requestedGroups) {
+      attachGroup(g);
+    }
+    // Always ensure core is attached even if caller omitted it.
+    attachGroup("core");
 
     return () => {
       listenerErrorsRef.current.clear();
-      for (const u of unsubs) u();
+      sessionRef.current = null;
+      attachedGroupsRef.current.clear();
+      for (const unsubs of groupUnsubsRef.current.values()) {
+        for (const u of unsubs) u();
+      }
+      groupUnsubsRef.current.clear();
     };
+    // groupsKey intentionally omitted: sticky attach is handled by the second effect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId, viewerUid, narrowToMemberCrm]);
+
+  // Sticky attach: when new groups are requested, subscribe without tearing down existing ones.
+  React.useEffect(() => {
+    const session = sessionRef.current;
+    if (!session) return;
+    for (const g of requestedGroups) {
+      session.attachGroup(g);
+    }
+  }, [groupsKey, requestedGroups]);
 
   return state;
 }

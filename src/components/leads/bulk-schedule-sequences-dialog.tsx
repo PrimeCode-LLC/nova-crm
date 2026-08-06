@@ -84,6 +84,8 @@ import { MailboxSignaturePreview } from "@/components/leads/mailbox-signature-pr
 import { GlobalEmailFooterPreview } from "@/components/leads/global-email-footer-preview";
 import { cn } from "@/lib/utils";
 import type { Followup } from "@/lib/types";
+import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
+import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 
 function toScheduleIso(value: string, wallClockZone: string): string {
   const trimmed = value.trim();
@@ -152,6 +154,7 @@ export function BulkScheduleSequencesDialog({
     organizationId,
     getOwnerDisplayName,
     organizationSendPolicy,
+    addOrgActivityEvent,
   } = useWorkspace();
   const timeZone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
@@ -529,6 +532,8 @@ export function BulkScheduleSequencesDialog({
     let success = 0;
     let skipped = 0;
     let failed = 0;
+    let emailsScheduled = 0;
+    const successLeadIds: string[] = [];
     const mailboxById = new Map(selected.map((m) => [m.id, m]));
 
     for (let i = 0; i < queue.length; i++) {
@@ -740,6 +745,8 @@ export function BulkScheduleSequencesDialog({
         }${continuityNote}`,
       });
       success += 1;
+      emailsScheduled += okCount;
+      successLeadIds.push(leadId);
     }
 
     if (mode === "preview") {
@@ -787,6 +794,20 @@ export function BulkScheduleSequencesDialog({
         ? { description: `${skipped} skipped · ${failed} failed` }
         : undefined,
     );
+    if (success > 0 && currentUserId) {
+      const onlyId = success === 1 ? successLeadIds[0] : undefined;
+      const onlyLead = onlyId
+        ? leadsRef.current.find((l) => l.id === onlyId)
+        : undefined;
+      emitBulkLeadOrgActivity(addOrgActivityEvent, {
+        type: "leads_sequences_scheduled",
+        actorId: currentUserId,
+        count: success,
+        emailCount: emailsScheduled,
+        leadId: onlyId,
+        leadLabel: onlyLead ? leadDisplayLabel(onlyLead) : undefined,
+      });
+    }
     if (failed === 0 && success > 0) {
       onCompleteRef.current?.();
     }

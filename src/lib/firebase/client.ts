@@ -2,7 +2,14 @@
 
 import { initializeApp, getApps, type FirebaseApp } from "firebase/app";
 import { getAuth, type Auth } from "firebase/auth";
-import { getFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  memoryLocalCache,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from "firebase/firestore";
 import { getStorage, type FirebaseStorage } from "firebase/storage";
 import { getFirebaseWebConfig } from "./config";
 
@@ -34,9 +41,31 @@ export function getFirebaseAuth(): Auth {
   return auth;
 }
 
+/**
+ * Prefer persistent multi-tab cache so reconnects resume via tokens (only
+ * changed docs billed) and sibling tabs share one persistence lease.
+ * Single-tab persistence breaks when a second tab / HMR instance is open.
+ * Fall back to memory cache when IndexedDB is unavailable.
+ */
 export function getFirebaseDb(): Firestore {
   if (!db) {
-    db = getFirestore(getFirebaseApp());
+    const appInstance = getFirebaseApp();
+    try {
+      db = initializeFirestore(appInstance, {
+        localCache: persistentLocalCache({
+          tabManager: persistentMultipleTabManager(),
+        }),
+      });
+    } catch {
+      try {
+        // Already initialized (HMR) or persistence unavailable — reuse or memory.
+        db = getFirestore(appInstance);
+      } catch {
+        db = initializeFirestore(appInstance, {
+          localCache: memoryLocalCache(),
+        });
+      }
+    }
   }
   return db;
 }

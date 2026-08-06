@@ -4,6 +4,7 @@ import * as React from "react";
 import dynamic from "next/dynamic";
 import type { QuickAddPill } from "@/components/layout/quick-add-dialog";
 import type { ChannelKey, PipelineStage } from "@/lib/types";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
 export type NewProspectPrefill = {
   leadNotes?: string;
@@ -61,17 +62,27 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
   const [newProspectOpen, setNewProspectOpen] = React.useState(false);
   const [prospectLaunch, setProspectLaunch] = React.useState<NewProspectLaunch | undefined>();
   const [prospectLaunchKey, setProspectLaunchKey] = React.useState(0);
+  const workspace = useWorkspace();
+  const requestWorkspaceGroups = workspace.requestWorkspaceGroups;
 
-  const openQuickAdd = React.useCallback((next?: OpenQuickAddOpts) => {
-    setOpts(next ?? {});
-    setOpen(true);
-  }, []);
+  const openQuickAdd = React.useCallback(
+    (next?: OpenQuickAddOpts) => {
+      requestWorkspaceGroups?.(["directory"]);
+      setOpts(next ?? {});
+      setOpen(true);
+    },
+    [requestWorkspaceGroups],
+  );
 
-  const openNewProspectForm = React.useCallback((launch: NewProspectLaunch) => {
-    setProspectLaunch(launch);
-    setProspectLaunchKey((value) => value + 1);
-    setNewProspectOpen(true);
-  }, []);
+  const openNewProspectForm = React.useCallback(
+    (launch: NewProspectLaunch) => {
+      requestWorkspaceGroups?.(["directory", "campaigns"]);
+      setProspectLaunch(launch);
+      setProspectLaunchKey((value) => value + 1);
+      setNewProspectOpen(true);
+    },
+    [requestWorkspaceGroups],
+  );
 
   const handleNewProspectOpenChange = React.useCallback((nextOpen: boolean) => {
     setNewProspectOpen(nextOpen);

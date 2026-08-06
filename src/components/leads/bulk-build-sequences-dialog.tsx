@@ -43,6 +43,8 @@ import {
   defaultFollowupChannelMix,
   getActiveFollowupPlanForLead,
 } from "@/lib/followup-plans";
+import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
+import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 
 type SuggestApiItem = {
   title: string;
@@ -128,6 +130,7 @@ export function BulkBuildSequencesDialog({
     touchpoints,
     leadTasks,
     crmLabels,
+    addOrgActivityEvent,
   } = useWorkspace();
   const timeZone = useOrgTimezone();
 
@@ -426,7 +429,7 @@ export function BulkBuildSequencesDialog({
       priority: it.priority,
       auto: false,
     }));
-    createPlanRef.current(plan, created);
+    createPlanRef.current(plan, created, { skipTimeline: true });
     return { ok: true, stepCount: created.length };
   }
 
@@ -445,6 +448,7 @@ export function BulkBuildSequencesDialog({
     let success = 0;
     let skipped = 0;
     let failed = 0;
+    const successLeadIds: string[] = [];
 
     for (let i = 0; i < ids.length; i++) {
       if (cancelRef.current) {
@@ -502,6 +506,7 @@ export function BulkBuildSequencesDialog({
         detail: `${activated.stepCount} step${activated.stepCount === 1 ? "" : "s"}`,
       });
       success += 1;
+      successLeadIds.push(leadId);
     }
 
     setPhase("done");
@@ -511,6 +516,19 @@ export function BulkBuildSequencesDialog({
         ? { description: `${skipped} skipped · ${failed} failed` }
         : undefined,
     );
+    if (success > 0 && currentUserId) {
+      const onlyId = success === 1 ? successLeadIds[0] : undefined;
+      const onlyLead = onlyId
+        ? leadsRef.current.find((l) => l.id === onlyId)
+        : undefined;
+      emitBulkLeadOrgActivity(addOrgActivityEvent, {
+        type: "leads_sequences_built",
+        actorId: currentUserId,
+        count: success,
+        leadId: onlyId,
+        leadLabel: onlyLead ? leadDisplayLabel(onlyLead) : undefined,
+      });
+    }
     if (failed === 0 && skipped === 0 && success > 0) {
       onCompleteRef.current?.();
     }

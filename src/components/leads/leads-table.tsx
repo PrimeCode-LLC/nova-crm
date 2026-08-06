@@ -106,6 +106,8 @@ import {
   leadsToProspectExportRows,
 } from "@/lib/imports/prospect-export";
 import { LEAD_TABLE_COLUMN_LABELS as COL } from "@/lib/leads/lead-table-labels";
+import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
+import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import {
   LEAD_SEQUENCE_STATUS_LABEL,
   LEAD_SEQUENCE_STATUS_OPTIONS,
@@ -540,6 +542,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     activeOrgMemberIds,
     followupPlans,
     followups,
+    addOrgActivityEvent,
   } = useWorkspace();
   const { openQuickAdd, openNewProspectForm } = useOpenQuickAdd();
   const leadsChannelFilterOptions = useChannelOptions({ includeDisabled: true });
@@ -669,12 +672,27 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     setArchiveBusy(true);
     setArchiveProgressDone(0);
     let removed = 0;
+    const removedIds: string[] = [];
     for (const id of archiveLeadIds) {
-      if (await deleteLead(id, { quiet: true })) removed += 1;
+      if (await deleteLead(id, { quiet: true, skipActivity: true })) {
+        removed += 1;
+        removedIds.push(id);
+      }
       setArchiveProgressDone((done) => done + 1);
     }
     setArchiveBusy(false);
     if (removed > 0) {
+      if (currentUserId) {
+        const onlyId = removed === 1 ? removedIds[0] : undefined;
+        const onlyLead = onlyId ? leads.find((l) => l.id === onlyId) : undefined;
+        emitBulkLeadOrgActivity(addOrgActivityEvent, {
+          type: "leads_deleted",
+          actorId: currentUserId,
+          count: removed,
+          leadId: onlyId,
+          leadLabel: onlyLead ? leadDisplayLabel(onlyLead) : undefined,
+        });
+      }
       toast.success(
         removed === 1 ? "Lead deleted" : `Deleted ${removed} lead${removed === 1 ? "" : "s"}`,
         removed < total
@@ -690,7 +708,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         description: "None of the selected leads could be removed. Try again or contact an admin.",
       });
     }
-  }, [archiveLeadIds, deleteLead]);
+  }, [archiveLeadIds, deleteLead, currentUserId, leads, addOrgActivityEvent]);
 
   const confirmMarkLost = React.useCallback(() => {
     if (!markLostLeadIds.length) return;

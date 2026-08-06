@@ -522,6 +522,9 @@ const ORG_FEED_TYPES = new Set<OrgActivityEventType>([
   "wall_exit_denied",
   "wall_exit_attempt",
   "wall_exited",
+  "leads_sequences_built",
+  "leads_sequences_scheduled",
+  "leads_deleted",
 ]);
 
 export function buildOpsActivityFeed(input: {

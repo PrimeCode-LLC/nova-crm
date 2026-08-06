@@ -78,12 +78,19 @@ export type WorkspaceLookup = {
 };
 
 export function createWorkspaceLookup(snapshot: WorkspaceSnapshot): WorkspaceLookup {
+  const leadsById = new Map(snapshot.leads.map((l) => [l.id, l]));
+  const contactsById = new Map(snapshot.contacts.map((c) => [c.id, c]));
+  const accountsById = new Map(snapshot.accounts.map((a) => [a.id, a]));
+  const usersById = new Map(snapshot.users.map((u) => [u.id, u]));
+  const profilesById = new Map(snapshot.profiles.map((p) => [p.id, p]));
+  const campaignsById = new Map(snapshot.campaigns.map((c) => [c.id, c]));
+
   return {
-    getLeadById: (id) => snapshot.leads.find((l) => l.id === id),
-    getContactById: (id) => snapshot.contacts.find((c) => c.id === id),
-    getAccountById: (id) => snapshot.accounts.find((a) => a.id === id),
-    getUserById: (id) => snapshot.users.find((u) => u.id === id),
-    getProfileById: (id) => (id ? snapshot.profiles.find((p) => p.id === id) : undefined),
-    getCampaignById: (id) => (id ? snapshot.campaigns.find((c) => c.id === id) : undefined),
+    getLeadById: (id) => leadsById.get(id),
+    getContactById: (id) => contactsById.get(id),
+    getAccountById: (id) => accountsById.get(id),
+    getUserById: (id) => usersById.get(id),
+    getProfileById: (id) => (id ? profilesById.get(id) : undefined),
+    getCampaignById: (id) => (id ? campaignsById.get(id) : undefined),
   };
 }

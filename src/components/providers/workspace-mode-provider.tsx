@@ -1,8 +1,15 @@
 "use client";
 
 import * as React from "react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import type { WorkspaceMode } from "@/lib/workspace-mode";
+import type { WorkspaceListenerGroup } from "@/lib/workspace-listener-groups";
+import {
+  CORE_WORKSPACE_GROUPS,
+  groupsForPathname,
+  mergeWorkspaceGroups,
+  workspaceGroupsKey,
+} from "@/lib/workspace-listener-groups";
 import type {
   Account,
   Campaign,
@@ -114,6 +121,7 @@ import {
   recordLeadStageChangeClient,
 } from "@/lib/firestore/audit-change-client";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
+import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
@@ -182,7 +190,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     /** Session-backed (persists in tab until refresh / mode change). */
     sessionHydrated: boolean;
     addFollowup: (f: Followup) => void;
-    createFollowupPlanWithFollowups: (plan: FollowupPlan, followups: Followup[]) => void;
+    createFollowupPlanWithFollowups: (
+      plan: FollowupPlan,
+      followups: Followup[],
+      options?: { skipTimeline?: boolean },
+    ) => void;
     setFollowupCompleted: (id: string, completed: boolean) => void;
     setFollowupEmailSchedule: (
       id: string,
@@ -255,7 +267,10 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     patchAccount: (accountId: string, patch: Partial<Account>) => void;
     patchContact: (contactId: string, patch: Partial<Contact>) => void;
     /** Removes a lead (org owner or admin only in live). Resolves `true` if removed or queued successfully. */
-    deleteLead: (leadId: string, options?: { quiet?: boolean }) => Promise<boolean>;
+    deleteLead: (
+      leadId: string,
+      options?: { quiet?: boolean; skipActivity?: boolean },
+    ) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
     canDeleteLeads: boolean;
     /** Whether the active user may edit this lead (prospect-derived leads are admin-only). */
@@ -281,6 +296,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     updateCrmLabel: (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => void;
     removeCrmLabel: (id: string) => void;
     patchDeal: (dealId: string, patch: Partial<Deal>) => void;
+    /**
+     * Request sticky Firestore listener groups (e.g. `directory` when opening QuickAdd).
+     * Groups stay attached for the rest of the session.
+     */
+    requestWorkspaceGroups: (groups: readonly WorkspaceListenerGroup[]) => void;
   };
 
 const WorkspaceContext = React.createContext<WorkspaceContextValue | null>(null);
@@ -310,10 +330,48 @@ export function WorkspaceModeProvider({
   children: React.ReactNode;
 }) {
   const router = useRouter();
+  const pathname = usePathname() ?? "/";
   const [mode, setModeState] = React.useState<WorkspaceMode>(initialMode);
   const [demoPersonaId, setDemoPersonaState] = React.useState(initialDemoPersonaId);
   const [demoSnapshot, setDemoSnapshot] = React.useState<WorkspaceSnapshot | null>(null);
   const snapshotRef = React.useRef<WorkspaceSnapshot>(LIVE_SNAPSHOT);
+
+  /** Sticky Firestore listener groups for this session (union of routes visited + dialogs). */
+  const [requestedGroups, setRequestedGroups] = React.useState<Set<WorkspaceListenerGroup>>(
+    () => mergeWorkspaceGroups(CORE_WORKSPACE_GROUPS, groupsForPathname(pathname)),
+  );
+  const requestedGroupsKey = workspaceGroupsKey(requestedGroups);
+
+  React.useEffect(() => {
+    const routeGroups = groupsForPathname(pathname);
+    if (routeGroups.length === 0) return;
+    setRequestedGroups((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const g of routeGroups) {
+        if (!next.has(g)) {
+          next.add(g);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [pathname]);
+
+  const requestWorkspaceGroups = React.useCallback((groups: readonly WorkspaceListenerGroup[]) => {
+    if (groups.length === 0) return;
+    setRequestedGroups((prev) => {
+      let changed = false;
+      const next = new Set(prev);
+      for (const g of groups) {
+        if (!next.has(g)) {
+          next.add(g);
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, []);
 
   const organizationName =
     organizationNameProp?.trim() || "Workspace";
@@ -409,8 +467,8 @@ export function WorkspaceModeProvider({
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
 
-  const { user: fbUser } = useAuth();
-  const { data: userDoc, error: userProfileLoadError } = useUserDoc(
+  const { user: fbUser, loading: authLoading } = useAuth();
+  const { data: userDoc, error: userProfileLoadError, loading: userDocLoading } = useUserDoc(
     mode === "demo" || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
   );
   const liveOrgId =
@@ -452,6 +510,7 @@ export function WorkspaceModeProvider({
     fbUser?.uid,
     narrowMemberCrm,
     viewerForMemberScope,
+    requestedGroups,
   );
 
   const liveLeadsForPersistRef = React.useRef<Lead[]>([]);
@@ -900,19 +959,22 @@ export function WorkspaceModeProvider({
   );
 
   const createFollowupPlanWithFollowups = React.useCallback(
-    (plan: FollowupPlan, items: Followup[]) => {
+    (plan: FollowupPlan, items: Followup[], options?: { skipTimeline?: boolean }) => {
       const iso = new Date().toISOString();
-      const timelines: TimelineEvent[] = items
-        .filter((f): f is Followup & { leadId: string } => Boolean(f.leadId))
-        .map((f) => ({
-          id: newLocalId("te-local"),
-          leadId: f.leadId,
-          type: "followup_created" as const,
-          actorId: f.ownerId || plan.ownerId,
-          summary: `Scheduled follow-up: ${f.title}`,
-          createdAt: iso,
-          payload: { followupId: f.id, planId: plan.id },
-        }));
+      const skipTimeline = options?.skipTimeline === true;
+      const timelines: TimelineEvent[] = skipTimeline
+        ? []
+        : items
+            .filter((f): f is Followup & { leadId: string } => Boolean(f.leadId))
+            .map((f) => ({
+              id: newLocalId("te-local"),
+              leadId: f.leadId,
+              type: "followup_created" as const,
+              actorId: f.ownerId || plan.ownerId,
+              summary: `Scheduled follow-up: ${f.title}`,
+              createdAt: iso,
+              payload: { followupId: f.id, planId: plan.id },
+            }));
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
@@ -2084,8 +2146,12 @@ export function WorkspaceModeProvider({
   );
 
   const deleteLead = React.useCallback(
-    async (leadId: string, options?: { quiet?: boolean }): Promise<boolean> => {
+    async (
+      leadId: string,
+      options?: { quiet?: boolean; skipActivity?: boolean },
+    ): Promise<boolean> => {
       const quiet = options?.quiet === true;
+      const skipActivity = options?.skipActivity === true;
       const snap = snapshotRef.current;
       const role = snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? "member";
       if (!roleAtLeast(role, "manager")) {
@@ -2103,6 +2169,17 @@ export function WorkspaceModeProvider({
         }
         return false;
       }
+
+      const recordDeletedActivity = () => {
+        if (skipActivity || !snap.currentUserId) return;
+        emitBulkLeadOrgActivity(addOrgActivityEvent, {
+          type: "leads_deleted",
+          actorId: snap.currentUserId,
+          count: 1,
+          leadId,
+          leadLabel: leadDisplayLabel(lead),
+        });
+      };
 
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
@@ -2130,6 +2207,7 @@ export function WorkspaceModeProvider({
               pinnedLeadIds: s.pinnedLeadIds.filter((id) => id !== leadId),
             };
           });
+          recordDeletedActivity();
           return true;
         } catch (e) {
           if (!quiet) {
@@ -2158,9 +2236,10 @@ export function WorkspaceModeProvider({
           pinnedLeadIds: s.pinnedLeadIds.filter((id) => id !== leadId),
         };
       });
+      recordDeletedActivity();
       return true;
     },
-    [mode, userDoc?.organizationId],
+    [mode, userDoc?.organizationId, addOrgActivityEvent],
   );
 
   const updateLeadStage = React.useCallback(
@@ -2541,9 +2620,21 @@ export function WorkspaceModeProvider({
       organizationSendPolicy,
       intentPlaybook,
       setIntentPlaybook,
-      liveFirestoreError: mode === "live" ? liveFs.error : null,
+      liveFirestoreError:
+        mode === "live"
+          ? !authLoading && !fbUser && isFirebaseWebConfigured() && !isAuthDisabled()
+            ? new Error(
+                "Firebase Auth session is missing in this browser tab. Sign out and sign in again to load live CRM data.",
+              )
+            : liveFs.error
+          : null,
       userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
-      workspaceLoading: mode === "live" ? liveFs.loading : demoSnapshot == null,
+      workspaceLoading:
+        mode === "live"
+          ? authLoading ||
+            (Boolean(fbUser) && userDocLoading) ||
+            (Boolean(liveOrgId) && liveFs.loading)
+          : demoSnapshot == null,
       followupsReady:
         mode === "demo" ? demoSnapshot != null : liveFs.coreReady.followups,
       setMode,
@@ -2602,6 +2693,7 @@ export function WorkspaceModeProvider({
       bumpLeadActivity,
       getOwnerDisplayName,
       activeOrgMemberIds,
+      requestWorkspaceGroups,
     };
   }, [
     snapshot,
@@ -2621,6 +2713,8 @@ export function WorkspaceModeProvider({
     liveFs.coreReady.followups,
     demoSnapshot,
     userProfileLoadError,
+    authLoading,
+    userDocLoading,
     fbUser,
     userDoc,
     setMode,
@@ -2672,6 +2766,8 @@ export function WorkspaceModeProvider({
     toggleLeadPin,
     isLeadPinned,
     bumpLeadActivity,
+    requestWorkspaceGroups,
+    requestedGroupsKey,
   ]);
 
   return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;

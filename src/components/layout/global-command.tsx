@@ -33,8 +33,13 @@ export function GlobalCommandMenu({
   onOpenChange: (open: boolean) => void;
 }) {
   const router = useRouter();
-  const { leads, accounts, contacts, users, profiles } = useWorkspace();
+  const { leads, accounts, contacts, users, profiles, requestWorkspaceGroups } = useWorkspace();
   const profileChannelOptions = useChannelOptions();
+
+  React.useEffect(() => {
+    if (!open) return;
+    requestWorkspaceGroups(["directory"]);
+  }, [open, requestWorkspaceGroups]);
   const navAccess = useNavAccessContext();
   const navSections = React.useMemo(
     () => getVisibleNavSections(navAccess),

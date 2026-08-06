@@ -1121,7 +1121,11 @@ export type OrgActivityEventType =
   | "import_completed"
   | "wall_exit_denied"
   | "wall_exit_attempt"
-  | "wall_exited";
+  | "wall_exited"
+  /** Bulk / summary CRM ops (intake-style Live activity rows). */
+  | "leads_sequences_built"
+  | "leads_sequences_scheduled"
+  | "leads_deleted";
 
 export interface OrgActivityEvent {
   id: string;
