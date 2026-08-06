@@ -75,6 +75,7 @@ import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   getPausedFollowupPlanForLead,
   mergeFollowupPlans,
+  retirableFollowupsForPlan,
 } from "@/lib/followup-plans";
 import {
   getActiveMailbox,
@@ -2084,11 +2085,20 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           currentUserId={ws.currentUserId}
           followupPlans={followupPlansMerged}
           regenerateFromPlan={pausedBouncePlan}
+          initialSequenceMode="full"
           initialChannel="linkedin_outbound"
           initialUserPrompt="Email outreach exhausted after hard bounces. Build a LinkedIn outbound sequence (connection request + follow-up messages) using the LinkedIn profile on this lead."
           onCreatePlanWithFollowups={(plan, batch) => {
             if (pausedBouncePlan) {
-              ws.supersedeFollowupPlan(pausedBouncePlan.id, plan.id);
+              // Steps with a live queued send are left for the Followups tab,
+              // which can cancel the scheduled row before retiring them.
+              ws.supersedeFollowupPlan(
+                pausedBouncePlan.id,
+                plan.id,
+                retirableFollowupsForPlan(followupsForLead, pausedBouncePlan.id)
+                  .filter((f) => !f.scheduledEmailId)
+                  .map((f) => f.id),
+              );
             }
             ws.createFollowupPlanWithFollowups(plan, batch);
             ws.patchLead(lead.id, { suggestLinkedInSequence: false });

@@ -83,6 +83,7 @@ import {
   persistFollowupSetPaused,
   persistFollowupPlanCreate,
   persistFollowupPlanPatch,
+  persistFollowupPlanSupersede,
   persistLeadTaskCreate,
   persistLeadTaskSetCompleted,
   persistLeadActivityBump,
@@ -131,7 +132,7 @@ import {
   type LeadArchiveReason,
 } from "@/lib/leads/lead-archive";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
-import { mergeFollowupPlans } from "@/lib/followup-plans";
+import { mergeFollowupPlans, SUPERSEDED_STEP_CANCEL_REASON } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { canAction } from "@/lib/permissions/can";
 import {
@@ -259,7 +260,12 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
       openFollowupIds: string[];
       actorId?: string;
     }) => Promise<void>;
-    supersedeFollowupPlan: (oldPlanId: string, newPlanId: string) => void;
+    supersedeFollowupPlan: (
+      oldPlanId: string,
+      newPlanId: string,
+      /** Unsent steps of the old plan to cancel; cancel linked sends first. */
+      retireFollowupIds?: readonly string[],
+    ) => void;
     addLeadTask: (t: LeadTask) => void;
     setLeadTaskCompleted: (id: string, completed: boolean) => void;
     addLeadNote: (leadId: string, body: string, authorId: string) => void;
@@ -1259,40 +1265,72 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId, leadOwnerIdForFirestore, fbUser?.uid],
   );
 
+  /**
+   * Replace a plan with its regenerated successor. `retireFollowupIds` are the
+   * old plan's unsent steps: they are cancelled here so a replaced cadence
+   * cannot keep sending, and so the list stops showing dead steps next to the
+   * new ones. Cancel any linked scheduled email before calling.
+   */
   const supersedeFollowupPlan = React.useCallback(
-    (oldPlanId: string, newPlanId: string) => {
+    (oldPlanId: string, newPlanId: string, retireFollowupIds: readonly string[] = []) => {
+      const iso = new Date().toISOString();
+      const stepPatch: Partial<Followup> = {
+        deliveryStatus: "cancelled",
+        cancelledAt: iso,
+        cancelReason: SUPERSEDED_STEP_CANCEL_REASON,
+        scheduledEmailId: undefined,
+        emailScheduledAt: undefined,
+      };
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
             const db = getFirebaseDb();
-            await persistFollowupPlanPatch(db, oldPlanId, {
-              status: "superseded",
-              supersededByPlanId: newPlanId,
+            await persistFollowupPlanSupersede(db, {
+              oldPlanId,
+              newPlanId,
+              followupIds: retireFollowupIds,
+              cancelReason: SUPERSEDED_STEP_CANCEL_REASON,
+              cancelledAt: iso,
             });
           } catch (e) {
-            toastError("Could not update prior plan", e, {
+            toastError("Could not retire the prior sequence", e, {
               location: "src/components/providers/workspace-mode-provider.tsx",
               functionName: "workspacePersist",
             });
           }
         })();
       }
-      setSessionV2((s) => ({
-        ...s,
-        followupPlans: {
-          ...s.followupPlans,
-          patches: {
-            ...s.followupPlans.patches,
-            [oldPlanId]: {
-              ...(s.followupPlans.patches[oldPlanId] ?? {}),
-              status: "superseded",
-              supersededByPlanId: newPlanId,
+      setSessionV2((s) => {
+        const extraIds = new Set(s.followups.extras.map((f) => f.id));
+        const patches = { ...s.followups.patches };
+        for (const id of retireFollowupIds) {
+          if (extraIds.has(id)) continue;
+          patches[id] = { ...(patches[id] ?? {}), ...stepPatch };
+        }
+        return {
+          ...s,
+          followupPlans: {
+            ...s.followupPlans,
+            patches: {
+              ...s.followupPlans.patches,
+              [oldPlanId]: {
+                ...(s.followupPlans.patches[oldPlanId] ?? {}),
+                status: "superseded",
+                supersededByPlanId: newPlanId,
+              },
             },
           },
-        },
-      }));
+          followups: {
+            ...s.followups,
+            patches,
+            extras: s.followups.extras.map((f) =>
+              retireFollowupIds.includes(f.id) ? { ...f, ...stepPatch } : f,
+            ),
+          },
+        };
+      });
     },
     [mode, userDoc?.organizationId],
   );

@@ -52,7 +52,9 @@ import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,
   getPausedFollowupPlanForLead,
+  isSupersededFollowup,
   mergeFollowupPlans,
+  retirableFollowupsForPlan,
   sequenceModeLabel,
   channelMixLabel,
 } from "@/lib/followup-plans";
@@ -482,7 +484,11 @@ export function LeadFollowups({
     import("@/lib/types").ChannelKey | undefined
   >();
   const [suggestPrompt, setSuggestPrompt] = React.useState<string | undefined>();
+  const [suggestMode, setSuggestMode] = React.useState<
+    import("@/lib/types").FollowupSequenceMode | undefined
+  >();
   const [dismissedPlanId, setDismissedPlanId] = React.useState<string | null>(null);
+  const [showSuperseded, setShowSuperseded] = React.useState(false);
   const [deleteTarget, setDeleteTarget] = React.useState<Followup | null>(null);
   const [scheduleTarget, setScheduleTarget] = React.useState<Followup | null>(null);
   const [scheduleAllOpen, setScheduleAllOpen] = React.useState(false);
@@ -592,8 +598,10 @@ export function LeadFollowups({
     });
   }, [followups]);
 
-  const open = displayFollowups.filter((f) => !f.completedAt);
   const done = displayFollowups.filter((f) => f.completedAt);
+  /** Steps of a replaced sequence: kept for history, out of the working list. */
+  const superseded = displayFollowups.filter((f) => !f.completedAt && isSupersededFollowup(f));
+  const open = displayFollowups.filter((f) => !f.completedAt && !isSupersededFollowup(f));
 
   const planOpen = React.useMemo(() => {
     if (!activePlan) return [];
@@ -727,14 +735,38 @@ export function LeadFollowups({
     updateFollowup(id, patch);
   }
 
+  /**
+   * Retire the replaced plan's undelivered steps. Queued sends are cancelled
+   * first: the cron owns a scheduled row until it is cancelled, so retiring the
+   * step alone would let the dead cadence deliver anyway. A step whose send
+   * cannot be cancelled is left alone so the CRM keeps matching the queue.
+   */
+  function retirePlan(oldPlanId: string, newPlanId: string) {
+    const retire = retirableFollowupsForPlan(displayFollowups, oldPlanId);
+    void (async () => {
+      const retiredIds: string[] = [];
+      for (const f of retire) {
+        if (f.scheduledEmailId && !(await cancelLinkedSchedule(f))) continue;
+        retiredIds.push(f.id);
+      }
+      supersedeFollowupPlan(oldPlanId, newPlanId, retiredIds);
+      if (retiredIds.length < retire.length) {
+        toast.warning("Some steps of the old sequence could not be retired", {
+          description: "Cancel their queued email manually before the new sequence sends.",
+        });
+      }
+    })();
+  }
+
   function handleCreatePlan(plan: FollowupPlan, batch: Followup[]) {
     if (regeneratePlan) {
-      supersedeFollowupPlan(regeneratePlan.id, plan.id);
+      retirePlan(regeneratePlan.id, plan.id);
     }
     createFollowupPlanWithFollowups(plan, batch);
     setRegeneratePlan(undefined);
     setSuggestChannel(undefined);
     setSuggestPrompt(undefined);
+    setSuggestMode(undefined);
     setDismissedPlanId(null);
     if (lead.suggestLinkedInSequence) {
       patchLead(lead.id, { suggestLinkedInSequence: false });
@@ -745,12 +777,15 @@ export function LeadFollowups({
     setRegeneratePlan(regenerate);
     setSuggestChannel(undefined);
     setSuggestPrompt(undefined);
+    setSuggestMode(undefined);
     setSuggestOpen(true);
   }
 
   function openLinkedInSuggest() {
     setRegeneratePlan(pausedPlan);
     setSuggestChannel("linkedin_outbound");
+    // Email bounced rather than got answered, so LinkedIn still needs an opener.
+    setSuggestMode("full");
     setSuggestPrompt(
       "Email outreach exhausted after hard bounces. Build a LinkedIn outbound sequence (connection request + follow-up messages) using the LinkedIn profile on this lead.",
     );
@@ -917,6 +952,7 @@ export function LeadFollowups({
             setRegeneratePlan(undefined);
             setSuggestChannel(undefined);
             setSuggestPrompt(undefined);
+            setSuggestMode(undefined);
           }
         }}
         lead={lead}
@@ -925,6 +961,7 @@ export function LeadFollowups({
         currentUserId={currentUserId}
         followupPlans={plans}
         regenerateFromPlan={regeneratePlan}
+        initialSequenceMode={suggestMode}
         initialChannel={suggestChannel}
         initialUserPrompt={suggestPrompt}
         onCreatePlanWithFollowups={handleCreatePlan}
@@ -1008,6 +1045,53 @@ export function LeadFollowups({
         <div className="rounded-md border border-dashed px-6 py-10 text-center text-sm text-muted-foreground">
           <CalendarClock className="mx-auto h-5 w-5 mb-2 opacity-60" />
           No open reminders or sequences. Add a reminder or build a personalized sequence.
+        </div>
+      )}
+
+      {superseded.length > 0 && (
+        <div>
+          <button
+            type="button"
+            onClick={() => setShowSuperseded((v) => !v)}
+            aria-expanded={showSuperseded}
+            className="flex items-center gap-1.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground hover:text-foreground"
+          >
+            {showSuperseded ? (
+              <ChevronUp className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
+            Superseded ({superseded.length})
+          </button>
+          {showSuperseded && (
+            <ul className="space-y-1 mt-2">
+              {superseded.map((f) => (
+                <li
+                  key={f.id}
+                  className="flex items-center gap-3 rounded-md border border-dashed px-3 py-1.5 bg-muted/10 opacity-70"
+                >
+                  <span className="text-sm text-muted-foreground truncate flex-1 min-w-0">
+                    <span className="block truncate">{f.title}</span>
+                    <span className="block text-[10px] font-normal truncate">
+                      Replaced by a regenerated sequence · was due {fmtDate(f.dueAt)}
+                    </span>
+                  </span>
+                  {canMutateRow(f) ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      aria-label="Delete followup"
+                      onClick={() => setDeleteTarget(f)}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
 

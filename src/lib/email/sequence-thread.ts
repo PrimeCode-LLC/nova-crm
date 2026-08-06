@@ -21,6 +21,17 @@ export type SequenceThreadStep = {
   freshThread?: boolean;
 };
 
+/**
+ * Conversation a plan continues (the lead's reply, for a regenerated sequence).
+ * Used only until the plan sends its own first step, after which that step
+ * becomes the thread root.
+ */
+export type SequenceThreadAnchor = {
+  inReplyTo: string;
+  referenceIds?: string[];
+  subject?: string;
+};
+
 export type SequenceThreadResolution =
   | { kind: "root" }
   | { kind: "wait_for_prior" }
@@ -64,6 +75,7 @@ function isAwaitingOutboundSend(step: SequenceThreadStep): boolean {
 export function resolveSequenceThreadContext(
   current: SequenceThreadStep,
   siblings: readonly SequenceThreadStep[],
+  anchor?: SequenceThreadAnchor,
 ): SequenceThreadResolution {
   const scoped = current.freshThread
     ? siblings.filter((step) => step.id === current.id || Boolean(step.freshThread))
@@ -90,7 +102,19 @@ export function resolveSequenceThreadContext(
     });
 
   if (priorSent.length === 0) {
-    return { kind: "root" };
+    const anchorId = current.freshThread ? undefined : normalizeMessageId(anchor?.inReplyTo);
+    if (!anchorId) return { kind: "root" };
+    const referenceIds = [...new Set(
+      [...(anchor?.referenceIds ?? []), anchorId]
+        .map((id) => normalizeMessageId(id))
+        .filter((id): id is string => Boolean(id)),
+    )].slice(-50);
+    return {
+      kind: "reply",
+      inReplyTo: anchorId,
+      referenceIds,
+      subject: replySubject(anchor?.subject?.trim() || undefined),
+    };
   }
 
   const referenceIds = [

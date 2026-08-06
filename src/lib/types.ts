@@ -792,6 +792,17 @@ export interface FollowupPlan {
   /** `${mailboxId}:in:${uid}` when paused due to inbox reply. */
   replyMessageId?: string;
   supersededByPlanId?: string;
+  /**
+   * Conversation this plan continues. Set when a sequence is regenerated after
+   * a reply so its first email threads onto that reply instead of opening a new
+   * thread the prospect will not recognize.
+   */
+  threadAnchor?: {
+    /** RFC 5322 Message-ID of the lead's reply (no angle brackets). */
+    inReplyTo: string;
+    referenceIds?: string[];
+    subject?: string;
+  };
   /** Set when every step in the sequence has been completed or sent. */
   completedAt?: ISODate;
   /** Optional Script library item used as a style guide when the sequence was generated. */

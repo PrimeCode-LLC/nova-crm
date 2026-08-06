@@ -187,4 +187,55 @@ describe("resolveSequenceThreadContext", () => {
       subject: "Re: New campaign intro",
     });
   });
+
+  it("threads a regenerated plan's first step onto the reply it was built from", () => {
+    const result = resolveSequenceThreadContext(
+      { id: "f1", dueAt: "2026-03-01T10:00:00.000Z", title: "Answer their timing question" },
+      [{ id: "f1", dueAt: "2026-03-01T10:00:00.000Z", title: "Answer their timing question" }],
+      {
+        inReplyTo: "<their-reply@prospect.example>",
+        referenceIds: ["<our-intro@nova.local>"],
+        subject: "Re: cutting onboarding time",
+      },
+    );
+    expect(result).toEqual({
+      kind: "reply",
+      inReplyTo: "their-reply@prospect.example",
+      referenceIds: ["our-intro@nova.local", "their-reply@prospect.example"],
+      subject: "Re: cutting onboarding time",
+    });
+  });
+
+  it("prefers the plan's own sent step over the anchor once it exists", () => {
+    const result = resolveSequenceThreadContext(
+      { id: "f2", dueAt: "2026-03-05T10:00:00.000Z", title: "Second touch" },
+      [
+        {
+          id: "f1",
+          dueAt: "2026-03-01T10:00:00.000Z",
+          emailSubject: "Re: cutting onboarding time",
+          deliveryStatus: "sent",
+          sentAt: "2026-03-01T10:05:00.000Z",
+          sentMessageId: "our-reply@nova.local",
+        },
+        { id: "f2", dueAt: "2026-03-05T10:00:00.000Z", title: "Second touch" },
+      ],
+      { inReplyTo: "their-reply@prospect.example", subject: "cutting onboarding time" },
+    );
+    expect(result).toEqual({
+      kind: "reply",
+      inReplyTo: "our-reply@nova.local",
+      referenceIds: ["our-reply@nova.local"],
+      subject: "Re: cutting onboarding time",
+    });
+  });
+
+  it("ignores the anchor when the step is explicitly a fresh thread", () => {
+    const result = resolveSequenceThreadContext(
+      { id: "f1", dueAt: "2026-03-01T10:00:00.000Z", title: "New angle", freshThread: true },
+      [{ id: "f1", dueAt: "2026-03-01T10:00:00.000Z", title: "New angle", freshThread: true }],
+      { inReplyTo: "their-reply@prospect.example", subject: "cutting onboarding time" },
+    );
+    expect(result).toEqual({ kind: "root" });
+  });
 });

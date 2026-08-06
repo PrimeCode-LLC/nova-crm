@@ -21,6 +21,7 @@ import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 import {
   resolveSequenceThreadContext,
+  type SequenceThreadAnchor,
   type SequenceThreadStep,
 } from "@/lib/email/sequence-thread";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
@@ -581,6 +582,24 @@ function followupDocToThreadStep(id: string, data: Record<string, unknown>): Seq
   };
 }
 
+/** Conversation a regenerated plan continues, when it was built from a reply. */
+function planThreadAnchor(
+  data: Record<string, unknown> | undefined,
+): SequenceThreadAnchor | undefined {
+  const raw = data?.threadAnchor;
+  if (!raw || typeof raw !== "object") return undefined;
+  const anchor = raw as Record<string, unknown>;
+  const inReplyTo = typeof anchor.inReplyTo === "string" ? anchor.inReplyTo.trim() : "";
+  if (!inReplyTo) return undefined;
+  return {
+    inReplyTo,
+    referenceIds: Array.isArray(anchor.referenceIds)
+      ? anchor.referenceIds.map((id) => String(id)).filter(Boolean)
+      : undefined,
+    subject: typeof anchor.subject === "string" ? anchor.subject : undefined,
+  };
+}
+
 /**
  * Build In-Reply-To / References from earlier sent steps in the same plan.
  * Returns null when this mail already has explicit reply headers (e.g. schedule-from-thread).
@@ -621,7 +640,9 @@ async function resolveSequenceThreadingForFollowup(input: {
     const siblings = siblingsSnap.docs.map((doc) =>
       followupDocToThreadStep(doc.id, doc.data() as Record<string, unknown>),
     );
-    return resolveSequenceThreadContext(current, siblings);
+    const planSnap = await db.collection(COLLECTIONS.followupPlans).doc(planId).get();
+    const anchor = planThreadAnchor(planSnap.data() as Record<string, unknown> | undefined);
+    return resolveSequenceThreadContext(current, siblings, anchor);
   } catch {
     return { kind: "none" };
   }

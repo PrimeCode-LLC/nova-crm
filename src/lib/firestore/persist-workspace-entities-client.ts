@@ -6,6 +6,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
@@ -130,12 +131,57 @@ export async function persistFollowupPlanCreate(
   if (plan.pausedReason) data.pausedReason = plan.pausedReason;
   if (plan.replyMessageId) data.replyMessageId = plan.replyMessageId;
   if (plan.supersededByPlanId) data.supersededByPlanId = plan.supersededByPlanId;
+  if (plan.threadAnchor?.inReplyTo) {
+    data.threadAnchor = {
+      inReplyTo: plan.threadAnchor.inReplyTo,
+      ...(plan.threadAnchor.referenceIds?.length
+        ? { referenceIds: plan.threadAnchor.referenceIds }
+        : {}),
+      ...(plan.threadAnchor.subject ? { subject: plan.threadAnchor.subject } : {}),
+    };
+  }
   if (plan.kind) data.kind = plan.kind;
   if (plan.sequenceMode) data.sequenceMode = plan.sequenceMode;
   if (plan.channelMix) data.channelMix = plan.channelMix;
   if (plan.completedAt) data.completedAt = plan.completedAt;
   if (plan.sourceScriptId) data.sourceScriptId = plan.sourceScriptId;
   await setDoc(doc(db, COLLECTIONS.followupPlans, plan.id), data);
+}
+
+/**
+ * Retire a replaced plan and its unsent steps in one batch.
+ *
+ * Batched because a partial apply leaves a superseded plan whose steps still
+ * look live, which is how a replaced cadence keeps sending. Steps are cancelled
+ * rather than deleted so delivery history survives the replan.
+ */
+export async function persistFollowupPlanSupersede(
+  db: Firestore,
+  input: {
+    oldPlanId: string;
+    newPlanId: string;
+    followupIds: readonly string[];
+    cancelReason: string;
+    cancelledAt: string;
+  },
+): Promise<void> {
+  const batch = writeBatch(db);
+  batch.update(doc(db, COLLECTIONS.followupPlans, input.oldPlanId), {
+    status: "superseded",
+    supersededByPlanId: input.newPlanId,
+    updatedAt: serverTimestamp(),
+  });
+  for (const followupId of input.followupIds) {
+    batch.update(doc(db, COLLECTIONS.followups, followupId), {
+      deliveryStatus: "cancelled",
+      cancelledAt: input.cancelledAt,
+      cancelReason: input.cancelReason,
+      scheduledEmailId: deleteField(),
+      emailScheduledAt: deleteField(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+  await batch.commit();
 }
 
 export async function persistFollowupPlanPatch(

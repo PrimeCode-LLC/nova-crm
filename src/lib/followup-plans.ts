@@ -216,6 +216,30 @@ export function pausedFollowupsForPlan(followups: readonly Followup[], planId: s
   return followupsForPlan(followups, planId).filter((f) => !f.completedAt && f.pausedAt);
 }
 
+/**
+ * Steps retired when a replan replaced their plan. They are cancelled rather
+ * than deleted so delivery history and the lead timeline stay auditable.
+ */
+export const SUPERSEDED_STEP_CANCEL_REASON = "Superseded by regenerated sequence";
+
+export function isSupersededFollowup(f: Pick<Followup, "cancelReason">): boolean {
+  return f.cancelReason === SUPERSEDED_STEP_CANCEL_REASON;
+}
+
+/**
+ * Steps a replan should retire: everything in the plan that was never actually
+ * delivered. Includes steps already cancelled when the lead replied, since
+ * those are just as dead once a new cadence takes over.
+ */
+export function retirableFollowupsForPlan(
+  followups: readonly Followup[],
+  planId: string,
+): Followup[] {
+  return followupsForPlan(followups, planId).filter(
+    (f) => !f.completedAt && f.deliveryStatus !== "sent" && !isSupersededFollowup(f),
+  );
+}
+
 /** Plans referenced by follow-ups but missing a plan row (legacy AI batch). */
 export function synthesizePlansFromFollowups(
   followups: readonly Followup[],

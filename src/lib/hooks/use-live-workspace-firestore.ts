@@ -340,6 +340,20 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
   };
 }
 
+function asFollowupPlanThreadAnchor(raw: unknown): FollowupPlan["threadAnchor"] {
+  if (!raw || typeof raw !== "object") return undefined;
+  const anchor = raw as Record<string, unknown>;
+  const inReplyTo = typeof anchor.inReplyTo === "string" ? anchor.inReplyTo.trim() : "";
+  if (!inReplyTo) return undefined;
+  return {
+    inReplyTo,
+    referenceIds: Array.isArray(anchor.referenceIds)
+      ? anchor.referenceIds.map((id) => String(id)).filter(Boolean)
+      : undefined,
+    subject: typeof anchor.subject === "string" ? anchor.subject : undefined,
+  };
+}
+
 function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan {
   return {
     id,
@@ -365,6 +379,7 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
     replyMessageId: typeof raw.replyMessageId === "string" ? raw.replyMessageId : undefined,
     supersededByPlanId:
       typeof raw.supersededByPlanId === "string" ? raw.supersededByPlanId : undefined,
+    threadAnchor: asFollowupPlanThreadAnchor(raw.threadAnchor),
     completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
     sourceScriptId:
       typeof raw.sourceScriptId === "string" && raw.sourceScriptId.trim()

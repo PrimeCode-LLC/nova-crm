@@ -154,7 +154,8 @@ export function SuggestFollowupsDialog({
   onCreatePlanWithFollowups,
   regenerateFromPlan,
   followupPlans = [],
-  initialSequenceMode = "full",
+  /** Explicit mode override; regeneration otherwise continues the conversation. */
+  initialSequenceMode,
   /** Prefill channel (e.g. linkedin_outbound after email exhausted). */
   initialChannel,
   /** Prefill user prompt when opening for a specific recovery path. */
@@ -178,8 +179,9 @@ export function SuggestFollowupsDialog({
   const timeZone = useOrgTimezone();
   const hasLinkedIn = leadHasLinkedIn(lead, aiContext.contact);
   const [phase, setPhase] = React.useState<"prompt" | "review">("prompt");
-  const [sequenceMode, setSequenceMode] =
-    React.useState<FollowupSequenceMode>(initialSequenceMode);
+  const [sequenceMode, setSequenceMode] = React.useState<FollowupSequenceMode>(
+    initialSequenceMode ?? "full",
+  );
   const [channelMix, setChannelMix] = React.useState<FollowupChannelMix>("email");
   const [userPrompt, setUserPrompt] = React.useState("");
   const [loading, setLoading] = React.useState(false);
@@ -189,14 +191,18 @@ export function SuggestFollowupsDialog({
   const [leadChannel, setLeadChannel] = React.useState<ChannelKey>(lead.channel);
   const [scriptId, setScriptId] = React.useState("");
   const [selectedScript, setSelectedScript] = React.useState<ScriptLibraryItem | null>(null);
+  /** Set by the API on a replan so the new cadence lands in the reply's thread. */
+  const [threadAnchor, setThreadAnchor] = React.useState<FollowupPlan["threadAnchor"]>();
 
   React.useEffect(() => {
     if (!open) return;
     setPhase("prompt");
-    setSequenceMode(
-      regenerateFromPlan?.sequenceMode ??
-        (regenerateFromPlan ? "continue" : initialSequenceMode),
-    );
+    /**
+     * A replan after a reply always continues the conversation. Inheriting the
+     * prior plan's mode meant a "full" cadence regenerated into another cold
+     * intro even though the prospect had already answered.
+     */
+    setSequenceMode(initialSequenceMode ?? (regenerateFromPlan ? "continue" : "full"));
     setChannelMix(
       regenerateFromPlan?.channelMix ??
         defaultFollowupChannelMix({
@@ -218,6 +224,7 @@ export function SuggestFollowupsDialog({
     setLeadChannel(initialChannel ?? lead.channel);
     setScriptId(regenerateFromPlan?.sourceScriptId ?? "");
     setSelectedScript(null);
+    setThreadAnchor(undefined);
   }, [
     open,
     lead.id,
@@ -257,11 +264,13 @@ export function SuggestFollowupsDialog({
       planSummary?: string;
       leadChannel?: ChannelKey;
       items?: SuggestApiItem[];
+      threadAnchor?: FollowupPlan["threadAnchor"];
     },
     mode: FollowupSequenceMode = sequenceMode,
   ) {
     setPlanSummary(data.planSummary ?? "");
     setLeadChannel(data.leadChannel ?? lead.channel);
+    setThreadAnchor(data.threadAnchor?.inReplyTo ? data.threadAnchor : undefined);
     const apiItems = (data.items ?? []) as SuggestApiItem[];
     const includeInitial = mode === "full";
     setItems(
@@ -369,6 +378,7 @@ export function SuggestFollowupsDialog({
       channelMix,
       createdAt: new Date().toISOString(),
       supersededByPlanId: undefined,
+      threadAnchor,
       sourceScriptId: scriptId || undefined,
     };
     const created: Followup[] = selected.map((it) => ({

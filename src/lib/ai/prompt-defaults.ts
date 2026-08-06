@@ -214,7 +214,8 @@ Operational rules (the CRM depends on these):
 - Honor channelMix / channelMixHint in the user message: that block overrides "prefer lead channel". For multi_channel, interleave LinkedIn and email as one strategy - never collapse to a single channel.
 - A LinkedIn step that follows a connection request can only be delivered if the invite was accepted. Write it as if accepted and state that dependency in description so the rep knows the step is contingent. In a mixed cadence the email steps must still stand on their own if the invite is never accepted.
 - Due dates are assigned by the CRM with this business-day formula (Sat/Sun skipped): Initial Day 0, Follow-up 1 = +3 business days, Follow-up 2 = +5 after FU1, Follow-up 3 = +7 after FU2. Set offsetDays to match (0/3/5/7 full, or 3/5/7 in continue) but prioritize strong copy over exact timing.
-- If regenerateContext is provided, the lead replied - draft a fresh plan that directly acknowledges their message and advances toward a meeting when appropriate.
+- If regenerateContext is provided, the lead replied and the prior cadence is being retired. Step 1 is a direct answer to their reply, not a restart: quote or paraphrase the specific thing they said, respond to it, and advance toward a meeting when appropriate. Never reintroduce yourself or the company, never repeat a pitch already in the thread, and never open with a content-free check-in ("just checking in", "are you back", "any update"). Later steps still need a new, specific reason to reply - a fresh angle, proof, or resource - not a nudge. Title the steps as continuations of the conversation (for example "Reply - answer their timing question", "Email 2 - proof for their use case"), never "Email 1 - Intro".
+- The prior email thread block is the source of truth for what has already been said. Never repeat a claim, question, subject line, or CTA that already appears in it.
 - For email-capable channels include a concise emailSubject. For LinkedIn, Upwork, or similar, leave emailSubject empty and write channel-appropriate copy.
 - Critical: End every email messageBody on the call to action or final sentence - do NOT add any closing/sign-off line (no "Best,", "Best regards,", "Thanks,", "Thank you,", "Cheers,", "Regards,", "Sincerely,", "Warmly,", or similar), and do NOT include a name, title, company, phone, or email footer. The CRM appends the sender's mailbox signature when the email is scheduled.
 - Output structured JSON only.`,
@@ -234,6 +235,9 @@ Recipient role + precomputed deal signals (mandatory - role is also mirrored in 
 
 User instructions (may be empty; treat as high priority when present):
 {{userPrompt}}
+
+Prior email thread with this prospect (verbatim; may be empty):
+{{threadBlock}}
 
 Regenerate context (if replanning after a lead reply):
 {{regenerateBlock}}
@@ -826,7 +830,15 @@ Optional CTA on graphic:`,
  */
 export const REQUIRED_PROMPT_VARS: Partial<Record<AiFeatureKey, string[]>> = {
   lead_analyze: ["userPrompt", "today"],
-  followup_suggest: ["channelMix", "channelMixHint", "sequenceMode", "sequenceModeHint", "roleGuidance"],
+  followup_suggest: [
+    "channelMix",
+    "channelMixHint",
+    "sequenceMode",
+    "sequenceModeHint",
+    "roleGuidance",
+    "threadBlock",
+    "regenerateBlock",
+  ],
   email_reply: ["replyGuidance"],
   email_reply_classify: ["signals"],
   content_draft_generate: ["playbook", "charTarget", "format", "sourcePost", "knowledgePackContext"],

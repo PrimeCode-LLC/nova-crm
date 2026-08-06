@@ -12,6 +12,12 @@ import {
   formatLeadSignalGuidance,
 } from "@/lib/ai/lead-signal-profile";
 import { loadLeadAiContextServer } from "@/lib/ai/load-lead-ai-context-server";
+import {
+  buildFollowupReplyThread,
+  formatFollowupRegenerateBlock,
+  formatFollowupThreadBlock,
+  type FollowupReplyThread,
+} from "@/lib/ai/followup-reply-thread";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
@@ -289,14 +295,30 @@ export async function POST(req: Request) {
     },
   });
 
+  /**
+   * The stored thread is loaded separately from `context` so the prospect's own
+   * words land in their own prompt section instead of being buried in the lead
+   * context JSON, where the model routinely missed them and wrote a cold opener.
+   */
+  let replyThread: FollowupReplyThread = { transcript: "" };
+  try {
+    replyThread = await buildFollowupReplyThread({ organizationId: orgId, leadId: parsed.data.leadId });
+  } catch {
+    /* Thread context is an enhancement; generation still works without it. */
+  }
+
   const userPrompt = parsed.data.userPrompt?.trim() || "(none, use lead context only)";
   const sequenceMode = parsed.data.sequenceMode ?? "full";
   const channelMix = parsed.data.channelMix ?? "lead";
+  const isReplanAfterReply =
+    Boolean(parsed.data.regenerateContext?.trim()) && !parsed.data.singleStep;
   const sequenceModeHint = parsed.data.singleStep
     ? "Regenerate exactly ONE replacement follow-up step. Preserve its purpose and position in the cadence, but rewrite the title, subject, notes, and message using current lead context. Return exactly one item."
-    : sequenceMode === "continue"
-      ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+ / LinkedIn bump)."
-      : "Full personalized outreach from first touch through last touch.";
+    : isReplanAfterReply
+      ? "Replanning after the prospect replied. The intro and the whole prior cadence are already spent, so a cold opener is wrong no matter what sequenceMode says. Step 1 answers their reply inside the existing thread; the remaining steps advance that same conversation on new ground."
+      : sequenceMode === "continue"
+        ? "Intro/first outreach already sent. Do NOT draft a cold opener. Number steps as remaining follow-ups (e.g. Email 2+ / LinkedIn bump)."
+        : "Full personalized outreach from first touch through last touch.";
   const channelMixHint = buildChannelMixHint(channelMix);
   // Also fold into roleGuidance so customized org prompts without {{channelMixHint}} still obey the mix.
   const roleGuidanceWithMix = `${roleGuidance}\n${channelMixHint}`;
@@ -320,7 +342,8 @@ export async function POST(req: Request) {
         channelMix,
         channelMixHint,
         templateHint,
-        regenerateBlock: parsed.data.regenerateContext?.trim() || "(none)",
+        threadBlock: formatFollowupThreadBlock(replyThread),
+        regenerateBlock: formatFollowupRegenerateBlock(parsed.data.regenerateContext, replyThread),
         roleGuidance: roleGuidanceWithMix,
       },
       schema: parsed.data.singleStep ? singleStepSuggestSchema : suggestSchema,
@@ -339,11 +362,20 @@ export async function POST(req: Request) {
         scriptId: selectedTemplate?.id ?? null,
       },
     });
+    /**
+     * Only a replan anchors onto the existing conversation - a fresh Build
+     * sequence must start its own thread rather than reviving an old one.
+     */
+    const threadAnchor =
+      parsed.data.regenerateContext?.trim() && !parsed.data.singleStep
+        ? replyThread.anchor
+        : undefined;
     return NextResponse.json({
       ...normalizeSuggestResult(result),
       leadChannel: loaded.lead.channel as ChannelKey,
       sequenceMode,
       channelMix,
+      ...(threadAnchor ? { threadAnchor } : {}),
     });
   } catch (e) {
     return aiErrorResponse(e, {
