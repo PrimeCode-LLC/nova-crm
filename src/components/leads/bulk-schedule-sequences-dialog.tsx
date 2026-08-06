@@ -734,7 +734,20 @@ export function BulkScheduleSequencesDialog({
       for (const step of assigned.steps.filter((s) => s.included)) {
         const followupRaw = schedulable.find((f) => f.id === step.id);
         if (!followupRaw) continue;
-        const followup = await hydrateFollowupMessageBody(followupRaw);
+        let followup: Followup;
+        try {
+          followup = await hydrateFollowupMessageBody(followupRaw);
+        } catch (e) {
+          lastError =
+            e instanceof Error && e.message.trim()
+              ? e.message.trim()
+              : "Could not load follow-up email body";
+          break;
+        }
+        if (!followup.messageBody?.trim()) {
+          lastError = "Email body is missing on this sequence step";
+          break;
+        }
         const result = await scheduleFollowupEmailClient({
           followupId: followup.id,
           leadId: lead.id,

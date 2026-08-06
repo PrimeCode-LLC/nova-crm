@@ -326,6 +326,24 @@ service cloud.firestore {
         || callerOwnsLead(data.get('leadId', ''));
     }
 
+    /**
+     * Single-doc get for follow-ups / plans. Must cover everyone who can already
+     * list via `ownerManagerIds`, plus teammates who can read the parent lead
+     * (shared co-owners, prospect assignees). Live CRM snapshots omit
+     * `messageBody` and re-fetch by id before schedule/send — a stricter get
+     * than list caused "Missing or insufficient permissions" on bulk schedule.
+     */
+    function canReadFollowupOrPlan(data) {
+      return canReadCrmOwnedBy(data.get('ownerId', ''))
+        || request.auth.uid in data.get('ownerManagerIds', [])
+        || (
+          data.get('leadId', '') is string
+          && data.get('leadId', '').size() > 0
+          && exists(/databases/$(database)/documents/leads/$(data.get('leadId', '')))
+          && canReadLead(get(/databases/$(database)/documents/leads/$(data.get('leadId', ''))).data)
+        );
+    }
+
     match /leads/{id} {
       allow get: if tenantReadable() && canReadLead(resource.data);
       allow list: if tenantReadable() && canListLead(resource.data);
@@ -353,7 +371,7 @@ service cloud.firestore {
     }
 
     match /followups/{id} {
-      allow get: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow get: if tenantReadable() && canReadFollowupOrPlan(resource.data);
       allow list: if tenantReadable() && canListCrmOwned(resource.data);
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()
@@ -365,7 +383,7 @@ service cloud.firestore {
     }
 
     match /followupPlans/{id} {
-      allow get: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow get: if tenantReadable() && canReadFollowupOrPlan(resource.data);
       allow list: if tenantReadable() && canListCrmOwned(resource.data);
       allow create: if signedIn() && isCreatingInOwnOrg();
       allow update: if signedIn()

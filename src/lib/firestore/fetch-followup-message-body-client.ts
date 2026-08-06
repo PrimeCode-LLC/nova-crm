@@ -15,10 +15,23 @@ export async function fetchFollowupMessageBodyClient(
   const id = followupId.trim();
   if (!id) return undefined;
   const db = getFirebaseDb();
-  const snap = await getDoc(doc(db, COLLECTIONS.followups, id));
-  if (!snap.exists()) return undefined;
-  const raw = snap.data() as Record<string, unknown>;
-  return typeof raw.messageBody === "string" ? raw.messageBody : undefined;
+  try {
+    const snap = await getDoc(doc(db, COLLECTIONS.followups, id));
+    if (!snap.exists()) return undefined;
+    const raw = snap.data() as Record<string, unknown>;
+    return typeof raw.messageBody === "string" ? raw.messageBody : undefined;
+  } catch (e) {
+    const code =
+      e && typeof e === "object" && "code" in e
+        ? String((e as { code: unknown }).code)
+        : "";
+    if (code === "permission-denied") {
+      throw new Error(
+        "Missing or insufficient permissions to load this follow-up email body.",
+      );
+    }
+    throw e;
+  }
 }
 
 /** Returns a followup with `messageBody` filled from Firestore when it was omitted from live state. */
