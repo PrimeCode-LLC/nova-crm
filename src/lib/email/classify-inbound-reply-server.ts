@@ -191,6 +191,8 @@ async function writeReplyActionAndLead(input: {
   source: ReplyAction["source"];
   result: z.infer<typeof replyClassifySchema>;
   actorUid?: string;
+  /** When true, clear prior draft / decision fields so a manual re-run starts clean. */
+  force?: boolean;
 }): Promise<{ actionId: string }> {
   const db = getAdminDb();
   if (!db) return { actionId: "" };
@@ -244,10 +246,31 @@ async function writeReplyActionAndLead(input: {
     updatedAt: now,
   };
 
+  const forceReset = input.force
+    ? {
+        draftSubject: FieldValue.delete(),
+        draftBody: FieldValue.delete(),
+        draftTo: FieldValue.delete(),
+        draftError: FieldValue.delete(),
+        draftReferenceIds: FieldValue.delete(),
+        sentAt: FieldValue.delete(),
+        sentMessageId: FieldValue.delete(),
+        decidedAt: FieldValue.delete(),
+        decidedBy: FieldValue.delete(),
+        ...(!waitUntilDate ? { waitUntilDate: FieldValue.delete() } : {}),
+      }
+    : {};
+
   await db
     .collection(COLLECTIONS.replyActions)
     .doc(actionId)
-    .set(stripUndefined(doc as unknown as Record<string, unknown>), { merge: true });
+    .set(
+      {
+        ...stripUndefined(doc as unknown as Record<string, unknown>),
+        ...forceReset,
+      },
+      { merge: true },
+    );
 
   const isAutoReply = doc.classification === "auto_reply";
   const replySource: "imap" | "instantly" | "manual" =
@@ -402,6 +425,8 @@ export async function classifyInboundLeadMailServer(input: {
   leadId: string;
   messages: LeadMailUpsertInput[];
   actorUid?: string;
+  /** Bypass idempotent skip for pending/accepted/dismissed actions (manual re-run). */
+  force?: boolean;
 }): Promise<{ classified: number; skipped: number }> {
   const db = getAdminDb();
   let classified = 0;
@@ -422,7 +447,7 @@ export async function classifyInboundLeadMailServer(input: {
 
   const actionId = replyActionDocId(input.leadId, newest.providerKey);
   const existing = await db.collection(COLLECTIONS.replyActions).doc(actionId).get();
-  if (existing.exists) {
+  if (existing.exists && !input.force) {
     const status = String(existing.data()?.status ?? "");
     if (status === "pending" || status === "accepted" || status === "dismissed") {
       skipped += 1;
@@ -547,6 +572,7 @@ export async function classifyInboundLeadMailServer(input: {
     source,
     result,
     actorUid: input.actorUid,
+    force: input.force,
   });
   classified += 1;
   return { classified, skipped };

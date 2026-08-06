@@ -65,6 +65,7 @@ import { LeadNotes } from "@/components/leads/lead-notes";
 import { LeadFollowups } from "@/components/leads/lead-followups";
 import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-banner";
 import { LeadReplyActionBanner } from "@/components/leads/lead-reply-action-banner";
+import { LeadReplyIntelligenceTrigger } from "@/components/leads/lead-reply-intelligence-trigger";
 import { LeadContactEmailActionBanner } from "@/components/leads/lead-contact-email-action-banner";
 import { UpdateContactEmailDialog } from "@/components/leads/update-contact-email-dialog";
 import { SwitchLeadContactDialog } from "@/components/leads/switch-lead-contact-dialog";
@@ -1493,6 +1494,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                   />
                   <LeadReplyActionBanner
                     lead={lead}
+                    onOpenEmails={() => onTabChange("emails")}
+                  />
+                  <LeadReplyIntelligenceTrigger
+                    lead={lead}
+                    canEdit={canEditLead}
                     onOpenEmails={() => onTabChange("emails")}
                   />
                   <LeadReplyReviewBanner lead={lead} />
