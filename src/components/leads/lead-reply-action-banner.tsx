@@ -305,6 +305,19 @@ export function LeadReplyActionBanner({
             {draftReady ? <Badge variant="outline">Draft ready</Badge> : null}
           </div>
           <p className="text-sm font-medium leading-snug">{nextStep}</p>
+          {(action?.waitUntilDate || lead.followUpAfterDate) &&
+          (action?.classification === "auto_reply" ||
+            lead.replyClass === "auto_reply" ||
+            action?.recommendedAction === "wait" ||
+            action?.recommendedAction === "schedule_followup") ? (
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              Schedule starts on{" "}
+              <span className="font-medium text-foreground">
+                {action?.waitUntilDate || lead.followUpAfterDate}
+              </span>{" "}
+              — regenerate or Schedule all will use that day as step 1.
+            </p>
+          ) : null}
           {rationale ? (
             <p className="text-xs text-muted-foreground leading-relaxed">{rationale}</p>
           ) : null}

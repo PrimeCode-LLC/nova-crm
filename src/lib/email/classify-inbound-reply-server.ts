@@ -24,6 +24,7 @@ import { replyTextOnly, stripQuotedReply } from "@/lib/email/strip-quoted-reply"
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import { buildReplyDetectedPatch } from "@/lib/leads/reply-review";
+import { resolveWaitUntilDate } from "@/lib/email/ooo-return-date";
 
 export const replyClassifySchema = z.object({
   classification: z.enum([
@@ -48,6 +49,12 @@ export const replyClassifySchema = z.object({
   ]),
   rationale: z.string(),
   nextStepSummary: z.string(),
+  /**
+   * Calendar day (YYYY-MM-DD) to wait until before following up.
+   * Empty string when no dated return / deferral is named.
+   * Required for OpenAI structured outputs (no optional object fields).
+   */
+  waitUntilDate: z.string().max(32),
 });
 
 export function replyActionDocId(leadId: string, inboundProviderKey: string): string {
@@ -58,6 +65,7 @@ function heuristicAutoReply(input: {
   subject: string;
   preview: string;
   bodyText: string;
+  today?: string;
 }): z.infer<typeof replyClassifySchema> | null {
   if (
     !isLikelyAutoReply({
@@ -67,13 +75,45 @@ function heuristicAutoReply(input: {
   ) {
     return null;
   }
+  const waitUntilDate =
+    resolveWaitUntilDate({
+      subject: input.subject,
+      body: `${input.preview}\n${input.bodyText}`,
+      today: input.today,
+    }) ?? "";
   return {
     classification: "auto_reply",
     potentialScore: 10,
     recommendedAction: "wait",
     rationale: "Looks like an automatic / out-of-office reply, not a human decision.",
-    nextStepSummary: "Wait for their return or follow up later — do not treat this as a sales reply.",
+    nextStepSummary: waitUntilDate
+      ? `Wait until ${waitUntilDate}, then follow up — do not treat this as a sales reply.`
+      : "Wait for their return or follow up later — do not treat this as a sales reply.",
+    waitUntilDate,
   };
+}
+
+/** Fill waitUntilDate from heuristics when the model left it blank or invalid. */
+function withResolvedWaitUntil(
+  result: z.infer<typeof replyClassifySchema>,
+  input: { subject: string; body: string; today: string },
+): z.infer<typeof replyClassifySchema> {
+  const waitUntilDate =
+    resolveWaitUntilDate({
+      aiWaitUntilDate: result.waitUntilDate,
+      subject: input.subject,
+      body: input.body,
+      nextStepSummary: result.nextStepSummary,
+      today: input.today,
+    }) ?? "";
+  if (waitUntilDate === (result.waitUntilDate ?? "").trim()) return result;
+  const nextStepSummary =
+    result.classification === "auto_reply" &&
+    waitUntilDate &&
+    !/\d{4}-\d{2}-\d{2}/.test(result.nextStepSummary)
+      ? `Wait until ${waitUntilDate}, then follow up — do not treat this as a sales reply.`
+      : result.nextStepSummary;
+  return { ...result, waitUntilDate, nextStepSummary };
 }
 
 function leadSnapshotForClassify(lead: ReturnType<typeof mapLeadDoc>): string {
@@ -173,6 +213,13 @@ async function writeReplyActionAndLead(input: {
   const inboundSubject = (input.inboundSubject || "").trim().slice(0, 300);
   const inboundMessageId = (input.inboundMessageId || "").trim() || undefined;
 
+  const waitUntilDate = resolveWaitUntilDate({
+    aiWaitUntilDate: input.result.waitUntilDate,
+    subject: inboundSubject,
+    body: inboundPreview,
+    nextStepSummary: input.result.nextStepSummary,
+  });
+
   const doc: ReplyAction = {
     id: actionId,
     organizationId: input.organizationId,
@@ -186,6 +233,7 @@ async function writeReplyActionAndLead(input: {
     recommendedAction: input.result.recommendedAction as ReplyRecommendedAction,
     rationale: input.result.rationale.trim().slice(0, 1_000),
     nextStepSummary: input.result.nextStepSummary.trim().slice(0, 500),
+    ...(waitUntilDate ? { waitUntilDate } : {}),
     ...(inboundPreview ? { inboundPreview } : {}),
     ...(inboundFrom ? { inboundFrom } : {}),
     ...(inboundSubject ? { inboundSubject } : {}),
@@ -237,8 +285,20 @@ async function writeReplyActionAndLead(input: {
               ...(input.inboundProviderKey
                 ? { lastAutoReplyMessageId: input.inboundProviderKey }
                 : {}),
+              ...(waitUntilDate
+                ? { followUpAfterDate: waitUntilDate }
+                : {}),
             }
-          : humanReplyPatch ?? {}),
+          : {
+              ...(humanReplyPatch ?? {}),
+              // Clear a stale OOO wait, unless this human deferral names a new date.
+              followUpAfterDate:
+                waitUntilDate &&
+                (doc.recommendedAction === "schedule_followup" ||
+                  doc.recommendedAction === "wait")
+                  ? waitUntilDate
+                  : FieldValue.delete(),
+            }),
       }),
       { merge: true },
     );
@@ -377,17 +437,17 @@ export async function classifyInboundLeadMailServer(input: {
   }
   const lead = mapLeadDoc(leadSnap.id, leadSnap.data() as Record<string, unknown>);
 
+  const today = new Date().toISOString().slice(0, 10);
   const rawBody = (newest.bodyText || newest.preview || "").trim();
   // Our own quoted pitch below their reply skews classification and burns tokens.
   const stripped = stripQuotedReply(rawBody);
   const body = stripped.text;
-  const heuristic = heuristicAutoReply({
+  let result = heuristicAutoReply({
     subject: newest.subject,
     preview: newest.preview || "",
     bodyText: body,
+    today,
   });
-
-  let result = heuristic;
   if (!result) {
     const settings = await getOrganizationAiSettingsServer(input.organizationId);
     if (!settings.enabled || !canUseAiFeature(settings, "email_reply_classify", undefined)) {
@@ -398,6 +458,7 @@ export async function classifyInboundLeadMailServer(input: {
         recommendedAction: "reply_now",
         rationale: "Inbound reply detected; AI reply classify is off for this organization.",
         nextStepSummary: "Review the reply in Inbox or Emails and decide the next step.",
+        waitUntilDate: "",
       };
     } else {
       try {
@@ -420,23 +481,26 @@ export async function classifyInboundLeadMailServer(input: {
           doNotContact: lead.doNotContact,
         });
 
-        result = await runAiStructuredFeature({
-          organizationId: input.organizationId,
-          userId: input.actorUid || "system",
-          feature: "email_reply_classify",
-          leadId: input.leadId,
-          schema: replyClassifySchema,
-          promptVars: {
-            today: new Date().toISOString().slice(0, 10),
-            from: newest.from,
-            subject: newest.subject,
-            date: newest.date,
-            body: body.slice(0, 8_000),
-            signals,
-            thread: thread.text.slice(0, 12_000),
-            leadContext: leadSnapshotForClassify(lead),
-          },
-        });
+        result = withResolvedWaitUntil(
+          await runAiStructuredFeature({
+            organizationId: input.organizationId,
+            userId: input.actorUid || "system",
+            feature: "email_reply_classify",
+            leadId: input.leadId,
+            schema: replyClassifySchema,
+            promptVars: {
+              today,
+              from: newest.from,
+              subject: newest.subject,
+              date: newest.date,
+              body: body.slice(0, 8_000),
+              signals,
+              thread: thread.text.slice(0, 12_000),
+              leadContext: leadSnapshotForClassify(lead),
+            },
+          }),
+          { subject: newest.subject, body, today },
+        );
       } catch (error) {
         if (error instanceof AiForbiddenError || error instanceof AiNotConfiguredError) {
           result = {
@@ -445,6 +509,7 @@ export async function classifyInboundLeadMailServer(input: {
             recommendedAction: "reply_now",
             rationale: "Inbound reply detected; AI classify unavailable.",
             nextStepSummary: "Review the reply and decide the next step.",
+            waitUntilDate: "",
           };
         } else {
           result = {
@@ -453,6 +518,7 @@ export async function classifyInboundLeadMailServer(input: {
             recommendedAction: "reply_now",
             rationale: "Inbound reply detected; classification failed.",
             nextStepSummary: "Review the reply and decide the next step.",
+            waitUntilDate: "",
           };
         }
       }
@@ -512,6 +578,10 @@ export async function getReplyActionServer(input: {
     recommendedAction: data.recommendedAction as ReplyRecommendedAction,
     rationale: String(data.rationale ?? ""),
     nextStepSummary: String(data.nextStepSummary ?? ""),
+    waitUntilDate:
+      typeof data.waitUntilDate === "string" && /^\d{4}-\d{2}-\d{2}$/.test(data.waitUntilDate.trim())
+        ? data.waitUntilDate.trim()
+        : undefined,
     draftSubject: typeof data.draftSubject === "string" ? data.draftSubject : undefined,
     draftBody: typeof data.draftBody === "string" ? data.draftBody : undefined,
     draftTo: typeof data.draftTo === "string" ? data.draftTo : undefined,

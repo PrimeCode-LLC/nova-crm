@@ -8,6 +8,7 @@ import {
   findActivePlanToPauseOnReply,
   isLikelyAutoReply,
 } from "@/lib/followup-plan-reply";
+import { parseOooReturnDate } from "@/lib/email/ooo-return-date";
 import { isDeliveryStatusNotification } from "@/lib/email/detect-hard-bounce";
 import {
   cancelScheduledEmailsForFollowups,
@@ -194,10 +195,14 @@ export function FollowupPlanReplyWatcher() {
       if (c.auto) {
         void (async () => {
           try {
+            const waitUntil = parseOooReturnDate(
+              `${c.message.subject}\n${c.message.preview || ""}\n${c.message.bodyText || ""}`,
+            );
             await patchLeadAsync(c.leadId, {
               lastAutoReplyAt: c.message.date || new Date().toISOString(),
               lastAutoReplyMessageId: c.mid,
               lastActivityAt: c.message.date || new Date().toISOString(),
+              ...(waitUntil ? { followUpAfterDate: waitUntil } : {}),
             });
             processedRef.current.add(c.mid);
             writeProcessed(processedRef.current);

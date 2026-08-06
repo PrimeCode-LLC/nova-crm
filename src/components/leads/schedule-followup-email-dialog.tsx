@@ -25,6 +25,10 @@ import {
   defaultAudienceScheduleDatetimeLocal,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
+import {
+  hasActiveFollowUpAfterDate,
+} from "@/lib/email/ooo-return-date";
+import { isoFromDateInput } from "@/lib/followup-date";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import {
   autoFixScheduleDates,
@@ -179,9 +183,17 @@ export function ScheduleFollowupEmailDialog({
           : defaultContactRecipientEmail(recipientOptions),
       );
       setSubject(hydrated.emailSubject?.trim() || hydrated.title || "");
+      const waitDate = lead.followUpAfterDate;
+      const dueDay = hydrated.dueAt?.slice(0, 10);
+      const preferIso =
+        hasActiveFollowUpAfterDate(waitDate, timezone) &&
+        waitDate &&
+        (!dueDay || dueDay < waitDate)
+          ? isoFromDateInput(waitDate, timezone)
+          : hydrated.dueAt;
       setScheduledAt(
         defaultAudienceScheduleDatetimeLocal({
-          preferIso: hydrated.dueAt,
+          preferIso,
           timeZone: timezone,
           sendWindowStartHour: sendWindow.startHour,
           sendWindowEndHour: sendWindow.endHour,
@@ -209,6 +221,8 @@ export function ScheduleFollowupEmailDialog({
     timezone,
     organizationId,
     currentUserId,
+    lead.followUpAfterDate,
+    organizationSendPolicy,
   ]);
 
   React.useEffect(() => {

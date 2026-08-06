@@ -139,6 +139,11 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       typeof raw.lastAutoReplyMessageId === "string"
         ? raw.lastAutoReplyMessageId
         : undefined,
+    followUpAfterDate:
+      typeof raw.followUpAfterDate === "string" &&
+      /^\d{4}-\d{2}-\d{2}$/.test(raw.followUpAfterDate.trim())
+        ? raw.followUpAfterDate.trim()
+        : undefined,
     lastEmailOpenedAt: raw.lastEmailOpenedAt
       ? firestoreValueToIso(raw.lastEmailOpenedAt)
       : undefined,

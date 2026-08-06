@@ -636,6 +636,12 @@ export interface Lead {
   lastAutoReplyAt?: ISODate;
   lastAutoReplyMessageId?: string;
   /**
+   * Do not schedule sequence steps before this calendar day (YYYY-MM-DD).
+   * Stamped from an OOO return date or a dated deferral ("ask me in Q3").
+   * Cleared when a human reply arrives without a new wait date, or when the day passes.
+   */
+  followUpAfterDate?: string;
+  /**
    * Latest first-party email open (tracking pixel) for this lead.
    * Stamped on first open per tracked message; used by dashboard + list filters.
    */

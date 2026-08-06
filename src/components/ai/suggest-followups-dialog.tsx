@@ -52,6 +52,10 @@ import { PRIORITY_TONE } from "@/lib/constants";
 import { useChannelOptions } from "@/hooks/use-channel-options";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
+import {
+  hasActiveFollowUpAfterDate,
+  sequenceCadenceStartFromWaitUntil,
+} from "@/lib/email/ooo-return-date";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
 import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
@@ -273,14 +277,23 @@ export function SuggestFollowupsDialog({
     setThreadAnchor(data.threadAnchor?.inReplyTo ? data.threadAnchor : undefined);
     const apiItems = (data.items ?? []) as SuggestApiItem[];
     const includeInitial = mode === "full";
+    const cadenceFrom = sequenceCadenceStartFromWaitUntil({
+      followUpAfterDate: lead.followUpAfterDate,
+      timeZone,
+    });
     setItems(
       apiItems.map((it, i) => ({
         ...it,
         emailSubject: it.emailSubject ?? "",
         key: `s-${i}`,
         included: true,
-        // Cadence: Initial Day 0 → +3 BD → +5 BD → +7 BD (weekends skipped)
-        dueDate: dateInputForSequenceStep(i, { includeInitial, timeZone }),
+        // Cadence: Initial Day 0 → +3 BD → +5 BD → +7 BD (weekends skipped).
+        // When an OOO named a return date, Day 0 is that day (not today).
+        dueDate: dateInputForSequenceStep(i, {
+          includeInitial,
+          from: cadenceFrom,
+          timeZone,
+        }),
       })),
     );
     setPhase("review");
@@ -564,7 +577,10 @@ export function SuggestFollowupsDialog({
               . Due dates skip weekends
               {sequenceMode === "full"
                 ? ": Day 0, then +3 / +5 / +7 business days."
-                : " (+3 / +5 / +7 business days from today)."}{" "}
+                : " (+3 / +5 / +7 business days from today)."}
+              {hasActiveFollowUpAfterDate(lead.followUpAfterDate, timeZone)
+                ? ` Day 0 is ${lead.followUpAfterDate} (return date from their auto-reply / deferral).`
+                : ""}{" "}
               Verify copy, then activate.
             </p>
             <ul className="space-y-4">

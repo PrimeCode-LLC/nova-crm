@@ -36,6 +36,11 @@ export type ReplyAction = {
   recommendedAction: ReplyRecommendedAction;
   rationale: string;
   nextStepSummary: string;
+  /**
+   * Calendar day (YYYY-MM-DD) named in an OOO / timed deferral.
+   * Scheduling starts the cadence on or after this day.
+   */
+  waitUntilDate?: string;
   draftSubject?: string;
   draftBody?: string;
   draftTo?: string;

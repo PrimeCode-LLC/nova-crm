@@ -831,6 +831,10 @@ export function LeadOverview({
             label="Last auto-reply"
             value={lead.lastAutoReplyAt ? fmtDate(lead.lastAutoReplyAt) : "-"}
           />
+          <Metric
+            label="Follow up after"
+            value={lead.followUpAfterDate ? lead.followUpAfterDate : "-"}
+          />
           <Metric label="Reply source" value={lead.lastReplySource || "-"} />
           <Metric label="Created" value={fmtRelative(lead.createdAt)} />
         </CardContent>

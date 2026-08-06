@@ -21,6 +21,11 @@ import {
   defaultAudienceScheduleDatetimeLocal,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
+import {
+  hasActiveFollowUpAfterDate,
+  sequenceCadenceStartFromWaitUntil,
+} from "@/lib/email/ooo-return-date";
+import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
 import { hydrateFollowupsMessageBodies } from "@/lib/firestore/fetch-followup-message-body-client";
@@ -234,21 +239,41 @@ export function ScheduleSequenceEmailsDialog({
       setIncludeFooter(true);
       setContinuityMode("continue");
       setSteps(
-        hydrated.map((f) => ({
-          followupId: f.id,
-          title: f.title,
-          subject: f.emailSubject?.trim() || f.title,
-          scheduledAt: defaultAudienceScheduleDatetimeLocal({
-            preferIso: f.dueAt,
-            timeZone: timezone,
-            sendWindowStartHour: sendWindow.startHour,
-            sendWindowEndHour: sendWindow.endHour,
-            spreadKey: f.id,
-            sendPolicy: organizationSendPolicy,
-          }),
-          body: f.messageBody ?? "",
-          included: true,
-        })),
+        hydrated.map((f, index) => {
+          const waitDate = lead.followUpAfterDate;
+          const waitActive = hasActiveFollowUpAfterDate(waitDate, timezone);
+          const dueDay = f.dueAt?.slice(0, 10);
+          let preferIso = f.dueAt;
+          if (waitActive && waitDate && (!dueDay || dueDay < waitDate)) {
+            // Old due dates landed before they return — re-lay the cadence from that day.
+            preferIso = isoFromDateInput(
+              dateInputForSequenceStep(index, {
+                includeInitial: true,
+                from: sequenceCadenceStartFromWaitUntil({
+                  followUpAfterDate: waitDate,
+                  timeZone: timezone,
+                }),
+                timeZone: timezone,
+              }),
+              timezone,
+            );
+          }
+          return {
+            followupId: f.id,
+            title: f.title,
+            subject: f.emailSubject?.trim() || f.title,
+            scheduledAt: defaultAudienceScheduleDatetimeLocal({
+              preferIso,
+              timeZone: timezone,
+              sendWindowStartHour: sendWindow.startHour,
+              sendWindowEndHour: sendWindow.endHour,
+              spreadKey: f.id,
+              sendPolicy: organizationSendPolicy,
+            }),
+            body: f.messageBody ?? "",
+            included: true,
+          };
+        }),
       );
       setSubmitting(false);
     })();
@@ -271,6 +296,7 @@ export function ScheduleSequenceEmailsDialog({
     planFollowups,
     organizationSendPolicy,
     timezone,
+    lead.followUpAfterDate,
   ]);
 
   React.useEffect(() => {
@@ -458,6 +484,9 @@ export function ScheduleSequenceEmailsDialog({
             <DialogDescription>
               Queue every email-capable step from one mailbox. That mailbox&apos;s signature is
               appended to each email when scheduled.
+              {hasActiveFollowUpAfterDate(lead.followUpAfterDate, timezone)
+                ? ` Times start on ${lead.followUpAfterDate} (return date from their auto-reply).`
+                : ""}
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-3 py-2">
