@@ -280,24 +280,8 @@ export function NewProspectDialog({
   const { data: liveUserDoc } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
   );
-  const [sessionOwnerId, setSessionOwnerId] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = (await res.json()) as { user?: { uid?: string } | null };
-        const uid = data.user?.uid;
-        if (!cancelled && uid) setSessionOwnerId(uid);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const effectiveUid = currentUserId || sessionOwnerId || undefined;
+  /** Prefer workspace uid; fall back to Firebase Auth uid (no extra `/api/auth/me`). */
+  const effectiveUid = currentUserId || fbUser?.uid || undefined;
 
   const F = emptyFormDefaults();
   const [channel, setChannel] = React.useState<ChannelKey>(

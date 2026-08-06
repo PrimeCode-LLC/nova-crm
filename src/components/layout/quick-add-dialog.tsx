@@ -315,25 +315,8 @@ function LeadFormBody({
   const { data: liveUserDoc } = useUserDoc(
     isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
   );
-  /** Live workspace snapshot often has no `users` / `currentUserId`; session gives the signed-in uid for owner + picker. */
-  const [sessionOwnerId, setSessionOwnerId] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    let cancelled = false;
-    void fetch("/api/auth/me", { credentials: "same-origin", cache: "no-store" })
-      .then(async (res) => {
-        if (!res.ok) return;
-        const data = (await res.json()) as {
-          user?: { uid?: string; email?: string; name?: string } | null;
-        };
-        if (cancelled || !data.user?.uid) return;
-        setSessionOwnerId(data.user.uid);
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  /** Live workspace often has no `currentUserId`; Firebase Auth uid is enough for owner + picker. */
+  const sessionOwnerId = fbUser?.uid ?? null;
 
   const form = useForm<LeadForm>({
     resolver: zodResolver(leadSchema),

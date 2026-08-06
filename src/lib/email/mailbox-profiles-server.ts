@@ -13,6 +13,8 @@ import {
 import {
   deleteMailboxSecretsServer,
   getMailboxSecretsServer,
+  googleAuthConnectedFromSecretsData,
+  mailboxSecretDocRef,
   upsertMailboxSecretsServer,
 } from "@/lib/email/mailbox-secrets-server";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
@@ -126,7 +128,12 @@ function firestoreToMailbox(
     imap: { user: string; password: string };
     googleOAuth?: { accountEmail: string; refreshToken?: string };
   } | null,
-  options?: { dataOwnerUid?: string; stripSecrets?: boolean },
+  options?: {
+    dataOwnerUid?: string;
+    stripSecrets?: boolean;
+    /** When set, overrides vault-derived googleAuthConnected (lite hydrate). */
+    googleAuthConnected?: boolean;
+  },
 ): EmailMailboxSettings {
   const strip = Boolean(options?.stripSecrets);
   const smtpUser = strip ? "" : (secrets?.smtp.user ?? "");
@@ -135,6 +142,7 @@ function firestoreToMailbox(
   const imapPassword = strip ? "" : (secrets?.imap.password ?? "");
   const googleEmail = secrets?.googleOAuth?.accountEmail?.trim() ?? "";
   const googleRefresh = secrets?.googleOAuth?.refreshToken?.trim() ?? "";
+  const googleFromVault = Boolean(googleEmail && googleRefresh);
   const mailbox: EmailMailboxSettings = {
     id: mailboxId,
     label: String(data.label ?? "Mailbox"),
@@ -166,7 +174,10 @@ function firestoreToMailbox(
     sendGapSeconds: parseSendGapSeconds(data.sendGapSeconds),
     assignedUserIds: parseAssignedUserIds(data.assignedUserIds),
     // Require a refresh token — access-only / empty-token vault rows look "connected" but IMAP fails.
-    googleAuthConnected: Boolean(googleEmail && googleRefresh),
+    googleAuthConnected:
+      typeof options?.googleAuthConnected === "boolean"
+        ? options.googleAuthConnected
+        : googleFromVault,
     ...(typeof data.inboxLastSyncError === "string" && data.inboxLastSyncError.trim()
       ? { transportError: data.inboxLastSyncError.trim().slice(0, 500) }
       : {}),
@@ -271,10 +282,50 @@ export async function setEmailAccountMetaServer(input: {
 export async function listMailboxesForMemberServer(input: {
   organizationId: string;
   uid: string;
+  /**
+   * When false (dashboard hydrate / inbound-heads), skip vault decrypts.
+   * IMAP/SMTP routes resolve secrets server-side via mailboxId.
+   * Default true for send/scheduled paths that still read passwords from the list.
+   */
+  includeSecrets?: boolean;
 }): Promise<EmailMailboxSettings[]> {
   const root = memberRoot(input.organizationId, input.uid);
   if (!root) return [];
   const snap = await root.collection("emailMailboxes").get();
+  const includeSecrets = input.includeSecrets !== false;
+
+  if (!includeSecrets) {
+    const db = getAdminDb();
+    const googleConnectedById = new Map<string, boolean>();
+    if (db && snap.docs.length > 0) {
+      const refs = snap.docs
+        .map((doc) => mailboxSecretDocRef(input.organizationId, input.uid, doc.id))
+        .filter((ref): ref is NonNullable<typeof ref> => Boolean(ref));
+      for (let i = 0; i < refs.length; i += 100) {
+        const chunk = refs.slice(i, i + 100);
+        const secretSnaps = await db.getAll(...chunk);
+        for (let j = 0; j < secretSnaps.length; j++) {
+          const secretSnap = secretSnaps[j]!;
+          const mailboxId = chunk[j]!.id;
+          googleConnectedById.set(
+            mailboxId,
+            googleAuthConnectedFromSecretsData(
+              secretSnap.exists ? (secretSnap.data() as Record<string, unknown>) : undefined,
+            ),
+          );
+        }
+      }
+    }
+    const out = snap.docs.map((doc) =>
+      firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, null, {
+        stripSecrets: true,
+        googleAuthConnected: googleConnectedById.get(doc.id) ?? false,
+      }),
+    );
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  }
+
   const out = await Promise.all(
     snap.docs.map(async (doc) => {
       const secrets = await getMailboxSecretsServer({
@@ -333,6 +384,44 @@ export async function listMailboxesAssignedToViewerServer(input: {
   organizationId: string;
   viewerUid: string;
 }): Promise<EmailMailboxSettings[]> {
+  const db = getAdminDb();
+  if (!db) return [];
+
+  // Prefer one collection-group query over O(members) fan-out.
+  try {
+    const snap = await db
+      .collectionGroup("emailMailboxes")
+      .where("assignedUserIds", "array-contains", input.viewerUid)
+      .get();
+    const out: EmailMailboxSettings[] = [];
+    for (const doc of snap.docs) {
+      // organizations/{orgId}/members/{uid}/emailMailboxes/{mailboxId}
+      const parts = doc.ref.path.split("/");
+      if (
+        parts.length < 6 ||
+        parts[0] !== COLLECTIONS.organizations ||
+        parts[1] !== input.organizationId ||
+        parts[2] !== ORG_SUBCOLLECTIONS.members ||
+        parts[4] !== "emailMailboxes"
+      ) {
+        continue;
+      }
+      const ownerUid = parts[3]!;
+      if (!ownerUid || ownerUid === input.viewerUid) continue;
+      out.push(
+        firestoreToMailbox(doc.id, doc.data() as Record<string, unknown>, null, {
+          dataOwnerUid: ownerUid,
+          stripSecrets: true,
+          googleAuthConnected: false,
+        }),
+      );
+    }
+    out.sort((a, b) => a.label.localeCompare(b.label));
+    return out;
+  } catch {
+    // Index / collection-group not ready — fall back to per-member scan.
+  }
+
   const users = await listOrgUsersServer(input.organizationId);
   const others = users.filter((u) => u.id && u.id !== input.viewerUid);
   const chunks = await Promise.all(

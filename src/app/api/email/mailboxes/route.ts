@@ -51,7 +51,11 @@ export async function GET(req: Request) {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
-  const forUser = new URL(req.url).searchParams.get("forUser");
+  const url = new URL(req.url);
+  const forUser = url.searchParams.get("forUser");
+  const includeSecrets = url.searchParams.get("includeSecrets") === "1";
+  const includeUsage = url.searchParams.get("includeUsage") === "1";
+
   const resolved = await resolveMailboxDataOwnerUid({
     organizationId: g.ctx.session.organizationId,
     viewerUid: g.ctx.session.uid,
@@ -64,24 +68,25 @@ export async function GET(req: Request) {
 
   const { organizationId, uid: viewerUid } = g.ctx.session;
   const { dataOwnerUid } = resolved;
-  const [ownMailboxes, meta] = await Promise.all([
-    listMailboxesForMemberServer({ organizationId, uid: dataOwnerUid }),
+  const mergeAssigned = dataOwnerUid === viewerUid && resolved.viewerIsMailboxOwner;
+
+  const [ownMailboxes, meta, assigned, timeZone] = await Promise.all([
+    listMailboxesForMemberServer({
+      organizationId,
+      uid: dataOwnerUid,
+      includeSecrets,
+    }),
     getEmailAccountMetaServer({ organizationId, uid: dataOwnerUid }),
+    mergeAssigned
+      ? listMailboxesAssignedToViewerServer({ organizationId, viewerUid })
+      : Promise.resolve([]),
+    getOrgTimezoneServer(organizationId),
   ]);
 
-  let mailboxes = ownMailboxes;
-  /** Only merge per-mailbox assignments when loading the viewer's own account (not view-as). */
-  if (dataOwnerUid === viewerUid && resolved.viewerIsMailboxOwner) {
-    const assigned = await listMailboxesAssignedToViewerServer({
-      organizationId,
-      viewerUid,
-    });
-    mailboxes = mergeOwnAndAssignedMailboxes(ownMailboxes, assigned);
-  }
+  const mailboxes = mergeAssigned
+    ? mergeOwnAndAssignedMailboxes(ownMailboxes, assigned)
+    : ownMailboxes;
 
-  const includeUsage = new URL(req.url).searchParams.get("includeUsage") === "1";
-
-  const timeZone = await getOrgTimezoneServer(organizationId);
   const dayKey = sendDayKey(new Date(), timeZone);
   const sendUsageByMailboxId: Record<string, { dayKey: string; used: number; limit: number | null }> = {};
   if (includeUsage) {
@@ -170,7 +175,11 @@ export async function PATCH(req: Request) {
   }
   const emailKey = normalizeCrmEmailKey(mailboxRest.emailAddress);
   if (emailKey) {
-    const existing = await listMailboxesForMemberServer({ organizationId, uid });
+    const existing = await listMailboxesForMemberServer({
+      organizationId,
+      uid,
+      includeSecrets: false,
+    });
     const duplicate = existing.find(
       (m) => m.id !== mailboxRest.id && normalizeCrmEmailKey(m.emailAddress) === emailKey,
     );

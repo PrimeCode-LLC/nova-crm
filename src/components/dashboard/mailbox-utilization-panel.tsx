@@ -132,7 +132,7 @@ export function MailboxUtilizationPanel({
     isDemo,
     currentUserId,
     // Let followups/leads + chart cards claim bandwidth before this 60–100s call.
-    deferMs: 2_500,
+    deferMs: 5_000,
   });
   const scope = scopeProp ?? apiScope;
   const isMine = scope === "mine";

@@ -77,6 +77,32 @@ export async function exchangeIdTokenForSession(
   };
 }
 
+type AuthMeBody = {
+  user?: { uid?: string; organizationId?: string; orgRole?: string } | null;
+  isPlatformAdmin?: boolean;
+  membershipPending?: boolean;
+  pendingOrganizationName?: string | null;
+};
+
+/** In-flight dedupe so Strict Mode / multiple mount effects share one `/api/auth/me`. */
+let authMeInflight: Promise<AuthMeBody | null> | null = null;
+
+export async function fetchAuthMe(): Promise<AuthMeBody | null> {
+  if (authMeInflight) return authMeInflight;
+  authMeInflight = (async () => {
+    try {
+      const meRes = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+      if (!meRes.ok) return null;
+      return (await meRes.json()) as AuthMeBody;
+    } catch {
+      return null;
+    } finally {
+      authMeInflight = null;
+    }
+  })();
+  return authMeInflight;
+}
+
 /**
  * After login or on app load, align the Firebase client ID token with custom
  * claims stamped by `/api/auth/session` (rules read `users/{uid}.organizationId`
@@ -84,11 +110,8 @@ export async function exchangeIdTokenForSession(
  */
 export async function syncFirebaseAuthClaimsClient(user: User): Promise<void> {
   try {
-    const meRes = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
-    if (!meRes.ok) return;
-    const body = (await meRes.json()) as {
-      user?: { organizationId?: string; orgRole?: string } | null;
-    };
+    const body = await fetchAuthMe();
+    if (!body) return;
     const expectedOrg = body.user?.organizationId;
     if (!expectedOrg) return;
     const token = await user.getIdTokenResult(false);

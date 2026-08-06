@@ -198,7 +198,7 @@ export function InboxBackgroundSync() {
     // On dashboard, give Firestore (followups/leads → chart cards) a head start
     // before the 19-mailbox inbound-heads read (often 90–100s).
     const onDashboard = pathname === "/dashboard" || pathname.startsWith("/dashboard/");
-    const bootstrapDelayMs = onDashboard ? 3_000 : 0;
+    const bootstrapDelayMs = onDashboard ? 5_000 : 0;
     const bootstrapTimer = window.setTimeout(() => {
       if (!cancelled) void hydrateFromServerHeads();
     }, bootstrapDelayMs);

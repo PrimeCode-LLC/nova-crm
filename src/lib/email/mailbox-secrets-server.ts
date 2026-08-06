@@ -77,6 +77,23 @@ function isEncryptedBlob(raw: unknown): raw is EncryptedBlob {
   );
 }
 
+export function mailboxSecretDocRef(orgId: string, uid: string, mailboxId: string) {
+  return mailboxSecretDoc(orgId, uid, mailboxId);
+}
+
+/**
+ * Cheap connected check: reads the secrets doc but does not decrypt.
+ * True when a Google account email + refresh token blob are present.
+ */
+export function googleAuthConnectedFromSecretsData(
+  data: Record<string, unknown> | undefined,
+): boolean {
+  if (!data) return false;
+  const email =
+    typeof data.googleAccountEmail === "string" ? data.googleAccountEmail.trim() : "";
+  return Boolean(email && isEncryptedBlob(data.googleRefreshToken));
+}
+
 function mailboxSecretDoc(orgId: string, uid: string, mailboxId: string) {
   const db = getAdminDb();
   if (!db) return null;

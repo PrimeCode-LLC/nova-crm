@@ -1,10 +1,7 @@
 import { NextResponse } from "next/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { getVerifiedSession } from "@/lib/auth/server";
-import {
-  resolveLiveTenantForSession,
-  sessionWithLiveTenant,
-} from "@/lib/auth/resolve-live-tenant";
+import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
@@ -20,9 +17,18 @@ export async function GET() {
   if (!session) {
     return NextResponse.json({ user: null, isPlatformAdmin: false }, { status: 401 });
   }
-  const live = await resolveLiveTenantForSession(session);
-  const user = await sessionWithLiveTenant(session);
-  const isPlatformAdmin = await isUserPlatformAdmin(session.uid, session.email);
+
+  const [live, isPlatformAdmin] = await Promise.all([
+    resolveLiveTenantForSession(session),
+    isUserPlatformAdmin(session.uid, session.email),
+  ]);
+
+  const user = {
+    ...session,
+    organizationId: live.organizationId,
+    orgRole: live.orgRole,
+  };
+
   let membershipPending = live.membershipPending;
   let pendingOrganizationName: string | null = null;
   try {

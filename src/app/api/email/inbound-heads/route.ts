@@ -33,6 +33,7 @@ export async function GET(req: Request) {
     const mailboxes = await listMailboxesForMemberServer({
       organizationId: g.ctx.session.organizationId,
       uid: resolved.dataOwnerUid,
+      includeSecrets: false,
     });
     const targets = mailboxIdFilter
       ? mailboxes.filter((m) => m.id === mailboxIdFilter)
