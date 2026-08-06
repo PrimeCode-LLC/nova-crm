@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Send } from "lucide-react";
+import { Loader2, Send } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,35 +10,48 @@ import { Textarea } from "@/components/ui/textarea";
 
 export function ContactForm() {
   const [submitting, setSubmitting] = React.useState(false);
+  const [website, setWebsite] = React.useState("");
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    const form = e.currentTarget;
+    const fd = new FormData(form);
+    const name = String(fd.get("name") ?? "").trim();
+    const email = String(fd.get("email") ?? "").trim();
+    const company = String(fd.get("company") ?? "").trim();
+    const teamSize = String(fd.get("size") ?? "").trim();
+    const message = String(fd.get("message") ?? "").trim();
+
+    if (!name || !email || !message) {
+      toast.error("Please fill in name, email, and your message.");
+      return;
+    }
+
     setSubmitting(true);
     try {
-      const form = e.currentTarget;
-      const fd = new FormData(form);
-      const entry = {
-        at: new Date().toISOString(),
-        name: String(fd.get("name") ?? "").trim(),
-        email: String(fd.get("email") ?? "").trim(),
-        company: String(fd.get("company") ?? "").trim(),
-        size: String(fd.get("size") ?? "").trim(),
-        message: String(fd.get("message") ?? "").trim(),
-      };
-      if (!entry.name || !entry.email || !entry.message) {
-        toast.error("Please fill in name, email, and your message.");
+      const res = await fetch("/api/marketing/interest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "contact",
+          name,
+          email,
+          company: company || undefined,
+          teamSize: teamSize || undefined,
+          message,
+          website,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      if (!res.ok) {
+        toast.error(data.error || "Could not send your message.");
         return;
       }
-      const key = "nova-marketing-contact-intake";
-      const raw = typeof window !== "undefined" ? localStorage.getItem(key) : null;
-      const prev = (raw ? (JSON.parse(raw) as unknown[]) : []) as typeof entry[];
-      if (typeof window !== "undefined") {
-        localStorage.setItem(key, JSON.stringify([...prev, entry]));
-      }
-      toast.success("Got it. We'll be in touch within 24 hours.");
+      toast.success("Got it. We'll be in touch soon.");
       form.reset();
+      setWebsite("");
     } catch {
-      toast.error("Could not save your message in this browser.");
+      toast.error("Network error. Email sales@stellixsoft.com directly.");
     } finally {
       setSubmitting(false);
     }
@@ -46,6 +59,17 @@ export function ContactForm() {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-4">
+      <input
+        type="text"
+        name="website"
+        value={website}
+        onChange={(e) => setWebsite(e.target.value)}
+        tabIndex={-1}
+        autoComplete="off"
+        aria-hidden
+        className="pointer-events-none absolute h-0 w-0 opacity-0"
+      />
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Field id="name" label="Your name" placeholder="Jane Cooper" required />
         <Field
@@ -60,27 +84,36 @@ export function ContactForm() {
       <Field
         id="size"
         label="Team size"
-        placeholder="e.g. 8 sales, 2 scrapers"
+        placeholder="e.g. 8 AEs, 2 SDRs"
       />
 
       <div className="space-y-1.5">
-        <Label htmlFor="message">What's on your mind?</Label>
+        <Label htmlFor="message">What should we know?</Label>
         <Textarea
           id="message"
           name="message"
           required
           rows={5}
-          placeholder="Tell us about your channels, what's broken in Sheets, or the integrations you need."
+          placeholder="Tell us about your outbound motion, reply volume, and what you want Nova to handle."
         />
       </div>
 
       <Button type="submit" size="lg" disabled={submitting} className="w-full">
-        <Send />
-        {submitting ? "Sending..." : "Send message"}
+        {submitting ? (
+          <>
+            <Loader2 className="animate-spin" />
+            Sending…
+          </>
+        ) : (
+          <>
+            <Send />
+            Send message
+          </>
+        )}
       </Button>
 
       <p className="text-center text-[11px] text-muted-foreground">
-        By submitting you agree to our{" "}
+        Messages go to sales@stellixsoft.com. By submitting you agree to our{" "}
         <a className="underline underline-offset-2" href="/legal/privacy">
           privacy policy
         </a>

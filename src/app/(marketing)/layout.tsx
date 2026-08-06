@@ -22,9 +22,9 @@ function BackgroundGradient() {
       aria-hidden
       className="pointer-events-none fixed inset-0 -z-10 overflow-hidden"
     >
-      <div className="absolute -top-40 left-1/2 h-[600px] w-[1100px] -translate-x-1/2 rounded-full bg-primary/15 blur-[140px] dark:bg-primary/10" />
-      <div className="absolute top-[40vh] -right-40 h-[500px] w-[700px] rounded-full bg-indigo-500/10 blur-[120px]" />
-      <div className="absolute bottom-0 left-0 h-[400px] w-[500px] rounded-full bg-fuchsia-500/[0.06] blur-[120px]" />
+      <div className="absolute -top-40 left-1/2 h-[620px] w-[1100px] -translate-x-1/2 rounded-full bg-primary/12 blur-[140px] dark:bg-primary/10" />
+      <div className="absolute top-[38vh] -right-40 h-[480px] w-[680px] rounded-full bg-cyan-500/[0.08] blur-[120px]" />
+      <div className="absolute bottom-0 left-0 h-[380px] w-[480px] rounded-full bg-sky-500/[0.05] blur-[120px]" />
     </div>
   );
 }

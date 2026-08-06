@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { Logo } from "./logo";
+import { SITE } from "@/lib/site";
 
 const FOOTER_SECTIONS = [
   {
@@ -34,9 +35,7 @@ export function SiteFooter() {
           <div className="space-y-3">
             <Logo size="sm" />
             <p className="max-w-xs text-sm text-muted-foreground">
-              Multi-channel sales ops, finally sane. Pipeline clarity for teams
-              running cold email, LinkedIn, Upwork, and inbound, all in one
-              place.
+              {SITE.oneLiner}
             </p>
           </div>
 
@@ -63,8 +62,7 @@ export function SiteFooter() {
 
         <div className="mt-12 flex flex-col items-start justify-between gap-4 border-t border-border/60 pt-6 text-xs text-muted-foreground sm:flex-row sm:items-center">
           <p>
-            © {new Date().getFullYear()} Nova CRM. Built for high-output sales
-            teams. ·{" "}
+            © {new Date().getFullYear()} {SITE.name}. Built by{" "}
             <a
               href="https://stellixsoft.com/"
               target="_blank"
@@ -73,8 +71,15 @@ export function SiteFooter() {
             >
               Stellix Soft LLC
             </a>
+            . Sales:{" "}
+            <a
+              href={`mailto:${SITE.salesEmail}`}
+              className="font-medium text-foreground/80 transition-colors hover:text-foreground"
+            >
+              {SITE.salesEmail}
+            </a>
           </p>
-          <p className="font-mono">v1 · pre-launch</p>
+          <p className="font-mono">Early access · waitlist open</p>
         </div>
       </div>
     </footer>

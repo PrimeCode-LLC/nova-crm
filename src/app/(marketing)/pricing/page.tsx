@@ -4,70 +4,69 @@ import { ArrowRight, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { CtaBand } from "@/components/marketing/cta-band";
 import { Section, SectionHeading } from "@/components/marketing/section";
+import { WaitlistForm } from "@/components/marketing/waitlist-form";
 import { cn } from "@/lib/utils";
 
 export const metadata: Metadata = {
   title: "Pricing",
   description:
-    "Simple, per-seat pricing. Start free, upgrade when your team needs department-scoped visibility, admin policy overrides, and integrations.",
+    "Join the Nova waitlist for early access. Plans for operators, revenue teams, and scaled outbound organizations.",
 };
 
 const TIERS = [
   {
-    name: "Starter",
-    price: "$0",
-    cadence: "free forever",
+    name: "Operator",
+    price: "Waitlist",
+    cadence: "early access",
     description:
-      "For solo operators and one-team workshops. The core CRM, no time limit.",
-    cta: "Start free",
-    href: "/signup",
+      "For founders and lean GTM operators who want intelligent journeys without a heavy CRM rollout.",
+    cta: "Join waitlist",
+    href: "#waitlist",
     highlight: false,
     features: [
-      "Up to 3 users",
-      "Up to 1,000 leads",
-      "All channels (email, LinkedIn, Upwork, forms)",
-      "Table + Kanban + lead detail views",
-      "Activity layer & idle-lead alerts",
-      "Sheets import + export",
-      "Community support",
+      "Personalized AI sequences",
+      "Reply intelligence & drafts",
+      "RAG company knowledge",
+      "Engagement signals",
+      "Prospect & lead workspace",
+      "Email waitlist onboarding",
     ],
   },
   {
-    name: "Team",
-    price: "$24",
-    cadence: "per user / month",
+    name: "Revenue Team",
+    price: "Custom",
+    cadence: "per seat · talk to us",
     description:
-      "For growing teams that need permissions, audit trails, and integrations.",
-    cta: "Start 14-day trial",
-    href: "/signup",
+      "For teams that need shared intelligence, mailbox capacity, and governed outbound execution.",
+    cta: "Talk to sales",
+    href: "/contact",
     highlight: true,
     features: [
-      "Unlimited leads & contacts",
-      "3-layer permissions: role defaults, department rules, per-person overrides",
-      "Director dashboard & funnel diagnostics",
-      "Followups, reminders, audit log",
-      "n8n + webhook outbound queue",
-      "BANT-required stage gating",
-      "Priority email support",
+      "Everything in Operator",
+      "Team visibility & ownership",
+      "Adaptive multi-step campaigns",
+      "OOO / referral / opt-out handling",
+      "Intent Radar + Fit Check",
+      "Connected content engine",
+      "Priority onboarding",
     ],
   },
   {
     name: "Scale",
-    price: "Custom",
-    cadence: "talk to us",
+    price: "Enterprise",
+    cadence: "custom deployment",
     description:
-      "For agencies and 25+ seat sales orgs running multi-profile outbound at scale.",
+      "For agencies and high-volume outbound orgs that need policy, capacity, and dedicated support.",
     cta: "Contact sales",
     href: "/contact",
     highlight: false,
     features: [
-      "Everything in Team",
-      "SSO / SAML",
-      "Custom integrations (Apollo, Outlook, LinkedIn)",
-      "Commission engine (v2 early access)",
-      "Cohort & ROI analytics",
-      "Dedicated migration engineer",
-      "SLAs and dedicated CSM",
+      "Everything in Revenue Team",
+      "Org send policy & capacity controls",
+      "SSO / advanced governance",
+      "Custom knowledge libraries",
+      "Integration roadmap & SLAs",
+      "Dedicated CSM",
     ],
   },
 ];
@@ -79,8 +78,8 @@ export default function PricingPage() {
         <SectionHeading
           align="center"
           eyebrow="Pricing"
-          title="One price, everything included."
-          description="No hidden modules, no per-channel charges, no per-pipeline fees. Pay for seats, get the whole product."
+          title="Early access, priced for outcomes."
+          description="Nova is opening in waves. Join the waitlist and we’ll match you to the right plan based on team size and outbound volume."
         />
       </Section>
 
@@ -93,7 +92,7 @@ export default function PricingPage() {
                 "relative flex flex-col overflow-hidden rounded-2xl border bg-card/60 p-7 backdrop-blur-sm",
                 tier.highlight
                   ? "border-primary/50 shadow-2xl shadow-primary/15"
-                  : "border-border/60"
+                  : "border-border/60",
               )}
             >
               {tier.highlight && (
@@ -107,7 +106,7 @@ export default function PricingPage() {
                 <h3 className="text-lg font-semibold">{tier.name}</h3>
                 {tier.highlight && (
                   <span className="rounded-full bg-primary/15 px-2.5 py-0.5 text-[11px] font-medium text-primary">
-                    Most popular
+                    Recommended
                   </span>
                 )}
               </div>
@@ -143,7 +142,7 @@ export default function PricingPage() {
                         "mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
                         tier.highlight
                           ? "bg-primary text-primary-foreground"
-                          : "bg-muted text-muted-foreground"
+                          : "bg-muted text-muted-foreground",
                       )}
                     >
                       <Check className="h-3 w-3" strokeWidth={3} />
@@ -156,10 +155,18 @@ export default function PricingPage() {
           ))}
         </div>
 
-        <p className="mt-10 text-center text-xs text-muted-foreground">
-          All plans include unlimited channels, all view types, and migration
-          from Sheets. Annual billing saves 20%.
-        </p>
+        <div
+          id="waitlist"
+          className="mx-auto mt-14 max-w-xl rounded-2xl border border-border/60 bg-card/60 p-6 text-center"
+        >
+          <h3 className="text-lg font-semibold">Join the Nova waitlist</h3>
+          <p className="mt-2 text-sm text-muted-foreground">
+            Share your work email and we&apos;ll follow up from sales@stellixsoft.com.
+          </p>
+          <div className="mt-5">
+            <WaitlistForm showCompany />
+          </div>
+        </div>
       </Section>
 
       <CtaBand />

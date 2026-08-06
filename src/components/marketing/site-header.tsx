@@ -65,9 +65,9 @@ export async function SiteHeader() {
               <Button
                 size="sm"
                 nativeButton={false}
-                render={<Link href="/signup" />}
+                render={<Link href="/pricing#waitlist" />}
               >
-                Get started
+                Join waitlist
                 <ArrowRight />
               </Button>
             </>
@@ -121,9 +121,9 @@ export async function SiteHeader() {
                       <Button
                         className="w-full"
                         nativeButton={false}
-                        render={<Link href="/signup" />}
+                        render={<Link href="/pricing#waitlist" />}
                       >
-                        Get started
+                        Join waitlist
                       </Button>
                     </div>
                   )}

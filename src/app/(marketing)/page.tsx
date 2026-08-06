@@ -1,26 +1,28 @@
 import type { Metadata } from "next";
-import { ChannelsGrid } from "@/components/marketing/channels-grid";
 import { Comparison } from "@/components/marketing/comparison";
 import { CtaBand } from "@/components/marketing/cta-band";
-import { FeatureList } from "@/components/marketing/feature-list";
 import { Hero } from "@/components/marketing/hero";
-import { TeamAccessGovernance } from "@/components/marketing/team-access-governance";
-import { TwoLayer } from "@/components/marketing/two-layer";
+import { IntelligencePillars } from "@/components/marketing/intelligence-pillars";
+import { JourneySteps } from "@/components/marketing/journey-steps";
+import { KnowledgeRag } from "@/components/marketing/knowledge-rag";
+import { NotAnotherCrm } from "@/components/marketing/not-another-crm";
+import { ReplyIntelligence } from "@/components/marketing/reply-intelligence";
+import { SITE } from "@/lib/site";
 
 export const metadata: Metadata = {
-  title: "Multi-channel Sales CRM",
-  description:
-    "Replace Sheets with a CRM built for teams running cold email, LinkedIn, Upwork, and inbound. Private-by-default leads, department and team visibility, admin policies with overrides, plus per-channel funnels and director-level diagnostics.",
+  title: "AI Revenue Execution System",
+  description: SITE.description,
 };
 
 export default function LandingPage() {
   return (
     <>
       <Hero />
-      <ChannelsGrid />
-      <TwoLayer />
-      <TeamAccessGovernance />
-      <FeatureList />
+      <NotAnotherCrm />
+      <JourneySteps />
+      <IntelligencePillars />
+      <ReplyIntelligence />
+      <KnowledgeRag />
       <Comparison />
       <CtaBand />
     </>

@@ -5,7 +5,7 @@ import { Section, SectionHeading } from "@/components/marketing/section";
 export const metadata: Metadata = {
   title: "About",
   description:
-    "We built Nova CRM because every existing CRM forced our team to deform our workflow. So we replaced the spreadsheet at the center.",
+    "Nova started because storing prospects is not the same as managing them. We built an intelligent system that runs every prospect journey.",
 };
 
 export default function AboutPage() {
@@ -15,28 +15,28 @@ export default function AboutPage() {
         <SectionHeading
           align="center"
           eyebrow="About"
-          title="We built the CRM we wanted to use."
-          description="Nova started as the internal tool we built for our own sales team. After running it for six months across cold email, LinkedIn, Upwork, inbound, and 1:1 outreach, we realized other teams had the same problem."
+          title="Built because recording activity is not enough."
+          description="Nova comes from Stellix Soft — a team that lived the gap between CRM records, rigid sequencers, and the real work of moving prospects forward with judgment."
         />
       </Section>
 
       <Section className="py-12">
         <div className="mx-auto grid max-w-5xl gap-10 md:grid-cols-2">
           <Block
-            title="The story"
-            body="We were running a 12-person sales team across six channels with one shared Google Sheet. n8n watched the sheet, Instantly ran the campaigns, and someone (always the wrong person) fielded the inbound replies. Things fell through the cracks every week."
+            title="The problem"
+            body="Teams already had CRMs, inboxes, and automation tools. What they lacked was a system that understands each prospect, decides the next move, and executes most of the journey without constant babysitting."
           />
           <Block
             title="The insight"
-            body="Generic CRMs force a single funnel onto every channel. Spreadsheets don't enforce permissions. Neither tracks the effort that creates the leads. We needed both: funnels per channel and one converged closing pipeline, with effort and intent as separate layers."
+            body="A CRM tells you what happened. A sequencer fires what you pre-wrote. Revenue teams need something that interprets replies, adapts sequences, and grounds every message in real company knowledge."
           />
           <Block
-            title="The principle"
-            body="The system should be fully usable on day one without integrations. Manual entry is a first-class citizen. Integrations come online over weeks and months, they're upgrades, never preconditions."
+            title="The product"
+            body="Nova is an AI revenue execution system: personalized journeys, adaptive follow-ups, reply intelligence, RAG-powered knowledge, engagement signals, and content from one connected layer."
           />
           <Block
-            title="The bet"
-            body="If you can answer 'why did closings drop this month?' in ten seconds, you'll fix problems weeks earlier. That single capability (diagnosis without spreadsheet archaeology) pays for the whole tool."
+            title="The standard"
+            body="Every prospect should feel individually managed. Automation without judgment is spam. Intelligence without execution is a dashboard. Nova is designed to do both."
           />
         </div>
       </Section>

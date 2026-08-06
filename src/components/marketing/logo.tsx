@@ -1,6 +1,6 @@
 import { Sparkles, Zap } from "lucide-react";
 import Link from "next/link";
-import { APP_NAME } from "@/lib/constants";
+import { SITE } from "@/lib/site";
 import { cn } from "@/lib/utils";
 
 export function Logo({
@@ -22,25 +22,25 @@ export function Logo({
       className={cn(
         "group inline-flex items-center gap-2.5 outline-none",
         "focus-visible:ring-2 focus-visible:ring-ring/50 rounded-lg",
-        className
+        className,
       )}
-      aria-label={`${APP_NAME} home`}
+      aria-label={`${SITE.name} home`}
     >
       <span
         className={cn(
           "relative flex items-center justify-center rounded-xl bg-primary text-primary-foreground",
           "shadow-lg shadow-primary/30 transition-transform group-hover:scale-[1.03]",
-          dim
+          dim,
         )}
       >
         <Zap className={iconDim} />
-        <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-indigo-500 ring-2 ring-background">
+        <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-cyan-500 ring-2 ring-background">
           <Sparkles className="h-2.5 w-2.5 text-white" />
         </span>
       </span>
       {showWordmark && (
         <span className={cn("font-semibold tracking-tight", text)}>
-          {APP_NAME}
+          {SITE.name}
         </span>
       )}
     </Link>

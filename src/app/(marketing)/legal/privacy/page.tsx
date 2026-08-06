@@ -4,7 +4,7 @@ import { Prose } from "@/components/marketing/prose";
 
 export const metadata: Metadata = {
   title: "Privacy Policy",
-  description: "How Nova CRM collects, uses, and protects your data.",
+  description: "How Nova collects, uses, and protects your data.",
 };
 
 const UPDATED = "May 2, 2026";
@@ -48,7 +48,7 @@ export default function PrivacyPage() {
         <h2>Your rights</h2>
         <p>
           You can export, correct, or delete your data at any time. Email{" "}
-          <a href="mailto:privacy@novacrm.com">privacy@novacrm.com</a>.
+          <a href="mailto:sales@stellixsoft.com">sales@stellixsoft.com</a>.
         </p>
       </Prose>
     </Section>

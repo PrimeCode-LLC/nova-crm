@@ -15,21 +15,18 @@ export const metadata: Metadata = {
     default: `${SITE.name}: ${SITE.tagline}`,
     template: `%s · ${SITE.name}`,
   },
-  description:
-    "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+  description: SITE.description,
   openGraph: {
     type: "website",
     siteName: SITE.name,
     title: `${SITE.name}: ${SITE.tagline}`,
-    description:
-      "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+    description: SITE.description,
     url: SITE.url,
   },
   twitter: {
     card: "summary_large_image",
     title: `${SITE.name}: ${SITE.tagline}`,
-    description:
-      "Multi-channel Sales CRM for pipeline clarity and funnel diagnosis.",
+    description: SITE.description,
   },
 };
 

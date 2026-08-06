@@ -4,7 +4,7 @@ import { Prose } from "@/components/marketing/prose";
 
 export const metadata: Metadata = {
   title: "Terms of Service",
-  description: "The terms governing your use of Nova CRM.",
+  description: "The terms governing your use of Nova.",
 };
 
 const UPDATED = "May 2, 2026";
@@ -25,8 +25,9 @@ export default function TermsPage() {
 
         <h2>Service</h2>
         <p>
-          Nova CRM provides a hosted multi-channel sales CRM. We may update
-          features, pricing, or limits with reasonable notice.
+          Nova provides a hosted AI revenue execution system for prospect
+          journeys. We may update features, pricing, or limits with reasonable
+          notice.
         </p>
 
         <h2>Your account</h2>

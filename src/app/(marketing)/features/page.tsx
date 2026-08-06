@@ -1,17 +1,19 @@
 import type { Metadata } from "next";
-import { ChannelsGrid } from "@/components/marketing/channels-grid";
 import { Comparison } from "@/components/marketing/comparison";
 import { CtaBand } from "@/components/marketing/cta-band";
 import { DashboardPreview } from "@/components/marketing/dashboard-preview";
-import { FeatureList } from "@/components/marketing/feature-list";
+import { IntelligencePillars } from "@/components/marketing/intelligence-pillars";
+import { JourneySteps } from "@/components/marketing/journey-steps";
+import { KnowledgeRag } from "@/components/marketing/knowledge-rag";
+import { NotAnotherCrm } from "@/components/marketing/not-another-crm";
+import { ReplyIntelligence } from "@/components/marketing/reply-intelligence";
 import { Section, SectionHeading } from "@/components/marketing/section";
-import { TeamAccessGovernance } from "@/components/marketing/team-access-governance";
-import { TwoLayer } from "@/components/marketing/two-layer";
+import { SITE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Features",
   description:
-    "Pipeline views, org-aware permissions and private-by-default leads, department and team policies with admin overrides, idle-lead alerts, multi-channel touchpoints, BANT stage gates, and director-level diagnostics.",
+    "Adaptive sequences, reply intelligence, RAG-grounded outreach, engagement signals, Intent Radar, Fit Check, and connected content — the Nova revenue execution stack.",
 };
 
 export default function FeaturesPage() {
@@ -21,18 +23,19 @@ export default function FeaturesPage() {
         <SectionHeading
           align="center"
           eyebrow="Features"
-          title="The shortest path from lead to closed."
-          description="Built specifically for teams running 6+ outbound channels with mixed permissions and a director who needs answers in 10 seconds."
+          title="The intelligence layer that runs every prospect journey."
+          description={SITE.oneLiner}
         />
         <div className="mx-auto mt-14 max-w-6xl">
           <DashboardPreview />
         </div>
       </Section>
 
-      <ChannelsGrid />
-      <TwoLayer />
-      <TeamAccessGovernance />
-      <FeatureList />
+      <NotAnotherCrm />
+      <JourneySteps />
+      <IntelligencePillars />
+      <ReplyIntelligence />
+      <KnowledgeRag />
       <Comparison />
       <CtaBand />
     </>

@@ -1,32 +1,33 @@
 import type { Metadata } from "next";
-import { Mail, MessageSquare, Phone } from "lucide-react";
+import { Mail, MessageSquare, Users } from "lucide-react";
 import { Section, SectionHeading } from "@/components/marketing/section";
 import { ContactForm } from "@/components/marketing/contact-form";
+import { SITE } from "@/lib/site";
 
 export const metadata: Metadata = {
   title: "Contact",
   description:
-    "Talk to the team: sales questions, migration help, feature requests, or just a hello.",
+    "Talk to Nova sales about waitlist access, demos, migrations, or partnership questions.",
 };
 
 const CHANNELS = [
   {
     icon: Mail,
-    title: "Email",
-    body: "hello@novacrm.com",
-    note: "Replies within 24 hours, Mon–Fri.",
+    title: "Sales",
+    body: SITE.salesEmail,
+    note: "Waitlist, demos, and enterprise inquiries.",
   },
   {
     icon: MessageSquare,
-    title: "Live chat",
-    body: "Sign up to start a thread in-app.",
-    note: "Fastest path for trial questions.",
+    title: "Product questions",
+    body: "Use the form with context.",
+    note: "Tell us your channels, volume, and team size.",
   },
   {
-    icon: Phone,
-    title: "Sales",
-    body: "For 25+ seat orgs.",
-    note: "Use the form and we'll book a call.",
+    icon: Users,
+    title: "Teams & agencies",
+    body: "25+ seats or multi-client ops.",
+    note: "We’ll book a working session, not a slideshow.",
   },
 ];
 
@@ -36,8 +37,8 @@ export default function ContactPage() {
       <SectionHeading
         align="center"
         eyebrow="Contact"
-        title="Let's talk."
-        description="Migration questions, integration timelines, or just a sanity check. We read everything."
+        title="Talk to the Nova team."
+        description="Waitlist access, rollout planning, or a sanity check on whether Nova fits your motion. We read everything."
       />
 
       <div className="mx-auto mt-16 grid max-w-5xl gap-10 lg:grid-cols-[1fr_1.2fr]">
@@ -52,7 +53,18 @@ export default function ContactPage() {
               </span>
               <div>
                 <h3 className="font-medium">{c.title}</h3>
-                <p className="mt-0.5 text-sm text-foreground/85">{c.body}</p>
+                <p className="mt-0.5 text-sm text-foreground/85">
+                  {c.title === "Sales" ? (
+                    <a
+                      href={`mailto:${SITE.salesEmail}`}
+                      className="underline underline-offset-2 hover:text-foreground"
+                    >
+                      {c.body}
+                    </a>
+                  ) : (
+                    c.body
+                  )}
+                </p>
                 <p className="mt-1 text-xs text-muted-foreground">{c.note}</p>
               </div>
             </div>

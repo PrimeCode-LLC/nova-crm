@@ -160,8 +160,48 @@
   }
 }
 
-/* Scrollbar polish */
+/* Marketing landing reveals */
+@keyframes nova-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes nova-soft-glow {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
 @layer utilities {
+  .nova-rise {
+    animation: nova-rise 0.8s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .nova-rise-delay-1 {
+    animation-delay: 80ms;
+  }
+  .nova-rise-delay-2 {
+    animation-delay: 160ms;
+  }
+  .nova-rise-delay-3 {
+    animation-delay: 240ms;
+  }
+  .nova-rise-delay-4 {
+    animation-delay: 320ms;
+  }
+  .nova-soft-glow {
+    animation: nova-soft-glow 8s ease-in-out infinite;
+  }
+
   .scrollbar-thin::-webkit-scrollbar {
     width: 8px;
     height: 8px;

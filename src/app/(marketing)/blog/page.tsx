@@ -7,7 +7,7 @@ import { formatDate, getAllPosts } from "@/lib/blog";
 export const metadata: Metadata = {
   title: "Blog",
   description:
-    "Field notes on running multi-channel sales: pipeline diagnostics, the two-layer tracking model, and migrating from Sheets.",
+    "Notes on intelligent prospect journeys, reply handling, and revenue execution — from the team building Nova.",
 };
 
 export default function BlogIndexPage() {
@@ -21,7 +21,7 @@ export default function BlogIndexPage() {
           align="center"
           eyebrow="Blog"
           title="Field notes from the front lines."
-          description="Concrete plays, tracking models, and migration tactics, written by people running the same CRM you are."
+          description="Plays on prospect journeys, reply intelligence, and outbound execution — written while building Nova."
         />
       </Section>
 
