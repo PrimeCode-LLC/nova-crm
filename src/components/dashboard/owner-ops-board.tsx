@@ -21,7 +21,10 @@ import {
   type WallScene,
 } from "@/components/dashboard/wall-scene-carousel";
 import { useDashboardMeetings } from "@/hooks/use-dashboard-meetings";
-import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import {
+  buildDashboardWallHref,
+  type DashboardTimeRangeKey,
+} from "@/lib/dashboard-date-range";
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import type { DashboardWidgets } from "@/lib/dashboard-preferences";
 import { defaultWallPreferences, type WallPreferences } from "@/lib/wall-preferences";
@@ -410,7 +413,7 @@ export function OwnerOpsBoard({
       {showWallLink && widgets.wallLink ? (
         <div className="flex justify-end">
           <Link
-            href="/dashboard/wall"
+            href={buildDashboardWallHref(range)}
             className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
           >
             <Monitor className="h-3.5 w-3.5" />

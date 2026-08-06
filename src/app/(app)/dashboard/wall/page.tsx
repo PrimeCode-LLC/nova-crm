@@ -1,10 +1,18 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Maximize2, Minimize2, Monitor, X } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Calendar, Maximize2, Minimize2, Monitor, X } from "lucide-react";
 import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { OwnerOpsBoard } from "@/components/dashboard/owner-ops-board";
 import {
   WallPinLockOverlay,
@@ -30,8 +38,19 @@ import { roleAtLeast } from "@/lib/platform/org-role";
 import { getFirebaseDb } from "@/lib/firebase/client";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { persistUserNotificationCreate } from "@/lib/notifications/persist-user-notification-client";
-import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import {
+  buildDashboardHref,
+  buildDashboardWallHref,
+  DASHBOARD_TIME_RANGE_LABELS,
+  parseDashboardTimeRangeKey,
+  type DashboardTimeRangeKey,
+} from "@/lib/dashboard-date-range";
 import type { OrgActivityEvent, OrgMemberRole } from "@/lib/types";
+
+const WALL_RANGE_OPTIONS = (
+  Object.entries(DASHBOARD_TIME_RANGE_LABELS) as [DashboardTimeRangeKey, string][]
+).map(([key, label]) => ({ key, label }));
 
 function newOrgActivityId() {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -59,8 +78,10 @@ function unlockEscapeKey() {
   }
 }
 
-export default function DashboardWallPage() {
+function DashboardWallPageInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const range = parseDashboardTimeRangeKey(searchParams.get("range"), "30d");
   const {
     leads,
     deals,
@@ -147,7 +168,7 @@ export default function DashboardWallPage() {
       actorId: currentUserId,
       summary,
       createdAt: new Date().toISOString(),
-      href: "/dashboard/wall",
+      href: buildDashboardWallHref(range),
       entityType: "wall",
       entityId: "display",
     };
@@ -180,7 +201,7 @@ export default function DashboardWallPage() {
           kind: "security",
           message: "Someone tried to leave wall mode without entering the PIN.",
           target: "Wall display",
-          targetHref: "/dashboard/wall",
+          targetHref: buildDashboardWallHref(range),
         });
       } catch {
         /* best-effort */
@@ -263,7 +284,6 @@ export default function DashboardWallPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armedHash]);
 
-  const range: DashboardTimeRangeKey = "7d";
   const metrics = React.useMemo(
     () =>
       computeDashboardWorkflowMetrics({
@@ -276,11 +296,16 @@ export default function DashboardWallPage() {
         range,
         timeZone: organizationTimezone,
       }),
-    [leads, followups, followupPlans, leadTasks, contacts, currentUserId, organizationTimezone],
+    [leads, followups, followupPlans, leadTasks, contacts, currentUserId, range, organizationTimezone],
   );
 
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;
+
+  function setRange(next: DashboardTimeRangeKey) {
+    if (next === range) return;
+    router.replace(buildDashboardWallHref(next));
+  }
 
   async function enterFullscreen() {
     setFsError(null);
@@ -323,7 +348,7 @@ export default function DashboardWallPage() {
       openLockWithAttempt("exit_button");
       return;
     }
-    router.push("/dashboard");
+    router.push(buildDashboardHref(range));
   }
 
   async function toggleFullscreen() {
@@ -352,7 +377,7 @@ export default function DashboardWallPage() {
         kind: "security",
         message: "Someone entered a wrong PIN trying to exit wall mode.",
         target: "Wall display",
-        targetHref: "/dashboard/wall",
+        targetHref: buildDashboardWallHref(range),
       });
     } catch {
       /* best-effort */
@@ -371,7 +396,7 @@ export default function DashboardWallPage() {
     } catch {
       /* ignore */
     }
-    router.push("/dashboard");
+    router.push(buildDashboardHref(range));
   }
 
   if (workspaceLoading) {
@@ -386,7 +411,7 @@ export default function DashboardWallPage() {
     return (
       <div className="fixed inset-0 z-[200] flex flex-col items-center justify-center gap-3 bg-background p-8">
         <p className="text-sm text-muted-foreground">Wall mode is for owners and managers.</p>
-        <Link href="/dashboard" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+        <Link href={buildDashboardHref(range)} className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
           Back to dashboard
         </Link>
       </div>
@@ -434,7 +459,7 @@ export default function DashboardWallPage() {
               <code className="rounded bg-muted px-1 py-0.5">--kiosk</code>.
             </p>
             <Link
-              href="/dashboard"
+              href={buildDashboardHref(range)}
               className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "mt-3")}
             >
               Cancel
@@ -461,6 +486,29 @@ export default function DashboardWallPage() {
           <h1 className="text-lg font-semibold tracking-tight">Command board</h1>
         </div>
         <div className="flex items-center gap-3">
+          <Select
+            value={range}
+            onValueChange={(v) => {
+              if (!v) return;
+              setRange(parseDashboardTimeRangeKey(v, range));
+            }}
+          >
+            <SelectTrigger size="sm" className="w-auto min-w-36 gap-1.5 whitespace-nowrap bg-background/80">
+              <Calendar className="h-3.5 w-3.5 shrink-0 opacity-70" aria-hidden />
+              <SelectValue className="whitespace-nowrap">
+                {selectTriggerLabelByKey(range, WALL_RANGE_OPTIONS) ?? undefined}
+              </SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {(Object.entries(DASHBOARD_TIME_RANGE_LABELS) as [DashboardTimeRangeKey, string][]).map(
+                ([value, label]) => (
+                  <SelectItem key={value} value={value}>
+                    {label}
+                  </SelectItem>
+                ),
+              )}
+            </SelectContent>
+          </Select>
           <p className="hidden tabular-nums text-sm text-muted-foreground sm:block">
             {clock.toLocaleString(undefined, {
               weekday: "short",
@@ -515,5 +563,19 @@ export default function DashboardWallPage() {
         />
       </div>
     </div>
+  );
+}
+
+export default function DashboardWallPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="fixed inset-0 z-[200] bg-background p-6">
+          <WorkspacePageSkeleton />
+        </div>
+      }
+    >
+      <DashboardWallPageInner />
+    </Suspense>
   );
 }

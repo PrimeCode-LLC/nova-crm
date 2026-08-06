@@ -36,6 +36,23 @@ export function parseDashboardTimeRangeKey(
   return fallback;
 }
 
+/** Wall display URL — carries the Overview date filter so KPIs stay in sync. */
+export function buildDashboardWallHref(
+  range: DashboardTimeRangeKey = "30d",
+): string {
+  const p = new URLSearchParams();
+  p.set("range", range);
+  return `/dashboard/wall?${p.toString()}`;
+}
+
+/** Overview URL with an optional date range (e.g. exiting wall mode). */
+export function buildDashboardHref(range?: DashboardTimeRangeKey): string {
+  if (!range) return "/dashboard";
+  const p = new URLSearchParams();
+  p.set("range", range);
+  return `/dashboard?${p.toString()}`;
+}
+
 /** Dashboard Replies KPI → list of leads/prospects with `lastReplyAt` in range. */
 export function buildRepliesDrillHref(
   range: DashboardTimeRangeKey = "30d",

@@ -17,6 +17,7 @@ import { Separator } from "@/components/ui/separator";
 import { toast } from "sonner";
 import { useWallPreferences } from "@/hooks/use-wall-preferences";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
+import { buildDashboardWallHref } from "@/lib/dashboard-date-range";
 import { cn } from "@/lib/utils";
 import {
   WALL_DWELL_OPTIONS,
@@ -229,7 +230,7 @@ export function WallDisplaySettingsCard({ userId }: { userId: string }) {
 
         <div className="flex flex-wrap items-center gap-2">
           <Link
-            href="/dashboard/wall"
+            href={buildDashboardWallHref("30d")}
             className={cn(buttonVariants({ variant: "default", size: "sm" }), "gap-1.5")}
           >
             <Monitor className="h-3.5 w-3.5" />

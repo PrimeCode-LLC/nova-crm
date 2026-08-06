@@ -3,6 +3,7 @@
 import * as React from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -63,7 +64,10 @@ import {
   filterActivityCountersByDateRange,
   type DashboardTimeRangeKey,
   DASHBOARD_TIME_RANGE_LABELS,
+  buildDashboardHref,
+  buildDashboardWallHref,
   buildRepliesDrillHref,
+  parseDashboardTimeRangeKey,
 } from "@/lib/dashboard-date-range";
 import {
   OWNER_SCOPE_PREFIX,
@@ -133,6 +137,9 @@ const DASHBOARD_RANGE_OPTIONS = (
 ).map(([key, label]) => ({ key, label }));
 
 export default function DashboardPage() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const rangeFromUrl = parseDashboardTimeRangeKey(searchParams.get("range"), "30d");
   const {
     leads,
     deals,
@@ -156,7 +163,8 @@ export default function DashboardPage() {
     activeOrgMemberIds,
   } = useWorkspace();
   const navAccess = useNavAccessContext();
-  const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();  const emailResponseCtx = useLeadEmailResponseContext();
+  const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
+  const emailResponseCtx = useLeadEmailResponseContext();
   const { localRollups } = useLocalActivityRollups();
   const activityCountersWithLocal = React.useMemo(
     () => mergeActivityCounters(activityCounters, localRollups),
@@ -166,7 +174,11 @@ export default function DashboardPage() {
   const [channelScope, setChannelScope] = React.useState<ChannelKey[]>([]);
   const [draftChannels, setDraftChannels] = React.useState<ChannelKey[]>([]);
   const [ownerScope, setOwnerScope] = React.useState("all-owners");
-  const [timeRange, setTimeRange] = React.useState("30d");
+  const [timeRange, setTimeRange] = React.useState(rangeFromUrl);
+
+  React.useEffect(() => {
+    setTimeRange(rangeFromUrl);
+  }, [rangeFromUrl]);
 
   const ownerScopeDeps = React.useMemo(
     () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
@@ -537,7 +549,7 @@ export default function DashboardPage() {
           <>
             {canCustomizeLayout ? (
               <Link
-                href="/dashboard/wall"
+                href={buildDashboardWallHref(timeRange as DashboardTimeRangeKey)}
                 className={cn(buttonVariants({ variant: "outline", size: "sm" }), "gap-1.5")}
               >
                 <Monitor className="h-3.5 w-3.5" />
@@ -563,7 +575,9 @@ export default function DashboardPage() {
               value={timeRange}
               onValueChange={(v) => {
                 if (!v || v === timeRange) return;
-                setTimeRange(v);
+                const next = parseDashboardTimeRangeKey(v, timeRange as DashboardTimeRangeKey);
+                setTimeRange(next);
+                router.replace(buildDashboardHref(next), { scroll: false });
               }}
             >
               <SelectTrigger size="sm" className="w-auto min-w-40 gap-1.5 whitespace-nowrap">

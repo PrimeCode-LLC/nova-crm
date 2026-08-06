@@ -2,8 +2,28 @@ import { describe, expect, it } from "vitest";
 import {
   getDashboardRangeStart,
   filterActivityRecordsByDateRange,
+  buildDashboardHref,
+  buildDashboardWallHref,
+  parseDashboardTimeRangeKey,
 } from "@/lib/dashboard-date-range";
 import type { ActivityRecord } from "@/lib/types";
+
+describe("buildDashboardWallHref / buildDashboardHref", () => {
+  it("carries the selected range into wall mode", () => {
+    expect(buildDashboardWallHref("today")).toBe("/dashboard/wall?range=today");
+    expect(buildDashboardWallHref("30d")).toBe("/dashboard/wall?range=30d");
+  });
+
+  it("round-trips range back to overview", () => {
+    expect(buildDashboardHref("today")).toBe("/dashboard?range=today");
+    expect(buildDashboardHref()).toBe("/dashboard");
+  });
+
+  it("parses wall query range with a safe fallback", () => {
+    expect(parseDashboardTimeRangeKey("today")).toBe("today");
+    expect(parseDashboardTimeRangeKey("nope", "30d")).toBe("30d");
+  });
+});
 
 describe("getDashboardRangeStart today vs 1d", () => {
   // 2026-07-29 02:00 UTC = Jul 28 evening EDT, Jul 29 morning PKT
