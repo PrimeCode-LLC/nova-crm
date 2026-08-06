@@ -26,11 +26,12 @@ import {
   Search,
   CheckCheck,
   ShieldAlert,
+  type LucideIcon,
 } from "lucide-react";
 import { toast } from "sonner";
 import type { User } from "@/lib/types";
 
-const KIND_ICONS: Record<NotificationKind, React.ElementType> = {
+const KIND_ICONS: Record<NotificationKind, LucideIcon> = {
   mention: AtSign,
   assignment: UserPlus,
   followup: CalendarClock,

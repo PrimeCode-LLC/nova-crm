@@ -71,13 +71,13 @@ import {
 } from "@/lib/base-ui-select-label";
 import { channelLabelFromValue } from "@/lib/channel-options";
 import { useChannelOptions } from "@/hooks/use-channel-options";
-import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User } from "lucide-react";
+import { UserRound, Building2, Contact as ContactIcon, CheckSquare, User, type LucideIcon } from "lucide-react";
 
 export type QuickAddPill = "lead" | "contact" | "account" | "task" | "profile";
 
 type Pill = QuickAddPill;
 
-const PILLS: { key: Pill; label: string; icon: React.ElementType }[] = [
+const PILLS: { key: Pill; label: string; icon: LucideIcon }[] = [
   { key: "lead", label: "Lead", icon: UserRound },
   { key: "contact", label: "Contact", icon: ContactIcon },
   { key: "account", label: "Company", icon: Building2 },
