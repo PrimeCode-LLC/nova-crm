@@ -679,6 +679,15 @@ export interface Lead {
 
   labelIds?: string[];
 
+  /**
+   * Soft-archive: hidden from Leads / Prospects / Pipeline when set.
+   * Permanent delete remains a separate manager+ action (typically from Archive).
+   */
+  archivedAt?: ISODate;
+  archivedBy?: string;
+  /** Why the row was archived (`manual` | `lost` | `rejected`). */
+  archiveReason?: "manual" | "lost" | "rejected";
+
   createdAt: ISODate;
   updatedAt: ISODate;
 }
@@ -1136,7 +1145,9 @@ export type OrgActivityEventType =
   /** Bulk / summary CRM ops (intake-style Live activity rows). */
   | "leads_sequences_built"
   | "leads_sequences_scheduled"
-  | "leads_deleted";
+  | "leads_deleted"
+  | "leads_archived"
+  | "leads_restored";
 
 export interface OrgActivityEvent {
   id: string;

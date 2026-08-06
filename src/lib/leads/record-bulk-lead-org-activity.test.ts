@@ -29,6 +29,16 @@ describe("summarizeBulkLeadOrgActivity", () => {
     expect(summarizeBulkLeadOrgActivity({ type: "leads_deleted", count: 1 })).toBe("Deleted 1 lead");
     expect(summarizeBulkLeadOrgActivity({ type: "leads_deleted", count: 5 })).toBe("Deleted 5 leads");
   });
+
+  it("summarizes archive and restore", () => {
+    expect(summarizeBulkLeadOrgActivity({ type: "leads_archived", count: 1, leadLabel: "Ada" })).toBe(
+      "Archived “Ada”",
+    );
+    expect(summarizeBulkLeadOrgActivity({ type: "leads_archived", count: 4 })).toBe("Archived 4 leads");
+    expect(summarizeBulkLeadOrgActivity({ type: "leads_restored", count: 2 })).toBe(
+      "Restored 2 leads from archive",
+    );
+  });
 });
 
 describe("buildOpsActivityFeed bulk lead org events", () => {

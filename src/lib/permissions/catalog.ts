@@ -719,6 +719,7 @@ export const MODULE_BY_HREF: Record<string, ModuleKey> = {
   "/admin/departments": "departments",
   "/dashboard/reply-intelligence": "dashboard",
   "/replies": "leads",
+  "/archive": "leads",
 };
 
 export function modulesByCluster(): {

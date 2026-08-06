@@ -52,6 +52,7 @@ export function groupsForPathname(pathname: string): WorkspaceListenerGroup[] {
   const isDashboard = p === "/dashboard" || p.startsWith("/dashboard/");
   const isLeads = p === "/leads" || p.startsWith("/leads/");
   const isProspects = p === "/prospects" || p.startsWith("/prospects/");
+  const isArchive = p === "/archive" || p.startsWith("/archive/");
   const isLeadDetail = /^\/leads\/[^/]+$/.test(p);
   const isAccounts = p === "/accounts" || p.startsWith("/accounts/");
   const isAccountDetail = /^\/accounts\/[^/]+$/.test(p);
@@ -70,6 +71,7 @@ export function groupsForPathname(pathname: string): WorkspaceListenerGroup[] {
   if (
     isLeads ||
     isProspects ||
+    isArchive ||
     isInbox ||
     isAccounts ||
     isContacts ||
@@ -87,6 +89,7 @@ export function groupsForPathname(pathname: string): WorkspaceListenerGroup[] {
     isFollowups ||
     isLeads ||
     isProspects ||
+    isArchive ||
     isInbox ||
     isDashboard ||
     isScheduling
@@ -106,7 +109,14 @@ export function groupsForPathname(pathname: string): WorkspaceListenerGroup[] {
     groups.push("activity");
   }
 
-  if (isDashboard || isOutreach || isLeads || isProspects || isAdminCampaigns) {
+  if (
+    isDashboard ||
+    isOutreach ||
+    isLeads ||
+    isProspects ||
+    isArchive ||
+    isAdminCampaigns
+  ) {
     groups.push("campaigns");
   }
 

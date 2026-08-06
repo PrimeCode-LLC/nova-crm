@@ -212,5 +212,13 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       raw.emailVerificationSource === "manual"
         ? raw.emailVerificationSource
         : undefined,
+    archivedAt: raw.archivedAt ? firestoreValueToIso(raw.archivedAt) : undefined,
+    archivedBy: typeof raw.archivedBy === "string" ? raw.archivedBy : undefined,
+    archiveReason:
+      raw.archiveReason === "manual" ||
+      raw.archiveReason === "lost" ||
+      raw.archiveReason === "rejected"
+        ? raw.archiveReason
+        : undefined,
   };
 }

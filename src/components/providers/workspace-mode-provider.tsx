@@ -123,6 +123,13 @@ import {
 } from "@/lib/firestore/audit-change-client";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
+import {
+  buildArchivePatch,
+  buildRestoreAsProspectPatch,
+  buildRestorePatch,
+  isLeadArchived,
+  type LeadArchiveReason,
+} from "@/lib/leads/lead-archive";
 import { enrichLeadsIdleState } from "@/lib/lead-idle";
 import { mergeFollowupPlans } from "@/lib/followup-plans";
 import { roleAtLeast } from "@/lib/platform/org-role";
@@ -279,6 +286,16 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     deleteLead: (
       leadId: string,
       options?: { quiet?: boolean; skipActivity?: boolean },
+    ) => Promise<boolean>;
+    /** Soft-archive a lead/prospect (hides from active lists). */
+    archiveLead: (
+      leadId: string,
+      options?: { reason?: LeadArchiveReason; quiet?: boolean; skipActivity?: boolean },
+    ) => Promise<boolean>;
+    /** Restore from archive; optionally land in Prospects. */
+    restoreLead: (
+      leadId: string,
+      options?: { asProspect?: boolean; quiet?: boolean; skipActivity?: boolean },
     ) => Promise<boolean>;
     /** Whether the active user may delete leads (org `owner` or `admin`). */
     canDeleteLeads: boolean;
@@ -2311,6 +2328,116 @@ export function WorkspaceModeProvider({
     [mode, userDoc?.organizationId, addOrgActivityEvent],
   );
 
+  const archiveLead = React.useCallback(
+    async (
+      leadId: string,
+      options?: { reason?: LeadArchiveReason; quiet?: boolean; skipActivity?: boolean },
+    ): Promise<boolean> => {
+      const quiet = options?.quiet === true;
+      const skipActivity = options?.skipActivity === true;
+      const snap = snapshotRef.current;
+      const viewerRole: OrgMemberRole =
+        snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? userDoc?.orgRole ?? "member";
+      const lead = snap.leads.find((l) => l.id === leadId);
+      if (!lead) return false;
+      if (!canEditProspectDerivedLead(lead, viewerRole)) {
+        if (!quiet) toast.error("Only workspace admins can archive this lead.");
+        return false;
+      }
+      if (isLeadArchived(lead)) {
+        if (!quiet) toast.info("Already archived");
+        return true;
+      }
+      const actorId = snap.currentUserId;
+      if (!actorId) {
+        if (!quiet) toast.error("Sign in to archive leads.");
+        return false;
+      }
+      const patch = buildArchivePatch({
+        actorId,
+        reason: options?.reason ?? "manual",
+      });
+      try {
+        await patchLeadAsync(leadId, patch);
+      } catch (e) {
+        if (!quiet) {
+          toastError("Could not archive lead", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "archiveLead",
+          });
+        }
+        return false;
+      }
+      if (!skipActivity) {
+        emitBulkLeadOrgActivity(addOrgActivityEvent, {
+          type: "leads_archived",
+          actorId,
+          count: 1,
+          leadId,
+          leadLabel: leadDisplayLabel(lead),
+        });
+      }
+      if (!quiet) toast.success("Moved to archive");
+      return true;
+    },
+    [userDoc?.orgRole, patchLeadAsync, addOrgActivityEvent],
+  );
+
+  const restoreLead = React.useCallback(
+    async (
+      leadId: string,
+      options?: { asProspect?: boolean; quiet?: boolean; skipActivity?: boolean },
+    ): Promise<boolean> => {
+      const quiet = options?.quiet === true;
+      const skipActivity = options?.skipActivity === true;
+      const snap = snapshotRef.current;
+      const viewerRole: OrgMemberRole =
+        snap.users.find((u) => u.id === snap.currentUserId)?.orgRole ?? userDoc?.orgRole ?? "member";
+      const lead = snap.leads.find((l) => l.id === leadId);
+      if (!lead) return false;
+      if (!canEditProspectDerivedLead(lead, viewerRole)) {
+        if (!quiet) toast.error("Only workspace admins can restore this lead.");
+        return false;
+      }
+      if (!isLeadArchived(lead)) {
+        if (!quiet) toast.info("Not archived");
+        return true;
+      }
+      const actorId = snap.currentUserId;
+      if (!actorId) {
+        if (!quiet) toast.error("Sign in to restore leads.");
+        return false;
+      }
+      const asProspect = options?.asProspect === true;
+      const patch = asProspect ? buildRestoreAsProspectPatch() : buildRestorePatch();
+      try {
+        await patchLeadAsync(leadId, patch);
+      } catch (e) {
+        if (!quiet) {
+          toastError("Could not restore lead", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "restoreLead",
+          });
+        }
+        return false;
+      }
+      if (!skipActivity) {
+        emitBulkLeadOrgActivity(addOrgActivityEvent, {
+          type: "leads_restored",
+          actorId,
+          count: 1,
+          leadId,
+          leadLabel: leadDisplayLabel(lead),
+        });
+      }
+      if (!quiet) {
+        toast.success(asProspect ? "Restored to Prospects" : "Restored from archive");
+      }
+      return true;
+    },
+    [userDoc?.orgRole, patchLeadAsync, addOrgActivityEvent],
+  );
+
   const updateLeadStage = React.useCallback(
     (leadId: string, nextStage: PipelineStage, previousStage: PipelineStage, actorId: string) => {
       const snap = snapshotRef.current;
@@ -2323,6 +2450,11 @@ export function WorkspaceModeProvider({
       }
 
       const iso = new Date().toISOString();
+      const shouldArchiveLost =
+        nextStage === "lost" && previousStage !== "lost" && lead && !isLeadArchived(lead);
+      const archivePatch = shouldArchiveLost
+        ? buildArchivePatch({ actorId, reason: "lost", now: iso })
+        : null;
       const ev: TimelineEvent = {
         id: newLocalId("te-local"),
         leadId,
@@ -2341,13 +2473,16 @@ export function WorkspaceModeProvider({
         void (async () => {
           try {
             const db = getFirebaseDb();
-            await updateDoc(doc(db, COLLECTIONS.leads, leadId), {
+            const stagePayload: Record<string, unknown> = {
               stage: nextStage,
-            });
+              ...(archivePatch ?? {}),
+            };
+            await updateDoc(doc(db, COLLECTIONS.leads, leadId), stagePayload);
             await persistTimelineEventCreate(db, orgId, ev, leadOwnerIdForFirestore(leadId));
             if (syncSalesLeadStage && linkedSalesLeadId) {
               await updateDoc(doc(db, COLLECTIONS.leads, linkedSalesLeadId), {
                 stage: nextStage,
+                ...(archivePatch ?? {}),
               });
             }
             recordLeadStageChangeClient({
@@ -2369,12 +2504,17 @@ export function WorkspaceModeProvider({
       setSessionV2((s) => {
         const leadPatches = {
           ...s.leadPatches,
-          [leadId]: { ...s.leadPatches[leadId], stage: nextStage },
+          [leadId]: {
+            ...s.leadPatches[leadId],
+            stage: nextStage,
+            ...(archivePatch ?? {}),
+          },
         };
         if (syncSalesLeadStage && linkedSalesLeadId) {
           leadPatches[linkedSalesLeadId] = {
             ...s.leadPatches[linkedSalesLeadId],
             stage: nextStage,
+            ...(archivePatch ?? {}),
           };
         }
         return {
@@ -2751,6 +2891,8 @@ export function WorkspaceModeProvider({
       updateCrmLabel,
       removeCrmLabel,
       deleteLead,
+      archiveLead,
+      restoreLead,
       canDeleteLeads,
       canEditLead,
       viewerOrgRole: viewerRole,
@@ -2831,6 +2973,8 @@ export function WorkspaceModeProvider({
     updateCrmLabel,
     removeCrmLabel,
     deleteLead,
+    archiveLead,
+    restoreLead,
     updateLeadStage,
     toggleLeadPin,
     isLeadPinned,

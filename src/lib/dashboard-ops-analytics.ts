@@ -594,6 +594,8 @@ const ORG_FEED_TYPES = new Set<OrgActivityEventType>([
   "leads_sequences_built",
   "leads_sequences_scheduled",
   "leads_deleted",
+  "leads_archived",
+  "leads_restored",
 ]);
 
 export function buildOpsActivityFeed(input: {

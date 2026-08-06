@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Bookmark, Download, FilePenLine, Kanban, Upload, ChevronDown, Target } from "lucide-react";
+import { Bookmark, Download, FilePenLine, Kanban, Upload, ChevronDown, Target, Archive } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import type { LeadsTableRef, LeadsTablePreset } from "@/components/leads/leads-table";
@@ -22,6 +22,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOpenQuickAdd } from "@/components/layout/quick-add-launcher";
 import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
 import { ProspectDraftBanner } from "@/components/prospects/prospect-draft-banner";
+import { filterActiveLeads } from "@/lib/leads/lead-archive";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -42,7 +43,10 @@ function ProspectsPageInner() {
     preset: LeadsTablePreset;
   }>({ key: 0, preset: "default" });
 
-  const prospectCount = React.useMemo(() => leads.filter((l) => l.intakeKind === "prospect").length, [leads]);
+  const prospectCount = React.useMemo(
+    () => filterActiveLeads(leads).filter((l) => l.intakeKind === "prospect").length,
+    [leads],
+  );
 
   return (
     <AppPage>
@@ -147,6 +151,16 @@ function ProspectsPageInner() {
               render={
                 <Link href="/leads">
                   <Target className="h-3.5 w-3.5" /> All leads
+                </Link>
+              }
+            />
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/archive">
+                  <Archive className="h-3.5 w-3.5" /> Archive
                 </Link>
               }
             />

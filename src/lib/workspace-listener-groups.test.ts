@@ -15,6 +15,12 @@ describe("groupsForPathname", () => {
     expect(groupsForPathname("/notifications")).toEqual([]);
   });
 
+  it("maps archive like leads list", () => {
+    expect(groupsForPathname("/archive")).toEqual(
+      expect.arrayContaining(["directory", "plans", "campaigns"]),
+    );
+  });
+
   it("maps leads list and detail", () => {
     expect(groupsForPathname("/leads")).toEqual(
       expect.arrayContaining(["directory", "plans", "campaigns"]),

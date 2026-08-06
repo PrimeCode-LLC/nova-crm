@@ -5,7 +5,7 @@ import { Suspense } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { Bookmark, Download, Kanban, Upload, ChevronDown } from "lucide-react";
+import { Bookmark, Download, Kanban, Upload, ChevronDown, Archive } from "lucide-react";
 
 import { AppPage, PageBody, PageHeader } from "@/components/common/page-header";
 import type { LeadsTableRef, LeadsTablePreset } from "@/components/leads/leads-table";
@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ownerScopeFromQueryParam } from "@/lib/owner-scope";
+import { filterActiveLeads } from "@/lib/leads/lead-archive";
 
 const LeadsTable = dynamic(
   () => import("@/components/leads/leads-table").then((m) => ({ default: m.LeadsTable })),
@@ -45,9 +46,10 @@ function LeadsPageInner() {
   const idleOnly = searchParams.get("filter") === "idle";
 
   const { leads, isDemo, workspaceLoading } = useWorkspace();
+  const activeLeads = React.useMemo(() => filterActiveLeads(leads), [leads]);
   const salesLeadCount = React.useMemo(
-    () => leads.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead").length,
-    [leads],
+    () => activeLeads.filter((l) => !l.intakeKind || l.intakeKind === "sales_lead").length,
+    [activeLeads],
   );
   const tableRef = React.useRef<LeadsTableRef>(null);
   const [tableSession, setTableSession] = React.useState<{
@@ -123,6 +125,16 @@ function LeadsPageInner() {
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
+            <Button
+              variant="outline"
+              size="sm"
+              nativeButton={false}
+              render={
+                <Link href="/archive">
+                  <Archive className="h-3.5 w-3.5" /> Archive
+                </Link>
+              }
+            />
             <Button
               variant="outline"
               size="sm"

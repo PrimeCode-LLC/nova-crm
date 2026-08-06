@@ -71,8 +71,12 @@ import {
   Sparkles,
   UserCog,
   XCircle,
+  Archive,
+  ArchiveRestore,
+  Undo2,
 } from "lucide-react";
 import type { Lead, PipelineStage, ChannelKey, LeadTemperature } from "@/lib/types";
+import { filterActiveLeads, filterArchivedLeads } from "@/lib/leads/lead-archive";
 import {
   PIPELINE_STAGES,
   CHANNEL_LIST,
@@ -403,7 +407,11 @@ function LeadStageCell({ lead, readOnly }: { lead: Lead; readOnly?: boolean }) {
                 e.stopPropagation();
                 if (s.key === lead.stage) return;
                 updateLeadStage(lead.id, s.key, lead.stage, currentUserId);
-                toast.success(`Stage → ${s.label}`);
+                toast.success(
+                  s.key === "lost"
+                    ? `Stage → ${s.label} (archived)`
+                    : `Stage → ${s.label}`,
+                );
               }}
             >
               <span className="flex w-full min-w-0 items-center gap-2">
@@ -489,9 +497,14 @@ export interface LeadsTableProps {
   /** When set, intake scope is fixed (toolbar control hidden) - e.g. Leads vs Prospects routes. */
   lockedIntakeScope?: "all" | "prospect" | "sales_lead";
   /** Origin route for lead-detail back navigation (appended as `?from=…`). */
-  linkFromKey?: "prospects" | "pipeline";
+  linkFromKey?: "prospects" | "pipeline" | "archive";
   /** Initial owner filter (`me`, `all-owners`, `open-queue`, etc.). */
   initialOwnerScope?: string;
+  /**
+   * `active` (default) hides archived rows.
+   * `archived` shows only archived rows and swaps bulk actions to restore / delete.
+   */
+  listMode?: "active" | "archived";
 }
 
 export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(function LeadsTable(
@@ -505,6 +518,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     lockedIntakeScope,
     linkFromKey,
     initialOwnerScope = "all-owners",
+    listMode = "active",
   },
   ref,
 ) {
@@ -538,6 +552,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     canDeleteLeads,
     canEditLead,
     deleteLead,
+    archiveLead,
+    restoreLead,
     updateLeadStage,
     activeOrgMemberIds,
     followupPlans,
@@ -607,22 +623,33 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     setIntakeScope(initialIntakeScope);
   }, [initialIntakeScope, lockedIntakeScope]);
   const [reassignLeadIds, setReassignLeadIds] = React.useState<string[]>([]);
-  const [archiveOpen, setArchiveOpen] = React.useState(false);
-  const [archiveLeadIds, setArchiveLeadIds] = React.useState<string[]>([]);
-  const [archiveBusy, setArchiveBusy] = React.useState(false);
-  const [archiveProgressDone, setArchiveProgressDone] = React.useState(0);
+  const [deleteOpen, setDeleteOpen] = React.useState(false);
+  const [deleteLeadIds, setDeleteLeadIds] = React.useState<string[]>([]);
+  const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [deleteProgressDone, setDeleteProgressDone] = React.useState(0);
+  const [softArchiveOpen, setSoftArchiveOpen] = React.useState(false);
+  const [softArchiveLeadIds, setSoftArchiveLeadIds] = React.useState<string[]>([]);
+  const [softArchiveBusy, setSoftArchiveBusy] = React.useState(false);
+  const [softArchiveProgressDone, setSoftArchiveProgressDone] = React.useState(0);
+  const [restoreOpen, setRestoreOpen] = React.useState(false);
+  const [restoreLeadIds, setRestoreLeadIds] = React.useState<string[]>([]);
+  const [restoreAsProspect, setRestoreAsProspect] = React.useState(false);
+  const [restoreBusy, setRestoreBusy] = React.useState(false);
+  const [restoreProgressDone, setRestoreProgressDone] = React.useState(0);
   const [markLostOpen, setMarkLostOpen] = React.useState(false);
   const [markLostLeadIds, setMarkLostLeadIds] = React.useState<string[]>([]);
   const [markLostBusy, setMarkLostBusy] = React.useState(false);
   const [bulkVerifyOpen, setBulkVerifyOpen] = React.useState(false);
   const [bulkVerifyLeadIds, setBulkVerifyLeadIds] = React.useState<string[]>([]);
 
+  const isArchiveList = listMode === "archived";
+
   const openReassignForIds = React.useCallback((ids: string[]) => {
     setReassignLeadIds(ids);
     setReassignOpen(true);
   }, []);
 
-  const openArchiveForIds = React.useCallback(
+  const openDeleteForIds = React.useCallback(
     (ids: string[]) => {
       if (!ids.length) return;
       if (isDemo) {
@@ -638,11 +665,44 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         toast.error("Only organization owners, admins, and managers can delete leads.");
         return;
       }
-      setArchiveLeadIds(ids);
-      setArchiveProgressDone(0);
-      setArchiveOpen(true);
+      setDeleteLeadIds(ids);
+      setDeleteProgressDone(0);
+      setDeleteOpen(true);
     },
     [isDemo, canDeleteLeads],
+  );
+
+  const openSoftArchiveForIds = React.useCallback(
+    (ids: string[]) => {
+      if (!ids.length) return;
+      if (isDemo) {
+        toast.info("Demo workspace", {
+          description: "Archiving is disabled in sample data.",
+        });
+        return;
+      }
+      setSoftArchiveLeadIds(ids);
+      setSoftArchiveProgressDone(0);
+      setSoftArchiveOpen(true);
+    },
+    [isDemo],
+  );
+
+  const openRestoreForIds = React.useCallback(
+    (ids: string[], asProspect: boolean) => {
+      if (!ids.length) return;
+      if (isDemo) {
+        toast.info("Demo workspace", {
+          description: "Restore is disabled in sample data.",
+        });
+        return;
+      }
+      setRestoreLeadIds(ids);
+      setRestoreAsProspect(asProspect);
+      setRestoreProgressDone(0);
+      setRestoreOpen(true);
+    },
+    [isDemo],
   );
 
   const openMarkLostForIds = React.useCallback((ids: string[]) => {
@@ -666,21 +726,21 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     [isDemo],
   );
 
-  const confirmArchive = React.useCallback(async () => {
-    if (!archiveLeadIds.length) return;
-    const total = archiveLeadIds.length;
-    setArchiveBusy(true);
-    setArchiveProgressDone(0);
+  const confirmDelete = React.useCallback(async () => {
+    if (!deleteLeadIds.length) return;
+    const total = deleteLeadIds.length;
+    setDeleteBusy(true);
+    setDeleteProgressDone(0);
     let removed = 0;
     const removedIds: string[] = [];
-    for (const id of archiveLeadIds) {
+    for (const id of deleteLeadIds) {
       if (await deleteLead(id, { quiet: true, skipActivity: true })) {
         removed += 1;
         removedIds.push(id);
       }
-      setArchiveProgressDone((done) => done + 1);
+      setDeleteProgressDone((done) => done + 1);
     }
-    setArchiveBusy(false);
+    setDeleteBusy(false);
     if (removed > 0) {
       if (currentUserId) {
         const onlyId = removed === 1 ? removedIds[0] : undefined;
@@ -699,16 +759,123 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           ? { description: `${total - removed} could not be removed. Check permissions or try again.` }
           : undefined,
       );
-      setArchiveOpen(false);
-      setArchiveLeadIds([]);
-      setArchiveProgressDone(0);
+      setDeleteOpen(false);
+      setDeleteLeadIds([]);
+      setDeleteProgressDone(0);
       setRowSelection({});
     } else {
       toast.error("Could not delete", {
         description: "None of the selected leads could be removed. Try again or contact an admin.",
       });
     }
-  }, [archiveLeadIds, deleteLead, currentUserId, leads, addOrgActivityEvent]);
+  }, [deleteLeadIds, deleteLead, currentUserId, leads, addOrgActivityEvent]);
+
+  const confirmSoftArchive = React.useCallback(async () => {
+    if (!softArchiveLeadIds.length) return;
+    const total = softArchiveLeadIds.length;
+    setSoftArchiveBusy(true);
+    setSoftArchiveProgressDone(0);
+    let archived = 0;
+    const archivedIds: string[] = [];
+    for (const id of softArchiveLeadIds) {
+      if (await archiveLead(id, { reason: "manual", quiet: true, skipActivity: true })) {
+        archived += 1;
+        archivedIds.push(id);
+      }
+      setSoftArchiveProgressDone((done) => done + 1);
+    }
+    setSoftArchiveBusy(false);
+    if (archived > 0) {
+      if (currentUserId) {
+        const onlyId = archived === 1 ? archivedIds[0] : undefined;
+        const onlyLead = onlyId ? leads.find((l) => l.id === onlyId) : undefined;
+        emitBulkLeadOrgActivity(addOrgActivityEvent, {
+          type: "leads_archived",
+          actorId: currentUserId,
+          count: archived,
+          leadId: onlyId,
+          leadLabel: onlyLead ? leadDisplayLabel(onlyLead) : undefined,
+        });
+      }
+      toast.success(
+        archived === 1 ? "Moved to archive" : `Archived ${archived} lead${archived === 1 ? "" : "s"}`,
+        archived < total
+          ? { description: `${total - archived} could not be archived.` }
+          : undefined,
+      );
+      setSoftArchiveOpen(false);
+      setSoftArchiveLeadIds([]);
+      setSoftArchiveProgressDone(0);
+      setRowSelection({});
+    } else {
+      toast.error("Could not archive", {
+        description: "None of the selected leads could be archived. Check permissions or try again.",
+      });
+    }
+  }, [softArchiveLeadIds, archiveLead, currentUserId, leads, addOrgActivityEvent]);
+
+  const confirmRestore = React.useCallback(async () => {
+    if (!restoreLeadIds.length) return;
+    const total = restoreLeadIds.length;
+    setRestoreBusy(true);
+    setRestoreProgressDone(0);
+    let restored = 0;
+    const restoredIds: string[] = [];
+    for (const id of restoreLeadIds) {
+      if (
+        await restoreLead(id, {
+          asProspect: restoreAsProspect,
+          quiet: true,
+          skipActivity: true,
+        })
+      ) {
+        restored += 1;
+        restoredIds.push(id);
+      }
+      setRestoreProgressDone((done) => done + 1);
+    }
+    setRestoreBusy(false);
+    if (restored > 0) {
+      if (currentUserId) {
+        const onlyId = restored === 1 ? restoredIds[0] : undefined;
+        const onlyLead = onlyId ? leads.find((l) => l.id === onlyId) : undefined;
+        emitBulkLeadOrgActivity(addOrgActivityEvent, {
+          type: "leads_restored",
+          actorId: currentUserId,
+          count: restored,
+          leadId: onlyId,
+          leadLabel: onlyLead ? leadDisplayLabel(onlyLead) : undefined,
+        });
+      }
+      toast.success(
+        restoreAsProspect
+          ? restored === 1
+            ? "Restored to Prospects"
+            : `Restored ${restored} to Prospects`
+          : restored === 1
+            ? "Restored from archive"
+            : `Restored ${restored} lead${restored === 1 ? "" : "s"}`,
+        restored < total
+          ? { description: `${total - restored} could not be restored.` }
+          : undefined,
+      );
+      setRestoreOpen(false);
+      setRestoreLeadIds([]);
+      setRestoreProgressDone(0);
+      setRowSelection({});
+    } else {
+      toast.error("Could not restore", {
+        description: "None of the selected rows could be restored. Check permissions or try again.",
+      });
+    }
+  }, [
+    restoreLeadIds,
+    restoreAsProspect,
+    restoreLead,
+    currentUserId,
+    leads,
+    addOrgActivityEvent,
+  ]);
 
   const confirmMarkLost = React.useCallback(() => {
     if (!markLostLeadIds.length) return;
@@ -736,7 +903,9 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     setMarkLostBusy(false);
     if (updated > 0) {
       toast.success(
-        updated === 1 ? "Marked as Lost" : `Marked ${updated} leads as Lost`,
+        updated === 1
+          ? "Marked Lost and archived"
+          : `Marked ${updated} as Lost and archived`,
         skipped > 0
           ? { description: `${skipped} skipped (already Lost or no permission).` }
           : undefined,
@@ -758,10 +927,10 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
     setColumnFilters(mergeUrlColumnFilters(preset, initialChannels, initialStages));
   }, [urlChannelKey, urlStageKey, preset, initialChannels, initialStages]);
 
-  const afterIdleFilter = React.useMemo(
-    () => (idleOnly ? leads.filter((l) => l.isIdle) : leads),
-    [leads, idleOnly],
-  );
+  const afterIdleFilter = React.useMemo(() => {
+    const scoped = isArchiveList ? filterArchivedLeads(leads) : filterActiveLeads(leads);
+    return idleOnly ? scoped.filter((l) => l.isIdle) : scoped;
+  }, [leads, idleOnly, isArchiveList]);
 
   const inboxSyncedLeadIds = React.useMemo(
     () => buildInboxSyncedLeadIds(leads, linkedLeadByMessageId, inboundByMailbox, emailSent),
@@ -1331,20 +1500,75 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               <DropdownMenuItem onClick={() => router.push(buildLeadHref(id, "tab=notes"))}>
                 Add note
               </DropdownMenuItem>
-              {canDeleteLeads ? (
+              {isArchiveList ? (
                 <>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      openArchiveForIds([id]);
-                    }}
-                  >
-                    Delete
-                  </DropdownMenuItem>
+                  {canEdit ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openRestoreForIds([id], false);
+                        }}
+                      >
+                        <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openRestoreForIds([id], true);
+                        }}
+                      >
+                        <Undo2 className="h-3.5 w-3.5" /> Restore as prospect
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                  {canDeleteLeads ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDeleteForIds([id]);
+                        }}
+                      >
+                        Delete permanently
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
                 </>
-              ) : null}
+              ) : (
+                <>
+                  {canEdit ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openSoftArchiveForIds([id]);
+                        }}
+                      >
+                        <Archive className="h-3.5 w-3.5" /> Archive
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                  {canDeleteLeads ? (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        variant="destructive"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openDeleteForIds([id]);
+                        }}
+                      >
+                        Delete permanently
+                      </DropdownMenuItem>
+                    </>
+                  ) : null}
+                </>
+              )}
             </DropdownMenuContent>
           </DropdownMenu>
         );
@@ -1352,7 +1576,7 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
       enableSorting: false,
       size: 40,
     },
-  ], [router, openReassignForIds, openArchiveForIds, getProfileById, getContactById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref, sequenceStatusByLeadId]);
+  ], [router, openReassignForIds, openDeleteForIds, openSoftArchiveForIds, openRestoreForIds, isArchiveList, getProfileById, getContactById, crmLabels, intentPlaybook, effectiveIntakeScope, lockedIntakeScope, salesLeadTableReadOnly, canEditLead, canDeleteLeads, buildLeadHref, sequenceStatusByLeadId]);
 
   const table = useReactTable({
     data: dataForTable,
@@ -1552,13 +1776,13 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         onSuccess={() => setRowSelection({})}
       />
       <AlertDialog
-        open={archiveOpen}
+        open={deleteOpen}
         onOpenChange={(o) => {
-          if (!archiveBusy) {
-            setArchiveOpen(o);
+          if (!deleteBusy) {
+            setDeleteOpen(o);
             if (!o) {
-              setArchiveLeadIds([]);
-              setArchiveProgressDone(0);
+              setDeleteLeadIds([]);
+              setDeleteProgressDone(0);
             }
           }
         }}
@@ -1566,35 +1790,35 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
         <AlertDialogContent className="sm:max-w-md">
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {archiveLeadIds.length === 1
+              {deleteLeadIds.length === 1
                 ? "Delete this lead permanently?"
-                : `Delete ${archiveLeadIds.length} leads permanently?`}
+                : `Delete ${deleteLeadIds.length} leads permanently?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {archiveLeadIds.length === 1
-                ? "This permanently removes the lead from your workspace. Notes and activity for it will no longer appear. This cannot be undone."
+              {deleteLeadIds.length === 1
+                ? "This permanently removes the lead from your workspace. Notes and activity for it will no longer appear. This cannot be undone. Prefer Archive if you might need it later."
                 : "These leads will be permanently removed from your workspace. Notes and activity for them will no longer appear. This cannot be undone."}
             </AlertDialogDescription>
           </AlertDialogHeader>
-          {archiveBusy && archiveLeadIds.length > 0 ? (
+          {deleteBusy && deleteLeadIds.length > 0 ? (
             <div className="space-y-3">
-              {archiveLeadIds.length > 1 ? (
+              {deleteLeadIds.length > 1 ? (
                 <div className="grid grid-cols-3 gap-2 rounded-lg border bg-muted/30 p-3 text-center">
                   <div>
                     <div className="text-lg font-semibold tabular-nums">
-                      {archiveLeadIds.length}
+                      {deleteLeadIds.length}
                     </div>
                     <div className="text-xs text-muted-foreground">Total</div>
                   </div>
                   <div>
                     <div className="text-lg font-semibold tabular-nums text-destructive">
-                      {archiveProgressDone}
+                      {deleteProgressDone}
                     </div>
                     <div className="text-xs text-muted-foreground">Deleted</div>
                   </div>
                   <div>
                     <div className="text-lg font-semibold tabular-nums">
-                      {Math.max(0, archiveLeadIds.length - archiveProgressDone)}
+                      {Math.max(0, deleteLeadIds.length - deleteProgressDone)}
                     </div>
                     <div className="text-xs text-muted-foreground">Remaining</div>
                   </div>
@@ -1602,25 +1826,25 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               ) : null}
               <Progress
                 value={
-                  archiveLeadIds.length > 0
-                    ? Math.round((archiveProgressDone / archiveLeadIds.length) * 100)
+                  deleteLeadIds.length > 0
+                    ? Math.round((deleteProgressDone / deleteLeadIds.length) * 100)
                     : 0
                 }
                 className="w-full gap-2 [&_[data-slot=progress-indicator]]:bg-destructive"
               >
                 <ProgressLabel className="text-xs text-muted-foreground">
-                  {archiveProgressDone >= archiveLeadIds.length
+                  {deleteProgressDone >= deleteLeadIds.length
                     ? "Finishing…"
                     : "Deleting leads…"}
                 </ProgressLabel>
                 <ProgressValue className="text-xs">
                   {() =>
-                    archiveLeadIds.length > 1
-                      ? `${archiveProgressDone} / ${archiveLeadIds.length} · ${Math.round(
-                          (archiveProgressDone / archiveLeadIds.length) * 100,
+                    deleteLeadIds.length > 1
+                      ? `${deleteProgressDone} / ${deleteLeadIds.length} · ${Math.round(
+                          (deleteProgressDone / deleteLeadIds.length) * 100,
                         )}%`
                       : `${Math.round(
-                          (archiveProgressDone / archiveLeadIds.length) * 100,
+                          (deleteProgressDone / deleteLeadIds.length) * 100,
                         )}%`
                   }
                 </ProgressValue>
@@ -1628,27 +1852,148 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
             </div>
           ) : null}
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={archiveBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleteBusy}>Cancel</AlertDialogCancel>
             <AlertDialogAction
               variant="destructive"
-              disabled={archiveBusy}
+              disabled={deleteBusy}
               onClick={() => {
-                void confirmArchive();
+                void confirmDelete();
               }}
             >
-              {archiveBusy ? (
+              {deleteBusy ? (
                 <>
                   <Loader2 className="h-4 w-4 animate-spin" />
-                  {archiveLeadIds.length > 1
+                  {deleteLeadIds.length > 1
                     ? `Deleting ${Math.round(
-                        (archiveProgressDone / Math.max(1, archiveLeadIds.length)) * 100,
+                        (deleteProgressDone / Math.max(1, deleteLeadIds.length)) * 100,
                       )}%`
                     : "Deleting…"}
                 </>
-              ) : archiveLeadIds.length === 1 ? (
-                "Delete"
+              ) : deleteLeadIds.length === 1 ? (
+                "Delete permanently"
               ) : (
-                "Delete all"
+                "Delete all permanently"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={softArchiveOpen}
+        onOpenChange={(o) => {
+          if (!softArchiveBusy) {
+            setSoftArchiveOpen(o);
+            if (!o) {
+              setSoftArchiveLeadIds([]);
+              setSoftArchiveProgressDone(0);
+            }
+          }
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {softArchiveLeadIds.length === 1
+                ? "Move to archive?"
+                : `Archive ${softArchiveLeadIds.length} leads?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Archived rows leave Leads and Prospects but stay recoverable under Archive. You can
+              restore or permanently delete them later.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {softArchiveBusy && softArchiveLeadIds.length > 0 ? (
+            <div className="space-y-3">
+              <Progress
+                value={Math.round((softArchiveProgressDone / softArchiveLeadIds.length) * 100)}
+                className="w-full gap-2"
+              >
+                <ProgressLabel className="text-xs text-muted-foreground">Archiving…</ProgressLabel>
+                <ProgressValue className="text-xs">
+                  {() =>
+                    `${softArchiveProgressDone} / ${softArchiveLeadIds.length}`
+                  }
+                </ProgressValue>
+              </Progress>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={softArchiveBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={softArchiveBusy}
+              onClick={() => {
+                void confirmSoftArchive();
+              }}
+            >
+              {softArchiveBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Archiving…
+                </>
+              ) : (
+                "Archive"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog
+        open={restoreOpen}
+        onOpenChange={(o) => {
+          if (!restoreBusy) {
+            setRestoreOpen(o);
+            if (!o) {
+              setRestoreLeadIds([]);
+              setRestoreProgressDone(0);
+            }
+          }
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {restoreAsProspect
+                ? restoreLeadIds.length === 1
+                  ? "Restore as prospect?"
+                  : `Restore ${restoreLeadIds.length} as prospects?`
+                : restoreLeadIds.length === 1
+                  ? "Restore from archive?"
+                  : `Restore ${restoreLeadIds.length} from archive?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {restoreAsProspect
+                ? "These rows return to Prospects (intake). You can promote them to Leads again later."
+                : "These rows return to Leads or Prospects based on their intake type."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          {restoreBusy && restoreLeadIds.length > 0 ? (
+            <div className="space-y-3">
+              <Progress
+                value={Math.round((restoreProgressDone / restoreLeadIds.length) * 100)}
+                className="w-full gap-2"
+              >
+                <ProgressLabel className="text-xs text-muted-foreground">Restoring…</ProgressLabel>
+                <ProgressValue className="text-xs">
+                  {() => `${restoreProgressDone} / ${restoreLeadIds.length}`}
+                </ProgressValue>
+              </Progress>
+            </div>
+          ) : null}
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={restoreBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={restoreBusy}
+              onClick={() => {
+                void confirmRestore();
+              }}
+            >
+              {restoreBusy ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" /> Restoring…
+                </>
+              ) : restoreAsProspect ? (
+                "Restore as prospect"
+              ) : (
+                "Restore"
               )}
             </AlertDialogAction>
           </AlertDialogFooter>
@@ -1667,13 +2012,12 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           <AlertDialogHeader>
             <AlertDialogTitle>
               {markLostLeadIds.length === 1
-                ? "Mark this lead as Lost?"
-                : `Mark ${markLostLeadIds.length} leads as Lost?`}
+                ? "Mark Lost and archive?"
+                : `Mark ${markLostLeadIds.length} as Lost and archive?`}
             </AlertDialogTitle>
             <AlertDialogDescription>
-              {markLostLeadIds.length === 1
-                ? "This sets the pipeline stage to Lost. You can change the stage again later if needed."
-                : "This sets the pipeline stage to Lost for every selected lead you can edit. Stages can be changed again later if needed."}
+              Sets stage to Lost and moves the row to Archive so it leaves your active Leads list.
+              You can restore it later from Archive.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -1688,8 +2032,8 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
               {markLostBusy
                 ? "Updating…"
                 : markLostLeadIds.length === 1
-                  ? "Mark as Lost"
-                  : "Mark all as Lost"}
+                  ? "Mark Lost & archive"
+                  : "Mark all Lost & archive"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -2214,94 +2558,147 @@ export const LeadsTable = React.forwardRef<LeadsTableRef, LeadsTableProps>(funct
           >
             <UserCog className="h-3.5 w-3.5" /> Assign owner
           </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              if (!ids.length) return;
-              setCampaignLeadIds(ids);
-              setCampaignDialogOpen(true);
-            }}
-          >
-            <Mail className="h-3.5 w-3.5" /> Add to campaign
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              if (!ids.length) return;
-              setBulkBuildLeadIds(ids);
-              setBulkBuildOpen(true);
-            }}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> Build sequences
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              if (!ids.length) return;
-              setBulkScheduleLeadIds(ids);
-              setBulkScheduleOpen(true);
-            }}
-          >
-            <CalendarClock className="h-3.5 w-3.5" /> Schedule sequences
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              if (!ids.length) return;
-              setBulkTagLeadIds(ids);
-              setBulkTagOpen(true);
-            }}
-          >
-            <Tag className="h-3.5 w-3.5" /> Tag
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              openBulkVerifyForIds(ids);
-            }}
-          >
-            <ShieldCheck className="h-3.5 w-3.5" />
-            Verify emails
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            type="button"
-            onClick={() => {
-              const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-              openMarkLostForIds(ids);
-            }}
-          >
-            <XCircle className="h-3.5 w-3.5" /> Mark as Lost
-          </Button>
-          {canDeleteLeads ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              type="button"
-              onClick={() => {
-                const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
-                openArchiveForIds(ids);
-              }}
-            >
-              <Trash2 className="h-3.5 w-3.5" /> Delete
-            </Button>
-          ) : null}
+          {isArchiveList ? (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  openRestoreForIds(ids, false);
+                }}
+              >
+                <ArchiveRestore className="h-3.5 w-3.5" /> Restore
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  openRestoreForIds(ids, true);
+                }}
+              >
+                <Undo2 className="h-3.5 w-3.5" /> Restore as prospect
+              </Button>
+              {canDeleteLeads ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  type="button"
+                  onClick={() => {
+                    const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                    openDeleteForIds(ids);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete permanently
+                </Button>
+              ) : null}
+            </>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  if (!ids.length) return;
+                  setCampaignLeadIds(ids);
+                  setCampaignDialogOpen(true);
+                }}
+              >
+                <Mail className="h-3.5 w-3.5" /> Add to campaign
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  if (!ids.length) return;
+                  setBulkBuildLeadIds(ids);
+                  setBulkBuildOpen(true);
+                }}
+              >
+                <Sparkles className="h-3.5 w-3.5" /> Build sequences
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  if (!ids.length) return;
+                  setBulkScheduleLeadIds(ids);
+                  setBulkScheduleOpen(true);
+                }}
+              >
+                <CalendarClock className="h-3.5 w-3.5" /> Schedule sequences
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  if (!ids.length) return;
+                  setBulkTagLeadIds(ids);
+                  setBulkTagOpen(true);
+                }}
+              >
+                <Tag className="h-3.5 w-3.5" /> Tag
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  openBulkVerifyForIds(ids);
+                }}
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Verify emails
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  openMarkLostForIds(ids);
+                }}
+              >
+                <XCircle className="h-3.5 w-3.5" /> Mark Lost & archive
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                type="button"
+                onClick={() => {
+                  const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                  openSoftArchiveForIds(ids);
+                }}
+              >
+                <Archive className="h-3.5 w-3.5" /> Archive
+              </Button>
+              {canDeleteLeads ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  type="button"
+                  onClick={() => {
+                    const ids = table.getSelectedRowModel().rows.map((r) => r.original.id);
+                    openDeleteForIds(ids);
+                  }}
+                >
+                  <Trash2 className="h-3.5 w-3.5" /> Delete
+                </Button>
+              ) : null}
+            </>
+          )}
         </div>
       )}
 

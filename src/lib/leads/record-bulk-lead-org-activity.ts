@@ -2,7 +2,11 @@ import type { OrgActivityEvent, OrgActivityEventType } from "@/lib/types";
 
 export type BulkLeadOrgActivityType = Extract<
   OrgActivityEventType,
-  "leads_sequences_built" | "leads_sequences_scheduled" | "leads_deleted"
+  | "leads_sequences_built"
+  | "leads_sequences_scheduled"
+  | "leads_deleted"
+  | "leads_archived"
+  | "leads_restored"
 >;
 
 export function newOrgActivityId(): string {
@@ -43,6 +47,18 @@ export function summarizeBulkLeadOrgActivity(input: {
     return `Scheduled sequences for ${n} leads${emailSuffix}`;
   }
 
+  if (input.type === "leads_archived") {
+    if (n === 1 && label) return `Archived “${label}”`;
+    if (n === 1) return "Archived 1 lead";
+    return `Archived ${n} leads`;
+  }
+
+  if (input.type === "leads_restored") {
+    if (n === 1 && label) return `Restored “${label}” from archive`;
+    if (n === 1) return "Restored 1 lead from archive";
+    return `Restored ${n} leads from archive`;
+  }
+
   if (n === 1 && label) return `Deleted lead “${label}”`;
   if (n === 1) return "Deleted 1 lead";
   return `Deleted ${n} leads`;
@@ -58,13 +74,17 @@ export function buildBulkLeadOrgActivity(input: {
   leadLabel?: string;
 }): OrgActivityEvent | null {
   if (input.count < 1) return null;
+  const href =
+    input.type === "leads_archived" || input.type === "leads_restored"
+      ? "/archive"
+      : "/leads";
   return {
     id: newOrgActivityId(),
     type: input.type,
     actorId: input.actorId,
     summary: summarizeBulkLeadOrgActivity(input),
     createdAt: new Date().toISOString(),
-    href: "/leads",
+    href,
     entityType: "lead",
     entityId: input.leadId,
     payload: {

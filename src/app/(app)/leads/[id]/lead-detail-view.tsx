@@ -26,6 +26,8 @@ import {
   MailWarning,
   Undo2,
   ArrowUpRight,
+  Archive,
+  ArchiveRestore,
 } from "lucide-react";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
@@ -152,6 +154,7 @@ import {
   moveToLeadBlockedReason,
   moveToLeadConfirmCopy,
 } from "@/lib/prospects/move-to-lead";
+import { isLeadArchived } from "@/lib/leads/lead-archive";
 import {
   prospectOwnerIdOf,
   viewerManagesProspectOwner,
@@ -223,6 +226,8 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const [linkedinSuggestOpen, setLinkedinSuggestOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
   const [deleteBusy, setDeleteBusy] = React.useState(false);
+  const [archiveOpen, setArchiveOpen] = React.useState(false);
+  const [archiveBusy, setArchiveBusy] = React.useState(false);
   const [moveBackOpen, setMoveBackOpen] = React.useState(false);
   const [moveBackBusy, setMoveBackBusy] = React.useState(false);
   const [moveBackAck, setMoveBackAck] = React.useState(false);
@@ -249,15 +254,19 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const backHref =
     backFrom === "pipeline"
       ? "/pipeline"
-      : backFrom === "prospects" || lead?.intakeKind === "prospect"
-        ? "/prospects"
-        : "/leads";
+      : backFrom === "archive"
+        ? "/archive"
+        : backFrom === "prospects" || lead?.intakeKind === "prospect"
+          ? "/prospects"
+          : "/leads";
   const backLabel =
     backHref === "/pipeline"
       ? "Back to pipeline"
-      : backHref === "/prospects"
-        ? "Back to prospects"
-        : "Back to leads";
+      : backHref === "/archive"
+        ? "Back to archive"
+        : backHref === "/prospects"
+          ? "Back to prospects"
+          : "Back to leads";
   const channelOptions = useChannelOptions({ includeDisabled: true });
   const channelTagTooltips = React.useMemo(() => {
     if (!lead) return undefined;
@@ -790,10 +799,11 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
       <AlertDialog open={deleteOpen} onOpenChange={(o) => !deleteBusy && setDeleteOpen(o)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this lead?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this lead permanently?</AlertDialogTitle>
             <AlertDialogDescription>
               This permanently removes {lead.contactName} at {lead.companyName} from your workspace. Notes and activity
-              for this lead will no longer appear. This cannot be undone. Only organization owners, admins, and managers can do this.
+              for this lead will no longer appear. This cannot be undone. Prefer Archive if you might need it later.
+              Only organization owners, admins, and managers can do this.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -813,7 +823,37 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                 })();
               }}
             >
-              {deleteBusy ? "Deleting…" : "Delete lead"}
+              {deleteBusy ? "Deleting…" : "Delete permanently"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <AlertDialog open={archiveOpen} onOpenChange={(o) => !archiveBusy && setArchiveOpen(o)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Move to archive?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {lead.contactName} at {lead.companyName} will leave active Leads/Prospects lists. You can restore or
+              permanently delete it later from Archive.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archiveBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={archiveBusy}
+              onClick={() => {
+                void (async () => {
+                  setArchiveBusy(true);
+                  const ok = await ws.archiveLead(lead.id, { reason: "manual" });
+                  setArchiveBusy(false);
+                  if (ok) {
+                    setArchiveOpen(false);
+                    router.push("/archive");
+                  }
+                })();
+              }}
+            >
+              {archiveBusy ? "Archiving…" : "Archive"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1164,6 +1204,49 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     </DropdownMenuItem>
                   </>
                 ) : null}
+                {canEditLead && !isLeadArchived(lead) ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        setArchiveOpen(true);
+                      }}
+                    >
+                      <Archive className="h-3.5 w-3.5" />
+                      Archive
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
+                {canEditLead && isLeadArchived(lead) ? (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        void (async () => {
+                          const ok = await ws.restoreLead(lead.id);
+                          if (ok) router.push(backHref === "/archive" ? "/archive" : backHref);
+                        })();
+                      }}
+                    >
+                      <ArchiveRestore className="h-3.5 w-3.5" />
+                      Restore from archive
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        void (async () => {
+                          const ok = await ws.restoreLead(lead.id, { asProspect: true });
+                          if (ok) router.push("/prospects");
+                        })();
+                      }}
+                    >
+                      <Undo2 className="h-3.5 w-3.5" />
+                      Restore as prospect
+                    </DropdownMenuItem>
+                  </>
+                ) : null}
                 {ws.canDeleteLeads ? (
                   <>
                     <DropdownMenuSeparator />
@@ -1175,7 +1258,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       }}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
-                      Delete lead
+                      Delete permanently
                     </DropdownMenuItem>
                   </>
                 ) : null}
@@ -1197,6 +1280,33 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
               onClick={() => setEditingSection("routing")}
             >
               Review setting
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+      {isLeadArchived(lead) ? (
+        <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-4 py-2 text-sm text-muted-foreground sm:px-6">
+          <Archive className="h-4 w-4 shrink-0" />
+          This record is archived
+          {lead.archivedAt ? (
+            <span className="tabular-nums">
+              · {new Date(lead.archivedAt).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" })}
+            </span>
+          ) : null}
+          {canEditLead ? (
+            <Button
+              type="button"
+              variant="link"
+              size="sm"
+              className="ml-auto h-auto p-0"
+              onClick={() => {
+                void (async () => {
+                  const ok = await ws.restoreLead(lead.id);
+                  if (ok) router.push(backHref === "/archive" ? "/leads" : backHref);
+                })();
+              }}
+            >
+              Restore
             </Button>
           ) : null}
         </div>

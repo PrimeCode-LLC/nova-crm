@@ -13,6 +13,7 @@ import { Plus, Table as TableIcon, Filter } from "lucide-react";
 import Link from "next/link";
 import { PRIORITY_TONE } from "@/lib/constants";
 import type { LeadPriority } from "@/lib/types";
+import { filterActiveLeads } from "@/lib/leads/lead-archive";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -35,6 +36,8 @@ export default function PipelinePage() {
   const { openQuickAdd } = useOpenQuickAdd();
   const [boardQuery, setBoardQuery] = React.useState("");
   const [priorityFilter, setPriorityFilter] = React.useState<LeadPriority[]>([]);
+
+  const activeLeads = React.useMemo(() => filterActiveLeads(leads), [leads]);
 
   const hasActiveFilters =
     boardQuery.trim().length > 0 || priorityFilter.length > 0;
@@ -125,11 +128,11 @@ export default function PipelinePage() {
       <PageBody>
         {workspaceLoading ? (
           <WorkspacePageSkeleton />
-        ) : !isDemo && leads.length === 0 ? (
+        ) : !isDemo && activeLeads.length === 0 ? (
           <WorkspaceEmptyHint title="No leads to show on the board" />
         ) : (
           <KanbanBoard
-            leads={leads}
+            leads={activeLeads}
             boardFilter={{ query: boardQuery, priorities: priorityFilter }}
             onAddToStage={(stage) =>
               openQuickAdd({ initialPill: "lead", initialLeadStage: stage })

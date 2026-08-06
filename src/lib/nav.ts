@@ -31,6 +31,7 @@ import {
   BookOpen,
   UserCircle2,
   Clapperboard,
+  Archive,
   type LucideIcon,
 } from "lucide-react";
 
@@ -84,6 +85,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { href: "/dashboard/reply-intelligence", label: "Reply intelligence", icon: Sparkles },
       { href: "/leads", label: "Leads", icon: Target },
       { href: "/prospects", label: "Prospects", icon: ScanSearch },
+      { href: "/archive", label: "Archive", icon: Archive },
       { href: "/my-strategy", label: "My Strategy", icon: BookOpen },
       { href: "/intake", label: "Intake pool", icon: Rss },
       { href: "/fit-check", label: "Fit Check", icon: Sparkles },
