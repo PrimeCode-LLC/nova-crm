@@ -55,6 +55,25 @@ export type ScheduleFollowupEmailResult =
   | { ok: true; scheduledEmailId: string; emailScheduledAt: string }
   | { ok: false; error: string };
 
+/** Durable From/To fields to persist on the followup when queuing. */
+export function followupScheduleMailboxFields(
+  mailbox: EmailMailboxSettings,
+  to: string,
+): {
+  mailboxId: string;
+  fromEmail: string;
+  toEmail: string;
+  mailboxOwnerUid?: string;
+} {
+  const owner = mailbox.dataOwnerUid?.trim();
+  return {
+    mailboxId: mailbox.id,
+    fromEmail: mailbox.emailAddress.trim(),
+    toEmail: to.trim(),
+    ...(owner ? { mailboxOwnerUid: owner } : {}),
+  };
+}
+
 export async function scheduleFollowupEmailClient(
   input: ScheduleFollowupEmailInput,
 ): Promise<ScheduleFollowupEmailResult> {

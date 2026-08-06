@@ -822,6 +822,17 @@ export interface Followup {
   scheduledEmailId?: string;
   /** When the linked scheduled email is set to send. */
   emailScheduledAt?: ISODate;
+  /**
+   * Mailbox used when this step was last scheduled/sent. Kept after cancel/send so
+   * resume and "Schedule all" can prefer the same From without hunting history.
+   */
+  mailboxId?: string;
+  /** From address last used for this step (mailbox email at schedule/send time). */
+  fromEmail?: string;
+  /** Recipient address last used for this step. */
+  toEmail?: string;
+  /** Member uid that owns `mailboxId` (shared / view-as mailboxes). */
+  mailboxOwnerUid?: string;
   /** Durable outbound state retained after the scheduled-email link is cleared. */
   deliveryStatus?: FollowupDeliveryStatus;
   sentAt?: ISODate;

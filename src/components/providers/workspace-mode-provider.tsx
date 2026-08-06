@@ -199,7 +199,15 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     setFollowupEmailSchedule: (
       id: string,
       schedule:
-        | { scheduledEmailId: string; emailScheduledAt: string; freshThread?: boolean }
+        | {
+            scheduledEmailId: string;
+            emailScheduledAt: string;
+            freshThread?: boolean;
+            mailboxId?: string;
+            fromEmail?: string;
+            toEmail?: string;
+            mailboxOwnerUid?: string;
+          }
         | null,
     ) => void;
     clearFollowupEmailSchedule: (id: string) => void;
@@ -1290,7 +1298,15 @@ export function WorkspaceModeProvider({
     (
       id: string,
       schedule:
-        | { scheduledEmailId: string; emailScheduledAt: string; freshThread?: boolean }
+        | {
+            scheduledEmailId: string;
+            emailScheduledAt: string;
+            freshThread?: boolean;
+            mailboxId?: string;
+            fromEmail?: string;
+            toEmail?: string;
+            mailboxOwnerUid?: string;
+          }
         | null,
     ) => {
       const writeFs =
@@ -1320,6 +1336,12 @@ export function WorkspaceModeProvider({
                 ? {
                     scheduledEmailId: schedule.scheduledEmailId,
                     emailScheduledAt: schedule.emailScheduledAt,
+                    ...(schedule.mailboxId ? { mailboxId: schedule.mailboxId } : {}),
+                    ...(schedule.fromEmail ? { fromEmail: schedule.fromEmail } : {}),
+                    ...(schedule.toEmail ? { toEmail: schedule.toEmail } : {}),
+                    ...(schedule.mailboxOwnerUid
+                      ? { mailboxOwnerUid: schedule.mailboxOwnerUid }
+                      : {}),
                   }
                 : schedule,
             },
@@ -1333,6 +1355,12 @@ export function WorkspaceModeProvider({
                     cancelledAt: undefined,
                     deliveryError: undefined,
                     cancelReason: undefined,
+                    ...(schedule.mailboxId ? { mailboxId: schedule.mailboxId } : {}),
+                    ...(schedule.fromEmail ? { fromEmail: schedule.fromEmail } : {}),
+                    ...(schedule.toEmail ? { toEmail: schedule.toEmail } : {}),
+                    ...(schedule.mailboxOwnerUid
+                      ? { mailboxOwnerUid: schedule.mailboxOwnerUid }
+                      : {}),
                     ...(schedule.freshThread === true
                       ? { freshThread: true }
                       : schedule.freshThread === false

@@ -298,6 +298,22 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     emailScheduledAt: raw.emailScheduledAt
       ? firestoreValueToIso(raw.emailScheduledAt)
       : undefined,
+    mailboxId:
+      typeof raw.mailboxId === "string" && raw.mailboxId.trim()
+        ? raw.mailboxId.trim()
+        : undefined,
+    fromEmail:
+      typeof raw.fromEmail === "string" && raw.fromEmail.trim()
+        ? raw.fromEmail.trim()
+        : undefined,
+    toEmail:
+      typeof raw.toEmail === "string" && raw.toEmail.trim()
+        ? raw.toEmail.trim()
+        : undefined,
+    mailboxOwnerUid:
+      typeof raw.mailboxOwnerUid === "string" && raw.mailboxOwnerUid.trim()
+        ? raw.mailboxOwnerUid.trim()
+        : undefined,
     deliveryStatus:
       raw.deliveryStatus === "scheduled" ||
       raw.deliveryStatus === "sent" ||

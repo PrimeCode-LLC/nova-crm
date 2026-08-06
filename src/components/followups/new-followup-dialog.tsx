@@ -358,6 +358,27 @@ export function NewFollowupDialog({
                 : "Create a one-off reminder linked to this lead."}
             </DialogDescription>
           </DialogHeader>
+          {isEdit && editFollowup && (editFollowup.fromEmail || editFollowup.toEmail) ? (
+            <p className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+              {editFollowup.scheduledEmailId
+                ? "Queued from "
+                : "Last used "}
+              {editFollowup.fromEmail ? (
+                <span className="font-medium text-foreground">{editFollowup.fromEmail}</span>
+              ) : (
+                "mailbox"
+              )}
+              {editFollowup.toEmail ? (
+                <>
+                  {" "}
+                  → <span className="font-medium text-foreground">{editFollowup.toEmail}</span>
+                </>
+              ) : null}
+              {!editFollowup.scheduledEmailId
+                ? ". Re-schedule to keep sending from the same mailbox."
+                : ". Changing due date, time, or message cancels the queue — then re-schedule with the same From."}
+            </p>
+          ) : null}
           <div className="grid gap-4 py-2">
             {!fixedLeadId && !isEdit && (
               <div className="grid gap-3">

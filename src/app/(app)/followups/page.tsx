@@ -48,7 +48,7 @@ import {
 } from "@/lib/org-timezone";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
-import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
+import { followupScheduleMailboxFields, scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
 import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
 import {
   followupQueueKind,
@@ -675,6 +675,10 @@ export default function FollowupsPage() {
             setFollowupEmailSchedule(f.id, {
               scheduledEmailId: f.scheduledEmailId,
               emailScheduledAt: result.scheduledAt,
+              ...(f.mailboxId ? { mailboxId: f.mailboxId } : {}),
+              ...(f.fromEmail ? { fromEmail: f.fromEmail } : {}),
+              ...(f.toEmail ? { toEmail: f.toEmail } : {}),
+              ...(f.mailboxOwnerUid ? { mailboxOwnerUid: f.mailboxOwnerUid } : {}),
             });
             updateFollowup(f.id, { dueAt: result.scheduledAt });
           }
@@ -708,9 +712,13 @@ export default function FollowupsPage() {
           }
 
           const contact = getContactById(lead.contactId);
-          const to = defaultContactRecipientEmail(
-            buildContactRecipientOptions(lead, contact),
-          );
+          const recipientOptions = buildContactRecipientOptions(lead, contact);
+          const rememberedTo = f.toEmail?.trim();
+          const to =
+            rememberedTo &&
+            recipientOptions.some((o) => o.email.toLowerCase() === rememberedTo.toLowerCase())
+              ? rememberedTo
+              : defaultContactRecipientEmail(recipientOptions);
           if (!to) {
             skipped += 1;
             continue;
@@ -756,6 +764,7 @@ export default function FollowupsPage() {
           setFollowupEmailSchedule(f.id, {
             scheduledEmailId: result.scheduledEmailId,
             emailScheduledAt: result.emailScheduledAt,
+            ...followupScheduleMailboxFields(sendableMailbox, to),
           });
           updateFollowup(f.id, { dueAt: result.emailScheduledAt });
           rememberLastUsedMailbox(organizationId, currentUserId, sendableMailbox.id);

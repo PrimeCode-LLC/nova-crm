@@ -12,6 +12,7 @@ import {
 } from "@/stores/email-account-store";
 import {
   scheduleFollowupEmailClient,
+  followupScheduleMailboxFields,
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
 import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/org-timezone";
@@ -34,6 +35,7 @@ import {
 } from "@/lib/email/mailbox-schedule-capacity";
 import {
   planHasPriorSentEmailSteps,
+  resolvePriorSequenceRecipient,
   resolvePriorSequenceSender,
   type SequenceScheduleContinuityMode,
 } from "@/lib/email/sequence-schedule-continuity";
@@ -108,6 +110,10 @@ export function ScheduleSequenceEmailsDialog({
       scheduledEmailId: string;
       emailScheduledAt: string;
       freshThread?: boolean;
+      mailboxId?: string;
+      fromEmail?: string;
+      toEmail?: string;
+      mailboxOwnerUid?: string;
     },
   ) => void;
 }) {
@@ -205,7 +211,7 @@ export function ScheduleSequenceEmailsDialog({
     void (async () => {
       const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
       const priorId =
-        hasPriorSent && priorSender?.mailboxId &&
+        priorSender?.mailboxId &&
         mailboxOptions.some((m) => m.id === priorSender.mailboxId)
           ? priorSender.mailboxId
           : "";
@@ -219,7 +225,11 @@ export function ScheduleSequenceEmailsDialog({
       const hydrated = await hydrateFollowupsMessageBodies(schedulable);
       if (cancelled) return;
       setMailboxId(defaultId);
-      setTo(defaultContactRecipientEmail(recipientOptions));
+      const priorTo = resolvePriorSequenceRecipient({
+        planFollowups,
+        recipientEmails: recipientOptions.map((o) => o.email),
+      });
+      setTo(priorTo || defaultContactRecipientEmail(recipientOptions));
       setIncludeSignature(true);
       setIncludeFooter(true);
       setContinuityMode("continue");
@@ -258,6 +268,7 @@ export function ScheduleSequenceEmailsDialog({
     currentUserId,
     hasPriorSent,
     priorSender?.mailboxId,
+    planFollowups,
     organizationSendPolicy,
     timezone,
   ]);
@@ -418,6 +429,7 @@ export function ScheduleSequenceEmailsDialog({
           scheduledEmailId: result.scheduledEmailId,
           emailScheduledAt: result.emailScheduledAt,
           freshThread: startFresh,
+          ...followupScheduleMailboxFields(account, to),
         });
         updateFollowup(step.followupId, { dueAt: result.emailScheduledAt });
         okCount += 1;

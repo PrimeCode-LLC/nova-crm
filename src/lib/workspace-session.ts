@@ -21,6 +21,10 @@ const LEGACY_FOLLOWUP_KEY = "nova-crm-followup-delta-v1";
 export type FollowupEmailSchedulePatch = {
   scheduledEmailId: string;
   emailScheduledAt: string;
+  mailboxId?: string;
+  fromEmail?: string;
+  toEmail?: string;
+  mailboxOwnerUid?: string;
 };
 
 export type FollowupSessionDelta = {
@@ -113,6 +117,10 @@ function mergeFollowup(
             ...next,
             scheduledEmailId: s.scheduledEmailId,
             emailScheduledAt: s.emailScheduledAt,
+            ...(s.mailboxId ? { mailboxId: s.mailboxId } : {}),
+            ...(s.fromEmail ? { fromEmail: s.fromEmail } : {}),
+            ...(s.toEmail ? { toEmail: s.toEmail } : {}),
+            ...(s.mailboxOwnerUid ? { mailboxOwnerUid: s.mailboxOwnerUid } : {}),
           };
   }
   const fieldPatch = patches[f.id];

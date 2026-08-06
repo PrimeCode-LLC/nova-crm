@@ -4,7 +4,7 @@ import {
   scheduleLocalFromDueAt,
 } from "@/lib/email/bounce-recovery";
 import { isoFromDatetimeLocalInZone, resolveOrgTimezone } from "@/lib/org-timezone";
-import { scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
+import { scheduleFollowupEmailClient, followupScheduleMailboxFields } from "@/lib/schedule-followup-email-client";
 import type { EmailMailboxSettings } from "@/lib/email-account-types";
 import type { Followup, FollowupPlan } from "@/lib/types";
 
@@ -39,7 +39,14 @@ export type RerouteSequenceClientInput = {
   updateFollowupDueAt: (followupId: string, dueAt: string) => void;
   setFollowupEmailSchedule: (
     followupId: string,
-    schedule: { scheduledEmailId: string; emailScheduledAt: string } | null,
+    schedule: {
+      scheduledEmailId: string;
+      emailScheduledAt: string;
+      mailboxId?: string;
+      fromEmail?: string;
+      toEmail?: string;
+      mailboxOwnerUid?: string;
+    } | null,
   ) => void;
   resumePlan: (input: {
     planId: string;
@@ -127,6 +134,7 @@ export async function rerouteFollowupSequenceClient(
     input.setFollowupEmailSchedule(step.id, {
       scheduledEmailId: result.scheduledEmailId,
       emailScheduledAt: result.emailScheduledAt,
+      ...followupScheduleMailboxFields(input.mailbox, to),
     });
     reroutedCount += 1;
     followupIds.push(step.id);

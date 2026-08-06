@@ -239,6 +239,31 @@ export async function createScheduledEmailServer(input: {
     return { error: "Could not create scheduled email." };
   }
 
+  if (followupId) {
+    const db = getAdminDb();
+    if (db) {
+      try {
+        await db.collection(COLLECTIONS.followups).doc(followupId).update({
+          scheduledEmailId: ref.id,
+          emailScheduledAt: scheduledDate.toISOString(),
+          deliveryStatus: "scheduled",
+          mailboxId: input.mailboxId,
+          fromEmail: input.from.trim(),
+          toEmail: input.to.trim(),
+          mailboxOwnerUid: input.uid,
+          failedAt: FieldValue.delete(),
+          cancelledAt: FieldValue.delete(),
+          deliveryError: FieldValue.delete(),
+          cancelReason: FieldValue.delete(),
+          ...(input.forceNewThread ? { freshThread: true } : {}),
+          updatedAt: now,
+        });
+      } catch {
+        /* Client persistFollowupEmailSchedule is the primary path; this is best-effort. */
+      }
+    }
+  }
+
   return { ok: true, id: ref.id };
 }
 
@@ -383,6 +408,10 @@ async function updateFollowupDeliveryState(
     keepSchedule?: boolean;
     deliveryAttempts?: number;
     nextRetryAt?: string | null;
+    mailboxId?: string;
+    fromEmail?: string;
+    toEmail?: string;
+    mailboxOwnerUid?: string;
   },
 ): Promise<string | undefined> {
   const db = getAdminDb();
@@ -406,7 +435,12 @@ async function updateFollowupDeliveryState(
     if (input.deliveryAttempts != null) patch.deliveryAttempts = input.deliveryAttempts;
     if (input.nextRetryAt === null) patch.nextRetryAt = FieldValue.delete();
     else if (input.nextRetryAt) patch.nextRetryAt = input.nextRetryAt;
+    if (input.mailboxId?.trim()) patch.mailboxId = input.mailboxId.trim();
+    if (input.fromEmail?.trim()) patch.fromEmail = input.fromEmail.trim();
+    if (input.toEmail?.trim()) patch.toEmail = input.toEmail.trim();
+    if (input.mailboxOwnerUid?.trim()) patch.mailboxOwnerUid = input.mailboxOwnerUid.trim();
     if (input.clearSchedule) {
+      // Keep mailboxId / fromEmail / toEmail so resume can prefer the same sender.
       patch.scheduledEmailId = FieldValue.delete();
       patch.emailScheduledAt = FieldValue.delete();
     }
@@ -991,6 +1025,10 @@ async function sendScheduledDoc(
         completedAt: now,
         clearSchedule: true,
         nextRetryAt: null,
+        mailboxId,
+        fromEmail: String(data.from ?? mailbox.emailAddress ?? ""),
+        toEmail: String(data.to ?? ""),
+        mailboxOwnerUid: uid,
       });
       if (planId) await completePlanWhenAllStepsDone(planId, now);
     }

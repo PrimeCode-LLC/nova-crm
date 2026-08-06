@@ -319,6 +319,13 @@ function FollowupRow({
               Subject: {f.emailSubject}
             </p>
           )}
+          {(f.fromEmail || f.toEmail) && (
+            <p className="text-xs text-muted-foreground truncate mt-0.5">
+              {f.fromEmail ? `From ${f.fromEmail}` : null}
+              {f.fromEmail && f.toEmail ? " · " : null}
+              {f.toEmail ? `To ${f.toEmail}` : null}
+            </p>
+          )}
           {(isFailed || isRetrying) && f.deliveryError ? (
             <p className="text-xs text-destructive/90 truncate mt-0.5">{f.deliveryError}</p>
           ) : null}
@@ -480,7 +487,17 @@ export function LeadFollowups({
   const [retryingId, setRetryingId] = React.useState<string | null>(null);
   /** Live optimistic schedule chip until Firestore listener catches up (or clears after send). */
   const [optimisticSchedule, setOptimisticSchedule] = React.useState<
-    Record<string, { scheduledEmailId: string; emailScheduledAt: string } | null>
+    Record<
+      string,
+      {
+        scheduledEmailId: string;
+        emailScheduledAt: string;
+        mailboxId?: string;
+        fromEmail?: string;
+        toEmail?: string;
+        mailboxOwnerUid?: string;
+      } | null
+    >
   >({});
   const {
     addFollowup,
@@ -540,6 +557,10 @@ export function LeadFollowups({
         ...f,
         scheduledEmailId: o.scheduledEmailId,
         emailScheduledAt: o.emailScheduledAt,
+        ...(o.mailboxId ? { mailboxId: o.mailboxId } : {}),
+        ...(o.fromEmail ? { fromEmail: o.fromEmail } : {}),
+        ...(o.toEmail ? { toEmail: o.toEmail } : {}),
+        ...(o.mailboxOwnerUid ? { mailboxOwnerUid: o.mailboxOwnerUid } : {}),
       };
     });
   }, [followups, optimisticSchedule]);
@@ -631,6 +652,10 @@ export function LeadFollowups({
       scheduledEmailId: string;
       emailScheduledAt: string;
       freshThread?: boolean;
+      mailboxId?: string;
+      fromEmail?: string;
+      toEmail?: string;
+      mailboxOwnerUid?: string;
     } | null,
   ) {
     setFollowupEmailSchedule(id, schedule);
@@ -641,6 +666,12 @@ export function LeadFollowups({
           ? {
               scheduledEmailId: schedule.scheduledEmailId,
               emailScheduledAt: schedule.emailScheduledAt,
+              ...(schedule.mailboxId ? { mailboxId: schedule.mailboxId } : {}),
+              ...(schedule.fromEmail ? { fromEmail: schedule.fromEmail } : {}),
+              ...(schedule.toEmail ? { toEmail: schedule.toEmail } : {}),
+              ...(schedule.mailboxOwnerUid
+                ? { mailboxOwnerUid: schedule.mailboxOwnerUid }
+                : {}),
             }
           : schedule,
       }));
@@ -994,8 +1025,14 @@ export function LeadFollowups({
                   }}
                   aria-label={`Mark ${f.title} incomplete`}
                 />
-                <span className="text-sm line-through text-muted-foreground truncate flex-1">
-                  {f.title}
+                <span className="text-sm line-through text-muted-foreground truncate flex-1 min-w-0">
+                  <span className="block truncate">{f.title}</span>
+                  {f.fromEmail ? (
+                    <span className="block text-[10px] no-underline font-normal opacity-90 truncate">
+                      From {f.fromEmail}
+                      {f.toEmail ? ` · To ${f.toEmail}` : ""}
+                    </span>
+                  ) : null}
                 </span>
                 <span className="text-xs text-muted-foreground">{fmtRelative(f.completedAt)}</span>
                 {canMutateRow(f) ? (

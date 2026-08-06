@@ -27,35 +27,65 @@ export function planHasPriorSentEmailSteps(
   return planFollowups.some(isPriorSentStep);
 }
 
+function senderFromFollowupFields(
+  step: Followup,
+  mailboxById: Map<string, EmailMailboxSettings>,
+  mailboxByEmail: Map<string, EmailMailboxSettings>,
+): PriorSequenceSender | null {
+  const mailboxId = step.mailboxId?.trim();
+  const fromEmail = step.fromEmail?.trim();
+  if (!mailboxId && !fromEmail) return null;
+
+  const fromMb =
+    (mailboxId ? mailboxById.get(mailboxId) : undefined) ??
+    (fromEmail ? mailboxByEmail.get(normalizeEmail(fromEmail)) : undefined);
+
+  const resolvedId = fromMb?.id ?? mailboxId;
+  const resolvedFrom =
+    fromMb?.emailAddress.trim() || fromEmail || "";
+  if (!resolvedId || !resolvedFrom) return null;
+
+  return {
+    mailboxId: resolvedId,
+    fromEmail: resolvedFrom,
+    followupId: step.id,
+  };
+}
+
+function sortBySentOrDue(a: Followup, b: Followup): number {
+  const aAt = new Date(String(a.sentAt ?? a.dueAt ?? "")).getTime();
+  const bAt = new Date(String(b.sentAt ?? b.dueAt ?? "")).getTime();
+  if (aAt !== bAt) return aAt - bAt;
+  return a.id.localeCompare(b.id);
+}
+
 /**
- * Resolve the mailbox that sent an earlier step in this plan, when known.
- * Uses scheduled-email history (by followup id / scheduledEmailId) and mailbox
- * address matching. Returns null when prior mail was outside CRM mailboxes
- * (e.g. Instantly) or history is unavailable.
+ * Resolve the mailbox that sent (or was queued for) an earlier step in this plan.
+ * Prefers durable followup mailbox fields, then scheduled-email history.
+ * Returns null when prior mail was outside CRM mailboxes (e.g. Instantly)
+ * or history is unavailable.
  */
 export function resolvePriorSequenceSender(input: {
   planFollowups: readonly Followup[];
   scheduledEmails: readonly ScheduledEmail[];
   mailboxes: readonly EmailMailboxSettings[];
 }): PriorSequenceSender | null {
-  const priorSent = input.planFollowups
-    .filter(isPriorSentStep)
-    .slice()
-    .sort((a, b) => {
-      const aAt = new Date(String(a.sentAt ?? a.dueAt ?? "")).getTime();
-      const bAt = new Date(String(b.sentAt ?? b.dueAt ?? "")).getTime();
-      if (aAt !== bAt) return aAt - bAt;
-      return a.id.localeCompare(b.id);
-    });
-
-  if (priorSent.length === 0) return null;
-
   const mailboxById = new Map(input.mailboxes.map((m) => [m.id, m]));
   const mailboxByEmail = new Map(
     input.mailboxes
       .map((m) => [normalizeEmail(m.emailAddress), m] as const)
       .filter(([email]) => Boolean(email)),
   );
+
+  const priorSent = input.planFollowups
+    .filter(isPriorSentStep)
+    .slice()
+    .sort(sortBySentOrDue);
+
+  for (const step of priorSent) {
+    const fromFields = senderFromFollowupFields(step, mailboxById, mailboxByEmail);
+    if (fromFields) return fromFields;
+  }
 
   for (const step of priorSent) {
     const byScheduleId = step.scheduledEmailId
@@ -83,6 +113,34 @@ export function resolvePriorSequenceSender(input: {
     };
   }
 
+  // Resume after cancel/edit: any step that still remembers the mailbox.
+  const withMailbox = input.planFollowups
+    .filter((s) => Boolean(s.mailboxId?.trim() || s.fromEmail?.trim()))
+    .slice()
+    .sort(sortBySentOrDue);
+  for (const step of withMailbox) {
+    const fromFields = senderFromFollowupFields(step, mailboxById, mailboxByEmail);
+    if (fromFields) return fromFields;
+  }
+
+  return null;
+}
+
+/** Prefer a remembered To from plan steps when still in the recipient options. */
+export function resolvePriorSequenceRecipient(input: {
+  planFollowups: readonly Followup[];
+  recipientEmails: readonly string[];
+}): string | null {
+  const allowed = new Set(
+    input.recipientEmails.map((e) => normalizeEmail(e)).filter(Boolean),
+  );
+  if (allowed.size === 0) return null;
+
+  const ordered = input.planFollowups.slice().sort(sortBySentOrDue);
+  for (const step of ordered) {
+    const to = step.toEmail?.trim();
+    if (to && allowed.has(normalizeEmail(to))) return to;
+  }
   return null;
 }
 

@@ -12,6 +12,7 @@ import {
 } from "@/stores/email-account-store";
 import {
   scheduleFollowupEmailClient,
+  followupScheduleMailboxFields,
   toDatetimeLocalValue,
 } from "@/lib/schedule-followup-email-client";
 import {
@@ -92,7 +93,14 @@ export function ScheduleFollowupEmailDialog({
   lead: Lead;
   onScheduled: (
     followupId: string,
-    schedule: { scheduledEmailId: string; emailScheduledAt: string },
+    schedule: {
+      scheduledEmailId: string;
+      emailScheduledAt: string;
+      mailboxId?: string;
+      fromEmail?: string;
+      toEmail?: string;
+      mailboxOwnerUid?: string;
+    },
   ) => void;
 }) {
   const { isDemo, getContactById, currentUserId, organizationId, organizationSendPolicy } =
@@ -149,15 +157,27 @@ export function ScheduleFollowupEmailDialog({
     let cancelled = false;
     void (async () => {
       const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
-      const defaultId = resolveDefaultScheduleMailboxId({
-        mailboxIds: mailboxOptions.map((mb) => mb.id),
-        lastUsedId: prefs.lastMailboxId,
-        activeMailboxId,
-      });
+      const rememberedMailboxId =
+        followup.mailboxId &&
+        mailboxOptions.some((m) => m.id === followup.mailboxId)
+          ? followup.mailboxId
+          : "";
+      const defaultId =
+        rememberedMailboxId ||
+        resolveDefaultScheduleMailboxId({
+          mailboxIds: mailboxOptions.map((mb) => mb.id),
+          lastUsedId: prefs.lastMailboxId,
+          activeMailboxId,
+        });
       const hydrated = await hydrateFollowupMessageBody(followup);
       if (cancelled) return;
       setMailboxId(defaultId);
-      setTo(defaultContactRecipientEmail(recipientOptions));
+      const rememberedTo = followup.toEmail?.trim();
+      setTo(
+        rememberedTo && recipientOptions.some((o) => o.email === rememberedTo)
+          ? rememberedTo
+          : defaultContactRecipientEmail(recipientOptions),
+      );
       setSubject(hydrated.emailSubject?.trim() || hydrated.title || "");
       setScheduledAt(
         defaultAudienceScheduleDatetimeLocal({
@@ -321,6 +341,7 @@ export function ScheduleFollowupEmailDialog({
       onScheduled(followup.id, {
         scheduledEmailId: result.scheduledEmailId,
         emailScheduledAt: result.emailScheduledAt,
+        ...followupScheduleMailboxFields(account, to),
       });
       toast.success(isDemo ? "Email scheduled (demo)" : "Email scheduled", {
         description: isDemo

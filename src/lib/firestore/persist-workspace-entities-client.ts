@@ -187,9 +187,17 @@ export async function persistFollowupEmailSchedule(
     emailScheduledAt: string;
     /** When set, persists whether this step starts / joins a fresh thread. */
     freshThread?: boolean;
+    mailboxId?: string;
+    fromEmail?: string;
+    toEmail?: string;
+    mailboxOwnerUid?: string;
   } | null,
 ): Promise<void> {
   if (schedule) {
+    const mailboxId = schedule.mailboxId?.trim();
+    const fromEmail = schedule.fromEmail?.trim();
+    const toEmail = schedule.toEmail?.trim();
+    const mailboxOwnerUid = schedule.mailboxOwnerUid?.trim();
     await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
       scheduledEmailId: schedule.scheduledEmailId,
       emailScheduledAt: schedule.emailScheduledAt,
@@ -198,6 +206,10 @@ export async function persistFollowupEmailSchedule(
       cancelledAt: deleteField(),
       deliveryError: deleteField(),
       cancelReason: deleteField(),
+      ...(mailboxId ? { mailboxId } : {}),
+      ...(fromEmail ? { fromEmail } : {}),
+      ...(toEmail ? { toEmail } : {}),
+      ...(mailboxOwnerUid ? { mailboxOwnerUid } : {}),
       ...(schedule.freshThread === true
         ? { freshThread: true }
         : schedule.freshThread === false
@@ -207,6 +219,7 @@ export async function persistFollowupEmailSchedule(
     });
     return;
   }
+  // Clear queue link only — keep mailboxId / fromEmail / toEmail for resume UX.
   await updateDoc(doc(db, COLLECTIONS.followups, followupId), {
     scheduledEmailId: deleteField(),
     emailScheduledAt: deleteField(),

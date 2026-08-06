@@ -54,6 +54,7 @@ import {
   type SequenceScheduleContinuityMode,
 } from "@/lib/email/sequence-schedule-continuity";
 import {
+  followupScheduleMailboxFields,
   scheduleFollowupEmailClient,
 } from "@/lib/schedule-followup-email-client";
 import {
@@ -757,6 +758,7 @@ export function BulkScheduleSequencesDialog({
           scheduledEmailId: result.scheduledEmailId,
           emailScheduledAt: result.emailScheduledAt,
           freshThread: startFresh,
+          ...followupScheduleMailboxFields(mailbox, to),
         });
         updateFollowup(followup.id, { dueAt: result.emailScheduledAt });
         okCount += 1;

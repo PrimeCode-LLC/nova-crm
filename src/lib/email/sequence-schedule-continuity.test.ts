@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   countContinuityPreflight,
   planHasPriorSentEmailSteps,
+  resolvePriorSequenceRecipient,
   resolvePriorSequenceSender,
 } from "@/lib/email/sequence-schedule-continuity";
 import type { EmailMailboxSettings, ScheduledEmail } from "@/lib/email-account-types";
@@ -40,6 +41,77 @@ describe("sequence schedule continuity", () => {
       ]),
     ).toBe(true);
     expect(planHasPriorSentEmailSteps([followup({ id: "f2" })])).toBe(false);
+  });
+
+  it("resolves prior sender from durable followup mailbox fields", () => {
+    const planFollowups = [
+      followup({
+        id: "f1",
+        deliveryStatus: "sent",
+        sentAt: "2026-01-01T10:05:00.000Z",
+        sentMessageId: "root@x",
+        mailboxId: "mb-a",
+        fromEmail: "a@mailtech.com",
+        toEmail: "lead@acme.com",
+      }),
+      followup({ id: "f2", dueAt: "2026-01-05T10:00:00.000Z" }),
+    ];
+
+    expect(
+      resolvePriorSequenceSender({
+        planFollowups,
+        scheduledEmails: [],
+        mailboxes,
+      }),
+    ).toEqual({
+      mailboxId: "mb-a",
+      fromEmail: "a@mailtech.com",
+      followupId: "f1",
+    });
+  });
+
+  it("resolves prior sender from cancelled step mailbox when history is gone", () => {
+    expect(
+      resolvePriorSequenceSender({
+        planFollowups: [
+          followup({
+            id: "f1",
+            deliveryStatus: "sent",
+            sentAt: "2026-01-01T10:05:00.000Z",
+            sentMessageId: "root@x",
+          }),
+          followup({
+            id: "f2",
+            deliveryStatus: "cancelled",
+            mailboxId: "mb-b",
+            fromEmail: "b@mailtech.com",
+            toEmail: "lead@acme.com",
+          }),
+        ],
+        scheduledEmails: [],
+        mailboxes,
+      }),
+    ).toEqual({
+      mailboxId: "mb-b",
+      fromEmail: "b@mailtech.com",
+      followupId: "f2",
+    });
+  });
+
+  it("resolves prior recipient from remembered toEmail", () => {
+    expect(
+      resolvePriorSequenceRecipient({
+        planFollowups: [
+          followup({
+            id: "f1",
+            toEmail: "lead@acme.com",
+            deliveryStatus: "sent",
+            sentAt: "2026-01-01T10:00:00.000Z",
+          }),
+        ],
+        recipientEmails: ["other@x.com", "lead@acme.com"],
+      }),
+    ).toBe("lead@acme.com");
   });
 
   it("resolves prior sender from scheduled email history", () => {
