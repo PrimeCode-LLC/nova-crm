@@ -6,6 +6,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { ClientOnly } from "./client-only";
 
 type WaitlistFormProps = {
   className?: string;
@@ -15,11 +16,37 @@ type WaitlistFormProps = {
   ctaLabel?: string;
 };
 
-export function WaitlistForm({
+/** Extension-ignore attrs — reduces password-manager DOM mutations during hydrate. */
+const EXT_IGNORE = {
+  "data-1p-ignore": true,
+  "data-lpignore": "true",
+  "data-form-type": "other",
+  "data-bwignore": "true",
+} as const;
+
+export function WaitlistForm(props: WaitlistFormProps) {
+  return (
+    <ClientOnly
+      fallback={
+        <div
+          className={cn(
+            "h-12 w-full animate-pulse rounded-lg bg-muted/40",
+            props.className,
+          )}
+          aria-hidden
+        />
+      }
+    >
+      <WaitlistFormInner {...props} />
+    </ClientOnly>
+  );
+}
+
+function WaitlistFormInner({
   className,
   size = "lg",
   showCompany = false,
-  ctaLabel = "Join the waitlist",
+  ctaLabel = "Reserve my founding slot",
 }: WaitlistFormProps) {
   const [email, setEmail] = React.useState("");
   const [company, setCompany] = React.useState("");
@@ -85,17 +112,21 @@ export function WaitlistForm({
         showCompany ? "" : "sm:flex-row sm:items-stretch",
         className,
       )}
+      autoComplete="off"
+      data-lpignore="true"
+      data-1p-ignore="true"
     >
-      {/* Honeypot */}
+      {/* Honeypot — not a real contact field */}
       <input
         type="text"
-        name="website"
+        name="website_url_confirm"
         value={website}
         onChange={(e) => setWebsite(e.target.value)}
         tabIndex={-1}
         autoComplete="off"
-        aria-hidden
+        aria-hidden="true"
         className="pointer-events-none absolute h-0 w-0 opacity-0"
+        {...EXT_IGNORE}
       />
 
       <div className={cn("flex flex-1 flex-col gap-3", showCompany && "sm:flex-row")}>
@@ -111,6 +142,7 @@ export function WaitlistForm({
             size === "lg" && "h-12 text-base",
           )}
           autoComplete="email"
+          {...EXT_IGNORE}
         />
         {showCompany && (
           <Input
@@ -124,6 +156,7 @@ export function WaitlistForm({
               size === "lg" && "h-12 text-base",
             )}
             autoComplete="organization"
+            {...EXT_IGNORE}
           />
         )}
       </div>

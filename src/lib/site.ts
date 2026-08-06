@@ -6,11 +6,11 @@ export const SITE = {
   name: "Nova",
   /** Short product identity for wordmarks */
   productName: "Nova",
-  tagline: "Every Prospect Journey, Intelligently Managed.",
+  tagline: "Nova books the meetings. You stop hiring another SDR.",
   description:
-    "Nova is an AI revenue execution system that understands each prospect, personalizes outreach, manages follow-ups, interprets replies, and advances every journey from first contact to final outcome.",
+    "Nova is for B2B service and SaaS owners running outbound with more pipeline than headcount. It personalizes outreach, runs follow-ups, reads every reply, and advances the deal — grounded in how you actually sell.",
   oneLiner:
-    "An intelligent prospect management system that understands, manages, and automates every prospect journey.",
+    "Nova books meetings without another SDR hire — personalized outbound, grounded in your business, under your approval.",
   salesEmail: "sales@stellixsoft.com",
   url:
     process.env.NEXT_PUBLIC_SITE_URL?.replace(/\/$/, "") ??

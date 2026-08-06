@@ -79,7 +79,7 @@ export function SiteFooter() {
               {SITE.salesEmail}
             </a>
           </p>
-          <p className="font-mono">Early access · waitlist open</p>
+          <p className="font-mono">Founding cohort · 25 teams</p>
         </div>
       </div>
     </footer>

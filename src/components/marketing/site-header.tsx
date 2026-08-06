@@ -24,8 +24,12 @@ export async function SiteHeader() {
   const hasSession = Boolean(cookieStore.get(SESSION_COOKIE_NAME)?.value);
 
   return (
-    <header className="sticky top-0 z-40 border-b border-border/60 bg-background/80 backdrop-blur-xl">
-      <div className="mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
+    <header className="sticky top-0 z-40">
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-b from-background/85 via-background/45 to-transparent"
+      />
+      <div className="relative mx-auto flex h-16 w-full max-w-7xl items-center justify-between gap-4 px-4 sm:px-6 lg:px-8">
         <div className="flex items-center gap-8">
           <Logo size="sm" />
           <nav className="hidden items-center gap-1 md:flex">
@@ -65,9 +69,9 @@ export async function SiteHeader() {
               <Button
                 size="sm"
                 nativeButton={false}
-                render={<Link href="/pricing#waitlist" />}
+                render={<Link href="/#waitlist" />}
               >
-                Join waitlist
+                Reserve a slot
                 <ArrowRight />
               </Button>
             </>
@@ -121,9 +125,9 @@ export async function SiteHeader() {
                       <Button
                         className="w-full"
                         nativeButton={false}
-                        render={<Link href="/pricing#waitlist" />}
+                        render={<Link href="/#waitlist" />}
                       >
-                        Join waitlist
+                        Reserve a slot
                       </Button>
                     </div>
                   )}
