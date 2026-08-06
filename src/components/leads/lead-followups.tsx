@@ -464,12 +464,15 @@ export function LeadFollowups({
   lead,
   aiContext,
   onFixEmailAndResume,
+  onSwitchContact,
 }: {
   followups: Followup[];
   lead: Lead;
   aiContext?: LeadFollowupAiContext;
   /** Opens the fix-email dialog with resume sequence (parent owns the dialog). */
   onFixEmailAndResume?: () => void;
+  /** Opens switch-contact dialog (same company, different person). */
+  onSwitchContact?: () => void;
 }) {
   const [dialogOpen, setDialogOpen] = React.useState(false);
   const [editTarget, setEditTarget] = React.useState<Followup | null>(null);
@@ -851,6 +854,7 @@ export function LeadFollowups({
           onRegenerate={() => openSuggest(pausedPlan)}
           onDismiss={() => setDismissedPlanId(pausedPlan.id)}
           onFixEmailAndResume={onFixEmailAndResume}
+          onSwitchContact={onSwitchContact}
           onBuildLinkedInSequence={
             hasLinkedIn || lead.suggestLinkedInSequence ? openLinkedInSuggest : undefined
           }

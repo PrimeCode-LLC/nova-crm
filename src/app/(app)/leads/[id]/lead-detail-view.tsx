@@ -65,6 +65,7 @@ import { LeadReplyReviewBanner } from "@/components/leads/lead-reply-review-bann
 import { LeadReplyActionBanner } from "@/components/leads/lead-reply-action-banner";
 import { LeadContactEmailActionBanner } from "@/components/leads/lead-contact-email-action-banner";
 import { UpdateContactEmailDialog } from "@/components/leads/update-contact-email-dialog";
+import { SwitchLeadContactDialog } from "@/components/leads/switch-lead-contact-dialog";
 import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
 import { rerouteFollowupSequenceClient } from "@/lib/email/reroute-followup-sequence-client";
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
@@ -217,6 +218,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
     "manual",
   );
   const [updateEmailSuggested, setUpdateEmailSuggested] = React.useState<string | undefined>();
+  const [switchContactOpen, setSwitchContactOpen] = React.useState(false);
   const [verifyingEmail, setVerifyingEmail] = React.useState(false);
   const [linkedinSuggestOpen, setLinkedinSuggestOpen] = React.useState(false);
   const [deleteOpen, setDeleteOpen] = React.useState(false);
@@ -1274,6 +1276,16 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                       >
                         {needsEmailFix ? "Update bounced email" : "Use suggested email"}
                       </Button>
+                      {needsEmailFix ? (
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setSwitchContactOpen(true)}
+                        >
+                          Try another person
+                        </Button>
+                      ) : null}
                     </div>
                   ) : null}
                   {canEditLead &&
@@ -1361,6 +1373,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                     suggestedEmail={suggestedNewEmail}
                     canEdit={canEditLead && Boolean(contact)}
                     onUpdateEmail={openUpdateEmail}
+                    onSwitchContact={
+                      canEditLead && contact ? () => setSwitchContactOpen(true) : undefined
+                    }
                     suggestLinkedInSequence={suggestLinkedIn}
                     hasLinkedIn={hasLinkedIn}
                     onBuildLinkedInSequence={() => setLinkedinSuggestOpen(true)}
@@ -1428,6 +1443,9 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
                               suggestedEmail: suggestedNewEmail ?? undefined,
                             })
                         : undefined
+                    }
+                    onSwitchContact={
+                      canEditLead && contact ? () => setSwitchContactOpen(true) : undefined
                     }
                   />
                 </TabsContent>
@@ -1930,6 +1948,18 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
           contact={contact}
           suggestedEmail={updateEmailSuggested}
           reason={updateEmailReason}
+          canResumeSequence={canResumeSequence}
+          onResumeSequence={canResumeSequence ? handleResumeSequence : undefined}
+        />
+      ) : null}
+      {contact && account ? (
+        <SwitchLeadContactDialog
+          open={switchContactOpen}
+          onOpenChange={setSwitchContactOpen}
+          lead={lead}
+          contact={contact}
+          account={account}
+          personas={prospecting.personas.filter((p) => p.active)}
           canResumeSequence={canResumeSequence}
           onResumeSequence={canResumeSequence ? handleResumeSequence : undefined}
         />

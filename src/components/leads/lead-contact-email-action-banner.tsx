@@ -10,6 +10,7 @@ export function LeadContactEmailActionBanner({
   suggestedEmail,
   canEdit,
   onUpdateEmail,
+  onSwitchContact,
   suggestLinkedInSequence = false,
   hasLinkedIn = false,
   onBuildLinkedInSequence,
@@ -18,6 +19,8 @@ export function LeadContactEmailActionBanner({
   suggestedEmail?: string | null;
   canEdit: boolean;
   onUpdateEmail: (opts: { reason: "bounce" | "suggested"; suggestedEmail?: string }) => void;
+  /** Keep company opportunity; outreach a different person. */
+  onSwitchContact?: () => void;
   /** After 2nd hard bounce with LinkedIn URL. */
   suggestLinkedInSequence?: boolean;
   hasLinkedIn?: boolean;
@@ -62,6 +65,11 @@ export function LeadContactEmailActionBanner({
                 Fix email instead
               </Button>
             ) : null}
+            {onSwitchContact ? (
+              <Button type="button" size="sm" variant="outline" onClick={onSwitchContact}>
+                Try another person
+              </Button>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -82,6 +90,8 @@ export function LeadContactEmailActionBanner({
                 : contact?.email
                   ? `${contact.email} is marked bounced. Replace it with a valid address to resume the sequence with the same copy.`
                   : "This contact’s email bounced. Add a valid address to continue outreach."}
+              {" "}
+              If this person is unreachable, keep the company and try another contact.
               {suggested ? (
                 <>
                   {" "}
@@ -105,6 +115,11 @@ export function LeadContactEmailActionBanner({
             >
               {hasPersonal ? "Update company email" : "Fix email & resume"}
             </Button>
+            {onSwitchContact ? (
+              <Button type="button" size="sm" variant="outline" onClick={onSwitchContact}>
+                Try another person
+              </Button>
+            ) : null}
             {suggested ? (
               <Button
                 type="button"

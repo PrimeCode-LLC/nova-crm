@@ -12,6 +12,7 @@ export function FollowupPlanPausedBanner({
   onRegenerate,
   onDismiss,
   onFixEmailAndResume,
+  onSwitchContact,
   onBuildLinkedInSequence,
   hasLinkedIn = false,
 }: {
@@ -20,6 +21,8 @@ export function FollowupPlanPausedBanner({
   onDismiss?: () => void;
   /** Bounce pause: fix email + reschedule same copy. */
   onFixEmailAndResume?: () => void;
+  /** Keep company; switch outreach to another person. */
+  onSwitchContact?: () => void;
   /** 2nd bounce with LinkedIn URL. */
   onBuildLinkedInSequence?: () => void;
   hasLinkedIn?: boolean;
@@ -51,6 +54,11 @@ export function FollowupPlanPausedBanner({
           <Button type="button" size="sm" onClick={onFixEmailAndResume}>
             <Mail className="h-3.5 w-3.5" />
             Fix email & resume
+          </Button>
+        ) : null}
+        {isBouncePause && onSwitchContact ? (
+          <Button type="button" size="sm" variant="outline" onClick={onSwitchContact}>
+            Try another person
           </Button>
         ) : null}
         {isEmailExhausted && hasLinkedIn && onBuildLinkedInSequence ? (
