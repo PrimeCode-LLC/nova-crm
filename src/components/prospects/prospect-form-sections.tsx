@@ -161,18 +161,40 @@ export function ProspectFormSections({
   verifyLeadId,
 }: Props) {
   const [verifyingEmail, setVerifyingEmail] = React.useState(false);
-  const update = <K extends keyof ProspectFormValues>(
-    key: K,
-    value: ProspectFormValues[K],
-    annotationKey?: AnnotationKey,
-  ) => onChange({ ...values, [key]: value }, annotationKey);
-  const selectedStrategy = strategies.find((strategy) => strategy.id === values.strategyId);
-  const strategyPersonas = personas.filter((persona) => persona.active);
-  const profileRequired = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(values.channel);
-  const profileOptions = profiles.filter(
-    (profile) => profile.active !== false && profile.channel === values.channel,
+  const valuesRef = React.useRef(values);
+  valuesRef.current = values;
+
+  const update = React.useCallback(
+    <K extends keyof ProspectFormValues>(
+      key: K,
+      value: ProspectFormValues[K],
+      annotationKey?: AnnotationKey,
+    ) => {
+      onChange({ ...valuesRef.current, [key]: value }, annotationKey);
+    },
+    [onChange],
   );
-  const readinessIssues = evaluateOutreachReadiness(values);
+
+  const selectedStrategy = React.useMemo(
+    () => strategies.find((strategy) => strategy.id === values.strategyId),
+    [strategies, values.strategyId],
+  );
+  const strategyPersonas = React.useMemo(
+    () => personas.filter((persona) => persona.active),
+    [personas],
+  );
+  const profileRequired = CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(values.channel);
+  const profileOptions = React.useMemo(
+    () =>
+      profiles.filter(
+        (profile) => profile.active !== false && profile.channel === values.channel,
+      ),
+    [profiles, values.channel],
+  );
+  const readinessIssues = React.useMemo(
+    () => evaluateOutreachReadiness(values),
+    [values],
+  );
 
   async function handleVerifyEmail() {
     if (!verifyLeadId || !values.email.trim() || verifyingEmail) return;
@@ -207,7 +229,7 @@ export function ProspectFormSections({
                 onValueChange={(value) => {
                   const strategyId = value === "__none__" ? "" : value ?? "";
                   onChange({
-                    ...values,
+                    ...valuesRef.current,
                     strategyId,
                     personaId: "",
                     strategyVersion: strategies.find((item) => item.id === strategyId)?.version,
@@ -268,7 +290,7 @@ export function ProspectFormSections({
               value={values.channel}
               onValueChange={(value) => {
                 if (!value) return;
-                onChange({ ...values, channel: value as ChannelKey, profileId: "" });
+                onChange({ ...valuesRef.current, channel: value as ChannelKey, profileId: "" });
               }}
             >
               <SelectTrigger>

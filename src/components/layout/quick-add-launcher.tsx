@@ -105,12 +105,14 @@ export function QuickAddLauncherProvider({ children }: { children: React.ReactNo
           initialLeadStage={opts.initialLeadStage}
         />
       ) : null}
-      <NewProspectDialog
-        key={prospectLaunchKey}
-        open={newProspectOpen}
-        onOpenChange={handleNewProspectOpenChange}
-        launch={prospectLaunch}
-      />
+      {newProspectOpen ? (
+        <NewProspectDialog
+          key={prospectLaunchKey}
+          open={newProspectOpen}
+          onOpenChange={handleNewProspectOpenChange}
+          launch={prospectLaunch}
+        />
+      ) : null}
     </QuickAddLauncherContext.Provider>
   );
 }
