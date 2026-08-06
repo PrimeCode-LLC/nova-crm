@@ -20,6 +20,8 @@ import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { getReplyActionServer } from "@/lib/email/classify-inbound-reply-server";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
+import type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
+import { resolveReplyReviewAfterReplyActionServer } from "@/lib/leads/resolve-reply-review-after-reply-action-server";
 
 function bodyToHtml(body: string): string {
   return body
@@ -121,6 +123,7 @@ export async function sendReplyActionServer(input: {
       inReplyTo?: string;
       referenceIds?: string[];
       leadId: string;
+      completion?: ReplyActionCompletionOutcome;
     }
   | { ok: false; error: string; status: number }
 > {
@@ -350,6 +353,13 @@ export async function sendReplyActionServer(input: {
     /* send already succeeded */
   }
 
+  const completion = await resolveReplyReviewAfterReplyActionServer({
+    organizationId: input.organizationId,
+    leadId: action.leadId,
+    actorUid: input.decidedBy,
+    mode: "completed",
+  });
+
   return {
     ok: true,
     messageId,
@@ -363,6 +373,7 @@ export async function sendReplyActionServer(input: {
     inReplyTo,
     referenceIds,
     leadId: action.leadId,
+    completion,
   };
 }
 

@@ -13,20 +13,29 @@ import {
   type ReplyAction,
   type ReplyClass,
 } from "@/lib/email/reply-action-types";
+import { hasPendingReplyAction } from "@/lib/email/reply-action-pending";
 import {
   dispatchLeadReplySent,
   REPLY_REGENERATE_DIRECTIONS,
   type ReplyRegenerateDirectionId,
 } from "@/lib/email/lead-reply-events";
 import type { Lead } from "@/lib/types";
-
-function hasPendingReplyAction(lead: Lead): boolean {
-  return Boolean(lead.pendingReplyActionId?.trim()) && lead.replyActionStatus === "pending";
-}
+import type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
 
 function senderLabel(raw: string): string {
   const match = raw.match(/^([^<]+)</);
   return (match?.[1] ?? raw).trim().replace(/^["']|["']$/g, "") || "them";
+}
+
+function completionToast(completion: ReplyActionCompletionOutcome | undefined, base: string) {
+  if (!completion?.replyReviewResolved) return base;
+  if (completion.promotedToLead) {
+    return `${base} · Promoted to lead at Replied`;
+  }
+  if (completion.stageMovedToReplied) {
+    return `${base} · Moved to Replied`;
+  }
+  return `${base} · Reply review cleared`;
 }
 
 export function LeadReplyActionBanner({
@@ -36,7 +45,7 @@ export function LeadReplyActionBanner({
   lead: Lead;
   onOpenEmails?: () => void;
 }) {
-  const { patchLeadAsync } = useWorkspace();
+  const { applyLeadLocalPatch } = useWorkspace();
   const [busy, setBusy] = React.useState(false);
   const [action, setAction] = React.useState<ReplyAction | null>(null);
   const [editing, setEditing] = React.useState(false);
@@ -52,6 +61,16 @@ export function LeadReplyActionBanner({
   const actionId = lead.pendingReplyActionId?.trim() ?? "";
   const pending = hasPendingReplyAction(lead);
 
+  const hydrateCompletion = React.useCallback(
+    (completion: ReplyActionCompletionOutcome | undefined) => {
+      if (!completion?.clientPatches?.length) return;
+      for (const row of completion.clientPatches) {
+        applyLeadLocalPatch(row.leadId, row.patch);
+      }
+    },
+    [applyLeadLocalPatch],
+  );
+
   const loadAction = React.useCallback(async () => {
     if (!pending || !actionId) {
       setAction(null);
@@ -63,7 +82,7 @@ export function LeadReplyActionBanner({
     const data = (await response.json()) as { ok?: boolean; action?: ReplyAction; resolvedByManualSend?: boolean };
     if (response.ok && data.ok && data.action) {
       if (data.resolvedByManualSend || data.action.status === "sent") {
-        await patchLeadAsync(lead.id, {
+        applyLeadLocalPatch(lead.id, {
           pendingReplyActionId: undefined,
           replyActionStatus: "sent",
           nextAction: "Reply sent — wait for their response",
@@ -78,7 +97,7 @@ export function LeadReplyActionBanner({
         setOptimisticPending(false);
       }
     }
-  }, [actionId, lead.id, patchLeadAsync, pending]);
+  }, [actionId, applyLeadLocalPatch, lead.id, pending]);
 
   React.useEffect(() => {
     if (!pending || !actionId) {
@@ -201,6 +220,7 @@ export function LeadReplyActionBanner({
         inReplyTo?: string;
         referenceIds?: string[];
         leadId?: string;
+        completion?: ReplyActionCompletionOutcome;
       };
       if (!response.ok || !data.ok) throw new Error(data.error || "Could not update");
 
@@ -223,11 +243,12 @@ export function LeadReplyActionBanner({
       }
 
       if (decision === "send") {
-        await patchLeadAsync(lead.id, {
+        applyLeadLocalPatch(lead.id, {
           pendingReplyActionId: undefined,
           replyActionStatus: "sent",
           nextAction: "Reply sent — wait for their response",
         });
+        hydrateCompletion(data.completion);
         dispatchLeadReplySent({
           leadId: data.leadId || lead.id,
           subject: data.subject || draftSubject,
@@ -242,15 +263,25 @@ export function LeadReplyActionBanner({
           referenceIds: data.referenceIds || action?.draftReferenceIds,
         });
         onOpenEmails?.();
-        toast.success("Reply sent in thread");
+        toast.success(completionToast(data.completion, "Reply sent in thread"));
         return;
       }
 
-      await patchLeadAsync(lead.id, {
+      applyLeadLocalPatch(lead.id, {
         pendingReplyActionId: undefined,
         replyActionStatus: decision,
       });
-      toast.success(decision === "accepted" ? "Next step confirmed" : "Suggestion dismissed");
+      hydrateCompletion(data.completion);
+      if (decision === "accepted") {
+        toast.success(
+          completionToast(
+            data.completion,
+            "Next step confirmed — handle offline if needed",
+          ),
+        );
+      } else {
+        toast.success("Suggestion dismissed — stage review may still need a decision");
+      }
     } catch (e) {
       if (decision === "regenerate") {
         setOptimisticPending(false);
@@ -432,10 +463,13 @@ export function LeadReplyActionBanner({
 
       {confirmSend && draftReady ? (
         <div className="pl-6 rounded-md border border-primary/30 bg-background/60 px-3 py-2 text-xs space-y-1">
-          <p className="font-medium">Send this reply in the same thread?</p>
+          <p className="font-medium">Send this reply and clear pending review?</p>
           <p className="text-muted-foreground">
             To {action?.draftTo || lead.contactEmail || "recipient"}
             {draftSubject ? ` · ${draftSubject}` : ""}
+            {lead.replyReviewStatus === "pending"
+              ? " · Also moves to Replied / clears dashboard review"
+              : ""}
           </p>
           <div className="flex flex-wrap gap-2 pt-1">
             <Button
@@ -520,7 +554,7 @@ export function LeadReplyActionBanner({
             disabled={busy}
             onClick={() => void patchDecision("accepted")}
           >
-            Confirm next step
+            Done · clear & move to Replied
           </Button>
         ) : null}
         {onOpenEmails ? (
@@ -535,7 +569,7 @@ export function LeadReplyActionBanner({
           disabled={busy}
           onClick={() => void patchDecision("dismissed")}
         >
-          Reject
+          Dismiss suggestion
         </Button>
       </div>
     </div>

@@ -25,6 +25,8 @@ import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import { buildReplyDetectedPatch } from "@/lib/leads/reply-review";
 import { resolveWaitUntilDate } from "@/lib/email/ooo-return-date";
+import type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
+import { resolveReplyReviewAfterReplyActionServer } from "@/lib/leads/resolve-reply-review-after-reply-action-server";
 
 export const replyClassifySchema = z.object({
   classification: z.enum([
@@ -635,7 +637,13 @@ export async function decideReplyActionServer(input: {
   actionId: string;
   decision: "accepted" | "dismissed";
   decidedBy: string;
-}): Promise<{ ok: true } | { ok: false; error: string; status: number }> {
+}): Promise<
+  | {
+      ok: true;
+      completion?: ReplyActionCompletionOutcome;
+    }
+  | { ok: false; error: string; status: number }
+> {
   const db = getAdminDb();
   if (!db) return { ok: false, error: "Database not configured.", status: 503 };
 
@@ -676,5 +684,12 @@ export async function decideReplyActionServer(input: {
     await leadRef.update(patch);
   }
 
-  return { ok: true };
+  const completion = await resolveReplyReviewAfterReplyActionServer({
+    organizationId: input.organizationId,
+    leadId: action.leadId,
+    actorUid: input.decidedBy,
+    mode: input.decision === "accepted" ? "completed" : "suggestion_dismissed",
+  });
+
+  return { ok: true, completion };
 }

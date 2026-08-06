@@ -7,6 +7,7 @@ import {
 } from "@/lib/email/lead-mail-store-server";
 import { getReplyActionServer } from "@/lib/email/classify-inbound-reply-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
+import { resolveReplyReviewAfterReplyActionServer } from "@/lib/leads/resolve-reply-review-after-reply-action-server";
 
 async function markPendingReplyActionSent(input: {
   organizationId: string;
@@ -99,6 +100,15 @@ export async function resolvePendingReplyActionOnOutboundServer(input: {
     sentAt: input.sentAt,
   });
 
+  if (cleared) {
+    await resolveReplyReviewAfterReplyActionServer({
+      organizationId: input.organizationId,
+      leadId,
+      actorUid: input.decidedBy,
+      mode: "completed",
+    });
+  }
+
   return cleared ? { cleared: true, actionId } : { cleared: false };
 }
 
@@ -159,6 +169,15 @@ export async function reconcilePendingReplyActionWithOutboundServer(input: {
     messageId: matchingOutbound.messageId,
     sentAt: matchingOutbound.date,
   });
+
+  if (cleared) {
+    await resolveReplyReviewAfterReplyActionServer({
+      organizationId: input.organizationId,
+      leadId: action.leadId,
+      actorUid: input.decidedBy,
+      mode: "completed",
+    });
+  }
 
   return { cleared };
 }

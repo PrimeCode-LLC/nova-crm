@@ -9,6 +9,7 @@ import {
   Clapperboard,
   MailWarning,
   MessageSquareReply,
+  Sparkles,
   Timer,
   ListTodo,
 } from "lucide-react";
@@ -33,6 +34,7 @@ import {
 } from "@/lib/content-calendar/types";
 import { contactFirstName, leadEntityLabel } from "@/lib/leads/lead-display-label";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
+import { hasPendingReplyAction } from "@/lib/email/reply-action-pending";
 import { isFollowupOverdue } from "@/lib/followup-open-status";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 
@@ -217,17 +219,37 @@ export function DashboardNeedsAttention({
 
   for (const lead of leads) {
     if (!hasPendingReplyReview(lead)) continue;
+    const aiReady = hasPendingReplyAction(lead);
     items.push({
       id: `reply-${lead.id}`,
       label: `Reply to review · ${entityWithPerson(lead)}`,
-      detail:
-        lead.intakeKind === "prospect"
+      detail: aiReady
+        ? lead.intakeKind === "prospect"
+          ? "AI next step ready · promote/move to Replied when you send or confirm."
+          : "AI next step ready · move to Replied when you send or confirm."
+        : lead.intakeKind === "prospect"
           ? "Promote to lead or confirm Replied on the dashboard."
           : "Confirm moving this opportunity to Replied.",
       href: lead.intakeKind === "prospect" ? `/leads/${lead.id}?from=prospects` : `/leads/${lead.id}`,
       time: timestamp(lead.lastReplyAt || lead.lastActivityAt, now),
       severity: "urgent",
       icon: MessageSquareReply,
+      ownerId: resolveOwnerId(lead),
+    });
+  }
+
+  for (const lead of leads) {
+    if (!hasPendingReplyAction(lead)) continue;
+    // Already covered above when reply review is also pending.
+    if (hasPendingReplyReview(lead)) continue;
+    items.push({
+      id: `reply-ai-${lead.id}`,
+      label: `AI reply ready · ${entityWithPerson(lead)}`,
+      detail: lead.nextAction?.trim() || "Review the suggested next step and send or dismiss.",
+      href: lead.intakeKind === "prospect" ? `/leads/${lead.id}?from=prospects` : `/leads/${lead.id}`,
+      time: timestamp(lead.lastReplyAt || lead.lastActivityAt, now),
+      severity: "urgent",
+      icon: Sparkles,
       ownerId: resolveOwnerId(lead),
     });
   }
@@ -300,7 +322,7 @@ export function DashboardNeedsAttention({
   for (const plan of plans) {
     if (plan.status !== "paused" || !plan.replyMessageId) continue;
     const planLead = leadById.get(plan.leadId);
-    if (planLead && hasPendingReplyReview(planLead)) continue;
+    if (planLead && (hasPendingReplyReview(planLead) || hasPendingReplyAction(planLead))) continue;
     items.push({
       id: `plan-${plan.id}`,
       label: `Sequence stopped on reply · ${leadLabel(plan.leadId)}`,
@@ -318,7 +340,7 @@ export function DashboardNeedsAttention({
 
   for (const lead of leads) {
     if (lead.intakeKind === "prospect" || !lead.isIdle || ["won", "lost"].includes(lead.stage)) continue;
-    if (hasPendingReplyReview(lead)) continue;
+    if (hasPendingReplyReview(lead) || hasPendingReplyAction(lead)) continue;
     items.push({
       id: `idle-${lead.id}`,
       label: `Idle lead · ${entityWithPerson(lead)}`,

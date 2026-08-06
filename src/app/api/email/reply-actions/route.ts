@@ -139,6 +139,7 @@ export async function PATCH(req: Request) {
       inReplyTo: result.inReplyTo,
       referenceIds: result.referenceIds,
       leadId: result.leadId,
+      completion: result.completion,
     });
   }
 
@@ -153,5 +154,5 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ ok: false, error: result.error }, { status: result.status });
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, completion: result.completion });
 }

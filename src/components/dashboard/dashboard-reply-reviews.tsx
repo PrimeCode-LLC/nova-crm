@@ -18,6 +18,7 @@ import {
   replyReviewActionLabel,
   replyReviewDetail,
 } from "@/lib/leads/reply-review";
+import { hasPendingReplyAction } from "@/lib/email/reply-action-pending";
 import { fmtRelative } from "@/lib/format";
 import type { Lead } from "@/lib/types";
 
@@ -99,6 +100,11 @@ export function DashboardReplyReviews({ leads }: { leads: readonly Lead[] }) {
                     ) : null}
                   </Link>
                   <p className="truncate text-xs text-muted-foreground">{replyReviewDetail(lead)}</p>
+                  {hasPendingReplyAction(lead) ? (
+                    <p className="truncate text-[11px] text-amber-700 dark:text-amber-400">
+                      AI next step ready on the lead — send or confirm to clear this too.
+                    </p>
+                  ) : null}
                   {lead.lastReplyAt ? (
                     <p className="text-[11px] text-muted-foreground/80">
                       Reply {fmtRelative(lead.lastReplyAt)}
