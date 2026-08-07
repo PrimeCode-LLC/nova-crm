@@ -3,8 +3,11 @@ import { describe, expect, it } from "vitest";
 import { prospectFormFromDraft, type ProspectDraft } from "./draft-types";
 import {
   buildProspectEntities,
+  domainFromWebsiteOrEmail,
   emptyProspectForm,
   evaluateOutreachReadiness,
+  isValidOptionalHttpUrl,
+  normalizeOptionalHttpUrl,
   parseProspectForm,
   validateProspectForm,
 } from "./prospect-form";
@@ -138,5 +141,36 @@ describe("prospect form validation and mapping", () => {
     });
     expect(result.errors).toContain("Business name is required.");
     expect(result.qualifyIssues.some((issue) => issue.blocking)).toBe(true);
+  });
+
+  it("accepts bare website domains and normalizes them on save", () => {
+    const form = emptyProspectForm();
+    Object.assign(form, {
+      bizName: "Stellix",
+      firstName: "Ada",
+      lastName: "Lovelace",
+      website: "stellixsoft.com",
+      channel: "cold_email",
+    });
+    expect(isValidOptionalHttpUrl(form.website)).toBe(true);
+    expect(normalizeOptionalHttpUrl(form.website)).toBe("https://stellixsoft.com");
+    expect(domainFromWebsiteOrEmail(form.website, "")).toBe("stellixsoft.com");
+    const { account } = buildProspectEntities({
+      form,
+      accountId: "a-1",
+      contactId: "ct-1",
+      leadId: "l-1",
+      ownerId: "u-1",
+      now: "2026-07-21T00:00:00.000Z",
+    });
+    expect(account.website).toBe("https://stellixsoft.com");
+    expect(account.domain).toBe("stellixsoft.com");
+  });
+
+  it("rejects values that are not URLs", () => {
+    expect(isValidOptionalHttpUrl("not a website")).toBe(false);
+    expect(isValidOptionalHttpUrl("https://ok.example")).toBe(true);
+    expect(isValidOptionalHttpUrl("www.ok.example/about")).toBe(true);
+    expect(isValidOptionalHttpUrl("")).toBe(true);
   });
 });

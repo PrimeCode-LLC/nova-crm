@@ -68,6 +68,7 @@ import {
   buildProspectEntities,
   domainFromWebsiteOrEmail,
   isValidOptionalHttpUrl,
+  normalizeProspectFormUrlFields,
   normalizedEmail,
 } from "@/lib/prospects/prospect-form";
 
@@ -476,10 +477,18 @@ export function NewProspectDialog({
       return;
     }
 
-    const nextForm = { ...formRef.current };
+    const nextForm = normalizeProspectFormUrlFields({ ...formRef.current });
     const bn = collapseAccidentalDoubleName(nextForm.bizName);
     if (bn !== nextForm.bizName.trim()) {
       nextForm.bizName = bn;
+    }
+    if (
+      nextForm.website !== formRef.current.website ||
+      nextForm.companyLinkedin !== formRef.current.companyLinkedin ||
+      nextForm.careersUrl !== formRef.current.careersUrl ||
+      nextForm.linkedin !== formRef.current.linkedin ||
+      bn !== formRef.current.bizName.trim()
+    ) {
       setForm(nextForm);
     }
     if (!bn) {
@@ -538,7 +547,7 @@ export function NewProspectDialog({
     ];
     const invalidUrl = urls.find(([, value]) => !isValidOptionalHttpUrl(value));
     if (invalidUrl) {
-      toast.error(`${invalidUrl[0]} must be a complete http(s) URL.`);
+      toast.error(`${invalidUrl[0]} must be a valid URL (e.g. example.com or https://example.com).`);
       return;
     }
 

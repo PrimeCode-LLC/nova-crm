@@ -176,6 +176,8 @@ export async function reconcilePendingReplyActionWithOutboundServer(input: {
       leadId: action.leadId,
       actorUid: input.decidedBy,
       mode: "completed",
+      classification: action.classification,
+      recommendedAction: action.recommendedAction,
     });
   }
 

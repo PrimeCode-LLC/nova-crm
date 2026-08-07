@@ -32,6 +32,7 @@ import {
 import type { BuyerPersona, ProspectingStrategy } from "@/lib/prospecting-strategy/types";
 import {
   evaluateOutreachReadiness,
+  normalizeOptionalHttpUrl,
   PROSPECT_FORM_UNSET,
   type ProspectFormValues,
 } from "@/lib/prospects/prospect-form";
@@ -446,10 +447,32 @@ export function ProspectFormSections({
             <Input value={values.country} onChange={(event) => update("country", event.target.value, "country")} />
           </Field>
           <Field label="Website URL" annotation={renderAnnotation?.("companyWebsite")} wide>
-            <Input type="url" value={values.website} onChange={(event) => update("website", event.target.value, "companyWebsite")} />
+            <Input
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="example.com or https://example.com"
+              value={values.website}
+              onChange={(event) => update("website", event.target.value, "companyWebsite")}
+              onBlur={(event) => {
+                const next = normalizeOptionalHttpUrl(event.target.value);
+                if (next !== event.target.value) update("website", next, "companyWebsite");
+              }}
+            />
           </Field>
           <Field label="Company LinkedIn URL" annotation={renderAnnotation?.("companyLinkedIn")} wide>
-            <Input type="url" value={values.companyLinkedin} onChange={(event) => update("companyLinkedin", event.target.value, "companyLinkedIn")} />
+            <Input
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="linkedin.com/company/…"
+              value={values.companyLinkedin}
+              onChange={(event) => update("companyLinkedin", event.target.value, "companyLinkedIn")}
+              onBlur={(event) => {
+                const next = normalizeOptionalHttpUrl(event.target.value);
+                if (next !== event.target.value) update("companyLinkedin", next, "companyLinkedIn");
+              }}
+            />
           </Field>
           <div className={cn("contents", !values.showAdvancedCompany && "hidden")}>
             <Field label="Year founded" annotation={renderAnnotation?.("yearFounded")}>
@@ -492,7 +515,18 @@ export function ProspectFormSections({
               <Input value={values.techStackStr} onChange={(event) => update("techStackStr", event.target.value, "techStack")} />
             </Field>
             <Field label="Careers page URL" wide>
-              <Input type="url" value={values.careersUrl} onChange={(event) => update("careersUrl", event.target.value)} />
+              <Input
+                type="text"
+                inputMode="url"
+                autoComplete="url"
+                placeholder="example.com/careers"
+                value={values.careersUrl}
+                onChange={(event) => update("careersUrl", event.target.value)}
+                onBlur={(event) => {
+                  const next = normalizeOptionalHttpUrl(event.target.value);
+                  if (next !== event.target.value) update("careersUrl", next);
+                }}
+              />
             </Field>
           </div>
         </div>
@@ -564,7 +598,18 @@ export function ProspectFormSections({
             <SimpleSelect value={values.bestChannel} options={BEST_CHANNEL_OPTIONS} onChange={(value) => update("bestChannel", value as ProspectFormValues["bestChannel"])} />
           </Field>
           <Field label="LinkedIn profile URL" annotation={renderAnnotation?.("contactLinkedIn")} wide>
-            <Input type="url" value={values.linkedin} onChange={(event) => update("linkedin", event.target.value, "contactLinkedIn")} />
+            <Input
+              type="text"
+              inputMode="url"
+              autoComplete="url"
+              placeholder="linkedin.com/in/…"
+              value={values.linkedin}
+              onChange={(event) => update("linkedin", event.target.value, "contactLinkedIn")}
+              onBlur={(event) => {
+                const next = normalizeOptionalHttpUrl(event.target.value);
+                if (next !== event.target.value) update("linkedin", next, "contactLinkedIn");
+              }}
+            />
           </Field>
         </div>
       </section>

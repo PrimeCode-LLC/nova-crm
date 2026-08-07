@@ -11,6 +11,10 @@ import type { Lead, PipelineStage } from "@/lib/types";
 import type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { buildArchivePatch } from "@/lib/leads/lead-archive";
+import { cancelLeadOutreachServer } from "@/lib/email/cancel-lead-outreach-server";
+import { isReplyActionCloseLost } from "@/lib/email/reply-action-pending";
+import type { ReplyClass, ReplyRecommendedAction } from "@/lib/email/reply-action-types";
 
 export type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
 
@@ -23,38 +27,42 @@ function relatedIds(lead: Lead): string[] {
   return [...ids];
 }
 
+const emptyOutcome = (): ReplyActionCompletionOutcome => ({
+  replyReviewResolved: false,
+  stageMovedToReplied: false,
+  promotedToLead: false,
+  closedAsLost: false,
+  markedDoNotContact: false,
+  leadIds: [],
+  clientPatches: [],
+});
+
 /**
  * After a reply-intelligence action is sent or accepted, clear the parallel
- * "reply review" pending state and (when appropriate) move/promote to Replied
- * so dashboard Needs attention / Replies to review drop in one step.
+ * "reply review" pending state and apply the right pipeline outcome:
+ * - positive/default → promote/move to Replied
+ * - hard_no / close_lost → do-not-contact + Lost (no promote)
  */
 export async function resolveReplyReviewAfterReplyActionServer(input: {
   organizationId: string;
   leadId: string;
   actorUid: string;
   /**
-   * `completed` = send or confirm next step (accept review + stage).
-   * `suggestion_dismissed` = rejected AI suggestion only (leave stage review alone).
+   * `completed` = send or confirm next step (accept review + stage outcome).
+   * `suggestion_dismissed` = rejected AI suggestion; for hard_no also clears
+   * the promote/move-to-Replied review so it cannot contradict the classification.
    */
   mode: "completed" | "suggestion_dismissed";
+  classification?: ReplyClass;
+  recommendedAction?: ReplyRecommendedAction;
 }): Promise<ReplyActionCompletionOutcome> {
-  const empty: ReplyActionCompletionOutcome = {
-    replyReviewResolved: false,
-    stageMovedToReplied: false,
-    promotedToLead: false,
-    leadIds: [],
-    clientPatches: [],
-  };
-
-  if (input.mode === "suggestion_dismissed") return empty;
-
   const db = getAdminDb();
-  if (!db) return empty;
+  if (!db) return emptyOutcome();
 
   const leadSnap = await db.collection(COLLECTIONS.leads).doc(input.leadId).get();
-  if (!leadSnap.exists) return empty;
+  if (!leadSnap.exists) return emptyOutcome();
   const raw = leadSnap.data() as Record<string, unknown>;
-  if (String(raw.organizationId ?? "") !== input.organizationId) return empty;
+  if (String(raw.organizationId ?? "") !== input.organizationId) return emptyOutcome();
 
   const lead = mapLeadDoc(leadSnap.id, raw);
   const now = new Date().toISOString();
@@ -81,46 +89,246 @@ export async function resolveReplyReviewAfterReplyActionServer(input: {
   }
 
   const primary = leadById.get(input.leadId) ?? lead;
+  const closeLost = isReplyActionCloseLost({
+    classification: input.classification ?? primary.replyClass,
+    recommendedAction: input.recommendedAction,
+  });
+
+  // Dismissing a hard-no suggestion must not leave a "Promote to lead" review behind.
+  if (input.mode === "suggestion_dismissed") {
+    if (!closeLost) return emptyOutcome();
+    return dismissReplyReviewOnly({
+      leadIds,
+      leadById,
+      now,
+    });
+  }
+
   const anyNeedsReview = [...leadById.values()].some(
     (row) => row.replyReviewStatus === "pending" && shouldOpenReplyReview(row),
   );
 
   // Even without replyReviewStatus, early-stage / prospect after a human reply
-  // should land on Replied when the rep completes RI.
+  // should land on Replied (or Lost for hard no) when the rep completes RI.
   const shouldPromoteOrMove =
     shouldOpenReplyReview(primary) ||
     primary.intakeKind === "prospect" ||
-    stageIsBeforeReplied(primary.stage);
+    stageIsBeforeReplied(primary.stage) ||
+    closeLost;
 
-  if (!anyNeedsReview && !shouldPromoteOrMove) {
-    return empty;
+  if (!anyNeedsReview && !shouldPromoteOrMove && !closeLost) {
+    return emptyOutcome();
   }
+
+  if (closeLost) {
+    return applyCloseLostCompletion({
+      organizationId: input.organizationId,
+      actorUid: input.actorUid,
+      leadIds,
+      leadById,
+      now,
+    });
+  }
+
+  return applyPromoteOrRepliedCompletion({
+    organizationId: input.organizationId,
+    actorUid: input.actorUid,
+    leadIds,
+    leadById,
+    primary,
+    now,
+  });
+}
+
+async function dismissReplyReviewOnly(input: {
+  leadIds: string[];
+  leadById: Map<string, Lead>;
+  now: string;
+}): Promise<ReplyActionCompletionOutcome> {
+  const db = getAdminDb();
+  if (!db) return emptyOutcome();
+
+  const clientPatches: Array<{ leadId: string; patch: Partial<Lead> }> = [];
+  let resolved = false;
+
+  for (const id of input.leadIds) {
+    const row = input.leadById.get(id);
+    if (!row || row.replyReviewStatus !== "pending") continue;
+    await db.collection(COLLECTIONS.leads).doc(id).set(
+      {
+        replyReviewStatus: "dismissed",
+        lastActivityAt: input.now,
+        updatedAt: input.now,
+      },
+      { merge: true },
+    );
+    clientPatches.push({
+      leadId: id,
+      patch: { replyReviewStatus: "dismissed", lastActivityAt: input.now },
+    });
+    resolved = true;
+  }
+
+  if (!resolved) return emptyOutcome();
+  return {
+    replyReviewResolved: true,
+    stageMovedToReplied: false,
+    promotedToLead: false,
+    closedAsLost: false,
+    markedDoNotContact: false,
+    leadIds: input.leadIds,
+    clientPatches,
+  };
+}
+
+async function applyCloseLostCompletion(input: {
+  organizationId: string;
+  actorUid: string;
+  leadIds: string[];
+  leadById: Map<string, Lead>;
+  now: string;
+}): Promise<ReplyActionCompletionOutcome> {
+  const db = getAdminDb();
+  if (!db) return emptyOutcome();
+
+  const clientPatches: Array<{ leadId: string; patch: Partial<Lead> }> = [];
+  let closedAsLost = false;
+  let markedDoNotContact = false;
+  const archivePatch = buildArchivePatch({
+    actorId: input.actorUid,
+    reason: "lost",
+    now: input.now,
+  });
+
+  for (const id of input.leadIds) {
+    const row = input.leadById.get(id);
+    if (!row) continue;
+
+    const patch: Record<string, unknown> = {
+      replyReviewStatus: "accepted",
+      doNotContact: true,
+      temperature: "cold",
+      nextAction: "Do not contact — closed as lost (hard no / unsubscribe)",
+      lastActivityAt: input.now,
+      updatedAt: input.now,
+    };
+    const clientPatch: Partial<Lead> = {
+      replyReviewStatus: "accepted",
+      doNotContact: true,
+      temperature: "cold",
+      nextAction: "Do not contact — closed as lost (hard no / unsubscribe)",
+      lastActivityAt: input.now,
+    };
+    markedDoNotContact = true;
+
+    const shouldMoveStage = row.stage !== "lost" && row.stage !== "won";
+    if (shouldMoveStage) {
+      patch.stage = "lost" satisfies PipelineStage;
+      clientPatch.stage = "lost";
+      closedAsLost = true;
+      if (!row.archivedAt?.trim()) {
+        Object.assign(patch, archivePatch);
+        Object.assign(clientPatch, archivePatch);
+      }
+    }
+
+    await db.collection(COLLECTIONS.leads).doc(id).set(patch, { merge: true });
+    clientPatches.push({ leadId: id, patch: clientPatch });
+
+    if (shouldMoveStage) {
+      try {
+        const leadOwnerId = row.ownerId?.trim() || input.actorUid;
+        const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
+        const teId = `te-${crypto.randomUUID()}`;
+        await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+          stampForCreate(
+            input.organizationId,
+            {
+              leadId: id,
+              leadOwnerId,
+              leadOwnerManagerIds,
+              type: "stage_changed",
+              actorId: input.actorUid,
+              summary: `Moved from ${row.stage} → lost (hard no / unsubscribe)`,
+              payload: {
+                source: "reply_intelligence",
+                previousStage: row.stage,
+                nextStage: "lost",
+                reason: "hard_no_close_lost",
+                doNotContact: true,
+              },
+              createdAt: input.now,
+            },
+            input.actorUid,
+          ),
+        );
+      } catch {
+        /* timeline best-effort */
+      }
+    }
+  }
+
+  // Stop further outreach on the primary row (and linked ids).
+  for (const id of input.leadIds) {
+    try {
+      await cancelLeadOutreachServer({
+        organizationId: input.organizationId,
+        leadId: id,
+        userId: input.actorUid,
+        reason: "Hard no / unsubscribe — do not contact",
+      });
+    } catch {
+      /* outreach cancel best-effort */
+    }
+  }
+
+  return {
+    replyReviewResolved: true,
+    stageMovedToReplied: false,
+    promotedToLead: false,
+    closedAsLost,
+    markedDoNotContact,
+    leadIds: input.leadIds,
+    clientPatches,
+  };
+}
+
+async function applyPromoteOrRepliedCompletion(input: {
+  organizationId: string;
+  actorUid: string;
+  leadIds: string[];
+  leadById: Map<string, Lead>;
+  primary: Lead;
+  now: string;
+}): Promise<ReplyActionCompletionOutcome> {
+  const db = getAdminDb();
+  if (!db) return emptyOutcome();
 
   let stageMovedToReplied = false;
   let promotedToLead = false;
   const clientPatches: Array<{ leadId: string; patch: Partial<Lead> }> = [];
 
-  const isProspect = isProspectRow(primary);
-  const linkedSalesLeadId = primary.linkedSalesLeadId?.trim() || "";
+  const isProspect = isProspectRow(input.primary);
+  const linkedSalesLeadId = input.primary.linkedSalesLeadId?.trim() || "";
 
-  for (const id of leadIds) {
-    const row = leadById.get(id);
+  for (const id of input.leadIds) {
+    const row = input.leadById.get(id);
     if (!row) continue;
 
     const patch: Record<string, unknown> = {
       replyReviewStatus: "accepted",
-      lastActivityAt: now,
-      updatedAt: now,
+      lastActivityAt: input.now,
+      updatedAt: input.now,
       temperature: "warm",
     };
     const clientPatch: Partial<Lead> = {
       replyReviewStatus: "accepted",
-      lastActivityAt: now,
+      lastActivityAt: input.now,
       temperature: "warm",
     };
 
     // Promote prospect → sales lead when this is the prospect row without a linked sales lead.
-    if (isProspect && !linkedSalesLeadId && id === primary.id && row.intakeKind === "prospect") {
+    if (isProspect && !linkedSalesLeadId && id === input.primary.id && row.intakeKind === "prospect") {
       patch.intakeKind = FieldValue.delete();
       clientPatch.intakeKind = undefined;
       if (!row.ownerId?.trim() && input.actorUid) {
@@ -166,7 +374,7 @@ export async function resolveReplyReviewAfterReplyActionServer(input: {
                 previousStage: row.stage,
                 nextStage: "replied",
               },
-              createdAt: now,
+              createdAt: input.now,
             },
             input.actorUid,
           ),
@@ -181,7 +389,9 @@ export async function resolveReplyReviewAfterReplyActionServer(input: {
     replyReviewResolved: true,
     stageMovedToReplied,
     promotedToLead,
-    leadIds,
+    closedAsLost: false,
+    markedDoNotContact: false,
+    leadIds: input.leadIds,
     clientPatches,
   };
 }

@@ -689,6 +689,8 @@ export async function decideReplyActionServer(input: {
     leadId: action.leadId,
     actorUid: input.decidedBy,
     mode: input.decision === "accepted" ? "completed" : "suggestion_dismissed",
+    classification: action.classification,
+    recommendedAction: action.recommendedAction,
   });
 
   return { ok: true, completion };

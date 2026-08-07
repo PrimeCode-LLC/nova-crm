@@ -1,4 +1,5 @@
 import { PIPELINE_STAGES } from "@/lib/constants";
+import { shouldSuppressReplyReviewForHardNo } from "@/lib/email/reply-action-pending";
 import type { Lead, PipelineStage } from "@/lib/types";
 import { isProspectRow } from "@/lib/prospects/prospect-access";
 
@@ -23,7 +24,10 @@ export function shouldOpenReplyReview(lead: Pick<Lead, "intakeKind" | "stage">):
 
 export function hasPendingReplyReview(lead: Lead): boolean {
   if (lead.replyReviewStatus !== "pending") return false;
-  return shouldOpenReplyReview(lead);
+  if (!shouldOpenReplyReview(lead)) return false;
+  // Hard no / unsubscribe must not surface "Promote to lead · Replied".
+  if (shouldSuppressReplyReviewForHardNo(lead)) return false;
+  return true;
 }
 
 export function replyReviewActionFor(lead: Lead): ReplyReviewAction {

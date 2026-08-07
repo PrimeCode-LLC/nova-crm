@@ -13,7 +13,10 @@ import {
   type ReplyAction,
   type ReplyClass,
 } from "@/lib/email/reply-action-types";
-import { hasPendingReplyAction } from "@/lib/email/reply-action-pending";
+import {
+  hasPendingReplyAction,
+  isReplyActionCloseLost,
+} from "@/lib/email/reply-action-pending";
 import {
   dispatchLeadReplySent,
   REPLY_REGENERATE_DIRECTIONS,
@@ -29,6 +32,9 @@ function senderLabel(raw: string): string {
 
 function completionToast(completion: ReplyActionCompletionOutcome | undefined, base: string) {
   if (!completion?.replyReviewResolved) return base;
+  if (completion.closedAsLost || completion.markedDoNotContact) {
+    return `${base} · Marked do-not-contact & closed as Lost`;
+  }
   if (completion.promotedToLead) {
     return `${base} · Promoted to lead at Replied`;
   }
@@ -169,6 +175,10 @@ export function LeadReplyActionBanner({
         recommendedAction: action.recommendedAction,
       })
     : Boolean(classification && classification !== "auto_reply" && classification !== "hard_no");
+  const isCloseLost = isReplyActionCloseLost({
+    classification,
+    recommendedAction: action?.recommendedAction,
+  });
   const draftReady = action?.draftStatus === "ready" && Boolean(draftBody.trim()) && !optimisticPending;
   const draftPending =
     optimisticPending || action?.draftStatus === "pending" || Boolean(lead.nextAction?.includes("Draft generating"));
@@ -276,11 +286,17 @@ export function LeadReplyActionBanner({
         toast.success(
           completionToast(
             data.completion,
-            "Next step confirmed — handle offline if needed",
+            isCloseLost
+              ? "Opt-out confirmed"
+              : "Next step confirmed — handle offline if needed",
           ),
         );
       } else {
-        toast.success("Suggestion dismissed — stage review may still need a decision");
+        toast.success(
+          isCloseLost
+            ? "Suggestion dismissed"
+            : "Suggestion dismissed — stage review may still need a decision",
+        );
       }
     } catch (e) {
       if (decision === "regenerate") {
@@ -554,7 +570,9 @@ export function LeadReplyActionBanner({
             disabled={busy}
             onClick={() => void patchDecision("accepted")}
           >
-            Done · clear & move to Replied
+            {isCloseLost
+              ? "Mark do-not-contact · close as Lost"
+              : "Done · clear & move to Replied"}
           </Button>
         ) : null}
         {onOpenEmails ? (

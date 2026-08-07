@@ -242,10 +242,16 @@ export function DashboardNeedsAttention({
     if (!hasPendingReplyAction(lead)) continue;
     // Already covered above when reply review is also pending.
     if (hasPendingReplyReview(lead)) continue;
+    const hardNo = lead.replyClass === "hard_no";
     items.push({
       id: `reply-ai-${lead.id}`,
-      label: `AI reply ready · ${entityWithPerson(lead)}`,
-      detail: lead.nextAction?.trim() || "Review the suggested next step and send or dismiss.",
+      label: hardNo
+        ? `Hard no · ${entityWithPerson(lead)}`
+        : `AI reply ready · ${entityWithPerson(lead)}`,
+      detail: hardNo
+        ? lead.nextAction?.trim() ||
+          "Confirm do-not-contact and close as Lost — do not promote to Replied."
+        : lead.nextAction?.trim() || "Review the suggested next step and send or dismiss.",
       href: lead.intakeKind === "prospect" ? `/leads/${lead.id}?from=prospects` : `/leads/${lead.id}`,
       time: timestamp(lead.lastReplyAt || lead.lastActivityAt, now),
       severity: "urgent",

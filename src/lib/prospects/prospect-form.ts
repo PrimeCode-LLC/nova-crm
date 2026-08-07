@@ -266,11 +266,44 @@ export function normalizedEmail(value: string): string {
   return value.trim().toLocaleLowerCase();
 }
 
+/**
+ * Accepts bare domains (`stellixsoft.com`, `www.example.com/path`) and full http(s) URLs.
+ * Returns a normalized http(s) URL, or the trimmed original when it cannot be parsed.
+ */
+export function normalizeOptionalHttpUrl(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  const candidate = /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+  try {
+    const url = new URL(candidate);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return trimmed;
+    const host = url.hostname.toLocaleLowerCase();
+    if (!host || (host !== "localhost" && !host.includes("."))) return trimmed;
+    url.hash = "";
+    url.username = "";
+    url.password = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return trimmed;
+  }
+}
+
+export function normalizeProspectFormUrlFields(form: ProspectFormValues): ProspectFormValues {
+  return {
+    ...form,
+    website: normalizeOptionalHttpUrl(form.website),
+    companyLinkedin: normalizeOptionalHttpUrl(form.companyLinkedin),
+    careersUrl: normalizeOptionalHttpUrl(form.careersUrl),
+    linkedin: normalizeOptionalHttpUrl(form.linkedin),
+  };
+}
+
 export function domainFromWebsiteOrEmail(website: string, email: string): string | undefined {
   const site = website.trim();
   if (site) {
     try {
-      return new URL(site).hostname.toLocaleLowerCase().replace(/^www\./, "") || undefined;
+      const normalized = normalizeOptionalHttpUrl(site);
+      return new URL(normalized).hostname.toLocaleLowerCase().replace(/^www\./, "") || undefined;
     } catch {
       // Validation reports malformed URLs; email remains a useful fallback.
     }
@@ -292,9 +325,12 @@ export function isoFromProspectDate(value: string): string | undefined {
 
 export function isValidOptionalHttpUrl(value: string): boolean {
   if (!value.trim()) return true;
+  const normalized = normalizeOptionalHttpUrl(value);
   try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:";
+    const url = new URL(normalized);
+    if (url.protocol !== "http:" && url.protocol !== "https:") return false;
+    const host = url.hostname.toLocaleLowerCase();
+    return Boolean(host) && (host === "localhost" || host.includes("."));
   } catch {
     return false;
   }
@@ -342,7 +378,9 @@ export function validateProspectForm(
     ["Contact LinkedIn", form.linkedin],
   ];
   for (const [label, value] of urls) {
-    if (!isValidOptionalHttpUrl(value)) errors.push(`${label} must be a complete http(s) URL.`);
+    if (!isValidOptionalHttpUrl(value)) {
+      errors.push(`${label} must be a valid URL (e.g. example.com or https://example.com).`);
+    }
   }
   if (form.yearFounded.trim()) {
     const year = Number(form.yearFounded);
@@ -401,7 +439,8 @@ export function buildProspectEntities(input: BuildProspectEntitiesInput): {
   contact: Contact;
   lead: Lead;
 } {
-  const { form, ownerId, now } = input;
+  const form = normalizeProspectFormUrlFields(input.form);
+  const { ownerId, now } = input;
   const firstName = form.firstName.trim();
   const lastName = form.lastName.trim();
   const fullName = `${firstName} ${lastName}`.trim();
@@ -428,14 +467,14 @@ export function buildProspectEntities(input: BuildProspectEntitiesInput): {
     businessStatus: form.bizStatus === PROSPECT_FORM_UNSET ? undefined : form.bizStatus,
     size: form.size === PROSPECT_FORM_UNSET ? undefined : form.size,
     revenueRange: form.rev === PROSPECT_FORM_UNSET ? undefined : form.rev,
-    website: form.website.trim() || undefined,
-    linkedin: form.companyLinkedin.trim() || undefined,
+    website: form.website || undefined,
+    linkedin: form.companyLinkedin || undefined,
     websiteStatus: form.webStatus === PROSPECT_FORM_UNSET ? undefined : form.webStatus,
     techStack: parseTechStack(form.techStackStr),
     onlineActivityScore: form.activity === PROSPECT_FORM_UNSET ? undefined : form.activity,
     lastWebsiteActivityAt: isoFromProspectDate(form.lastSiteAt),
     lastWebsiteActivityNote: form.lastSiteNote.trim() || undefined,
-    careersPageUrl: form.careersUrl.trim() || undefined,
+    careersPageUrl: form.careersUrl || undefined,
     contactCount: 1,
     leadCount: 1,
     openDealValue: 0,
