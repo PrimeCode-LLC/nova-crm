@@ -1,14 +1,6 @@
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
-import type {
-  Deal,
-  Followup,
-  Lead,
-  LeadTask,
-  User,
-  ActivityCounterRow,
-  ActivityRecord,
-} from "@/lib/types";
+import type { Deal, Followup, Lead, LeadTask, User } from "@/lib/types";
 
 export type ServerWorkspaceBundle = {
   leads: Lead[];
@@ -16,8 +8,6 @@ export type ServerWorkspaceBundle = {
   followups: Followup[];
   leadTasks: LeadTask[];
   users: User[];
-  activityCounters: ActivityCounterRow[];
-  activityRecords: ActivityRecord[];
 };
 
 export async function fetchTenantWorkspaceBundleServer(
@@ -29,16 +19,13 @@ export async function fetchTenantWorkspaceBundleServer(
   const orgFilter = (col: string) =>
     db.collection(col).where("organizationId", "==", organizationId).limit(2000);
 
-  const [leadsSnap, dealsSnap, followupsSnap, tasksSnap, usersSnap, countersSnap, recordsSnap] =
-    await Promise.all([
-      orgFilter(COLLECTIONS.leads).get(),
-      orgFilter(COLLECTIONS.deals).get(),
-      orgFilter(COLLECTIONS.followups).get(),
-      orgFilter(COLLECTIONS.leadTasks).get(),
-      db.collection(COLLECTIONS.users).where("organizationId", "==", organizationId).get(),
-      orgFilter(COLLECTIONS.activityCounters).get(),
-      orgFilter(COLLECTIONS.activityRecords).get(),
-    ]);
+  const [leadsSnap, dealsSnap, followupsSnap, tasksSnap, usersSnap] = await Promise.all([
+    orgFilter(COLLECTIONS.leads).get(),
+    orgFilter(COLLECTIONS.deals).get(),
+    orgFilter(COLLECTIONS.followups).get(),
+    orgFilter(COLLECTIONS.leadTasks).get(),
+    db.collection(COLLECTIONS.users).where("organizationId", "==", organizationId).get(),
+  ]);
 
   const mapLead = (id: string, raw: Record<string, unknown>): Lead =>
     ({ ...raw, id } as Lead);
@@ -51,11 +38,5 @@ export async function fetchTenantWorkspaceBundleServer(
     followups: followupsSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as Followup),
     leadTasks: tasksSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as LeadTask),
     users: usersSnap.docs.map((d) => ({ ...d.data(), id: d.id }) as User),
-    activityCounters: countersSnap.docs.map(
-      (d) => ({ ...d.data(), id: d.id }) as ActivityCounterRow,
-    ),
-    activityRecords: recordsSnap.docs.map(
-      (d) => ({ ...d.data(), id: d.id }) as ActivityRecord,
-    ),
   };
 }

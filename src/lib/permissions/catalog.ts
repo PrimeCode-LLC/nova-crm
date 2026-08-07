@@ -193,7 +193,7 @@ export const MODULE_META: Record<ModuleKey, ModuleMeta> = {
   },
   activity: {
     label: "Activity",
-    description: "Activity feed and history",
+    description: "Retired daily rollups (redirects to dashboard)",
     cluster: "workspace",
     viewOnly: true,
     href: "/activity",

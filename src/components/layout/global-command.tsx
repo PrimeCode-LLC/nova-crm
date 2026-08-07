@@ -134,8 +134,8 @@ export function GlobalCommandMenu({
           >
             <Plus className="mr-2 h-4 w-4" /> Add outreach profile
           </CommandItem>
-          <CommandItem onSelect={() => go("/activity")}>
-            <Sparkles className="mr-2 h-4 w-4" /> Log daily activity
+          <CommandItem onSelect={() => go("/dashboard")}>
+            <Sparkles className="mr-2 h-4 w-4" /> Open dashboard
           </CommandItem>
         </CommandGroup>
 

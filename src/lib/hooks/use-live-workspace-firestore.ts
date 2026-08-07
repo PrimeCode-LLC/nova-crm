@@ -443,26 +443,6 @@ function asTimelineEvent(id: string, raw: Record<string, unknown>): TimelineEven
   };
 }
 
-function asActivityCounterRow(id: string, raw: Record<string, unknown>): ActivityCounterRow {
-  const countersRaw = raw.counters;
-  const counters: Record<string, number> = {};
-  if (countersRaw && typeof countersRaw === "object" && !Array.isArray(countersRaw)) {
-    for (const [k, v] of Object.entries(countersRaw as Record<string, unknown>)) {
-      const n = typeof v === "number" ? v : Number(v);
-      if (Number.isFinite(n)) counters[k] = n;
-    }
-  }
-  return {
-    id,
-    userId: String(raw.userId ?? ""),
-    channel: String(raw.channel ?? "cold_email") as ChannelKey,
-    profileId: optionalNonEmptyString(raw.profileId),
-    campaignId: optionalNonEmptyString(raw.campaignId),
-    date: firestoreValueToIso(raw.date),
-    counters,
-  };
-}
-
 function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRecord {
   const metadataRaw = raw.metadata;
   return {
@@ -1121,14 +1101,7 @@ export function useLiveWorkspaceFirestore(
       }
 
       if (group === "activity") {
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "activityCounters",
-          COLLECTIONS.activityCounters,
-          asActivityCounterRow,
-          "userManagerIds",
-          "userId",
-        );
+        // activityCounters (manual daily rollups) no longer subscribed — feed uses activityRecords.
         subscribeOwnedByOwnerOrManager(
           group,
           "activityRecords",

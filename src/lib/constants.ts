@@ -238,16 +238,3 @@ export const CHANNEL_FUNNELS: Record<
     { key: "offer", label: "Offer" },
   ],
 };
-
-export const IDLE_THRESHOLD_DAYS: Record<PipelineStage, number> = {
-  new: 3,
-  viewed: 4,
-  contacted: 5,
-  replied: 2,
-  qualified: 5,
-  discovery: 7,
-  proposal: 7,
-  negotiation: 5,
-  won: 9999,
-  lost: 9999,
-};

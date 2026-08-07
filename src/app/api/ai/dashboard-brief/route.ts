@@ -16,16 +16,12 @@ import {
   filterLeadsByOwnerScope,
   filterFollowupsByOwnerScope,
   filterLeadTasksByOwnerScope,
-  filterActivityCountersByOwnerScope,
-  filterActivityRecordsByOwnerScope,
   getOwnerFilterTriggerLabel,
   buildPersonOwnerOptions,
 } from "@/lib/owner-scope";
 import {
   filterLeadsByDateRange,
   filterDealsByDateRange,
-  filterActivityRecordsByDateRange,
-  filterActivityCountersByDateRange,
   type DashboardTimeRangeKey,
 } from "@/lib/dashboard-date-range";
 import { getAdminDb } from "@/lib/firebase/admin";
@@ -118,15 +114,13 @@ export async function POST(req: Request) {
     }
   }
 
-  let bundle = parsed.data.demoBundle
+  const bundle = parsed.data.demoBundle
     ? {
         leads: parsed.data.demoBundle.leads as unknown as Lead[],
         deals: parsed.data.demoBundle.deals as unknown as Deal[],
         followups: parsed.data.demoBundle.followups as unknown as Followup[],
         leadTasks: parsed.data.demoBundle.leadTasks as unknown as LeadTask[],
         users: parsed.data.demoBundle.users as unknown as User[],
-        activityCounters: [],
-        activityRecords: [],
       }
     : await fetchTenantWorkspaceBundleServer(orgId);
 
@@ -156,26 +150,6 @@ export async function POST(req: Request) {
   const leadIds = new Set(leads.map((l) => l.id));
   let deals = bundle.deals.filter((d) => leadIds.has(d.leadId));
   deals = filterDealsByDateRange(deals, timeRange, rangeOpts);
-
-  let activityCounters = bundle.activityCounters;
-  if (channelScope.length) {
-    activityCounters = activityCounters.filter((r) => channelScope.includes(r.channel));
-  }
-  activityCounters = filterActivityCountersByOwnerScope(
-    filterActivityCountersByDateRange(activityCounters, timeRange, rangeOpts),
-    parsed.data.ownerScope,
-    ownerScopeDeps,
-  );
-
-  let activityRecords = bundle.activityRecords;
-  if (channelScope.length) {
-    activityRecords = activityRecords.filter((r) => channelScope.includes(r.channel));
-  }
-  activityRecords = filterActivityRecordsByOwnerScope(
-    filterActivityRecordsByDateRange(activityRecords, timeRange, rangeOpts),
-    parsed.data.ownerScope,
-    ownerScopeDeps,
-  );
 
   const personOwnerOptions = buildPersonOwnerOptions(
     bundle.leads,

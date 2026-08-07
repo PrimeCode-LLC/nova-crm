@@ -112,15 +112,27 @@ export const DASHBOARD_WIDGET_META: {
   { key: "actionBoard", label: "Action board / My day", group: "shared" },
   { key: "wallLink", label: "Wall mode link", group: "ops" },
   { key: "classicKpis", label: "Classic KPI cards", group: "classic" },
-  { key: "pipelineKpis", label: "Pipeline & response KPIs", group: "shared" },
+  {
+    key: "pipelineKpis",
+    label: "Pipeline & response KPIs (classic)",
+    group: "classic",
+  },
   { key: "replyReviews", label: "Replies to review", group: "shared" },
   { key: "aiBrief", label: "AI brief", group: "shared" },
   { key: "trendChart", label: "Activity trend", group: "classic" },
-  { key: "channelFunnels", label: "Channel funnels", group: "shared" },
-  { key: "pipelineDistribution", label: "Pipeline distribution", group: "shared" },
-  { key: "channelMix", label: "Channel mix", group: "shared" },
-  { key: "idleLeads", label: "Idle leads", group: "shared" },
-  { key: "campaigns", label: "Outreach campaigns", group: "shared" },
+  { key: "channelFunnels", label: "Channel funnels (classic)", group: "classic" },
+  {
+    key: "pipelineDistribution",
+    label: "Pipeline distribution (classic)",
+    group: "classic",
+  },
+  { key: "channelMix", label: "Channel mix (classic)", group: "classic" },
+  { key: "idleLeads", label: "Idle leads (classic)", group: "classic" },
+  {
+    key: "campaigns",
+    label: "Outreach campaigns (classic / Instantly)",
+    group: "classic",
+  },
 ];
 
 export const DEFAULT_DASHBOARD_WIDGETS: DashboardWidgets = {
@@ -137,14 +149,15 @@ export const DEFAULT_DASHBOARD_WIDGETS: DashboardWidgets = {
   actionBoard: true,
   replyReviews: true,
   aiBrief: true,
-  pipelineKpis: true,
+  /** Classic Overview appendages — off by default; not shown under ops layout. */
+  pipelineKpis: false,
   classicKpis: true,
   trendChart: true,
-  channelFunnels: true,
-  pipelineDistribution: true,
-  channelMix: true,
-  idleLeads: true,
-  campaigns: true,
+  channelFunnels: false,
+  pipelineDistribution: false,
+  channelMix: false,
+  idleLeads: false,
+  campaigns: false,
   wallLink: true,
 };
 

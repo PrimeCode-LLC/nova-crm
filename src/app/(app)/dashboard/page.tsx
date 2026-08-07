@@ -19,8 +19,6 @@ import { FrontlineBoard } from "@/components/dashboard/frontline-board";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useLocalActivityRollups } from "@/hooks/use-local-activity-rollups";
-import { mergeActivityCounters } from "@/lib/activity-local-rollups";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, roleLabel } from "@/lib/constants";
@@ -61,7 +59,6 @@ import {
   filterLeadsByDateRange,
   filterDealsByDateRange,
   filterActivityRecordsByDateRange,
-  filterActivityCountersByDateRange,
   type DashboardTimeRangeKey,
   DASHBOARD_TIME_RANGE_LABELS,
   buildDashboardHref,
@@ -72,7 +69,6 @@ import {
 import {
   OWNER_SCOPE_PREFIX,
   buildPersonOwnerOptions,
-  filterActivityCountersByOwnerScope,
   filterActivityRecordsByOwnerScope,
   filterLeadsByOwnerScope,
   getOwnerFilterTriggerLabel,
@@ -146,7 +142,6 @@ export default function DashboardPage() {
     isDemo,
     workspaceLoading,
     users,
-    activityCounters,
     activityRecords,
     campaigns,
     currentUserId,
@@ -165,11 +160,6 @@ export default function DashboardPage() {
   const navAccess = useNavAccessContext();
   const enabledBuiltinChannels = useEnabledBuiltinChannelKeys();
   const emailResponseCtx = useLeadEmailResponseContext();
-  const { localRollups } = useLocalActivityRollups();
-  const activityCountersWithLocal = React.useMemo(
-    () => mergeActivityCounters(activityCounters, localRollups),
-    [activityCounters, localRollups],
-  );
   const [filterOpen, setFilterOpen] = React.useState(false);
   const [channelScope, setChannelScope] = React.useState<ChannelKey[]>([]);
   const [draftChannels, setDraftChannels] = React.useState<ChannelKey[]>([]);
@@ -242,26 +232,6 @@ export default function DashboardPage() {
         timeZone: organizationTimezone,
       }),
     [ownerScopedDeals, timeRange, organizationTimezone],
-  );
-
-  const activityAfterChannel = React.useMemo(
-    () =>
-      channelScope.length
-        ? activityCountersWithLocal.filter((r) => channelScope.includes(r.channel))
-        : activityCountersWithLocal,
-    [activityCountersWithLocal, channelScope],
-  );
-
-  const scopedActivityCounters = React.useMemo(
-    () =>
-      filterActivityCountersByOwnerScope(
-        filterActivityCountersByDateRange(activityAfterChannel, timeRange as DashboardTimeRangeKey, {
-          timeZone: organizationTimezone,
-        }),
-        ownerScope,
-        ownerScopeDeps,
-      ),
-    [activityAfterChannel, ownerScope, ownerScopeDeps, timeRange, organizationTimezone],
   );
 
   const activityRecordsAfterChannel = React.useMemo(
@@ -445,16 +415,11 @@ export default function DashboardPage() {
           return {
             channel: key,
             title: meta?.label ?? key,
-            counts: aggregateChannelFunnelCounts(key, scopedActivityCounters, scopedSalesLeads, scopedDeals),
+            // Manual activityCounters retired — funnel stages from pipeline only.
+            counts: aggregateChannelFunnelCounts(key, [], scopedSalesLeads, scopedDeals),
           };
         }),
-    [
-      funnelChannelKeys,
-      prefs.channelFunnelsVisible,
-      scopedActivityCounters,
-      scopedSalesLeads,
-      scopedDeals,
-    ],
+    [funnelChannelKeys, prefs.channelFunnelsVisible, scopedSalesLeads, scopedDeals],
   );
 
   const outreachMetrics = React.useMemo(
@@ -987,7 +952,7 @@ export default function DashboardPage() {
                       hint="Sales lead created → first outbound email"
                       deltaType="positive-down"
                       icon={Clock}
-                      href="/activity"
+                      href="/inbox"
                       tone={
                         avgResponseMin != null && avgResponseMin > 120 ? "warn" : "default"
                       }
@@ -1050,38 +1015,7 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {opsLayout && w.pipelineKpis ? (
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-                <div className="min-w-0 lg:col-span-2">
-                  <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                    <KpiCard
-                      label="Pipeline value"
-                      value={`$${(pipelineValue / 1000).toFixed(0)}k`}
-                      hint={pipelineHint}
-                      icon={TrendingUp}
-                      href="/deals"
-                    />
-                    <KpiCard
-                      label={`Closed (${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey]})`}
-                      value={`$${(closedValue / 1000).toFixed(0)}k`}
-                      hint={`${scopedDeals.filter((d) => d.stage === "won").length} deals won`}
-                      icon={DollarSign}
-                      href="/deals"
-                    />
-                  </div>
-                </div>
-                <KpiCard
-                  label="Avg first outreach"
-                  value={avgResponseMin != null ? `${avgResponseMin.toFixed(0)}m` : "-"}
-                  hint="Sales lead created → first outbound email"
-                  deltaType="positive-down"
-                  icon={Clock}
-                  href="/activity"
-                />
-              </div>
-            ) : null}
-
-            {w.channelFunnels ? (
+            {!opsLayout && w.channelFunnels ? (
               <div>
                 <div className="mb-3 flex items-start justify-between gap-3">
                   <div>
@@ -1111,13 +1045,10 @@ export default function DashboardPage() {
               </div>
             ) : null}
 
-            {(w.scorecard && !opsLayout) ||
-            (w.pipelineDistribution && opsLayout) ||
-            w.channelMix ||
-            w.idleLeads ? (
+            {!opsLayout && (w.scorecard || w.channelMix || w.idleLeads) ? (
               <div className="grid grid-cols-1 gap-4 xl:grid-cols-3">
                 <div className="flex flex-col gap-4 xl:col-span-2">
-                  {!opsLayout && w.scorecard ? (
+                  {w.scorecard ? (
                     <PersonScorecard
                       leads={scopedSalesLeads}
                       deals={scopedDeals}
@@ -1126,16 +1057,16 @@ export default function DashboardPage() {
                       range={timeRange as DashboardTimeRangeKey}
                     />
                   ) : null}
-                  {opsLayout && w.pipelineDistribution ? (
-                    <PipelineDistribution leads={scopedSalesLeads} />
-                  ) : null}
                   {w.channelMix ? <ChannelMix leads={scopedSalesLeads} /> : null}
                 </div>
                 {w.idleLeads ? <IdleLeads leads={scopedSalesLeads} /> : null}
               </div>
             ) : null}
 
-            {campaigns.length > 0 && w.campaigns && canViewOutreachCampaigns ? (
+            {!opsLayout &&
+            campaigns.length > 0 &&
+            w.campaigns &&
+            canViewOutreachCampaigns ? (
               <section className="space-y-3">
                 <div>
                   <h2 className="text-sm font-semibold">Outreach campaigns</h2>

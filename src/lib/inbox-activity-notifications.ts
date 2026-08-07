@@ -57,7 +57,7 @@ export function buildActivityInboxNotifications(
         ? "/admin/import"
         : r.leadId
           ? `/leads/${r.leadId}`
-          : "/activity",
+          : "/dashboard",
       timestamp: r.occurredAt,
     });
   }

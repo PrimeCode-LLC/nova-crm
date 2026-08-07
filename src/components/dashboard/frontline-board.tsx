@@ -167,7 +167,7 @@ export function FrontlineBoard({
             hint="Sales lead created → first outbound email"
             deltaType="positive-down"
             icon={Clock}
-            href="/activity"
+            href="/inbox"
             tone={avgResponseMin != null && avgResponseMin > 120 ? "warn" : "default"}
           />
         </div>
