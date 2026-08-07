@@ -33,10 +33,18 @@ import {
   type ContentItem,
 } from "@/lib/content-calendar/types";
 import { contactFirstName, leadEntityLabel } from "@/lib/leads/lead-display-label";
+import { isLeadArchived } from "@/lib/leads/lead-archive";
 import { hasPendingReplyReview } from "@/lib/leads/reply-review";
 import { hasPendingReplyAction } from "@/lib/email/reply-action-pending";
 import { isFollowupOverdue } from "@/lib/followup-open-status";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+
+/** Archived or closed (won/lost) leads should not surface on Needs attention. */
+function isClosedOrArchivedLead(lead: Lead | undefined): boolean {
+  if (!lead) return false;
+  if (isLeadArchived(lead)) return true;
+  return lead.stage === "won" || lead.stage === "lost";
+}
 
 type AttentionItem = {
   id: string;
@@ -218,6 +226,7 @@ export function DashboardNeedsAttention({
   }
 
   for (const lead of leads) {
+    if (isClosedOrArchivedLead(lead)) continue;
     if (!hasPendingReplyReview(lead)) continue;
     const aiReady = hasPendingReplyAction(lead);
     items.push({
@@ -239,6 +248,7 @@ export function DashboardNeedsAttention({
   }
 
   for (const lead of leads) {
+    if (isClosedOrArchivedLead(lead)) continue;
     if (!hasPendingReplyAction(lead)) continue;
     // Already covered above when reply review is also pending.
     if (hasPendingReplyReview(lead)) continue;
@@ -263,6 +273,7 @@ export function DashboardNeedsAttention({
   for (const followup of followups) {
     if (followup.completedAt || followup.pausedAt) continue;
     const lead = leadFor(followup.leadId);
+    if (isClosedOrArchivedLead(lead)) continue;
     const ownerId = resolveOwnerId(lead, followup.ownerId);
     if (followup.deliveryStatus === "failed") {
       items.push({
@@ -310,6 +321,7 @@ export function DashboardNeedsAttention({
     const due = timestamp(task.dueAt, Number.POSITIVE_INFINITY);
     if (due >= now) continue;
     const lead = leadFor(task.leadId);
+    if (isClosedOrArchivedLead(lead)) continue;
     const person =
       contactFirstName(task.contextContact) ||
       (lead?.companyName?.trim() ? contactFirstName(lead.contactName) : undefined);
@@ -328,6 +340,7 @@ export function DashboardNeedsAttention({
   for (const plan of plans) {
     if (plan.status !== "paused" || !plan.replyMessageId) continue;
     const planLead = leadById.get(plan.leadId);
+    if (isClosedOrArchivedLead(planLead)) continue;
     if (planLead && (hasPendingReplyReview(planLead) || hasPendingReplyAction(planLead))) continue;
     items.push({
       id: `plan-${plan.id}`,
@@ -345,7 +358,8 @@ export function DashboardNeedsAttention({
   }
 
   for (const lead of leads) {
-    if (lead.intakeKind === "prospect" || !lead.isIdle || ["won", "lost"].includes(lead.stage)) continue;
+    if (isClosedOrArchivedLead(lead)) continue;
+    if (lead.intakeKind === "prospect" || !lead.isIdle) continue;
     if (hasPendingReplyReview(lead) || hasPendingReplyAction(lead)) continue;
     items.push({
       id: `idle-${lead.id}`,
