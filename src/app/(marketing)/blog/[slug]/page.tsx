@@ -7,6 +7,7 @@ import { CtaBand } from "@/components/marketing/cta-band";
 import { Prose } from "@/components/marketing/prose";
 import { Section } from "@/components/marketing/section";
 import { formatDate, getAllPosts, getAllSlugs, getPostBySlug } from "@/lib/blog";
+import { absoluteUrl, SITE } from "@/lib/site";
 
 type Params = { slug: string };
 
@@ -51,8 +52,31 @@ export default async function BlogPostPage({
   const next = idx > 0 ? all[idx - 1] : undefined;
   const Content = post.Content;
 
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "Article",
+    headline: post.title,
+    description: post.description,
+    datePublished: post.publishedAt,
+    author: {
+      "@type": "Organization",
+      name: post.author.name,
+    },
+    publisher: {
+      "@type": "Organization",
+      name: SITE.name,
+      url: SITE.url,
+    },
+    mainEntityOfPage: absoluteUrl(`/blog/${post.slug}`),
+    keywords: post.tags.join(", "),
+  };
+
   return (
     <>
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <Section className="pt-20 pb-8" containerClassName="max-w-3xl">
         <Button
           size="sm"

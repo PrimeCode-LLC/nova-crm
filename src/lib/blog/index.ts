@@ -15,11 +15,25 @@ export type BlogPost = BlogPostMeta & {
   Content: ComponentType;
 };
 
-import { post as multiChannel } from "@/content/blog/multi-channel-pipeline-visibility";
-import { post as twoLayer } from "@/content/blog/two-layer-tracking-model";
-import { post as replacingSheets } from "@/content/blog/replacing-google-sheets-for-sales";
+import { post as aiOutbound } from "@/content/blog/ai-outbound-without-hiring-sdr";
+import { post as staticSequences } from "@/content/blog/why-static-cold-email-sequences-fail";
+import { post as replyHandling } from "@/content/blog/handle-outbound-replies-without-drowning";
+import { post as noHallucinations } from "@/content/blog/stop-ai-sales-emails-from-hallucinating";
+import { post as followUpPlaybook } from "@/content/blog/cold-email-follow-up-playbook";
+import { post as aiSdrVsHire } from "@/content/blog/ai-sdr-vs-hiring-an-sdr";
+import { post as serviceFounders } from "@/content/blog/outbound-for-b2b-service-founders";
+import { post as personalisedScale } from "@/content/blog/personalised-outbound-at-scale";
 
-const POSTS: BlogPost[] = [multiChannel, twoLayer, replacingSheets];
+const POSTS: BlogPost[] = [
+  aiOutbound,
+  staticSequences,
+  replyHandling,
+  noHallucinations,
+  followUpPlaybook,
+  aiSdrVsHire,
+  serviceFounders,
+  personalisedScale,
+];
 
 export function getAllPosts(): BlogPost[] {
   return [...POSTS].sort((a, b) =>

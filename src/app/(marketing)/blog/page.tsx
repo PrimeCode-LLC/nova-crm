@@ -5,9 +5,9 @@ import { Section, SectionHeading } from "@/components/marketing/section";
 import { formatDate, getAllPosts } from "@/lib/blog";
 
 export const metadata: Metadata = {
-  title: "Blog",
+  title: "Blog — AI outbound, reply handling & prospect journeys",
   description:
-    "Notes on intelligent prospect journeys, reply handling, and revenue execution — from the team building Nova.",
+    "Practical guides on AI outbound, cold email follow-ups, reply intelligence, and booking meetings without hiring another SDR — from the team building Nova.",
 };
 
 export default function BlogIndexPage() {
@@ -20,8 +20,8 @@ export default function BlogIndexPage() {
         <SectionHeading
           align="center"
           eyebrow="Blog"
-          title="Field notes from the front lines."
-          description="Plays on prospect journeys, reply intelligence, and outbound execution — written while building Nova."
+          title="Outbound that books meetings."
+          description="Guides on AI outbound, prospect journeys, reply handling, and grounded messaging — written while building Nova."
         />
       </Section>
 

@@ -89,6 +89,7 @@ import { LeadEmailsPanel } from "@/components/leads/lead-emails-panel";
 import { LeadQualityBadge } from "@/components/leads/lead-quality-badge";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
+import { fetchLeadByIdClient } from "@/lib/leads/fetch-lead-by-id-client";
 import { fmtCurrency, fmtDate, fmtRelative, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import {
@@ -253,7 +254,110 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   );
 
   const backFrom = searchParams.get("from");
-  const lead = ws.getLeadById(leadId);
+  const leadFromWorkspace = ws.getLeadById(leadId);
+  /** Direct doc fetch when list snapshot is cold (new tab) or scoped listener lag. */
+  const [hydrateState, setHydrateState] = React.useState<{
+    leadId: string;
+    status: "idle" | "loading" | "missing" | "forbidden" | "error";
+    error: string | null;
+  }>({ leadId, status: "idle", error: null });
+  const [hydratedBundle, setHydratedBundle] = React.useState<{
+    leadId: string;
+    lead: Lead;
+  } | null>(null);
+  const leadHydrateStatus =
+    hydrateState.leadId === leadId ? hydrateState.status : "idle";
+  const leadHydrateError =
+    hydrateState.leadId === leadId ? hydrateState.error : null;
+  const hydratedLead =
+    hydratedBundle?.leadId === leadId ? hydratedBundle.lead : null;
+
+  React.useEffect(() => {
+    if (!leadId.trim()) {
+      setHydrateState({ leadId, status: "missing", error: null });
+      return;
+    }
+    if (leadFromWorkspace || hydratedLead) {
+      setHydrateState({ leadId, status: "idle", error: null });
+      return;
+    }
+    if (ws.isDemo) {
+      if (!ws.workspaceLoading) {
+        setHydrateState({ leadId, status: "missing", error: null });
+      }
+      return;
+    }
+    if (!ws.organizationId) {
+      // Auth/org still settling or Firebase Auth missing in this tab — keep skeleton
+      // unless the provider already surfaced an auth error.
+      if (ws.liveFirestoreError) {
+        setHydrateState({
+          leadId,
+          status: "error",
+          error: ws.liveFirestoreError.message,
+        });
+      } else {
+        setHydrateState({
+          leadId,
+          status: ws.workspaceLoading ? "idle" : "loading",
+          error: null,
+        });
+      }
+      return;
+    }
+
+    let cancelled = false;
+    setHydrateState({ leadId, status: "loading", error: null });
+
+    void fetchLeadByIdClient({
+      leadId,
+      organizationId: ws.organizationId,
+    }).then((result) => {
+      if (cancelled) return;
+      if (result.status === "ok") {
+        ws.stageCrmEntities({
+          leads: [result.lead],
+          accounts: result.account ? [result.account] : undefined,
+          contacts: result.contact ? [result.contact] : undefined,
+        });
+        setHydratedBundle({ leadId, lead: result.lead });
+        setHydrateState({ leadId, status: "idle", error: null });
+        return;
+      }
+      if (result.status === "forbidden" || result.status === "wrong_org") {
+        setHydrateState({ leadId, status: "forbidden", error: null });
+        return;
+      }
+      if (result.status === "error") {
+        setHydrateState({ leadId, status: "error", error: result.message });
+        return;
+      }
+      if (result.status === "unavailable") {
+        setHydrateState({
+          leadId,
+          status: "error",
+          error: "Live CRM is not configured in this environment.",
+        });
+        return;
+      }
+      setHydrateState({ leadId, status: "missing", error: null });
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    hydratedLead,
+    leadFromWorkspace,
+    leadId,
+    ws.isDemo,
+    ws.liveFirestoreError,
+    ws.organizationId,
+    ws.stageCrmEntities,
+    ws.workspaceLoading,
+  ]);
+
+  const lead = leadFromWorkspace ?? hydratedLead ?? undefined;
   const backHref =
     backFrom === "pipeline"
       ? "/pipeline"
@@ -509,16 +613,24 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
   const pinned = lead ? ws.isLeadPinned(lead.id) : false;
 
   if (!lead) {
-    if (ws.workspaceLoading) {
+    const stillLoading =
+      leadHydrateStatus === "idle" || leadHydrateStatus === "loading";
+    if (stillLoading) {
       return (
         <PageBody>
           <WorkspacePageSkeleton />
         </PageBody>
       );
     }
+    const emptyMessage =
+      leadHydrateStatus === "forbidden"
+        ? "You don’t have access to this lead."
+        : leadHydrateStatus === "error"
+          ? leadHydrateError || "Could not load this lead. Try refreshing."
+          : "This lead was not found in your current workspace.";
     return (
       <PageBody className="flex flex-col items-center justify-center gap-4 py-16">
-        <p className="text-sm text-muted-foreground">This lead was not found in your current workspace.</p>
+        <p className="text-sm text-muted-foreground">{emptyMessage}</p>
         <Button
           size="sm"
           variant="outline"
@@ -527,7 +639,7 @@ export function LeadDetailView({ leadId }: { leadId: string }) {
             <Link href={backHref}>{backLabel}</Link>
           }
         />
-        {!ws.isDemo && <WorkspaceEmptyHint />}
+        {!ws.isDemo && leadHydrateStatus === "missing" && <WorkspaceEmptyHint />}
       </PageBody>
     );
   }
