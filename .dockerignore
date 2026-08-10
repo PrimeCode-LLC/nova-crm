@@ -1,0 +1,46 @@
+# Dependencies and caches
+node_modules
+**/node_modules
+.npm
+.pnpm-store
+
+# Next.js / build output
+.next
+out
+build
+dist
+coverage
+*.tsbuildinfo
+
+# Env and secrets — never bake into images
+.env
+.env.*
+!.env.example
+
+# Git / IDE / local tooling
+.git
+.gitignore
+.cursor
+.claude
+.vscode
+.idea
+.DS_Store
+*.pem
+.shots
+
+# Logs and Firebase local emulators
+*.log
+firebase-debug.log*
+firestore-debug.log*
+firebase-export-*
+
+# Docs and plan assets (not needed at runtime)
+Architecture fixes plan
+docs
+*.md
+
+# CI and local-only build artifacts
+.github
+extension/dist
+functions/lib
+functions/node_modules

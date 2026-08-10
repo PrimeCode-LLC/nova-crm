@@ -12,6 +12,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:prospect-drafts:emulator": "firebase emulators:exec --config firebase.emulator-test.json --only firestore --project demo-crm-prospect-drafts \"vitest run src/lib/prospects/draft-server.emulator.test.ts\"",
     "export:strategy-packs": "npx --yes tsx scripts/export-strategy-packs.ts",

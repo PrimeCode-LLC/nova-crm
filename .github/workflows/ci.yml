@@ -1,0 +1,49 @@
+# CI — runs on every pull request (migration W0.5)
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Test
+        run: npm run test
+
+      - name: Build
+        run: npm run build
+        env:
+          # Public placeholders so Next can compile client bundles in CI.
+          # Real secrets never belong here — see docs/ENVIRONMENTS.md.
+          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.example.com
+          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder
+          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-placeholder.appspot.com
+          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "0"
+          NEXT_PUBLIC_FIREBASE_APP_ID: "1:0:web:ci"
+          NEXT_PUBLIC_AUTH_DISABLED: "true"
+          DISABLE_AUTH: "true"

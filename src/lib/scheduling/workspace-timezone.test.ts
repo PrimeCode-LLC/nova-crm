@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   clearLegacyAccountTimezone,
   formatWorkspaceTimezoneChoice,
@@ -8,7 +8,38 @@ import {
   workspaceTimezonesDiffer,
 } from "@/lib/scheduling/workspace-timezone";
 
+function installMemoryLocalStorage(): void {
+  const store = new Map<string, string>();
+  const memoryStorage: Storage = {
+    get length() {
+      return store.size;
+    },
+    clear: () => store.clear(),
+    getItem: (key) => (store.has(key) ? store.get(key)! : null),
+    key: (index) => [...store.keys()][index] ?? null,
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    setItem: (key, value) => {
+      store.set(key, String(value));
+    },
+  };
+  // readLegacyAccountTimezone / clearLegacyAccountTimezone gate on `window`.
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: globalThis,
+  });
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: memoryStorage,
+  });
+}
+
 describe("workspace timezone sync helpers", () => {
+  beforeEach(() => {
+    installMemoryLocalStorage();
+  });
+
   afterEach(() => {
     localStorage.removeItem(LS_ACCOUNT_SETTINGS);
   });
