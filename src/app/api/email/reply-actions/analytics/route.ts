@@ -9,6 +9,11 @@ import {
   type ReplyLeadOutcome,
 } from "@/lib/email/reply-action-analytics";
 import { listReplyActionsForAnalyticsServer } from "@/lib/email/list-reply-actions-analytics-server";
+import {
+  getCachedReplyIntelList,
+  replyIntelListCacheKey,
+  setCachedReplyIntelList,
+} from "@/lib/email/reply-intel-cache";
 import { listMembersForDisplayServer } from "@/lib/platform/member-display";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
 import { seesAllLeadsInTenant } from "@/lib/workspace-hierarchy";
@@ -66,17 +71,35 @@ export async function GET(req: Request) {
   const orgId = g.ctx.session.organizationId;
   const viewerUid = g.ctx.session.uid;
 
-  const [listed, orgUsers, members] = await Promise.all([
-    listReplyActionsForAnalyticsServer({
+  const listKey = replyIntelListCacheKey({
+    organizationId: orgId,
+    fromIso,
+    toIso,
+    classification,
+    status,
+  });
+
+  const [cachedList, orgUsers, members] = await Promise.all([
+    getCachedReplyIntelList(listKey),
+    listOrgUsersServer(orgId),
+    listMembersForDisplayServer(orgId),
+  ]);
+
+  let listed;
+  let listCached = false;
+  if (cachedList) {
+    listed = cachedList.rows;
+    listCached = true;
+  } else {
+    listed = await listReplyActionsForAnalyticsServer({
       organizationId: orgId,
       fromIso,
       toIso,
       classification,
       status,
-    }),
-    listOrgUsersServer(orgId),
-    listMembersForDisplayServer(orgId),
-  ]);
+    });
+    await setCachedReplyIntelList(listKey, listed);
+  }
 
   const viewer = resolveViewer({
     uid: viewerUid,
@@ -98,6 +121,7 @@ export async function GET(req: Request) {
     scope: orgWide ? "org" : "mine",
     analytics,
     memberLabels,
+    cached: listCached,
   };
 
   if (includeRows) {
