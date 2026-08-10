@@ -2,6 +2,7 @@ import { defineSecret, defineString } from "firebase-functions/params";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { runInboxImapHeadsSyncOnFunctions } from "./inboxImapSync";
 import { runDueScheduledEmailsOnFunctions } from "./scheduledEmailSend";
+import { runDueScrapersOnFunctions } from "./scrapersRun";
 
 const cronSecret = defineSecret("CRON_SECRET");
 /** Same 32-byte key App Hosting uses to decrypt mailbox vault docs. */
@@ -41,6 +42,16 @@ const scheduledEmailRuntime = defineString("SCHEDULED_EMAIL_RUNTIME", {
   default: "functions",
   description:
     "functions = CF SMTP send + AH postprocess; apphosting = legacy full cron on SITE_URL",
+});
+
+/**
+ * Rollback: set SCRAPERS_RUNTIME=apphosting to restore full scrape+cleanup on App Hosting.
+ * Default `functions` keeps RSS fan-out off the interactive web tier.
+ */
+const scrapersRuntime = defineString("SCRAPERS_RUNTIME", {
+  default: "functions",
+  description:
+    "functions = CF scrape+cleanup; apphosting = legacy full cron on SITE_URL",
 });
 
 function bindMailEnv(): void {
@@ -106,19 +117,47 @@ const cronScheduleOptions = {
 };
 
 /**
- * Stagger remaining App Hosting cron traffic (postprocess + scrapers).
- * - IMAP heads (Cloud Functions): :00,:05,:10,... then light AH postprocess
- * - Scheduled send (Cloud Functions): :02,:07,:12,... then light AH postprocess
- * - Scrapers: :07,:22,:37,:52
+ * Stagger heavy work across the hour:
+ * - IMAP heads (CF): :00,:05,:10,... then light AH postprocess
+ * - Scheduled send (CF): :02,:07,:12,... then light AH postprocess
+ * - Scrapers (CF): :07,:22,:37,:52
  */
 export const runDueScrapers = onSchedule(
   {
     ...cronScheduleOptions,
     schedule: "7-59/15 * * * *",
+    timeoutSeconds: 540,
+    memory: "1GiB" as const,
   },
   async () => {
-    const result = await callAppHostingCron("/api/cron/scrapers/run", "Scraper cron");
-    console.log(JSON.stringify({ level: "info", message: "Scraper cron ok", result }));
+    const runtime = scrapersRuntime.value().trim().toLowerCase() || "functions";
+
+    if (runtime === "apphosting") {
+      const result = await callAppHostingCron("/api/cron/scrapers/run", "Scraper cron");
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Scraper cron ok (legacy apphosting runtime)",
+          result,
+        }),
+      );
+      return;
+    }
+
+    const result = await runDueScrapersOnFunctions();
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Scraper cron ok (functions runtime)",
+        result: {
+          orgCount: result.orgCount,
+          feedsRun: result.feedsRun,
+          newItems: result.newItems,
+          expiredDeleted: result.expiredDeleted,
+          staleEpochDeleted: result.staleEpochDeleted,
+        },
+      }),
+    );
   },
 );
 

@@ -18,6 +18,11 @@ import {
 } from "@/lib/scrapers/feeds-server";
 import { runScraperFeedsServer } from "@/lib/scrapers/run-feeds-server";
 import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
+import {
+  runOrgScrapersViaWorker,
+  runOrgScrapersViaWorkerStream,
+  scrapersWorkerEnabled,
+} from "@/lib/scrapers/scrapers-worker-client";
 import { recordAudit } from "@/lib/firestore/audit";
 
 export const maxDuration = 300;
@@ -78,6 +83,35 @@ export async function POST(req: Request) {
       (json as { streamProgress?: unknown }).streamProgress === true;
 
     if (streamProgress) {
+      if (scrapersWorkerEnabled()) {
+        try {
+          const workerRes = await runOrgScrapersViaWorkerStream({
+            organizationId: orgId,
+            force: true,
+            actorId: uid,
+          });
+          // Audit fires after stream completes on the worker path via a tee would be heavy;
+          // record a start audit here; worker writes org-activity.
+          void recordAudit({
+            organizationId: orgId,
+            actorUid: uid,
+            event: "scraper.run",
+            meta: { via: "functions_worker", stream: true },
+          });
+          return workerRes;
+        } catch (error) {
+          console.error(
+            JSON.stringify({
+              level: "error",
+              message: "Scraper run_all worker stream failed",
+              route: "/api/org/scraper-feeds",
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+          return NextResponse.json({ error: "Could not run scrapers" }, { status: 502 });
+        }
+      }
+
       const encoder = new TextEncoder();
       const stream = new ReadableStream<Uint8Array>({
         async start(controller) {
@@ -145,6 +179,33 @@ export async function POST(req: Request) {
           "Cache-Control": "no-cache, no-transform",
         },
       });
+    }
+
+    if (scrapersWorkerEnabled()) {
+      try {
+        const { results, newTotal } = await runOrgScrapersViaWorker({
+          organizationId: orgId,
+          force: true,
+          actorId: uid,
+        });
+        void recordAudit({
+          organizationId: orgId,
+          actorUid: uid,
+          event: "scraper.run",
+          meta: { feedCount: results.length, newTotal, via: "functions_worker" },
+        });
+        return NextResponse.json({ results, newTotal });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            level: "error",
+            message: "Scraper run_all worker failed",
+            route: "/api/org/scraper-feeds",
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+        return NextResponse.json({ error: "Could not run scrapers" }, { status: 502 });
+      }
     }
 
     const { results } = await runScraperFeedsServer({ organizationId: orgId, force: true });

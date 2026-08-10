@@ -36,8 +36,8 @@
 | **1** | Inbox IMAP head sync | **Cloud Functions** `syncInboxImapHeads` → `inboxImapSync.ts` (P1.2); AH only `/api/cron/inbox-imap/postprocess` | Every 5 min (`*/5`) | ≤12 mailboxes/tick, sequential IMAP; ≤800 heads/mailbox | CF 540s · 1 GiB; postprocess route 300s | **Moved off interactive App Hosting (P1.2).** Rollback: `IMAP_SYNC_RUNTIME=apphosting` |
 | **2** | Scheduled outbound email send | **Cloud Functions** `sendDueScheduledEmails` → `scheduledEmailSend.ts` (P1.3); AH `POST /api/cron/scheduled-emails/postprocess` | Every 5 min (`2-59/5`) | ≤50 due docs/tick; **requeue** send gaps (no sleep) | CF 540s · 1 GiB; postprocess 120s | **Moved off interactive App Hosting (P1.3).** Rollback: `SCHEDULED_EMAIL_RUNTIME=apphosting` |
 
-| **3** | Due RSS scrapers + intake cleanup | **App Hosting** `/api/cron/scrapers/run` (`runDueScrapers`) | ~Every 15 min (`7-59/15`) | Feed concurrency 4; RSS timeout 25s/feed; all orgs’ due feeds; then intake pool cleanup | Route 300s · CF 540s · 512 MiB | Multi-tenant HTTP fan-out + Firestore writes; can run long when many feeds are due |
-| **4** | Manual / API scraper run | **App Hosting** `POST` paths on `/api/org/scraper-feeds` | User/admin triggered | Same `runScraperFeedsServer` path (concurrency 4) | Route 300s | Same heavy work as #3 but on-demand; competes with interactive traffic when an admin clicks Run |
+| **3** | Due RSS scrapers + intake cleanup | **Cloud Functions** `runDueScrapers` → `scrapersRun.ts` (P1.4); AH `/api/cron/scrapers/run` rollback only | ~Every 15 min (`7-59/15`) | Feed concurrency 4; RSS timeout 25s/feed; all orgs’ due feeds; then intake pool cleanup | CF 540s · 1 GiB | **Moved off interactive App Hosting (P1.4).** Rollback: `SCRAPERS_RUNTIME=apphosting` |
+| **4** | Manual / API scraper run | **CF** `runOrgScrapers` HTTPS when `SCRAPERS_WORKER_URL` set; else AH fallback | User/admin triggered | Same engine (concurrency 4) | CF 540s · 1 GiB; AH route 300s | AH auth + proxy; long work off web when worker URL configured |
 | **5** | MillionVerifier bulk verify | **App Hosting** `/api/integrations/millionverifier/verify` | User triggered | External API batching | Route 300s | Long outbound HTTP on web tier; lower frequency than crons |
 | **6** | Prospect import preview / confirm staging | **App Hosting** `/api/org/imports/preview`, `…/confirm` | User triggered | Parse ≤10k rows / 20 MB; stage chunks of 40 rows | Default route budget | CPU/memory spike + many Firestore writes on web; **row processing already offloaded** to CF (see #A) |
 | **7** | Content capture reminders | **App Hosting** `/api/cron/content-capture-reminders` (`sendContentCaptureReminders`) | Hourly; effective ~09:00 per org TZ | Scan brands + org captures; notify idle capturers | Route 120s · CF 540s · 512 MiB | Mostly Firestore + notifications; most hourly ticks no-op outside local 09:00 |
@@ -78,22 +78,22 @@
 | **Parity** | Tracking (`mailTracking.ts`), IMAP Sent APPEND (non-Gmail/Outlook), timeline `email_sent` on postprocess |
 | **Rollback** | Set Functions param `SCHEDULED_EMAIL_RUNTIME=apphosting` |
 
-### 3 — Scrapers cron
+### 3 — Scrapers cron (P1.4 **done**)
 
 | | |
 |--|--|
-| **Route** | `src/app/api/cron/scrapers/run/route.ts` |
-| **Impl** | `runAllOrganizationsScrapersDueServer` + `cleanupIntakePoolServer` |
-| **Trigger** | `runDueScrapers` |
-| **Work** | Due feeds across orgs (concurrency 4, 25s RSS timeout) → raw items → intake cleanup |
-| **Rollback** | Re-point scheduler; feeds skip until next due window |
+| **Heavy** | Cloud Functions `functions/src/scrapersRun.ts` via `runDueScrapers` |
+| **Manual** | HTTPS `runOrgScrapers` (Bearer `CRON_SECRET`); AH proxies when `SCRAPERS_WORKER_URL` is set |
+| **Legacy / rollback** | `GET /api/cron/scrapers/run` when `SCRAPERS_RUNTIME=apphosting` |
+| **Work** | Due feeds across orgs (concurrency 4, 25s RSS timeout) → raw items → org activity → intake cleanup |
+| **Rollback** | Set Functions param `SCRAPERS_RUNTIME=apphosting` |
 
 ### 4 — Manual scraper run
 
 | | |
 |--|--|
-| **Route** | `src/app/api/org/scraper-feeds/route.ts` (`maxDuration = 300`) |
-| **Same engine as #3** | Move with #3 or force “enqueue only” once a worker exists |
+| **Route** | `src/app/api/org/scraper-feeds/route.ts` (`maxDuration = 300`) — auth + proxy |
+| **Worker** | Same CF engine as #3 via `runOrgScrapers` |
 
 ### 5 — MillionVerifier
 
@@ -121,18 +121,18 @@
 
 ---
 
-## Suggested P1.4+ sequence
+## Suggested P1.5 sequence
 
 1. ~~**P1.2** — Move **IMAP sync** off App Hosting~~ **done**
 2. ~~**P1.3** — Move **scheduled-email send**~~ **done**
-3. **P1.4** — Move **scrapers cron** (+ stop long manual runs on web, or proxy to the same service).
+3. ~~**P1.4** — Move **scrapers cron** (+ manual via worker)~~ **done**
 4. **P1.5** — Content capture reminders + any remaining 300s user APIs (MillionVerifier / import staging) as capacity allows.
 5. **Out of scope for P1** — Prospect chunk worker (already CF); dashboard summary full scans (Phase 3); real queue (Phase 4).
 
-**Stagger reminder:** IMAP CF `:00`, scheduled send CF `:02`, scrapers AH `:07` — remaining AH jobs still share `maxInstances: 3`.
+**Stagger reminder:** IMAP CF `:00`, scheduled send CF `:02`, scrapers CF `:07`.
 
 ---
 
 ## Phase 1 exit (from baby-steps plan)
 
-Interactive App Hosting is not blocked by IMAP / import / scraper / scheduled-send bursts. Import chunks + **IMAP heads (P1.2)** + **scheduled SMTP (P1.3)** already off the web tier; P1.4+ must clear scrapers (rank 3–4).
+Interactive App Hosting is not blocked by IMAP / import / scraper / scheduled-send bursts. Import chunks + **IMAP heads (P1.2)** + **scheduled SMTP (P1.3)** + **scrapers (P1.4)** already off the web tier; P1.5 clears remaining light crons / long user APIs.

@@ -57,10 +57,10 @@ Rule: ENGINEERING_RULES §3 / §5 — do not block App Hosting with IMAP/import/
 | P1.1 | [x] | Jobs/crons inventory ranked by hang risk — see companion doc; **#1 move = IMAP sync** |
 | P1.2 | [x] | IMAP heads sync on Cloud Functions (`functions/src/inboxImapSync.ts`); AH only postprocess bounce/fanout. Rollback: `IMAP_SYNC_RUNTIME=apphosting` |
 | P1.3 | [x] | Scheduled SMTP on CF (`scheduledEmailSend.ts`) + tracking + Sent APPEND; AH postprocess lead-mail/timeline/reply-intel. Rollback: `SCHEDULED_EMAIL_RUNTIME=apphosting` |
-| P1.4 | [ ] | Move scrapers cron (+ long manual scraper runs) off App Hosting |
+| P1.4 | [x] | Scrapers cron on CF (`scrapersRun.ts`); manual runs proxy via `runOrgScrapers` when `SCRAPERS_WORKER_URL` set. Rollback: `SCRAPERS_RUNTIME=apphosting` |
 | P1.5 | [ ] | Move remaining light crons / long user APIs as needed (content reminders, MillionVerifier, import staging) |
 
-**Phase 1 exit:** Interactive App Hosting is not blocked by IMAP / scraper / scheduled-send bursts. (Import chunks, IMAP heads, and scheduled SMTP send already run on Cloud Functions.)
+**Phase 1 exit:** Interactive App Hosting is not blocked by IMAP / scraper / scheduled-send bursts. (Import chunks, IMAP heads, scheduled SMTP, and scrapers already run on Cloud Functions.)
 
 ---
 

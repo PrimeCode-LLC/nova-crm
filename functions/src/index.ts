@@ -34,6 +34,8 @@ export {
   sendContentCaptureReminders,
 } from "./appHostingCron";
 
+export { runOrgScrapers } from "./runOrgScrapersHttp";
+
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 
 if (!getApps().length) {

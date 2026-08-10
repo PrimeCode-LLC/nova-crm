@@ -5,6 +5,12 @@ import { cleanupIntakePoolServer } from "@/lib/scrapers/raw-items-server";
 
 export const maxDuration = 300;
 
+/**
+ * Legacy / rollback path for P1.4.
+ * Default: Cloud Functions `runDueScrapers` runs scrape+cleanup when
+ * `SCRAPERS_RUNTIME=functions`. Set `SCRAPERS_RUNTIME=apphosting` to restore
+ * this App Hosting route as the heavy worker.
+ */
 export async function GET(req: Request) {
   if (!verifyCronSecret(req)) return cronUnauthorized();
 
