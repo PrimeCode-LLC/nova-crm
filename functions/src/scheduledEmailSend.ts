@@ -10,7 +10,11 @@
  */
 import crypto from "crypto";
 import { FieldValue, getFirestore, type DocumentReference } from "firebase-admin/firestore";
+import { ImapFlow } from "imapflow";
 import nodemailer from "nodemailer";
+// eslint-disable-next-line @typescript-eslint/no-require-imports
+const MailComposer = require("nodemailer/lib/mail-composer");
+import { prepareTrackedHtmlForFunctions } from "./mailTracking";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
@@ -33,6 +37,7 @@ export type ScheduledEmailSendResult = {
     scheduledEmailId: string;
     leadId?: string;
     followupId?: string;
+    scheduledByUserId?: string;
     messageId?: string;
     subject: string;
     from: string;
@@ -425,7 +430,110 @@ async function claimScheduledDoc(
   });
 }
 
+function scoreSentPath(path: string): number {
+  const p = path.toLowerCase().replace(/\s+/g, " ");
+  if (p.includes("[gmail]/sent mail")) return 20;
+  if (p === "sent" || p.endsWith("/sent") || p.endsWith(".sent")) return 14;
+  if (p.includes("sent items")) return 13;
+  if (p.includes("sent")) return 8;
+  return 0;
+}
+
+async function resolveSentMailboxPath(client: ImapFlow): Promise<string | null> {
+  const boxes = await client.list();
+  const ranked = [...boxes]
+    .filter((b) => scoreSentPath(b.path) > 0)
+    .sort((a, b) => scoreSentPath(b.path) - scoreSentPath(a.path));
+  return ranked[0]?.path ?? null;
+}
+
+async function buildOutboundRawMail(input: {
+  from: string;
+  to: string;
+  cc?: string;
+  bcc?: string;
+  subject: string;
+  text?: string;
+  html?: string;
+  replyTo?: string;
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
+  attachments: Array<{ filename: string; content: Buffer; contentType: string }>;
+}): Promise<Buffer> {
+  const mailOptions = {
+    from: input.from,
+    to: input.to,
+    cc: input.cc || undefined,
+    bcc: input.bcc || undefined,
+    subject: input.subject,
+    text: input.text || undefined,
+    html: input.html || undefined,
+    replyTo: input.replyTo || undefined,
+    messageId: input.messageId || undefined,
+    inReplyTo: input.inReplyTo || undefined,
+    references: input.references?.length ? input.references : undefined,
+    date: new Date(),
+    attachments:
+      input.attachments.length > 0
+        ? input.attachments.map((att) => ({
+            filename: att.filename,
+            content: att.content,
+            contentType: att.contentType,
+          }))
+        : undefined,
+  };
+  return new Promise((resolve, reject) => {
+    const composer = new MailComposer(mailOptions);
+    composer.compile().build((err: Error | null, message: Buffer) => {
+      if (err) reject(err);
+      else resolve(message);
+    });
+  });
+}
+
+async function appendToSentFolder(input: {
+  imapHost: string;
+  imapPort: number;
+  imapSecure: boolean;
+  user: string;
+  pass: string;
+  accessToken?: string;
+  rawMessage: Buffer;
+}): Promise<void> {
+  const host = normalizeMailHost(input.imapHost);
+  if (!host || !input.user) return;
+  const client = new ImapFlow({
+    host,
+    port: input.imapPort,
+    secure: input.imapSecure,
+    auth: input.accessToken
+      ? { user: input.user, accessToken: input.accessToken }
+      : { user: input.user, pass: input.pass },
+    logger: false,
+    connectionTimeout: 12_000,
+    greetingTimeout: 12_000,
+    socketTimeout: 60_000,
+  });
+  client.on("error", () => undefined);
+  try {
+    await client.connect();
+    const sentPath = await resolveSentMailboxPath(client);
+    if (!sentPath) return;
+    await client.append(sentPath, input.rawMessage, ["\\Seen"], new Date());
+  } finally {
+    try {
+      await client.logout();
+    } catch {
+      client.close();
+    }
+  }
+}
+
 async function sendSmtp(input: {
+  organizationId: string;
+  uid: string;
+  mailboxId: string;
   host: string;
   port: number;
   secure: boolean;
@@ -444,7 +552,16 @@ async function sendSmtp(input: {
   inReplyTo?: string;
   referenceIds?: string[];
   attachments: Array<{ filename: string; content: Buffer; contentType: string }>;
-}): Promise<{ ok: true; messageId?: string } | { ok: false; error: string }> {
+  trackOpens: boolean;
+  trackClicks: boolean;
+  leadId?: string;
+  followupId?: string;
+  scheduledEmailId: string;
+  appendSentCopy: boolean;
+  imapHost?: string;
+  imapPort?: number;
+  imapSecure?: boolean;
+}): Promise<{ ok: true; messageId?: string; htmlSent: string } | { ok: false; error: string }> {
   const host = normalizeMailHost(input.host);
   if (!host || !input.user || !input.from.trim() || !input.to.trim()) {
     return { ok: false, error: "SMTP host, user, From, and To are required." };
@@ -460,6 +577,7 @@ async function sendSmtp(input: {
   const messageIdDomain =
     input.from.split("@")[1]?.replace(/[^A-Za-z0-9.-]/g, "") || "nova.local";
   const outboundMessageId = `<${crypto.randomUUID()}@${messageIdDomain}>`;
+  const messageIdNormalized = normalizeMessageId(outboundMessageId) ?? outboundMessageId;
   const inReplyToNormalized = normalizeMessageId(input.inReplyTo);
   const inReplyTo = inReplyToNormalized ? `<${inReplyToNormalized}>` : undefined;
   const references = [
@@ -471,6 +589,20 @@ async function sendSmtp(input: {
     .filter((v, i, all) => all.indexOf(v) === i)
     .slice(-50)
     .map((v) => `<${v}>`);
+
+  const tracked = await prepareTrackedHtmlForFunctions({
+    html: input.html,
+    organizationId: input.organizationId,
+    mailboxId: input.mailboxId,
+    mailboxOwnerUid: input.uid,
+    messageId: messageIdNormalized,
+    trackOpens: input.trackOpens,
+    trackClicks: input.trackClicks,
+    leadId: input.leadId,
+    followupId: input.followupId,
+    scheduledEmailId: input.scheduledEmailId,
+  });
+  const html = tracked.html || input.html;
 
   const transporter = nodemailer.createTransport({
     host,
@@ -492,7 +624,7 @@ async function sendSmtp(input: {
       bcc: input.bcc || undefined,
       subject: input.subject.trim() || "(no subject)",
       text: input.text || undefined,
-      html: input.html || undefined,
+      html: html || undefined,
       replyTo: input.replyTo?.trim() || undefined,
       messageId: outboundMessageId,
       inReplyTo,
@@ -506,7 +638,38 @@ async function sendSmtp(input: {
             }))
           : undefined,
     });
-    return { ok: true, messageId: normalizeMessageId(outboundMessageId) };
+
+    if (input.appendSentCopy && input.imapHost) {
+      try {
+        const rawMessage = await buildOutboundRawMail({
+          from: fromHeader,
+          to: input.to,
+          cc: input.cc,
+          bcc: input.bcc,
+          subject: input.subject.trim() || "(no subject)",
+          text: input.text,
+          html,
+          replyTo: input.replyTo?.trim() || undefined,
+          messageId: outboundMessageId,
+          inReplyTo,
+          references,
+          attachments: input.attachments,
+        });
+        await appendToSentFolder({
+          imapHost: input.imapHost,
+          imapPort: input.imapPort ?? 993,
+          imapSecure: input.imapSecure !== false,
+          user: input.user,
+          pass: input.pass,
+          accessToken: input.accessToken,
+          rawMessage,
+        });
+      } catch {
+        /* Sent APPEND is best-effort after a successful SMTP send */
+      }
+    }
+
+    return { ok: true, messageId: messageIdNormalized, htmlSent: html };
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return { ok: false, error: msg.slice(0, 500) || "SMTP send failed" };
@@ -730,8 +893,18 @@ async function sendOne(
   const referenceIds = Array.isArray(data.referenceIds)
     ? data.referenceIds.map(String).filter(Boolean).slice(-50)
     : undefined;
+  const connectionType = String(mb.connectionType ?? "");
+  const appendSentCopy =
+    connectionType !== "google_workspace" && connectionType !== "microsoft_outlook";
+  const scheduledByUserId =
+    typeof data.scheduledByUserId === "string" && data.scheduledByUserId.trim()
+      ? data.scheduledByUserId.trim()
+      : undefined;
 
   const result = await sendSmtp({
+    organizationId,
+    uid,
+    mailboxId,
     host: String(mb.smtpHost ?? ""),
     port: Number(mb.smtpPort ?? 587) || 587,
     secure: Boolean(mb.smtpSecure),
@@ -750,11 +923,21 @@ async function sendOne(
     inReplyTo,
     referenceIds,
     attachments,
+    trackOpens: Boolean(mb.readReceipts),
+    trackClicks: Boolean(mb.trackClicks),
+    leadId: leadId || undefined,
+    followupId: followupId || undefined,
+    scheduledEmailId: docRef.id,
+    appendSentCopy,
+    imapHost: String(mb.imapHost ?? "") || undefined,
+    imapPort: Number(mb.imapPort ?? 993) || 993,
+    imapSecure: mb.imapSecure !== false,
   });
 
   const now = new Date().toISOString();
   if (result.ok) {
     const messageId = result.messageId;
+    const htmlSent = result.htmlSent;
     await docRef.update({
       status: "sent",
       sentAt: now,
@@ -811,6 +994,7 @@ async function sendOne(
         scheduledEmailId: docRef.id,
         ...(leadId ? { leadId } : {}),
         ...(followupId ? { followupId } : {}),
+        ...(scheduledByUserId ? { scheduledByUserId } : {}),
         ...(messageId ? { messageId } : {}),
         subject,
         from,
@@ -821,7 +1005,7 @@ async function sendOne(
           ? { replyTo: String(data.replyTo ?? mb.replyTo) }
           : {}),
         text,
-        html,
+        html: htmlSent,
         ...(inReplyTo ? { inReplyTo } : {}),
         ...(referenceIds?.length ? { referenceIds } : {}),
         sentAt: now,

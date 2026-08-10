@@ -1,5 +1,10 @@
+import { randomUUID } from "node:crypto";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
+import { getAdminDb } from "@/lib/firebase/admin";
+import { COLLECTIONS } from "@/lib/firestore/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/firestore/tenant-write";
 
 export type ScheduledEmailPostprocessItem = {
   organizationId: string;
@@ -8,6 +13,7 @@ export type ScheduledEmailPostprocessItem = {
   scheduledEmailId: string;
   leadId?: string;
   followupId?: string;
+  scheduledByUserId?: string;
   messageId?: string;
   subject: string;
   from: string;
@@ -22,14 +28,69 @@ export type ScheduledEmailPostprocessItem = {
   sentAt: string;
 };
 
+async function recordScheduledEmailSentTimeline(
+  item: ScheduledEmailPostprocessItem,
+): Promise<boolean> {
+  const db = getAdminDb();
+  const leadId = item.leadId?.trim();
+  if (!db || !leadId) return false;
+
+  let leadOwnerId = item.uid;
+  try {
+    const leadSnap = await db.collection(COLLECTIONS.leads).doc(leadId).get();
+    if (leadSnap.exists) {
+      const owner = (leadSnap.data() as Record<string, unknown>).ownerId;
+      if (typeof owner === "string" && owner.trim()) leadOwnerId = owner.trim();
+    }
+  } catch {
+    /* keep mailbox owner */
+  }
+
+  const actorId = item.scheduledByUserId?.trim() || leadOwnerId || item.uid;
+  const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
+  const teId = `te-${randomUUID()}`;
+  await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(
+    stampForCreate(
+      item.organizationId,
+      {
+        leadId,
+        leadOwnerId,
+        leadOwnerManagerIds,
+        type: "email_sent",
+        actorId,
+        summary: `Email sent: ${item.subject.trim() || "(no subject)"}`,
+        payload: {
+          source: "scheduled",
+          mailboxId: item.mailboxId,
+          ...(item.scheduledByUserId?.trim()
+            ? { scheduledByUserId: item.scheduledByUserId.trim() }
+            : {}),
+          ...(item.uid !== actorId ? { mailboxOwnerUid: item.uid } : {}),
+          ...(item.messageId ? { messageId: item.messageId } : {}),
+          ...(item.followupId ? { followupId: item.followupId } : {}),
+        },
+      },
+      actorId,
+    ),
+  );
+  return true;
+}
+
 /**
  * P1.3 companion to Cloud Functions scheduled send.
- * Persists lead-mail + reply-intel cleanup for messages already marked sent on CF.
+ * Persists lead-mail, timeline, and reply-intel for messages already marked sent on CF.
  */
 export async function runScheduledEmailPostprocessCronServer(
   items: ScheduledEmailPostprocessItem[],
-): Promise<{ processed: number; leadMail: number; replyIntel: number; errors: number }> {
+): Promise<{
+  processed: number;
+  leadMail: number;
+  timeline: number;
+  replyIntel: number;
+  errors: number;
+}> {
   let leadMail = 0;
+  let timeline = 0;
   let replyIntel = 0;
   let errors = 0;
 
@@ -60,10 +121,15 @@ export async function runScheduledEmailPostprocessCronServer(
       errors += 1;
     }
     try {
+      if (await recordScheduledEmailSentTimeline(item)) timeline += 1;
+    } catch {
+      errors += 1;
+    }
+    try {
       await resolvePendingReplyActionOnOutboundServer({
         organizationId: item.organizationId,
         leadId: item.leadId,
-        decidedBy: item.uid,
+        decidedBy: item.scheduledByUserId || item.uid,
         messageId: item.messageId,
         sentAt: item.sentAt,
       });
@@ -73,5 +139,5 @@ export async function runScheduledEmailPostprocessCronServer(
     }
   }
 
-  return { processed: items.length, leadMail, replyIntel, errors };
+  return { processed: items.length, leadMail, timeline, replyIntel, errors };
 }

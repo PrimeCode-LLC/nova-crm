@@ -72,9 +72,10 @@
 | | |
 |--|--|
 | **SMTP (heavy)** | Cloud Functions `functions/src/scheduledEmailSend.ts` via `sendDueScheduledEmails` |
-| **Postprocess (light)** | App Hosting `POST /api/cron/scheduled-emails/postprocess` — lead-mail + reply-intel |
+| **Postprocess (light)** | App Hosting `POST /api/cron/scheduled-emails/postprocess` — lead-mail + `email_sent` timeline + reply-intel |
 | **Legacy / rollback** | `GET /api/cron/scheduled-emails/send` when `SCHEDULED_EMAIL_RUNTIME=apphosting` |
-| **Work** | Collection-group due query → claim → SMTP (gap requeue, no sleep) → scheduled + followup status on CF; AH postprocess for lead-mail |
+| **Work** | Collection-group due query → claim → SMTP (gap requeue, no sleep) + open/click tracking + custom-SMTP Sent APPEND → scheduled + followup status on CF; AH postprocess for CRM side effects |
+| **Parity** | Tracking (`mailTracking.ts`), IMAP Sent APPEND (non-Gmail/Outlook), timeline `email_sent` on postprocess |
 | **Rollback** | Set Functions param `SCHEDULED_EMAIL_RUNTIME=apphosting` |
 
 ### 3 — Scrapers cron

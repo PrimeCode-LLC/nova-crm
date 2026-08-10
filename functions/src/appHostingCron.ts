@@ -45,6 +45,7 @@ const scheduledEmailRuntime = defineString("SCHEDULED_EMAIL_RUNTIME", {
 
 function bindMailEnv(): void {
   process.env.EMAIL_SECRETS_KEY_BASE64 = emailSecretsKey.value();
+  process.env.SITE_URL = siteUrl.value().replace(/\/$/, "");
   const mailId = googleMailClientId.value().trim();
   const mailSecret = googleMailClientSecret.value().trim();
   const calId = googleCalendarClientId.value().trim();
