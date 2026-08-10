@@ -129,11 +129,11 @@ Exports:
 - **`health`**: HTTP sanity check  
 - **`recomputePermissionsOnUserWrite`**: on `users/{userId}` write, merges role + `permissionOverrides` into `computedPermissions/{userId}`  
 - **`syncInboxImapHeads`**: every 5 minutes — **IMAP head sync on Cloud Functions** (P1.2), then `POST` App Hosting `/api/cron/inbox-imap/postprocess` for bounce/fanout. Rollback: Functions param `IMAP_SYNC_RUNTIME=apphosting`  
+- **`sendDueScheduledEmails`**: every 5 minutes — **SMTP send on Cloud Functions** (P1.3), then `POST` App Hosting `/api/cron/scheduled-emails/postprocess`. Rollback: `SCHEDULED_EMAIL_RUNTIME=apphosting`  
 - **`runDueScrapers`**: every 15 minutes, calls App Hosting `/api/cron/scrapers/run` (due feeds only; honors disable + interval)  
-- **`sendDueScheduledEmails`**: every 5 minutes, calls `/api/cron/scheduled-emails/send`  
 - **`cleanupProspectImportTemporaryData`**: hourly import cleanup  
 
-Set Cloud Function secrets: `firebase functions:secrets:set CRON_SECRET` (same value as App Hosting) and `firebase functions:secrets:set EMAIL_SECRETS_KEY_BASE64` (same vault key as App Hosting). Optional params: `SITE_URL`, `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` (or `GOOGLE_MAIL_*`) for Workspace IMAP, `IMAP_SYNC_RUNTIME`.
+Set Cloud Function secrets: `firebase functions:secrets:set CRON_SECRET` (same value as App Hosting) and `firebase functions:secrets:set EMAIL_SECRETS_KEY_BASE64` (same vault key as App Hosting). Optional params: `SITE_URL`, `GOOGLE_CALENDAR_CLIENT_ID` / `GOOGLE_CALENDAR_CLIENT_SECRET` (or `GOOGLE_MAIL_*`) for Workspace mail, `IMAP_SYNC_RUNTIME`, `SCHEDULED_EMAIL_RUNTIME`.
 
 Deploy: `npm run firebase:deploy:functions` from `crm/` (requires Blaze for callable HTTP/functions).
 

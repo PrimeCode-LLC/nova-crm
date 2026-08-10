@@ -34,7 +34,8 @@
 | Hang rank | Job | Runs on | Cadence | Cap | Budget | Why this rank |
 |-----------|-----|---------|---------|-----|--------|----------------|
 | **1** | Inbox IMAP head sync | **Cloud Functions** `syncInboxImapHeads` → `inboxImapSync.ts` (P1.2); AH only `/api/cron/inbox-imap/postprocess` | Every 5 min (`*/5`) | ≤12 mailboxes/tick, sequential IMAP; ≤800 heads/mailbox | CF 540s · 1 GiB; postprocess route 300s | **Moved off interactive App Hosting (P1.2).** Rollback: `IMAP_SYNC_RUNTIME=apphosting` |
-| **2** | Scheduled outbound email send | **App Hosting** `/api/cron/scheduled-emails/send` (`sendDueScheduledEmails`) | Every 5 min (`2-59/5`) | ≤50 due docs/tick; may **sleep ≤25s** per mailbox send gap | Route 300s · CF 540s · 512 MiB | SMTP/API send + intentional sleeps hold a web instance; same 5‑min band as IMAP (staggered :02 vs :00) |
+| **2** | Scheduled outbound email send | **Cloud Functions** `sendDueScheduledEmails` → `scheduledEmailSend.ts` (P1.3); AH `POST /api/cron/scheduled-emails/postprocess` | Every 5 min (`2-59/5`) | ≤50 due docs/tick; **requeue** send gaps (no sleep) | CF 540s · 1 GiB; postprocess 120s | **Moved off interactive App Hosting (P1.3).** Rollback: `SCHEDULED_EMAIL_RUNTIME=apphosting` |
+
 | **3** | Due RSS scrapers + intake cleanup | **App Hosting** `/api/cron/scrapers/run` (`runDueScrapers`) | ~Every 15 min (`7-59/15`) | Feed concurrency 4; RSS timeout 25s/feed; all orgs’ due feeds; then intake pool cleanup | Route 300s · CF 540s · 512 MiB | Multi-tenant HTTP fan-out + Firestore writes; can run long when many feeds are due |
 | **4** | Manual / API scraper run | **App Hosting** `POST` paths on `/api/org/scraper-feeds` | User/admin triggered | Same `runScraperFeedsServer` path (concurrency 4) | Route 300s | Same heavy work as #3 but on-demand; competes with interactive traffic when an admin clicks Run |
 | **5** | MillionVerifier bulk verify | **App Hosting** `/api/integrations/millionverifier/verify` | User triggered | External API batching | Route 300s | Long outbound HTTP on web tier; lower frequency than crons |
@@ -66,15 +67,15 @@
 | **Work** | List active orgs → due mailboxes → sequential IMAP connect → fetch inbox head (≤800) → write heads **on CF**; then AH bounce + fanout |
 | **Rollback** | Set Functions param `IMAP_SYNC_RUNTIME=apphosting` (full sync on App Hosting again) |
 
-### 2 — Scheduled emails send
+### 2 — Scheduled emails send (P1.3 **done**)
 
 | | |
 |--|--|
-| **Route** | `src/app/api/cron/scheduled-emails/send/route.ts` |
-| **Impl** | `processDueScheduledEmailsServer` in `src/lib/email/scheduled-emails-server.ts` |
-| **Trigger** | `sendDueScheduledEmails` |
-| **Work** | Collection-group query due `pending`/`processing` (limit 50) → claim → SMTP/send; may `await` send-gap sleep ≤25s |
-| **Rollback** | Re-point scheduler; pending mail queues until next tick |
+| **SMTP (heavy)** | Cloud Functions `functions/src/scheduledEmailSend.ts` via `sendDueScheduledEmails` |
+| **Postprocess (light)** | App Hosting `POST /api/cron/scheduled-emails/postprocess` — lead-mail + reply-intel |
+| **Legacy / rollback** | `GET /api/cron/scheduled-emails/send` when `SCHEDULED_EMAIL_RUNTIME=apphosting` |
+| **Work** | Collection-group due query → claim → SMTP (gap requeue, no sleep) → scheduled + followup status on CF; AH postprocess for lead-mail |
+| **Rollback** | Set Functions param `SCHEDULED_EMAIL_RUNTIME=apphosting` |
 
 ### 3 — Scrapers cron
 
@@ -119,18 +120,18 @@
 
 ---
 
-## Suggested P1.3+ sequence
+## Suggested P1.4+ sequence
 
-1. ~~**P1.2** — Move **IMAP sync** off App Hosting~~ **done** (CF heads + AH postprocess)
-2. **P1.3** — Move **scheduled-email send** the same way.
+1. ~~**P1.2** — Move **IMAP sync** off App Hosting~~ **done**
+2. ~~**P1.3** — Move **scheduled-email send**~~ **done**
 3. **P1.4** — Move **scrapers cron** (+ stop long manual runs on web, or proxy to the same service).
 4. **P1.5** — Content capture reminders + any remaining 300s user APIs (MillionVerifier / import staging) as capacity allows.
 5. **Out of scope for P1** — Prospect chunk worker (already CF); dashboard summary full scans (Phase 3); real queue (Phase 4).
 
-**Stagger reminder:** IMAP CF `:00`, scheduled send `:02`, scrapers `:07` — remaining AH jobs still share `maxInstances: 3`.
+**Stagger reminder:** IMAP CF `:00`, scheduled send CF `:02`, scrapers AH `:07` — remaining AH jobs still share `maxInstances: 3`.
 
 ---
 
 ## Phase 1 exit (from baby-steps plan)
 
-Interactive App Hosting is not blocked by IMAP / import / scraper / scheduled-send bursts. Import chunk processing + **IMAP head sync (P1.2)** already off the web tier; P1.3+ must clear ranks 2–3 (and ideally 4).
+Interactive App Hosting is not blocked by IMAP / import / scraper / scheduled-send bursts. Import chunks + **IMAP heads (P1.2)** + **scheduled SMTP (P1.3)** already off the web tier; P1.4+ must clear scrapers (rank 3–4).

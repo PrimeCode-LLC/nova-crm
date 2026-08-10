@@ -1,13 +1,14 @@
 import { defineSecret, defineString } from "firebase-functions/params";
 import { onSchedule } from "firebase-functions/v2/scheduler";
 import { runInboxImapHeadsSyncOnFunctions } from "./inboxImapSync";
+import { runDueScheduledEmailsOnFunctions } from "./scheduledEmailSend";
 
 const cronSecret = defineSecret("CRON_SECRET");
 /** Same 32-byte key App Hosting uses to decrypt mailbox vault docs. */
 const emailSecretsKey = defineSecret("EMAIL_SECRETS_KEY_BASE64");
 
 /**
- * Google OAuth for Workspace IMAP (XOAUTH2). Prefer setting these as Functions
+ * Google OAuth for Workspace IMAP/SMTP (XOAUTH2). Prefer setting these as Functions
  * params to match App Hosting env. Mail-specific overrides optional.
  */
 const googleMailClientId = defineString("GOOGLE_MAIL_CLIENT_ID", { default: "" });
@@ -31,6 +32,28 @@ const imapSyncRuntime = defineString("IMAP_SYNC_RUNTIME", {
   description:
     "functions = CF heads sync + AH postprocess; apphosting = legacy full cron on SITE_URL",
 });
+
+/**
+ * Rollback: set SCHEDULED_EMAIL_RUNTIME=apphosting to restore full send on App Hosting.
+ * Default `functions` keeps SMTP off the interactive web tier.
+ */
+const scheduledEmailRuntime = defineString("SCHEDULED_EMAIL_RUNTIME", {
+  default: "functions",
+  description:
+    "functions = CF SMTP send + AH postprocess; apphosting = legacy full cron on SITE_URL",
+});
+
+function bindMailEnv(): void {
+  process.env.EMAIL_SECRETS_KEY_BASE64 = emailSecretsKey.value();
+  const mailId = googleMailClientId.value().trim();
+  const mailSecret = googleMailClientSecret.value().trim();
+  const calId = googleCalendarClientId.value().trim();
+  const calSecret = googleCalendarClientSecret.value().trim();
+  if (mailId) process.env.GOOGLE_MAIL_CLIENT_ID = mailId;
+  if (mailSecret) process.env.GOOGLE_MAIL_CLIENT_SECRET = mailSecret;
+  if (calId) process.env.GOOGLE_CALENDAR_CLIENT_ID = calId;
+  if (calSecret) process.env.GOOGLE_CALENDAR_CLIENT_SECRET = calSecret;
+}
 
 async function callAppHostingCron(
   path: string,
@@ -82,12 +105,10 @@ const cronScheduleOptions = {
 };
 
 /**
- * Stagger heavy App Hosting cron traffic so IMAP postprocess + scheduled-send + scrapers
- * never pile onto the same minute (shared maxInstances: 3 pool).
+ * Stagger remaining App Hosting cron traffic (postprocess + scrapers).
  * - IMAP heads (Cloud Functions): :00,:05,:10,... then light AH postprocess
- * - Scheduled send: :02,:07,:12,...
- * - Scrapers: :07,:22,:37,:52 (avoids :00/:15/:30/:45 pile-ups with the 5-min jobs)
- * Scraper tick remains ~every 15 minutes (matches minimum feed interval in settings).
+ * - Scheduled send (Cloud Functions): :02,:07,:12,... then light AH postprocess
+ * - Scrapers: :07,:22,:37,:52
  */
 export const runDueScrapers = onSchedule(
   {
@@ -100,18 +121,62 @@ export const runDueScrapers = onSchedule(
   },
 );
 
-/** Sends due scheduled outbound emails via App Hosting. */
+/** P1.3 — Due scheduled SMTP send on Cloud Functions; AH only postprocess. */
 export const sendDueScheduledEmails = onSchedule(
   {
     ...cronScheduleOptions,
     schedule: "2-59/5 * * * *",
+    timeoutSeconds: 540,
+    memory: "1GiB" as const,
+    secrets: [cronSecret, emailSecretsKey],
   },
   async () => {
-    const result = await callAppHostingCron(
-      "/api/cron/scheduled-emails/send",
-      "Scheduled email cron",
+    const runtime = scheduledEmailRuntime.value().trim().toLowerCase() || "functions";
+
+    if (runtime === "apphosting") {
+      const result = await callAppHostingCron(
+        "/api/cron/scheduled-emails/send",
+        "Scheduled email cron",
+      );
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Scheduled email cron ok (legacy apphosting runtime)",
+          result,
+        }),
+      );
+      return;
+    }
+
+    bindMailEnv();
+    const sendResult = await runDueScheduledEmailsOnFunctions();
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Scheduled email send ok (functions runtime)",
+        result: {
+          processed: sendResult.processed,
+          sent: sendResult.sent,
+          failed: sendResult.failed,
+          skipped: sendResult.skipped,
+        },
+      }),
     );
-    console.log(JSON.stringify({ level: "info", message: "Scheduled email cron ok", result }));
+
+    if (sendResult.sentItems.length > 0) {
+      const post = await callAppHostingCron(
+        "/api/cron/scheduled-emails/postprocess",
+        "Scheduled email postprocess",
+        { method: "POST", body: { sent: sendResult.sentItems } },
+      );
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Scheduled email postprocess ok",
+          result: post,
+        }),
+      );
+    }
   },
 );
 
@@ -142,17 +207,7 @@ export const syncInboxImapHeads = onSchedule(
       return;
     }
 
-    // Bind secrets / params into process.env for the in-process IMAP worker.
-    process.env.EMAIL_SECRETS_KEY_BASE64 = emailSecretsKey.value();
-    const mailId = googleMailClientId.value().trim();
-    const mailSecret = googleMailClientSecret.value().trim();
-    const calId = googleCalendarClientId.value().trim();
-    const calSecret = googleCalendarClientSecret.value().trim();
-    if (mailId) process.env.GOOGLE_MAIL_CLIENT_ID = mailId;
-    if (mailSecret) process.env.GOOGLE_MAIL_CLIENT_SECRET = mailSecret;
-    if (calId) process.env.GOOGLE_CALENDAR_CLIENT_ID = calId;
-    if (calSecret) process.env.GOOGLE_CALENDAR_CLIENT_SECRET = calSecret;
-
+    bindMailEnv();
     const heads = await runInboxImapHeadsSyncOnFunctions();
     console.log(
       JSON.stringify({
