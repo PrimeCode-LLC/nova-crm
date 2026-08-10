@@ -11,9 +11,15 @@ import {
   isRedisConfigured,
 } from "@/lib/cache/redis";
 
-const redisUrl = process.env.REDIS_URL?.trim() || "redis://localhost:6379";
+/**
+ * Live Redis round-trips only when CI/local explicitly sets REDIS_URL.
+ * Do not default to localhost — that hangs GitHub Actions (no Redis service)
+ * while node-redis reconnects on ECONNREFUSED.
+ */
+const redisUrl = process.env.REDIS_URL?.trim() || null;
 
 async function redisReachable(): Promise<boolean> {
+  if (!redisUrl) return false;
   const prev = process.env.REDIS_URL;
   process.env.REDIS_URL = redisUrl;
   try {
@@ -27,6 +33,7 @@ async function redisReachable(): Promise<boolean> {
   } finally {
     if (prev === undefined) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = prev;
+    await closeRedis();
   }
 }
 
@@ -36,20 +43,20 @@ describe.skipIf(!canRun)("redis cache helper (live)", () => {
   const prefix = `nova:test:p0.2:${Date.now()}`;
 
   afterAll(async () => {
-    process.env.REDIS_URL = redisUrl;
+    process.env.REDIS_URL = redisUrl!;
     await cacheDel(`${prefix}:str`);
     await cacheDel(`${prefix}:json`);
     await closeRedis();
   });
 
   it("is configured when REDIS_URL is set", () => {
-    process.env.REDIS_URL = redisUrl;
+    process.env.REDIS_URL = redisUrl!;
     expect(isRedisConfigured()).toBe(true);
     expect(DEFAULT_CACHE_TTL_SECONDS).toBe(60);
   });
 
   it("get/set/del round-trip with ~60s TTL", async () => {
-    process.env.REDIS_URL = redisUrl;
+    process.env.REDIS_URL = redisUrl!;
     await closeRedis();
 
     const key = `${prefix}:str`;
@@ -67,7 +74,7 @@ describe.skipIf(!canRun)("redis cache helper (live)", () => {
   });
 
   it("JSON helpers round-trip", async () => {
-    process.env.REDIS_URL = redisUrl;
+    process.env.REDIS_URL = redisUrl!;
     const key = `${prefix}:json`;
     const payload = { openSalesLeads: 12, orgId: "org_test" };
 
@@ -88,6 +95,21 @@ describe("redis cache helper (unconfigured)", () => {
     expect(await cacheGet("any")).toBeNull();
     expect(await cacheSet("any", "x")).toBe(false);
     expect(await cacheDel("any")).toBe(false);
+
+    if (prev === undefined) delete process.env.REDIS_URL;
+    else process.env.REDIS_URL = prev;
+    await closeRedis();
+  });
+
+  it("fails fast when REDIS_URL points at a closed port", async () => {
+    const prev = process.env.REDIS_URL;
+    // Reserved/documentation port — nothing should listen here in CI.
+    process.env.REDIS_URL = "redis://127.0.0.1:9";
+    await closeRedis();
+
+    const started = Date.now();
+    expect(await getRedis()).toBeNull();
+    expect(Date.now() - started).toBeLessThan(5_000);
 
     if (prev === undefined) delete process.env.REDIS_URL;
     else process.env.REDIS_URL = prev;

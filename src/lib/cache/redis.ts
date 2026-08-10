@@ -28,6 +28,9 @@ let connectPromise: Promise<RedisClientType | null> | null = null;
 /**
  * Shared Redis client. Returns null when `REDIS_URL` is unset or connect fails
  * (callers should fall back to the uncached path).
+ *
+ * Connect is fail-fast (no infinite reconnect) so CI / missing Redis cannot hang
+ * the process on ECONNREFUSED retries.
  */
 export async function getRedis(): Promise<RedisClientType | null> {
   const url = getRedisUrl();
@@ -37,16 +40,33 @@ export async function getRedis(): Promise<RedisClientType | null> {
   if (connectPromise) return connectPromise;
 
   connectPromise = (async () => {
+    let next: RedisClientType | null = null;
     try {
-      const next = createClient({ url }) as RedisClientType;
+      next = createClient({
+        url,
+        socket: {
+          connectTimeout: 2_000,
+          // Do not keep retrying — cache misses should fall back immediately.
+          reconnectStrategy: false,
+        },
+      }) as RedisClientType;
       next.on("error", (err) => {
-        console.error("[redis] client error", err);
+        // Expected when Redis is down; keep noise low for ops logs.
+        console.error("[redis] client error", err instanceof Error ? err.message : err);
       });
       await next.connect();
       client = next;
       return client;
     } catch (err) {
-      console.error("[redis] connect failed", err);
+      console.error("[redis] connect failed", err instanceof Error ? err.message : err);
+      if (next) {
+        try {
+          next.removeAllListeners();
+          await next.disconnect();
+        } catch {
+          /* ignore teardown errors */
+        }
+      }
       client = null;
       return null;
     } finally {
@@ -62,8 +82,20 @@ export async function closeRedis(): Promise<void> {
   connectPromise = null;
   const current = client;
   client = null;
-  if (current?.isOpen) {
-    await current.quit();
+  if (!current) return;
+  try {
+    current.removeAllListeners();
+    if (current.isOpen) {
+      await current.quit();
+    } else {
+      await current.disconnect();
+    }
+  } catch {
+    try {
+      current.destroy();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
