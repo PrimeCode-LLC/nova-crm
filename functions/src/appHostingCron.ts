@@ -1,5 +1,6 @@
 import { defineSecret, defineString } from "firebase-functions/params";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { processContentCaptureRemindersOnFunctions } from "./contentCaptureReminders";
 import { runInboxImapHeadsSyncOnFunctions } from "./inboxImapSync";
 import { runDueScheduledEmailsOnFunctions } from "./scheduledEmailSend";
 import { runDueScrapersOnFunctions } from "./scrapersRun";
@@ -52,6 +53,16 @@ const scrapersRuntime = defineString("SCRAPERS_RUNTIME", {
   default: "functions",
   description:
     "functions = CF scrape+cleanup; apphosting = legacy full cron on SITE_URL",
+});
+
+/**
+ * Rollback: set CONTENT_CAPTURE_REMINDERS_RUNTIME=apphosting to restore AH cron.
+ * Default `functions` keeps brand scan + notifications off the interactive web tier.
+ */
+const contentCaptureRemindersRuntime = defineString("CONTENT_CAPTURE_REMINDERS_RUNTIME", {
+  default: "functions",
+  description:
+    "functions = CF reminders; apphosting = legacy full cron on SITE_URL",
 });
 
 function bindMailEnv(): void {
@@ -275,21 +286,42 @@ export const syncInboxImapHeads = onSchedule(
 );
 
 /**
- * Hourly tick: App Hosting only notifies capturers when it is ~09:00 in each
- * organization's workspace timezone (see processContentCaptureRemindersServer).
+ * P1.5 — Hourly tick: notify idle/behind capturers at ~09:00 in each org TZ.
+ * Default runtime is Cloud Functions; AH route kept for rollback.
  */
 export const sendContentCaptureReminders = onSchedule(
   {
     ...cronScheduleOptions,
     schedule: "every 1 hours",
+    timeoutSeconds: 540,
+    memory: "512MiB" as const,
   },
   async () => {
-    const result = await callAppHostingCron(
-      "/api/cron/content-capture-reminders",
-      "Content capture reminders cron",
-    );
+    const runtime =
+      contentCaptureRemindersRuntime.value().trim().toLowerCase() || "functions";
+
+    if (runtime === "apphosting") {
+      const result = await callAppHostingCron(
+        "/api/cron/content-capture-reminders",
+        "Content capture reminders cron",
+      );
+      console.log(
+        JSON.stringify({
+          level: "info",
+          message: "Content capture reminders cron ok (legacy apphosting runtime)",
+          result,
+        }),
+      );
+      return;
+    }
+
+    const result = await processContentCaptureRemindersOnFunctions();
     console.log(
-      JSON.stringify({ level: "info", message: "Content capture reminders cron ok", result }),
+      JSON.stringify({
+        level: "info",
+        message: "Content capture reminders cron ok (functions runtime)",
+        result,
+      }),
     );
   },
 );

@@ -35,6 +35,7 @@ export {
 } from "./appHostingCron";
 
 export { runOrgScrapers } from "./runOrgScrapersHttp";
+export { verifyMillionVerifierLeads } from "./millionVerifierHttp";
 
 setGlobalOptions({ region: "us-central1", maxInstances: 10 });
 

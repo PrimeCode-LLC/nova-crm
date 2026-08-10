@@ -26,6 +26,15 @@ env:
     value: https://us-central1-novacrm-41ef8.cloudfunctions.net/runOrgScrapers
     availability:
       - RUNTIME
+  # P1.5 — MillionVerifier bulk verify proxies to Cloud Functions.
+  - variable: MILLIONVERIFIER_RUNTIME
+    value: functions
+    availability:
+      - RUNTIME
+  - variable: MILLIONVERIFIER_WORKER_URL
+    value: https://us-central1-novacrm-41ef8.cloudfunctions.net/verifyMillionVerifierLeads
+    availability:
+      - RUNTIME
 runConfig:
   # Keep one instance warm so the first requests after deploy (/, favicon, RSC) are not rejected with HTTP 429 while scaling from zero.
   minInstances: 1

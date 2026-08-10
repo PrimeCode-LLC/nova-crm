@@ -3,6 +3,10 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { verifyLeadsEmailsServer } from "@/lib/integrations/millionverifier/apply-verification-server";
 import { MILLION_VERIFIER_MAX_BATCH } from "@/lib/integrations/millionverifier/constants";
+import {
+  millionVerifierWorkerEnabled,
+  verifyLeadsViaWorker,
+} from "@/lib/integrations/millionverifier/millionverifier-worker-client";
 import { hasMillionVerifierApiKeyServer } from "@/lib/integrations/millionverifier/secrets";
 
 /** Allow a full 50-email batch at concurrency 5 with MV timeouts up to 10s. */
@@ -40,6 +44,30 @@ export async function POST(req: Request) {
       },
       { status: 400 },
     );
+  }
+
+  if (millionVerifierWorkerEnabled()) {
+    try {
+      const { results, summary } = await verifyLeadsViaWorker({
+        organizationId: orgId,
+        actorUid: g.ctx.session.uid,
+        leadIds: parsed.data.leadIds,
+      });
+      return NextResponse.json({ results, summary });
+    } catch (error) {
+      console.error(
+        JSON.stringify({
+          level: "error",
+          message: "MillionVerifier worker failed",
+          route: "/api/integrations/millionverifier/verify",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Verification failed" },
+        { status: 502 },
+      );
+    }
   }
 
   const results = await verifyLeadsEmailsServer({

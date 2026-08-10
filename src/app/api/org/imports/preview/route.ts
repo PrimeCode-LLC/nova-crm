@@ -8,6 +8,8 @@ import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+/** Large XLSX/CSV parse + Firestore staging can take minutes; keep off default short budgets. */
+export const maxDuration = 300;
 const MAX_MULTIPART_BYTES = PROSPECT_IMPORT_MAX_BYTES + 1024 * 1024;
 
 export async function POST(req: Request) {

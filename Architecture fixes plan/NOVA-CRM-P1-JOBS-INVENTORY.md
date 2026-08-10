@@ -38,9 +38,9 @@
 
 | **3** | Due RSS scrapers + intake cleanup | **Cloud Functions** `runDueScrapers` → `scrapersRun.ts` (P1.4); AH `/api/cron/scrapers/run` rollback only | ~Every 15 min (`7-59/15`) | Feed concurrency 4; RSS timeout 25s/feed; all orgs’ due feeds; then intake pool cleanup | CF 540s · 1 GiB | **Moved off interactive App Hosting (P1.4).** Rollback: `SCRAPERS_RUNTIME=apphosting` |
 | **4** | Manual / API scraper run | **CF** `runOrgScrapers` HTTPS when `SCRAPERS_WORKER_URL` set; else AH fallback | User/admin triggered | Same engine (concurrency 4) | CF 540s · 1 GiB; AH route 300s | AH auth + proxy; long work off web when worker URL configured |
-| **5** | MillionVerifier bulk verify | **App Hosting** `/api/integrations/millionverifier/verify` | User triggered | External API batching | Route 300s | Long outbound HTTP on web tier; lower frequency than crons |
-| **6** | Prospect import preview / confirm staging | **App Hosting** `/api/org/imports/preview`, `…/confirm` | User triggered | Parse ≤10k rows / 20 MB; stage chunks of 40 rows | Default route budget | CPU/memory spike + many Firestore writes on web; **row processing already offloaded** to CF (see #A) |
-| **7** | Content capture reminders | **App Hosting** `/api/cron/content-capture-reminders` (`sendContentCaptureReminders`) | Hourly; effective ~09:00 per org TZ | Scan brands + org captures; notify idle capturers | Route 120s · CF 540s · 512 MiB | Mostly Firestore + notifications; most hourly ticks no-op outside local 09:00 |
+| **5** | MillionVerifier bulk verify | **CF** `verifyMillionVerifierLeads` when `MILLIONVERIFIER_WORKER_URL` set; else AH | User triggered | ≤50 leads, concurrency 5 | CF 540s · 512 MiB; AH route 300s | **P1.5:** AH auth + proxy. Rollback: `MILLIONVERIFIER_RUNTIME=apphosting` |
+| **6** | Prospect import preview / confirm staging | **App Hosting** preview/confirm; **CF** chunk apply | User triggered | Parse ≤10k rows / 20 MB; stage chunks of 40 | Preview `maxDuration` 300; confirm 60; CF chunk 180s | **P1.5:** explicit route budgets; row apply already on CF |
+| **7** | Content capture reminders | **Cloud Functions** `sendContentCaptureReminders` → `contentCaptureReminders.ts` (P1.5) | Hourly; effective ~09:00 per org TZ | Scan brands + org captures; notify idle capturers | CF 540s · 512 MiB | **Moved off interactive App Hosting (P1.5).** Rollback: `CONTENT_CAPTURE_REMINDERS_RUNTIME=apphosting` |
 
 ### Already off the interactive web tier (do not treat as P1.2 move targets)
 
@@ -95,44 +95,42 @@
 | **Route** | `src/app/api/org/scraper-feeds/route.ts` (`maxDuration = 300`) — auth + proxy |
 | **Worker** | Same CF engine as #3 via `runOrgScrapers` |
 
-### 5 — MillionVerifier
+### 5 — MillionVerifier (P1.5 **done**)
 
 | | |
 |--|--|
-| **Route** | `src/app/api/integrations/millionverifier/verify/route.ts` |
-| **Note** | Lower priority than scheduled crons; still a 300s web-tier hold |
+| **Route** | AH `POST /api/integrations/millionverifier/verify` — session auth + proxy |
+| **Worker** | CF HTTPS `verifyMillionVerifierLeads` |
+| **Rollback** | `MILLIONVERIFIER_RUNTIME=apphosting` (or unset worker URL) |
 
 ### 6 — Import staging (web) vs chunk worker (CF)
 
 | | |
 |--|--|
-| **Web** | Preview/parse + confirm staging (`prospect-import-server.ts`) |
+| **Web** | Preview/parse + confirm staging (`prospect-import-server.ts`); preview `maxDuration=300` |
 | **Worker** | `processProspectImportChunk` already on Functions |
-| **P1 note** | Chunk processing is done. Remaining hang risk is large preview/confirm on App Hosting — address after IMAP/email/scrapers, or with upload size/time guards |
+| **P1.5** | Explicit budgets only; full preview CF move deferred (L) |
 
-### 7 — Content capture reminders
+### 7 — Content capture reminders (P1.5 **done**)
 
 | | |
 |--|--|
-| **Route** | `src/app/api/cron/content-capture-reminders/route.ts` |
-| **Impl** | `processContentCaptureRemindersServer` |
-| **Trigger** | `sendContentCaptureReminders` hourly |
-| **P1 note** | Lowest cron priority; move last or fold into worker when other crons move |
+| **Heavy** | Cloud Functions `functions/src/contentCaptureReminders.ts` via `sendContentCaptureReminders` |
+| **Legacy / rollback** | `GET /api/cron/content-capture-reminders` when `CONTENT_CAPTURE_REMINDERS_RUNTIME=apphosting` |
+| **Work** | Scan brands; at org-local 09:00 notify idle/behind capturers |
+| **Rollback** | Set Functions param `CONTENT_CAPTURE_REMINDERS_RUNTIME=apphosting` |
 
 ---
 
-## Suggested P1.5 sequence
+## Suggested next (post–Phase 1)
 
-1. ~~**P1.2** — Move **IMAP sync** off App Hosting~~ **done**
-2. ~~**P1.3** — Move **scheduled-email send**~~ **done**
-3. ~~**P1.4** — Move **scrapers cron** (+ manual via worker)~~ **done**
-4. **P1.5** — Content capture reminders + any remaining 300s user APIs (MillionVerifier / import staging) as capacity allows.
-5. **Out of scope for P1** — Prospect chunk worker (already CF); dashboard summary full scans (Phase 3); real queue (Phase 4).
+1. ~~**P1.2–P1.5**~~ **done** — IMAP, scheduled email, scrapers, content reminders, MillionVerifier worker, import budgets
+2. **Later** — Full import preview CF move if hang reports force it; Phase 2+ from migration plan
 
-**Stagger reminder:** IMAP CF `:00`, scheduled send CF `:02`, scrapers CF `:07`.
+**Stagger reminder:** IMAP CF `:00`, scheduled send CF `:02`, scrapers CF `:07`; content reminders hourly on CF.
 
 ---
 
 ## Phase 1 exit (from baby-steps plan)
 
-Interactive App Hosting is not blocked by IMAP / import / scraper / scheduled-send bursts. Import chunks + **IMAP heads (P1.2)** + **scheduled SMTP (P1.3)** + **scrapers (P1.4)** already off the web tier; P1.5 clears remaining light crons / long user APIs.
+Interactive App Hosting is not blocked by IMAP / import-chunk / scraper / scheduled-send / content-reminder bursts. MillionVerifier bulk verify and scraper manual runs proxy to CF when worker URLs are set.

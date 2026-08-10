@@ -4,6 +4,11 @@ import { processContentCaptureRemindersServer } from "@/lib/content-calendar/cap
 
 export const maxDuration = 120;
 
+/**
+ * Legacy / rollback path for P1.5.
+ * Default: Cloud Functions `sendContentCaptureReminders` when
+ * `CONTENT_CAPTURE_REMINDERS_RUNTIME=functions`.
+ */
 export async function GET(req: Request) {
   if (!verifyCronSecret(req)) return cronUnauthorized();
 
