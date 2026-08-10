@@ -17,6 +17,11 @@ export const COLLECTIONS = {
   departments: "departments",
   permissionOverrides: "permissionOverrides",
   activityCounters: "activityCounters",
+  /**
+   * Precomputed org-wide dashboard KPI summary (Phase 0).
+   * Doc id === organizationId. See `src/lib/dashboard-summary.ts`.
+   */
+  orgDashboardSummaries: "orgDashboardSummaries",
   activityRecords: "activityRecords",
   profiles: "profiles",
   campaigns: "campaigns",
@@ -141,6 +146,7 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.departments,
   COLLECTIONS.permissionOverrides,
   COLLECTIONS.activityCounters,
+  COLLECTIONS.orgDashboardSummaries,
   COLLECTIONS.activityRecords,
   COLLECTIONS.profiles,
   COLLECTIONS.campaigns,

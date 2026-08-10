@@ -533,6 +533,16 @@ service cloud.firestore {
       allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
     }
 
+    // Precomputed org dashboard KPIs (Phase 0). Doc id === organizationId.
+    // Writes are Admin SDK / server only so clients cannot forge metrics.
+    match /orgDashboardSummaries/{orgId} {
+      allow get: if tenantReadable()
+        && inCallerOrg(resource.data)
+        && resource.data.organizationId == orgId;
+      allow list: if tenantReadable() && inCallerOrg(resource.data);
+      allow create, update, delete: if false;
+    }
+
     match /activityRecords/{id} {
       allow get: if tenantReadable() && canReadCrmActivityUser(resource.data.get('userId', ''));
       allow list: if tenantReadable() && canListActivityRow(resource.data);

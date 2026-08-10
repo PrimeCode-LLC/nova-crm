@@ -12,6 +12,7 @@ import {
   type ContentItem,
 } from "@/lib/content-calendar/types";
 import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
+import { useContentOpsSummary } from "@/hooks/use-content-ops-summary";
 
 function startOfDay(d: Date): number {
   const x = new Date(d);
@@ -79,16 +80,31 @@ export function ContentOpsBoard({
   subjectLabel?: string;
 }) {
   const { brands, items, captures, loading } = useContentCalendarData();
+  const summary = useContentOpsSummary({ enabled: !subjectLabel });
   const [now] = React.useState(() => Date.now());
-  const metrics = React.useMemo(
+  const liveMetrics = React.useMemo(
     () => contentOpsMetrics(items, currentUserId, now),
     [items, currentUserId, now],
   );
-  const activeBrands = brands.filter((b) => b.active).length;
-  const recentCaptures = captures.filter((c) => {
+  const liveActiveBrands = brands.filter((b) => b.active).length;
+  const liveRecentCaptures = captures.filter((c) => {
     const t = new Date(c.createdAt).getTime();
     return Number.isFinite(t) && now - t < 7 * 86_400_000;
   }).length;
+
+  const useSummary =
+    summary.enabled && summary.org && summary.person && !subjectLabel;
+  const myOpenSteps = useSummary ? summary.person!.myOpenSteps : liveMetrics.myOpenSteps;
+  const scheduledThisWeek = useSummary
+    ? summary.org!.scheduledThisWeek
+    : liveMetrics.scheduledThisWeek;
+  const publishedThisWeek = useSummary
+    ? summary.org!.publishedThisWeek
+    : liveMetrics.publishedThisWeek;
+  const activeBrands = useSummary ? summary.org!.activeBrands : liveActiveBrands;
+  const recentCaptures = useSummary ? summary.org!.recentCaptures : liveRecentCaptures;
+  const showLoading = useSummary ? summary.loading : loading;
+
   const plateHint = subjectLabel
     ? `Checklist steps assigned to ${subjectLabel}`
     : "Checklist steps assigned to you";
@@ -98,31 +114,31 @@ export function ContentOpsBoard({
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <KpiCard
           label={subjectLabel ? "On their plate" : "On my plate"}
-          value={loading ? "…" : metrics.myOpenSteps}
+          value={showLoading ? "…" : myOpenSteps}
           hint={plateHint}
           icon={Clapperboard}
           href="/content"
-          tone={metrics.myOpenSteps > 0 ? "warn" : "default"}
+          tone={myOpenSteps > 0 ? "warn" : "default"}
         />
         <KpiCard
           label="Scheduled this week"
-          value={loading ? "…" : metrics.scheduledThisWeek}
+          value={showLoading ? "…" : scheduledThisWeek}
           hint="Approved / scheduled publish slots"
           icon={CalendarDays}
           href="/content"
-          tone={metrics.scheduledThisWeek > 0 ? "info" : "default"}
+          tone={scheduledThisWeek > 0 ? "info" : "default"}
         />
         <KpiCard
           label="Published this week"
-          value={loading ? "…" : metrics.publishedThisWeek}
+          value={showLoading ? "…" : publishedThisWeek}
           hint="Completed in the last 7 days"
           icon={Layers}
           href="/content"
-          tone={metrics.publishedThisWeek > 0 ? "success" : "default"}
+          tone={publishedThisWeek > 0 ? "success" : "default"}
         />
         <KpiCard
           label="Captures (7d)"
-          value={loading ? "…" : recentCaptures}
+          value={showLoading ? "…" : recentCaptures}
           hint={`${activeBrands} active brand${activeBrands === 1 ? "" : "s"}`}
           icon={Camera}
           href="/content/capture"
