@@ -306,11 +306,17 @@ export default function DashboardPage() {
     if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) {
       return workflowMetrics;
     }
-    return applyOrgDashboardSummaryToWorkflowMetrics(workflowMetrics, summary, timeRange);
+    return applyOrgDashboardSummaryToWorkflowMetrics(
+      workflowMetrics,
+      summary,
+      timeRange,
+      dashboardSummary.person,
+    );
   }, [
     workflowMetrics,
     dashboardSummary.enabled,
     dashboardSummary.summary,
+    dashboardSummary.person,
     orgWideDashboardScope,
     timeRange,
   ]);

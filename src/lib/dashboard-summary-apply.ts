@@ -1,7 +1,6 @@
 /**
- * Apply precomputed org summary onto live workflow metrics (P0.6–P0.10).
- * Person-scoped fields (myOpenTasks, …) stay from live. Range fields only
- * override when `rangeKey` is a precomputed window.
+ * Apply precomputed org + person summary onto live workflow metrics (P0.6–P0.11).
+ * Range fields only override when `rangeKey` is a precomputed window.
  */
 
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
@@ -10,6 +9,7 @@ import {
   type OrgDashboardSummary,
   type OrgDashboardSummaryRangeKey,
 } from "@/lib/dashboard-summary";
+import type { PersonDashboardTaskGauges } from "@/lib/dashboard-person-summary";
 
 function isSummaryRangeKey(value: string): value is OrgDashboardSummaryRangeKey {
   return (ORG_DASHBOARD_SUMMARY_RANGE_KEYS as readonly string[]).includes(value);
@@ -19,6 +19,7 @@ export function applyOrgDashboardSummaryToWorkflowMetrics(
   live: DashboardWorkflowMetrics,
   summary: OrgDashboardSummary,
   rangeKey: string,
+  person?: PersonDashboardTaskGauges | null,
 ): DashboardWorkflowMetrics {
   const next = { ...live };
   const assign = <K extends keyof DashboardWorkflowMetrics>(
@@ -40,6 +41,12 @@ export function applyOrgDashboardSummaryToWorkflowMetrics(
   assign("overdueFollowups", summary.overdueFollowups);
   assign("totalReplies", summary.totalReplies);
   assign("repliesPendingReview", summary.repliesPendingReview);
+
+  if (person) {
+    assign("myOpenTasks", person.myOpenTasks);
+    assign("overdueTasks", person.overdueTasks);
+    assign("waitingOnOthers", person.waitingOnOthers);
+  }
 
   if (isSummaryRangeKey(rangeKey)) {
     const window = summary.ranges?.[rangeKey];

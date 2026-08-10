@@ -310,8 +310,13 @@ function DashboardWallPageInner() {
   const displayMetrics = React.useMemo(() => {
     const summary = dashboardSummary.summary;
     if (!dashboardSummary.enabled || !summary) return metrics;
-    return applyOrgDashboardSummaryToWorkflowMetrics(metrics, summary, range);
-  }, [metrics, dashboardSummary.enabled, dashboardSummary.summary, range]);
+    return applyOrgDashboardSummaryToWorkflowMetrics(
+      metrics,
+      summary,
+      range,
+      dashboardSummary.person,
+    );
+  }, [metrics, dashboardSummary.enabled, dashboardSummary.summary, dashboardSummary.person, range]);
 
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;

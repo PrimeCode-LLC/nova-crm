@@ -2,27 +2,31 @@ import { NextResponse } from "next/server";
 import { guardTenantApi, roleAtLeast } from "@/lib/platform/tenant-api-guard";
 import { buildOrgMailboxUtilizationServer } from "@/lib/email/mailbox-utilization-server";
 import {
+  getCachedMailboxUtilization,
+  setCachedMailboxUtilization,
+} from "@/lib/email/mailbox-utilization-cache";
+import {
   filterMailboxUtilizationForViewer,
   summarizeMailboxUtilization,
   type MailboxUtilizationRow,
 } from "@/lib/email/mailbox-utilization";
+import { isRedisConfigured } from "@/lib/cache/redis";
 
+/** Process-local fallback when Redis is unset (dev without Compose Redis). */
 const UTILIZATION_CACHE_TTL_MS = 60_000;
-const utilizationCache = new Map<
+const utilizationMemoryCache = new Map<
   string,
   {
     expiresAt: number;
     rows: MailboxUtilizationRow[];
-    summary: ReturnType<typeof summarizeMailboxUtilization>;
+    generatedAt: string;
   }
 >();
 
 /**
- * Inbox capacity utilization.
+ * Inbox capacity utilization (P0.11: Redis-shared cache when configured).
  * - Managers / admins / owners: org-wide rows
  * - Members (salespeople): only mailboxes they own or are assigned to
- *
- * Powers the dashboard "Inbox utilization" card + detail dialog.
  */
 export async function GET() {
   const g = await guardTenantApi();
@@ -33,33 +37,44 @@ export async function GET() {
     const viewerUid = g.ctx.session.uid;
     const canViewOrgWide = roleAtLeast(g.ctx.role, "manager");
 
-    const hit = utilizationCache.get(orgId);
     let rows: MailboxUtilizationRow[];
     let generatedAt: string;
     let cached: boolean;
+    let cacheSource: "redis" | "memory" | null = null;
 
-    if (hit && hit.expiresAt > Date.now()) {
-      rows = hit.rows;
-      generatedAt = new Date(hit.expiresAt - UTILIZATION_CACHE_TTL_MS).toISOString();
+    const redisHit = await getCachedMailboxUtilization(orgId);
+    if (redisHit?.rows) {
+      rows = redisHit.rows;
+      generatedAt = redisHit.generatedAt;
       cached = true;
+      cacheSource = "redis";
     } else {
-      rows = await buildOrgMailboxUtilizationServer({
-        organizationId: orgId,
-      });
-      const summary = summarizeMailboxUtilization(rows);
-      utilizationCache.set(orgId, {
-        expiresAt: Date.now() + UTILIZATION_CACHE_TTL_MS,
-        rows,
-        summary,
-      });
-      if (utilizationCache.size > 100) {
-        const now = Date.now();
-        for (const [k, v] of utilizationCache) {
-          if (v.expiresAt <= now) utilizationCache.delete(k);
+      const memHit = utilizationMemoryCache.get(orgId);
+      if (memHit && memHit.expiresAt > Date.now()) {
+        rows = memHit.rows;
+        generatedAt = memHit.generatedAt;
+        cached = true;
+        cacheSource = "memory";
+      } else {
+        rows = await buildOrgMailboxUtilizationServer({
+          organizationId: orgId,
+        });
+        const payload = await setCachedMailboxUtilization(orgId, rows);
+        utilizationMemoryCache.set(orgId, {
+          expiresAt: Date.now() + UTILIZATION_CACHE_TTL_MS,
+          rows,
+          generatedAt: payload.generatedAt,
+        });
+        if (utilizationMemoryCache.size > 100) {
+          const now = Date.now();
+          for (const [k, v] of utilizationMemoryCache) {
+            if (v.expiresAt <= now) utilizationMemoryCache.delete(k);
+          }
         }
+        generatedAt = payload.generatedAt;
+        cached = false;
+        cacheSource = isRedisConfigured() ? "redis" : "memory";
       }
-      generatedAt = new Date().toISOString();
-      cached = false;
     }
 
     const scopedRows = canViewOrgWide
@@ -74,6 +89,7 @@ export async function GET() {
       summary,
       generatedAt,
       cached,
+      cacheSource,
     });
   } catch (err) {
     console.error("[mailboxes/utilization]", err);

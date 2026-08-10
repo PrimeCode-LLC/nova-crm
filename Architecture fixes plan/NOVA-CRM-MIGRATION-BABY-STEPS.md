@@ -40,7 +40,8 @@ Pain relief first; no data migration. Rule: no client-side aggregation of KPIs �
 | P0.8 | [x] | Open pipeline $ + openDealCount + leadEstimateContributors via CF recompute on lead/deal writes |
 | P0.9 | [x] | Pipeline distribution (`pipelineByStage`) via same recompute; Overview uses summary when flag + org-wide |
 | P0.10 | [x] | Full org summary: remaining §A scalars, `channelMix`, `funnelByChannel`, `ranges` (today/7d/30d/all); followup CF refresh |
-| P0.11+ | [ ] | Deferred: mailbox util, ops scoreboards, reply-intelligence, content ops, person-scoped tasks |
+| P0.11 | [x] | Mailbox util → Redis 60s; person task gauges (`dash:person:v1:…`) on summary GET; Team Command / reply-intel / content still deferred |
+| P0.12+ | [ ] | Deferred: ops scoreboards (Team Command / Strategy), reply-intelligence cache, content ops |
 
 **Phase 0 exit:** Primary dashboard numbers from precomputed/cached sources; flag can roll back; Firebase read volume for dashboard drops.
 

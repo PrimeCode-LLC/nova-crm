@@ -3,18 +3,21 @@
 import { useQuery } from "@tanstack/react-query";
 import { isDashboardSummariesV1Enabled } from "@/lib/dashboard-summary-flags";
 import type { OrgDashboardSummary } from "@/lib/dashboard-summary";
+import type { PersonDashboardTaskGauges } from "@/lib/dashboard-person-summary";
 
 export type OrgDashboardSummaryResponse = {
   ok: boolean;
   enabled: boolean;
   summary: OrgDashboardSummary | null;
+  person?: PersonDashboardTaskGauges | null;
   source: "redis" | "firestore" | null;
+  personSource?: "redis" | "firestore" | null;
   error?: string;
 };
 
 /**
- * Fetches precomputed org dashboard KPIs when `dashboard_summaries_v1` is on.
- * Callers should fall back to live aggregation when `summary` is null.
+ * Fetches precomputed org dashboard KPIs (+ person task gauges) when
+ * `dashboard_summaries_v1` is on. Fall back to live aggregation when `summary` is null.
  */
 export function useOrgDashboardSummary(opts: {
   enabled?: boolean;
@@ -43,7 +46,9 @@ export function useOrgDashboardSummary(opts: {
     flagOn,
     enabled,
     summary: query.data?.summary ?? null,
+    person: query.data?.person ?? null,
     source: query.data?.source ?? null,
+    personSource: query.data?.personSource ?? null,
     loading: query.isLoading,
     error: query.error instanceof Error ? query.error.message : null,
   };

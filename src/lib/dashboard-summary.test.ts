@@ -264,12 +264,38 @@ describe("channel mix + apply (P0.10)", () => {
       overdueTasks: 2,
       waitingOnOthers: 1,
     };
-    const next = applyOrgDashboardSummaryToWorkflowMetrics(live, summary, "30d");
+    const next = applyOrgDashboardSummaryToWorkflowMetrics(live, summary, "30d", {
+      myOpenTasks: 3,
+      overdueTasks: 1,
+      waitingOnOthers: 0,
+      updatedAt: "2026-08-11T00:00:00.000Z",
+    });
     expect(next.openSalesLeads).toBe(9);
     expect(next.prospects).toBe(4);
     expect(next.sentInRange).toBe(12);
     expect(next.repliesInRange).toBe(3);
     expect(next.opensInRange).toBe(5);
-    expect(next.myOpenTasks).toBe(7);
+    expect(next.myOpenTasks).toBe(3);
+    expect(next.overdueTasks).toBe(1);
+    expect(next.waitingOnOthers).toBe(0);
+  });
+});
+
+describe("person task gauges (P0.11)", () => {
+  it("counts open / overdue / waiting-on-others for a user", async () => {
+    const { computePersonDashboardTaskGauges } = await import("@/lib/dashboard-person-summary");
+    const now = Date.parse("2026-08-11T12:00:00.000Z");
+    expect(
+      computePersonDashboardTaskGauges(
+        [
+          { assigneeId: "u1", createdById: "u1", dueAt: "2026-08-10T00:00:00.000Z" },
+          { assigneeId: "u1", createdById: "u2" },
+          { assigneeId: "u2", createdById: "u1" },
+          { assigneeId: "u1", createdById: "u1", completedAt: "2026-08-11T00:00:00.000Z" },
+        ],
+        "u1",
+        now,
+      ),
+    ).toEqual({ myOpenTasks: 2, overdueTasks: 1, waitingOnOthers: 1 });
   });
 });
