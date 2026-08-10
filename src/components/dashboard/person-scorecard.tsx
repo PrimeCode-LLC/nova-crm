@@ -14,6 +14,7 @@ import { ROLES, roleLabel } from "@/lib/constants";
 import { fmtCurrency, fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
+import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
 import type { Deal, Followup, Lead, LeadTask } from "@/lib/types";
 
 export function PersonScorecard({
@@ -23,6 +24,7 @@ export function PersonScorecard({
   tasks: tasksOverride,
   range = "30d",
   wall,
+  orgWideScope: orgWideScopeProp,
 }: {
   leads?: Lead[];
   deals?: Deal[];
@@ -30,6 +32,8 @@ export function PersonScorecard({
   tasks?: LeadTask[];
   range?: DashboardTimeRangeKey;
   wall?: boolean;
+  /** When true + flag, prefer Redis-backed scoreboard rows (P0.13). */
+  orgWideScope?: boolean;
 } = {}) {
   const ws = useWorkspace();
   const timeZone = useOrgTimezone();
@@ -45,19 +49,35 @@ export function PersonScorecard({
     viewer?.roleId === "team_lead" ||
     viewerHasElevatedWorkspaceRole(viewer);
 
-  const rowsAll = React.useMemo(
-    () =>
-      buildOpsScorecardRows({
-        users,
-        leads,
-        deals,
-        followups,
-        tasks,
-        range,
-        timeZone,
-      }),
-    [users, leads, deals, followups, tasks, range, timeZone],
-  );
+  const orgWideScope =
+    orgWideScopeProp ??
+    (!leadsOverride && !dealsOverride && !followupsOverride && !tasksOverride);
+  const scoreboards = useOpsScoreboards({ range, orgWideScope });
+
+  const rowsAll = React.useMemo(() => {
+    if (scoreboards.enabled && scoreboards.payload?.opsScorecard) {
+      return scoreboards.payload.opsScorecard;
+    }
+    return buildOpsScorecardRows({
+      users,
+      leads,
+      deals,
+      followups,
+      tasks,
+      range,
+      timeZone,
+    });
+  }, [
+    scoreboards.enabled,
+    scoreboards.payload,
+    users,
+    leads,
+    deals,
+    followups,
+    tasks,
+    range,
+    timeZone,
+  ]);
 
   const rows = canSeeTeam ? rowsAll : rowsAll.filter((r) => r.userId === currentUserId);
   const rangeLabel = DASHBOARD_TIME_RANGE_LABELS[range];

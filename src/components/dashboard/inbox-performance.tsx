@@ -8,6 +8,7 @@ import { buildInboxPerformanceRows } from "@/lib/dashboard-ops-analytics";
 import type { DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
 import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
+import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
 import { fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { Followup, Lead, User } from "@/lib/types";
@@ -18,26 +19,42 @@ export function InboxPerformance({
   followups,
   range,
   wall,
+  orgWideScope = false,
 }: {
   users: User[];
   leads: Lead[];
   followups: Followup[];
   range: DashboardTimeRangeKey;
   wall?: boolean;
+  /** When true + flag, prefer Redis-backed scoreboard rows (P0.13). */
+  orgWideScope?: boolean;
 }) {
   const timeZone = useOrgTimezone();
-  const rows = React.useMemo(
-    () =>
-      buildInboxPerformanceRows({
-        users,
-        leads,
-        followups,
-        range,
-        timeZone,
-        limit: wall ? 6 : 10,
-      }),
-    [users, leads, followups, range, wall, timeZone],
-  );
+  const scoreboards = useOpsScoreboards({ range, orgWideScope });
+  const limit = wall ? 6 : 10;
+  const rows = React.useMemo(() => {
+    if (scoreboards.enabled && scoreboards.payload?.inbox) {
+      return scoreboards.payload.inbox.slice(0, limit);
+    }
+    return buildInboxPerformanceRows({
+      users,
+      leads,
+      followups,
+      range,
+      timeZone,
+      limit,
+    });
+  }, [
+    scoreboards.enabled,
+    scoreboards.payload,
+    users,
+    leads,
+    followups,
+    range,
+    wall,
+    timeZone,
+    limit,
+  ]);
 
   return (
     <Card className="min-w-0">

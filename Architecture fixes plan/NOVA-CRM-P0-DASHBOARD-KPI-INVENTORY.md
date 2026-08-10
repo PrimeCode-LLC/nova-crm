@@ -117,8 +117,8 @@
 | Follow-up schedule by day | series | followups | `buildFollowupScheduleByDay` | 3 | Month calendar counts |
 | Person / ops scorecard rows | table | leads + deals + followups + tasks | `buildOpsScorecardRows` | 4 | Per-user multi-metric |
 | Inbox performance rows | table | followups (+ users) | `buildInboxPerformanceRows` | 4 | sent/replies/rates/failed |
-| Team Command rows + lens scores | table | leads + deals + followups + tasks + users | `buildTeamCommandRows` | 5 | Heavy; dual window for momentum |
-| Strategy scoreboard rows | table | strategies + leads + deals + followups | `buildStrategyScoreboardRows` | 5 | Attribution + composite score |
+| Team Command rows + lens scores | table | leads + deals + followups + tasks + users | `buildTeamCommandRows` | 5 | **P0.13:** Redis `dash:ops-scoreboards:v1` via API (not orgDashboardSummaries) |
+| Strategy scoreboard rows | table | strategies + leads + deals + followups | `buildStrategyScoreboardRows` | 5 | **P0.13:** same ops-scoreboards payload |
 | Action board bucket counts | list | tasks + followups + meetings | length of buckets | 4 | Urgent/overdue/pending/meetings |
 | Ops activity feed | list | timeline + org events + tasks | merge/sort recent | 5 | Not a KPI tile; still scans |
 | Meetings today (pulse) | scalar | meetings API/hook | count today | 4 | `useDashboardMeetings` |
@@ -198,7 +198,7 @@
 
 ## Explicit non-goals for Phase 0
 
-- Do not migrate Team Command / Strategy Scoreboard composite scores until scalar KPIs are cached (expensive, many dimensions).
+- ~~Do not migrate Team Command / Strategy Scoreboard composite scores until scalar KPIs are cached~~ — done in **P0.13** (on-demand Redis, not CF orgDashboardSummaries).
 - Do not reintroduce live Firestore listeners for dashboard numbers (ENGINEERING_RULES: realtime is exception-only).
 - Filter dimensions (channel / owner / range): prefer org-wide precompute first; scoped variants are a follow-up design (extra Redis keys or accept client filter on small summary payloads — never re-scan full collections).
 

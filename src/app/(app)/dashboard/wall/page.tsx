@@ -581,6 +581,7 @@ function DashboardWallPageInner() {
           wall
           isDemo={isDemo}
           wallPrefs={wallPrefs}
+          orgWideScope
         />
       </div>
     </div>

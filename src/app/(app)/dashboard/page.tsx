@@ -889,6 +889,7 @@ export default function DashboardPage() {
                 orgMeetingsScope={orgMeetingsScope}
                 widgets={opsWidgets}
                 isDemo={isDemo}
+                orgWideScope={orgWideDashboardScope}
               />
             ) : frontlineLayout ? (
               <FrontlineBoard
@@ -1161,6 +1162,7 @@ export default function DashboardPage() {
                       followups={workflowFollowups}
                       tasks={workflowTasks}
                       range={timeRange as DashboardTimeRangeKey}
+                      orgWideScope={orgWideDashboardScope}
                     />
                   ) : null}
                   {w.channelMix ? (

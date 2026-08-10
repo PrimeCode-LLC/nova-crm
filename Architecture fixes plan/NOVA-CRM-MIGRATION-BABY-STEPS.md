@@ -42,7 +42,7 @@ Pain relief first; no data migration. Rule: no client-side aggregation of KPIs �
 | P0.10 | [x] | Full org summary: remaining §A scalars, `channelMix`, `funnelByChannel`, `ranges` (today/7d/30d/all); followup CF refresh |
 | P0.11 | [x] | Mailbox util → Redis 60s; person task gauges (`dash:person:v1:…`) on summary GET |
 | P0.12 | [x] | Reply-intel list Redis cache; content-ops summary API + ContentOpsBoard override |
-| P0.13+ | [ ] | Deferred: Team Command / Strategy / inbox scoreboards (heavy multi-metric tables) |
+| P0.13 | [x] | Team Command / Strategy / Inbox / Person scoreboards → `GET /api/org/ops-scoreboards` + Redis `dash:ops-scoreboards:v1:…` when flag + org-wide |
 
 **Phase 0 exit:** Primary dashboard numbers from precomputed/cached sources; flag can roll back; Firebase read volume for dashboard drops.
 

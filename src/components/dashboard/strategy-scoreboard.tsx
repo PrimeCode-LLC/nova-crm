@@ -21,6 +21,7 @@ import { DASHBOARD_TIME_RANGE_LABELS } from "@/lib/dashboard-date-range";
 import { fmtCurrency, fmtNumber, fmtPercent, initials } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { WallMetricTiles } from "@/components/dashboard/wall-metric-tiles";
+import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
 import type { Deal, Followup, Lead } from "@/lib/types";
 
 export function StrategyScoreboard({
@@ -30,6 +31,7 @@ export function StrategyScoreboard({
   range = "30d",
   wall,
   className,
+  orgWideScope: orgWideScopeProp,
 }: {
   leads?: Lead[];
   deals?: Deal[];
@@ -37,6 +39,8 @@ export function StrategyScoreboard({
   range?: DashboardTimeRangeKey;
   wall?: boolean;
   className?: string;
+  /** When true + flag, prefer Redis-backed scoreboard rows (P0.13). */
+  orgWideScope?: boolean;
 } = {}) {
   const ws = useWorkspace();
   const timeZone = useOrgTimezone();
@@ -51,29 +55,36 @@ export function StrategyScoreboard({
     setAllStrategyScoreboardVisible,
   } = useDashboardPreferences(currentUserId || "anon");
 
-  const board = React.useMemo(
-    () =>
-      buildStrategyScoreboardRows({
-        strategies,
-        assignments,
-        leads,
-        deals,
-        followups,
-        range,
-        outreachThreshold: intentPlaybook.outreachThreshold,
-        timeZone,
-      }),
-    [
+  const orgWideScope =
+    orgWideScopeProp ?? (!leadsOverride && !dealsOverride && !followupsOverride);
+  const scoreboards = useOpsScoreboards({ range, orgWideScope });
+
+  const board = React.useMemo(() => {
+    if (scoreboards.enabled && scoreboards.payload?.strategy) {
+      return scoreboards.payload.strategy;
+    }
+    return buildStrategyScoreboardRows({
       strategies,
       assignments,
       leads,
       deals,
       followups,
       range,
-      intentPlaybook.outreachThreshold,
+      outreachThreshold: intentPlaybook.outreachThreshold,
       timeZone,
-    ],
-  );
+    });
+  }, [
+    scoreboards.enabled,
+    scoreboards.payload,
+    strategies,
+    assignments,
+    leads,
+    deals,
+    followups,
+    range,
+    intentPlaybook.outreachThreshold,
+    timeZone,
+  ]);
 
   const settingsOptions = React.useMemo(
     () =>

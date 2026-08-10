@@ -20,6 +20,7 @@ import {
   type DashboardTimeRangeKey,
   type TeamCommandTimeRangeKey,
 } from "@/lib/dashboard-date-range";
+import { useOpsScoreboards } from "@/hooks/use-ops-scoreboards";
 import { fmtCurrency, fmtNumber, fmtPercent } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { viewerHasElevatedWorkspaceRole } from "@/lib/viewer-elevated";
@@ -202,6 +203,7 @@ export function TeamCommand({
   range = "30d",
   wall,
   className,
+  orgWideScope: orgWideScopeProp,
 }: {
   leads?: Lead[];
   deals?: Deal[];
@@ -210,6 +212,8 @@ export function TeamCommand({
   range?: DashboardTimeRangeKey;
   wall?: boolean;
   className?: string;
+  /** When true + flag, prefer Redis-backed scoreboard rows (P0.13). */
+  orgWideScope?: boolean;
 } = {}) {
   const ws = useWorkspace();
   const timeZone = useOrgTimezone();
@@ -229,6 +233,14 @@ export function TeamCommand({
     setLocalRange(toTeamCommandRange(range));
   }, [range]);
 
+  const orgWideScope =
+    orgWideScopeProp ??
+    (!leadsOverride && !dealsOverride && !followupsOverride && !tasksOverride);
+  const scoreboards = useOpsScoreboards({
+    range: localRange,
+    orgWideScope,
+  });
+
   const viewer = users.find((u) => u.id === currentUserId);
   const canSeeTeam =
     viewer?.roleId === "director" ||
@@ -236,20 +248,32 @@ export function TeamCommand({
     viewer?.roleId === "team_lead" ||
     viewerHasElevatedWorkspaceRole(viewer);
 
-  const rowsAll = React.useMemo(
-    () =>
-      buildTeamCommandRows({
-        users,
-        leads,
-        deals,
-        followups,
-        tasks,
-        range: localRange,
-        outreachThreshold: intentPlaybook.outreachThreshold,
-        timeZone,
-      }),
-    [users, leads, deals, followups, tasks, localRange, intentPlaybook.outreachThreshold, timeZone],
-  );
+  const rowsAll = React.useMemo(() => {
+    if (scoreboards.enabled && scoreboards.payload?.teamCommand) {
+      return scoreboards.payload.teamCommand;
+    }
+    return buildTeamCommandRows({
+      users,
+      leads,
+      deals,
+      followups,
+      tasks,
+      range: localRange,
+      outreachThreshold: intentPlaybook.outreachThreshold,
+      timeZone,
+    });
+  }, [
+    scoreboards.enabled,
+    scoreboards.payload,
+    users,
+    leads,
+    deals,
+    followups,
+    tasks,
+    localRange,
+    intentPlaybook.outreachThreshold,
+    timeZone,
+  ]);
 
   const scoped = canSeeTeam ? rowsAll : rowsAll.filter((r) => r.userId === currentUserId);
   const rows = React.useMemo(

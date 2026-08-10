@@ -118,6 +118,7 @@ export function OwnerOpsBoard({
   showWallLink,
   isDemo,
   wallPrefs,
+  orgWideScope = false,
 }: {
   metrics: DashboardWorkflowMetrics;
   leads: Lead[];
@@ -142,6 +143,8 @@ export function OwnerOpsBoard({
   isDemo?: boolean;
   /** Wall display timing / scene prefs (Settings → Wall). */
   wallPrefs?: WallPreferences;
+  /** Org-wide (no channel/owner filters) — enables Redis scoreboards when flag on. */
+  orgWideScope?: boolean;
 }) {
   const wallSettings = wallPrefs ?? defaultWallPreferences();
   const needMeetings = Boolean(widgets.pulse || widgets.actionBoard || wall);
@@ -242,6 +245,7 @@ export function OwnerOpsBoard({
         followups={teamCommandFollowups ?? followups}
         tasks={tasks}
         range={range}
+        orgWideScope={orgWideScope}
         wall
         className="min-h-0 flex-1"
       />
@@ -253,6 +257,7 @@ export function OwnerOpsBoard({
           followups={followups}
           tasks={tasks}
           range={range}
+          orgWideScope={orgWideScope}
           wall
         />
       </div>
@@ -261,7 +266,14 @@ export function OwnerOpsBoard({
     const capacityStack = widgets.mailboxUtilization || showInboxPerformance ? (
       <div key="capacity" className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto lg:max-w-[38%]">
         {showInboxPerformance ? (
-          <InboxPerformance users={users} leads={leads} followups={followups} range={range} wall />
+          <InboxPerformance
+            users={users}
+            leads={leads}
+            followups={followups}
+            range={range}
+            orgWideScope={orgWideScope}
+            wall
+          />
         ) : null}
         {widgets.mailboxUtilization ? (
           <MailboxUtilizationPanel
@@ -327,6 +339,7 @@ export function OwnerOpsBoard({
                 deals={deals}
                 followups={followups}
                 range={range}
+                orgWideScope={orgWideScope}
                 wall
                 className="min-h-0 flex-1"
               />
@@ -370,6 +383,7 @@ export function OwnerOpsBoard({
     teamCommandLeads,
     teamCommandDeals,
     teamCommandFollowups,
+    orgWideScope,
     meetings,
     timelineByLead,
     orgActivityEvents,
@@ -467,6 +481,7 @@ export function OwnerOpsBoard({
                   followups={teamCommandFollowups ?? followups}
                   tasks={tasks}
                   range={range}
+                  orgWideScope={orgWideScope}
                 />
               ) : null}
               {widgets.strategyScoreboard ? (
@@ -475,6 +490,7 @@ export function OwnerOpsBoard({
                   deals={deals}
                   followups={followups}
                   range={range}
+                  orgWideScope={orgWideScope}
                 />
               ) : null}
               {showScorecard ? (
@@ -484,6 +500,7 @@ export function OwnerOpsBoard({
                   followups={followups}
                   tasks={tasks}
                   range={range}
+                  orgWideScope={orgWideScope}
                 />
               ) : null}
               {widgets.needsAttention ? (
@@ -502,6 +519,7 @@ export function OwnerOpsBoard({
                   leads={leads}
                   followups={followups}
                   range={range}
+                  orgWideScope={orgWideScope}
                 />
               ) : null}
               {widgets.mailboxUtilization ? (
