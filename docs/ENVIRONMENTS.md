@@ -30,6 +30,7 @@ and [`NOVA-CRM-ENGINEERING-RULES.md`](../Architecture%20fixes%20plan/NOVA-CRM-EN
 | Postgres 16 | `postgres://nova:nova_dev_password@localhost:5432/nova_crm` |
 | Redis 7 | `redis://localhost:6379` |
 
+Set `REDIS_URL` in local `.env.local` to use the Phase 0 cache helper (`src/lib/cache/redis.ts`).  
 These credentials are **dev-only**. Do not reuse them in staging or production.
 
 ## Checklist before pointing any script at a DB

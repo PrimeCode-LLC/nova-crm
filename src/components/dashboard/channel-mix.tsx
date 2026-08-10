@@ -8,15 +8,29 @@ import { ChannelChip } from "@/components/common/channel-chip";
 import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
 import type { Lead } from "@/lib/types";
 
-export function ChannelMix({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
+type ChannelMixProps = {
+  leads?: Lead[];
+  /** Precomputed sales-lead counts + wins by channel (P0.10). */
+  channelMix?: Record<string, { count: number; won: number }> | null;
+};
+
+export function ChannelMix({
+  leads: leadsOverride,
+  channelMix: channelMixOverride,
+}: ChannelMixProps = {}) {
   const ws = useWorkspace();
   const leads = leadsOverride ?? ws.leads;
   const enabledKeys = useEnabledBuiltinChannelKeys();
-  const total = leads.length;
+  const total = channelMixOverride
+    ? Object.values(channelMixOverride).reduce((sum, row) => sum + (row?.count ?? 0), 0)
+    : leads.length;
   const rows = enabledKeys
     .map((key) => {
-      const count = leads.filter((l) => l.channel === key).length;
-      const won = leads.filter((l) => l.channel === key && l.stage === "won").length;
+      const fromSummary = channelMixOverride?.[key];
+      const count =
+        fromSummary?.count ?? leads.filter((l) => l.channel === key).length;
+      const won =
+        fromSummary?.won ?? leads.filter((l) => l.channel === key && l.stage === "won").length;
       return {
         key,
         count,

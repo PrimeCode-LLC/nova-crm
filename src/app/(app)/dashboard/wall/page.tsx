@@ -29,6 +29,8 @@ import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skelet
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
+import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
+import { applyOrgDashboardSummaryToWorkflowMetrics } from "@/lib/dashboard-summary-apply";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
 import { useWallPreferences } from "@/hooks/use-wall-preferences";
@@ -301,6 +303,16 @@ function DashboardWallPageInner() {
     [leads, followups, followupPlans, leadTasks, contacts, currentUserId, range, organizationTimezone],
   );
 
+  const dashboardSummary = useOrgDashboardSummary({
+    enabled: !isDemo && !workspaceLoading,
+    orgWideScope: true,
+  });
+  const displayMetrics = React.useMemo(() => {
+    const summary = dashboardSummary.summary;
+    if (!dashboardSummary.enabled || !summary) return metrics;
+    return applyOrgDashboardSummaryToWorkflowMetrics(metrics, summary, range);
+  }, [metrics, dashboardSummary.enabled, dashboardSummary.summary, range]);
+
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;
 
@@ -546,7 +558,7 @@ function DashboardWallPageInner() {
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-hidden p-4 md:p-5">
         <OwnerOpsBoard
-          metrics={metrics}
+          metrics={displayMetrics}
           leads={leads}
           deals={deals}
           followups={followups}

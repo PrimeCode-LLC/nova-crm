@@ -20,6 +20,10 @@ import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { aggregateChannelFunnelCounts, computeOpenPipelineMetrics } from "@/lib/dashboard-analytics";
+import {
+  applyOrgDashboardSummaryToWorkflowMetrics,
+  summaryClosedRevenue,
+} from "@/lib/dashboard-summary-apply";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, roleLabel } from "@/lib/constants";
 import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
@@ -96,6 +100,7 @@ import {
   Monitor,
 } from "lucide-react";
 import { computeDashboardWorkflowMetrics, isSalesLead } from "@/lib/dashboard-workflow";
+import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
 import {
   Select,
   SelectContent,
@@ -289,6 +294,26 @@ export default function DashboardPage() {
       organizationTimezone,
     ],
   );
+
+  /** Org-wide summary only (P0.6) — filtered views stay on live aggregation. */
+  const orgWideDashboardScope = channelScope.length === 0 && ownerScope === "all-owners";
+  const dashboardSummary = useOrgDashboardSummary({
+    enabled: !isDemo && !workspaceLoading,
+    orgWideScope: orgWideDashboardScope,
+  });
+  const displayMetrics = React.useMemo(() => {
+    const summary = dashboardSummary.summary;
+    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) {
+      return workflowMetrics;
+    }
+    return applyOrgDashboardSummaryToWorkflowMetrics(workflowMetrics, summary, timeRange);
+  }, [
+    workflowMetrics,
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    orgWideDashboardScope,
+    timeRange,
+  ]);
   const avgResponseMin = React.useMemo(
     () =>
       computeAverageResponseTimeMinutes(scopedSalesLeads, emailResponseCtx, {
@@ -313,8 +338,67 @@ export default function DashboardPage() {
     () => computeOpenPipelineMetrics(scopedSalesLeads, scopedDeals),
     [scopedSalesLeads, scopedDeals],
   );
-  const pipelineValue = pipelineMetrics.total;
-  const closedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
+  const displayPipelineMetrics = React.useMemo(() => {
+    const summary = dashboardSummary.summary;
+    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) {
+      return pipelineMetrics;
+    }
+    return {
+      total:
+        typeof summary.openPipelineValue === "number" && Number.isFinite(summary.openPipelineValue)
+          ? Math.max(0, summary.openPipelineValue)
+          : pipelineMetrics.total,
+      openDealCount:
+        typeof summary.openDealCount === "number" && Number.isFinite(summary.openDealCount)
+          ? Math.max(0, summary.openDealCount)
+          : pipelineMetrics.openDealCount,
+      leadEstimateContributors:
+        typeof summary.leadEstimateContributors === "number" &&
+        Number.isFinite(summary.leadEstimateContributors)
+          ? Math.max(0, summary.leadEstimateContributors)
+          : pipelineMetrics.leadEstimateContributors,
+    };
+  }, [
+    pipelineMetrics,
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    orgWideDashboardScope,
+  ]);
+  const pipelineValue = displayPipelineMetrics.total;
+  const displayPipelineByStage = React.useMemo(() => {
+    const summary = dashboardSummary.summary;
+    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return null;
+    const byStage = summary.pipelineByStage;
+    if (!byStage || typeof byStage !== "object") return null;
+    return byStage;
+  }, [dashboardSummary.enabled, dashboardSummary.summary, orgWideDashboardScope]);
+  const displayChannelMix = React.useMemo(() => {
+    const summary = dashboardSummary.summary;
+    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return null;
+    const mix = summary.channelMix;
+    if (!mix || typeof mix !== "object") return null;
+    return mix;
+  }, [dashboardSummary.enabled, dashboardSummary.summary, orgWideDashboardScope]);
+  const displayFunnelByChannel = React.useMemo(() => {
+    const summary = dashboardSummary.summary;
+    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return null;
+    const byChannel = summary.funnelByChannel;
+    if (!byChannel || typeof byChannel !== "object") return null;
+    return byChannel;
+  }, [dashboardSummary.enabled, dashboardSummary.summary, orgWideDashboardScope]);
+  const liveClosedValue = scopedDeals.filter((d) => d.stage === "won").reduce((s, d) => s + d.value, 0);
+  const liveWonDealCount = scopedDeals.filter((d) => d.stage === "won").length;
+  const summaryClosed = React.useMemo(() => {
+    if (!dashboardSummary.enabled || !orgWideDashboardScope) return null;
+    return summaryClosedRevenue(dashboardSummary.summary, timeRange);
+  }, [
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    orgWideDashboardScope,
+    timeRange,
+  ]);
+  const closedValue = summaryClosed?.closedRevenue ?? liveClosedValue;
+  const wonDealCount = summaryClosed?.wonDealCount ?? liveWonDealCount;
 
   const viewer = React.useMemo(
     () => (currentUserId ? getUserById(currentUserId) : undefined),
@@ -387,14 +471,16 @@ export default function DashboardPage() {
     [w, canViewMailboxUtilization],
   );
   const pipelineHint = React.useMemo(() => {
-    const parts = [`${pipelineMetrics.openDealCount} open deal${pipelineMetrics.openDealCount === 1 ? "" : "s"}`];
-    if (pipelineMetrics.leadEstimateContributors > 0) {
+    const parts = [
+      `${displayPipelineMetrics.openDealCount} open deal${displayPipelineMetrics.openDealCount === 1 ? "" : "s"}`,
+    ];
+    if (displayPipelineMetrics.leadEstimateContributors > 0) {
       parts.push(
-        `${pipelineMetrics.leadEstimateContributors} lead estimate${pipelineMetrics.leadEstimateContributors === 1 ? "" : "s"}`,
+        `${displayPipelineMetrics.leadEstimateContributors} lead estimate${displayPipelineMetrics.leadEstimateContributors === 1 ? "" : "s"}`,
       );
     }
     return parts.join(" · ");
-  }, [pipelineMetrics.leadEstimateContributors, pipelineMetrics.openDealCount]);
+  }, [displayPipelineMetrics.leadEstimateContributors, displayPipelineMetrics.openDealCount]);
 
   const funnelChannelKeys = React.useMemo(() => {
     const enabledSet = new Set(enabledBuiltinChannels);
@@ -412,14 +498,23 @@ export default function DashboardPage() {
         .filter((key) => prefs.channelFunnelsVisible[key] !== false)
         .map((key) => {
           const meta = CHANNEL_LIST.find((c) => c.key === key);
+          const fromSummary = displayFunnelByChannel?.[key];
           return {
             channel: key,
             title: meta?.label ?? key,
             // Manual activityCounters retired — funnel stages from pipeline only.
-            counts: aggregateChannelFunnelCounts(key, [], scopedSalesLeads, scopedDeals),
+            counts:
+              fromSummary ??
+              aggregateChannelFunnelCounts(key, [], scopedSalesLeads, scopedDeals),
           };
         }),
-    [funnelChannelKeys, prefs.channelFunnelsVisible, scopedSalesLeads, scopedDeals],
+    [
+      funnelChannelKeys,
+      prefs.channelFunnelsVisible,
+      scopedSalesLeads,
+      scopedDeals,
+      displayFunnelByChannel,
+    ],
   );
 
   const outreachMetrics = React.useMemo(
@@ -460,41 +555,41 @@ export default function DashboardPage() {
     downloadDashboardKpiCsv(
       [
         { label: "Scope", value: scope },
-        { label: "Open sales leads", value: String(workflowMetrics.openSalesLeads) },
-        { label: "Prospects", value: String(workflowMetrics.prospects) },
-        { label: "Prospects need routing", value: String(workflowMetrics.prospectsNeedRouting) },
-        { label: "Prospects need sequence", value: String(workflowMetrics.prospectsNeedSequence) },
-        { label: "Prospects ready to push", value: String(workflowMetrics.prospectsReadyToPush) },
-        { label: "Prospects pushed", value: String(workflowMetrics.prospectsPushed) },
-        { label: "Follow-ups due", value: String(workflowMetrics.followupsDue) },
-        { label: "Active sequences", value: String(workflowMetrics.activeSequences) },
-        { label: "Sequence steps remaining", value: String(workflowMetrics.remainingSequenceSteps) },
-        { label: "Sequences paused on reply", value: String(workflowMetrics.pausedOnReply) },
-        { label: "Total replies", value: String(workflowMetrics.totalReplies) },
-        { label: "Replies in range", value: String(workflowMetrics.repliesInRange) },
-        { label: "Replies pending review", value: String(workflowMetrics.repliesPendingReview) },
-        { label: "Emails sent in range", value: String(workflowMetrics.sentInRange) },
-        { label: "Emails opened in range", value: String(workflowMetrics.opensInRange) },
-        { label: "Emails scheduled", value: String(workflowMetrics.scheduledSteps) },
-        { label: "Emails need schedule", value: String(workflowMetrics.readyUnscheduledSteps) },
-        { label: "Email failures", value: String(workflowMetrics.failedDeliveries) },
-        ...(workflowMetrics.retryingDeliveries > 0
-          ? [{ label: "Email retrying", value: String(workflowMetrics.retryingDeliveries) }]
+        { label: "Open sales leads", value: String(displayMetrics.openSalesLeads) },
+        { label: "Prospects", value: String(displayMetrics.prospects) },
+        { label: "Prospects need routing", value: String(displayMetrics.prospectsNeedRouting) },
+        { label: "Prospects need sequence", value: String(displayMetrics.prospectsNeedSequence) },
+        { label: "Prospects ready to push", value: String(displayMetrics.prospectsReadyToPush) },
+        { label: "Prospects pushed", value: String(displayMetrics.prospectsPushed) },
+        { label: "Follow-ups due", value: String(displayMetrics.followupsDue) },
+        { label: "Active sequences", value: String(displayMetrics.activeSequences) },
+        { label: "Sequence steps remaining", value: String(displayMetrics.remainingSequenceSteps) },
+        { label: "Sequences paused on reply", value: String(displayMetrics.pausedOnReply) },
+        { label: "Total replies", value: String(displayMetrics.totalReplies) },
+        { label: "Replies in range", value: String(displayMetrics.repliesInRange) },
+        { label: "Replies pending review", value: String(displayMetrics.repliesPendingReview) },
+        { label: "Emails sent in range", value: String(displayMetrics.sentInRange) },
+        { label: "Emails opened in range", value: String(displayMetrics.opensInRange) },
+        { label: "Emails scheduled", value: String(displayMetrics.scheduledSteps) },
+        { label: "Emails need schedule", value: String(displayMetrics.readyUnscheduledSteps) },
+        { label: "Email failures", value: String(displayMetrics.failedDeliveries) },
+        ...(displayMetrics.retryingDeliveries > 0
+          ? [{ label: "Email retrying", value: String(displayMetrics.retryingDeliveries) }]
           : []),
-        { label: "Emails bounced in range", value: String(workflowMetrics.bouncedEmailsInRange) },
+        { label: "Emails bounced in range", value: String(displayMetrics.bouncedEmailsInRange) },
         {
           label: "Open bounce review tasks",
-          value: String(workflowMetrics.openBounceReviewTasks),
+          value: String(displayMetrics.openBounceReviewTasks),
         },
-        { label: "My open tasks", value: String(workflowMetrics.myOpenTasks) },
+        { label: "My open tasks", value: String(displayMetrics.myOpenTasks) },
         { label: "Pipeline value (USD)", value: String(Math.round(pipelineValue)) },
         { label: "Closed revenue (USD)", value: String(Math.round(closedValue)) },
         {
           label: "Open deals",
-          value: String(pipelineMetrics.openDealCount),
+          value: String(displayPipelineMetrics.openDealCount),
         },
-        { label: "Won deals", value: String(scopedDeals.filter((d) => d.stage === "won").length) },
-        { label: "Idle leads", value: String(workflowMetrics.idleSalesLeads) },
+        { label: "Won deals", value: String(wonDealCount) },
+        { label: "Idle leads", value: String(displayMetrics.idleSalesLeads) },
         {
           label: "Avg first outreach (minutes)",
           value: avgResponseMin != null ? String(Math.round(avgResponseMin)) : "-",
@@ -769,7 +864,7 @@ export default function DashboardPage() {
 
             {opsLayout ? (
               <OwnerOpsBoard
-                metrics={workflowMetrics}
+                metrics={displayMetrics}
                 leads={scopedLeads}
                 deals={scopedDeals}
                 followups={workflowFollowups}
@@ -792,7 +887,7 @@ export default function DashboardPage() {
             ) : frontlineLayout ? (
               <FrontlineBoard
                 role={effectiveRole}
-                metrics={workflowMetrics}
+                metrics={displayMetrics}
                 leads={scopedLeads}
                 followups={workflowFollowups}
                 plans={workflowPlans}
@@ -803,7 +898,7 @@ export default function DashboardPage() {
                 pipelineValue={pipelineValue}
                 closedValue={closedValue}
                 pipelineHint={pipelineHint}
-                wonDealCount={scopedDeals.filter((d) => d.stage === "won").length}
+                wonDealCount={wonDealCount}
                 avgResponseMin={avgResponseMin}
                 isDemo={isDemo}
               />
@@ -812,14 +907,14 @@ export default function DashboardPage() {
                 <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-7 gap-4">
                   <KpiCard
                     label="Open sales leads"
-                    value={workflowMetrics.openSalesLeads}
-                    hint={`${workflowMetrics.idleSalesLeads} idle`}
+                    value={displayMetrics.openSalesLeads}
+                    hint={`${displayMetrics.idleSalesLeads} idle`}
                     icon={Target}
                     href="/leads"
                     tone={
-                      workflowMetrics.idleSalesLeads > 0
+                      displayMetrics.idleSalesLeads > 0
                         ? "warn"
-                        : workflowMetrics.openSalesLeads > 0
+                        : displayMetrics.openSalesLeads > 0
                           ? "info"
                           : "default"
                     }
@@ -827,13 +922,13 @@ export default function DashboardPage() {
                   <KpiCard
                     label="Prospects"
                     value={scopedProspects.length}
-                    hint={`${workflowMetrics.prospectsNeedRouting} need routing · ${workflowMetrics.prospectsNeedSequence} need sequence · ${workflowMetrics.prospectsReadyToPush} ready to push · ${workflowMetrics.prospectsPushed} pushed`}
+                    hint={`${displayMetrics.prospectsNeedRouting} need routing · ${displayMetrics.prospectsNeedSequence} need sequence · ${displayMetrics.prospectsReadyToPush} ready to push · ${displayMetrics.prospectsPushed} pushed`}
                     icon={UserRoundSearch}
                     href="/prospects"
                     tone={
-                      workflowMetrics.prospectsNeedRouting > 0 ||
-                      workflowMetrics.prospectsNeedSequence > 0 ||
-                      workflowMetrics.prospectsReadyToPush > 0
+                      displayMetrics.prospectsNeedRouting > 0 ||
+                      displayMetrics.prospectsNeedSequence > 0 ||
+                      displayMetrics.prospectsReadyToPush > 0
                         ? "warn"
                         : scopedProspects.length > 0
                           ? "info"
@@ -842,84 +937,84 @@ export default function DashboardPage() {
                   />
                   <KpiCard
                     label="Total replies"
-                    value={workflowMetrics.totalReplies}
-                    hint={`${workflowMetrics.repliesInRange} in ${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey].toLowerCase()} · ${workflowMetrics.repliesPendingReview} to review`}
+                    value={displayMetrics.totalReplies}
+                    hint={`${displayMetrics.repliesInRange} in ${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey].toLowerCase()} · ${displayMetrics.repliesPendingReview} to review`}
                     icon={MessageSquareReply}
                     href={buildRepliesDrillHref(timeRange as DashboardTimeRangeKey)}
                     tone={
-                      workflowMetrics.repliesPendingReview > 0
+                      displayMetrics.repliesPendingReview > 0
                         ? "warn"
-                        : workflowMetrics.repliesInRange > 0
+                        : displayMetrics.repliesInRange > 0
                           ? "success"
                           : "default"
                     }
                   />
                   <KpiCard
                     label="Follow-ups due"
-                    value={workflowMetrics.followupsDue}
-                    hint={`${workflowMetrics.overdueFollowups} overdue · ${workflowMetrics.remainingSequenceSteps} in sequence · ${workflowMetrics.scheduledSteps} scheduled`}
+                    value={displayMetrics.followupsDue}
+                    hint={`${displayMetrics.overdueFollowups} overdue · ${displayMetrics.remainingSequenceSteps} in sequence · ${displayMetrics.scheduledSteps} scheduled`}
                     icon={CalendarClock}
                     href="/followups"
                     tone={
-                      workflowMetrics.overdueFollowups > 0
+                      displayMetrics.overdueFollowups > 0
                         ? "danger"
-                        : workflowMetrics.followupsDue > 0
+                        : displayMetrics.followupsDue > 0
                           ? "warn"
                           : "default"
                     }
                   />
                   <KpiCard
                     label="Active sequences"
-                    value={workflowMetrics.activeSequences}
-                    hint={`${workflowMetrics.remainingSequenceSteps} steps remaining · ${workflowMetrics.pausedOnReply} stopped on reply`}
+                    value={displayMetrics.activeSequences}
+                    hint={`${displayMetrics.remainingSequenceSteps} steps remaining · ${displayMetrics.pausedOnReply} stopped on reply`}
                     icon={Workflow}
                     href="/followups"
-                    tone={workflowMetrics.activeSequences > 0 ? "info" : "default"}
+                    tone={displayMetrics.activeSequences > 0 ? "info" : "default"}
                   />
                   <KpiCard
                     label="Tasks"
-                    value={workflowMetrics.myOpenTasks}
-                    hint={`${workflowMetrics.overdueTasks} overdue · ${workflowMetrics.waitingOnOthers} waiting on others`}
+                    value={displayMetrics.myOpenTasks}
+                    hint={`${displayMetrics.overdueTasks} overdue · ${displayMetrics.waitingOnOthers} waiting on others`}
                     icon={ListTodo}
                     href="/tasks"
                     tone={
-                      workflowMetrics.overdueTasks > 0
+                      displayMetrics.overdueTasks > 0
                         ? "danger"
-                        : workflowMetrics.myOpenTasks > 0
+                        : displayMetrics.myOpenTasks > 0
                           ? "info"
                           : "default"
                     }
                   />
                   <KpiCard
                     label="Email delivery"
-                    value={workflowMetrics.sentInRange}
-                    hint={`${workflowMetrics.scheduledSteps} scheduled · ${workflowMetrics.readyUnscheduledSteps} need schedule · ${workflowMetrics.failedDeliveries} failed${
-                      workflowMetrics.retryingDeliveries > 0
-                        ? ` · ${workflowMetrics.retryingDeliveries} retrying`
+                    value={displayMetrics.sentInRange}
+                    hint={`${displayMetrics.scheduledSteps} scheduled · ${displayMetrics.readyUnscheduledSteps} need schedule · ${displayMetrics.failedDeliveries} failed${
+                      displayMetrics.retryingDeliveries > 0
+                        ? ` · ${displayMetrics.retryingDeliveries} retrying`
                         : ""
                     }${
-                      workflowMetrics.opensInRange > 0
-                        ? ` · ${workflowMetrics.opensInRange} opened`
+                      displayMetrics.opensInRange > 0
+                        ? ` · ${displayMetrics.opensInRange} opened`
                         : ""
                     }${
-                      workflowMetrics.bouncedEmailsInRange > 0 ||
-                      workflowMetrics.openBounceReviewTasks > 0
-                        ? ` · ${workflowMetrics.bouncedEmailsInRange} bounced · ${workflowMetrics.openBounceReviewTasks} to review`
+                      displayMetrics.bouncedEmailsInRange > 0 ||
+                      displayMetrics.openBounceReviewTasks > 0
+                        ? ` · ${displayMetrics.bouncedEmailsInRange} bounced · ${displayMetrics.openBounceReviewTasks} to review`
                         : ""
                     }`}
                     icon={Send}
                     href="/inbox?folder=scheduled"
                     tone={
                       ((): KpiTone => {
-                        if (workflowMetrics.failedDeliveries > 0) return "danger";
+                        if (displayMetrics.failedDeliveries > 0) return "danger";
                         if (
-                          workflowMetrics.bouncedEmailsInRange > 0 ||
-                          workflowMetrics.openBounceReviewTasks > 0 ||
-                          workflowMetrics.readyUnscheduledSteps > 0
+                          displayMetrics.bouncedEmailsInRange > 0 ||
+                          displayMetrics.openBounceReviewTasks > 0 ||
+                          displayMetrics.readyUnscheduledSteps > 0
                         ) {
                           return "warn";
                         }
-                        if (workflowMetrics.sentInRange > 0) return "info";
+                        if (displayMetrics.sentInRange > 0) return "info";
                         return "default";
                       })()
                     }
@@ -939,7 +1034,7 @@ export default function DashboardPage() {
                     <KpiCard
                       label={`Closed (${DASHBOARD_TIME_RANGE_LABELS[timeRange as DashboardTimeRangeKey]})`}
                       value={`$${(closedValue / 1000).toFixed(0)}k`}
-                      hint={`${scopedDeals.filter((d) => d.stage === "won").length} deals won`}
+                      hint={`${wonDealCount} deals won`}
                       icon={DollarSign}
                       href="/deals"
                       tone={
@@ -1011,7 +1106,12 @@ export default function DashboardPage() {
                     activityRecords={scopedActivityRecords}
                   />
                 </div>
-                {w.pipelineDistribution ? <PipelineDistribution leads={scopedSalesLeads} /> : null}
+                {w.pipelineDistribution ? (
+                  <PipelineDistribution
+                    leads={scopedSalesLeads}
+                    stageCounts={displayPipelineByStage}
+                  />
+                ) : null}
               </div>
             ) : null}
 
@@ -1057,7 +1157,9 @@ export default function DashboardPage() {
                       range={timeRange as DashboardTimeRangeKey}
                     />
                   ) : null}
-                  {w.channelMix ? <ChannelMix leads={scopedSalesLeads} /> : null}
+                  {w.channelMix ? (
+                    <ChannelMix leads={scopedSalesLeads} channelMix={displayChannelMix} />
+                  ) : null}
                 </div>
                 {w.idleLeads ? <IdleLeads leads={scopedSalesLeads} /> : null}
               </div>

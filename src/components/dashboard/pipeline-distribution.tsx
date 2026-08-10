@@ -6,18 +6,29 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtNumber } from "@/lib/format";
 import type { Lead, PipelineStage } from "@/lib/types";
 
-export function PipelineDistribution({ leads: leadsOverride }: { leads?: Lead[] } = {}) {
+type PipelineDistributionProps = {
+  leads?: Lead[];
+  /** Precomputed sales-lead counts by stage (P0.9); skips client aggregation when set. */
+  stageCounts?: Record<string, number> | null;
+};
+
+export function PipelineDistribution({
+  leads: leadsOverride,
+  stageCounts: stageCountsOverride,
+}: PipelineDistributionProps = {}) {
   const ws = useWorkspace();
   const leads = leadsOverride ?? ws.leads;
-  const counts = leads.reduce<Record<PipelineStage, number>>(
+  const countsFromLeads = leads.reduce<Record<PipelineStage, number>>(
     (acc, l) => {
       acc[l.stage] = (acc[l.stage] ?? 0) + 1;
       return acc;
     },
     {} as Record<PipelineStage, number>,
   );
-
-  const total = leads.length;
+  const counts = stageCountsOverride ?? countsFromLeads;
+  const total = stageCountsOverride
+    ? Object.values(stageCountsOverride).reduce((sum, n) => sum + (Number(n) || 0), 0)
+    : leads.length;
   const stagesToShow = PIPELINE_STAGES.filter((s) => s.key !== "won" && s.key !== "lost");
 
   return (
