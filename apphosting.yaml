@@ -17,6 +17,15 @@ env:
     value: kiggclhehjjlembdafbpkjeindbhbemk
     availability:
       - RUNTIME
+  # P1.4 — manual scraper runs proxy to Cloud Functions (cron uses Functions param SCRAPERS_RUNTIME).
+  - variable: SCRAPERS_RUNTIME
+    value: functions
+    availability:
+      - RUNTIME
+  - variable: SCRAPERS_WORKER_URL
+    value: https://us-central1-novacrm-41ef8.cloudfunctions.net/runOrgScrapers
+    availability:
+      - RUNTIME
 runConfig:
   # Keep one instance warm so the first requests after deploy (/, favicon, RSC) are not rejected with HTTP 429 while scaling from zero.
   minInstances: 1
