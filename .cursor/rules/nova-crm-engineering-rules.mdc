@@ -1,0 +1,21 @@
+---
+description: Nova CRM binding engineering contract — Postgres, RLS, no client metric aggregation, queue/workers, no new Firebase without exception
+alwaysApply: true
+---
+
+# Nova CRM engineering rules
+
+Binding contract: [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md). Root `ENGINEERING_RULES.md` is a pointer only — edit the Architecture fixes plan file.
+
+If a request conflicts with these rules: name the rule, propose the compliant alternative, proceed with a non-compliant approach only after an explicit user override (logged exception).
+
+## Non-negotiables
+
+- **DB of record:** PostgreSQL (+ `pgvector` for embeddings). No Firestore/doc DB for CRM transactional data.
+- **Tenancy:** RLS on `organization_id` for every tenant-scoped table before ship.
+- **Metrics:** No client-side aggregation of KPIs — precomputed summaries / materialized views + background updates.
+- **Realtime:** Exception only (chat, notifications, claim/collision). Default is request/response + cache invalidation.
+- **Background work:** Queue + dedicated worker tier — never block the web tier. Two deployables only (`Dockerfile` + `Dockerfile.worker`); no new microservices without an explicit scale/team trigger.
+- **Auth:** Not Firebase Auth (Clerk/WorkOS/Auth.js + httpOnly session).
+- **Firebase:** No new Firebase dependency without a written exception.
+- **Process:** Migrations via ORM only; PRs to `main` with CI; no prod deploys by hand; staging never uses prod credentials; validate + authz every API route.

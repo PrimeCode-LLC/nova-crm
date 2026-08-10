@@ -1,0 +1,69 @@
+# docker-compose.yml — local development only.
+# Week 0 (W0.4): start infra only:
+#   docker compose up -d postgres redis
+# Web + worker services stay commented until Phase 4 (P4.6).
+# See NOVA-CRM-ENGINEERING-RULES.md §1 and docs/ENVIRONMENTS.md.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: nova_dev_password
+      POSTGRES_DB: nova_crm
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nova -d nova_crm"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # --- Deferred until P4.6 (worker entrypoint + next standalone output) ---
+  # web:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     NODE_ENV: development
+  #     DATABASE_URL: postgres://nova:nova_dev_password@postgres:5432/nova_crm
+  #     REDIS_URL: redis://redis:6379
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #
+  # worker:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile.worker
+  #   environment:
+  #     NODE_ENV: development
+  #     DATABASE_URL: postgres://nova:nova_dev_password@postgres:5432/nova_crm
+  #     REDIS_URL: redis://redis:6379
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

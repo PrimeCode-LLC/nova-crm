@@ -55,6 +55,11 @@ export async function resolveLiveTenantForSession(
   return value;
 }
 
+/** Test-only: drop the in-process TTL cache between cases. */
+export function clearLiveTenantCacheForTests(): void {
+  tenantCache.clear();
+}
+
 async function resolveLiveTenantForSessionUncached(
   session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
 ): Promise<ResolvedTenantContext> {

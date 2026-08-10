@@ -33,11 +33,12 @@ vi.mock("@/lib/firestore/collections", () => ({
   COLLECTIONS: { users: "users" },
 }));
 
-import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
+import { resolveLiveTenantForSession, clearLiveTenantCacheForTests } from "@/lib/auth/resolve-live-tenant";
 
 describe("resolveLiveTenantForSession", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    clearLiveTenantCacheForTests();
     userGet.mockResolvedValue({ data: () => ({ status: "active" }) });
     getOrganizationServer.mockResolvedValue({ id: "org-1", status: "active" });
   });

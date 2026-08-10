@@ -5,5 +5,9 @@ This version has breaking changes: APIs, conventions, and file structure may all
 <!-- END:nextjs-agent-rules -->
 
 <!-- BEGIN:nova-engineering-rules -->
-Also follow `ENGINEERING_RULES.md` (Nova CRM architecture contract: Postgres target, no client-side metric aggregation, queue/worker for background work, RLS, no new Firebase dependencies without an explicit exception). If a request conflicts with those rules, flag the conflict before implementing.
+# Nova CRM — Engineering Rules (binding)
+
+Canonical contract (loaded every session). If a request conflicts with these rules, flag the conflict before implementing.
+
+@Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md
 <!-- END:nova-engineering-rules -->

@@ -2,6 +2,10 @@
 
 Next.js 16 **App Router** sales CRM UI with **Firebase Auth**, **Firestore**, **session cookies** (Admin-verified), optional **Cloud Functions**, and **Firebase App Hosting** config.
 
+## Branching
+
+Work on `feature/*` branches and merge to `main` via PR only — see [`docs/BRANCHING.md`](docs/BRANCHING.md). Do not push directly to `main`.
+
 ## Quick start
 
 ```bash
@@ -13,6 +17,17 @@ npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Unauthenticated visitors are redirected to `/login`.
+
+### Local Docker (Postgres + Redis)
+
+```bash
+docker compose up -d postgres redis
+# Wait until healthy, then:
+# DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm
+# REDIS_URL=redis://localhost:6379
+```
+
+Repo-root `Dockerfile` / `Dockerfile.worker` are ready for later tiers; web/worker Compose services stay commented until Phase 4. Env separation rules: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 
 ### UI-only dev (no Firebase Admin)
 
