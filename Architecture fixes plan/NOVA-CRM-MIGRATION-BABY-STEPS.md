@@ -48,6 +48,22 @@ Pain relief first; no data migration. Rule: no client-side aggregation of KPIs �
 
 ---
 
+## Phase 1 — Split heavy work off interactive web tier (still Firebase)
+
+Rule: ENGINEERING_RULES §3 / §5 — do not block App Hosting with IMAP/import/scraper/scheduled-send bursts. Full ranked inventory: [`NOVA-CRM-P1-JOBS-INVENTORY.md`](NOVA-CRM-P1-JOBS-INVENTORY.md).
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P1.1 | [x] | Jobs/crons inventory ranked by hang risk — see companion doc; **#1 move = IMAP sync** |
+| P1.2 | [x] | IMAP heads sync on Cloud Functions (`functions/src/inboxImapSync.ts`); AH only postprocess bounce/fanout. Rollback: `IMAP_SYNC_RUNTIME=apphosting` |
+| P1.3 | [ ] | Move scheduled-email send off App Hosting |
+| P1.4 | [ ] | Move scrapers cron (+ long manual scraper runs) off App Hosting |
+| P1.5 | [ ] | Move remaining light crons / long user APIs as needed (content reminders, MillionVerifier, import staging) |
+
+**Phase 1 exit:** Interactive App Hosting is not blocked by IMAP / scraper / scheduled-send bursts. (Prospect import *chunk* processing already runs on Cloud Functions; IMAP heads sync moved in P1.2.)
+
+---
+
 ## Later phases
 
-Phase 1–6 steps live in the migration plan; expand checkboxes here as each phase starts.
+Phase 2–6 steps live in the migration plan; expand checkboxes here as each phase starts.

@@ -5,7 +5,12 @@ import { runInboxImapSyncCronServer } from "@/lib/email/inbox-imap-sync-cron-ser
 export const maxDuration = 300;
 
 /**
- * Server-side IMAP inbox head sync (badge / list hydrate without open browser tabs).
+ * Legacy / rollback path: full IMAP inbox head sync on App Hosting.
+ *
+ * Production (P1.2+) runs heads on Cloud Functions (`syncInboxImapHeads`) and only
+ * calls `/api/cron/inbox-imap/postprocess` here. Set Functions param
+ * `IMAP_SYNC_RUNTIME=apphosting` to restore this route as the scheduled target.
+ *
  * Respects per-mailbox `syncIntervalMinutes` + `inboxLastSyncedAt`.
  */
 export async function GET(req: Request) {
