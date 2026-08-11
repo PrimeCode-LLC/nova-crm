@@ -20,7 +20,11 @@ import {
   type PipelineDealFields,
   type PipelineLeadFields,
 } from "./openPipeline";
-import { recomputeOrgDashboardSummaryForOrg } from "./orgDashboardSummary";
+import { refreshOrgDashboardSummaryAfterWrite } from "./orgDashboardSummary";
+import {
+  cronSecret,
+  orgDashboardSummaryStore,
+} from "./orgDashboardSummaryNotify";
 
 export {
   cleanupProspectImportTemporaryData,
@@ -32,6 +36,7 @@ export {
   sendDueScheduledEmails,
   syncInboxImapHeads,
   sendContentCaptureReminders,
+  refreshPostgresDashboardSummaries,
 } from "./appHostingCron";
 
 export { runOrgScrapers } from "./runOrgScrapersHttp";
@@ -94,7 +99,10 @@ export const recomputePermissionsOnUserWrite = onDocumentWritten(
 
 /** Keeps sequence status aligned with manual and automated follow-up completion. */
 export const reconcileFollowupPlanOnFollowupWrite = onDocumentWritten(
-  "followups/{followupId}",
+  {
+    document: "followups/{followupId}",
+    secrets: [cronSecret],
+  },
   async (event) => {
     const before = event.data?.before.data() as Record<string, unknown> | undefined;
     const after = event.data?.after.data() as Record<string, unknown> | undefined;
@@ -137,7 +145,7 @@ export const reconcileFollowupPlanOnFollowupWrite = onDocumentWritten(
       }
     }
 
-    // P0.10 — refresh sent/due/range gauges when follow-up KPI fields change.
+    // P0.10 / P3.4 — refresh dashboard gauges when follow-up KPI fields change.
     if (organizationId) {
       const kpiTouched =
         !before ||
@@ -148,17 +156,24 @@ export const reconcileFollowupPlanOnFollowupWrite = onDocumentWritten(
         before.completedAt !== after.completedAt ||
         before.pausedAt !== after.pausedAt;
       if (kpiTouched) {
-        await recomputeOrgDashboardSummaryForOrg(db, organizationId);
+        await refreshOrgDashboardSummaryAfterWrite(
+          db,
+          organizationId,
+          orgDashboardSummaryStore.value(),
+        );
       }
     }
   },
 );
 
 /**
- * Phase 0 — full org dashboard summary recompute on lead writes (P0.4–P0.10).
+ * Phase 0 / P3.4 — org dashboard summary refresh on lead writes.
  */
 export const syncOpenSalesLeadsOnLeadWrite = onDocumentWritten(
-  "leads/{leadId}",
+  {
+    document: "leads/{leadId}",
+    secrets: [cronSecret],
+  },
   async (event) => {
     const leadId = event.params.leadId as string;
     const beforeRaw = event.data?.before?.exists
@@ -231,15 +246,22 @@ export const syncOpenSalesLeadsOnLeadWrite = onDocumentWritten(
       Boolean(beforeRaw) !== Boolean(afterRaw);
 
     if (!touched) return;
-    await recomputeOrgDashboardSummaryForOrg(db, organizationId);
+    await refreshOrgDashboardSummaryAfterWrite(
+      db,
+      organizationId,
+      orgDashboardSummaryStore.value(),
+    );
   },
 );
 
 /**
- * Phase 0 — full org dashboard summary recompute when deals change.
+ * Phase 0 / P3.4 — org dashboard summary refresh when deals change.
  */
 export const syncOpenPipelineOnDealWrite = onDocumentWritten(
-  "deals/{dealId}",
+  {
+    document: "deals/{dealId}",
+    secrets: [cronSecret],
+  },
   async (event) => {
     const beforeRaw = event.data?.before?.exists
       ? (event.data.before.data() as Record<string, unknown>)
@@ -270,6 +292,10 @@ export const syncOpenPipelineOnDealWrite = onDocumentWritten(
       : null;
 
     if (!dealWriteAffectsOpenPipeline(before, after)) return;
-    await recomputeOrgDashboardSummaryForOrg(db, organizationId);
+    await refreshOrgDashboardSummaryAfterWrite(
+      db,
+      organizationId,
+      orgDashboardSummaryStore.value(),
+    );
   },
 );

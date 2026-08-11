@@ -35,6 +35,20 @@ env:
     value: https://us-central1-novacrm-41ef8.cloudfunctions.net/verifyMillionVerifierLeads
     availability:
       - RUNTIME
+  # P3.4 soak — Postgres org dashboard summaries (SoT). Keep FS writer unset/false.
+  - variable: POSTGRES_DASHBOARD_SUMMARY_WRITER_V1
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: POSTGRES_DASHBOARD_SUMMARY_READ_V1
+    value: "true"
+    availability:
+      - RUNTIME
+  - variable: NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1
+    value: "true"
+    availability:
+      - BUILD
+      - RUNTIME
 runConfig:
   # Keep one instance warm so the first requests after deploy (/, favicon, RSC) are not rejected with HTTP 429 while scaling from zero.
   minInstances: 1

@@ -1,5 +1,6 @@
 // Nova CRM — Prisma schema (Phase 2+)
 // P2.1 empty init · P2.2 orgs/members · P2.6–P2.9 accounts/contacts/leads/deals
+// P3.1 org_dashboard_summaries
 // See Architecture fixes plan/NOVA-CRM-MIGRATION-BABY-STEPS.md
 
 generator client {
@@ -33,7 +34,8 @@ model Organization {
   createdAt            DateTime  @map("created_at") @db.Timestamptz(3)
   updatedAt            DateTime  @map("updated_at") @db.Timestamptz(3)
 
-  members Member[]
+  members           Member[]
+  dashboardSummary  OrgDashboardSummary?
 
   @@map("organizations")
 }
@@ -154,4 +156,37 @@ model Deal {
   @@index([organizationId, stage])
   @@index([organizationId, leadId])
   @@map("deals")
+}
+
+/// Precomputed org dashboard KPIs (P3.1). Mirrors Firestore `orgDashboardSummaries/{orgId}`
+/// / `OrgDashboardSummary` (P0.3). Writers land in P3.2; read cutover in P3.3.
+model OrgDashboardSummary {
+  organizationId            String   @id @map("organization_id")
+  version                   Int      @default(1)
+  updatedAt                 DateTime @map("updated_at") @db.Timestamptz(3)
+  openSalesLeads            Int      @default(0) @map("open_sales_leads")
+  idleSalesLeads            Int      @default(0) @map("idle_sales_leads")
+  prospects                 Int      @default(0)
+  prospectsNeedRouting      Int      @default(0) @map("prospects_need_routing")
+  prospectsReadyToPush      Int      @default(0) @map("prospects_ready_to_push")
+  prospectsPushed           Int      @default(0) @map("prospects_pushed")
+  followupsDue              Int      @default(0) @map("followups_due")
+  overdueFollowups          Int      @default(0) @map("overdue_followups")
+  totalReplies              Int      @default(0) @map("total_replies")
+  repliesPendingReview      Int      @default(0) @map("replies_pending_review")
+  openPipelineValue         Float    @default(0) @map("open_pipeline_value")
+  openDealCount             Int      @default(0) @map("open_deal_count")
+  leadEstimateContributors  Int      @default(0) @map("lead_estimate_contributors")
+  /// Sales-lead counts by pipeline stage (`PipelineStage` → count).
+  pipelineByStage           Json     @default("{}") @map("pipeline_by_stage")
+  /// Per-channel `{ count, won }` (`ChannelKey` → object).
+  channelMix                Json     @default("{}") @map("channel_mix")
+  /// Per-channel funnel stage counts.
+  funnelByChannel           Json     @default("{}") @map("funnel_by_channel")
+  /// Windows: today / 7d / 30d / all → range metrics object.
+  ranges                    Json     @default("{}")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("org_dashboard_summaries")
 }

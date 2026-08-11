@@ -7,6 +7,10 @@
 
 import type { Prisma } from "@/generated/prisma/client";
 import { isPostgresDualWriteCrmEnabled } from "@/lib/db/dual-write-crm-flags";
+import {
+  lookupCrmOrganizationId,
+  scheduleOrgDashboardSummaryRefresh,
+} from "@/lib/db/org-dashboard-summary-refresh";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withRlsBypass } from "@/lib/db/tenant-scope";
 import { getAdminDb } from "@/lib/firebase/admin";
@@ -326,6 +330,15 @@ export async function upsertCrmMirror(
   }
 }
 
+function scheduleSummaryRefreshAfterCrmWrite(
+  entity: CrmEntity,
+  organizationId: string | null | undefined,
+): void {
+  if (entity !== "lead" && entity !== "deal") return;
+  if (!organizationId?.trim()) return;
+  scheduleOrgDashboardSummaryRefresh(organizationId);
+}
+
 /** Re-read from Firestore Admin and upsert (or delete if missing). */
 export async function mirrorCrmEntityAfterWrite(
   entity: CrmEntity,
@@ -338,7 +351,12 @@ export async function mirrorCrmEntityAfterWrite(
     if (!db) return;
     const snap = await db.collection(collectionFor(entity)).doc(id).get();
     if (!snap.exists) {
+      let orgId = opts?.organizationId?.trim() || null;
+      if (!orgId && (entity === "lead" || entity === "deal")) {
+        orgId = await lookupCrmOrganizationId(entity, id);
+      }
       await deleteCrmMirror(entity, id);
+      scheduleSummaryRefreshAfterCrmWrite(entity, orgId);
       return;
     }
     const data = snap.data() as CrmFirestoreDoc;
@@ -357,6 +375,7 @@ export async function mirrorCrmEntityAfterWrite(
       return;
     }
     await upsertCrmMirror(entity, id, data);
+    scheduleSummaryRefreshAfterCrmWrite(entity, data.organizationId ?? opts?.organizationId);
   } catch (err) {
     console.error(
       "[dual-write-crm] mirror failed",
@@ -376,6 +395,7 @@ export async function mirrorCrmDocAfterWrite(
   if (!isPostgresDualWriteCrmEnabled() || !isDatabaseConfigured()) return;
   try {
     await upsertCrmMirror(entity, id, data);
+    scheduleSummaryRefreshAfterCrmWrite(entity, data.organizationId);
   } catch (err) {
     console.error(
       "[dual-write-crm] doc mirror failed",

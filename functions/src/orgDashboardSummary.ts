@@ -291,3 +291,29 @@ export async function recomputeOrgDashboardSummaryForOrg(
 
   void nowMs;
 }
+
+/**
+ * P3.4 — route summary refresh by `ORG_DASHBOARD_SUMMARY_STORE`.
+ * Default `postgres`: notify App Hosting (no Firestore write).
+ */
+export async function refreshOrgDashboardSummaryAfterWrite(
+  db: Firestore,
+  organizationId: string,
+  storeRaw?: string,
+): Promise<void> {
+  const orgId = organizationId.trim();
+  if (!orgId) return;
+
+  const {
+    normalizeOrgDashboardSummaryStore,
+    notifyAppHostingOrgDashboardSummaryRecompute,
+  } = await import("./orgDashboardSummaryNotify");
+  const store = normalizeOrgDashboardSummaryStore(storeRaw);
+
+  if (store === "firestore" || store === "dual") {
+    await recomputeOrgDashboardSummaryForOrg(db, orgId);
+  }
+  if (store === "postgres" || store === "dual") {
+    await notifyAppHostingOrgDashboardSummaryRecompute(orgId);
+  }
+}

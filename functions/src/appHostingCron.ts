@@ -4,8 +4,8 @@ import { processContentCaptureRemindersOnFunctions } from "./contentCaptureRemin
 import { runInboxImapHeadsSyncOnFunctions } from "./inboxImapSync";
 import { runDueScheduledEmailsOnFunctions } from "./scheduledEmailSend";
 import { runDueScrapersOnFunctions } from "./scrapersRun";
+import { cronSecret, siteUrl } from "./siteParams";
 
-const cronSecret = defineSecret("CRON_SECRET");
 /** Same 32-byte key App Hosting uses to decrypt mailbox vault docs. */
 const emailSecretsKey = defineSecret("EMAIL_SECRETS_KEY_BASE64");
 
@@ -18,11 +18,6 @@ const googleMailClientSecret = defineString("GOOGLE_MAIL_CLIENT_SECRET", { defau
 const googleCalendarClientId = defineString("GOOGLE_CALENDAR_CLIENT_ID", { default: "" });
 const googleCalendarClientSecret = defineString("GOOGLE_CALENDAR_CLIENT_SECRET", {
   default: "",
-});
-
-const siteUrl = defineString("SITE_URL", {
-  default: "https://nova.stellixsoft.com",
-  description: "Public App Hosting origin (no trailing slash)",
 });
 
 /**
@@ -63,6 +58,19 @@ const contentCaptureRemindersRuntime = defineString("CONTENT_CAPTURE_REMINDERS_R
   default: "functions",
   description:
     "functions = CF reminders; apphosting = legacy full cron on SITE_URL",
+});
+
+/**
+ * P4.4 — when both are true, schedulers enqueue onto BullMQ via App Hosting
+ * `/api/cron/queue/dispatch` instead of running heavy work on CF/AH.
+ */
+const queueWorkerV1 = defineString("QUEUE_WORKER_V1", {
+  default: "false",
+  description: "Master BullMQ switch (must be true with QUEUE_HEAVY_JOBS_V1)",
+});
+const queueHeavyJobsV1 = defineString("QUEUE_HEAVY_JOBS_V1", {
+  default: "false",
+  description: "Enqueue IMAP/email/scrapers/reminders/dashboard onto BullMQ worker",
 });
 
 function bindMailEnv(): void {
@@ -118,6 +126,27 @@ async function callAppHostingCron(
   return parsed;
 }
 
+/** P4.4 — enqueue onto BullMQ worker via App Hosting dispatcher. Returns true when queued. */
+async function dispatchQueueJob(job: string): Promise<boolean> {
+  if (queueWorkerV1.value() !== "true" || queueHeavyJobsV1.value() !== "true") {
+    return false;
+  }
+  const result = await callAppHostingCron(
+    "/api/cron/queue/dispatch",
+    `Queue dispatch (${job})`,
+    { method: "POST", body: { job } },
+  );
+  console.log(
+    JSON.stringify({
+      level: "info",
+      message: "Heavy job enqueued to BullMQ",
+      job,
+      result,
+    }),
+  );
+  return true;
+}
+
 const cronScheduleOptions = {
   timeZone: "UTC",
   secrets: [cronSecret],
@@ -141,6 +170,8 @@ export const runDueScrapers = onSchedule(
     memory: "1GiB" as const,
   },
   async () => {
+    if (await dispatchQueueJob("scrapers")) return;
+
     const runtime = scrapersRuntime.value().trim().toLowerCase() || "functions";
 
     if (runtime === "apphosting") {
@@ -182,6 +213,8 @@ export const sendDueScheduledEmails = onSchedule(
     secrets: [cronSecret, emailSecretsKey],
   },
   async () => {
+    if (await dispatchQueueJob("scheduled-email")) return;
+
     const runtime = scheduledEmailRuntime.value().trim().toLowerCase() || "functions";
 
     if (runtime === "apphosting") {
@@ -244,6 +277,8 @@ export const syncInboxImapHeads = onSchedule(
     secrets: [cronSecret, emailSecretsKey],
   },
   async () => {
+    if (await dispatchQueueJob("imap-sync")) return;
+
     const runtime = imapSyncRuntime.value().trim().toLowerCase() || "functions";
 
     if (runtime === "apphosting") {
@@ -297,6 +332,8 @@ export const sendContentCaptureReminders = onSchedule(
     memory: "512MiB" as const,
   },
   async () => {
+    if (await dispatchQueueJob("content-reminders")) return;
+
     const runtime =
       contentCaptureRemindersRuntime.value().trim().toLowerCase() || "functions";
 
@@ -320,6 +357,35 @@ export const sendContentCaptureReminders = onSchedule(
       JSON.stringify({
         level: "info",
         message: "Content capture reminders cron ok (functions runtime)",
+        result,
+      }),
+    );
+  },
+);
+
+/**
+ * P3.2 — every minute: drain Redis dirty-set for Postgres org dashboard summaries.
+ * Work runs on App Hosting (`/api/cron/dashboard-summaries/refresh`); no-op when
+ * `POSTGRES_DASHBOARD_SUMMARY_WRITER_V1` is off. Moves to BullMQ worker in Phase 4.
+ */
+export const refreshPostgresDashboardSummaries = onSchedule(
+  {
+    ...cronScheduleOptions,
+    schedule: "* * * * *",
+    timeoutSeconds: 120,
+    memory: "256MiB" as const,
+  },
+  async () => {
+    if (await dispatchQueueJob("dashboard-summary")) return;
+
+    const result = await callAppHostingCron(
+      "/api/cron/dashboard-summaries/refresh",
+      "Postgres dashboard summary refresh",
+    );
+    console.log(
+      JSON.stringify({
+        level: "info",
+        message: "Postgres dashboard summary refresh cron ok",
         result,
       }),
     );

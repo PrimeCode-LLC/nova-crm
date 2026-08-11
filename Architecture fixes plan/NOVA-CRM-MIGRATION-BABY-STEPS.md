@@ -79,12 +79,46 @@ ORM: **Prisma 7** + Migrate. Tenant key: `organization_id` + **RLS mandatory** b
 | P2.7 | [x] | Contacts: same shared CRM pipeline (FK-friendly columns, no hard inter-entity FKs yet) |
 | P2.8 | [x] | Leads: same + promote/Instantly server mirrors |
 | P2.9 | [x] | Deals: schema+RLS+patch dual-write (creates still session-only in UI — ETL covers existing FS deals) |
-| P2.10 | [ ] | Feature-flagged read cutover for one list (e.g. leads) to Postgres |
+| P2.10 | [x] | Leads list read cutover behind `POSTGRES_READ_LEADS_V1` (+ `NEXT_PUBLIC_…`); `GET /api/org/leads` + `listLeadsFromPostgres` (RLS); workspace poll when flag on, Firestore when off |
 
 **Phase 2 exit:** Core CRM entities dual-written, reconciled in staging; at least one read path on Postgres behind a flag.
 
 ---
 
+## Phase 3 — Dashboard reads from Postgres
+
+Rule: ENGINEERING_RULES §1 — KPIs from precomputed summaries, not client aggregation. Replaces Phase 0 Firestore `orgDashboardSummaries` over time.
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P3.1 | [x] | Table `org_dashboard_summaries` + RLS + `nova_app` grants; Prisma model `OrgDashboardSummary`; mapper `src/lib/db/org-dashboard-summary-postgres.ts`; schema note [`NOVA-CRM-P3-ORG-DASHBOARD-SUMMARY-PG.md`](NOVA-CRM-P3-ORG-DASHBOARD-SUMMARY-PG.md) |
+| P3.2 | [x] | Writer flag `POSTGRES_DASHBOARD_SUMMARY_WRITER_V1`; recompute from PG leads/deals (+ FS followups); Redis dirty-set + ~60s cooldown; hooked from CRM dual-write; cron `GET /api/cron/dashboard-summaries/refresh` + CF `refreshPostgresDashboardSummaries` |
+| P3.3 | [x] | Read flag `POSTGRES_DASHBOARD_SUMMARY_READ_V1` (+ `NEXT_PUBLIC_…`); `GET /api/org/dashboard-summary` prefers Redis→Postgres (RLS); client hook enables on either Phase 0 or P3.3 flag (FS fallback removed in P3.4) |
+| P3.4 | [x] | Postgres SoT for org KPI summaries: no FS fallback on PG read; admin recompute → PG; FS writes opt-in `DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1`; CF `ORG_DASHBOARD_SUMMARY_STORE=postgres` → `POST /api/cron/dashboard-summaries/recompute-org` |
+
+**Phase 3 exit:** Dashboard metrics served from Postgres precompute, not client aggregation or Firestore scans. ✓
+
+---
+
+## Phase 4 — Real queue + worker tier
+
+Rule: ENGINEERING_RULES §3 / §5 — web and worker are separate deployables; heavy work only on the worker. Companion: [`NOVA-CRM-P4-QUEUE-WORKER.md`](NOVA-CRM-P4-QUEUE-WORKER.md).
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P4.1 | [x] | BullMQ + `ioredis` on `REDIS_URL`; `src/lib/queue/connection.ts` + `queues.ts`; live Queue vs Compose Redis |
+| P4.2 | [x] | `src/worker/index.ts` + `npm run build:worker` (esbuild) → `dist/worker/index.js`; hello job + `/healthz` |
+| P4.3 | [x] | Import chunks: confirm enqueues; worker applies via `prospect-import-chunk-apply`; CF trigger skipped when `QUEUE_IMPORT_CHUNKS_V1` |
+| P4.4 | [x] | IMAP / scheduled email / scrapers / reminders / dashboard drain enqueue via `/api/cron/queue/dispatch` + AH cron helpers when `QUEUE_HEAVY_JOBS_V1` |
+| P4.5 | [x] | Per-tenant Redis sliding window + worker limiter + priority lanes (`src/lib/queue/fairness.ts`) |
+| P4.6 | [x] | Next `output: 'standalone'`; Compose `web`/`worker` (profile `full`); `/api/health` |
+
+**Phase 4 exit:** Web and worker are separate deployables; background work only on worker when queue flags are on. ✓
+
+**Local soak (2026-08-11):** `npx tsx scripts/soak-phase4-queue.ts` passed — hello + dashboard consumed by worker; import enqueue lands on `nova-import-chunks`; HTTP `/api/cron/queue/dispatch` and dashboard refresh return `queued:true` (no inline heavy drain). Requires `QUEUE_*` + `CRON_SECRET` + `npm run worker` + `npm run dev`.
+
+---
+
 ## Later phases
 
-Phase 3–6 steps live in the migration plan; expand checkboxes here as each phase starts.
+Phase 5–6 steps live in the migration plan; expand checkboxes here as each phase starts.

@@ -11,6 +11,7 @@
  */
 
 import { PrismaPg } from "@prisma/adapter-pg";
+import { Pool } from "pg";
 import { PrismaClient } from "@/generated/prisma/client";
 
 export function getDatabaseUrl(): string | null {
@@ -22,9 +23,33 @@ export function isDatabaseConfigured(): boolean {
   return Boolean(getDatabaseUrl());
 }
 
+/** Default interactive-transaction wait / run budgets (ms). */
+export const PRISMA_TX_MAX_WAIT_MS = 10_000;
+export const PRISMA_TX_TIMEOUT_MS = 20_000;
+
 const globalForPrisma = globalThis as unknown as {
   prisma: PrismaClient | undefined;
+  pgPool: Pool | undefined;
 };
+
+function createPgPool(connectionString: string): Pool {
+  const max = Math.max(
+    2,
+    Math.min(20, Number.parseInt(process.env.PG_POOL_MAX ?? "10", 10) || 10),
+  );
+  const pool = new Pool({
+    connectionString,
+    max,
+    // Fail fast under saturation instead of hanging until interactive tx gives up.
+    connectionTimeoutMillis: 10_000,
+    idleTimeoutMillis: 30_000,
+    allowExitOnIdle: true,
+  });
+  pool.on("error", (err) => {
+    console.error("[pg-pool] idle client error", err instanceof Error ? err.message : err);
+  });
+  return pool;
+}
 
 function createPrismaClient(): PrismaClient {
   const connectionString = getDatabaseUrl();
@@ -34,8 +59,16 @@ function createPrismaClient(): PrismaClient {
     );
   }
 
-  const adapter = new PrismaPg({ connectionString });
-  return new PrismaClient({ adapter });
+  const pool = createPgPool(connectionString);
+  globalForPrisma.pgPool = pool;
+  const adapter = new PrismaPg(pool);
+  return new PrismaClient({
+    adapter,
+    transactionOptions: {
+      maxWait: PRISMA_TX_MAX_WAIT_MS,
+      timeout: PRISMA_TX_TIMEOUT_MS,
+    },
+  });
 }
 
 /**
@@ -50,10 +83,18 @@ export function getPrisma(): PrismaClient {
   return globalForPrisma.prisma;
 }
 
-/** Close the shared client (tests / graceful shutdown). */
+/** Close the shared client + pool (tests / graceful shutdown). */
 export async function disconnectPrisma(): Promise<void> {
   const client = globalForPrisma.prisma;
-  if (!client) return;
+  const pool = globalForPrisma.pgPool;
   globalForPrisma.prisma = undefined;
-  await client.$disconnect();
+  globalForPrisma.pgPool = undefined;
+  if (client) {
+    await client.$disconnect();
+  }
+  if (pool) {
+    await pool.end().catch(() => {
+      /* ignore */
+    });
+  }
 }

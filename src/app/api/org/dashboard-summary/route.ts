@@ -3,16 +3,22 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { isDashboardSummariesV1Enabled } from "@/lib/dashboard-summary-flags";
 import { getOrgDashboardSummaryServer } from "@/lib/dashboard-summary-server";
 import { getPersonDashboardTaskGaugesServer } from "@/lib/dashboard-person-summary-server";
+import { isPostgresDashboardSummaryReadEnabled } from "@/lib/db/postgres-dashboard-summary-flags";
+import { getOrgDashboardSummaryFromPostgres } from "@/lib/db/org-dashboard-summary-read";
 
 /**
- * P0.6 / P0.11 — read org dashboard summary (Redis → Firestore) + person task gauges.
- * When `dashboard_summaries_v1` is off, returns `{ enabled: false }` so clients keep the live path.
+ * P0.6 / P3.3 / P3.4 — read org dashboard summary + person task gauges.
+ *
+ * Enablement: Phase 3 Postgres read and/or Phase 0 Firestore read (rollback).
+ * P3.4: when Postgres read is on, Postgres is sole source (no Firestore fallback).
  */
 export async function GET() {
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
-  if (!isDashboardSummariesV1Enabled()) {
+  const pgRead = isPostgresDashboardSummaryReadEnabled();
+  const fsRead = isDashboardSummariesV1Enabled();
+  if (!pgRead && !fsRead) {
     return NextResponse.json({
       ok: true,
       enabled: false,
@@ -25,12 +31,18 @@ export async function GET() {
   const orgId = g.ctx.session.organizationId;
   const uid = g.ctx.session.uid;
 
-  const [result, personResult] = await Promise.all([
-    getOrgDashboardSummaryServer(orgId),
+  const [summaryResult, personResult] = await Promise.all([
+    (async () => {
+      if (pgRead) {
+        // P3.4 — Postgres is SoT; do not fall back to Firestore.
+        return getOrgDashboardSummaryFromPostgres(orgId);
+      }
+      return getOrgDashboardSummaryServer(orgId);
+    })(),
     getPersonDashboardTaskGaugesServer(orgId, uid),
   ]);
 
-  if (!result) {
+  if (!summaryResult) {
     return NextResponse.json({
       ok: true,
       enabled: true,
@@ -44,8 +56,8 @@ export async function GET() {
   return NextResponse.json({
     ok: true,
     enabled: true,
-    summary: result.summary,
-    source: result.source,
+    summary: summaryResult.summary,
+    source: summaryResult.source,
     person: personResult?.gauges ?? null,
     personSource: personResult?.source ?? null,
   });

@@ -1,6 +1,6 @@
 /**
- * Admin backfill / repair for full org dashboard summary (P0.4–P0.10).
- * Live updates come from Cloud Functions on lead/deal/followup writes.
+ * Admin backfill / repair for org dashboard summary (P3.4: Postgres SoT).
+ * Live updates: CRM dual-write schedule + CF → App Hosting recompute-org.
  */
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
@@ -20,6 +20,7 @@ export async function POST() {
   const s = result.summary;
   return NextResponse.json({
     ok: true,
+    store: "postgres",
     openSalesLeads: s.openSalesLeads,
     idleSalesLeads: s.idleSalesLeads,
     prospects: s.prospects,

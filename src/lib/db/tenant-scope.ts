@@ -10,9 +10,18 @@
  */
 
 import type { Prisma } from "@/generated/prisma/client";
-import { getPrisma } from "@/lib/db/prisma";
+import {
+  getPrisma,
+  PRISMA_TX_MAX_WAIT_MS,
+  PRISMA_TX_TIMEOUT_MS,
+} from "@/lib/db/prisma";
 
 export type TenantTx = Prisma.TransactionClient;
+
+const TX_OPTIONS = {
+  maxWait: PRISMA_TX_MAX_WAIT_MS,
+  timeout: PRISMA_TX_TIMEOUT_MS,
+} as const;
 
 async function setOrganizationId(tx: TenantTx, organizationId: string): Promise<void> {
   // Third arg true => SET LOCAL (transaction-scoped; safe with pooled connections).
@@ -39,7 +48,7 @@ export async function withOrganizationScope<T>(
   return prisma.$transaction(async (tx) => {
     await setOrganizationId(tx, organizationId);
     return fn(tx);
-  });
+  }, TX_OPTIONS);
 }
 
 /**
@@ -52,5 +61,5 @@ export async function withRlsBypass<T>(fn: (tx: TenantTx) => Promise<T>): Promis
   return prisma.$transaction(async (tx) => {
     await setBypassRls(tx, true);
     return fn(tx);
-  });
+  }, TX_OPTIONS);
 }

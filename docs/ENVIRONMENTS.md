@@ -51,6 +51,29 @@ Org/member reconcile (P2.5): `npm run db:reconcile:orgs-members` (optional `--or
 CRM entities (P2.6–P2.9): set `POSTGRES_DUAL_WRITE_CRM_V1=true` for live mirrors. Backfill/reconcile:
 `npm run db:backfill:crm -- --dry-run` then without `--dry-run`; `npm run db:reconcile:crm`.
 
+Leads list read cutover (P2.10): set `POSTGRES_READ_LEADS_V1=true` and `NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true` so the workspace leads list uses `GET /api/org/leads` (Postgres + RLS) instead of Firestore `onSnapshot`. Flag off = Firestore. Requires a clean CRM backfill/reconcile first. Client polls every **60s** with an in-flight guard; API pages internally (`all=1`) and strips heavy payload blobs.
+
+Optional pool tuning: `PG_POOL_MAX` (default 10) for the Prisma `pg` pool.
+
+Postgres dashboard summary writer (P3.2): set `POSTGRES_DASHBOARD_SUMMARY_WRITER_V1=true` so lead/deal dual-writes mark the org dirty and refresh `org_dashboard_summaries` (debounced ~60s). Cron drain: `GET /api/cron/dashboard-summaries/refresh` with `Authorization: Bearer CRON_SECRET` (Cloud Functions `refreshPostgresDashboardSummaries` every minute). Requires `DATABASE_URL`; Redis recommended for dirty-set coalesce.
+
+Postgres dashboard summary read (P3.3/P3.4): set `POSTGRES_DASHBOARD_SUMMARY_READ_V1=true` and `NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true` so `GET /api/org/dashboard-summary` reads Postgres only (+ Redis `dash:summary:pg:v1:…`). No Firestore fallback when this flag is on.
+
+P3.4 SoT: admin `POST /api/org/dashboard-summary/recompute` writes Postgres. Firestore `orgDashboardSummaries` writes require opt-in `DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1=true`. Cloud Functions use `ORG_DASHBOARD_SUMMARY_STORE=postgres` (default) → `POST /api/cron/dashboard-summaries/recompute-org`; set `firestore` or `dual` only for rollback.
+
+Phase 0 `DASHBOARD_SUMMARIES_V1` remains a **read rollback** to Firestore summaries.
+
+## Phase 4 — BullMQ worker (local)
+
+| | |
+|--|--|
+| Flags | `QUEUE_WORKER_V1=true` plus `QUEUE_IMPORT_CHUNKS_V1` and/or `QUEUE_HEAVY_JOBS_V1` |
+| Worker | `REDIS_URL=redis://localhost:6379 npm run worker` (or `npm run build:worker && npm run worker:built`) |
+| Full Compose | `docker compose --profile full up --build` (web + worker + postgres + redis) |
+| Dispatch | `POST /api/cron/queue/dispatch` with `{ "job": "imap-sync" \| … }` and `Authorization: Bearer CRON_SECRET` |
+
+See [`Architecture fixes plan/NOVA-CRM-P4-QUEUE-WORKER.md`](../Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md).
+
 ## Checklist before pointing any script at a DB
 
 - [ ] `DATABASE_URL` host is clearly local, staging, or prod — never ambiguous

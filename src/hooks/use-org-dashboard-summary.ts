@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { isDashboardSummariesV1Enabled } from "@/lib/dashboard-summary-flags";
+import { isPostgresDashboardSummaryReadEnabled } from "@/lib/db/postgres-dashboard-summary-flags";
 import type { OrgDashboardSummary } from "@/lib/dashboard-summary";
 import type { PersonDashboardTaskGauges } from "@/lib/dashboard-person-summary";
 
@@ -10,21 +11,26 @@ export type OrgDashboardSummaryResponse = {
   enabled: boolean;
   summary: OrgDashboardSummary | null;
   person?: PersonDashboardTaskGauges | null;
-  source: "redis" | "firestore" | null;
+  source: "redis" | "firestore" | "postgres" | null;
   personSource?: "redis" | "firestore" | null;
   error?: string;
 };
 
+/** True when either Phase 0 Firestore summaries or Phase 3 Postgres read is enabled. */
+export function isOrgDashboardSummaryClientEnabled(): boolean {
+  return isDashboardSummariesV1Enabled() || isPostgresDashboardSummaryReadEnabled();
+}
+
 /**
- * Fetches precomputed org dashboard KPIs (+ person task gauges) when
- * `dashboard_summaries_v1` is on. Fall back to live aggregation when `summary` is null.
+ * Fetches precomputed org dashboard KPIs (+ person task gauges) when a summary
+ * read flag is on. Fall back to live aggregation when `summary` is null.
  */
 export function useOrgDashboardSummary(opts: {
   enabled?: boolean;
   /** Org-wide summary only — disable when channel/owner filters are active. */
   orgWideScope?: boolean;
 }) {
-  const flagOn = isDashboardSummariesV1Enabled();
+  const flagOn = isOrgDashboardSummaryClientEnabled();
   const enabled = Boolean(opts.enabled) && flagOn && opts.orgWideScope !== false;
 
   const query = useQuery({

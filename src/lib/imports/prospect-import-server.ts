@@ -15,6 +15,7 @@ import {
   type ProspectImportPolicy,
   type StagedProspectImportRow,
 } from "@/lib/imports/prospect-import-types";
+import { isQueueImportChunksV1Enabled } from "@/lib/queue/flags";
 
 const QUERY_CHUNK_SIZE = 30;
 const ROWS_PER_CHUNK = 40;
@@ -511,6 +512,20 @@ export async function confirmProspectImportJob(input: {
     batch.update(chunkDoc.ref, { status: "queued", updatedAt: now });
   }
   await batch.commit();
+
+  if (isQueueImportChunksV1Enabled()) {
+    const { enqueueImportChunkJob } = await import("@/lib/queue/enqueue");
+    for (const chunkDoc of chunksSnapshot.docs) {
+      const chunkOrg = String(chunkDoc.data()?.organizationId ?? organizationId);
+      if (chunkOrg !== organizationId) continue;
+      await enqueueImportChunkJob({
+        organizationId,
+        jobId,
+        chunkId: chunkDoc.id,
+      });
+    }
+  }
+
   return { ...job, policy, reimportConfirmed, status: "queued", startedAt: now, updatedAt: now };
 }
 
