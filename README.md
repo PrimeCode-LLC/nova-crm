@@ -1,6 +1,34 @@
 # Nova CRM (Relay)
 
-Next.js 16 **App Router** sales CRM UI with **Firebase Auth**, **Firestore**, **session cookies** (Admin-verified), optional **Cloud Functions**, and **Firebase App Hosting** config.
+Next.js 16 **App Router** sales CRM. **Target architecture:** PostgreSQL (RLS) + Redis + two deployables (**web** + **worker**). **Today (migration in progress):** Firebase Auth / Firestore still in use alongside Postgres dual-write and a BullMQ worker. Binding rules: [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md). Progress checklist: [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md).
+
+## Current architecture (not frontend / backend microservices)
+
+There are **two app deployables**, not a separate “frontend Docker” and “backend Docker”:
+
+| Deployable | Image | Role |
+|------------|--------|------|
+| **Web** | `Dockerfile` | Next.js UI + API routes (interactive traffic only) |
+| **Worker** | `Dockerfile.worker` | BullMQ consumer — imports, IMAP, scheduled email, scrapers, reminders, dashboard refresh |
+
+Local infra is Compose **Postgres 16** + **Redis 7**. Default `docker compose up` starts infra only; web/worker are under Compose profile `full`.
+
+```mermaid
+flowchart LR
+  browser[Browser] --> web[Web_Next.js]
+  web --> pg[(Postgres_RLS)]
+  web --> redis[(Redis)]
+  web -->|enqueue| redis
+  redis --> worker[Worker_BullMQ]
+  worker --> pg
+  worker --> redis
+  web -.->|dual-write_still| fs[(Firestore)]
+  web -.->|login_still| fa[Firebase_Auth]
+```
+
+- Heavy work must not run on the web tier when queue flags are on — see [`NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md).
+- **Auth today:** Firebase Auth + httpOnly session cookies. **Phase 5 target:** Clerk (confirm at P5.0).
+- Env / flag details: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md). Tenant SaaS model (still Firebase-shaped): [`docs/SAAS-ARCHITECTURE.md`](docs/SAAS-ARCHITECTURE.md).
 
 ## Branching
 
@@ -13,22 +41,43 @@ cd crm
 npm install
 cp .env.example .env.local
 # Fill NEXT_PUBLIC_FIREBASE_* and FIREBASE_ADMIN_* (see below)
+# Set DATABASE_URL / MIGRATE_DATABASE_URL / REDIS_URL (see Docker section)
+docker compose up -d postgres redis
+npm run db:migrate:deploy   # first time / after pulling migrations
 npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000). Unauthenticated visitors are redirected to `/login`.
 
+### Local worker (Phase 4)
+
+With Redis up and `REDIS_URL` in `.env.local`:
+
+```bash
+# Optional queue cutover (defaults off — CF/AH paths remain):
+# QUEUE_WORKER_V1=true
+# QUEUE_IMPORT_CHUNKS_V1=true
+# QUEUE_HEAVY_JOBS_V1=true
+npm run worker
+```
+
+Health: `http://127.0.0.1:8081/healthz`. Full containerized stack (web + worker + infra):
+
+```bash
+docker compose --profile full up --build
+```
+
 ### Local Docker (Postgres + Redis)
 
 ```bash
 docker compose up -d postgres redis
-# Wait until healthy, then:
-# DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm
+# Wait until healthy, then in .env.local:
+# DATABASE_URL=postgres://nova_app:nova_dev_password@localhost:5432/nova_crm
+# MIGRATE_DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm
 # REDIS_URL=redis://localhost:6379
 ```
 
-Repo-root `Dockerfile` / `Dockerfile.worker` are ready for later tiers; web/worker Compose services stay commented until Phase 4. Env separation rules: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
-
+Env separation rules: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 ### UI-only dev (no Firebase Admin)
 
 If you have not set **Firebase Admin** credentials yet, either:
@@ -152,11 +201,21 @@ Deploy: `npm run firebase:deploy:functions` from `crm/` (requires Blaze for call
 
 | Script | Command |
 |--------|---------|
-| `npm run dev` | Next dev server |
-| `npm run build` | Production build |
+| `npm run dev` | Next web tier (interactive) |
+| `npm run worker` | BullMQ worker tier (`src/worker`) |
+| `npm run build` | Production Next build (`output: 'standalone'`) |
+| `npm run build:worker` | Bundle worker → `dist/worker/index.js` |
+| `npm run db:migrate:deploy` | Apply Prisma migrations (local/staging) |
+| `npm run db:studio` | Prisma Studio UI for local Postgres (needs Compose DB up) |
 | `npm run firebase:deploy:rules` | Deploy Firestore rules only |
 | `npm run firebase:deploy:functions` | Deploy Cloud Functions |
 
-## Product docs
+## Product / migration docs
 
-See repo root `PROJECT-OVERVIEW.md` and the Cursor plan for domain model and roadmap.
+| Doc | What |
+|-----|------|
+| [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md) | Binding architecture contract |
+| [`Architecture fixes plan/NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md) | Phase checklist (Week 0 → Phase 6) |
+| [`Architecture fixes plan/NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md) | Queue names, flags, worker soak |
+| [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Local/staging/prod + dual-write / queue flags |
+| Repo root `PROJECT-OVERVIEW.md` | Domain model / product overview |

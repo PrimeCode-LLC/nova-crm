@@ -17,6 +17,7 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
+    "db:studio": "prisma studio",
     "db:status": "prisma migrate status",
     "db:backfill:orgs-members": "npx --yes tsx scripts/backfill-orgs-members-to-postgres.ts",
     "db:reconcile:orgs-members": "npx --yes tsx scripts/reconcile-orgs-members.ts",
