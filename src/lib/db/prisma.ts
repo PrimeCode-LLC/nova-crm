@@ -1,8 +1,9 @@
 /**
  * Server-side Prisma client (Phase 2 / P2.1).
  *
- * Local: `DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm`
- * (Compose Postgres 16 — see docs/ENVIRONMENTS.md).
+ * Local app: `DATABASE_URL=postgres://nova_app:nova_dev_password@localhost:5432/nova_crm`
+ * (Compose Postgres 16 — `nova_app` is non-superuser so FORCE RLS applies).
+ * Migrations: `MIGRATE_DATABASE_URL` as Compose superuser `nova` (see docs/ENVIRONMENTS.md).
  * Staging/prod: separate managed Postgres URLs — never share with local.
  *
  * Prisma 7 requires a driver adapter (`@prisma/adapter-pg`).

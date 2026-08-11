@@ -10,11 +10,14 @@ loadEnv();
 loadEnv({ path: ".env.local", override: true });
 
 /**
- * Real `DATABASE_URL` is required for migrate/deploy and runtime.
- * `prisma generate` (postinstall / CI without env files) only needs a syntactically
- * valid URL — it does not open a connection. Placeholder keeps generate green.
+ * Migrations need a role that can DDL (local Compose: `nova` superuser).
+ * Runtime app queries must use `nova_app` (no BYPASSRLS) so FORCE RLS applies —
+ * see `DATABASE_URL` vs `MIGRATE_DATABASE_URL` in docs/ENVIRONMENTS.md.
+ *
+ * `prisma generate` may run without env files — placeholder is non-connecting.
  */
 const databaseUrl =
+  process.env.MIGRATE_DATABASE_URL?.trim() ||
   process.env.DATABASE_URL?.trim() ||
   "postgresql://prisma:prisma@127.0.0.1:5432/prisma_generate_placeholder?schema=public";
 

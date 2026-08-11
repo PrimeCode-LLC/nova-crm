@@ -71,7 +71,7 @@ ORM: **Prisma 7** + Migrate. Tenant key: `organization_id` + **RLS mandatory** b
 | ID | Status | Notes |
 |----|--------|-------|
 | P2.1 | [x] | Prisma 7 + `@prisma/adapter-pg`; `DATABASE_URL`; `prisma/migrations/20260811000000_init` (empty); `src/lib/db/prisma.ts`; scripts `db:generate` / `db:migrate` / `db:migrate:deploy` |
-| P2.2 | [ ] | Schema: `organizations` + `members` + RLS policies; isolation test |
+| P2.2 | [x] | `organizations` + `members` models; RLS + FORCE (`app.organization_id` / `app.bypass_rls`); `nova_app` runtime role (superuser bypass fix); `withOrganizationScope` / `withRlsBypass`; isolation tests; CI Postgres + migrate |
 | P2.3 | [ ] | Dual-write create/update for orgs/members |
 | P2.4 | [ ] | Idempotent ETL backfill orgs/members |
 | P2.5 | [ ] | Reconciliation script (counts + sample field diffs) |

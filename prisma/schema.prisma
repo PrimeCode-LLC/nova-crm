@@ -1,5 +1,5 @@
 // Nova CRM — Prisma schema (Phase 2+)
-// P2.1: empty init (migrate history only). Entity models start in P2.2.
+// P2.1: empty init. P2.2: organizations + members (+ RLS in migration SQL).
 // See Architecture fixes plan/NOVA-CRM-MIGRATION-BABY-STEPS.md
 
 generator client {
@@ -9,4 +9,51 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+/// Tenant root. Firestore id preserved as primary key for dual-write (P2.3+).
+model Organization {
+  id                   String    @id
+  name                 String
+  slug                 String    @unique
+  status               String
+  planId               String    @map("plan_id")
+  maxUsers             Int?      @map("max_users")
+  seatsUsed            Int       @default(0) @map("seats_used")
+  ownerUid             String?   @map("owner_uid")
+  primaryEmail         String?   @map("primary_email")
+  pendingOwnerEmail    String?   @map("pending_owner_email")
+  trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(3)
+  settings             Json      @default("{}")
+  channelAdmin         Json?     @map("channel_admin")
+  intakeFilterDefaults Json?     @map("intake_filter_defaults")
+  intakePoolEpoch      Int       @default(1) @map("intake_pool_epoch")
+  intentPlaybook       Json?     @map("intent_playbook")
+  openJoinTokenHash    String?   @map("open_join_token_hash")
+  createdAt            DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  members Member[]
+
+  @@map("organizations")
+}
+
+/// Org membership. Firestore: organizations/{orgId}/members/{uid}.
+model Member {
+  uid            String
+  organizationId String    @map("organization_id")
+  email          String
+  displayName    String    @map("display_name")
+  role           String
+  status         String
+  invitedByUid   String    @map("invited_by_uid")
+  joinedAt       DateTime  @map("joined_at") @db.Timestamptz(3)
+  disabledAt     DateTime? @map("disabled_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, uid])
+  @@index([organizationId])
+  @@index([email])
+  @@map("members")
 }

@@ -27,17 +27,20 @@ and [`NOVA-CRM-ENGINEERING-RULES.md`](../Architecture%20fixes%20plan/NOVA-CRM-EN
 
 | Service | URL / connection |
 |---------|------------------|
-| Postgres 16 | `postgres://nova:nova_dev_password@localhost:5432/nova_crm` |
+| Postgres 16 | Superuser (migrate): `postgres://nova:nova_dev_password@localhost:5432/nova_crm` · App (RLS): `postgres://nova_app:nova_dev_password@localhost:5432/nova_crm` |
 | Redis 7 | `redis://localhost:6379` |
 
 Set in local `.env.local` (see `.env.example`):
 
-- `DATABASE_URL` — Prisma Migrate + `src/lib/db/prisma.ts` (Phase 2+)
+- `DATABASE_URL` — app role `nova_app` (Prisma Client / RLS enforced)
+- `MIGRATE_DATABASE_URL` — Compose superuser `nova` (Prisma Migrate DDL)
 - `REDIS_URL` — Phase 0 cache helper (`src/lib/cache/redis.ts`)
 
 These credentials are **dev-only**. Do not reuse them in staging or production.
 
-Local migrate (P2.1): `docker compose up -d postgres` then `npm run db:migrate:deploy` (or `npm run db:migrate` when adding models).
+Local migrate (P2.1+): `docker compose up -d postgres` then `npm run db:migrate:deploy` (or `npm run db:migrate` when adding models).
+
+Tenant queries (P2.2+): use `withOrganizationScope(orgId, …)` from `src/lib/db/tenant-scope.ts` so Postgres RLS (`app.organization_id`) applies. Use `withRlsBypass` only for platform/ETL paths.
 
 ## Checklist before pointing any script at a DB
 
