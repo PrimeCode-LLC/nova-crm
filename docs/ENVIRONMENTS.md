@@ -30,8 +30,14 @@ and [`NOVA-CRM-ENGINEERING-RULES.md`](../Architecture%20fixes%20plan/NOVA-CRM-EN
 | Postgres 16 | `postgres://nova:nova_dev_password@localhost:5432/nova_crm` |
 | Redis 7 | `redis://localhost:6379` |
 
-Set `REDIS_URL` in local `.env.local` to use the Phase 0 cache helper (`src/lib/cache/redis.ts`).  
+Set in local `.env.local` (see `.env.example`):
+
+- `DATABASE_URL` — Prisma Migrate + `src/lib/db/prisma.ts` (Phase 2+)
+- `REDIS_URL` — Phase 0 cache helper (`src/lib/cache/redis.ts`)
+
 These credentials are **dev-only**. Do not reuse them in staging or production.
+
+Local migrate (P2.1): `docker compose up -d postgres` then `npm run db:migrate:deploy` (or `npm run db:migrate` when adding models).
 
 ## Checklist before pointing any script at a DB
 

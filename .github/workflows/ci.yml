@@ -24,6 +24,10 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        env:
+          # Satisfies prisma.config.ts during postinstall `prisma generate`.
+          # Not a real DB — generate does not connect. See docs/ENVIRONMENTS.md.
+          DATABASE_URL: postgresql://prisma:prisma@127.0.0.1:5432/prisma_generate_placeholder?schema=public
 
       - name: Lint
         run: npm run lint
@@ -47,3 +51,4 @@ jobs:
           NEXT_PUBLIC_FIREBASE_APP_ID: "1:0:web:ci"
           NEXT_PUBLIC_AUTH_DISABLED: "true"
           DISABLE_AUTH: "true"
+          DATABASE_URL: postgresql://prisma:prisma@127.0.0.1:5432/prisma_generate_placeholder?schema=public

@@ -64,6 +64,24 @@ Rule: ENGINEERING_RULES §3 / §5 — do not block App Hosting with IMAP/import/
 
 ---
 
+## Phase 2 — Postgres + dual-write core CRM
+
+ORM: **Prisma 7** + Migrate. Tenant key: `organization_id` + **RLS mandatory** before ship (P2.2+). Dependency order: `organizations → members → accounts → contacts → leads → deals`.
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P2.1 | [x] | Prisma 7 + `@prisma/adapter-pg`; `DATABASE_URL`; `prisma/migrations/20260811000000_init` (empty); `src/lib/db/prisma.ts`; scripts `db:generate` / `db:migrate` / `db:migrate:deploy` |
+| P2.2 | [ ] | Schema: `organizations` + `members` + RLS policies; isolation test |
+| P2.3 | [ ] | Dual-write create/update for orgs/members |
+| P2.4 | [ ] | Idempotent ETL backfill orgs/members |
+| P2.5 | [ ] | Reconciliation script (counts + sample field diffs) |
+| P2.6–P2.9 | [ ] | Repeat schema → dual-write → ETL → reconcile for accounts, contacts, leads, deals |
+| P2.10 | [ ] | Feature-flagged read cutover for one list (e.g. leads) to Postgres |
+
+**Phase 2 exit:** Core CRM entities dual-written, reconciled in staging; at least one read path on Postgres behind a flag.
+
+---
+
 ## Later phases
 
-Phase 2–6 steps live in the migration plan; expand checkboxes here as each phase starts.
+Phase 3–6 steps live in the migration plan; expand checkboxes here as each phase starts.

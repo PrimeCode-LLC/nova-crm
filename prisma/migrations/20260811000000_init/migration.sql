@@ -1,0 +1,3 @@
+-- P2.1 empty init: establishes Prisma Migrate history against Compose Postgres.
+-- No CRM tables yet — organizations/members (+ RLS) land in P2.2.
+-- This file intentionally has no DDL.

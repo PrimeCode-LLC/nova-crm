@@ -1,0 +1,12 @@
+// Nova CRM — Prisma schema (Phase 2+)
+// P2.1: empty init (migrate history only). Entity models start in P2.2.
+// See Architecture fixes plan/NOVA-CRM-MIGRATION-BABY-STEPS.md
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}

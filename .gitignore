@@ -48,7 +48,12 @@ firestore-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Prisma Client (generated via postinstall / db:generate)
+/src/generated/prisma
+
 # Private strategy packs (tenant-specific ICP — do not ship in SaaS product)
 /packs/private/*.json
 /packs/private/seeds/
 .shots/
+
+/src/generated/prisma
