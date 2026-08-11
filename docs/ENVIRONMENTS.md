@@ -42,6 +42,15 @@ Local migrate (P2.1+): `docker compose up -d postgres` then `npm run db:migrate:
 
 Tenant queries (P2.2+): use `withOrganizationScope(orgId, …)` from `src/lib/db/tenant-scope.ts` so Postgres RLS (`app.organization_id`) applies. Use `withRlsBypass` only for platform/ETL paths.
 
+Org/member dual-write (P2.3): set `POSTGRES_DUAL_WRITE_ORGS_V1=true` to mirror Firestore org/member writes into Postgres after success (Firestore remains source of truth).
+
+Org/member backfill (P2.4): `npm run db:backfill:orgs-members -- --dry-run` then without `--dry-run`. Options: `--org=<id>`, `--limit=<n>`. Staging first — never production from a laptop.
+
+Org/member reconcile (P2.5): `npm run db:reconcile:orgs-members` (optional `--org=` / `--sample=`). Exit 0 only when counts match and there are no missing rows or field diffs.
+
+CRM entities (P2.6–P2.9): set `POSTGRES_DUAL_WRITE_CRM_V1=true` for live mirrors. Backfill/reconcile:
+`npm run db:backfill:crm -- --dry-run` then without `--dry-run`; `npm run db:reconcile:crm`.
+
 ## Checklist before pointing any script at a DB
 
 - [ ] `DATABASE_URL` host is clearly local, staging, or prod — never ambiguous

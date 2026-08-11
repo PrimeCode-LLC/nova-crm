@@ -43,5 +43,7 @@ export async function updateOrganizationIntentPlaybookServer(
     return { error: msg || "Failed to save playbook" };
   }
 
+  const { mirrorOrganizationAfterWrite } = await import("@/lib/db/dual-write-orgs");
+  await mirrorOrganizationAfterWrite(organizationId);
   return { ok: true, playbook: normalized };
 }

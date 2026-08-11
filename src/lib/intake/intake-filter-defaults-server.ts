@@ -38,5 +38,7 @@ export async function updateOrganizationIntakeFilterDefaultsServer(
     intakeFilterDefaults: normalized,
     updatedAt: FieldValue.serverTimestamp(),
   });
+  const { mirrorOrganizationAfterWrite } = await import("@/lib/db/dual-write-orgs");
+  await mirrorOrganizationAfterWrite(organizationId);
   return { ok: true };
 }

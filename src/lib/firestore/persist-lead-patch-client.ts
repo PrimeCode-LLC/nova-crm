@@ -3,6 +3,7 @@ import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Lead } from "@/lib/types";
+import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 
 const OMIT_FROM_PATCH = new Set(["id", "createdAt", "updatedAt"]);
 
@@ -33,4 +34,5 @@ export async function persistLeadPatchClient(
       opts?.ownerManagerIds ?? (await resolveOwnerManagerIdsClient(db, patch.ownerId));
   }
   await updateDoc(doc(db, COLLECTIONS.leads, leadId), payload);
+  scheduleCrmMirrorClient("lead", leadId);
 }

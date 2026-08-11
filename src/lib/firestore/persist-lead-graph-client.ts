@@ -3,6 +3,7 @@ import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Account, Contact, Lead } from "@/lib/types";
+import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -35,6 +36,7 @@ export async function persistAccountCreateClient(
     opts?.ownerManagerIds,
   );
   await setDoc(doc(db, COLLECTIONS.accounts, account.id), data);
+  scheduleCrmMirrorClient("account", account.id);
 }
 
 export async function persistContactCreateClient(
@@ -50,6 +52,7 @@ export async function persistContactCreateClient(
     opts?.ownerManagerIds,
   );
   await setDoc(doc(db, COLLECTIONS.contacts, contact.id), data);
+  scheduleCrmMirrorClient("contact", contact.id);
 }
 
 export async function persistLeadCreateClient(
@@ -65,6 +68,7 @@ export async function persistLeadCreateClient(
     opts?.ownerManagerIds,
   );
   await setDoc(doc(db, COLLECTIONS.leads, lead.id), data);
+  scheduleCrmMirrorClient("lead", lead.id);
 }
 
 /**
@@ -113,4 +117,7 @@ export async function persistLeadGraphClient(
   );
 
   await batch.commit();
+  scheduleCrmMirrorClient("account", account.id);
+  scheduleCrmMirrorClient("contact", contact.id);
+  scheduleCrmMirrorClient("lead", lead.id);
 }

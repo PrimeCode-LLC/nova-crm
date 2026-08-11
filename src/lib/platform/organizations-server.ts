@@ -21,6 +21,8 @@ import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { parseIntakeFilterDefaults } from "@/lib/intake/intake-filter-defaults";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
 import { parseOrgSendPolicy } from "@/lib/email/org-send-policy";
+import { mirrorOrganizationAfterWrite } from "@/lib/db/dual-write-orgs";
+import { parseIntentPlaybook } from "@/lib/intent/parse-playbook";
 
 const TRIAL_DAYS = 14;
 
@@ -172,6 +174,10 @@ function docToOrg(id: string, data: DocumentData): Organization {
       data.intakePoolEpoch >= 1
         ? Math.floor(data.intakePoolEpoch)
         : undefined,
+    intentPlaybook:
+      data.intentPlaybook !== undefined && data.intentPlaybook !== null
+        ? parseIntentPlaybook(data.intentPlaybook)
+        : undefined,
     createdAt: tsToIso(data.createdAt as Timestamp | undefined),
     updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
     openJoinTokenHash:
@@ -253,6 +259,7 @@ export async function claimPendingOrgOwnerServer(
     pendingOwnerEmail: FieldValue.delete(),
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }
 
@@ -310,6 +317,7 @@ export async function createOrganizationServer(input: {
     payload.pendingOwnerEmail = input.pendingOwnerEmail.toLowerCase();
   }
   await ref.set(payload);
+  await mirrorOrganizationAfterWrite(ref.id);
   return { id: ref.id, slug };
 }
 
@@ -323,6 +331,7 @@ export async function bumpOrganizationSeatsServer(
     seatsUsed: FieldValue.increment(delta),
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorOrganizationAfterWrite(orgId);
 }
 
 export async function updateOrganizationServer(
@@ -382,6 +391,7 @@ export async function updateOrganizationServer(
   }
 
   await ref.update(updates);
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }
 
@@ -405,5 +415,6 @@ export async function updateOrganizationChannelAdminServer(
     },
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }

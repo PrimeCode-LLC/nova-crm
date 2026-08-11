@@ -72,10 +72,13 @@ ORM: **Prisma 7** + Migrate. Tenant key: `organization_id` + **RLS mandatory** b
 |----|--------|-------|
 | P2.1 | [x] | Prisma 7 + `@prisma/adapter-pg`; `DATABASE_URL`; `prisma/migrations/20260811000000_init` (empty); `src/lib/db/prisma.ts`; scripts `db:generate` / `db:migrate` / `db:migrate:deploy` |
 | P2.2 | [x] | `organizations` + `members` models; RLS + FORCE (`app.organization_id` / `app.bypass_rls`); `nova_app` runtime role (superuser bypass fix); `withOrganizationScope` / `withRlsBypass`; isolation tests; CI Postgres + migrate |
-| P2.3 | [ ] | Dual-write create/update for orgs/members |
-| P2.4 | [ ] | Idempotent ETL backfill orgs/members |
-| P2.5 | [ ] | Reconciliation script (counts + sample field diffs) |
-| P2.6–P2.9 | [ ] | Repeat schema → dual-write → ETL → reconcile for accounts, contacts, leads, deals |
+| P2.3 | [x] | Dual-write orgs/members behind `POSTGRES_DUAL_WRITE_ORGS_V1`; hooks in `organizations-server` / `members-server` (+ channelAdmin, open-join, intake filters/epoch, intent playbook); `src/lib/db/dual-write-orgs.ts` |
+| P2.4 | [x] | Idempotent ETL `npm run db:backfill:orgs-members` (`scripts/backfill-orgs-members-to-postgres.ts` + `src/lib/db/etl-orgs-members.ts`); `--dry-run` / `--org=` / `--limit=`; reuses P2.3 upserts |
+| P2.5 | [x] | Reconcile `npm run db:reconcile:orgs-members` (`scripts/reconcile-orgs-members.ts` + `src/lib/db/reconcile-orgs-members.ts`); counts + missing rows + sample field diffs; exit 1 if not clean |
+| P2.6 | [x] | Accounts: schema+RLS, dual-write (`POSTGRES_DUAL_WRITE_CRM_V1` + `/api/org/crm-mirror` + client persist hooks), ETL/reconcile via `db:backfill:crm` / `db:reconcile:crm` |
+| P2.7 | [x] | Contacts: same shared CRM pipeline (FK-friendly columns, no hard inter-entity FKs yet) |
+| P2.8 | [x] | Leads: same + promote/Instantly server mirrors |
+| P2.9 | [x] | Deals: schema+RLS+patch dual-write (creates still session-only in UI — ETL covers existing FS deals) |
 | P2.10 | [ ] | Feature-flagged read cutover for one list (e.g. leads) to Postgres |
 
 **Phase 2 exit:** Core CRM entities dual-written, reconciled in staging; at least one read path on Postgres behind a flag.

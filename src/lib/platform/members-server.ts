@@ -16,6 +16,10 @@ import {
   bumpOrganizationSeatsServer,
   getOrganizationServer,
 } from "@/lib/platform/organizations-server";
+import {
+  mirrorMemberAfterWrite,
+  mirrorMemberDeleteAfterWrite,
+} from "@/lib/db/dual-write-orgs";
 
 function tsToIso(t: Timestamp | undefined | null): ISODate {
   if (!t || !t.toDate) return new Date().toISOString();
@@ -196,6 +200,7 @@ export async function upsertMemberServer(input: {
   if (!existing.exists && nextStatus === "active") {
     await bumpOrganizationSeatsServer(input.organizationId, 1);
   }
+  await mirrorMemberAfterWrite(input.organizationId, input.uid);
   return { created: !existing.exists };
 }
 
@@ -227,6 +232,7 @@ export async function setMemberStatusServer(
   } else if (prevStatus === "active" && status !== "active") {
     await bumpOrganizationSeatsServer(orgId, -1);
   }
+  await mirrorMemberAfterWrite(orgId, uid);
   return { ok: true };
 }
 
@@ -244,6 +250,7 @@ export async function setMemberRoleServer(
     role,
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorMemberAfterWrite(orgId, uid);
   return { ok: true };
 }
 
@@ -260,6 +267,7 @@ export async function deleteMemberServer(
   if (prevStatus === "active") {
     await bumpOrganizationSeatsServer(orgId, -1);
   }
+  await mirrorMemberDeleteAfterWrite(orgId, uid);
   return { ok: true };
 }
 

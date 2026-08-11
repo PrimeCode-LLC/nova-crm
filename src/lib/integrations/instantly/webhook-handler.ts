@@ -14,6 +14,7 @@ import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import { upsertLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";
 import { classifyInboundLeadMailServer } from "@/lib/email/classify-inbound-reply-server";
 import { leadMailProviderKey } from "@/lib/email/lead-mail-ids";
+import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
 
 export type InstantlyWebhookPayload = {
   timestamp?: string;
@@ -125,6 +126,7 @@ export async function handleInstantlyWebhookEvent(
     if (novaCampaign) patch.campaignId = novaCampaign.id;
     patch.pushToInstantly = "pushed";
     await doc.ref.update(stampForUpdate(stripUndefined(patch)));
+    await mirrorCrmEntityAfterWrite("lead", leadId, { organizationId });
   } else {
     leadId = `l-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
     const accountId = `a-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
@@ -177,6 +179,9 @@ export async function handleInstantlyWebhookEvent(
         }),
       ),
     );
+    await mirrorCrmEntityAfterWrite("account", accountId, { organizationId });
+    await mirrorCrmEntityAfterWrite("contact", contactId, { organizationId });
+    await mirrorCrmEntityAfterWrite("lead", leadId, { organizationId });
   }
 
   const leadSnap = await db.collection(COLLECTIONS.leads).doc(leadId).get();

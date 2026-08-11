@@ -60,5 +60,7 @@ export async function setOrganizationOpenJoinHashServer(
       updatedAt: FieldValue.serverTimestamp(),
     });
   }
+  const { mirrorOrganizationAfterWrite } = await import("@/lib/db/dual-write-orgs");
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }

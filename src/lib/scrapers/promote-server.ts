@@ -13,6 +13,7 @@ import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playboo
 import { withInitialQualityScore } from "@/lib/intent/apply-quality-score";
 import { researchFieldsFromIntakeItem } from "@/lib/intent/score-intake-item";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 
 function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
@@ -227,6 +228,16 @@ export async function promoteRawItemToProspectServer(input: {
     ),
   );
   await batch.commit();
+
+  await mirrorCrmEntityAfterWrite("account", accountId, {
+    organizationId: input.organizationId,
+  });
+  await mirrorCrmEntityAfterWrite("contact", contactId, {
+    organizationId: input.organizationId,
+  });
+  await mirrorCrmEntityAfterWrite("lead", leadId, {
+    organizationId: input.organizationId,
+  });
 
   const teId = newEntityId("te");
   await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(

@@ -7,6 +7,7 @@ import { listAllLeadsForInstantlyCampaign } from "./client";
 import { mapInstantlyLeadToContact } from "./lead-mapper";
 import { getInstantlyApiKeyServer } from "./secrets";
 import type { InstantlyLead } from "./types";
+import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
 
 export type SyncInstantlyCampaignLeadsResult = {
   total: number;
@@ -170,11 +171,15 @@ export async function syncInstantlyCampaignLeadsToNova(
   }
 
   for (let i = 0; i < updates.length; i += BATCH_OPS_LIMIT) {
+    const slice = updates.slice(i, i + BATCH_OPS_LIMIT);
     const batch = db.batch();
-    for (const u of updates.slice(i, i + BATCH_OPS_LIMIT)) {
+    for (const u of slice) {
       batch.update(u.ref, u.data);
     }
     await batch.commit();
+    for (const u of slice) {
+      await mirrorCrmEntityAfterWrite("lead", u.ref.id, { organizationId });
+    }
   }
 
   for (let i = 0; i < creates.length; i += Math.floor(BATCH_OPS_LIMIT / 3)) {
@@ -186,6 +191,15 @@ export async function syncInstantlyCampaignLeadsToNova(
       batch.set(db.collection(COLLECTIONS.leads).doc(c.leadId), c.lead);
     }
     await batch.commit();
+    for (const c of slice) {
+      await mirrorCrmEntityAfterWrite("account", c.accountId, {
+        organizationId,
+      });
+      await mirrorCrmEntityAfterWrite("contact", c.contactId, {
+        organizationId,
+      });
+      await mirrorCrmEntityAfterWrite("lead", c.leadId, { organizationId });
+    }
   }
 
   return {

@@ -50,5 +50,9 @@ export async function bumpIntakePoolEpochServer(input: {
     return { ok: true as const, previousEpoch, epoch };
   });
 
+  if ("ok" in result && result.ok) {
+    const { mirrorOrganizationAfterWrite } = await import("@/lib/db/dual-write-orgs");
+    await mirrorOrganizationAfterWrite(input.organizationId);
+  }
   return result;
 }

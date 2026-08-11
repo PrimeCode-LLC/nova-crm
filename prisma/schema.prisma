@@ -1,5 +1,5 @@
 // Nova CRM — Prisma schema (Phase 2+)
-// P2.1: empty init. P2.2: organizations + members (+ RLS in migration SQL).
+// P2.1 empty init · P2.2 orgs/members · P2.6–P2.9 accounts/contacts/leads/deals
 // See Architecture fixes plan/NOVA-CRM-MIGRATION-BABY-STEPS.md
 
 generator client {
@@ -56,4 +56,102 @@ model Member {
   @@index([organizationId])
   @@index([email])
   @@map("members")
+}
+
+/// Firestore `accounts/{id}`. Relation FKs deferred until data is clean (ETL-friendly).
+model Account {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  name           String
+  domain         String?
+  industry       String?
+  website        String?
+  ownerId        String   @map("owner_id")
+  contactCount   Int      @default(0) @map("contact_count")
+  leadCount      Int      @default(0) @map("lead_count")
+  openDealValue  Float    @default(0) @map("open_deal_value")
+  /// Full Firestore document (minus id) for dual-write parity.
+  payload        Json     @default("{}")
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, ownerId])
+  @@map("accounts")
+}
+
+/// Firestore `contacts/{id}`.
+model Contact {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  accountId      String   @map("account_id")
+  firstName      String   @map("first_name")
+  lastName       String   @map("last_name")
+  fullName       String   @map("full_name")
+  email          String?
+  phone          String?
+  title          String?
+  ownerId        String   @map("owner_id")
+  payload        Json     @default("{}")
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, accountId])
+  @@index([organizationId, email])
+  @@map("contacts")
+}
+
+/// Firestore `leads/{id}`.
+model Lead {
+  id             String    @id
+  organizationId String    @map("organization_id")
+  accountId      String    @map("account_id")
+  contactId      String    @map("contact_id")
+  channel        String
+  stage          String
+  temperature    String
+  priority       String
+  ownerId        String    @map("owner_id")
+  contactName    String    @map("contact_name")
+  companyName    String    @map("company_name")
+  intakeKind     String?   @map("intake_kind")
+  touches        Int       @default(0)
+  isIdle         Boolean   @default(false) @map("is_idle")
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+  payload        Json      @default("{}")
+  createdAt      DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, stage])
+  @@index([organizationId, ownerId])
+  @@index([organizationId, accountId])
+  @@map("leads")
+}
+
+/// Firestore `deals/{id}`.
+model Deal {
+  id                String    @id
+  organizationId    String    @map("organization_id")
+  leadId            String    @map("lead_id")
+  accountId         String    @map("account_id")
+  contactId         String    @map("contact_id")
+  name              String
+  stage             String
+  value             Float
+  currency          String
+  probability       Int
+  expectedCloseDate DateTime  @map("expected_close_date") @db.Timestamptz(3)
+  ownerId           String    @map("owner_id")
+  wonAt             DateTime? @map("won_at") @db.Timestamptz(3)
+  lostAt            DateTime? @map("lost_at") @db.Timestamptz(3)
+  payload           Json      @default("{}")
+  createdAt         DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, stage])
+  @@index([organizationId, leadId])
+  @@map("deals")
 }

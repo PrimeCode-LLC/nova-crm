@@ -1,6 +1,7 @@
 import { doc, serverTimestamp, writeBatch } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 
 /**
  * Deletes a lead document and decrements the parent account's `leadCount`.
@@ -18,4 +19,6 @@ export async function persistLeadDeleteClient(
     updatedAt: serverTimestamp(),
   });
   await batch.commit();
+  scheduleCrmMirrorClient("lead", input.leadId, "delete");
+  scheduleCrmMirrorClient("account", input.accountId);
 }
