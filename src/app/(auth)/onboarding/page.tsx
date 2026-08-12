@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
 
 export default function OnboardingPage() {
   const router = useRouter();
@@ -94,7 +95,7 @@ export default function OnboardingPage() {
         <button
           type="button"
           className="text-primary hover:underline"
-          onClick={() => router.replace("/login")}
+          onClick={() => router.replace(isClerkAuthV1Enabled() ? "/sign-in" : "/login")}
         >
           Sign in instead
         </button>

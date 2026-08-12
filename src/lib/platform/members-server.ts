@@ -94,6 +94,74 @@ export async function findMembershipForUserServer(
   return docToMember(orgId, d.id, d.data());
 }
 
+/**
+ * Resolve an org membership by email (Clerk bridge / invite matching).
+ * Prefers Postgres (RLS bypass) when configured; falls back to Firestore
+ * collection-group query on `email`.
+ */
+export async function findMembershipByEmailServer(
+  email: string,
+): Promise<OrganizationMember | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.member.findFirst({
+          where: {
+            email: normalized,
+            status: { in: ["active", "pending"] },
+          },
+          orderBy: { joinedAt: "desc" },
+        }),
+      );
+      if (row) {
+        return {
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] findMembershipByEmailServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const db = getAdminDb();
+  if (!db) return null;
+  try {
+    const snap = await db
+      .collectionGroup(ORG_SUBCOLLECTIONS.members)
+      .where("email", "==", normalized)
+      .limit(1)
+      .get();
+    if (snap.empty) return null;
+    const d = snap.docs[0]!;
+    const orgId = d.ref.parent.parent?.id ?? "";
+    return docToMember(orgId, d.id, d.data());
+  } catch (err: unknown) {
+    if (isFirestoreFailedPrecondition(err)) {
+      console.warn(
+        "[members] findMembershipByEmailServer needs a collection-group index on members.email",
+      );
+      return null;
+    }
+    throw err;
+  }
+}
+
 export const OTHER_WORKSPACE_JOIN_ERROR =
   "This account already belongs to another workspace. They must leave it before joining here.";
 

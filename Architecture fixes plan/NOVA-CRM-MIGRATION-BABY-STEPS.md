@@ -4,7 +4,7 @@ Working checklist for the architecture migration. One baby step ≈ one PR. Do n
 
 Source plan: implementation guide §4 + `ENGINEERING_RULES` / `NOVA-CRM-ENGINEERING-RULES.md`.
 
-**Locked defaults:** Prisma + Migrate · Compose Postgres 16 + Redis 7 · Phase 5 auth = Clerk (confirm at P5.0) · two deployables only (web + worker).
+**Locked defaults:** Prisma + Migrate · Compose Postgres 16 + Redis 7 · Phase 5 auth = Clerk (P5.0 confirmed 2026-08-12) · two deployables only (web + worker).
 
 ---
 
@@ -119,6 +119,23 @@ Rule: ENGINEERING_RULES §3 / §5 — web and worker are separate deployables; h
 
 ---
 
+## Phase 5 — Auth migration (Clerk)
+
+Rule: ENGINEERING_RULES — not Firebase Auth; httpOnly / server-verified session. Companion: [`NOVA-CRM-P5-AUTH-CLERK.md`](NOVA-CRM-P5-AUTH-CLERK.md).
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P5.0 | [x] | Clerk confirmed; Organizations off (Nova owns tenants); env vars documented in companion |
+| P5.1 | [x] | `@clerk/nextjs`; flag `auth_clerk_v1`; OptionalClerkProvider; `/sign-in` `/sign-up`; proxy `clerkMiddleware` when flag on; Firebase path when off |
+| P5.2 | [x] | Map Clerk user ↔ member ↔ `organization_id` via externalId + email (`resolveClerkIdentity`) |
+| P5.3 | [x] | Clerk preferred in `getVerifiedSession` / `requireTenantSession`; Firebase cookie secondary |
+| P5.4 | [x] | Invite/join via Clerk + `clerk-complete-membership`; onboarding syncs Clerk metadata; links use `/sign-up` |
+| P5.5 | [x] | `/login` `/signup` redirect to Clerk; Firebase Auth unused for web login (custom-token bridge remains for Firestore) |
+
+**Phase 5 exit:** Auth is Clerk; Firebase Auth unused for web login.
+
+---
+
 ## Later phases
 
-Phase 5–6 steps live in the migration plan; expand checkboxes here as each phase starts.
+Phase 6 steps live in the migration plan; expand checkboxes here when Phase 5 exits.

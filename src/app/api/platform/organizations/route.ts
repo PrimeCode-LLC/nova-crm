@@ -13,7 +13,7 @@ import {
 import { setAppClaims } from "@/lib/auth/claims";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
-import { getRequestOrigin } from "@/lib/invite-link";
+import { getRequestOrigin, authSignInPath, authSignUpPath } from "@/lib/invite-link";
 import { sendSystemEmail } from "@/lib/email/send-system-email";
 import { renderInviteEmail } from "@/lib/email/invite-email";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
@@ -280,8 +280,8 @@ export async function POST(req: Request) {
   if (ownerEmail && !ownerPassword) {
     const origin = await getRequestOrigin();
     setupLink = resolvedOwnerUid
-      ? `${origin.replace(/\/$/, "")}/login`
-      : `${origin.replace(/\/$/, "")}/signup`;
+      ? `${origin.replace(/\/$/, "")}${authSignInPath()}`
+      : `${origin.replace(/\/$/, "")}${authSignUpPath()}`;
     const email = renderInviteEmail({
       organizationName: rest.name,
       inviterName: g.ctx.session.name,

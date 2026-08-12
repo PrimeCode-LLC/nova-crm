@@ -1,7 +1,10 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
+import { auth } from "@clerk/nextjs/server";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
+import { authEntryPath } from "@/lib/auth/server";
 
 function firstString(
   v: string | string[] | undefined,
@@ -11,7 +14,6 @@ function firstString(
   return undefined;
 }
 
-/** Same-origin path only - blocks open redirects via callbackUrl. */
 function safeInternalPath(raw: string | undefined): string {
   if (!raw || typeof raw !== "string") return "/dashboard";
   let decoded: string;
@@ -28,7 +30,6 @@ function safeInternalPath(raw: string | undefined): string {
 
 /**
  * Compatibility entry for tools that expect NextAuth-style `/auth?callbackUrl=...`.
- * This app signs in at `/login` using the `next` query param.
  */
 export default async function AuthCompatPage({
   searchParams,
@@ -49,5 +50,11 @@ export default async function AuthCompatPage({
     redirect(nextPath);
   }
 
-  redirect(`/login?next=${encodeURIComponent(nextPath)}`);
+  if (isClerkAuthV1ServerEnabled()) {
+    const { userId } = await auth();
+    if (userId) redirect(nextPath);
+  }
+
+  const entry = authEntryPath();
+  redirect(`${entry}?next=${encodeURIComponent(nextPath)}`);
 }

@@ -6,6 +6,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { getVerifiedSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
+import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
+import { authEntryPath } from "@/lib/auth/server";
 import { findMembershipForUserServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
@@ -17,7 +19,7 @@ export default async function JoinPendingPage() {
   }
   const session = await getVerifiedSession();
   if (!session) {
-    redirect("/login?next=/join/pending");
+    redirect(`${authEntryPath()}?next=${encodeURIComponent("/join/pending")}`);
   }
   let membership;
   try {
@@ -50,7 +52,7 @@ export default async function JoinPendingPage() {
       </p>
       <div className="flex flex-col gap-2 sm:flex-row">
         <Link
-          href="/login"
+          href={isClerkAuthV1Enabled() ? "/sign-in" : "/login"}
           className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex text-center")}
         >
           Switch account

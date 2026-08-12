@@ -3,37 +3,20 @@ import { redirect } from "next/navigation";
 import { getAdminAuth } from "@/lib/firebase/admin";
 import { SESSION_COOKIE_NAME } from "./constants";
 import { isAuthDisabled } from "./flags";
+import { isClerkAuthV1Enabled } from "./clerk-flags";
 import { readAppClaims } from "./claims";
-import type { OrgMemberRole } from "@/lib/types";
+import { getClerkAppSession } from "./clerk-session";
+import { resolveLiveTenantForSession } from "./resolve-live-tenant";
+import type { AppSession } from "./session-types";
 
+export type { AppSession } from "./session-types";
 export { isAuthDisabled } from "./flags";
-
-export type AppSession = {
-  uid: string;
-  email?: string;
-  name?: string;
-  organizationId?: string;
-  orgRole?: OrgMemberRole;
-  platformAdmin?: boolean;
-};
 
 /** Short in-process cache of verified session cookies (Fluid Compute warm instances). */
 const SESSION_CACHE_TTL_MS = 30_000;
 const sessionCache = new Map<string, { expiresAt: number; session: AppSession }>();
 
-/** Verifies the httpOnly session cookie. Returns null if missing/invalid. */
-export async function getVerifiedSession(): Promise<AppSession | null> {
-  if (isAuthDisabled()) {
-    return {
-      uid: "dev",
-      email: "dev@local",
-      name: "Dev user",
-      organizationId: "dev-org",
-      orgRole: "owner",
-      platformAdmin: true,
-    };
-  }
-
+async function getFirebaseAppSession(): Promise<AppSession | null> {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
 
@@ -44,7 +27,6 @@ export async function getVerifiedSession(): Promise<AppSession | null> {
   if (!adminAuth) return null;
 
   try {
-    // checkRevoked=false: rely on cookie expiry + 30s cache; avoids Auth round-trip every API call.
     const decoded = await adminAuth.verifySessionCookie(token, false);
     const claims = readAppClaims(decoded as unknown as Record<string, unknown>);
     const session: AppSession = {
@@ -69,10 +51,39 @@ export async function getVerifiedSession(): Promise<AppSession | null> {
   }
 }
 
+/**
+ * Verifies Clerk and/or Firebase `__nova_session`.
+ * P5.3: when Clerk is enabled, prefer Clerk (Firebase cookie is secondary / bridge).
+ */
+export async function getVerifiedSession(): Promise<AppSession | null> {
+  if (isAuthDisabled()) {
+    return {
+      uid: "dev",
+      email: "dev@local",
+      name: "Dev user",
+      organizationId: "dev-org",
+      orgRole: "owner",
+      platformAdmin: true,
+    };
+  }
+
+  if (isClerkAuthV1Enabled()) {
+    const clerk = await getClerkAppSession();
+    if (clerk) return clerk;
+    return getFirebaseAppSession();
+  }
+
+  return getFirebaseAppSession();
+}
+
+export function authEntryPath(): string {
+  return isClerkAuthV1Enabled() ? "/sign-in" : "/login";
+}
+
 export async function requireSession(): Promise<AppSession> {
   const session = await getVerifiedSession();
   if (!session) {
-    redirect("/login");
+    redirect(authEntryPath());
   }
   return session;
 }
@@ -80,13 +91,25 @@ export async function requireSession(): Promise<AppSession> {
 /**
  * Server pages that touch tenant data should call this - it short-circuits
  * to `/onboarding` when a signed-in user has no organization yet.
+ * P5.3: resolves live membership (email / uid) so Clerk sessions get org context.
  */
 export async function requireTenantSession(): Promise<
   AppSession & { organizationId: string }
 > {
   const session = await requireSession();
-  if (!session.organizationId) {
+  const live = await resolveLiveTenantForSession(session);
+  if (live.membershipPending) {
+    redirect("/join/pending");
+  }
+  if (live.accessDeniedReason === "inactive_user") {
+    redirect(authEntryPath());
+  }
+  if (!live.organizationId) {
     redirect("/onboarding");
   }
-  return session as AppSession & { organizationId: string };
+  return {
+    ...session,
+    organizationId: live.organizationId,
+    orgRole: live.orgRole ?? session.orgRole,
+  };
 }

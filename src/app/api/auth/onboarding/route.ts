@@ -2,7 +2,10 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { FieldValue } from "firebase-admin/firestore";
 import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { auth } from "@clerk/nextjs/server";
 import { getVerifiedSession } from "@/lib/auth/server";
+import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
+import { syncClerkNovaClaims } from "@/lib/auth/clerk-identity";
 import { setAppClaims } from "@/lib/auth/claims";
 import { createOrganizationServer } from "@/lib/platform/organizations-server";
 import {
@@ -97,6 +100,25 @@ export async function POST(req: Request) {
     orgRole: "owner",
     platformAdmin: session.platformAdmin || undefined,
   });
+
+  if (isClerkAuthV1ServerEnabled()) {
+    try {
+      const { userId } = await auth();
+      if (userId) {
+        await syncClerkNovaClaims(userId, {
+          novaUid: session.uid,
+          organizationId: created.id,
+          orgRole: "owner",
+          platformAdmin: session.platformAdmin || undefined,
+        });
+      }
+    } catch (err) {
+      console.warn(
+        "[onboarding] Clerk metadata sync failed",
+        err instanceof Error ? err.message : err,
+      );
+    }
+  }
 
   return NextResponse.json({ ok: true, organizationId: created.id });
 }
