@@ -10,7 +10,7 @@ import { COLLECTIONS } from "@/lib/firestore/collections";
  * P6.2: when sole-writer flag on, mutates Postgres only.
  */
 export async function persistLeadDeleteClient(
-  db: Firestore,
+  db: Firestore | null,
   input: { leadId: string; accountId: string; accountLeadCount: number },
 ): Promise<void> {
   const nextCount = Math.max(0, input.accountLeadCount - 1);
@@ -24,6 +24,10 @@ export async function persistLeadDeleteClient(
       accountLeadCount: nextCount,
     });
     return;
+  }
+
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
   }
 
   const batch = writeBatch(db);

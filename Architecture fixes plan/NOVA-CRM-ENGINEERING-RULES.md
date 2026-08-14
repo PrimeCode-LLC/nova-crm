@@ -25,7 +25,9 @@ These were decided deliberately after evaluating the previous Firebase-based arc
 
 **CRM transactional entities** (`organizations` / `members` pending sole-writer; `accounts` / `contacts` / `leads` / `deals`; org dashboard summaries) use **PostgreSQL** as the system of record when the Phase 6 read + sole-writer flags are on. Do **not** add new Firestore collections or client listeners for those entities.
 
-**Written exception — Firebase may remain in the repo for non-CRM domains until separately migrated:**
+**Logged override (2026-08-15):** deploys may set `FIREBASE_DISABLED=true` (+ `NEXT_PUBLIC_FIREBASE_DISABLED=true`) to run **Clerk + Postgres + Redis only**. In that mode Firebase Admin/client are not initialized; residual Firestore domains below are unavailable until migrated. This is an explicit operator choice for self-hosted / Firebase-free deploy, not a silent reintroduction of Firebase.
+
+**Written exception — Firebase may remain in the repo for non-CRM domains until separately migrated** (when Firebase is not disabled):
 
 - Realtime / collab: workspace chat, user notifications  
 - Email / mailbox / lead mail messages / reply intel / mail tracking  
@@ -37,7 +39,7 @@ These were decided deliberately after evaluating the previous Firebase-based arc
 - Clerk→Firebase **custom-token bridge** (required while any client Firestore listeners remain)  
 - `firebase` / `firebase-admin` packages, rules, indexes, Cloud Functions for the above  
 
-P6.5 exit for the migration means **CRM path decommissioned**, not “zero Firebase bytes in package.json.” Full package removal is a later program of work per domain above.
+P6.5 exit for the migration means **CRM path decommissioned**, not “zero Firebase bytes in package.json.” Full package removal is a later program of work per domain above. Firebase-free mode gates the packages off at runtime via `FIREBASE_DISABLED`.
 
 ### §1a — On microservices (explicit, so this isn't re-decided per task)
 

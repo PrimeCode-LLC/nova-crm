@@ -10,7 +10,7 @@ import type { Contact } from "@/lib/types";
 const OMIT = new Set(["id", "createdAt", "updatedAt"]);
 
 export async function persistContactPatchClient(
-  db: Firestore,
+  db: Firestore | null,
   contactId: string,
   patch: Partial<Contact>,
   opts?: { ownerManagerIds?: string[] },
@@ -24,7 +24,7 @@ export async function persistContactPatchClient(
   }
   if (patch.ownerId !== undefined) {
     patchPayload.ownerManagerIds =
-      opts?.ownerManagerIds ?? (await resolveOwnerManagerIdsClient(db, patch.ownerId));
+      opts?.ownerManagerIds ?? (db ? await resolveOwnerManagerIdsClient(db, patch.ownerId) : []);
   }
 
   if (isPostgresSoleWriterCrmV1Enabled()) {
@@ -36,6 +36,10 @@ export async function persistContactPatchClient(
       unset,
     });
     return;
+  }
+
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
   }
 
   const payload: Record<string, unknown> = { updatedAt: serverTimestamp() };

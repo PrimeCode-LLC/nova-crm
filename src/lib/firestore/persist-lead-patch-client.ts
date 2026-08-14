@@ -16,7 +16,7 @@ const OMIT_FROM_PATCH = new Set(["id", "createdAt", "updatedAt"]);
  * P6.2: when sole-writer flag on, writes Postgres only (no Firestore).
  */
 export async function persistLeadPatchClient(
-  db: Firestore,
+  db: Firestore | null,
   leadId: string,
   patch: Partial<Lead>,
   opts?: { ownerManagerIds?: string[] },
@@ -30,7 +30,10 @@ export async function persistLeadPatchClient(
   }
   if (patch.ownerId !== undefined) {
     patchPayload.ownerManagerIds =
-      opts?.ownerManagerIds ?? (await resolveOwnerManagerIdsClient(db, patch.ownerId));
+      opts?.ownerManagerIds ??
+      (db
+        ? await resolveOwnerManagerIdsClient(db, patch.ownerId)
+        : []);
   }
 
   if (isPostgresSoleWriterCrmV1Enabled()) {
@@ -42,6 +45,10 @@ export async function persistLeadPatchClient(
       unset,
     });
     return;
+  }
+
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
   }
 
   const payload: Record<string, unknown> = {

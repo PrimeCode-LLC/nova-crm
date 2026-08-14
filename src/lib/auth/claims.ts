@@ -27,10 +27,11 @@ const CLAIM_KEYS: ReadonlyArray<keyof AppClaims> = [
  * (e.g. set by Firebase Auth providers).
  */
 export async function setAppClaims(
-  adminAuth: Auth,
+  adminAuth: Auth | null,
   uid: string,
   patch: AppClaims,
 ): Promise<void> {
+  if (!adminAuth) return;
   const user = await adminAuth.getUser(uid);
   const existing = (user.customClaims ?? {}) as Record<string, unknown>;
   const next: Record<string, unknown> = { ...existing };

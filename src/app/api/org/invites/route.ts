@@ -67,17 +67,19 @@ export async function POST(req: Request) {
 
   const inviteEmail = parsed.data.email.trim().toLowerCase();
   const orgId = g.ctx.session.organizationId;
-  try {
-    const existingUser = await g.ctx.adminAuth.getUserByEmail(inviteEmail);
-    const membershipCheck = await assertNotMemberOfOtherOrgServer(
-      existingUser.uid,
-      orgId,
-    );
-    if ("error" in membershipCheck) {
-      return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
+  if (g.ctx.adminAuth) {
+    try {
+      const existingUser = await g.ctx.adminAuth.getUserByEmail(inviteEmail);
+      const membershipCheck = await assertNotMemberOfOtherOrgServer(
+        existingUser.uid,
+        orgId,
+      );
+      if ("error" in membershipCheck) {
+        return NextResponse.json({ error: membershipCheck.error }, { status: 400 });
+      }
+    } catch {
+      /* No Firebase account yet - invite is fine. */
     }
-  } catch {
-    /* No Firebase account yet - invite is fine. */
   }
 
   const result = await createInviteServer({

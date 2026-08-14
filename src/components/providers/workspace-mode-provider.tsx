@@ -47,9 +47,11 @@ import {
 } from "@/lib/workspace-hierarchy";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
+import { useSessionUserProfile } from "@/lib/hooks/use-session-user-profile";
 import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
 import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { getFirebaseDb } from "@/lib/firebase/client";
+import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { resolveOrganizationIdForFirestoreWrite } from "@/lib/firebase/resolve-organization-id-for-write";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
@@ -541,19 +543,49 @@ export function WorkspaceModeProvider({
     updates: Record<string, Partial<Pick<CrmLabel, "name" | "color">>>;
   }>({ added: [], removedIds: [], updates: {} });
 
+  const liveDbOrNull = React.useCallback((): ReturnType<typeof getFirebaseDb> | null => {
+    return isFirebaseWebConfigured() ? getFirebaseDb() : null;
+  }, []);
+  const requireLiveDb = React.useCallback((): ReturnType<typeof getFirebaseDb> => {
+    const db = liveDbOrNull();
+    if (!db) throw new Error("Firestore is not configured");
+    return db;
+  }, [liveDbOrNull]);
+
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
 
+  const firebaseLive = isFirebaseWebConfigured();
   const { user: fbUser, loading: authLoading } = useAuth();
-  const { data: userDoc, error: userProfileLoadError, loading: userDocLoading } = useUserDoc(
-    mode === "demo" || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
+  const sessionProfile = useSessionUserProfile(
+    mode === "live" && !firebaseLive,
+  );
+  const {
+    data: fsUserDoc,
+    error: userProfileLoadError,
+    loading: userDocLoading,
+  } = useUserDoc(
+    mode === "demo" || isAuthDisabled() || !firebaseLive || !fbUser
+      ? undefined
+      : fbUser.uid,
+  );
+  const userDoc = firebaseLive ? fsUserDoc : sessionProfile.data;
+  const viewerUid = firebaseLive ? fbUser?.uid : sessionProfile.uid;
+  const identityLoading = firebaseLive ? authLoading : sessionProfile.loading;
+  /** CRM accounts/contacts/leads/deals: Postgres sole-writer or Firestore. */
+  const canPersistCrmLive = React.useCallback(
+    () =>
+      mode === "live" &&
+      Boolean(userDoc?.organizationId) &&
+      (isPostgresSoleWriterCrmV1Enabled() || isFirebaseWebConfigured()),
+    [mode, userDoc?.organizationId],
   );
   const liveOrgId =
     mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
   const viewerForMemberScope = React.useMemo((): User | null => {
-    if (!userDoc || !fbUser?.uid) return null;
-    return { ...userDoc, id: fbUser.uid } as User;
-  }, [fbUser?.uid, userDoc]);
+    if (!userDoc || !viewerUid) return null;
+    return { ...userDoc, id: viewerUid };
+  }, [viewerUid, userDoc]);
 
   React.useEffect(() => {
     if (mode === "demo") {
@@ -584,7 +616,7 @@ export function WorkspaceModeProvider({
     : userDoc?.orgRole === "member";
   const liveFs = useLiveWorkspaceFirestore(
     liveOrgId,
-    fbUser?.uid,
+    viewerUid,
     narrowMemberCrm,
     viewerForMemberScope,
     requestedGroups,
@@ -738,7 +770,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistProfileUpdate(db, id, patch);
           } catch (e) {
             toastError("Could not save profile", e, {
@@ -765,7 +797,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistProfileCreate(db, orgId, profile);
           } catch (e) {
             toastError("Could not save profile", e, {
@@ -788,7 +820,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistCampaignUpdate(db, id, patch);
           } catch (e) {
             console.error(e);
@@ -812,7 +844,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             const orgId = userDoc!.organizationId!;
             await persistCampaignCreate(db, orgId, campaign);
           } catch (e) {
@@ -833,11 +865,11 @@ export function WorkspaceModeProvider({
   const addAccount = React.useCallback(
     async (account: Account): Promise<void> => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         try {
-          const db = getFirebaseDb();
+          const db = liveDbOrNull();
           await persistAccountCreateClient(db, orgId, account);
         } catch (e) {
             toastError("Could not save company", e, {
@@ -855,11 +887,11 @@ export function WorkspaceModeProvider({
   const addContact = React.useCallback(
     async (contact: Contact): Promise<void> => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         try {
-          const db = getFirebaseDb();
+          const db = liveDbOrNull();
           await persistContactCreateClient(db, orgId, contact);
         } catch (e) {
             toastError("Could not save contact", e, {
@@ -886,11 +918,11 @@ export function WorkspaceModeProvider({
         snapshotRef.current.crmLabels,
       );
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         try {
-          const db = getFirebaseDb();
+          const db = liveDbOrNull();
           await persistLeadCreateClient(db, orgId, scored);
           recordLeadCreatedClient({
             leadId: scored.id,
@@ -942,11 +974,11 @@ export function WorkspaceModeProvider({
   const bumpLeadActivity = React.useCallback(
     (leadId: string) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = liveDbOrNull();
             await persistLeadActivityBump(db, leadId);
           } catch (e) {
             toastError("Could not update activity", e, {
@@ -993,7 +1025,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupCreate(db, orgId, f);
             if (f.leadId) await persistLeadActivityBump(db, f.leadId);
             if (timeline) {
@@ -1058,7 +1090,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupPlanCreate(db, orgId, plan);
             for (const f of items) {
               await persistFollowupCreate(db, orgId, f);
@@ -1117,7 +1149,7 @@ export function WorkspaceModeProvider({
       };
       if (writeFs && orgId) {
         try {
-          const db = getFirebaseDb();
+          const db = requireLiveDb();
           await persistFollowupPlanPatch(db, input.planId, planPatch);
           for (const fid of input.openFollowupIds) {
             await persistFollowupSetPaused(db, fid, true);
@@ -1187,7 +1219,7 @@ export function WorkspaceModeProvider({
       actorId?: string;
     }) => {
       const iso = new Date().toISOString();
-      const actorId = input.actorId ?? fbUser?.uid ?? "";
+      const actorId = input.actorId ?? viewerUid ?? "";
       const writeFs =
         mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
@@ -1199,7 +1231,7 @@ export function WorkspaceModeProvider({
       };
       if (writeFs && orgId) {
         try {
-          const db = getFirebaseDb();
+          const db = requireLiveDb();
           await persistFollowupPlanPatch(db, input.planId, {
             status: "active",
             pausedAt: null,
@@ -1267,7 +1299,7 @@ export function WorkspaceModeProvider({
         };
       });
     },
-    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, fbUser?.uid],
+    [mode, userDoc?.organizationId, leadOwnerIdForFirestore, viewerUid],
   );
 
   /**
@@ -1291,7 +1323,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupPlanSupersede(db, {
               oldPlanId,
               newPlanId,
@@ -1363,7 +1395,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupSetCompleted(db, id, completed);
             if (timeline && followup?.leadId) {
               await persistTimelineEventCreate(
@@ -1415,7 +1447,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupEmailSchedule(db, id, schedule);
           } catch (e) {
             toastError("Could not update email schedule", e, {
@@ -1528,7 +1560,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupPatch(db, id, patch);
           } catch (e) {
             toastError("Could not update follow-up", e, {
@@ -1581,7 +1613,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistFollowupDelete(db, id);
           } catch (e) {
             toastError("Could not delete follow-up", e, {
@@ -1627,7 +1659,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistLeadTaskCreate(db, orgId, t);
             if (timeline && t.leadId) {
               await persistTimelineEventCreate(
@@ -1680,7 +1712,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistNoteCreate(db, orgId, note, {
               leadOwnerId: leadOwnerIdForFirestore(leadId),
             });
@@ -1719,7 +1751,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistNoteUpdate(db, noteId, patch);
           } catch (e) {
             toastError("Could not save note", e, {
@@ -1754,7 +1786,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistNoteDelete(db, noteId);
           } catch (e) {
             toastError("Could not delete note", e, {
@@ -1796,7 +1828,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso }, leadOwnerIdForFirestore(t.leadId));
             await persistTimelineEventCreate(db, orgId, event, leadOwnerIdForFirestore(t.leadId));
             await persistLeadActivityBump(db, t.leadId);
@@ -1834,7 +1866,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistTimelineEventCreate(db, orgId, e, leadOwnerIdForFirestore(e.leadId));
           } catch (err) {
             toastError("Could not save timeline event", err, {
@@ -1869,7 +1901,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistOrgActivityEventCreate(db, orgId, e);
           } catch (err) {
             toastError("Could not save activity", err, {
@@ -1924,9 +1956,9 @@ export function WorkspaceModeProvider({
         : patch;
       const iso = new Date().toISOString();
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       if (writeFs) {
-        const db = getFirebaseDb();
+        const db = liveDbOrNull();
         await persistLeadPatchClient(db, leadId, scoredPatch);
       }
       applyLeadPatchToSession(leadId, scoredPatch, iso);
@@ -1936,7 +1968,7 @@ export function WorkspaceModeProvider({
         const salesPatch = prospectPatchForSalesLeadSync(scoredPatch);
         if (Object.keys(salesPatch).length > 0) {
           if (writeFs) {
-            const db = getFirebaseDb();
+            const db = liveDbOrNull();
             await persistLeadPatchClient(db, linkedSalesLeadId, salesPatch);
           }
           applyLeadPatchToSession(linkedSalesLeadId, salesPatch, iso);
@@ -1988,11 +2020,11 @@ export function WorkspaceModeProvider({
 
       const iso = new Date().toISOString();
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       const orgId = userDoc?.organizationId;
 
       if (writeFs && orgId) {
-        const db = getFirebaseDb();
+        const db = liveDbOrNull();
         await persistBulkOwnerReassignClient(db, orgId, items, nextOwnerId, onProgress);
       } else {
         // Demo / offline: simulate chunked progress for the UI.
@@ -2093,11 +2125,11 @@ export function WorkspaceModeProvider({
     (accountId: string, patch: Partial<Account>) => {
       const iso = new Date().toISOString();
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = liveDbOrNull();
             await persistAccountPatchClient(db, accountId, { ...patch, updatedAt: iso });
           } catch (e) {
             toastError("Could not save company", e, {
@@ -2122,11 +2154,11 @@ export function WorkspaceModeProvider({
     (contactId: string, patch: Partial<Contact>) => {
       const iso = new Date().toISOString();
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = liveDbOrNull();
             await persistContactPatchClient(db, contactId, { ...patch, updatedAt: iso });
           } catch (e) {
             toastError("Could not save contact", e, {
@@ -2157,11 +2189,11 @@ export function WorkspaceModeProvider({
         ? snap.leads.find((l) => l.id === merged.leadId)
         : undefined;
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = liveDbOrNull();
             await persistDealPatchClient(db, dealId, { ...patch, updatedAt: iso });
             if (existing && patch.stage && patch.stage !== existing.stage) {
               recordDealStageChangeClient({
@@ -2193,7 +2225,7 @@ export function WorkspaceModeProvider({
 
   const addCrmLabel = React.useCallback(
     (label: CrmLabel) => {
-      const canLiveWrite = mode === "live" && isFirebaseWebConfigured() && Boolean(fbUser);
+      const canLiveWrite = mode === "live" && isFirebaseWebConfigured() && Boolean(viewerUid);
       if (canLiveWrite) {
         void (async () => {
           try {
@@ -2211,7 +2243,7 @@ export function WorkspaceModeProvider({
               );
               return;
             }
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistCrmLabelCreate(db, orgId, label);
           } catch (e) {
             toastError("Could not save label", e, {
@@ -2224,7 +2256,7 @@ export function WorkspaceModeProvider({
       }
       setLabelDelta((d) => ({ ...d, added: [...d.added, label] }));
     },
-    [mode, fbUser, userDoc?.organizationId],
+    [mode, viewerUid, userDoc?.organizationId],
   );
 
   const updateCrmLabel = React.useCallback(
@@ -2234,7 +2266,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistCrmLabelUpdate(db, id, patch);
           } catch (e) {
             toastError("Could not update label", e, {
@@ -2260,7 +2292,7 @@ export function WorkspaceModeProvider({
       if (writeFs) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistCrmLabelDelete(db, id);
           } catch (e) {
             toastError("Could not delete label", e, {
@@ -2318,10 +2350,10 @@ export function WorkspaceModeProvider({
       };
 
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        canPersistCrmLive();
       if (writeFs) {
         try {
-          const db = getFirebaseDb();
+          const db = liveDbOrNull();
           await persistLeadDeleteClient(db, {
             leadId,
             accountId: account.id,
@@ -2522,7 +2554,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             const stagePayload: Record<string, unknown> = {
               stage: nextStage,
               ...(archivePatch ?? {}),
@@ -2598,7 +2630,7 @@ export function WorkspaceModeProvider({
     if (mode === "demo") {
       return demoSnapshot ?? LIVE_SNAPSHOT;
     }
-    const uid = fbUser?.uid ?? "";
+    const uid = viewerUid ?? "";
     /** Firestore query uses `organizationId`; if the member doc is missing that field, the roster is empty but leads still store `ownerId` as Firebase uid - merge the viewer so UserChip and owner pickers resolve. */
     let usersForSnapshot = liveFs.users;
     if (uid && userDoc && !usersForSnapshot.some((u) => u.id === uid)) {
@@ -2641,6 +2673,7 @@ export function WorkspaceModeProvider({
     demoSnapshot,
     demoPersonaId,
     fbUser?.uid,
+    viewerUid,
     userDoc,
     liveFs.users,
     liveFs.leads,
@@ -2792,7 +2825,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = getFirebaseDb();
+            const db = requireLiveDb();
             await persistLeadTaskSetCompleted(db, id, completed);
             if (timeline && task?.leadId) {
               await persistTimelineEventCreate(
@@ -2845,7 +2878,7 @@ export function WorkspaceModeProvider({
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId)?.orgRole ?? "member";
     const viewer =
       snapshotWithIdle.users.find((u) => u.id === snapshotWithIdle.currentUserId) ??
-      (userDoc && fbUser?.uid ? ({ ...userDoc, id: fbUser.uid } as User) : undefined);
+      (userDoc && viewerUid ? ({ ...userDoc, id: viewerUid } as User) : undefined);
     /** Permanent lead delete — org owner / admin / manager only (matches Firestore rules). */
     const canDeleteLeads = roleAtLeast(viewerRole, "manager");
     const canEditLead = (lead: Lead) => canEditProspectDerivedLead(lead, viewerRole);
@@ -2881,17 +2914,24 @@ export function WorkspaceModeProvider({
       setIntentPlaybook,
       liveFirestoreError:
         mode === "live"
-          ? !authLoading && !fbUser && isFirebaseWebConfigured() && !isAuthDisabled()
+          ? !identityLoading &&
+              !viewerUid &&
+              firebaseLive &&
+              !isAuthDisabled()
             ? new Error(
                 "Firebase Auth session is missing in this browser tab. Sign out and sign in again to load live CRM data.",
               )
             : liveFs.error
           : null,
-      userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
+      userProfileError:
+        mode === "live" && viewerUid
+          ? (firebaseLive ? userProfileLoadError : sessionProfile.error) ?? null
+          : null,
       workspaceLoading:
         mode === "live"
-          ? authLoading ||
-            (Boolean(fbUser) && userDocLoading) ||
+          ? identityLoading ||
+            (Boolean(viewerUid) &&
+              (firebaseLive ? userDocLoading : sessionProfile.loading)) ||
             (Boolean(liveOrgId) && liveFs.loading)
           : demoSnapshot == null,
       followupsReady:
@@ -2975,9 +3015,12 @@ export function WorkspaceModeProvider({
     liveFs.coreReady.followups,
     demoSnapshot,
     userProfileLoadError,
-    authLoading,
+    sessionProfile.error,
+    sessionProfile.loading,
+    identityLoading,
+    viewerUid,
+    firebaseLive,
     userDocLoading,
-    fbUser,
     userDoc,
     setMode,
     setDemoPersona,

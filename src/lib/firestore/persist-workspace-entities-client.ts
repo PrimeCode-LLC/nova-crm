@@ -401,7 +401,10 @@ export async function persistTimelineEventCreate(
   });
 }
 
-export async function persistLeadActivityBump(db: Firestore, leadId: string): Promise<void> {
+export async function persistLeadActivityBump(
+  db: Firestore | null,
+  leadId: string,
+): Promise<void> {
   if (isPostgresSoleWriterCrmV1Enabled()) {
     const { persistCrmWriteClient } = await import("@/lib/db/crm-write-client");
     await persistCrmWriteClient({
@@ -409,6 +412,9 @@ export async function persistLeadActivityBump(db: Firestore, leadId: string): Pr
       id: leadId,
     });
     return;
+  }
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
   }
   await updateDoc(doc(db, COLLECTIONS.leads, leadId), {
     touches: increment(1),

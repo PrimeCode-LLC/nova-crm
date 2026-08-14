@@ -18,17 +18,82 @@ import {
 import { readAndClearInviteTokens } from "@/components/providers/clerk-invite-stash";
 
 /**
- * When the user is signed into Clerk but not Firebase, mint a custom token
- * and sign into Firebase so **non-CRM** Firestore live listeners keep working
- * (chat, notifications, profiles, followups, etc.).
- *
- * P6.4/P6.5: CRM accounts/contacts/leads/deals can use Postgres reads/writes
- * without this bridge, but the bridge must stay until those residual FS
- * surfaces are migrated (ENGINEERING_RULES §1b).
+ * When Firebase is enabled: mint a custom token so residual Firestore listeners work.
+ * When Firebase is disabled: finish invite/join against Clerk + Postgres, then enter the app.
  */
 export function ClerkFirebaseBridge() {
   if (!isClerkAuthV1Enabled()) return null;
+  if (!isFirebaseWebConfigured()) return <ClerkPostgresOnlyBridge />;
   return <ClerkFirebaseBridgeInner />;
+}
+
+async function completeInviteAndRedirect(): Promise<string> {
+  const tokens = readAndClearInviteTokens();
+  let nextPath = "/dashboard";
+  if (tokens.inviteToken || tokens.openJoinToken) {
+    const complete = await fetch("/api/auth/clerk-complete-membership", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(tokens),
+    });
+    const body = (await complete.json().catch(() => ({}))) as {
+      error?: string;
+      membershipPending?: boolean;
+      organizationId?: string | null;
+    };
+    if (!complete.ok) {
+      throw new Error(body.error ?? "Could not accept invite.");
+    }
+    if (body.membershipPending) nextPath = "/join/pending";
+    else if (!body.organizationId) nextPath = "/onboarding";
+  }
+  document.cookie = `${WORKSPACE_MODE_COOKIE}=live; path=/; max-age=${WORKSPACE_MODE_MAX_AGE}; samesite=lax`;
+  return nextPath;
+}
+
+/** Firebase-free: Clerk session alone is enough for CRM (Postgres) APIs. */
+function ClerkPostgresOnlyBridge() {
+  const { isSignedIn, userId, isLoaded } = useClerkAuth();
+  const [error, setError] = React.useState<string | null>(null);
+  const ranRef = React.useRef<string | null>(null);
+
+  React.useEffect(() => {
+    if (!isLoaded || !isSignedIn || !userId) return;
+    if (ranRef.current === userId) return;
+    ranRef.current = userId;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        setError(null);
+        const nextPath = await completeInviteAndRedirect();
+        if (!cancelled) window.location.assign(nextPath);
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Could not finish sign-in.",
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [isLoaded, isSignedIn, userId]);
+
+  if (!error) return null;
+
+  return (
+    <div
+      role="status"
+      className="fixed bottom-4 left-1/2 z-[100] max-w-md -translate-x-1/2 rounded-md border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive shadow-lg"
+    >
+      <p className="font-medium">Sign-in incomplete</p>
+      <p className="mt-1 text-xs text-destructive/90">{error}</p>
+    </div>
+  );
 }
 
 function ClerkFirebaseBridgeInner() {
@@ -90,28 +155,7 @@ function ClerkFirebaseBridgeInner() {
         const idToken = await credential.user.getIdToken();
         await exchangeIdTokenForSession(idToken);
 
-        const tokens = readAndClearInviteTokens();
-        let nextPath = "/dashboard";
-        if (tokens.inviteToken || tokens.openJoinToken) {
-          const complete = await fetch("/api/auth/clerk-complete-membership", {
-            method: "POST",
-            credentials: "include",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(tokens),
-          });
-          const body = (await complete.json().catch(() => ({}))) as {
-            error?: string;
-            membershipPending?: boolean;
-            organizationId?: string | null;
-          };
-          if (!complete.ok) {
-            throw new Error(body.error ?? "Could not accept invite.");
-          }
-          if (body.membershipPending) nextPath = "/join/pending";
-          else if (!body.organizationId) nextPath = "/onboarding";
-        }
-
-        document.cookie = `${WORKSPACE_MODE_COOKIE}=live; path=/; max-age=${WORKSPACE_MODE_MAX_AGE}; samesite=lax`;
+        const nextPath = await completeInviteAndRedirect();
 
         if (!cancelled) {
           lastUidRef.current = userId;

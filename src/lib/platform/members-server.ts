@@ -61,6 +61,37 @@ function membersCol(orgId: string) {
 export async function listMembersServer(
   orgId: string,
 ): Promise<OrganizationMember[]> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const rows = await withRlsBypass(async (tx) =>
+        tx.member.findMany({
+          where: { organizationId: orgId },
+          orderBy: { joinedAt: "desc" },
+        }),
+      );
+      if (rows.length > 0 || !getAdminDb()) {
+        return rows.map((row) => ({
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] listMembersServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const col = membersCol(orgId);
   if (!col) return [];
   const snap = await col.orderBy("joinedAt", "desc").get();
@@ -71,6 +102,38 @@ export async function getMemberServer(
   orgId: string,
   uid: string,
 ): Promise<OrganizationMember | null> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.member.findUnique({
+          where: {
+            organizationId_uid: { organizationId: orgId, uid },
+          },
+        }),
+      );
+      if (row) {
+        return {
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] getMemberServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const col = membersCol(orgId);
   if (!col) return null;
   const d = await col.doc(uid).get();
@@ -81,6 +144,42 @@ export async function getMemberServer(
 export async function findMembershipForUserServer(
   uid: string,
 ): Promise<OrganizationMember | null> {
+  if (!uid.trim()) return null;
+
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.member.findFirst({
+          where: {
+            uid,
+            status: { in: ["active", "pending"] },
+          },
+          orderBy: { joinedAt: "desc" },
+        }),
+      );
+      if (row) {
+        return {
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] findMembershipForUserServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const db = getAdminDb();
   if (!db) return null;
   const snap = await db

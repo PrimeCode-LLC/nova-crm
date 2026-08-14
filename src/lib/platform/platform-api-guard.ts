@@ -7,7 +7,8 @@ import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 
 export type PlatformApiContext = {
   session: AppSession;
-  adminAuth: Auth;
+  /** Null when Firebase Admin is disabled / not configured. */
+  adminAuth: Auth | null;
 };
 
 export type PlatformGuardResult =
@@ -16,21 +17,11 @@ export type PlatformGuardResult =
 
 export async function guardPlatformApi(): Promise<PlatformGuardResult> {
   if (isAuthDisabled()) {
-    const adminAuth = getAdminAuth();
-    if (!adminAuth) {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          { error: "Firebase Admin is not configured." },
-          { status: 503 },
-        ),
-      };
-    }
     return {
       ok: true,
       ctx: {
         session: { uid: "dev", email: "dev@local", name: "Dev user" },
-        adminAuth,
+        adminAuth: getAdminAuth(),
       },
     };
   }
@@ -51,16 +42,5 @@ export async function guardPlatformApi(): Promise<PlatformGuardResult> {
     };
   }
 
-  const adminAuth = getAdminAuth();
-  if (!adminAuth) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "Firebase Admin is not configured." },
-        { status: 503 },
-      ),
-    };
-  }
-
-  return { ok: true, ctx: { session, adminAuth } };
+  return { ok: true, ctx: { session, adminAuth: getAdminAuth() } };
 }

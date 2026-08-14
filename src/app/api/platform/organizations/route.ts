@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardPlatformApi } from "@/lib/platform/platform-api-guard";
+import { firebaseAdminRequiredResponse } from "@/lib/firebase/require-admin-auth";
 import {
   createOrganizationServer,
   listOrganizationsServer,
@@ -86,6 +87,14 @@ export async function POST(req: Request) {
     );
   }
 
+  // Firebase password provisioning still needs Admin Auth; Clerk-only deploys
+  // should omit ownerPassword and invite via Clerk instead.
+  if (parsed.data.ownerPassword?.trim()) {
+    const missingAdmin = firebaseAdminRequiredResponse(g.ctx.adminAuth);
+    if (missingAdmin) return missingAdmin;
+  }
+  const adminAuth = g.ctx.adminAuth;
+
   const {
     settings: s,
     ownerEmail: rawOwnerEmail,
@@ -115,7 +124,7 @@ export async function POST(req: Request) {
     let uid: string;
     let createdNewFirebaseUser = false;
     try {
-      const rec = await g.ctx.adminAuth.createUser({
+      const rec = await adminAuth!.createUser({
         email: ownerEmail,
         password: ownerPassword,
         displayName: ownerDisplayNameFromInput.slice(0, 120),
@@ -126,7 +135,7 @@ export async function POST(req: Request) {
     } catch (err: unknown) {
       if (adminAuthErrorCode(err) === "auth/email-already-exists") {
         try {
-          const existing = await g.ctx.adminAuth.getUserByEmail(ownerEmail);
+          const existing = await adminAuth!.getUserByEmail(ownerEmail);
           uid = existing.uid;
         } catch {
           return NextResponse.json(
@@ -149,7 +158,7 @@ export async function POST(req: Request) {
     if ("error" in membershipCheck) {
       if (createdNewFirebaseUser) {
         try {
-          await g.ctx.adminAuth.deleteUser(uid);
+          await adminAuth!.deleteUser(uid);
         } catch {
           /* best-effort rollback */
         }
@@ -165,7 +174,7 @@ export async function POST(req: Request) {
     // Resolve by email only: existing Firebase user is linked; otherwise
     // `pendingOwnerEmail` is set so the org claims itself when they sign up.
     try {
-      const u = await g.ctx.adminAuth.getUserByEmail(ownerEmail);
+      const u = await adminAuth!.getUserByEmail(ownerEmail);
       const membershipCheck = await assertUserHasNoWorkspaceServer(u.uid, {
         context: "owner",
       });
@@ -188,7 +197,7 @@ export async function POST(req: Request) {
   if ("error" in result) {
     if (ownerProvisionCreatedNewFirebaseUser && resolvedOwnerUid) {
       try {
-        await g.ctx.adminAuth.deleteUser(resolvedOwnerUid);
+        await adminAuth!.deleteUser(resolvedOwnerUid);
       } catch {
         /* best-effort rollback */
       }
@@ -254,14 +263,14 @@ export async function POST(req: Request) {
       resolvedOwnerUid,
       ownerEmail,
     );
-    await setAppClaims(g.ctx.adminAuth, resolvedOwnerUid, {
+    await setAppClaims(adminAuth, resolvedOwnerUid, {
       organizationId: result.id,
       orgRole: "owner",
       platformAdmin: platformAdmin || undefined,
     });
 
     if (ownerLoginProvisioned) {
-      await g.ctx.adminAuth.revokeRefreshTokens(resolvedOwnerUid);
+      await adminAuth!.revokeRefreshTokens(resolvedOwnerUid);
       await recordAudit({
         organizationId: result.id,
         actorUid: g.ctx.session.uid,

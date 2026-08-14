@@ -16,7 +16,7 @@ function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<strin
 }
 
 async function withOwnerManagerIds(
-  db: Firestore,
+  db: Firestore | null,
   ownerId: string | undefined,
   base: Record<string, unknown>,
   override?: string[],
@@ -26,7 +26,7 @@ async function withOwnerManagerIds(
 }
 
 export async function persistAccountCreateClient(
-  db: Firestore,
+  db: Firestore | null,
   organizationId: string,
   account: Account,
   opts?: { ownerManagerIds?: string[] },
@@ -48,12 +48,16 @@ export async function persistAccountCreateClient(
     return;
   }
 
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
+  }
+
   await setDoc(doc(db, COLLECTIONS.accounts, account.id), data);
   scheduleCrmMirrorClient("account", account.id);
 }
 
 export async function persistContactCreateClient(
-  db: Firestore,
+  db: Firestore | null,
   organizationId: string,
   contact: Contact,
   opts?: { ownerManagerIds?: string[] },
@@ -75,12 +79,16 @@ export async function persistContactCreateClient(
     return;
   }
 
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
+  }
+
   await setDoc(doc(db, COLLECTIONS.contacts, contact.id), data);
   scheduleCrmMirrorClient("contact", contact.id);
 }
 
 export async function persistLeadCreateClient(
-  db: Firestore,
+  db: Firestore | null,
   organizationId: string,
   lead: Lead,
   opts?: { ownerManagerIds?: string[] },
@@ -102,6 +110,10 @@ export async function persistLeadCreateClient(
     return;
   }
 
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
+  }
+
   await setDoc(doc(db, COLLECTIONS.leads, lead.id), data);
   scheduleCrmMirrorClient("lead", lead.id);
 }
@@ -111,7 +123,7 @@ export async function persistLeadCreateClient(
  * P6.2: when sole-writer flag on, writes Postgres only (atomic upsert_graph).
  */
 export async function persistLeadGraphClient(
-  db: Firestore,
+  db: Firestore | null,
   organizationId: string,
   account: Account,
   contact: Contact,
@@ -146,6 +158,10 @@ export async function persistLeadGraphClient(
       lead: { id: lead.id, doc: leadDoc },
     });
     return;
+  }
+
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
   }
 
   const batch = writeBatch(db);

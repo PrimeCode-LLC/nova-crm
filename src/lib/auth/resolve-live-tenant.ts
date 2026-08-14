@@ -65,13 +65,15 @@ async function resolveLiveTenantForSessionUncached(
   session: Pick<AppSession, "uid" | "email" | "organizationId" | "orgRole">,
 ): Promise<ResolvedTenantContext> {
   const db = getAdminDb();
-  const userSnap = await db?.collection(COLLECTIONS.users).doc(session.uid).get();
-  const userStatus = userSnap?.data()?.status;
-  if (userStatus === "inactive") {
-    return {
-      membershipPending: false,
-      accessDeniedReason: "inactive_user",
-    };
+  if (db) {
+    const userSnap = await db.collection(COLLECTIONS.users).doc(session.uid).get();
+    const userStatus = userSnap?.data()?.status;
+    if (userStatus === "inactive") {
+      return {
+        membershipPending: false,
+        accessDeniedReason: "inactive_user",
+      };
+    }
   }
 
   let organizationId = session.organizationId;

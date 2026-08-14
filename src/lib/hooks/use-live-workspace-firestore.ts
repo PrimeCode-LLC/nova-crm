@@ -528,29 +528,122 @@ export function useLiveWorkspaceFirestore(
     listenerErrorsRef.current.clear();
 
     if (!isFirebaseWebConfigured()) {
-      setState({
-        loading: false,
-        coreReady: { users: true, leads: true, followups: true },
+      const pgLeads = isPostgresReadLeadsV1Enabled();
+      const pgCrm = isPostgresReadCrmV1Enabled();
+      if (!organizationId || (!pgLeads && !pgCrm)) {
+        setState({
+          loading: false,
+          coreReady: { users: true, leads: true, followups: true },
+          error: null,
+          users: [],
+          leads: [],
+          accounts: [],
+          contacts: [],
+          deals: [],
+          notes: [],
+          followups: [],
+          followupPlans: [],
+          leadTasks: [],
+          touchpoints: [],
+          timelineEvents: [],
+          activityCounters: [],
+          activityRecords: [],
+          orgActivityEvents: [],
+          profiles: [],
+          campaigns: [],
+          crmLabels: [],
+        });
+        return;
+      }
+
+      // Firebase-free: poll Postgres CRM APIs only (no Firestore listeners).
+      let cancelled = false;
+      const memberScope = narrowToMemberCrm;
+      const applyPg = (
+        key: "leads" | "accounts" | "contacts" | "deals",
+        coreKey: "leads" | null,
+        rows: unknown[],
+      ) => {
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error: null,
+          [key]: rows,
+          coreReady:
+            coreKey === "leads"
+              ? { ...prev.coreReady, leads: true, users: true, followups: true }
+              : { ...prev.coreReady, users: true, followups: true },
+        }));
+      };
+      const load = async () => {
+        try {
+          if (pgLeads) {
+            const res = await fetch(
+              `/api/org/leads?narrow=${memberScope ? "1" : "0"}&all=1`,
+              { credentials: "same-origin", cache: "no-store" },
+            );
+            const json = (await res.json()) as {
+              ok?: boolean;
+              leads?: Lead[];
+              error?: string;
+            };
+            if (cancelled) return;
+            if (!res.ok || !json.ok) {
+              throw new Error(json.error || `Leads API failed (${res.status})`);
+            }
+            applyPg("leads", "leads", Array.isArray(json.leads) ? json.leads : []);
+          } else {
+            applyPg("leads", "leads", []);
+          }
+          if (pgCrm) {
+            for (const entity of ["accounts", "contacts", "deals"] as const) {
+              const res = await fetch(
+                `/api/org/${entity}?narrow=${memberScope ? "1" : "0"}&all=1`,
+                { credentials: "same-origin", cache: "no-store" },
+              );
+              const json = (await res.json()) as {
+                ok?: boolean;
+                error?: string;
+              } & Record<string, unknown>;
+              if (cancelled) return;
+              if (!res.ok || !json.ok) {
+                throw new Error(
+                  (json.error as string) || `${entity} API failed (${res.status})`,
+                );
+              }
+              const rows = Array.isArray(json[entity]) ? json[entity] : [];
+              applyPg(entity, null, rows as unknown[]);
+            }
+          }
+        } catch (err) {
+          if (cancelled) return;
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            coreReady: { users: true, leads: true, followups: true },
+            error: err instanceof Error ? err : new Error(String(err)),
+          }));
+        }
+      };
+      setState((prev) => ({
+        ...prev,
+        loading: true,
+        coreReady: { users: false, leads: false, followups: true },
         error: null,
-        users: [],
-        leads: [],
-        accounts: [],
-        contacts: [],
-        deals: [],
-        notes: [],
-        followups: [],
-        followupPlans: [],
-        leadTasks: [],
-        touchpoints: [],
-        timelineEvents: [],
-        activityCounters: [],
-        activityRecords: [],
-        orgActivityEvents: [],
-        profiles: [],
-        campaigns: [],
-        crmLabels: [],
-      });
-      return;
+      }));
+      void load();
+      const intervalId = window.setInterval(() => {
+        void load();
+      }, POSTGRES_CRM_POLL_MS);
+      const onFocus = () => {
+        void load();
+      };
+      window.addEventListener("focus", onFocus);
+      return () => {
+        cancelled = true;
+        window.clearInterval(intervalId);
+        window.removeEventListener("focus", onFocus);
+      };
     }
 
     // Wait for organizationId (userDoc still hydrating). Marking core ready with

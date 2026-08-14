@@ -11,7 +11,8 @@ export { roleAtLeast };
 
 export type TenantApiContext = {
   session: AppSession & { organizationId: string };
-  adminAuth: Auth;
+  /** Null when Firebase Admin is disabled / not configured (Clerk + Postgres path). */
+  adminAuth: Auth | null;
   role: OrgMemberRole;
 };
 
@@ -23,23 +24,15 @@ export type TenantGuardResult =
  * Guard for tenant-scoped APIs - requires a session with an `organizationId`
  * and (optionally) a minimum org role.
  *
- * Falls back to a Firestore membership lookup if claims are missing/stale,
+ * Falls back to a membership lookup if claims are missing/stale,
  * so freshly-promoted users don't have to wait for an ID-token refresh.
+ *
+ * Firebase Admin is optional: Clerk + Postgres membership is enough for CRM APIs.
  */
 export async function guardTenantApi(opts?: {
   minRole?: OrgMemberRole;
 }): Promise<TenantGuardResult> {
   if (isAuthDisabled()) {
-    const adminAuth = getAdminAuth();
-    if (!adminAuth) {
-      return {
-        ok: false,
-        response: NextResponse.json(
-          { error: "Firebase Admin is not configured." },
-          { status: 503 },
-        ),
-      };
-    }
     return {
       ok: true,
       ctx: {
@@ -50,7 +43,7 @@ export async function guardTenantApi(opts?: {
           organizationId: "dev-org",
           orgRole: "owner",
         } as AppSession & { organizationId: string },
-        adminAuth,
+        adminAuth: getAdminAuth(),
         role: "owner",
       },
     };
@@ -113,24 +106,13 @@ export async function guardTenantApi(opts?: {
     };
   }
 
-  const adminAuth = getAdminAuth();
-  if (!adminAuth) {
-    return {
-      ok: false,
-      response: NextResponse.json(
-        { error: "Firebase Admin is not configured." },
-        { status: 503 },
-      ),
-    };
-  }
-
   return {
     ok: true,
     ctx: {
       session: { ...session, organizationId } as AppSession & {
         organizationId: string;
       },
-      adminAuth,
+      adminAuth: getAdminAuth(),
       role,
     },
   };

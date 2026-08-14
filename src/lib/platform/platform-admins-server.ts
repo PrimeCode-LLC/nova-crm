@@ -27,13 +27,19 @@ export async function listPlatformAdminsServer(): Promise<PlatformAdminRecord[]>
 }
 
 export async function grantPlatformAdminServer(
-  adminAuth: Auth,
+  adminAuth: Auth | null,
   emailRaw: string,
   role: PlatformAdminRole,
   createdByUid: string,
 ): Promise<{ ok: true } | { error: string }> {
   const email = emailRaw.trim().toLowerCase();
   if (!email) return { error: "Email is required" };
+  if (!adminAuth) {
+    return {
+      error:
+        "Firebase Admin is disabled. Grant platform access via PLATFORM_ADMIN_EMAILS instead.",
+    };
+  }
 
   let uid: string;
   try {

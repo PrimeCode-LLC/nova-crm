@@ -65,7 +65,7 @@ function leadPayloadFromPatch(patch: Partial<Lead>, withActivityBump: boolean): 
  * P6.4: when sole-writer flag on, patches Postgres CRM entities; timeline stays on Firestore.
  */
 export async function persistBulkOwnerReassignClient(
-  db: Firestore,
+  db: Firestore | null,
   organizationId: string,
   items: BulkOwnerReassignItem[],
   nextOwnerId: string,
@@ -127,22 +127,28 @@ export async function persistBulkOwnerReassignClient(
           patch: { ownerId: nextOwnerId, ownerManagerIds },
         });
       }
-      await setDoc(doc(db, COLLECTIONS.timelineEvents, item.timeline.id), {
-        organizationId,
-        leadId: item.timeline.leadId,
-        leadOwnerId: nextOwnerId,
-        leadOwnerManagerIds,
-        type: item.timeline.type,
-        actorId: item.timeline.actorId ?? null,
-        summary: item.timeline.summary,
-        payload: null,
-        createdAt: item.timeline.createdAt,
-      });
+      if (db) {
+        await setDoc(doc(db, COLLECTIONS.timelineEvents, item.timeline.id), {
+          organizationId,
+          leadId: item.timeline.leadId,
+          leadOwnerId: nextOwnerId,
+          leadOwnerManagerIds,
+          type: item.timeline.type,
+          actorId: item.timeline.actorId ?? null,
+          summary: item.timeline.summary,
+          payload: null,
+          createdAt: item.timeline.createdAt,
+        });
+      }
       done += 1;
       if (done % 20 === 0) onProgress?.(done, total);
     }
     onProgress?.(total, total);
     return;
+  }
+
+  if (!db) {
+    throw new Error("Firestore is required when Postgres sole-writer is off");
   }
 
   let batch = writeBatch(db);

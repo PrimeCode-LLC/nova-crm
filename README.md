@@ -31,9 +31,7 @@ flowchart LR
 | **Auth (web login)** | **Clerk** — `/sign-in`, `/sign-up`; Nova maps identity → `organization_id` / role |
 | **CRM entities** | **Postgres** — accounts, contacts, leads, deals (+ org dashboard summaries) |
 | **CRM writes** | **Sole writer** via `POST /api/org/crm-write` — no Firestore dual-write on that path |
-| **Orgs / members** | Still Firestore-first writers (Postgres dual-write optional for migration soak) |
-| **Firebase residual** | Chat, notifications, email/mailbox, scrapers intake, imports metadata, scheduling, etc. — see ENGINEERING_RULES §1b |
-| **Clerk → Firebase bridge** | Custom token so remaining Firestore client listeners keep Auth rules until those domains migrate |
+| **Firebase** | **Optional / disabled** via `FIREBASE_DISABLED` — residual domains stay off until migrated |
 
 Heavy work must not run on the web tier when queue flags are on — see [`NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md).
 
@@ -43,48 +41,48 @@ Env / flag details: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md). Tenant model
 
 Work on `feature/*` branches and merge to `main` via PR only — see [`docs/BRANCHING.md`](docs/BRANCHING.md). Do not push directly to `main`.
 
-## Quick start
+## Quick start (Firebase-free)
 
 ```bash
 cd crm
 npm install
 cp .env.example .env.local
-# Fill Clerk keys + AUTH_CLERK_V1 (see Auth below)
-# Keep FIREBASE_ADMIN_* for residual Firestore + Clerk→Firebase bridge
-# Set DATABASE_URL / MIGRATE_DATABASE_URL / REDIS_URL (see Docker section)
+# Required:
+#   Clerk keys + AUTH_CLERK_V1 / NEXT_PUBLIC_AUTH_CLERK_V1
+#   DATABASE_URL / MIGRATE_DATABASE_URL / REDIS_URL
+#   FIREBASE_DISABLED=true + NEXT_PUBLIC_FIREBASE_DISABLED=true
+#   Postgres CRM cutover flags (reads + sole-writer + dashboard) — see below
 docker compose up -d postgres redis
-npm run db:migrate:deploy   # first time / after pulling migrations
+npm run db:migrate:deploy
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Unauthenticated visitors go to Clerk **`/sign-in`** when `auth_clerk_v1` is on.
+Open [http://localhost:3000](http://localhost:3000). Sign in at Clerk **`/sign-in`**.
 
-### Recommended local cutover flags (CRM on Postgres)
-
-After backfill/reconcile are clean for your org:
+### Recommended cutover flags (CRM on Postgres, no Firebase)
 
 ```bash
-# Auth
+FIREBASE_DISABLED=true
+NEXT_PUBLIC_FIREBASE_DISABLED=true
+
 AUTH_CLERK_V1=true
 NEXT_PUBLIC_AUTH_CLERK_V1=true
 
-# CRM reads (workspace polls APIs instead of Firestore onSnapshot)
 POSTGRES_READ_LEADS_V1=true
 NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
 POSTGRES_READ_CRM_V1=true
 NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
-
-# CRM writes — Postgres only (no dual-write on client/Admin sole-writer paths)
 POSTGRES_SOLE_WRITER_CRM_V1=true
 NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
 
-# Dashboard KPIs from Postgres precompute
 POSTGRES_DASHBOARD_SUMMARY_WRITER_V1=true
 POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
 NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
 ```
 
-Dual-write flags (`POSTGRES_DUAL_WRITE_*`) were the **Phase 2 migration bridge**. With sole-writer on, do **not** rely on dual-write for accounts/contacts/leads/deals — Postgres is the writer. Keep dual-write off unless you are actively soaking a new environment before sole-writer cutover.
+With `FIREBASE_DISABLED=true`, Firebase packages may remain in `package.json` but are not initialized. Residual domains (chat, email/mailbox, scrapers intake, content calendar, etc.) are unavailable until migrated to Postgres/worker. Platform bootstrap uses `PLATFORM_ADMIN_EMAILS`.
+
+Members/orgs must already exist in Postgres (from prior backfill). Invite acceptance that still stores tokens in Firestore will return 503 until invites are migrated.
 
 ### Local worker (Phase 4)
 
@@ -132,6 +130,7 @@ If you have not configured Clerk yet, either:
 | `NEXT_PUBLIC_CLERK_SIGN_IN_URL` | Client | Default `/sign-in` |
 | `NEXT_PUBLIC_CLERK_SIGN_UP_URL` | Client | Default `/sign-up` |
 | `AUTH_CLERK_V1` / `NEXT_PUBLIC_AUTH_CLERK_V1` | Server / client | Enable Clerk auth path |
+| `FIREBASE_DISABLED` / `NEXT_PUBLIC_FIREBASE_DISABLED` | Server / client | Kill switch — no Firebase init; Clerk + Postgres only |
 | `DATABASE_URL` | Server | App role `nova_app` (RLS enforced) |
 | `MIGRATE_DATABASE_URL` | CLI | Superuser for Prisma Migrate |
 | `REDIS_URL` | Server / worker | Cache + BullMQ |
