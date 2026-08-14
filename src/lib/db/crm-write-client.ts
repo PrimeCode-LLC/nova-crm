@@ -29,6 +29,10 @@ export type CrmWriteClientBody =
       account: { id: string; doc: Record<string, unknown> };
       contact: { id: string; doc: Record<string, unknown> };
       lead: { id: string; doc: Record<string, unknown> };
+    }
+  | {
+      action: "bump_lead_activity";
+      id: string;
     };
 
 export async function persistCrmWriteClient(body: CrmWriteClientBody): Promise<void> {

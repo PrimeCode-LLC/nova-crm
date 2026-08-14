@@ -121,8 +121,30 @@ gcloud firestore export gs://YOUR_BACKUP_BUCKET/firestore-$(date -u +%Y%m%d)
 
 Document the bucket path + date in the ops runbook; do not commit exports.
 
-## P6.4+ — Later (not started)
+## P6.4 — Strip CRM Firestore writes (incremental)
 
-- Strip CRM Firestore listeners / Admin CRM write paths / Clerk→Firebase bridge (incrementally)
-- Remove Firebase project deps after weeks of stable prod
-- Follow-on: orgs/members PG reads → sole writer; route remaining Admin CRM writers through PG.
+| Item | Detail |
+|------|--------|
+| Already done (P6.1) | Workspace skips FS `onSnapshot` for accounts/contacts/leads/deals when read flags on |
+| Admin | `promote-server`, Instantly `webhook-handler` + `sync-campaign-leads-server` write PG when sole-writer on |
+| Client gaps | `persist-bulk-owner-reassign-client`, `persistLeadActivityBump` → `/api/org/crm-write` |
+| Helpers | `crm-sole-writer-server.ts`, get/find helpers on `list-crm-postgres.ts`, `bump_lead_activity` action |
+| Bridge | **Kept** — chat, notifications, profiles, followups, etc. still need Firebase Auth for rules |
+| Remaining FS CRM writers | imports chunk apply, email bounce/reply patches, millionverifier, extension findings, prospects draft/push — follow-on |
+| Status | **Implemented** (2026-08-14) for primary Admin + client paths |
+
+## P6.5 — Firebase deps / exception
+
+| Item | Detail |
+|------|--------|
+| Decision | Do **not** remove `firebase` / `firebase-admin` while non-CRM domains remain on Firestore |
+| Contract | ENGINEERING_RULES **§1b** — CRM SoT = Postgres; Firebase allowed only for listed residual domains |
+| Exit meaning | CRM transactional path decommissioned (flags + writers), not empty Firebase |
+| Status | **Recorded** (2026-08-14) |
+
+### Follow-on (out of this baby step)
+
+- Orgs/members PG reads → sole writer  
+- Remaining Admin CRM patches (email, MV, imports, extension, prospects)  
+- Per-domain migration off Firestore → then drop bridge → then drop packages  
+

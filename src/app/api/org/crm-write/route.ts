@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { CrmEntity } from "@/lib/db/dual-write-crm";
 import {
   deleteCrmEntityPostgres,
+  bumpLeadActivityPostgres,
   patchCrmEntityPostgres,
   upsertCrmEntityPostgres,
   upsertLeadGraphPostgres,
@@ -61,11 +62,19 @@ const graphSchema = z
   })
   .strict();
 
+const bumpActivitySchema = z
+  .object({
+    action: z.literal("bump_lead_activity"),
+    id: z.string().min(1).max(128),
+  })
+  .strict();
+
 const bodySchema = z.discriminatedUnion("action", [
   upsertSchema,
   patchSchema,
   deleteSchema,
   graphSchema,
+  bumpActivitySchema,
 ]);
 
 /**
@@ -145,6 +154,9 @@ export async function POST(req: Request) {
           contact: body.contact,
           lead: body.lead,
         });
+        break;
+      case "bump_lead_activity":
+        result = await bumpLeadActivityPostgres(organizationId, body.id);
         break;
     }
 

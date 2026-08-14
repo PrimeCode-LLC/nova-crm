@@ -15,6 +15,15 @@ import { upsertLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server
 import { classifyInboundLeadMailServer } from "@/lib/email/classify-inbound-reply-server";
 import { leadMailProviderKey } from "@/lib/email/lead-mail-ids";
 import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
+import {
+  findLeadIdByContactEmailPostgres,
+  getLeadFromPostgres,
+} from "@/lib/db/list-crm-postgres";
+import {
+  isCrmSoleWriterActive,
+  patchCrmDocSoleWriter,
+  upsertLeadGraphSoleWriter,
+} from "@/lib/db/crm-sole-writer-server";
 
 export type InstantlyWebhookPayload = {
   timestamp?: string;
@@ -93,7 +102,7 @@ export async function handleInstantlyWebhookEvent(
     ? await findNovaCampaignByInstantlyId(organizationId, campaignId)
     : null;
 
-  const existing = await db
+  const existingFs = await db
     .collection(COLLECTIONS.leads)
     .where("organizationId", "==", organizationId)
     .where("contactEmail", "==", email)
@@ -107,13 +116,98 @@ export async function handleInstantlyWebhookEvent(
     "Reply received from Instantly";
 
   let leadId: string;
+  let leadOwnerId = "";
 
   const replyAt = new Date().toISOString();
+  const soleWriter = isCrmSoleWriterActive();
 
-  if (!existing.empty) {
-    const doc = existing.docs[0]!;
+  if (soleWriter) {
+    const existingId = await findLeadIdByContactEmailPostgres(organizationId, email);
+    if (existingId) {
+      leadId = existingId;
+      const existingLead = await getLeadFromPostgres(organizationId, leadId);
+      if (!existingLead) throw new Error("Lead missing in Postgres");
+      leadOwnerId = existingLead.ownerId;
+      const replyPatch = buildReplyDetectedPatch({
+        lead: existingLead,
+        replyAt,
+        source: "instantly",
+        replyMessageId: payload.unibox_url?.trim() || undefined,
+      });
+      const patch: Record<string, unknown> = { ...replyPatch };
+      if (novaCampaign) patch.campaignId = novaCampaign.id;
+      patch.pushToInstantly = "pushed";
+      await patchCrmDocSoleWriter(organizationId, "lead", leadId, stripUndefined(patch));
+    } else {
+      leadId = `l-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      const accountId = `a-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      const contactId = `ct-${crypto.randomUUID().replace(/-/g, "").slice(0, 12)}`;
+      const companyName = payload.campaign_name?.trim() || "Unknown";
+      const localPart = email.split("@")[0] ?? "Contact";
+      const contactName =
+        localPart.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) ||
+        "Contact";
+      const ownerManagerIds: string[] = [];
+      await upsertLeadGraphSoleWriter(organizationId, {
+        account: {
+          id: accountId,
+          doc: stampForCreate(organizationId, {
+            name: companyName,
+            domain: email.includes("@") ? email.split("@")[1] : undefined,
+            ownerManagerIds,
+            ownerId: "",
+            contactCount: 0,
+            leadCount: 1,
+            openDealValue: 0,
+          }),
+        },
+        contact: {
+          id: contactId,
+          doc: stampForCreate(organizationId, {
+            accountId,
+            firstName: contactName.split(" ")[0] ?? contactName,
+            lastName: contactName.split(" ").slice(1).join(" ") || "",
+            fullName: contactName,
+            email,
+            ownerManagerIds,
+            ownerId: "",
+          }),
+        },
+        lead: {
+          id: leadId,
+          doc: stampForCreate(
+            organizationId,
+            stripUndefined({
+              accountId,
+              contactId,
+              channel: "cold_email",
+              campaignId: novaCampaign?.id,
+              stage: "replied",
+              temperature: "warm",
+              priority: "high",
+              ownerId: "",
+              ownerManagerIds,
+              contactName,
+              contactEmail: email,
+              companyName,
+              pushToInstantly: "pushed",
+              touches: 1,
+              firstContactAt: replyAt,
+              lastActivityAt: replyAt,
+              lastReplyAt: replyAt,
+              lastReplySource: "instantly",
+              lastReplyMessageId: payload.unibox_url?.trim() || undefined,
+              replyReviewStatus: "accepted",
+            }),
+          ),
+        },
+      });
+    }
+  } else if (!existingFs.empty) {
+    const doc = existingFs.docs[0]!;
     leadId = doc.id;
     const existingLead = mapLeadDoc(doc.id, doc.data() as Record<string, unknown>);
+    leadOwnerId = existingLead.ownerId;
     const replyPatch = buildReplyDetectedPatch({
       lead: existingLead,
       replyAt,
@@ -184,8 +278,15 @@ export async function handleInstantlyWebhookEvent(
     await mirrorCrmEntityAfterWrite("lead", leadId, { organizationId });
   }
 
-  const leadSnap = await db.collection(COLLECTIONS.leads).doc(leadId).get();
-  const leadOwnerId = String(leadSnap.data()?.ownerId ?? "");
+  if (!leadOwnerId) {
+    if (soleWriter) {
+      const lead = await getLeadFromPostgres(organizationId, leadId);
+      leadOwnerId = lead?.ownerId ?? "";
+    } else {
+      const leadSnap = await db.collection(COLLECTIONS.leads).doc(leadId).get();
+      leadOwnerId = String(leadSnap.data()?.ownerId ?? "");
+    }
+  }
   const leadOwnerManagerIds = await resolveOwnerManagerIdsAdmin(db, leadOwnerId);
 
   await db.collection(COLLECTIONS.timelineEvents).add(

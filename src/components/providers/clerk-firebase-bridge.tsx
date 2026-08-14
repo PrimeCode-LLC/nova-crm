@@ -19,7 +19,12 @@ import { readAndClearInviteTokens } from "@/components/providers/clerk-invite-st
 
 /**
  * When the user is signed into Clerk but not Firebase, mint a custom token
- * and sign into Firebase so Firestore live listeners keep working (P5 parallel).
+ * and sign into Firebase so **non-CRM** Firestore live listeners keep working
+ * (chat, notifications, profiles, followups, etc.).
+ *
+ * P6.4/P6.5: CRM accounts/contacts/leads/deals can use Postgres reads/writes
+ * without this bridge, but the bridge must stay until those residual FS
+ * surfaces are migrated (ENGINEERING_RULES §1b).
  */
 export function ClerkFirebaseBridge() {
   if (!isClerkAuthV1Enabled()) return null;

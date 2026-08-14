@@ -3,9 +3,12 @@ import {
   doc,
   increment,
   serverTimestamp,
+  setDoc,
   writeBatch,
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
+import { persistCrmWriteClient } from "@/lib/db/crm-write-client";
+import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Lead, TimelineEvent } from "@/lib/types";
@@ -27,6 +30,20 @@ export type BulkOwnerReassignItem = {
   timeline: Pick<TimelineEvent, "id" | "leadId" | "type" | "actorId" | "summary" | "createdAt">;
 };
 
+function leadPatchFields(patch: Partial<Lead>): {
+  patch: Record<string, unknown>;
+  unset: string[];
+} {
+  const out: Record<string, unknown> = {};
+  const unset: string[] = [];
+  for (const [key, val] of Object.entries(patch)) {
+    if (OMIT_FROM_LEAD_PATCH.has(key)) continue;
+    if (val === undefined) unset.push(key);
+    else out[key] = val;
+  }
+  return { patch: out, unset };
+}
+
 function leadPayloadFromPatch(patch: Partial<Lead>, withActivityBump: boolean): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     updatedAt: serverTimestamp(),
@@ -44,8 +61,8 @@ function leadPayloadFromPatch(patch: Partial<Lead>, withActivityBump: boolean): 
 }
 
 /**
- * Bulk-assigns lead ownership using Firestore write batches.
- * Progress callback fires after each committed chunk (done count of items).
+ * Bulk-assigns lead ownership.
+ * P6.4: when sole-writer flag on, patches Postgres CRM entities; timeline stays on Firestore.
  */
 export async function persistBulkOwnerReassignClient(
   db: Firestore,
@@ -58,13 +75,81 @@ export async function persistBulkOwnerReassignClient(
 
   const ownerManagerIds = await resolveOwnerManagerIdsClient(db, nextOwnerId);
   const leadOwnerManagerIds = ownerManagerIds;
+  const total = items.length;
+
+  if (isPostgresSoleWriterCrmV1Enabled()) {
+    const accountsSeen = new Set<string>();
+    const contactsSeen = new Set<string>();
+    let done = 0;
+    for (const item of items) {
+      const leadFields = leadPatchFields({ ...item.leadPatch, ownerManagerIds });
+      await persistCrmWriteClient({
+        action: "patch",
+        entity: "lead",
+        id: item.leadId,
+        patch: {
+          ...leadFields.patch,
+          lastActivityAt: new Date().toISOString(),
+        },
+        unset: leadFields.unset,
+      });
+      if (
+        item.linkedSalesLeadId &&
+        item.linkedSalesPatch &&
+        Object.keys(item.linkedSalesPatch).length
+      ) {
+        const linked = leadPatchFields({ ...item.linkedSalesPatch, ownerManagerIds });
+        await persistCrmWriteClient({
+          action: "patch",
+          entity: "lead",
+          id: item.linkedSalesLeadId,
+          patch: linked.patch,
+          unset: linked.unset,
+        });
+      }
+      const accountId = item.accountId?.trim();
+      if (accountId && !accountsSeen.has(accountId)) {
+        accountsSeen.add(accountId);
+        await persistCrmWriteClient({
+          action: "patch",
+          entity: "account",
+          id: accountId,
+          patch: { ownerId: nextOwnerId, ownerManagerIds },
+        });
+      }
+      const contactId = item.contactId?.trim();
+      if (contactId && !contactsSeen.has(contactId)) {
+        contactsSeen.add(contactId);
+        await persistCrmWriteClient({
+          action: "patch",
+          entity: "contact",
+          id: contactId,
+          patch: { ownerId: nextOwnerId, ownerManagerIds },
+        });
+      }
+      await setDoc(doc(db, COLLECTIONS.timelineEvents, item.timeline.id), {
+        organizationId,
+        leadId: item.timeline.leadId,
+        leadOwnerId: nextOwnerId,
+        leadOwnerManagerIds,
+        type: item.timeline.type,
+        actorId: item.timeline.actorId ?? null,
+        summary: item.timeline.summary,
+        payload: null,
+        createdAt: item.timeline.createdAt,
+      });
+      done += 1;
+      if (done % 20 === 0) onProgress?.(done, total);
+    }
+    onProgress?.(total, total);
+    return;
+  }
 
   let batch = writeBatch(db);
   const opCount = { n: 0 };
   const accountsSeen = new Set<string>();
   const contactsSeen = new Set<string>();
   let done = 0;
-  const total = items.length;
 
   const commitCurrent = async () => {
     if (opCount.n === 0) return;

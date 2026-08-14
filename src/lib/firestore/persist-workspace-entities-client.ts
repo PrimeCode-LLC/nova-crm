@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type {
   ActivityCounterRow,
@@ -401,6 +402,14 @@ export async function persistTimelineEventCreate(
 }
 
 export async function persistLeadActivityBump(db: Firestore, leadId: string): Promise<void> {
+  if (isPostgresSoleWriterCrmV1Enabled()) {
+    const { persistCrmWriteClient } = await import("@/lib/db/crm-write-client");
+    await persistCrmWriteClient({
+      action: "bump_lead_activity",
+      id: leadId,
+    });
+    return;
+  }
   await updateDoc(doc(db, COLLECTIONS.leads, leadId), {
     touches: increment(1),
     lastActivityAt: serverTimestamp(),

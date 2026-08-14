@@ -343,3 +343,30 @@ export async function upsertLeadGraphPostgres(
   maybeRefreshSummary("lead", organizationId);
   return { ok: true };
 }
+
+/** Increment lead touches + lastActivityAt (P6.4 activity bump). */
+export async function bumpLeadActivityPostgres(
+  organizationId: string,
+  leadId: string,
+): Promise<CrmWriteResult> {
+  if (!isDatabaseConfigured()) {
+    return { ok: false, status: 503, error: "DATABASE_URL is not configured" };
+  }
+  const result = await withOrganizationScope(organizationId, async (tx) => {
+    const row = await tx.lead.findFirst({ where: { id: leadId, organizationId } });
+    if (!row) {
+      return { ok: false as const, status: 404, error: "lead not found" };
+    }
+    const merged = payloadRecord(row.payload);
+    const touches = Math.max(0, Math.floor(Number(merged.touches ?? row.touches) || 0)) + 1;
+    const now = new Date().toISOString();
+    merged.touches = touches;
+    merged.lastActivityAt = now;
+    merged.updatedAt = now;
+    merged.organizationId = organizationId;
+    await upsertInTx(tx, "lead", leadId, merged);
+    return { ok: true as const };
+  });
+  if (result.ok) maybeRefreshSummary("lead", organizationId);
+  return result;
+}

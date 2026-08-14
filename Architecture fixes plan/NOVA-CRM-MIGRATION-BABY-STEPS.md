@@ -148,8 +148,8 @@ Rule: ENGINEERING_RULES — PostgreSQL is DB of record; no Firestore for CRM tra
 | P6.1 | [x] | PG read cutover for **accounts / contacts / deals** behind `postgres_read_crm_v1`; APIs + workspace poll; profiles stay FS |
 | P6.2 | [x] | CRM sole writer flag `postgres_sole_writer_crm_v1` + `POST /api/org/crm-write`; client persist skips FS when on. **Orgs/members still FS** (need PG reads first) |
 | P6.3 | [x] | Firestore CRM archive script `npm run db:export:firestore-crm` → `archives/` (gitignored); companion runbook + optional gcloud managed export |
-| P6.4 | [ ] | Remove CRM Firestore listeners / Admin CRM write paths / Clerk→Firebase bridge (incrementally) |
-| P6.5 | [ ] | Remove Firebase project deps after weeks of stable prod (explicit exception if non-CRM FS remains) |
+| P6.4 | [x] | Admin CRM writers (promote, Instantly) + client gaps (bulk reassign, activity bump) respect sole-writer → PG; CRM listeners already skipped when read flags on; **bridge kept** for non-CRM FS |
+| P6.5 | [x] | ENGINEERING_RULES §1b: Firebase residual exception for non-CRM domains; CRM SoT = Postgres when flags on; packages **not** removed yet |
 
 **Phase 6 exit:** PostgreSQL is system of record for CRM entities; Firebase decommissioned for CRM (auth already Clerk).
 

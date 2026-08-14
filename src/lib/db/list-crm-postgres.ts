@@ -12,8 +12,9 @@ import type {
 } from "@/generated/prisma/client";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withOrganizationScope } from "@/lib/db/tenant-scope";
+import { leadFromPostgresRow } from "@/lib/db/list-leads-postgres";
 import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
-import type { Account, Contact, Deal, PipelineStage } from "@/lib/types";
+import type { Account, Contact, Deal, Lead, PipelineStage } from "@/lib/types";
 
 /** Default page size for workspace polls / API. */
 export const CRM_LIST_PAGE_SIZE = 250;
@@ -367,4 +368,57 @@ export async function listDealsFromPostgres(
     cursor = result.nextCursor;
   }
   return out;
+}
+
+/** Single-entity reads for sole-writer Admin paths (P6.4). */
+export async function getAccountFromPostgres(
+  organizationId: string,
+  id: string,
+): Promise<Account | null> {
+  if (!isDatabaseConfigured() || !organizationId.trim() || !id.trim()) return null;
+  const row = await withOrganizationScope(organizationId, (tx) =>
+    tx.account.findFirst({ where: { id, organizationId } }),
+  );
+  return row ? accountFromPostgresRow(row) : null;
+}
+
+export async function getContactFromPostgres(
+  organizationId: string,
+  id: string,
+): Promise<Contact | null> {
+  if (!isDatabaseConfigured() || !organizationId.trim() || !id.trim()) return null;
+  const row = await withOrganizationScope(organizationId, (tx) =>
+    tx.contact.findFirst({ where: { id, organizationId } }),
+  );
+  return row ? contactFromPostgresRow(row) : null;
+}
+
+export async function getLeadFromPostgres(
+  organizationId: string,
+  id: string,
+): Promise<Lead | null> {
+  if (!isDatabaseConfigured() || !organizationId.trim() || !id.trim()) return null;
+  const row = await withOrganizationScope(organizationId, (tx) =>
+    tx.lead.findFirst({ where: { id, organizationId } }),
+  );
+  return row ? leadFromPostgresRow(row, { slim: false }) : null;
+}
+
+/** Lookup lead id by denormalized `contactEmail` in payload (Instantly sync). */
+export async function findLeadIdByContactEmailPostgres(
+  organizationId: string,
+  email: string,
+): Promise<string | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!isDatabaseConfigured() || !organizationId.trim() || !normalized) return null;
+  const row = await withOrganizationScope(organizationId, (tx) =>
+    tx.lead.findFirst({
+      where: {
+        organizationId,
+        payload: { path: ["contactEmail"], equals: normalized },
+      },
+      select: { id: true },
+    }),
+  );
+  return row?.id ?? null;
 }
