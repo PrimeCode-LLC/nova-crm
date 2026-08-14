@@ -136,6 +136,25 @@ Rule: ENGINEERING_RULES — not Firebase Auth; httpOnly / server-verified sessio
 
 ---
 
-## Later phases
+## Phase 6 — Decommission Firebase (CRM data path)
 
-Phase 6 steps live in the migration plan; expand checkboxes here when Phase 5 exits.
+Rule: ENGINEERING_RULES — PostgreSQL is DB of record; no Firestore for CRM transactional data after exit. Companion: [`NOVA-CRM-P6-DECOMMISSION-FIREBASE.md`](NOVA-CRM-P6-DECOMMISSION-FIREBASE.md).
+
+**Gate before sole-writer cutover:** dual-write flags on in the target env, `db:reconcile:crm` (+ orgs/members) clean, and workspace **reads** for the six CRM entities on Postgres (leads already = P2.10; accounts/contacts/deals = P6.1).
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P6.0 | [x] | Inventory + gate checklist in companion; Phase 6 checkboxes expanded |
+| P6.1 | [x] | PG read cutover for **accounts / contacts / deals** behind `postgres_read_crm_v1`; APIs + workspace poll; profiles stay FS |
+| P6.2 | [x] | CRM sole writer flag `postgres_sole_writer_crm_v1` + `POST /api/org/crm-write`; client persist skips FS when on. **Orgs/members still FS** (need PG reads first) |
+| P6.3 | [x] | Firestore CRM archive script `npm run db:export:firestore-crm` → `archives/` (gitignored); companion runbook + optional gcloud managed export |
+| P6.4 | [ ] | Remove CRM Firestore listeners / Admin CRM write paths / Clerk→Firebase bridge (incrementally) |
+| P6.5 | [ ] | Remove Firebase project deps after weeks of stable prod (explicit exception if non-CRM FS remains) |
+
+**Phase 6 exit:** PostgreSQL is system of record for CRM entities; Firebase decommissioned for CRM (auth already Clerk).
+
+---
+
+## Cross-cutting (still applies)
+
+- Migrations via Prisma only · RLS on every tenant table · staging ≠ prod secrets · feature flags for cutovers · small revertable PRs

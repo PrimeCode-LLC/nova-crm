@@ -23,6 +23,7 @@
     "db:reconcile:orgs-members": "npx --yes tsx scripts/reconcile-orgs-members.ts",
     "db:backfill:crm": "npx --yes tsx scripts/backfill-crm-to-postgres.ts",
     "db:reconcile:crm": "npx --yes tsx scripts/reconcile-crm-entities.ts",
+    "db:export:firestore-crm": "npx --yes tsx scripts/export-firestore-crm-archive.ts",
     "test": "vitest run",
     "build:worker": "node scripts/build-worker.mjs",
     "worker": "tsx src/worker/index.ts",

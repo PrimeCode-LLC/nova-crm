@@ -51,6 +51,9 @@ next-env.d.ts
 # Prisma Client (generated via postinstall / db:generate)
 /src/generated/prisma
 
+# P6.3 Firestore export archives (may contain tenant PII — never commit)
+/archives/
+
 # Private strategy packs (tenant-specific ICP — do not ship in SaaS product)
 /packs/private/*.json
 /packs/private/seeds/

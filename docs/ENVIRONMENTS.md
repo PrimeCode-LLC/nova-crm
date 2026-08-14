@@ -53,6 +53,12 @@ CRM entities (P2.6–P2.9): set `POSTGRES_DUAL_WRITE_CRM_V1=true` for live mirro
 
 Leads list read cutover (P2.10): set `POSTGRES_READ_LEADS_V1=true` and `NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true` so the workspace leads list uses `GET /api/org/leads` (Postgres + RLS) instead of Firestore `onSnapshot`. Flag off = Firestore. Requires a clean CRM backfill/reconcile first. Client polls every **60s** with an in-flight guard; API pages internally (`all=1`) and strips heavy payload blobs.
 
+Accounts / contacts / deals read cutover (P6.1): set `POSTGRES_READ_CRM_V1=true` and `NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true` so workspace directory + deals use `GET /api/org/{accounts|contacts|deals}` (Postgres + RLS). Flag off = Firestore. Profiles stay on Firestore. Same 60s poll pattern as leads.
+
+CRM sole writer (P6.2): set `POSTGRES_SOLE_WRITER_CRM_V1=true` and `NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true` so client persist helpers write Postgres only via `POST /api/org/crm-write` (no Firestore write for accounts/contacts/leads/deals). Flag off = Firestore-first (+ dual-write mirror). Enable only after reconcile is clean and read flags are on. Orgs/members still use Firestore writers.
+
+Firestore CRM archive (P6.3): `npm run db:export:firestore-crm` writes JSONL under `archives/` (gitignored). Options: `--dry-run`, `--org=`, `--full`, `--limit=`, `--out=`. For large prod snapshots prefer `gcloud firestore export gs://…` (see P6 companion).
+
 Optional pool tuning: `PG_POOL_MAX` (default 10) for the Prisma `pg` pool.
 
 Postgres dashboard summary writer (P3.2): set `POSTGRES_DASHBOARD_SUMMARY_WRITER_V1=true` so lead/deal dual-writes mark the org dirty and refresh `org_dashboard_summaries` (debounced ~60s). Cron drain: `GET /api/cron/dashboard-summaries/refresh` with `Authorization: Bearer CRON_SECRET` (Cloud Functions `refreshPostgresDashboardSummaries` every minute). Requires `DATABASE_URL`; Redis recommended for dirty-set coalesce.

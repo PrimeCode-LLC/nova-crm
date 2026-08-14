@@ -1,9 +1,11 @@
 import { writeBatch, doc, setDoc } from "firebase/firestore";
 import type { Firestore } from "firebase/firestore";
+import { persistCrmWriteClient } from "@/lib/db/crm-write-client";
+import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
+import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
 import type { Account, Contact, Lead } from "@/lib/types";
-import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -35,6 +37,17 @@ export async function persistAccountCreateClient(
     stripUndefined({ ...account, organizationId }),
     opts?.ownerManagerIds,
   );
+
+  if (isPostgresSoleWriterCrmV1Enabled()) {
+    await persistCrmWriteClient({
+      action: "upsert",
+      entity: "account",
+      id: account.id,
+      doc: data,
+    });
+    return;
+  }
+
   await setDoc(doc(db, COLLECTIONS.accounts, account.id), data);
   scheduleCrmMirrorClient("account", account.id);
 }
@@ -51,6 +64,17 @@ export async function persistContactCreateClient(
     stripUndefined({ ...contact, organizationId }),
     opts?.ownerManagerIds,
   );
+
+  if (isPostgresSoleWriterCrmV1Enabled()) {
+    await persistCrmWriteClient({
+      action: "upsert",
+      entity: "contact",
+      id: contact.id,
+      doc: data,
+    });
+    return;
+  }
+
   await setDoc(doc(db, COLLECTIONS.contacts, contact.id), data);
   scheduleCrmMirrorClient("contact", contact.id);
 }
@@ -67,13 +91,24 @@ export async function persistLeadCreateClient(
     stripUndefined({ ...lead, organizationId }),
     opts?.ownerManagerIds,
   );
+
+  if (isPostgresSoleWriterCrmV1Enabled()) {
+    await persistCrmWriteClient({
+      action: "upsert",
+      entity: "lead",
+      id: lead.id,
+      doc: data,
+    });
+    return;
+  }
+
   await setDoc(doc(db, COLLECTIONS.leads, lead.id), data);
   scheduleCrmMirrorClient("lead", lead.id);
 }
 
 /**
  * Persists a new account + contact + lead graph for the signed-in user's tenant.
- * Call only when Firebase Web SDK is configured and the user can write per Firestore rules.
+ * P6.2: when sole-writer flag on, writes Postgres only (atomic upsert_graph).
  */
 export async function persistLeadGraphClient(
   db: Firestore,
@@ -86,36 +121,37 @@ export async function persistLeadGraphClient(
   const ownerManagerIds =
     opts?.ownerManagerIds ??
     (await resolveOwnerManagerIdsClient(db, lead.ownerId || account.ownerId));
+
+  const accountDoc = stripUndefined({
+    ...account,
+    organizationId,
+    ownerManagerIds,
+  });
+  const contactDoc = stripUndefined({
+    ...contact,
+    organizationId,
+    ownerManagerIds,
+  });
+  const leadDoc = stripUndefined({
+    ...lead,
+    organizationId,
+    ownerManagerIds,
+  });
+
+  if (isPostgresSoleWriterCrmV1Enabled()) {
+    await persistCrmWriteClient({
+      action: "upsert_graph",
+      account: { id: account.id, doc: accountDoc },
+      contact: { id: contact.id, doc: contactDoc },
+      lead: { id: lead.id, doc: leadDoc },
+    });
+    return;
+  }
+
   const batch = writeBatch(db);
-  const aRef = doc(db, COLLECTIONS.accounts, account.id);
-  const cRef = doc(db, COLLECTIONS.contacts, contact.id);
-  const lRef = doc(db, COLLECTIONS.leads, lead.id);
-
-  batch.set(
-    aRef,
-    stripUndefined({
-      ...account,
-      organizationId,
-      ownerManagerIds,
-    }) as Record<string, unknown>,
-  );
-  batch.set(
-    cRef,
-    stripUndefined({
-      ...contact,
-      organizationId,
-      ownerManagerIds,
-    }) as Record<string, unknown>,
-  );
-  batch.set(
-    lRef,
-    stripUndefined({
-      ...lead,
-      organizationId,
-      ownerManagerIds,
-    }) as Record<string, unknown>,
-  );
-
+  batch.set(doc(db, COLLECTIONS.accounts, account.id), accountDoc);
+  batch.set(doc(db, COLLECTIONS.contacts, contact.id), contactDoc);
+  batch.set(doc(db, COLLECTIONS.leads, lead.id), leadDoc);
   await batch.commit();
   scheduleCrmMirrorClient("account", account.id);
   scheduleCrmMirrorClient("contact", contact.id);

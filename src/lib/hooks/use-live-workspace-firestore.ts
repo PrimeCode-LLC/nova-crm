@@ -39,6 +39,7 @@ import type {
   CrmLabel,
 } from "@/lib/types";
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
+import { isPostgresReadCrmV1Enabled } from "@/lib/db/postgres-read-crm-flags";
 import { isPostgresReadLeadsV1Enabled } from "@/lib/db/postgres-read-leads-flags";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import type { WorkspaceListenerGroup } from "@/lib/workspace-listener-groups";
@@ -49,8 +50,8 @@ import {
 
 /** Cap history listeners so WebChannel does not load unbounded org history into every client. */
 const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
-/** Poll interval when leads are read from Postgres (P2.10) instead of Firestore onSnapshot. */
-const POSTGRES_LEADS_POLL_MS = 60_000;
+/** Poll interval when CRM entities are read from Postgres instead of Firestore onSnapshot. */
+const POSTGRES_CRM_POLL_MS = 60_000;
 const ORG_ACTIVITY_EVENTS_LIVE_LIMIT = 120;
 const TIMELINE_EVENTS_LIVE_LIMIT = 400;
 
@@ -858,7 +859,7 @@ export function useLiveWorkspaceFirestore(
           void loadLeadsFromPostgres();
           const intervalId = window.setInterval(() => {
             void loadLeadsFromPostgres();
-          }, POSTGRES_LEADS_POLL_MS);
+          }, POSTGRES_CRM_POLL_MS);
           const onFocus = () => {
             void loadLeadsFromPostgres();
           };
@@ -1023,22 +1024,86 @@ export function useLiveWorkspaceFirestore(
       }
 
       if (group === "directory") {
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "accounts",
-          COLLECTIONS.accounts,
-          asAccount,
-          "ownerManagerIds",
-          "ownerId",
-        );
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "contacts",
-          COLLECTIONS.contacts,
-          asContact,
-          "ownerManagerIds",
-          "ownerId",
-        );
+        /** P6.1: when flag on, skip Firestore accounts/contacts listeners and poll Postgres APIs. */
+        if (isPostgresReadCrmV1Enabled()) {
+          const startCrmPoll = (
+            path: string,
+            dataKey: "accounts" | "contacts",
+            pick: (json: Record<string, unknown>) => Account[] | Contact[],
+          ) => {
+            let cancelled = false;
+            let inflight: Promise<void> | null = null;
+            const load = async () => {
+              if (inflight) return;
+              inflight = (async () => {
+                try {
+                  const res = await fetch(
+                    `${path}?narrow=${memberScope ? "1" : "0"}&all=1`,
+                    { credentials: "same-origin", cache: "no-store" },
+                  );
+                  const json = (await res.json()) as Record<string, unknown> & {
+                    ok?: boolean;
+                    enabled?: boolean;
+                    error?: string;
+                  };
+                  if (cancelled) return;
+                  if (!res.ok || !json.ok) {
+                    throw new Error(json.error || `${dataKey} API failed (${res.status})`);
+                  }
+                  if (json.enabled === false) {
+                    throw new Error(`Postgres ${dataKey} read flag is off on server`);
+                  }
+                  applySnapshot(dataKey, dataKey, pick(json));
+                } catch (err) {
+                  if (cancelled) return;
+                  applyListenerError(
+                    dataKey,
+                    err instanceof Error ? err : new Error(String(err)),
+                  );
+                } finally {
+                  inflight = null;
+                }
+              })();
+              await inflight;
+            };
+            void load();
+            const intervalId = window.setInterval(() => {
+              void load();
+            }, POSTGRES_CRM_POLL_MS);
+            const onFocus = () => {
+              void load();
+            };
+            window.addEventListener("focus", onFocus);
+            pushUnsub(group, () => {
+              cancelled = true;
+              window.clearInterval(intervalId);
+              window.removeEventListener("focus", onFocus);
+            });
+          };
+          startCrmPoll("/api/org/accounts", "accounts", (json) =>
+            Array.isArray(json.accounts) ? (json.accounts as Account[]) : [],
+          );
+          startCrmPoll("/api/org/contacts", "contacts", (json) =>
+            Array.isArray(json.contacts) ? (json.contacts as Contact[]) : [],
+          );
+        } else {
+          subscribeOwnedByOwnerOrManager(
+            group,
+            "accounts",
+            COLLECTIONS.accounts,
+            asAccount,
+            "ownerManagerIds",
+            "ownerId",
+          );
+          subscribeOwnedByOwnerOrManager(
+            group,
+            "contacts",
+            COLLECTIONS.contacts,
+            asContact,
+            "ownerManagerIds",
+            "ownerId",
+          );
+        }
         subscribeOwnedByOwnerOrManager(
           group,
           "profiles",
@@ -1051,14 +1116,66 @@ export function useLiveWorkspaceFirestore(
       }
 
       if (group === "deals") {
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "deals",
-          COLLECTIONS.deals,
-          asDeal,
-          "ownerManagerIds",
-          "ownerId",
-        );
+        if (isPostgresReadCrmV1Enabled()) {
+          let cancelled = false;
+          let inflight: Promise<void> | null = null;
+          const loadDealsFromPostgres = async () => {
+            if (inflight) return;
+            inflight = (async () => {
+              try {
+                const res = await fetch(
+                  `/api/org/deals?narrow=${memberScope ? "1" : "0"}&all=1`,
+                  { credentials: "same-origin", cache: "no-store" },
+                );
+                const json = (await res.json()) as {
+                  ok?: boolean;
+                  enabled?: boolean;
+                  deals?: Deal[];
+                  error?: string;
+                };
+                if (cancelled) return;
+                if (!res.ok || !json.ok) {
+                  throw new Error(json.error || `Deals API failed (${res.status})`);
+                }
+                if (json.enabled === false) {
+                  throw new Error("Postgres deals read flag is off on server");
+                }
+                applySnapshot("deals", "deals", Array.isArray(json.deals) ? json.deals : []);
+              } catch (err) {
+                if (cancelled) return;
+                applyListenerError(
+                  "deals",
+                  err instanceof Error ? err : new Error(String(err)),
+                );
+              } finally {
+                inflight = null;
+              }
+            })();
+            await inflight;
+          };
+          void loadDealsFromPostgres();
+          const intervalId = window.setInterval(() => {
+            void loadDealsFromPostgres();
+          }, POSTGRES_CRM_POLL_MS);
+          const onFocus = () => {
+            void loadDealsFromPostgres();
+          };
+          window.addEventListener("focus", onFocus);
+          pushUnsub(group, () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+            window.removeEventListener("focus", onFocus);
+          });
+        } else {
+          subscribeOwnedByOwnerOrManager(
+            group,
+            "deals",
+            COLLECTIONS.deals,
+            asDeal,
+            "ownerManagerIds",
+            "ownerId",
+          );
+        }
         return;
       }
 
