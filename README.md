@@ -33,6 +33,12 @@ flowchart LR
 | **Background jobs** | **BullMQ worker** when queue flags are on |
 | **Firebase** | **Off** when `FIREBASE_DISABLED=true` — packages may remain installed but are not initialized |
 
+## Deploy on one VPS (production)
+
+Step-by-step Ubuntu + Docker guide (web, worker, Postgres, Redis, HTTPS, crons, backups) for non-technical and technical operators:
+
+→ **[`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md)**
+
 ## Branching
 
 Work on `feature/*` → PR → `main` only. See [`docs/BRANCHING.md`](docs/BRANCHING.md).
@@ -212,3 +218,4 @@ Legacy Cloud Functions live under `functions/` and App Hosting under `apphosting
 | [`NOVA-CRM-P6-DECOMMISSION-FIREBASE.md`](Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md) | CRM Postgres cutover |
 | [`NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md) | Queue / worker |
 | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Local / staging / prod |
+| [`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md) | One-VPS Ubuntu production setup (full working stack) |
