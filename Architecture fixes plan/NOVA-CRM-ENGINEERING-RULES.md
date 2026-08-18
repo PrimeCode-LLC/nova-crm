@@ -21,6 +21,26 @@ These were decided deliberately after evaluating the previous Firebase-based arc
 - **Auth is not Firebase Auth.** Use the agreed provider (WorkOS/Clerk/Auth.js) with SSO/SAML support. Session pattern: short-lived httpOnly cookie, server-verified.
 - **No new Firebase dependency, of any kind, for any feature**, without an explicit, written exception. This includes "just for this one small thing."
 
+### §1b — Firebase residual exception (Phase 6 / recorded 2026-08-14)
+
+**CRM transactional entities** (`organizations` / `members` pending sole-writer; `accounts` / `contacts` / `leads` / `deals`; org dashboard summaries) use **PostgreSQL** as the system of record when the Phase 6 read + sole-writer flags are on. Do **not** add new Firestore collections or client listeners for those entities.
+
+**Logged override (2026-08-15):** deploys may set `FIREBASE_DISABLED=true` (+ `NEXT_PUBLIC_FIREBASE_DISABLED=true`) to run **Clerk + Postgres + Redis only**. In that mode Firebase Admin/client are not initialized; residual Firestore domains below are unavailable until migrated. This is an explicit operator choice for self-hosted / Firebase-free deploy, not a silent reintroduction of Firebase.
+
+**Written exception — Firebase may remain in the repo for non-CRM domains until separately migrated** (when Firebase is not disabled):
+
+- Realtime / collab: workspace chat, user notifications  
+- Email / mailbox / lead mail messages / reply intel / mail tracking  
+- Scrapers intake raw items + feeds (promote writes CRM to Postgres when sole-writer is on)  
+- Imports job metadata / chunks / identity keys  
+- Content calendar, prospect drafts, extension findings  
+- Scheduling / meetings / calendar connections  
+- AI org subcollections, platform admin / org settings still on Admin FS  
+- Clerk→Firebase **custom-token bridge** (required while any client Firestore listeners remain)  
+- `firebase` / `firebase-admin` packages, rules, indexes, Cloud Functions for the above  
+
+P6.5 exit for the migration means **CRM path decommissioned**, not “zero Firebase bytes in package.json.” Full package removal is a later program of work per domain above. Firebase-free mode gates the packages off at runtime via `FIREBASE_DISABLED`.
+
 ### §1a — On microservices (explicit, so this isn't re-decided per task)
 
 Nova intentionally does **not** use classic microservices (many independently-deployed services, each with its own database). Two deployables — web and worker — is the deliberate, final decision for the current stage. Do not propose splitting out a new independent service "for scalability" or "for enterprise readiness" without an explicit trigger: a subsystem needing its own release cadence/team, or needing to scale an order of magnitude beyond the rest of the app. Absent that trigger, new functionality belongs in the web tier (user-facing) or the worker tier (background/queue-consumed), not a new service.

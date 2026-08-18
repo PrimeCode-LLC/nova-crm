@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { FieldValue } from "firebase-admin/firestore";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
+import { firebaseAdminRequiredResponse } from "@/lib/firebase/require-admin-auth";
 import {
   assertNotMemberOfOtherOrgServer,
   getMemberServer,
@@ -33,6 +34,9 @@ export async function POST(req: Request) {
   try {
     const g = await guardTenantApi({ minRole: "admin" });
     if (!g.ok) return g.response;
+    const missingAdmin = firebaseAdminRequiredResponse(g.ctx.adminAuth);
+    if (missingAdmin) return missingAdmin;
+    const adminAuth = g.ctx.adminAuth!;
 
     let json: unknown;
     try {
@@ -76,7 +80,7 @@ export async function POST(req: Request) {
     let createdNewFirebaseUser = false;
 
     try {
-      const rec = await g.ctx.adminAuth.createUser({
+      const rec = await adminAuth.createUser({
         email,
         password: parsed.data.password,
         displayName,
@@ -87,7 +91,7 @@ export async function POST(req: Request) {
     } catch (err: unknown) {
       if (adminAuthErrorCode(err) === "auth/email-already-exists") {
         try {
-          const existing = await g.ctx.adminAuth.getUserByEmail(email);
+          const existing = await adminAuth.getUserByEmail(email);
           uid = existing.uid;
         } catch {
           return NextResponse.json(
@@ -108,7 +112,7 @@ export async function POST(req: Request) {
     if (existingMember) {
       if (createdNewFirebaseUser) {
         try {
-          await g.ctx.adminAuth.deleteUser(uid);
+          await adminAuth.deleteUser(uid);
         } catch {
           /* best-effort rollback */
         }
@@ -126,7 +130,7 @@ export async function POST(req: Request) {
     if ("error" in membershipCheck) {
       if (createdNewFirebaseUser) {
         try {
-          await g.ctx.adminAuth.deleteUser(uid);
+          await adminAuth.deleteUser(uid);
         } catch {
           /* best-effort rollback */
         }
@@ -147,7 +151,7 @@ export async function POST(req: Request) {
     if ("error" in up) {
       if (createdNewFirebaseUser) {
         try {
-          await g.ctx.adminAuth.deleteUser(uid);
+          await adminAuth.deleteUser(uid);
         } catch {
           /* best-effort rollback */
         }
@@ -178,12 +182,12 @@ export async function POST(req: Request) {
     }
 
     const platformAdmin = await isUserPlatformAdmin(uid, email);
-    await setAppClaims(g.ctx.adminAuth, uid, {
+    await setAppClaims(adminAuth, uid, {
       organizationId: orgId,
       orgRole: parsed.data.role,
       platformAdmin: platformAdmin || undefined,
     });
-    await g.ctx.adminAuth.revokeRefreshTokens(uid);
+    await adminAuth.revokeRefreshTokens(uid);
 
     await recordAudit({
       organizationId: orgId,

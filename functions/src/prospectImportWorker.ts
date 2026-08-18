@@ -806,6 +806,13 @@ export const processProspectImportChunk = onDocumentUpdated(
     retry: false,
   },
   async (event) => {
+    // P4.3: BullMQ worker owns apply when queue flags are on (confirm enqueues jobs).
+    if (
+      process.env.QUEUE_WORKER_V1 === "true" &&
+      process.env.QUEUE_IMPORT_CHUNKS_V1 === "true"
+    ) {
+      return;
+    }
     const before = event.data?.before.data() as Chunk | undefined;
     const after = event.data?.after.data() as Chunk | undefined;
     if (!after || before?.status === "queued" || after.status !== "queued") return;

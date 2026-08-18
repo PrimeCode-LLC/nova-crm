@@ -1179,17 +1179,31 @@ async function sendScheduledDoc(
 
 async function processScheduledSnap(
   docs: Array<{ ref: DocumentReference; data: () => Record<string, unknown> }>,
-  opts?: { requeueSendGaps?: boolean },
+  opts?: {
+    requeueSendGaps?: boolean;
+    /** Stop claiming more docs after this wall-clock budget (local process-due). */
+    maxDurationMs?: number;
+  },
 ): Promise<{ processed: number; sent: number; failed: number; skipped: number }> {
   let sent = 0;
   let failed = 0;
   let skipped = 0;
+  let processed = 0;
   const runContext = {
     lastSentAtByMailbox: new Map<string, number>(),
     requeueSendGaps: Boolean(opts?.requeueSendGaps),
   };
+  const deadline =
+    typeof opts?.maxDurationMs === "number" && opts.maxDurationMs > 0
+      ? Date.now() + opts.maxDurationMs
+      : null;
 
   for (const doc of docs) {
+    if (deadline != null && Date.now() >= deadline) {
+      skipped += docs.length - processed;
+      break;
+    }
+    processed += 1;
     const claimed = await claimScheduledDoc(doc.ref);
     if (!claimed) {
       skipped += 1;
@@ -1206,7 +1220,7 @@ async function processScheduledSnap(
     }
   }
 
-  return { processed: docs.length, sent, failed, skipped };
+  return { processed, sent, failed, skipped };
 }
 
 /**
@@ -1229,7 +1243,8 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     .collection(SCHEDULED_COLLECTION)
     .where("status", "in", ["pending", "processing"])
     .where("scheduledAt", "<=", now)
-    .limit(50)
+    // Keep local/dev ticks small so the web process stays responsive.
+    .limit(8)
     .get();
 
   return processScheduledSnap(
@@ -1238,7 +1253,7 @@ export async function processDueScheduledEmailsForMemberServer(input: {
       data: () => doc.data() as Record<string, unknown>,
     })),
     // Never sleep on send gaps in the browser-driven local poller.
-    { requeueSendGaps: true },
+    { requeueSendGaps: true, maxDurationMs: 25_000 },
   );
 }
 

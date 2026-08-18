@@ -1,0 +1,192 @@
+// Nova CRM — Prisma schema (Phase 2+)
+// P2.1 empty init · P2.2 orgs/members · P2.6–P2.9 accounts/contacts/leads/deals
+// P3.1 org_dashboard_summaries
+// See Architecture fixes plan/NOVA-CRM-MIGRATION-BABY-STEPS.md
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+/// Tenant root. Firestore id preserved as primary key for dual-write (P2.3+).
+model Organization {
+  id                   String    @id
+  name                 String
+  slug                 String    @unique
+  status               String
+  planId               String    @map("plan_id")
+  maxUsers             Int?      @map("max_users")
+  seatsUsed            Int       @default(0) @map("seats_used")
+  ownerUid             String?   @map("owner_uid")
+  primaryEmail         String?   @map("primary_email")
+  pendingOwnerEmail    String?   @map("pending_owner_email")
+  trialEndsAt          DateTime? @map("trial_ends_at") @db.Timestamptz(3)
+  settings             Json      @default("{}")
+  channelAdmin         Json?     @map("channel_admin")
+  intakeFilterDefaults Json?     @map("intake_filter_defaults")
+  intakePoolEpoch      Int       @default(1) @map("intake_pool_epoch")
+  intentPlaybook       Json?     @map("intent_playbook")
+  openJoinTokenHash    String?   @map("open_join_token_hash")
+  createdAt            DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  members           Member[]
+  dashboardSummary  OrgDashboardSummary?
+
+  @@map("organizations")
+}
+
+/// Org membership. Firestore: organizations/{orgId}/members/{uid}.
+model Member {
+  uid            String
+  organizationId String    @map("organization_id")
+  email          String
+  displayName    String    @map("display_name")
+  role           String
+  status         String
+  invitedByUid   String    @map("invited_by_uid")
+  joinedAt       DateTime  @map("joined_at") @db.Timestamptz(3)
+  disabledAt     DateTime? @map("disabled_at") @db.Timestamptz(3)
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([organizationId, uid])
+  @@index([organizationId])
+  @@index([email])
+  @@map("members")
+}
+
+/// Firestore `accounts/{id}`. Relation FKs deferred until data is clean (ETL-friendly).
+model Account {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  name           String
+  domain         String?
+  industry       String?
+  website        String?
+  ownerId        String   @map("owner_id")
+  contactCount   Int      @default(0) @map("contact_count")
+  leadCount      Int      @default(0) @map("lead_count")
+  openDealValue  Float    @default(0) @map("open_deal_value")
+  /// Full Firestore document (minus id) for dual-write parity.
+  payload        Json     @default("{}")
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, ownerId])
+  @@map("accounts")
+}
+
+/// Firestore `contacts/{id}`.
+model Contact {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  accountId      String   @map("account_id")
+  firstName      String   @map("first_name")
+  lastName       String   @map("last_name")
+  fullName       String   @map("full_name")
+  email          String?
+  phone          String?
+  title          String?
+  ownerId        String   @map("owner_id")
+  payload        Json     @default("{}")
+  createdAt      DateTime @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, accountId])
+  @@index([organizationId, email])
+  @@map("contacts")
+}
+
+/// Firestore `leads/{id}`.
+model Lead {
+  id             String    @id
+  organizationId String    @map("organization_id")
+  accountId      String    @map("account_id")
+  contactId      String    @map("contact_id")
+  channel        String
+  stage          String
+  temperature    String
+  priority       String
+  ownerId        String    @map("owner_id")
+  contactName    String    @map("contact_name")
+  companyName    String    @map("company_name")
+  intakeKind     String?   @map("intake_kind")
+  touches        Int       @default(0)
+  isIdle         Boolean   @default(false) @map("is_idle")
+  archivedAt     DateTime? @map("archived_at") @db.Timestamptz(3)
+  payload        Json      @default("{}")
+  createdAt      DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, stage])
+  @@index([organizationId, ownerId])
+  @@index([organizationId, accountId])
+  @@map("leads")
+}
+
+/// Firestore `deals/{id}`.
+model Deal {
+  id                String    @id
+  organizationId    String    @map("organization_id")
+  leadId            String    @map("lead_id")
+  accountId         String    @map("account_id")
+  contactId         String    @map("contact_id")
+  name              String
+  stage             String
+  value             Float
+  currency          String
+  probability       Int
+  expectedCloseDate DateTime  @map("expected_close_date") @db.Timestamptz(3)
+  ownerId           String    @map("owner_id")
+  wonAt             DateTime? @map("won_at") @db.Timestamptz(3)
+  lostAt            DateTime? @map("lost_at") @db.Timestamptz(3)
+  payload           Json      @default("{}")
+  createdAt         DateTime  @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, stage])
+  @@index([organizationId, leadId])
+  @@map("deals")
+}
+
+/// Precomputed org dashboard KPIs (P3.1). Mirrors Firestore `orgDashboardSummaries/{orgId}`
+/// / `OrgDashboardSummary` (P0.3). Writers land in P3.2; read cutover in P3.3.
+model OrgDashboardSummary {
+  organizationId            String   @id @map("organization_id")
+  version                   Int      @default(1)
+  updatedAt                 DateTime @map("updated_at") @db.Timestamptz(3)
+  openSalesLeads            Int      @default(0) @map("open_sales_leads")
+  idleSalesLeads            Int      @default(0) @map("idle_sales_leads")
+  prospects                 Int      @default(0)
+  prospectsNeedRouting      Int      @default(0) @map("prospects_need_routing")
+  prospectsReadyToPush      Int      @default(0) @map("prospects_ready_to_push")
+  prospectsPushed           Int      @default(0) @map("prospects_pushed")
+  followupsDue              Int      @default(0) @map("followups_due")
+  overdueFollowups          Int      @default(0) @map("overdue_followups")
+  totalReplies              Int      @default(0) @map("total_replies")
+  repliesPendingReview      Int      @default(0) @map("replies_pending_review")
+  openPipelineValue         Float    @default(0) @map("open_pipeline_value")
+  openDealCount             Int      @default(0) @map("open_deal_count")
+  leadEstimateContributors  Int      @default(0) @map("lead_estimate_contributors")
+  /// Sales-lead counts by pipeline stage (`PipelineStage` → count).
+  pipelineByStage           Json     @default("{}") @map("pipeline_by_stage")
+  /// Per-channel `{ count, won }` (`ChannelKey` → object).
+  channelMix                Json     @default("{}") @map("channel_mix")
+  /// Per-channel funnel stage counts.
+  funnelByChannel           Json     @default("{}") @map("funnel_by_channel")
+  /// Windows: today / 7d / 30d / all → range metrics object.
+  ranges                    Json     @default("{}")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@map("org_dashboard_summaries")
+}

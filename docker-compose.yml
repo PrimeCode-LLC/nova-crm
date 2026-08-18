@@ -1,7 +1,6 @@
-# docker-compose.yml — local development only.
-# Week 0 (W0.4): start infra only:
-#   docker compose up -d postgres redis
-# Web + worker services stay commented until Phase 4 (P4.6).
+# docker-compose.yml — local development.
+# Infra: `docker compose up -d postgres redis`
+# Full stack (P4.6): `docker compose up -d` (postgres + redis + web + worker)
 # See NOVA-CRM-ENGINEERING-RULES.md §1 and docs/ENVIRONMENTS.md.
 
 services:
@@ -15,6 +14,7 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U nova -d nova_crm"]
       interval: 5s
@@ -33,36 +33,49 @@ services:
       timeout: 5s
       retries: 5
 
-  # --- Deferred until P4.6 (worker entrypoint + next standalone output) ---
-  # web:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   ports:
-  #     - "3000:3000"
-  #   environment:
-  #     NODE_ENV: development
-  #     DATABASE_URL: postgres://nova:nova_dev_password@postgres:5432/nova_crm
-  #     REDIS_URL: redis://redis:6379
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
-  #
-  # worker:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile.worker
-  #   environment:
-  #     NODE_ENV: development
-  #     DATABASE_URL: postgres://nova:nova_dev_password@postgres:5432/nova_crm
-  #     REDIS_URL: redis://redis:6379
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     redis:
-  #       condition: service_healthy
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://nova_app:nova_dev_password@postgres:5432/nova_crm
+      MIGRATE_DATABASE_URL: postgres://nova:nova_dev_password@postgres:5432/nova_crm
+      REDIS_URL: redis://redis:6379
+      QUEUE_WORKER_V1: "true"
+      QUEUE_IMPORT_CHUNKS_V1: "true"
+      QUEUE_HEAVY_JOBS_V1: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    ports:
+      - "8081:8081"
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://nova_app:nova_dev_password@postgres:5432/nova_crm
+      REDIS_URL: redis://redis:6379
+      WORKER_HEALTH_PORT: "8081"
+      QUEUE_WORKER_V1: "true"
+      QUEUE_IMPORT_CHUNKS_V1: "true"
+      QUEUE_HEAVY_JOBS_V1: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    profiles:
+      - full
 
 volumes:
   postgres_data:

@@ -1,6 +1,7 @@
 import type { AppSession } from "@/lib/auth/server";
 import type { OrgMemberRole } from "@/lib/types";
 import {
+  findMembershipByEmailServer,
   findMembershipForUserServer,
   getMemberServer,
 } from "@/lib/platform/members-server";
@@ -37,7 +38,7 @@ function tenantCacheKey(
  * admin role changes until the client re-exchanges the session).
  */
 export async function resolveLiveTenantForSession(
-  session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
+  session: Pick<AppSession, "uid" | "email" | "organizationId" | "orgRole">,
 ): Promise<ResolvedTenantContext> {
   const key = tenantCacheKey(session);
   const hit = tenantCache.get(key);
@@ -61,16 +62,18 @@ export function clearLiveTenantCacheForTests(): void {
 }
 
 async function resolveLiveTenantForSessionUncached(
-  session: Pick<AppSession, "uid" | "organizationId" | "orgRole">,
+  session: Pick<AppSession, "uid" | "email" | "organizationId" | "orgRole">,
 ): Promise<ResolvedTenantContext> {
   const db = getAdminDb();
-  const userSnap = await db?.collection(COLLECTIONS.users).doc(session.uid).get();
-  const userStatus = userSnap?.data()?.status;
-  if (userStatus === "inactive") {
-    return {
-      membershipPending: false,
-      accessDeniedReason: "inactive_user",
-    };
+  if (db) {
+    const userSnap = await db.collection(COLLECTIONS.users).doc(session.uid).get();
+    const userStatus = userSnap?.data()?.status;
+    if (userStatus === "inactive") {
+      return {
+        membershipPending: false,
+        accessDeniedReason: "inactive_user",
+      };
+    }
   }
 
   let organizationId = session.organizationId;
@@ -80,6 +83,9 @@ async function resolveLiveTenantForSessionUncached(
 
   if (!membership) {
     membership = await findMembershipForUserServer(session.uid);
+    if (!membership && session.email) {
+      membership = await findMembershipByEmailServer(session.email);
+    }
     if (membership?.status === "pending") {
       return {
         organizationId: membership.organizationId,

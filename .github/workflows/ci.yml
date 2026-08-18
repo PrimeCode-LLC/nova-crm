@@ -14,6 +14,25 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: nova
+          POSTGRES_PASSWORD: nova_dev_password
+          POSTGRES_DB: nova_crm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nova -d nova_crm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # App role — RLS enforced (FORCE). Never production (docs/ENVIRONMENTS.md).
+      DATABASE_URL: postgres://nova_app:nova_dev_password@localhost:5432/nova_crm
+      # DDL / migrate role (Compose superuser).
+      MIGRATE_DATABASE_URL: postgres://nova:nova_dev_password@localhost:5432/nova_crm
     steps:
       - uses: actions/checkout@v4
 
@@ -30,6 +49,9 @@ jobs:
 
       - name: Typecheck
         run: npm run typecheck
+
+      - name: Migrate Postgres (P2+)
+        run: npm run db:migrate:deploy
 
       - name: Test
         run: npm run test

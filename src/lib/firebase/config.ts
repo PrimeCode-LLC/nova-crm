@@ -1,5 +1,9 @@
+import { isFirebaseDisabled } from "@/lib/firebase/runtime";
+
 /** Public web config (safe on the client). */
 export function getFirebaseWebConfig() {
+  if (isFirebaseDisabled()) return null;
+
   const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
   const authDomain = process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN;
   const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;

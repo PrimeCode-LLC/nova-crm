@@ -12,8 +12,14 @@ import {
 } from "@/lib/scrapers/feeds-server";
 import { runScraperFeedByIdServer } from "@/lib/scrapers/run-feeds-server";
 import { recordScraperRunOrgActivity } from "@/lib/scrapers/record-scraper-run-activity";
+import {
+  runOrgScrapersViaWorker,
+  scrapersWorkerEnabled,
+} from "@/lib/scrapers/scrapers-worker-client";
 import { recordAudit } from "@/lib/firestore/audit";
 import { scraperFeedIntervalSchema } from "@/lib/scrapers/scraper-feed-interval-schema";
+
+export const maxDuration = 300;
 
 const patchSchema = z
   .object({
@@ -56,6 +62,36 @@ export async function PATCH(req: Request, ctx: RouteCtx) {
       orAdminFeature: "scrapers",
     });
     if (!g.ok) return g.response;
+
+    if (scrapersWorkerEnabled()) {
+      try {
+        const { results } = await runOrgScrapersViaWorker({
+          organizationId: g.ctx.session.organizationId,
+          feedIds: [feedId],
+          force: true,
+          actorId: g.ctx.session.uid,
+        });
+        const result = results[0];
+        if (!result) {
+          return NextResponse.json({ error: "Feed not found" }, { status: 400 });
+        }
+        if (!result.ok && result.error) {
+          return NextResponse.json({ error: result.error }, { status: 400 });
+        }
+        void recordAudit({
+          organizationId: g.ctx.session.organizationId,
+          actorUid: g.ctx.session.uid,
+          event: "scraper.run",
+          meta: { feedId, newCount: result.newCount, via: "functions_worker" },
+        });
+        return NextResponse.json({ result });
+      } catch (error) {
+        return NextResponse.json(
+          { error: error instanceof Error ? error.message : "Could not run scrapers" },
+          { status: 502 },
+        );
+      }
+    }
 
     const result = await runScraperFeedByIdServer(g.ctx.session.organizationId, feedId);
     if ("error" in result) {

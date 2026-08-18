@@ -5,6 +5,9 @@ import { getUnsafeLocalImportError } from "@/lib/imports/prospect-import-runtime
 import { confirmProspectImportJob } from "@/lib/imports/prospect-import-server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 
+/** Confirm is light (queue chunks); keep explicit budget for consistency. */
+export const maxDuration = 60;
+
 const bodySchema = z.object({
   policy: z.enum(["add_new", "update_non_empty", "replace"]),
   reimportConfirmed: z.boolean().default(false),

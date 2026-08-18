@@ -1,5 +1,6 @@
 import { headers } from "next/headers";
 import { SITE } from "@/lib/site";
+import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
 
 /** Build an absolute origin string for invite emails / setup links. */
 export async function getRequestOrigin(): Promise<string> {
@@ -16,6 +17,21 @@ export async function getRequestOrigin(): Promise<string> {
   return SITE.url;
 }
 
+/** Signup/accept URL — Clerk `/sign-up` when `auth_clerk_v1` is on. */
 export function inviteAcceptUrl(origin: string, token: string): string {
-  return `${origin.replace(/\/$/, "")}/signup?invite=${encodeURIComponent(token)}`;
+  const path = isClerkAuthV1Enabled() ? "/sign-up" : "/signup";
+  return `${origin.replace(/\/$/, "")}${path}?invite=${encodeURIComponent(token)}`;
+}
+
+export function openJoinAcceptUrl(origin: string, token: string): string {
+  const path = isClerkAuthV1Enabled() ? "/sign-up" : "/signup";
+  return `${origin.replace(/\/$/, "")}${path}?join=${encodeURIComponent(token)}`;
+}
+
+export function authSignInPath(): string {
+  return isClerkAuthV1Enabled() ? "/sign-in" : "/login";
+}
+
+export function authSignUpPath(): string {
+  return isClerkAuthV1Enabled() ? "/sign-up" : "/signup";
 }

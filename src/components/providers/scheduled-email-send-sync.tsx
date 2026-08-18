@@ -5,10 +5,10 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
-/** Slower than before — overlapping 20s handlers were starving the local Next.js process. */
-const POLL_MS = 120_000;
+/** Slower than before — overlapping handlers were starving the local Next.js process. */
+const POLL_MS = 180_000;
 /** Ignore visibility/effect re-fires that would stack process-due calls. */
-const MIN_RUN_GAP_MS = 45_000;
+const MIN_RUN_GAP_MS = 90_000;
 const PROCESS_DUE_LOCK = "nova-crm-process-due";
 
 /**
@@ -133,9 +133,9 @@ export function ScheduledEmailSendSync() {
 
     if (!emailServerHydrated) return;
 
-    // Defer first process-due so dashboard Firestore (chart cards) can connect —
-    // this route often runs 20–30s and saturates local Next + backend I/O.
-    const bootstrapTimer = window.setTimeout(() => void runLive(), 4_000);
+    // Defer first process-due so dashboard / leads can connect —
+    // this route often runs tens of seconds and saturates local Next + backend I/O.
+    const bootstrapTimer = window.setTimeout(() => void runLive(), 12_000);
     const id = window.setInterval(() => void runLive(), POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void runLive();

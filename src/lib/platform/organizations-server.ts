@@ -21,6 +21,8 @@ import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import { parseIntakeFilterDefaults } from "@/lib/intake/intake-filter-defaults";
 import { slugifyOrganizationName } from "@/lib/platform/slug";
 import { parseOrgSendPolicy } from "@/lib/email/org-send-policy";
+import { mirrorOrganizationAfterWrite } from "@/lib/db/dual-write-orgs";
+import { parseIntentPlaybook } from "@/lib/intent/parse-playbook";
 
 const TRIAL_DAYS = 14;
 
@@ -40,14 +42,22 @@ function settingsForFirestore(s: OrganizationSettings): Record<string, unknown> 
   return out;
 }
 
-function tsToIso(t: Timestamp | undefined | null): ISODate {
-  if (!t || !t.toDate) return new Date().toISOString();
-  return t.toDate().toISOString();
+function tsToIso(t: Timestamp | Date | undefined | null): ISODate {
+  if (!t) return new Date().toISOString();
+  if (t instanceof Date) return t.toISOString();
+  if (typeof (t as Timestamp).toDate === "function") {
+    return (t as Timestamp).toDate().toISOString();
+  }
+  return new Date().toISOString();
 }
 
-function maybeTsToIso(t: Timestamp | undefined | null): ISODate | undefined {
-  if (!t || !t.toDate) return undefined;
-  return t.toDate().toISOString();
+function maybeTsToIso(t: Timestamp | Date | undefined | null): ISODate | undefined {
+  if (!t) return undefined;
+  if (t instanceof Date) return t.toISOString();
+  if (typeof (t as Timestamp).toDate === "function") {
+    return (t as Timestamp).toDate().toISOString();
+  }
+  return undefined;
 }
 
 const CHANNEL_KEY_SET = new Set(Object.keys(CHANNELS) as ChannelKey[]);
@@ -162,7 +172,7 @@ function docToOrg(id: string, data: DocumentData): Organization {
       typeof data.pendingOwnerEmail === "string"
         ? data.pendingOwnerEmail
         : undefined,
-    trialEndsAt: maybeTsToIso(data.trialEndsAt as Timestamp | undefined),
+    trialEndsAt: maybeTsToIso(data.trialEndsAt as Timestamp | Date | undefined),
     settings,
     channelAdmin,
     intakeFilterDefaults,
@@ -172,8 +182,12 @@ function docToOrg(id: string, data: DocumentData): Organization {
       data.intakePoolEpoch >= 1
         ? Math.floor(data.intakePoolEpoch)
         : undefined,
-    createdAt: tsToIso(data.createdAt as Timestamp | undefined),
-    updatedAt: tsToIso(data.updatedAt as Timestamp | undefined),
+    intentPlaybook:
+      data.intentPlaybook !== undefined && data.intentPlaybook !== null
+        ? parseIntentPlaybook(data.intentPlaybook)
+        : undefined,
+    createdAt: tsToIso(data.createdAt as Timestamp | Date | undefined),
+    updatedAt: tsToIso(data.updatedAt as Timestamp | Date | undefined),
     openJoinTokenHash:
       typeof data.openJoinTokenHash === "string" && data.openJoinTokenHash
         ? data.openJoinTokenHash
@@ -208,6 +222,43 @@ export async function listOrganizationsServer(): Promise<Organization[]> {
 export async function getOrganizationServer(
   orgId: string,
 ): Promise<Organization | null> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.organization.findUnique({ where: { id: orgId } }),
+      );
+      if (row) {
+        return docToOrg(row.id, {
+          name: row.name,
+          slug: row.slug,
+          status: row.status,
+          planId: row.planId,
+          maxUsers: row.maxUsers ?? undefined,
+          seatsUsed: row.seatsUsed,
+          ownerUid: row.ownerUid ?? undefined,
+          primaryEmail: row.primaryEmail ?? undefined,
+          pendingOwnerEmail: row.pendingOwnerEmail ?? undefined,
+          trialEndsAt: row.trialEndsAt ?? undefined,
+          settings: row.settings ?? {},
+          channelAdmin: row.channelAdmin ?? undefined,
+          intakeFilterDefaults: row.intakeFilterDefaults ?? undefined,
+          intakePoolEpoch: row.intakePoolEpoch,
+          intentPlaybook: row.intentPlaybook ?? undefined,
+          openJoinTokenHash: row.openJoinTokenHash ?? undefined,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[orgs] getOrganizationServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const db = getAdminDb();
   if (!db) return null;
   const ref = db.collection(COLLECTIONS.organizations).doc(orgId);
@@ -253,6 +304,7 @@ export async function claimPendingOrgOwnerServer(
     pendingOwnerEmail: FieldValue.delete(),
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }
 
@@ -310,6 +362,7 @@ export async function createOrganizationServer(input: {
     payload.pendingOwnerEmail = input.pendingOwnerEmail.toLowerCase();
   }
   await ref.set(payload);
+  await mirrorOrganizationAfterWrite(ref.id);
   return { id: ref.id, slug };
 }
 
@@ -323,6 +376,7 @@ export async function bumpOrganizationSeatsServer(
     seatsUsed: FieldValue.increment(delta),
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorOrganizationAfterWrite(orgId);
 }
 
 export async function updateOrganizationServer(
@@ -382,6 +436,7 @@ export async function updateOrganizationServer(
   }
 
   await ref.update(updates);
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }
 
@@ -405,5 +460,6 @@ export async function updateOrganizationChannelAdminServer(
     },
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorOrganizationAfterWrite(orgId);
   return { ok: true };
 }

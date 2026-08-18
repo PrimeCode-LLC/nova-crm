@@ -16,6 +16,10 @@ import {
   bumpOrganizationSeatsServer,
   getOrganizationServer,
 } from "@/lib/platform/organizations-server";
+import {
+  mirrorMemberAfterWrite,
+  mirrorMemberDeleteAfterWrite,
+} from "@/lib/db/dual-write-orgs";
 
 function tsToIso(t: Timestamp | undefined | null): ISODate {
   if (!t || !t.toDate) return new Date().toISOString();
@@ -57,6 +61,37 @@ function membersCol(orgId: string) {
 export async function listMembersServer(
   orgId: string,
 ): Promise<OrganizationMember[]> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const rows = await withRlsBypass(async (tx) =>
+        tx.member.findMany({
+          where: { organizationId: orgId },
+          orderBy: { joinedAt: "desc" },
+        }),
+      );
+      if (rows.length > 0 || !getAdminDb()) {
+        return rows.map((row) => ({
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        }));
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] listMembersServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const col = membersCol(orgId);
   if (!col) return [];
   const snap = await col.orderBy("joinedAt", "desc").get();
@@ -67,6 +102,38 @@ export async function getMemberServer(
   orgId: string,
   uid: string,
 ): Promise<OrganizationMember | null> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.member.findUnique({
+          where: {
+            organizationId_uid: { organizationId: orgId, uid },
+          },
+        }),
+      );
+      if (row) {
+        return {
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] getMemberServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const col = membersCol(orgId);
   if (!col) return null;
   const d = await col.doc(uid).get();
@@ -77,6 +144,42 @@ export async function getMemberServer(
 export async function findMembershipForUserServer(
   uid: string,
 ): Promise<OrganizationMember | null> {
+  if (!uid.trim()) return null;
+
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.member.findFirst({
+          where: {
+            uid,
+            status: { in: ["active", "pending"] },
+          },
+          orderBy: { joinedAt: "desc" },
+        }),
+      );
+      if (row) {
+        return {
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] findMembershipForUserServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
   const db = getAdminDb();
   if (!db) return null;
   const snap = await db
@@ -88,6 +191,74 @@ export async function findMembershipForUserServer(
   const d = snap.docs[0]!;
   const orgId = d.ref.parent.parent?.id ?? "";
   return docToMember(orgId, d.id, d.data());
+}
+
+/**
+ * Resolve an org membership by email (Clerk bridge / invite matching).
+ * Prefers Postgres (RLS bypass) when configured; falls back to Firestore
+ * collection-group query on `email`.
+ */
+export async function findMembershipByEmailServer(
+  email: string,
+): Promise<OrganizationMember | null> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) return null;
+
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const row = await withRlsBypass(async (tx) =>
+        tx.member.findFirst({
+          where: {
+            email: normalized,
+            status: { in: ["active", "pending"] },
+          },
+          orderBy: { joinedAt: "desc" },
+        }),
+      );
+      if (row) {
+        return {
+          uid: row.uid,
+          organizationId: row.organizationId,
+          email: row.email,
+          displayName: row.displayName,
+          role: row.role as OrgMemberRole,
+          status: row.status as OrgMemberStatus,
+          invitedByUid: row.invitedByUid,
+          joinedAt: row.joinedAt.toISOString(),
+          disabledAt: row.disabledAt?.toISOString(),
+        };
+      }
+    }
+  } catch (err) {
+    console.warn(
+      "[members] findMembershipByEmailServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  const db = getAdminDb();
+  if (!db) return null;
+  try {
+    const snap = await db
+      .collectionGroup(ORG_SUBCOLLECTIONS.members)
+      .where("email", "==", normalized)
+      .limit(1)
+      .get();
+    if (snap.empty) return null;
+    const d = snap.docs[0]!;
+    const orgId = d.ref.parent.parent?.id ?? "";
+    return docToMember(orgId, d.id, d.data());
+  } catch (err: unknown) {
+    if (isFirestoreFailedPrecondition(err)) {
+      console.warn(
+        "[members] findMembershipByEmailServer needs a collection-group index on members.email",
+      );
+      return null;
+    }
+    throw err;
+  }
 }
 
 export const OTHER_WORKSPACE_JOIN_ERROR =
@@ -196,6 +367,7 @@ export async function upsertMemberServer(input: {
   if (!existing.exists && nextStatus === "active") {
     await bumpOrganizationSeatsServer(input.organizationId, 1);
   }
+  await mirrorMemberAfterWrite(input.organizationId, input.uid);
   return { created: !existing.exists };
 }
 
@@ -227,6 +399,7 @@ export async function setMemberStatusServer(
   } else if (prevStatus === "active" && status !== "active") {
     await bumpOrganizationSeatsServer(orgId, -1);
   }
+  await mirrorMemberAfterWrite(orgId, uid);
   return { ok: true };
 }
 
@@ -244,6 +417,7 @@ export async function setMemberRoleServer(
     role,
     updatedAt: FieldValue.serverTimestamp(),
   });
+  await mirrorMemberAfterWrite(orgId, uid);
   return { ok: true };
 }
 
@@ -260,6 +434,7 @@ export async function deleteMemberServer(
   if (prevStatus === "active") {
     await bumpOrganizationSeatsServer(orgId, -1);
   }
+  await mirrorMemberDeleteAfterWrite(orgId, uid);
   return { ok: true };
 }
 

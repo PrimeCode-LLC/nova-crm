@@ -10,6 +10,8 @@ import type { NextConfig } from "next";
  * app under a path with no ancestor lockfile, so the inferred root stays small.
  */
 const nextConfig: NextConfig = {
+  /** Required by root `Dockerfile` (standalone server.js + traced deps). P4.6. */
+  output: "standalone",
   /** Temporarily surface readable component names in production error stacks while we diagnose runtime crashes (React #185). Safe to remove once stable. */
   productionBrowserSourceMaps: true,
   experimental: {

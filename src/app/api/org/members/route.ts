@@ -121,7 +121,7 @@ export async function PATCH(req: Request) {
             { merge: true },
           );
       }
-      await g.ctx.adminAuth.revokeRefreshTokens(uid);
+      await g.ctx.adminAuth?.revokeRefreshTokens(uid);
     }
   }
 
@@ -147,7 +147,7 @@ export async function PATCH(req: Request) {
         organizationId: undefined,
         orgRole: undefined,
       });
-      await g.ctx.adminAuth.revokeRefreshTokens(uid);
+      await g.ctx.adminAuth?.revokeRefreshTokens(uid);
     } else if (effectiveStatus === "active") {
       const db = getAdminDb();
       await db
@@ -210,7 +210,7 @@ export async function DELETE(req: Request) {
       );
   }
   await setAppClaims(g.ctx.adminAuth, uid, {});
-  await g.ctx.adminAuth.revokeRefreshTokens(uid);
+  await g.ctx.adminAuth?.revokeRefreshTokens(uid);
   await recordAudit({
     organizationId: orgId,
     actorUid: g.ctx.session.uid,

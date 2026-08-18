@@ -3,11 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const {
   getMemberServer,
   findMembershipForUserServer,
+  findMembershipByEmailServer,
   getOrganizationServer,
   userGet,
 } = vi.hoisted(() => ({
   getMemberServer: vi.fn(),
   findMembershipForUserServer: vi.fn(),
+  findMembershipByEmailServer: vi.fn(),
   getOrganizationServer: vi.fn(),
   userGet: vi.fn(),
 }));
@@ -15,6 +17,7 @@ const {
 vi.mock("@/lib/platform/members-server", () => ({
   getMemberServer,
   findMembershipForUserServer,
+  findMembershipByEmailServer,
 }));
 
 vi.mock("@/lib/platform/organizations-server", () => ({
@@ -41,6 +44,7 @@ describe("resolveLiveTenantForSession", () => {
     clearLiveTenantCacheForTests();
     userGet.mockResolvedValue({ data: () => ({ status: "active" }) });
     getOrganizationServer.mockResolvedValue({ id: "org-1", status: "active" });
+    findMembershipByEmailServer.mockResolvedValue(null);
   });
 
   it("uses the live active membership role", async () => {
@@ -130,6 +134,27 @@ describe("resolveLiveTenantForSession", () => {
       organizationId: "org-1",
       orgRole: undefined,
       membershipPending: true,
+    });
+  });
+
+  it("falls back to email membership when uid misses", async () => {
+    getMemberServer.mockResolvedValue(null);
+    findMembershipForUserServer.mockResolvedValue(null);
+    findMembershipByEmailServer.mockResolvedValue({
+      uid: "fb-uid",
+      organizationId: "org-1",
+      role: "admin",
+      status: "active",
+    });
+    await expect(
+      resolveLiveTenantForSession({
+        uid: "user_clerk",
+        email: "rep@example.com",
+      }),
+    ).resolves.toMatchObject({
+      organizationId: "org-1",
+      orgRole: "admin",
+      membershipPending: false,
     });
   });
 });

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { applyOpenSalesLeadsDeltaServer } from "@/lib/dashboard-summary-server";
@@ -59,10 +59,18 @@ class FakeTx {
 
 describe("applyOpenSalesLeadsDeltaServer", () => {
   let db: FakeFirestore;
+  const prevFsWriter = process.env.DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1;
 
   beforeEach(() => {
     db = new FakeFirestore();
     vi.mocked(getAdminDb).mockReturnValue(db as never);
+    // P3.4 — Firestore delta path is opt-in rollback only.
+    process.env.DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1 = "true";
+  });
+
+  afterEach(() => {
+    if (prevFsWriter === undefined) delete process.env.DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1;
+    else process.env.DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1 = prevFsWriter;
   });
 
   it("seeds a summary doc on first +1", async () => {

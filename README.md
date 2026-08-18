@@ -1,161 +1,221 @@
 # Nova CRM (Relay)
 
-Next.js 16 **App Router** sales CRM UI with **Firebase Auth**, **Firestore**, **session cookies** (Admin-verified), optional **Cloud Functions**, and **Firebase App Hosting** config.
+Next.js 16 **App Router** sales CRM. **Deploy target:** Clerk (auth) + PostgreSQL (RLS) + Redis + two Docker deployables (**web** + **worker**). No Firebase required when `FIREBASE_DISABLED` is on.
+
+Binding rules: [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md). Migration checklist: [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md).
+
+## Architecture
+
+| Deployable | Image | Role |
+|------------|--------|------|
+| **Web** | `Dockerfile` | Next.js UI + API routes (interactive traffic only) |
+| **Worker** | `Dockerfile.worker` | BullMQ consumer — imports, IMAP, scheduled email, scrapers, reminders, dashboard refresh |
+
+Local infra: Compose **Postgres 16** + **Redis 7**. Default `docker compose up` starts infra only; web/worker use profile `full`.
+
+```mermaid
+flowchart LR
+  browser[Browser] --> web[Web_Next.js]
+  web --> clerk[Clerk_Auth]
+  web --> pg[(Postgres_RLS)]
+  web --> redis[(Redis)]
+  web -->|enqueue| redis
+  redis --> worker[Worker_BullMQ]
+  worker --> pg
+  worker --> redis
+```
+
+| Concern | System of record |
+|---------|------------------|
+| **Auth** | **Clerk** — `/sign-in`, `/sign-up`; Nova owns tenancy (`organization_id`, roles, invites) |
+| **CRM data** | **Postgres** — accounts, contacts, leads, deals, org/member lookups, dashboard summaries |
+| **CRM writes** | **Sole writer** — `POST /api/org/crm-write` (no dual-write) |
+| **Background jobs** | **BullMQ worker** when queue flags are on |
+| **Firebase** | **Off** when `FIREBASE_DISABLED=true` — packages may remain installed but are not initialized |
+
+## Deploy on one VPS (production)
+
+Step-by-step Ubuntu + Docker guide (web, worker, Postgres, Redis, HTTPS, crons, backups) for non-technical and technical operators:
+
+→ **[`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md)**
 
 ## Branching
 
-Work on `feature/*` branches and merge to `main` via PR only — see [`docs/BRANCHING.md`](docs/BRANCHING.md). Do not push directly to `main`.
+Work on `feature/*` → PR → `main` only. See [`docs/BRANCHING.md`](docs/BRANCHING.md).
 
-## Quick start
+## Quick start (recommended — Firebase-free)
 
 ```bash
 cd crm
 npm install
 cp .env.example .env.local
-# Fill NEXT_PUBLIC_FIREBASE_* and FIREBASE_ADMIN_* (see below)
-npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000). Unauthenticated visitors are redirected to `/login`.
-
-### Local Docker (Postgres + Redis)
+Fill `.env.local` (see below), then:
 
 ```bash
 docker compose up -d postgres redis
-# Wait until healthy, then:
-# DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm
-# REDIS_URL=redis://localhost:6379
+npm run db:migrate:deploy
+npm run dev
 ```
 
-Repo-root `Dockerfile` / `Dockerfile.worker` are ready for later tiers; web/worker Compose services stay commented until Phase 4. Env separation rules: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
+Open [http://localhost:3000](http://localhost:3000) → Clerk **`/sign-in`**.
 
-### UI-only dev (no Firebase Admin)
+### Required env (Firebase-free)
 
-If you have not set **Firebase Admin** credentials yet, either:
+```bash
+# Auth
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_...
+CLERK_SECRET_KEY=sk_test_...
+NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
+NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
+AUTH_CLERK_V1=true
+NEXT_PUBLIC_AUTH_CLERK_V1=true
 
-1. Set **`NEXT_PUBLIC_AUTH_DISABLED=true`** and **`DISABLE_AUTH=true`** in `.env.local` to skip auth and middleware (mock sidebar user), or  
-2. Configure Admin (recommended) so email/password sign-in can mint an httpOnly session cookie.
+# Kill Firebase at runtime (set both)
+FIREBASE_DISABLED=true
+NEXT_PUBLIC_FIREBASE_DISABLED=true
 
-## Environment variables
+# Data
+DATABASE_URL=postgres://nova_app:nova_dev_password@localhost:5432/nova_crm
+MIGRATE_DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm
+REDIS_URL=redis://localhost:6379
 
-| Variable | Where | Purpose |
-|----------|--------|---------|
-| `NEXT_PUBLIC_FIREBASE_*` | Client + server | Web SDK (`src/lib/firebase/client.ts`) |
-| `FIREBASE_ADMIN_PROJECT_ID` | Server | Admin SDK |
-| `FIREBASE_ADMIN_CLIENT_EMAIL` | Server | Service account email |
-| `FIREBASE_ADMIN_PRIVATE_KEY` | Server | PEM private key (`\n` escaped as `\\n` in `.env`) |
-| `PLATFORM_ADMIN_EMAILS` | Server | Comma-separated bootstrap operators for `/platform` |
-| `SYSTEM_SMTP_HOST` / `_PORT` / `_USER` / `_PASS` / `_FROM` | Server | Outbound transactional mail (invitations, owner setup links). If unset, the UI shows the link for manual copy. |
-| `NEXT_PUBLIC_SITE_URL` | Server | Origin used in invite links (falls back to host header) |
-| `INBOUND_WEBHOOK_SECRET` | Server | Legacy single-tenant webhook secret. New per-tenant secrets live on the org doc. |
-| `DISABLE_AUTH` | Server | `true` = skip session verification in `(app)` layout |
-| `NEXT_PUBLIC_AUTH_DISABLED` | Client + Edge | `true` = skip Firebase listeners + middleware auth |
+# CRM on Postgres (reads + sole-writer + dashboard)
+POSTGRES_READ_LEADS_V1=true
+NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
+POSTGRES_READ_CRM_V1=true
+NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
+POSTGRES_SOLE_WRITER_CRM_V1=true
+NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
+POSTGRES_DASHBOARD_SUMMARY_WRITER_V1=true
+POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
+NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
 
-See `.env.example` for the full list.
+# Optional
+PLATFORM_ADMIN_EMAILS=you@example.com
+NEXT_PUBLIC_SITE_URL=http://localhost:3000
+```
 
-## Auth & multi-tenant flow
+**Do not set** `NEXT_PUBLIC_FIREBASE_*` / `FIREBASE_ADMIN_*` for this mode. Leave dual-write flags (`POSTGRES_DUAL_WRITE_*`) **off**.
 
-The product is multi-tenant SaaS. See `docs/SAAS-ARCHITECTURE.md` for the full reference.
+### Prerequisites for a working login
 
-**Three signup branches** (`POST /api/auth/session`):
+- Orgs/members already in Postgres (from an earlier backfill, or seeded yourself).
+- Clerk user email matches a Postgres `members.email` (or Clerk `externalId` = Nova `uid`).
+- Platform operators: use `PLATFORM_ADMIN_EMAILS` (Firestore `platformAdmins` is unused when Firebase is off).
 
-1. **`/signup?invite=<token>`** - joins an existing org. The token resolves to an `organizations/{orgId}/invites/{inviteId}` doc; on accept, a `members/{uid}` doc is written and the invite is marked `accepted`.
-2. **Email matches a `pendingOwnerEmail`** - when an operator pre-seats an org from `/platform/organizations/new`, the first signup with that email auto-claims the workspace as `owner`.
-3. **Plain `/signup` with a company name** - bootstraps a personal org, the signer becomes `owner` (legacy CRM `roleId` set to `director`, `isSuperAdmin: true`).
+### Local worker
 
-After any branch, the server stamps Firebase **custom claims** (`organizationId`, `orgRole`, `platformAdmin`) and the client forces an ID-token refresh + re-exchange so the session cookie carries the new claims. `firestore.rules` reads claims first and falls back to the user doc, so freshly-signed-up users have working access on the very first request.
+```bash
+# QUEUE_WORKER_V1=true
+# QUEUE_IMPORT_CHUNKS_V1=true
+# QUEUE_HEAVY_JOBS_V1=true
+npm run worker
+```
 
-`/onboarding` is a defensive page for users that ended up signed in without an org (legacy accounts, or platform admins).
+Health: `http://127.0.0.1:8081/healthz`.
 
-**Sign out** clears the cookie and calls Firebase `signOut()`.
+Full stack:
 
-## Firestore & rules
+```bash
+docker compose --profile full up --build
+```
 
-- Rules file: `firestore.rules` - enforces tenant isolation. Every CRM doc must declare `organizationId == caller's org`. Server (Admin SDK) bypasses rules.
-- Indexes: `firestore.indexes.json` - pre-declares the composite indexes that tenant-filtered queries will hit.
-- Deploy: `npm run firebase:deploy:rules` and `firebase deploy --only firestore:indexes`
+### UI-only (no Clerk)
 
-Collections used in rules:
-- Tenant CRM: `leads`, `accounts`, `contacts`, `deals`, `departments`, `permissionOverrides`, `activityCounters`, `activityRecords`, `auditLog`
-- Identity: `users`, `computedPermissions`
-- SaaS: `organizations` (with subcollections `members`, `invites`, `audit`), `platformAdmins`
-- Server-only: `ingestQueue`
+```bash
+DISABLE_AUTH=true
+NEXT_PUBLIC_AUTH_DISABLED=true
+```
+
+Never use auth-disabled in production.
+
+## What works vs what does not (Firebase off)
+
+| Works | Unavailable until migrated off Firestore |
+|-------|------------------------------------------|
+| Clerk login / logout | Team chat |
+| CRM lists + sole-writer mutations | User notifications (FS listeners) |
+| Dashboard summaries (Postgres + Redis) | Email / mailbox / IMAP / scheduled send |
+| Org members list (Postgres) | Scrapers intake / feeds UI |
+| Tenant APIs with Clerk session | Content calendar, prospect drafts |
+| BullMQ worker path | Firestore invite-token accept (503) |
+| | Firebase password “provision login” |
+| | Chrome extension FS auth bridge |
+
+## Auth flow
+
+1. Sign in at **`/sign-in`** or sign up at **`/sign-up`** (Clerk).
+2. Server maps Clerk → Nova via `externalId` + email (`resolveClerkIdentity`) against **Postgres** members.
+3. Workspace shell loads identity from **`GET /api/auth/me`** (no Firebase user doc).
+4. CRM data polls Postgres APIs (no Firestore `onSnapshot`).
+5. With Firebase disabled, the Clerk→Firebase custom-token bridge is **skipped**.
+
+Details: [`NOVA-CRM-P5-AUTH-CLERK.md`](Architecture%20fixes%20plan/NOVA-CRM-P5-AUTH-CLERK.md).
+
+## CRM data path
+
+| Action | Path |
+|--------|------|
+| List accounts / contacts / leads / deals | `GET /api/org/{accounts\|contacts\|leads\|deals}` (RLS) |
+| Create / patch / delete / graph upsert | `POST /api/org/crm-write` |
+| Dashboard KPIs | `GET /api/org/dashboard-summary` → Postgres + Redis |
+
+Tenant queries: `withOrganizationScope` (`src/lib/db/tenant-scope.ts`).  
+Cutover notes: [`NOVA-CRM-P6-DECOMMISSION-FIREBASE.md`](Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md).
 
 ## Org management
 
-- **`/admin/team`** - owner / admin invite teammates, change roles, disable members. Talks to `/api/org/members` and `/api/org/invites`.
-- **`/admin/users`** - legacy demo view of the org chart (mock data). Linked from /admin/team.
-- **`/platform`** - operator console (gated by `platformAdmins` collection or `PLATFORM_ADMIN_EMAILS`). Create / edit organizations, manage other operators, run the legacy-user migration once after deploy.
+- **`/admin/team`** — invites / roles / disable (`/api/org/members`, `/api/org/invites`). Invite **email send** works without Firebase; **accepting** invite tokens still needs Firestore until invites move to Postgres.
+- **`/platform`** — operators via `PLATFORM_ADMIN_EMAILS`.
 
 ## Website → CRM webhook
 
-`POST /api/integrations/webhook/lead` with header **`Authorization: Bearer <secret>`** or **`x-webhook-secret: <secret>`**.
+`POST /api/integrations/webhook/lead` with `Authorization: Bearer <secret>` or `x-webhook-secret`. Body must include `organizationId`.
 
-The body MUST include `organizationId` so the lead is stamped to the right tenant. The secret is checked against `organizations/{orgId}.inboundWebhookSecret` (per-tenant) with `INBOUND_WEBHOOK_SECRET` env as a legacy fallback.
+## Environment variables (summary)
 
-```json
-{
-  "organizationId": "abc123",
-  "source": "website",
-  "contactEmail": "lead@example.com",
-  "contactName": "Jane Doe",
-  "companyName": "Acme",
-  "channel": "website_form",
-  "raw": {}
-}
-```
+| Variable | Purpose |
+|----------|---------|
+| `NEXT_PUBLIC_CLERK_*` / `CLERK_SECRET_KEY` / `AUTH_CLERK_V1` | Clerk auth |
+| `FIREBASE_DISABLED` / `NEXT_PUBLIC_FIREBASE_DISABLED` | Runtime kill switch |
+| `DATABASE_URL` / `MIGRATE_DATABASE_URL` | Postgres app + migrate roles |
+| `REDIS_URL` | Cache + BullMQ |
+| `POSTGRES_READ_*` / `POSTGRES_SOLE_WRITER_*` / `POSTGRES_DASHBOARD_SUMMARY_*` | CRM cutover |
+| `QUEUE_*_V1` | Route heavy jobs to worker |
+| `PLATFORM_ADMIN_EMAILS` | `/platform` bootstrap |
+| `CRON_SECRET` | Cron / queue dispatch bearer |
 
-Writes a tenant-stamped doc to **`ingestQueue`** via Admin SDK (clients cannot write this collection).
-
-## Social RSS scrapers (replaces n8n + Google Sheets)
-
-- **Admin → Scrapers** (`/admin/scrapers`): manage rss.app feed URLs, seed ~46 default feeds from the legacy n8n workflow, run feeds manually.
-- **Intake pool** (`/intake`): team browses new posts (7-day retention), promotes to **prospect** (open queue or assign to self), or dismisses.
-- Promoted prospects use the existing **Claim** flow on `/prospects` when left in the open queue.
-- Scheduled ingest: set `CRON_SECRET` on **App Hosting** and **Cloud Functions**, deploy functions (`runDueScrapers` every 15 minutes → `GET /api/cron/scrapers/run`). Per-feed interval and **Enabled** are stored in Firestore - disabled feeds are skipped. (`vercel.json` crons apply only on Vercel.)
-
-Deploy Firestore indexes after pulling: `npm run firebase:deploy:rules` (rules + indexes).
-
-## Cloud Functions
-
-Located in `functions/`. Build:
-
-```bash
-cd functions && npm install && npm run build
-```
-
-Exports:
-
-- **`health`**: HTTP sanity check  
-- **`recomputePermissionsOnUserWrite`**: on `users/{userId}` write, merges role + `permissionOverrides` into `computedPermissions/{userId}`  
-- **`runDueScrapers`**: every 15 minutes, calls App Hosting `/api/cron/scrapers/run` (due feeds only; honors disable + interval)  
-- **`sendDueScheduledEmails`**: every 5 minutes, calls `/api/cron/scheduled-emails/send`  
-- **`cleanupProspectImportTemporaryData`**: hourly import cleanup  
-
-Set Cloud Function secret: `firebase functions:secrets:set CRON_SECRET` (same value as App Hosting). Optional param `SITE_URL` defaults to production origin.
-
-Deploy: `npm run firebase:deploy:functions` from `crm/` (requires Blaze for callable HTTP/functions).
-
-## Firebase project files
-
-| File | Purpose |
-|------|---------|
-| `firebase.json` | Firestore + Functions |
-| `.firebaserc` | Default project id (`novacrm-41ef8`; change if needed) |
-| `apphosting.yaml` | App Hosting resource hints |
-| `firestore.rules` / `firestore.indexes.json` | Security + indexes |
-
-**App Hosting:** In the Firebase console, create an App Hosting backend and point the root at this **`crm`** directory so `next.config.ts` and `package.json` are at the backend root.
+Full list: `.env.example`. Env separation: [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md).
 
 ## Scripts
 
 | Script | Command |
 |--------|---------|
-| `npm run dev` | Next dev server |
-| `npm run build` | Production build |
-| `npm run firebase:deploy:rules` | Deploy Firestore rules only |
-| `npm run firebase:deploy:functions` | Deploy Cloud Functions |
+| `npm run dev` | Web tier |
+| `npm run worker` | BullMQ worker |
+| `npm run build` | Next standalone build |
+| `npm run build:worker` | Bundle worker |
+| `npm run db:migrate:deploy` | Apply Prisma migrations |
+| `npm run db:studio` | Prisma Studio |
+| `npm run db:backfill:crm` / `db:reconcile:crm` | Migration helpers (legacy soak) |
+| `npm run db:export:firestore-crm` | Archive FS CRM (only if Firebase Admin configured) |
 
-## Product docs
+## Optional: Firebase still enabled
 
-See repo root `PROJECT-OVERVIEW.md` and the Cursor plan for domain model and roadmap.
+Unset `FIREBASE_DISABLED` / `NEXT_PUBLIC_FIREBASE_DISABLED` and configure `NEXT_PUBLIC_FIREBASE_*` + `FIREBASE_ADMIN_*` only if you need residual Firestore domains or the Clerk→Firebase bridge. That path is transitional (ENGINEERING_RULES §1b). Prefer finishing domain migrations and keeping Firebase off for production deploys.
+
+Legacy Cloud Functions live under `functions/` and App Hosting under `apphosting.yaml` — not required for the Firebase-free Docker/web+worker deploy.
+
+## Docs
+
+| Doc | What |
+|-----|------|
+| [`NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md) | Binding contract (incl. Firebase-free override) |
+| [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md) | Phase checklist |
+| [`NOVA-CRM-P5-AUTH-CLERK.md`](Architecture%20fixes%20plan/NOVA-CRM-P5-AUTH-CLERK.md) | Clerk auth |
+| [`NOVA-CRM-P6-DECOMMISSION-FIREBASE.md`](Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md) | CRM Postgres cutover |
+| [`NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md) | Queue / worker |
+| [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Local / staging / prod |
+| [`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md) | One-VPS Ubuntu production setup (full working stack) |

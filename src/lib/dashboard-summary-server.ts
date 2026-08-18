@@ -1,5 +1,7 @@
 /**
  * Admin SDK writer/reader for `orgDashboardSummaries` (Phase 0 / P0.4–P0.6).
+ * P3.4: Postgres is the system of record for these KPIs. Firestore writes are
+ * opt-in via `DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1` (rollback only).
  * Clients cannot write this collection (Firestore rules deny create/update/delete).
  */
 
@@ -19,6 +21,8 @@ import {
   openSalesLeadsContributionDelta,
 } from "@/lib/dashboard-summary";
 import { computeOrgDashboardSummaryFields } from "@/lib/dashboard-summary-compute";
+import { isFirestoreOrgDashboardSummaryWriterEnabled } from "@/lib/db/postgres-dashboard-summary-flags";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
 import type { Deal, Followup, Lead } from "@/lib/types";
 import {
   DEFAULT_CACHE_TTL_SECONDS,
@@ -85,8 +89,8 @@ export type LeadDashboardGaugeDeltas = {
 };
 
 /**
- * Apply ±N to lead gauges, seeding a full v1 summary doc on first write.
- * No-ops when all deltas are 0 or Admin SDK is unavailable.
+ * Apply ±N to lead gauges on Firestore (rollback path only).
+ * P3.4: when Firestore writer is off, schedules a Postgres refresh instead.
  */
 export async function applyLeadDashboardGaugesDeltaServer(
   organizationId: string,
@@ -100,6 +104,16 @@ export async function applyLeadDashboardGaugesDeltaServer(
   const openDelta = deltas.openSalesLeads ?? 0;
   const idleDelta = deltas.idleSalesLeads ?? 0;
   if (!openDelta && !idleDelta) {
+    return { ok: true, openSalesLeads: -1, idleSalesLeads: -1 };
+  }
+
+  if (!isFirestoreOrgDashboardSummaryWriterEnabled()) {
+    if (isDatabaseConfigured()) {
+      const { scheduleOrgDashboardSummaryRefresh } = await import(
+        "@/lib/db/org-dashboard-summary-refresh"
+      );
+      scheduleOrgDashboardSummaryRefresh(orgId);
+    }
     return { ok: true, openSalesLeads: -1, idleSalesLeads: -1 };
   }
 
@@ -253,14 +267,51 @@ export async function recomputeOpenPipelineGaugesServer(
 }
 
 /**
- * Full org dashboard summary recount (P0.10) — all gauges, channel mix, funnels, ranges.
- * Prefer Cloud Function triggers; use this for admin backfill / repair.
+ * Full org dashboard summary recount.
+ * P3.4: when `DATABASE_URL` is set, Postgres is the system of record.
+ * Firestore `orgDashboardSummaries` is written only when
+ * `DASHBOARD_SUMMARIES_FIRESTORE_WRITER_V1=true` (rollback).
  */
 export async function recomputeOrgDashboardSummaryServer(
   organizationId: string,
 ): Promise<{ ok: true; summary: OrgDashboardSummary } | { ok: false; error: string }> {
   const orgId = organizationId.trim();
   if (!orgId) return { ok: false, error: "organizationId required" };
+
+  if (isDatabaseConfigured()) {
+    const { recomputeOrgDashboardSummaryPostgres } = await import(
+      "@/lib/db/org-dashboard-summary-refresh"
+    );
+    const pg = await recomputeOrgDashboardSummaryPostgres(orgId);
+    if (!pg.ok) return pg;
+
+    if (isFirestoreOrgDashboardSummaryWriterEnabled()) {
+      const written = await writeOrgDashboardSummaryToFirestore(pg.summary);
+      if (!written.ok) {
+        console.error("[dashboard-summary] FS rollback write failed", orgId, written.error);
+      }
+    }
+    return pg;
+  }
+
+  // Legacy path when Postgres is not configured.
+  return recomputeOrgDashboardSummaryFirestoreOnly(orgId);
+}
+
+async function writeOrgDashboardSummaryToFirestore(
+  summary: OrgDashboardSummary,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const db = getAdminDb();
+  const ref = summaryRef(summary.organizationId);
+  if (!db || !ref) return { ok: false, error: "Admin Firestore unavailable" };
+  await ref.set(summary, { merge: true });
+  await invalidateSummaryCache(summary.organizationId);
+  return { ok: true };
+}
+
+async function recomputeOrgDashboardSummaryFirestoreOnly(
+  orgId: string,
+): Promise<{ ok: true; summary: OrgDashboardSummary } | { ok: false; error: string }> {
   const db = getAdminDb();
   const ref = summaryRef(orgId);
   if (!db || !ref) return { ok: false, error: "Admin Firestore unavailable" };

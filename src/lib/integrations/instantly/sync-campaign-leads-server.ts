@@ -7,6 +7,13 @@ import { listAllLeadsForInstantlyCampaign } from "./client";
 import { mapInstantlyLeadToContact } from "./lead-mapper";
 import { getInstantlyApiKeyServer } from "./secrets";
 import type { InstantlyLead } from "./types";
+import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
+import { findLeadIdByContactEmailPostgres } from "@/lib/db/list-crm-postgres";
+import {
+  isCrmSoleWriterActive,
+  patchCrmDocSoleWriter,
+  upsertLeadGraphSoleWriter,
+} from "@/lib/db/crm-sole-writer-server";
 
 export type SyncInstantlyCampaignLeadsResult = {
   total: number;
@@ -22,10 +29,19 @@ async function findNovaLeadIdsByEmail(
   organizationId: string,
   emails: string[],
 ): Promise<Map<string, string>> {
+  const unique = [...new Set(emails.map((e) => e.toLowerCase()).filter(Boolean))];
+  const map = new Map<string, string>();
+
+  if (isCrmSoleWriterActive()) {
+    for (const email of unique) {
+      const id = await findLeadIdByContactEmailPostgres(organizationId, email);
+      if (id) map.set(email, id);
+    }
+    return map;
+  }
+
   const db = getAdminDb();
   if (!db) return new Map();
-  const map = new Map<string, string>();
-  const unique = [...new Set(emails.map((e) => e.toLowerCase()).filter(Boolean))];
 
   for (let i = 0; i < unique.length; i += EMAIL_IN_CHUNK) {
     const chunk = unique.slice(i, i + EMAIL_IN_CHUNK);
@@ -66,7 +82,8 @@ export async function syncInstantlyCampaignLeadsToNova(
   if (!apiKey) throw new Error("Instantly is not connected");
 
   const db = getAdminDb();
-  if (!db) throw new Error("Database not configured");
+  const soleWriter = isCrmSoleWriterActive();
+  if (!soleWriter && !db) throw new Error("Database not configured");
 
   const remoteLeads = await listAllLeadsForInstantlyCampaign(apiKey, instantlyCampaignId);
 
@@ -89,7 +106,8 @@ export async function syncInstantlyCampaignLeadsToNova(
   let linked = 0;
   let created = 0;
 
-  const updates: { ref: DocumentReference; data: Record<string, unknown> }[] = [];
+  const updates: { id: string; ref?: DocumentReference; data: Record<string, unknown> }[] =
+    [];
   const creates: PendingCreate[] = [];
   // Open-queue Instantly imports have blank ownerId → empty manager stamp.
   const ownerManagerIds: string[] = [];
@@ -98,7 +116,8 @@ export async function syncInstantlyCampaignLeadsToNova(
     const existingId = existingByEmail.get(fields.email);
     if (existingId) {
       updates.push({
-        ref: db.collection(COLLECTIONS.leads).doc(existingId),
+        id: existingId,
+        ref: db ? db.collection(COLLECTIONS.leads).doc(existingId) : undefined,
         data: stampForUpdate(
           {
             campaignId: novaCampaignId,
@@ -128,6 +147,10 @@ export async function syncInstantlyCampaignLeadsToNova(
             name: fields.companyName,
             domain: fields.companyDomain ?? null,
             ownerManagerIds,
+            ownerId: "",
+            contactCount: 0,
+            leadCount: 1,
+            openDealValue: 0,
           },
           uid,
         ),
@@ -135,10 +158,13 @@ export async function syncInstantlyCampaignLeadsToNova(
           organizationId,
           {
             accountId,
-            name: fields.contactName,
+            firstName: fields.contactName.split(" ")[0] ?? fields.contactName,
+            lastName: fields.contactName.split(" ").slice(1).join(" ") || "",
+            fullName: fields.contactName,
             email: fields.email,
             title: fields.contactTitle ?? null,
             ownerManagerIds,
+            ownerId: "",
           },
           uid,
         ),
@@ -169,23 +195,50 @@ export async function syncInstantlyCampaignLeadsToNova(
     }
   }
 
-  for (let i = 0; i < updates.length; i += BATCH_OPS_LIMIT) {
-    const batch = db.batch();
-    for (const u of updates.slice(i, i + BATCH_OPS_LIMIT)) {
-      batch.update(u.ref, u.data);
+  if (soleWriter) {
+    for (const u of updates) {
+      await patchCrmDocSoleWriter(organizationId, "lead", u.id, u.data);
     }
-    await batch.commit();
-  }
+    for (const c of creates) {
+      await upsertLeadGraphSoleWriter(organizationId, {
+        account: { id: c.accountId, doc: c.account },
+        contact: { id: c.contactId, doc: c.contact },
+        lead: { id: c.leadId, doc: c.lead },
+      });
+    }
+  } else {
+    if (!db) throw new Error("Database not configured");
+    for (let i = 0; i < updates.length; i += BATCH_OPS_LIMIT) {
+      const slice = updates.slice(i, i + BATCH_OPS_LIMIT);
+      const batch = db.batch();
+      for (const u of slice) {
+        if (u.ref) batch.update(u.ref, u.data);
+      }
+      await batch.commit();
+      for (const u of slice) {
+        await mirrorCrmEntityAfterWrite("lead", u.id, { organizationId });
+      }
+    }
 
-  for (let i = 0; i < creates.length; i += Math.floor(BATCH_OPS_LIMIT / 3)) {
-    const slice = creates.slice(i, i + Math.floor(BATCH_OPS_LIMIT / 3));
-    const batch = db.batch();
-    for (const c of slice) {
-      batch.set(db.collection(COLLECTIONS.accounts).doc(c.accountId), c.account);
-      batch.set(db.collection(COLLECTIONS.contacts).doc(c.contactId), c.contact);
-      batch.set(db.collection(COLLECTIONS.leads).doc(c.leadId), c.lead);
+    for (let i = 0; i < creates.length; i += Math.floor(BATCH_OPS_LIMIT / 3)) {
+      const slice = creates.slice(i, i + Math.floor(BATCH_OPS_LIMIT / 3));
+      const batch = db.batch();
+      for (const c of slice) {
+        batch.set(db.collection(COLLECTIONS.accounts).doc(c.accountId), c.account);
+        batch.set(db.collection(COLLECTIONS.contacts).doc(c.contactId), c.contact);
+        batch.set(db.collection(COLLECTIONS.leads).doc(c.leadId), c.lead);
+      }
+      await batch.commit();
+      for (const c of slice) {
+        await mirrorCrmEntityAfterWrite("account", c.accountId, {
+          organizationId,
+        });
+        await mirrorCrmEntityAfterWrite("contact", c.contactId, {
+          organizationId,
+        });
+        await mirrorCrmEntityAfterWrite("lead", c.leadId, { organizationId });
+      }
     }
-    await batch.commit();
   }
 
   return {

@@ -13,6 +13,16 @@ import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playboo
 import { withInitialQualityScore } from "@/lib/intent/apply-quality-score";
 import { researchFieldsFromIntakeItem } from "@/lib/intent/score-intake-item";
 import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
+import {
+  getAccountFromPostgres,
+  getContactFromPostgres,
+  getLeadFromPostgres,
+} from "@/lib/db/list-crm-postgres";
+import {
+  isCrmSoleWriterActive,
+  upsertLeadGraphSoleWriter,
+} from "@/lib/db/crm-sole-writer-server";
 import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
 
 function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
@@ -69,9 +79,56 @@ export async function promoteRawItemToProspectServer(input: {
   const db = getAdminDb();
   if (!db) return { error: "Database not configured" };
 
+  const soleWriter = isCrmSoleWriterActive();
+
   const item = await getScraperRawItemServer(input.organizationId, input.itemId);
   if (!item) return { error: "Item not found" };
   if (item.status === "promoted" && item.promotedToLeadId) {
+    if (soleWriter) {
+      const lead = await getLeadFromPostgres(
+        input.organizationId,
+        item.promotedToLeadId,
+      );
+      if (!lead) return { error: "Promoted lead record is missing" };
+      const accountId = lead.accountId;
+      const contactId = lead.contactId;
+      const [account, contact] = await Promise.all([
+        accountId
+          ? getAccountFromPostgres(input.organizationId, accountId)
+          : Promise.resolve(null),
+        contactId
+          ? getContactFromPostgres(input.organizationId, contactId)
+          : Promise.resolve(null),
+      ]);
+      const fallbackAt = new Date().toISOString();
+      return {
+        ok: true,
+        leadId: item.promotedToLeadId,
+        accountId,
+        contactId,
+        lead,
+        account: account ?? {
+          id: accountId || "a-unknown",
+          name: "Unknown company",
+          contactCount: 0,
+          leadCount: 0,
+          openDealValue: 0,
+          ownerId: lead.ownerId,
+          createdAt: fallbackAt,
+          updatedAt: fallbackAt,
+        },
+        contact: contact ?? {
+          id: contactId || "ct-unknown",
+          accountId: accountId || "a-unknown",
+          firstName: "Unknown",
+          lastName: "Contact",
+          fullName: "Unknown contact",
+          ownerId: lead.ownerId,
+          createdAt: fallbackAt,
+          updatedAt: fallbackAt,
+        },
+      };
+    }
     const existing = await db.collection(COLLECTIONS.leads).doc(item.promotedToLeadId).get();
     if (!existing.exists) {
       return { error: "Promoted lead record is missing" };
@@ -188,45 +245,54 @@ export async function promoteRawItemToProspectServer(input: {
   const lead = withInitialQualityScore(leadBase, playbook, []);
   const ownerManagerIds = await resolveOwnerManagerIdsAdmin(db, ownerId || input.userId);
 
-  const batch = db.batch();
-  const aRef = db.collection(COLLECTIONS.accounts).doc(accountId);
-  const cRef = db.collection(COLLECTIONS.contacts).doc(contactId);
-  const lRef = db.collection(COLLECTIONS.leads).doc(leadId);
+  const accountDoc = stampForCreate(
+    input.organizationId,
+    stripUndefined({
+      ...(account as unknown as Record<string, unknown>),
+      ownerManagerIds,
+    }),
+    input.userId,
+  );
+  const contactDoc = stampForCreate(
+    input.organizationId,
+    stripUndefined({
+      ...(contact as unknown as Record<string, unknown>),
+      ownerManagerIds,
+    }),
+    input.userId,
+  );
+  const leadDoc = stampForCreate(
+    input.organizationId,
+    stripUndefined({
+      ...(lead as unknown as Record<string, unknown>),
+      ownerManagerIds,
+    }),
+    input.userId,
+  );
 
-  batch.set(
-    aRef,
-    stampForCreate(
-      input.organizationId,
-      stripUndefined({
-        ...(account as unknown as Record<string, unknown>),
-        ownerManagerIds,
-      }),
-      input.userId,
-    ),
-  );
-  batch.set(
-    cRef,
-    stampForCreate(
-      input.organizationId,
-      stripUndefined({
-        ...(contact as unknown as Record<string, unknown>),
-        ownerManagerIds,
-      }),
-      input.userId,
-    ),
-  );
-  batch.set(
-    lRef,
-    stampForCreate(
-      input.organizationId,
-      stripUndefined({
-        ...(lead as unknown as Record<string, unknown>),
-        ownerManagerIds,
-      }),
-      input.userId,
-    ),
-  );
-  await batch.commit();
+  if (soleWriter) {
+    await upsertLeadGraphSoleWriter(input.organizationId, {
+      account: { id: accountId, doc: accountDoc },
+      contact: { id: contactId, doc: contactDoc },
+      lead: { id: leadId, doc: leadDoc },
+    });
+  } else {
+    const batch = db.batch();
+    batch.set(db.collection(COLLECTIONS.accounts).doc(accountId), accountDoc);
+    batch.set(db.collection(COLLECTIONS.contacts).doc(contactId), contactDoc);
+    batch.set(db.collection(COLLECTIONS.leads).doc(leadId), leadDoc);
+    await batch.commit();
+
+    await mirrorCrmEntityAfterWrite("account", accountId, {
+      organizationId: input.organizationId,
+    });
+    await mirrorCrmEntityAfterWrite("contact", contactId, {
+      organizationId: input.organizationId,
+    });
+    await mirrorCrmEntityAfterWrite("lead", leadId, {
+      organizationId: input.organizationId,
+    });
+  }
 
   const teId = newEntityId("te");
   await db.collection(COLLECTIONS.timelineEvents).doc(teId).set(

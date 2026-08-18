@@ -39,6 +39,8 @@ import type {
   CrmLabel,
 } from "@/lib/types";
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
+import { isPostgresReadCrmV1Enabled } from "@/lib/db/postgres-read-crm-flags";
+import { isPostgresReadLeadsV1Enabled } from "@/lib/db/postgres-read-leads-flags";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import type { WorkspaceListenerGroup } from "@/lib/workspace-listener-groups";
 import {
@@ -48,6 +50,8 @@ import {
 
 /** Cap history listeners so WebChannel does not load unbounded org history into every client. */
 const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
+/** Poll interval when CRM entities are read from Postgres instead of Firestore onSnapshot. */
+const POSTGRES_CRM_POLL_MS = 60_000;
 const ORG_ACTIVITY_EVENTS_LIVE_LIMIT = 120;
 const TIMELINE_EVENTS_LIVE_LIMIT = 400;
 
@@ -524,29 +528,122 @@ export function useLiveWorkspaceFirestore(
     listenerErrorsRef.current.clear();
 
     if (!isFirebaseWebConfigured()) {
-      setState({
-        loading: false,
-        coreReady: { users: true, leads: true, followups: true },
+      const pgLeads = isPostgresReadLeadsV1Enabled();
+      const pgCrm = isPostgresReadCrmV1Enabled();
+      if (!organizationId || (!pgLeads && !pgCrm)) {
+        setState({
+          loading: false,
+          coreReady: { users: true, leads: true, followups: true },
+          error: null,
+          users: [],
+          leads: [],
+          accounts: [],
+          contacts: [],
+          deals: [],
+          notes: [],
+          followups: [],
+          followupPlans: [],
+          leadTasks: [],
+          touchpoints: [],
+          timelineEvents: [],
+          activityCounters: [],
+          activityRecords: [],
+          orgActivityEvents: [],
+          profiles: [],
+          campaigns: [],
+          crmLabels: [],
+        });
+        return;
+      }
+
+      // Firebase-free: poll Postgres CRM APIs only (no Firestore listeners).
+      let cancelled = false;
+      const memberScope = narrowToMemberCrm;
+      const applyPg = (
+        key: "leads" | "accounts" | "contacts" | "deals",
+        coreKey: "leads" | null,
+        rows: unknown[],
+      ) => {
+        setState((prev) => ({
+          ...prev,
+          loading: false,
+          error: null,
+          [key]: rows,
+          coreReady:
+            coreKey === "leads"
+              ? { ...prev.coreReady, leads: true, users: true, followups: true }
+              : { ...prev.coreReady, users: true, followups: true },
+        }));
+      };
+      const load = async () => {
+        try {
+          if (pgLeads) {
+            const res = await fetch(
+              `/api/org/leads?narrow=${memberScope ? "1" : "0"}&all=1`,
+              { credentials: "same-origin", cache: "no-store" },
+            );
+            const json = (await res.json()) as {
+              ok?: boolean;
+              leads?: Lead[];
+              error?: string;
+            };
+            if (cancelled) return;
+            if (!res.ok || !json.ok) {
+              throw new Error(json.error || `Leads API failed (${res.status})`);
+            }
+            applyPg("leads", "leads", Array.isArray(json.leads) ? json.leads : []);
+          } else {
+            applyPg("leads", "leads", []);
+          }
+          if (pgCrm) {
+            for (const entity of ["accounts", "contacts", "deals"] as const) {
+              const res = await fetch(
+                `/api/org/${entity}?narrow=${memberScope ? "1" : "0"}&all=1`,
+                { credentials: "same-origin", cache: "no-store" },
+              );
+              const json = (await res.json()) as {
+                ok?: boolean;
+                error?: string;
+              } & Record<string, unknown>;
+              if (cancelled) return;
+              if (!res.ok || !json.ok) {
+                throw new Error(
+                  (json.error as string) || `${entity} API failed (${res.status})`,
+                );
+              }
+              const rows = Array.isArray(json[entity]) ? json[entity] : [];
+              applyPg(entity, null, rows as unknown[]);
+            }
+          }
+        } catch (err) {
+          if (cancelled) return;
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            coreReady: { users: true, leads: true, followups: true },
+            error: err instanceof Error ? err : new Error(String(err)),
+          }));
+        }
+      };
+      setState((prev) => ({
+        ...prev,
+        loading: true,
+        coreReady: { users: false, leads: false, followups: true },
         error: null,
-        users: [],
-        leads: [],
-        accounts: [],
-        contacts: [],
-        deals: [],
-        notes: [],
-        followups: [],
-        followupPlans: [],
-        leadTasks: [],
-        touchpoints: [],
-        timelineEvents: [],
-        activityCounters: [],
-        activityRecords: [],
-        orgActivityEvents: [],
-        profiles: [],
-        campaigns: [],
-        crmLabels: [],
-      });
-      return;
+      }));
+      void load();
+      const intervalId = window.setInterval(() => {
+        void load();
+      }, POSTGRES_CRM_POLL_MS);
+      const onFocus = () => {
+        void load();
+      };
+      window.addEventListener("focus", onFocus);
+      return () => {
+        cancelled = true;
+        window.clearInterval(intervalId);
+        window.removeEventListener("focus", onFocus);
+      };
     }
 
     // Wait for organizationId (userDoc still hydrating). Marking core ready with
@@ -814,71 +911,127 @@ export function useLiveWorkspaceFirestore(
           ),
         );
 
-        const leadSlices = new Map<string, Lead[]>();
-        const mergeLeadSlices = () => {
-          const byId = new Map<string, Lead>();
-          for (const slice of leadSlices.values()) {
-            for (const lead of slice) {
-              byId.set(lead.id, lead);
-            }
-          }
-          applySnapshot("leads", "leads", Array.from(byId.values()));
-        };
-        const subscribeLeads = (key: string, q: ReturnType<typeof query>) => {
-          pushUnsub(
-            group,
-            onSnapshot(
-              q,
-              (snap) => {
-                leadSlices.set(
-                  key,
-                  snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>)),
+        /** P2.10: when flag on, skip Firestore leads listeners and poll Postgres API. */
+        if (isPostgresReadLeadsV1Enabled()) {
+          let cancelled = false;
+          let inflight: Promise<void> | null = null;
+          const loadLeadsFromPostgres = async () => {
+            if (inflight) return;
+            inflight = (async () => {
+              try {
+                const res = await fetch(
+                  `/api/org/leads?narrow=${memberScope ? "1" : "0"}&all=1`,
+                  { credentials: "same-origin", cache: "no-store" },
                 );
-                mergeLeadSlices();
-              },
-              (err) => applyListenerError(`leads:${key}`, err),
-            ),
-          );
-        };
-        if (memberScope) {
-          subscribeLeads(
-            "owner",
-            query(
-              collection(db, COLLECTIONS.leads),
-              where("organizationId", "==", organizationId),
-              where("ownerId", "==", listOwnerId),
-            ),
-          );
-          subscribeLeads(
-            "managers",
-            query(
-              collection(db, COLLECTIONS.leads),
-              where("organizationId", "==", organizationId),
-              where("ownerManagerIds", "array-contains", uid),
-            ),
-          );
-          subscribeLeads(
-            "prospectAssignee",
-            query(
-              collection(db, COLLECTIONS.leads),
-              where("organizationId", "==", organizationId),
-              where("intakeKind", "==", "prospect"),
-              where("prospectAssigneeIds", "array-contains", uid),
-            ),
-          );
-          subscribeLeads(
-            "sharedOwner",
-            query(
-              collection(db, COLLECTIONS.leads),
-              where("organizationId", "==", organizationId),
-              where("sharedOwnerIds", "array-contains", uid),
-            ),
-          );
+                const json = (await res.json()) as {
+                  ok?: boolean;
+                  enabled?: boolean;
+                  leads?: Lead[];
+                  error?: string;
+                };
+                if (cancelled) return;
+                if (!res.ok || !json.ok) {
+                  throw new Error(json.error || `Leads API failed (${res.status})`);
+                }
+                if (json.enabled === false) {
+                  throw new Error("Postgres leads read flag is off on server");
+                }
+                applySnapshot("leads", "leads", Array.isArray(json.leads) ? json.leads : []);
+              } catch (err) {
+                if (cancelled) return;
+                applyListenerError(
+                  "leads",
+                  err instanceof Error ? err : new Error(String(err)),
+                );
+              } finally {
+                inflight = null;
+              }
+            })();
+            await inflight;
+          };
+          void loadLeadsFromPostgres();
+          const intervalId = window.setInterval(() => {
+            void loadLeadsFromPostgres();
+          }, POSTGRES_CRM_POLL_MS);
+          const onFocus = () => {
+            void loadLeadsFromPostgres();
+          };
+          window.addEventListener("focus", onFocus);
+          pushUnsub(group, () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+            window.removeEventListener("focus", onFocus);
+          });
         } else {
-          subscribeLeads(
-            "all",
-            query(collection(db, COLLECTIONS.leads), where("organizationId", "==", organizationId)),
-          );
+          const leadSlices = new Map<string, Lead[]>();
+          const mergeLeadSlices = () => {
+            const byId = new Map<string, Lead>();
+            for (const slice of leadSlices.values()) {
+              for (const lead of slice) {
+                byId.set(lead.id, lead);
+              }
+            }
+            applySnapshot("leads", "leads", Array.from(byId.values()));
+          };
+          const subscribeLeads = (key: string, q: ReturnType<typeof query>) => {
+            pushUnsub(
+              group,
+              onSnapshot(
+                q,
+                (snap) => {
+                  leadSlices.set(
+                    key,
+                    snap.docs.map((d) => asLead(d.id, d.data() as Record<string, unknown>)),
+                  );
+                  mergeLeadSlices();
+                },
+                (err) => applyListenerError(`leads:${key}`, err),
+              ),
+            );
+          };
+          if (memberScope) {
+            subscribeLeads(
+              "owner",
+              query(
+                collection(db, COLLECTIONS.leads),
+                where("organizationId", "==", organizationId),
+                where("ownerId", "==", listOwnerId),
+              ),
+            );
+            subscribeLeads(
+              "managers",
+              query(
+                collection(db, COLLECTIONS.leads),
+                where("organizationId", "==", organizationId),
+                where("ownerManagerIds", "array-contains", uid),
+              ),
+            );
+            subscribeLeads(
+              "prospectAssignee",
+              query(
+                collection(db, COLLECTIONS.leads),
+                where("organizationId", "==", organizationId),
+                where("intakeKind", "==", "prospect"),
+                where("prospectAssigneeIds", "array-contains", uid),
+              ),
+            );
+            subscribeLeads(
+              "sharedOwner",
+              query(
+                collection(db, COLLECTIONS.leads),
+                where("organizationId", "==", organizationId),
+                where("sharedOwnerIds", "array-contains", uid),
+              ),
+            );
+          } else {
+            subscribeLeads(
+              "all",
+              query(
+                collection(db, COLLECTIONS.leads),
+                where("organizationId", "==", organizationId),
+              ),
+            );
+          }
         }
 
         subscribeOwnedByOwnerOrManager(
@@ -964,22 +1117,86 @@ export function useLiveWorkspaceFirestore(
       }
 
       if (group === "directory") {
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "accounts",
-          COLLECTIONS.accounts,
-          asAccount,
-          "ownerManagerIds",
-          "ownerId",
-        );
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "contacts",
-          COLLECTIONS.contacts,
-          asContact,
-          "ownerManagerIds",
-          "ownerId",
-        );
+        /** P6.1: when flag on, skip Firestore accounts/contacts listeners and poll Postgres APIs. */
+        if (isPostgresReadCrmV1Enabled()) {
+          const startCrmPoll = (
+            path: string,
+            dataKey: "accounts" | "contacts",
+            pick: (json: Record<string, unknown>) => Account[] | Contact[],
+          ) => {
+            let cancelled = false;
+            let inflight: Promise<void> | null = null;
+            const load = async () => {
+              if (inflight) return;
+              inflight = (async () => {
+                try {
+                  const res = await fetch(
+                    `${path}?narrow=${memberScope ? "1" : "0"}&all=1`,
+                    { credentials: "same-origin", cache: "no-store" },
+                  );
+                  const json = (await res.json()) as Record<string, unknown> & {
+                    ok?: boolean;
+                    enabled?: boolean;
+                    error?: string;
+                  };
+                  if (cancelled) return;
+                  if (!res.ok || !json.ok) {
+                    throw new Error(json.error || `${dataKey} API failed (${res.status})`);
+                  }
+                  if (json.enabled === false) {
+                    throw new Error(`Postgres ${dataKey} read flag is off on server`);
+                  }
+                  applySnapshot(dataKey, dataKey, pick(json));
+                } catch (err) {
+                  if (cancelled) return;
+                  applyListenerError(
+                    dataKey,
+                    err instanceof Error ? err : new Error(String(err)),
+                  );
+                } finally {
+                  inflight = null;
+                }
+              })();
+              await inflight;
+            };
+            void load();
+            const intervalId = window.setInterval(() => {
+              void load();
+            }, POSTGRES_CRM_POLL_MS);
+            const onFocus = () => {
+              void load();
+            };
+            window.addEventListener("focus", onFocus);
+            pushUnsub(group, () => {
+              cancelled = true;
+              window.clearInterval(intervalId);
+              window.removeEventListener("focus", onFocus);
+            });
+          };
+          startCrmPoll("/api/org/accounts", "accounts", (json) =>
+            Array.isArray(json.accounts) ? (json.accounts as Account[]) : [],
+          );
+          startCrmPoll("/api/org/contacts", "contacts", (json) =>
+            Array.isArray(json.contacts) ? (json.contacts as Contact[]) : [],
+          );
+        } else {
+          subscribeOwnedByOwnerOrManager(
+            group,
+            "accounts",
+            COLLECTIONS.accounts,
+            asAccount,
+            "ownerManagerIds",
+            "ownerId",
+          );
+          subscribeOwnedByOwnerOrManager(
+            group,
+            "contacts",
+            COLLECTIONS.contacts,
+            asContact,
+            "ownerManagerIds",
+            "ownerId",
+          );
+        }
         subscribeOwnedByOwnerOrManager(
           group,
           "profiles",
@@ -992,14 +1209,66 @@ export function useLiveWorkspaceFirestore(
       }
 
       if (group === "deals") {
-        subscribeOwnedByOwnerOrManager(
-          group,
-          "deals",
-          COLLECTIONS.deals,
-          asDeal,
-          "ownerManagerIds",
-          "ownerId",
-        );
+        if (isPostgresReadCrmV1Enabled()) {
+          let cancelled = false;
+          let inflight: Promise<void> | null = null;
+          const loadDealsFromPostgres = async () => {
+            if (inflight) return;
+            inflight = (async () => {
+              try {
+                const res = await fetch(
+                  `/api/org/deals?narrow=${memberScope ? "1" : "0"}&all=1`,
+                  { credentials: "same-origin", cache: "no-store" },
+                );
+                const json = (await res.json()) as {
+                  ok?: boolean;
+                  enabled?: boolean;
+                  deals?: Deal[];
+                  error?: string;
+                };
+                if (cancelled) return;
+                if (!res.ok || !json.ok) {
+                  throw new Error(json.error || `Deals API failed (${res.status})`);
+                }
+                if (json.enabled === false) {
+                  throw new Error("Postgres deals read flag is off on server");
+                }
+                applySnapshot("deals", "deals", Array.isArray(json.deals) ? json.deals : []);
+              } catch (err) {
+                if (cancelled) return;
+                applyListenerError(
+                  "deals",
+                  err instanceof Error ? err : new Error(String(err)),
+                );
+              } finally {
+                inflight = null;
+              }
+            })();
+            await inflight;
+          };
+          void loadDealsFromPostgres();
+          const intervalId = window.setInterval(() => {
+            void loadDealsFromPostgres();
+          }, POSTGRES_CRM_POLL_MS);
+          const onFocus = () => {
+            void loadDealsFromPostgres();
+          };
+          window.addEventListener("focus", onFocus);
+          pushUnsub(group, () => {
+            cancelled = true;
+            window.clearInterval(intervalId);
+            window.removeEventListener("focus", onFocus);
+          });
+        } else {
+          subscribeOwnedByOwnerOrManager(
+            group,
+            "deals",
+            COLLECTIONS.deals,
+            asDeal,
+            "ownerManagerIds",
+            "ownerId",
+          );
+        }
         return;
       }
 

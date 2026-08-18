@@ -8,6 +8,7 @@ import {
   setOrganizationOpenJoinHashServer,
 } from "@/lib/platform/open-join-server";
 import { recordAudit } from "@/lib/firestore/audit";
+import { openJoinAcceptUrl } from "@/lib/invite-link";
 
 function originFromRequest(req: Request): string {
   const proto = req.headers.get("x-forwarded-proto") ?? "http";
@@ -56,7 +57,7 @@ export async function POST(req: Request) {
 
   const token = packOpenJoinToken(orgId, secret);
   const base = originFromRequest(req);
-  const signupUrl = `${base}/signup?join=${encodeURIComponent(token)}`;
+  const signupUrl = openJoinAcceptUrl(base, token);
 
   await recordAudit({
     organizationId: orgId,

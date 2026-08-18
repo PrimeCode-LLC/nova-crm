@@ -14,11 +14,11 @@ function userFieldsFromData(data: Record<string, unknown>): Pick<User, "managerI
 
 /** Client SDK: load owner user and return denormalized manager ids for CRM list rules. */
 export async function resolveOwnerManagerIdsClient(
-  db: Firestore,
+  db: Firestore | null,
   ownerId: string | undefined | null,
 ): Promise<string[]> {
   const oid = typeof ownerId === "string" ? ownerId.trim() : "";
-  if (!oid) return [];
+  if (!oid || !db) return [];
   const snap = await getDoc(doc(db, COLLECTIONS.users, oid));
   if (!snap.exists()) return [];
   return ownerManagerIdsFromUser(userFieldsFromData(snap.data() as Record<string, unknown>));

@@ -10,6 +10,9 @@ import {
   SheetTrigger,
 } from "@/components/ui/sheet";
 import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
+import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
+import { authSignInPath } from "@/lib/invite-link";
+import { auth } from "@clerk/nextjs/server";
 import { Logo } from "./logo";
 
 const NAV_LINKS = [
@@ -21,7 +24,12 @@ const NAV_LINKS = [
 
 export async function SiteHeader() {
   const cookieStore = await cookies();
-  const hasSession = Boolean(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  let hasSession = Boolean(cookieStore.get(SESSION_COOKIE_NAME)?.value);
+  if (!hasSession && isClerkAuthV1ServerEnabled()) {
+    const { userId } = await auth();
+    hasSession = Boolean(userId);
+  }
+  const signInHref = authSignInPath();
 
   return (
     <header className="sticky top-0 z-40">
@@ -62,7 +70,7 @@ export async function SiteHeader() {
                 variant="ghost"
                 className="hidden sm:inline-flex"
                 nativeButton={false}
-                render={<Link href="/login" />}
+                render={<Link href={signInHref} />}
               >
                 Log in
               </Button>
@@ -118,7 +126,7 @@ export async function SiteHeader() {
                         variant="outline"
                         className="w-full"
                         nativeButton={false}
-                        render={<Link href="/login" />}
+                        render={<Link href={signInHref} />}
                       >
                         Log in
                       </Button>
