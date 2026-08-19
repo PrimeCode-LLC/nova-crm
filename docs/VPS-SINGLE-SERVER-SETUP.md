@@ -41,7 +41,7 @@ Inside Docker (private network):
 |-----------|--------------|-----------------|--------------|
 | Web | `Dockerfile` | 3000 | `GET /api/health` |
 | Worker | `Dockerfile.worker` | 8081 | `GET /healthz` |
-| Postgres | `postgres:16-alpine` (or pgvector image later) | 5432 | `pg_isready` |
+| Postgres | `pgvector/pgvector:pg16` | 5432 | `pg_isready` |
 | Redis | `redis:7-alpine` | 6379 | `PING` |
 
 **Rule:** Never publish Postgres or Redis to the public internet. Only 80/443 (and SSH) on the firewall.
@@ -153,7 +153,7 @@ Your repo’s `docker-compose.yml` is oriented to **local** passwords. On the VP
 # EXAMPLE — change passwords; do not commit real secrets
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     restart: unless-stopped
     environment:
       POSTGRES_USER: nova
@@ -282,7 +282,7 @@ Replace hostnames. Caddy obtains Let’s Encrypt certificates automatically when
 
 Create `/opt/nova-crm/.env.production` with `chmod 600`. Never commit this file. Full variable reference: [`.env.example`](../.env.example).
 
-### 8.1 Always required (Mode A and B)
+### 8.1 Required
 
 ```bash
 # Public URLs
@@ -295,8 +295,6 @@ NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_live_...
 CLERK_SECRET_KEY=sk_live_...
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in
 NEXT_PUBLIC_CLERK_SIGN_UP_URL=/sign-up
-AUTH_CLERK_V1=true
-NEXT_PUBLIC_AUTH_CLERK_V1=true
 
 # Platform operators (comma-separated)
 PLATFORM_ADMIN_EMAILS=you@yourcompany.com
@@ -307,51 +305,10 @@ QUEUE_WORKER_V1=true
 QUEUE_IMPORT_CHUNKS_V1=true
 QUEUE_HEAVY_JOBS_V1=true
 
-# CRM on Postgres
-POSTGRES_READ_LEADS_V1=true
-NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
-POSTGRES_READ_CRM_V1=true
-NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
-POSTGRES_SOLE_WRITER_CRM_V1=true
-NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
-POSTGRES_DASHBOARD_SUMMARY_WRITER_V1=true
-POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
-NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
-
-# Leave dual-write OFF for clean Postgres-first CRM
-# POSTGRES_DUAL_WRITE_ORGS_V1=
-# POSTGRES_DUAL_WRITE_CRM_V1=
-
 # System email (pick one)
 RESEND_API_KEY=re_...
 RESEND_FROM="Nova CRM <noreply@yourdomain.com>"
 # OR SYSTEM_SMTP_* from .env.example
-```
-
-### 8.2 Mode A only — Firebase off
-
-```bash
-FIREBASE_DISABLED=true
-NEXT_PUBLIC_FIREBASE_DISABLED=true
-```
-
-Do **not** set `NEXT_PUBLIC_FIREBASE_*` / `FIREBASE_ADMIN_*`.
-
-### 8.3 Mode B — full product (email, RAG, etc.)
-
-Unset / omit `FIREBASE_DISABLED`. Add:
-
-```bash
-NEXT_PUBLIC_FIREBASE_API_KEY=...
-NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=...
-NEXT_PUBLIC_FIREBASE_PROJECT_ID=...
-NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=...
-NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=...
-NEXT_PUBLIC_FIREBASE_APP_ID=...
-
-FIREBASE_ADMIN_PROJECT_ID=...
-FIREBASE_ADMIN_CLIENT_EMAIL=...
-FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
 
 # Encrypt mailbox / AI / integration secrets at rest (32 random bytes, base64)
 EMAIL_SECRETS_KEY_BASE64=...
@@ -373,6 +330,8 @@ GOOGLE_CALENDAR_CLIENT_SECRET=...
 # INBOUND_WEBHOOK_SECRET=
 # NOVA_EXTENSION_IDS=
 ```
+
+Do **not** set Firebase env vars. Postgres + Clerk are always on.
 
 Clerk dashboard: set allowed origins / redirect URLs to `https://app.yourdomain.com`.  
 Google Cloud: enable Calendar API + Gmail scopes; add redirect  
@@ -520,7 +479,7 @@ Engineering rules: no hand edits on prod for “quick fixes”; deploy the same 
 | Instantly campaigns | **B** | Org Instantly secret + webhook |
 | Scrapers | **B** | Firebase intake + scrapers cron + worker |
 | Team chat / notifications | **B** | Firebase |
-| AI / RAG knowledge | **B** | Firebase vectors today + AI keys (`pgvector` not in schema yet) |
+| AI / RAG knowledge | **B** | `pgvector` (`ai_document_embeddings`) + AI keys |
 | Google/Microsoft calendar | **B** | OAuth clients + FS calendar connections |
 | System invites email | A/B | Resend or `SYSTEM_SMTP_*` |
 
@@ -567,7 +526,7 @@ See [NOVA-CRM-P4-QUEUE-WORKER.md](../Architecture%20fixes%20plan/NOVA-CRM-P4-QUE
 | `nova-dashboard-summary` | KPI drain |
 | `nova-hello` | Smoke test |
 
-AI/RAG is **not** on BullMQ yet (request/response on web). `pgvector` is a **future** Postgres target; current RAG uses Firestore vector search when Firebase is enabled.
+AI/RAG is **not** on BullMQ yet (request/response on web). Embeddings live in Postgres `ai_document_embeddings` (`pgvector`).
 
 ---
 

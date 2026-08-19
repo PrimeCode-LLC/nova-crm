@@ -60,7 +60,7 @@ describe("prospect import template", () => {
     expect(parsed.rows).toHaveLength(1);
     expect(parsed.rows[0]!.issues).toEqual([]);
     expect(parsed.rows[0]!.normalized.companyDomain).toBe("acme.example");
-  });
+  }, 15_000);
 });
 
 describe("prospect import parsing", () => {

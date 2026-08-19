@@ -3,6 +3,7 @@ import { FieldValue } from "firebase-admin/firestore";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
 import { guardPlatformApi } from "@/lib/platform/platform-api-guard";
+import { recordPlatformAudit } from "@/lib/platform/platform-audit-server";
 import { setAppClaims } from "@/lib/auth/claims";
 import { createOrganizationServer } from "@/lib/platform/organizations-server";
 import {
@@ -109,11 +110,25 @@ export async function POST() {
     });
   }
 
-  return NextResponse.json({
+  const summary = {
     total: results.length,
     migrated: results.filter((r) => r.action === "migrated").length,
     skipped: results.filter((r) => r.action === "skipped").length,
     failed: results.filter((r) => r.action === "failed").length,
     results,
+  };
+
+  await recordPlatformAudit({
+    event: "migration.run",
+    actorUid: g.ctx.session.uid,
+    actorEmail: g.ctx.session.email,
+    summary: `Legacy user migration: ${summary.migrated} migrated, ${summary.skipped} skipped, ${summary.failed} failed`,
+    metadata: {
+      migrated: summary.migrated,
+      skipped: summary.skipped,
+      failed: summary.failed,
+    },
   });
+
+  return NextResponse.json(summary);
 }

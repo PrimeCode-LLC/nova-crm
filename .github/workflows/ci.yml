@@ -16,7 +16,7 @@ jobs:
     timeout-minutes: 30
     services:
       postgres:
-        image: postgres:16-alpine
+        image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: nova
           POSTGRES_PASSWORD: nova_dev_password
@@ -44,6 +44,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Firebase removal gate (P7.9)
+        run: node scripts/check-firebase-imports.mjs
+
       - name: Lint
         run: npm run lint
 
@@ -59,13 +62,23 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Public placeholders so Next can compile client bundles in CI.
-          # Real secrets never belong here — see docs/ENVIRONMENTS.md.
-          NEXT_PUBLIC_FIREBASE_API_KEY: ci-placeholder
-          NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN: ci.example.com
-          NEXT_PUBLIC_FIREBASE_PROJECT_ID: ci-placeholder
-          NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: ci-placeholder.appspot.com
-          NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID: "0"
-          NEXT_PUBLIC_FIREBASE_APP_ID: "1:0:web:ci"
           NEXT_PUBLIC_AUTH_DISABLED: "true"
           DISABLE_AUTH: "true"
+          AUTH_CLERK_V1: "true"
+          NEXT_PUBLIC_AUTH_CLERK_V1: "true"
+          NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_ci
+          CLERK_SECRET_KEY: sk_test_ci
+          DATABASE_URL: postgres://nova_app:nova_dev_password@localhost:5432/nova_crm
+          REDIS_URL: redis://localhost:6379
+
+  docker-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build web image
+        run: docker build -t nova-crm-web -f Dockerfile .
+      - name: Build worker image
+        run: docker build -t nova-crm-worker -f Dockerfile.worker .
+      - name: Build migrate image
+        run: docker build -t nova-crm-migrate -f Dockerfile.migrate .

@@ -15,13 +15,11 @@ import {
   XCircle,
   Pencil,
   UserCheck,
-  KeyRound,
   Search,
   X,
   Megaphone,
 } from "lucide-react";
 import { toast } from "sonner";
-import { toastError } from "@/lib/error-logging/toast-error";
 
 import { PageBody, PageHeader } from "@/components/common/page-header";
 import { UserChip } from "@/components/common/user-chip";
@@ -34,12 +32,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { useQueryClient } from "@tanstack/react-query";
 import { ROLES } from "@/lib/constants";
-import { canManageOrgUsers } from "@/lib/can-manage-org-users";
+import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
 import type { AdminFeatureKey } from "@/lib/admin-features";
 import { userHasAdminFeature } from "@/lib/admin-feature-access";
 import type { RoleListItem } from "@/lib/permissions/role-types";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
 import { selectTriggerLabelByIdName } from "@/lib/base-ui-select-label";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
@@ -168,19 +165,6 @@ function resolveInvitedBy(
   return { label: "Unknown user" };
 }
 
-function randomTempPassword(): string {
-  const alphabet =
-    "abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789!@%^&*";
-  const len = 14;
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
-  let out = "";
-  for (let i = 0; i < len; i++) {
-    out += alphabet[bytes[i]! % alphabet.length]!;
-  }
-  return out;
-}
-
 function PeoplePageClientInner({
   currentUid,
   organization,
@@ -203,13 +187,7 @@ function PeoplePageClientInner({
   const [inviteEmail, setInviteEmail] = React.useState("");
   const [inviteRole, setInviteRole] = React.useState<OrgMemberRole>("member");
   const [inviteSubmitting, setInviteSubmitting] = React.useState(false);
-  const [provisionOpen, setProvisionOpen] = React.useState(false);
-  const [provisionEmail, setProvisionEmail] = React.useState("");
-  const [provisionDisplayName, setProvisionDisplayName] = React.useState("");
-  const [provisionPassword, setProvisionPassword] = React.useState("");
-  const [provisionRole, setProvisionRole] =
-    React.useState<OrgMemberRole>("member");
-  const [provisionSubmitting, setProvisionSubmitting] = React.useState(false);
+  const [backfillSubmitting, setBackfillSubmitting] = React.useState(false);
   const [lastAcceptUrl, setLastAcceptUrl] = React.useState<string | null>(null);
   const [lastDeliveryNote, setLastDeliveryNote] = React.useState<string | null>(
     null,
@@ -293,7 +271,7 @@ function PeoplePageClientInner({
   }
 
   const viewer = getUserById(currentUserId);
-  const canManageCrm = canManageOrgUsers(viewer);
+  const canManageCrm = canManageOrgHierarchy(viewer);
   const canEditFeatureGrants = canManageFeatureGrants(viewer);
 
   const canManage = role === "owner" || role === "admin";
@@ -436,74 +414,28 @@ function PeoplePageClientInner({
     }
   }
 
-  async function submitProvision(e: React.FormEvent) {
-    e.preventDefault();
-    if (!provisionEmail.trim() || provisionPassword.length < 8) return;
-    setProvisionSubmitting(true);
+  async function backfillCrmProfiles() {
+    setBackfillSubmitting(true);
     try {
-      const res = await fetch("/api/org/provision-login", {
+      const res = await fetch("/api/org/backfill-crm-profiles", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({
-          email: provisionEmail.trim(),
-          password: provisionPassword,
-          displayName: provisionDisplayName.trim() || undefined,
-          role: provisionRole,
-        }),
       });
-      const raw = await res.text();
-      let data: {
-        ok?: boolean;
-        linkedExistingFirebaseUser?: boolean;
-        error?: unknown;
-      } = {};
-      if (raw.trim()) {
-        try {
-          data = JSON.parse(raw) as typeof data;
-        } catch {
-          throw new Error(
-            res.status === 404
-              ? "This action is not on the server yet (404). Deploy the latest app build so /api/org/provision-login is available."
-              : res.status >= 500
-                ? `Server error (HTTP ${res.status}). Check deployment logs.`
-                : `Unexpected response from server (HTTP ${res.status}).`,
-          );
-        }
-      } else if (!res.ok) {
-        throw new Error(
-          `Request failed (HTTP ${res.status}) with an empty response. Deploy the latest build or check server logs.`,
-        );
-      }
-      if (!res.ok) {
-        const msg =
-          typeof data.error === "string"
-            ? data.error
-            : JSON.stringify(data.error ?? "Request failed");
-        throw new Error(msg);
-      }
-      if (data.linkedExistingFirebaseUser) {
-        toast.success(
-          "Existing Firebase account was added to this workspace. Ask them to sign in with their current password.",
-        );
-      } else {
-        toast.success(
-          "Login created. Share the email and temporary password securely; they can use “Forgot password” anytime to set a new one.",
-        );
-      }
-      setProvisionOpen(false);
-      setProvisionEmail("");
-      setProvisionDisplayName("");
-      setProvisionPassword("");
-      setProvisionRole("member");
+      const data = (await res.json()) as {
+        error?: string;
+        provisioned?: number;
+        skipped?: number;
+        total?: number;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Failed to sync CRM profiles");
+      toast.success(
+        `Synced CRM profiles for ${data.provisioned ?? 0} of ${data.total ?? 0} people`,
+      );
       await refresh();
     } catch (err) {
-      toastError(err instanceof Error ? err.message : "Failed", err, {
-        location: "src/app/(app)/admin/people/people-client.tsx",
-        functionName: "provisionLogin",
-      });
+      toast.error(err instanceof Error ? err.message : "Failed to sync CRM profiles");
     } finally {
-      setProvisionSubmitting(false);
+      setBackfillSubmitting(false);
     }
   }
 
@@ -555,7 +487,7 @@ function PeoplePageClientInner({
       : current.filter((g) => g !== "create_campaigns");
 
     const writeGrantsLive =
-      canEditFeatureGrants && mode === "live" && !isDemo && isFirebaseWebConfigured();
+      canEditFeatureGrants && mode === "live" && !isDemo;
     if (writeGrantsLive) {
       try {
         const res = await fetch("/api/org/workspace-users", {
@@ -604,7 +536,7 @@ function PeoplePageClientInner({
   async function handleSaveFeatureGrants() {
     if (!editMember || !canEditFeatureGrants) return;
     setProfileSaving(true);
-    const writeGrantsLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
+    const writeGrantsLive = mode === "live" && !isDemo;
     if (writeGrantsLive) {
       const res = await fetch("/api/org/workspace-users", {
         method: "PATCH",
@@ -660,7 +592,7 @@ function PeoplePageClientInner({
 
     setProfileSaving(true);
     try {
-      const writeLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
+      const writeLive = mode === "live" && !isDemo;
       if (writeLive) {
         const body: Record<string, unknown> = { userId: editMember.uid };
 
@@ -782,9 +714,15 @@ function PeoplePageClientInner({
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => setProvisionOpen(true)}
+                  onClick={() => void backfillCrmProfiles()}
+                  disabled={backfillSubmitting}
                 >
-                  <KeyRound className="h-3.5 w-3.5" /> Create login
+                  {backfillSubmitting ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3.5 w-3.5" />
+                  )}
+                  Sync CRM profiles
                 </Button>
                 <Button size="sm" onClick={() => setInviteOpen(true)}>
                   <UserPlus className="h-3.5 w-3.5" /> Invite
@@ -991,8 +929,18 @@ function PeoplePageClientInner({
                               <Badge variant="outline" className="text-[10px] font-medium">
                                 {crmRoleLabel(crm.roleId)}
                               </Badge>
+                            ) : canManageCrm ? (
+                              <button
+                                type="button"
+                                className="text-xs text-primary underline-offset-2 hover:underline"
+                                onClick={() => openMember(m)}
+                              >
+                                No CRM profile — assign
+                              </button>
                             ) : (
-                              <span className="text-xs">-</span>
+                              <Badge variant="outline" className="text-[10px] font-normal text-muted-foreground">
+                                No CRM profile
+                              </Badge>
                             )}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -1253,108 +1201,6 @@ function PeoplePageClientInner({
           </TabsContent>
         </Tabs>
       </PageBody>
-
-      <Dialog open={provisionOpen} onOpenChange={setProvisionOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4" /> Create login (admin)
-            </DialogTitle>
-            <DialogDescription>
-              Creates a Firebase email/password account (or adds an existing account
-              to this workspace) and activates them immediately. Share the password
-              out-of-band; they can reset it from the login screen.
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitProvision} className="space-y-3">
-            <div className="space-y-1.5">
-              <Label className="text-xs">Full name</Label>
-              <Input
-                placeholder="Jordan Harper"
-                value={provisionDisplayName}
-                onChange={(e) => setProvisionDisplayName(e.target.value)}
-                autoComplete="name"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Email</Label>
-              <Input
-                type="email"
-                placeholder="teammate@company.com"
-                value={provisionEmail}
-                onChange={(e) => setProvisionEmail(e.target.value)}
-                required
-                autoComplete="off"
-              />
-            </div>
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <Label className="text-xs">Temporary password</Label>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 text-xs"
-                  onClick={() => setProvisionPassword(randomTempPassword())}
-                >
-                  Generate
-                </Button>
-              </div>
-              <Input
-                type="text"
-                placeholder="8+ characters"
-                value={provisionPassword}
-                onChange={(e) => setProvisionPassword(e.target.value)}
-                autoComplete="new-password"
-                required
-                minLength={8}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs">Workspace role</Label>
-              <Select
-                value={provisionRole}
-                onValueChange={(v) => setProvisionRole(v as OrgMemberRole)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ROLE_OPTIONS.filter((opt) => {
-                    if (opt.value === "owner") return isOwner;
-                    if (opt.value === "admin") return isOwner;
-                    return true;
-                  }).map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      <div className="flex flex-col">
-                        <span>{opt.label}</span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {opt.help}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="ghost"
-                onClick={() => setProvisionOpen(false)}
-              >
-                Close
-              </Button>
-              <Button type="submit" disabled={provisionSubmitting}>
-                {provisionSubmitting && (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                )}
-                Create & add to team
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
 
       <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
         <DialogContent className="max-w-md">
@@ -1639,9 +1485,14 @@ function PeoplePageClientInner({
                   >
                     {!crmUser && !canManageCrm ? (
                       <p className="text-sm text-muted-foreground">
-                        No CRM profile yet. An admin can assign CRM permissions after they join.
+                        No CRM profile yet. A workspace owner or admin can assign CRM permissions.
                       </p>
-                    ) : (
+                    ) : !crmUser && canManageCrm ? (
+                      <p className="text-sm text-muted-foreground">
+                        No CRM profile yet. Choose a CRM permission role below and save to create one.
+                      </p>
+                    ) : null}
+                    {canManageCrm || crmUser ? (
                       <div className="space-y-3 pr-1">
                         <div className="space-y-1.5">
                           <Label className="text-xs">Display name</Label>
@@ -1677,7 +1528,9 @@ function PeoplePageClientInner({
                           <Select
                             value={editCrmRole}
                             onValueChange={(v) => setEditCrmRole((v as Role) ?? "salesperson")}
-                            disabled={!canManageCrm}
+                            disabled={
+                              !canManageCrm || editMember.uid === currentUserId
+                            }
                           >
                             <SelectTrigger className="h-9">
                               <SelectValue>{crmRoleLabel(editCrmRole)}</SelectValue>
@@ -1765,7 +1618,7 @@ function PeoplePageClientInner({
                           </p>
                         ) : null}
                       </div>
-                    )}
+                    ) : null}
                     {canManageCrm ? (
                       <Button
                         type="button"

@@ -56,6 +56,7 @@
 
 /* Light theme: warm near-white with refined indigo accent (WCAG AA verified) */
 :root {
+  color-scheme: light;
   --background: oklch(0.995 0.002 265);
   --foreground: oklch(0.18 0.01 265);            /* ~14:1 vs bg, AAA */
   --card: oklch(1 0 0);
@@ -95,6 +96,7 @@
 
 /* Dark theme: neutral near-black with indigo accent (DEFAULT) */
 .dark {
+  color-scheme: dark;
   --background: oklch(0.14 0 0);
   --foreground: oklch(0.98 0 0);
   --card: oklch(0.175 0 0);

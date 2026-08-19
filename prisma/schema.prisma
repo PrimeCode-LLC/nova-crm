@@ -190,3 +190,36 @@ model OrgDashboardSummary {
 
   @@map("org_dashboard_summaries")
 }
+
+/// Generic document store (P7) — replaces Firestore flat collections + org subcollections.
+model PgDocument {
+  path           String   @id
+  organizationId String?  @map("organization_id")
+  collectionRoot String   @map("collection_root")
+  payload        Json     @default("{}")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId, collectionRoot])
+  @@index([collectionRoot])
+  @@map("pg_documents")
+}
+
+/// Organization invite tokens (P7).
+model OrgInvite {
+  id             String    @id
+  organizationId String    @map("organization_id")
+  email          String
+  role           String
+  tokenHash      String    @map("token_hash")
+  status         String    @default("pending")
+  expiresAt      DateTime  @map("expires_at") @db.Timestamptz(3)
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  createdByUid   String    @map("created_by_uid")
+  acceptedAt     DateTime? @map("accepted_at") @db.Timestamptz(3)
+  acceptedByUid  String?   @map("accepted_by_uid")
+
+  @@index([organizationId])
+  @@index([tokenHash])
+  @@map("org_invites")
+}

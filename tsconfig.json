@@ -21,7 +21,13 @@
     "paths": {
       "@/*": ["./src/*"],
       "@nova/scoring": ["./packages/nova-scoring/src/index.ts"],
-      "@nova/scoring/*": ["./packages/nova-scoring/src/*"]
+      "@nova/scoring/*": ["./packages/nova-scoring/src/*"],
+      "firebase-admin/firestore": ["./src/lib/db/pg-firestore/shim-firestore.ts"],
+      "firebase-admin/app": ["./src/lib/db/pg-firestore/shim-app.ts"],
+      "firebase-admin/auth": ["./src/lib/db/pg-firestore/shim-auth.ts"],
+      "firebase/firestore": ["./src/lib/db/pg-firestore/shim-client-firestore.ts"],
+      "firebase/app": ["./src/lib/db/pg-firestore/shim-client-app.ts"],
+      "firebase/auth": ["./src/lib/db/pg-firestore/shim-client-auth.ts"]
     }
   },
   "include": [
@@ -32,5 +38,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "functions", "scripts", "packs/private", "extension", "**/*.emulator.test.ts"]
+  "exclude": ["node_modules", "scripts", "packs/private", "extension", "**/*.emulator.test.ts", "src/app/(auth)/login/login-client.tsx", "src/app/(auth)/signup/signup-client.tsx"]
 }

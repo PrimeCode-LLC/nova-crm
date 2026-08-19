@@ -2,15 +2,17 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardPlatformApi } from "@/lib/platform/platform-api-guard";
 import {
+  archiveOrganizationServer,
   getOrganizationServer,
   sanitizeOrganizationForApi,
   updateOrganizationServer,
 } from "@/lib/platform/organizations-server";
+import { recordPlatformAudit } from "@/lib/platform/platform-audit-server";
 
 const patchSchema = z.object({
   name: z.string().min(1).max(200).optional(),
   slug: z.string().min(1).max(80).optional(),
-  status: z.enum(["trial", "active", "suspended"]).optional(),
+  status: z.enum(["trial", "active", "suspended", "archived"]).optional(),
   planId: z.enum(["free", "pro", "enterprise"]).optional(),
   maxUsers: z.number().int().positive().max(100_000).nullable().optional(),
   settings: z
@@ -82,5 +84,53 @@ export async function PATCH(
     const status = result.error === "Organization not found" ? 404 : 400;
     return NextResponse.json({ error: result.error }, { status });
   }
+
+  const auditEvent =
+    parsed.data.status === "suspended"
+      ? "org.suspended"
+      : parsed.data.status === "archived"
+        ? "org.archived"
+        : parsed.data.status === "active" || parsed.data.status === "trial"
+          ? "org.restored"
+          : "org.updated";
+
+  await recordPlatformAudit({
+    event: auditEvent,
+    actorUid: g.ctx.session.uid,
+    actorEmail: g.ctx.session.email,
+    targetOrgId: orgId,
+    summary: `Organization updated${parsed.data.status ? ` → ${parsed.data.status}` : ""}`,
+    metadata: { patch: parsed.data },
+  });
+
   return NextResponse.json({ ok: true });
+}
+
+export async function DELETE(
+  _req: Request,
+  ctx: { params: Promise<{ orgId: string }> },
+) {
+  const g = await guardPlatformApi();
+  if (!g.ok) return g.response;
+  const { orgId } = await ctx.params;
+
+  const org = await getOrganizationServer(orgId);
+  if (!org) {
+    return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  const result = await archiveOrganizationServer(orgId);
+  if ("error" in result) {
+    return NextResponse.json({ error: result.error }, { status: 400 });
+  }
+
+  await recordPlatformAudit({
+    event: "org.archived",
+    actorUid: g.ctx.session.uid,
+    actorEmail: g.ctx.session.email,
+    targetOrgId: orgId,
+    summary: `Archived organization ${org.name || org.slug}`,
+  });
+
+  return NextResponse.json({ ok: true, archived: true });
 }

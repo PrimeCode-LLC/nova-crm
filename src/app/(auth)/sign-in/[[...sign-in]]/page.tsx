@@ -27,7 +27,7 @@ export default async function ClerkSignInPage({
     : "/dashboard";
 
   return (
-    <div className="flex min-h-dvh items-center justify-center bg-background p-6">
+    <>
       <ClerkInviteStash invite={invite} join={join} />
       <SignIn
         routing="path"
@@ -42,6 +42,6 @@ export default async function ClerkSignInPage({
         forceRedirectUrl={after}
         fallbackRedirectUrl={after}
       />
-    </div>
+    </>
   );
 }

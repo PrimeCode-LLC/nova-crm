@@ -15,6 +15,7 @@ type Row = Record<string, unknown>;
 
 function isIncrementTransform(raw: unknown): boolean {
   if (!raw || typeof raw !== "object") return false;
+  if ("__increment" in raw) return true;
   const name = (raw as { constructor?: { name?: string } }).constructor?.name ?? "";
   return name.includes("Increment");
 }
@@ -24,9 +25,11 @@ function applyPatch(current: Row, value: Row): Row {
   for (const [key, raw] of Object.entries(value)) {
     if (isIncrementTransform(raw)) {
       const operand =
-        typeof (raw as { operand?: unknown }).operand === "number"
-          ? (raw as { operand: number }).operand
-          : 1;
+        typeof (raw as { __increment?: unknown }).__increment === "number"
+          ? (raw as { __increment: number }).__increment
+          : typeof (raw as { operand?: unknown }).operand === "number"
+            ? (raw as { operand: number }).operand
+            : 1;
       next[key] = (Number(current[key] ?? 0) || 0) + operand;
     } else {
       next[key] = raw;

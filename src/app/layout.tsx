@@ -6,7 +6,6 @@ import { ThemeProvider } from "@/components/providers/theme-provider";
 import { QueryProvider } from "@/components/providers/query-provider";
 import { AuthProvider } from "@/components/providers/auth-provider";
 import { OptionalClerkProvider } from "@/components/providers/clerk-provider";
-import { ClerkFirebaseBridge } from "@/components/providers/clerk-firebase-bridge";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { SITE } from "@/lib/site";
 import "./globals.css";
@@ -54,7 +53,6 @@ export default function RootLayout({
           <QueryProvider>
             <OptionalClerkProvider>
               <AuthProvider>
-                <ClerkFirebaseBridge />
                 <TooltipProvider delay={200}>
                   {children}
                   <Toaster richColors closeButton expand={false} visibleToasts={4} position="bottom-right" />

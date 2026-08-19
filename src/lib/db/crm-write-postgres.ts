@@ -11,7 +11,7 @@ import {
   leadRowFromFirestore,
   type CrmEntity,
   type CrmFirestoreDoc,
-} from "@/lib/db/dual-write-crm";
+} from "@/lib/db/crm-types";
 import { scheduleOrgDashboardSummaryRefresh } from "@/lib/db/org-dashboard-summary-refresh";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withOrganizationScope, type TenantTx } from "@/lib/db/tenant-scope";
@@ -294,7 +294,7 @@ export async function deleteCrmEntityPostgres(
           where: { id: accountId },
           data: {
             leadCount: nextCount,
-            payload,
+            payload: payload as Prisma.InputJsonValue,
             updatedAt: new Date(),
           },
         });

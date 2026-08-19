@@ -15,6 +15,7 @@ import { recordAudit } from "@/lib/firestore/audit";
 import type { AuditEvent } from "@/lib/firestore/audit";
 import { getAdminDb } from "@/lib/firebase/admin";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { provisionCrmProfileServer } from "@/lib/platform/crm-profile-provision";
 
 const patchSchema = z.object({
   uid: z.string().min(1),
@@ -70,6 +71,17 @@ export async function PATCH(req: Request) {
           { orgRole: role, updatedAt: FieldValue.serverTimestamp() },
           { merge: true },
         );
+      const member = await getMemberServer(orgId, uid);
+      if (member?.status === "active") {
+        await provisionCrmProfileServer(db, {
+          uid,
+          organizationId: orgId,
+          orgRole: role,
+          email: member.email,
+          displayName: member.displayName,
+          actorUid: g.ctx.session.uid,
+        });
+      }
     }
     await recordAudit({
       organizationId: orgId,
@@ -120,6 +132,14 @@ export async function PATCH(req: Request) {
             },
             { merge: true },
           );
+        await provisionCrmProfileServer(db, {
+          uid,
+          organizationId: orgId,
+          orgRole: member?.role ?? "member",
+          email: member?.email,
+          displayName: member?.displayName,
+          actorUid: g.ctx.session.uid,
+        });
       }
       await g.ctx.adminAuth?.revokeRefreshTokens(uid);
     }
@@ -162,6 +182,16 @@ export async function PATCH(req: Request) {
           },
           { merge: true },
         );
+      if (db && member) {
+        await provisionCrmProfileServer(db, {
+          uid,
+          organizationId: orgId,
+          orgRole: member.role,
+          email: member.email,
+          displayName: member.displayName,
+          actorUid: g.ctx.session.uid,
+        });
+      }
       await setAppClaims(g.ctx.adminAuth, uid, {
         organizationId: orgId,
         orgRole: member?.role,

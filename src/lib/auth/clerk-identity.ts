@@ -21,6 +21,10 @@ function readMetaString(
   return typeof v === "string" && v.trim() ? v.trim() : undefined;
 }
 
+export function clerkEmailFromUser(user: User): string | undefined {
+  return clerkEmail(user);
+}
+
 function clerkEmail(user: User): string | undefined {
   return (
     user.primaryEmailAddress?.emailAddress ??
@@ -141,6 +145,63 @@ export async function resolveClerkIdentity(
     platformAdmin: platformAdmin || undefined,
     bridged,
   };
+}
+
+/** Look up a Clerk user by primary email (exact match, case-insensitive input). */
+export async function findClerkUserByEmailServer(
+  emailRaw: string,
+): Promise<User | null> {
+  const email = emailRaw.trim().toLowerCase();
+  if (!email) return null;
+  try {
+    const client = await clerkClient();
+    const { data } = await client.users.getUserList({
+      emailAddress: [email],
+      limit: 5,
+    });
+    return (
+      data.find(
+        (u) => clerkEmail(u)?.toLowerCase() === email,
+      ) ?? null
+    );
+  } catch (err) {
+    console.warn(
+      "[clerk-identity] getUserList by email failed",
+      err instanceof Error ? err.message : err,
+    );
+    return null;
+  }
+}
+
+/**
+ * Resolve the Nova uid stored on platform/membership records for a Clerk user.
+ * Prefers externalId / novaUid metadata, then membership by email, then Clerk id.
+ */
+export async function resolveNovaUidForClerkUser(user: User): Promise<string> {
+  const meta = (user.publicMetadata ?? {}) as Record<string, unknown>;
+  const externalId = user.externalId?.trim() || undefined;
+  const metaUid = readMetaString(meta, "novaUid");
+  const linkedUid = externalId || metaUid;
+  if (linkedUid) return linkedUid;
+
+  const email = clerkEmail(user);
+  if (email) {
+    const byEmail = await findMembershipByEmailServer(email);
+    if (byEmail) return byEmail.uid;
+  }
+
+  return user.id;
+}
+
+/** Resolve Nova uid + Clerk id for an email, or null when no Clerk account exists. */
+export async function resolveNovaUidByEmailServer(
+  emailRaw: string,
+): Promise<{ uid: string; clerkUserId: string; email: string } | null> {
+  const user = await findClerkUserByEmailServer(emailRaw);
+  if (!user) return null;
+  const email = clerkEmail(user) ?? emailRaw.trim().toLowerCase();
+  const uid = await resolveNovaUidForClerkUser(user);
+  return { uid, clerkUserId: user.id, email };
 }
 
 /** Persist Nova uid / org claims onto the Clerk user (P5.2+). */

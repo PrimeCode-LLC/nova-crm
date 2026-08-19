@@ -158,7 +158,7 @@ export async function recomputeOrgDashboardSummaryPostgres(
         }),
       ]);
       return {
-        leads: leadRows.map(leadFromPostgresRow),
+        leads: leadRows.map((row) => leadFromPostgresRow(row)),
         deals: dealRows.map(dealFromPostgresRow),
         timeZone: timezoneFromOrgSettings(org?.settings),
       };

@@ -1,11 +1,6 @@
 import crypto from "node:crypto";
-import {
-  FieldValue,
-  Timestamp,
-  type DocumentData,
-} from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
+import { withOrganizationScope, withRlsBypass } from "@/lib/db/tenant-scope";
 import type {
   ISODate,
   OrganizationInvite,
@@ -15,44 +10,36 @@ import type {
 
 const INVITE_TTL_DAYS = 7;
 
-function tsToIso(t: Timestamp | undefined | null): ISODate {
-  if (!t || !t.toDate) return new Date().toISOString();
-  return t.toDate().toISOString();
+function toIso(d: Date | null | undefined): ISODate {
+  return (d ?? new Date()).toISOString();
 }
 
-function maybeTsToIso(t: Timestamp | undefined | null): ISODate | undefined {
-  if (!t || !t.toDate) return undefined;
-  return t.toDate().toISOString();
-}
-
-function docToInvite(
-  organizationId: string,
-  id: string,
-  data: DocumentData,
-): OrganizationInvite {
+function rowToInvite(row: {
+  id: string;
+  organizationId: string;
+  email: string;
+  role: string;
+  tokenHash: string;
+  status: string;
+  expiresAt: Date;
+  createdAt: Date;
+  createdByUid: string;
+  acceptedAt: Date | null;
+  acceptedByUid: string | null;
+}): OrganizationInvite {
   return {
-    id,
-    organizationId,
-    email: String(data.email ?? "").toLowerCase(),
-    role: (data.role as OrgMemberRole) ?? "member",
-    tokenHash: String(data.tokenHash ?? ""),
-    status: (data.status as OrganizationInviteStatus) ?? "pending",
-    expiresAt: tsToIso(data.expiresAt as Timestamp | undefined),
-    createdAt: tsToIso(data.createdAt as Timestamp | undefined),
-    createdByUid: String(data.createdByUid ?? ""),
-    acceptedAt: maybeTsToIso(data.acceptedAt as Timestamp | undefined),
-    acceptedByUid:
-      typeof data.acceptedByUid === "string" ? data.acceptedByUid : undefined,
+    id: row.id,
+    organizationId: row.organizationId,
+    email: row.email.toLowerCase(),
+    role: (row.role as OrgMemberRole) ?? "member",
+    tokenHash: row.tokenHash,
+    status: (row.status as OrganizationInviteStatus) ?? "pending",
+    expiresAt: toIso(row.expiresAt),
+    createdAt: toIso(row.createdAt),
+    createdByUid: row.createdByUid,
+    acceptedAt: row.acceptedAt ? toIso(row.acceptedAt) : undefined,
+    acceptedByUid: row.acceptedByUid ?? undefined,
   };
-}
-
-function invitesCol(orgId: string) {
-  const db = getAdminDb();
-  if (!db) return null;
-  return db
-    .collection(COLLECTIONS.organizations)
-    .doc(orgId)
-    .collection(ORG_SUBCOLLECTIONS.invites);
 }
 
 export function hashInviteToken(token: string): string {
@@ -86,10 +73,14 @@ export function unpackInviteToken(
 export async function listInvitesServer(
   orgId: string,
 ): Promise<OrganizationInvite[]> {
-  const col = invitesCol(orgId);
-  if (!col) return [];
-  const snap = await col.orderBy("createdAt", "desc").get();
-  return snap.docs.map((d) => docToInvite(orgId, d.id, d.data()));
+  if (!isDatabaseConfigured()) return [];
+  const rows = await withOrganizationScope(orgId, (tx) =>
+    tx.orgInvite.findMany({
+      where: { organizationId: orgId },
+      orderBy: { createdAt: "desc" },
+    }),
+  );
+  return rows.map(rowToInvite);
 }
 
 export async function createInviteServer(input: {
@@ -100,43 +91,42 @@ export async function createInviteServer(input: {
 }): Promise<
   { invite: OrganizationInvite; token: string } | { error: string }
 > {
-  const col = invitesCol(input.organizationId);
-  if (!col) return { error: "Database not configured" };
+  if (!isDatabaseConfigured()) return { error: "Database not configured" };
 
   const email = input.email.trim().toLowerCase();
   if (!email) return { error: "Email is required" };
 
-  // If a pending invite already exists for that email, revoke it before creating a new one.
-  const existing = await col
-    .where("email", "==", email)
-    .where("status", "==", "pending")
-    .get();
-  for (const d of existing.docs) {
-    await d.ref.update({
-      status: "revoked",
-      updatedAt: FieldValue.serverTimestamp(),
-    });
-  }
-
   const secret = generateInviteToken();
-  const expiresAt = Timestamp.fromMillis(
-    Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000,
-  );
-  const ref = col.doc();
-  const payload = {
-    email,
-    role: input.role,
-    tokenHash: hashInviteToken(secret),
-    status: "pending" as const,
-    expiresAt,
-    createdAt: FieldValue.serverTimestamp(),
-    createdByUid: input.createdByUid,
-  };
-  await ref.set(payload);
-  const fresh = await ref.get();
+  const tokenHash = hashInviteToken(secret);
+  const expiresAt = new Date(Date.now() + INVITE_TTL_DAYS * 24 * 60 * 60 * 1000);
+  const id = crypto.randomUUID();
+
+  const row = await withOrganizationScope(input.organizationId, async (tx) => {
+    await tx.orgInvite.updateMany({
+      where: {
+        organizationId: input.organizationId,
+        email,
+        status: "pending",
+      },
+      data: { status: "revoked" },
+    });
+    return tx.orgInvite.create({
+      data: {
+        id,
+        organizationId: input.organizationId,
+        email,
+        role: input.role,
+        tokenHash,
+        status: "pending",
+        expiresAt,
+        createdByUid: input.createdByUid,
+      },
+    });
+  });
+
   return {
-    invite: docToInvite(input.organizationId, ref.id, fresh.data()!),
-    token: packInviteToken(input.organizationId, ref.id, secret),
+    invite: rowToInvite(row),
+    token: packInviteToken(input.organizationId, row.id, secret),
   };
 }
 
@@ -144,15 +134,14 @@ export async function revokeInviteServer(
   orgId: string,
   inviteId: string,
 ): Promise<{ ok: true } | { error: string }> {
-  const col = invitesCol(orgId);
-  if (!col) return { error: "Database not configured" };
-  const ref = col.doc(inviteId);
-  const cur = await ref.get();
-  if (!cur.exists) return { error: "Invite not found" };
-  await ref.update({
-    status: "revoked",
-    updatedAt: FieldValue.serverTimestamp(),
-  });
+  if (!isDatabaseConfigured()) return { error: "Database not configured" };
+  const updated = await withOrganizationScope(orgId, (tx) =>
+    tx.orgInvite.updateMany({
+      where: { id: inviteId, organizationId: orgId },
+      data: { status: "revoked" },
+    }),
+  );
+  if (updated.count === 0) return { error: "Invite not found" };
   return { ok: true };
 }
 
@@ -169,12 +158,15 @@ export async function lookupInviteByTokenServer(
 ): Promise<LookupResult> {
   const parts = unpackInviteToken(token);
   if (!parts) return { ok: false, reason: "not_found" };
+  if (!isDatabaseConfigured()) return { ok: false, reason: "not_found" };
 
-  const col = invitesCol(parts.orgId);
-  if (!col) return { ok: false, reason: "not_found" };
-  const d = await col.doc(parts.id).get();
-  if (!d.exists) return { ok: false, reason: "not_found" };
-  const invite = docToInvite(parts.orgId, d.id, d.data()!);
+  const row = await withRlsBypass((tx) =>
+    tx.orgInvite.findUnique({ where: { id: parts.id } }),
+  );
+  if (!row || row.organizationId !== parts.orgId) {
+    return { ok: false, reason: "not_found" };
+  }
+  const invite = rowToInvite(row);
 
   if (invite.tokenHash !== hashInviteToken(parts.secret)) {
     return { ok: false, reason: "not_found" };
@@ -192,11 +184,15 @@ export async function markInviteAcceptedServer(
   inviteId: string,
   acceptedByUid: string,
 ): Promise<void> {
-  const col = invitesCol(orgId);
-  if (!col) return;
-  await col.doc(inviteId).update({
-    status: "accepted",
-    acceptedAt: FieldValue.serverTimestamp(),
-    acceptedByUid,
-  });
+  if (!isDatabaseConfigured()) return;
+  await withRlsBypass((tx) =>
+    tx.orgInvite.updateMany({
+      where: { id: inviteId, organizationId: orgId },
+      data: {
+        status: "accepted",
+        acceptedAt: new Date(),
+        acceptedByUid,
+      },
+    }),
+  );
 }

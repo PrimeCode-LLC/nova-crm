@@ -19,7 +19,6 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useAuth } from "@/components/providers/auth-provider";
 import { initials } from "@/lib/format";
 import { useTheme } from "next-themes";
-import { EmailAuthProvider, reauthenticateWithCredential, updatePassword } from "firebase/auth";
 import {
   User,
   Building2,
@@ -350,39 +349,7 @@ function SettingsPage() {
       return;
     }
 
-    setChangingPassword(true);
-    try {
-      const credential = EmailAuthProvider.credential(
-        fbUser.email,
-        currentPassword,
-      );
-      await reauthenticateWithCredential(fbUser, credential);
-      await updatePassword(fbUser, newPassword);
-      setCurrentPassword("");
-      setNewPassword("");
-      setConfirmPassword("");
-      /* Firebase revokes old refresh tokens on password change; re-exchange so the
-       * httpOnly session cookie stays valid and protected routes are not 307→login storms. */
-      if (!isAuthDisabled() && isFirebaseWebConfigured()) {
-        try {
-          await refreshServerSessionFromCurrentUser(fbUser);
-        } catch (e) {
-          const detail = e instanceof Error ? e.message : "Session refresh failed.";
-          toast.error(
-            `Password was saved. ${detail} Sign out and sign in again if navigation breaks.`,
-          );
-          return;
-        }
-        toast.success("Password updated.");
-        window.setTimeout(() => window.location.reload(), 100);
-        return;
-      }
-      toast.success("Password updated.");
-    } catch (error) {
-      toast.error(formatFirebaseAuthError(error));
-    } finally {
-      setChangingPassword(false);
-    }
+    toast.info("Password is managed by Clerk. Use your account profile or /forgot-password.");
   }
 
   async function handleSendPasswordResetEmail() {

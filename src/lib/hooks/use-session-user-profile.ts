@@ -3,7 +3,8 @@
 import * as React from "react";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
-import type { OrgMemberRole, User } from "@/lib/types";
+import type { OrgMemberRole, Role, User } from "@/lib/types";
+import { defaultCrmRoleIdForOrgRole } from "@/lib/platform/crm-role-defaults";
 
 type MeResponse = {
   user: {
@@ -16,14 +17,22 @@ type MeResponse = {
   membershipPending?: boolean;
 };
 
+function sessionFallbackRoleId(orgRole?: OrgMemberRole): Role {
+  if (orgRole) return defaultCrmRoleIdForOrgRole(orgRole);
+  return "salesperson";
+}
+
 function toUser(u: NonNullable<MeResponse["user"]>): User {
+  const orgRole = u.orgRole;
+  const roleId = sessionFallbackRoleId(orgRole);
   return {
     id: u.uid,
     email: u.email ?? "",
     displayName: u.name ?? u.email?.split("@")[0] ?? u.uid,
-    roleId: "salesperson",
+    roleId,
     organizationId: u.organizationId,
-    orgRole: u.orgRole,
+    orgRole,
+    isSuperAdmin: orgRole === "owner",
     status: "active",
     createdAt: new Date().toISOString(),
   };

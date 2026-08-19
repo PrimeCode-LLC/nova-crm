@@ -155,6 +155,28 @@ Rule: ENGINEERING_RULES — PostgreSQL is DB of record; no Firestore for CRM tra
 
 ---
 
+## Phase 7 — Complete Firebase removal (zero dependency)
+
+Rule: ENGINEERING_RULES §1 — PostgreSQL is the only DB of record; no Firestore, no Firebase Auth, no Cloud Functions.
+
+| ID | Status | Notes |
+|----|--------|-------|
+| P7.0 | [x] | Full Firestore archive (`npm run db:export:firestore-crm -- --full`); CI import gate `scripts/check-firebase-imports.mjs` |
+| P7.1 | [x] | Collapse CRM cutover flags; Postgres sole writer always on; dual-write flags off |
+| P7.2 | [x] | Orgs/members/invites Postgres sole-writer (`org_invites` + member/org tables) |
+| P7.3 | [x] | Imports, prospect drafts, extension, scrapers → Postgres (`pg_documents` + worker) |
+| P7.4 | [x] | Email domain (IMAP, bounce/reply, scheduled send, MillionVerifier) → Postgres |
+| P7.5 | [x] | Workspace satellite entities → Postgres APIs (`/api/org/workspace-documents`) |
+| P7.6 | [x] | Content calendar + AI/RAG (`ai_document_embeddings` + pgvector; cosine fallback) |
+| P7.7 | [x] | Notifications + chat realtime (Redis pub/sub + SSE `/api/realtime/stream`) |
+| P7.8 | [x] | Clerk→Firebase bridge removed; login/signup/extension-login redirect to Clerk |
+| P7.9 | [x] | `functions/` + firebase config + npm packages deleted; ENGINEERING_RULES §1b closed |
+| P7.10 | [x] | `docker-compose.prod.yml`, migrate container, cron, CI Docker builds, backup scripts |
+
+**Phase 7 exit:** `rg -i firebase` returns nothing required by production; app runs on Clerk + Postgres + Redis + worker only.
+
+---
+
 ## Cross-cutting (still applies)
 
 - Migrations via Prisma only · RLS on every tenant table · staging ≠ prod secrets · feature flags for cutovers · small revertable PRs

@@ -29,21 +29,26 @@ export async function createUserNotificationServer(
   }
 
   const createdAt = input.createdAt ?? new Date().toISOString();
-  await ref.set({
-    organizationId: input.organizationId,
-    recipientId,
+    await ref.set({
+      organizationId: input.organizationId,
+      recipientId,
+      kind: input.kind,
+      actorId,
+      message: input.message,
+      target: input.target,
+      targetHref: input.targetHref,
+      ...(input.entityType ? { entityType: input.entityType } : {}),
+      ...(input.entityId ? { entityId: input.entityId } : {}),
+      ...(input.prefKey ? { prefKey: input.prefKey } : {}),
+      createdAt,
+      readAt: null,
+      dismissedAt: null,
+      updatedAt: createdAt,
+    });
+  const { publishRealtimeEvent } = await import("@/lib/realtime/sse");
+  await publishRealtimeEvent(input.organizationId, "notifications", recipientId, {
+    id,
     kind: input.kind,
-    actorId,
-    message: input.message,
-    target: input.target,
-    targetHref: input.targetHref,
-    ...(input.entityType ? { entityType: input.entityType } : {}),
-    ...(input.entityId ? { entityId: input.entityId } : {}),
-    ...(input.prefKey ? { prefKey: input.prefKey } : {}),
-    createdAt,
-    readAt: null,
-    dismissedAt: null,
-    updatedAt: createdAt,
   });
   return id;
 }

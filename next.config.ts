@@ -12,6 +12,48 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   /** Required by root `Dockerfile` (standalone server.js + traced deps). P4.6. */
   output: "standalone",
+  /** Postgres-backed shims replace Firebase packages (P7). */
+  turbopack: {
+    resolveAlias: {
+      "firebase-admin/firestore": "./src/lib/db/pg-firestore/shim-firestore.ts",
+      "firebase-admin/app": "./src/lib/db/pg-firestore/shim-app.ts",
+      "firebase-admin/auth": "./src/lib/db/pg-firestore/shim-auth.ts",
+      "firebase/firestore": "./src/lib/db/pg-firestore/shim-client-firestore.ts",
+      "firebase/app": "./src/lib/db/pg-firestore/shim-client-app.ts",
+      "firebase/auth": "./src/lib/db/pg-firestore/shim-client-auth.ts",
+    },
+  },
+  webpack: (config) => {
+    config.resolve ??= {};
+    config.resolve.alias ??= {};
+    Object.assign(config.resolve.alias, {
+      "firebase-admin/firestore": require("path").resolve(
+        __dirname,
+        "src/lib/db/pg-firestore/shim-firestore.ts",
+      ),
+      "firebase-admin/app": require("path").resolve(
+        __dirname,
+        "src/lib/db/pg-firestore/shim-app.ts",
+      ),
+      "firebase-admin/auth": require("path").resolve(
+        __dirname,
+        "src/lib/db/pg-firestore/shim-auth.ts",
+      ),
+      "firebase/firestore": require("path").resolve(
+        __dirname,
+        "src/lib/db/pg-firestore/shim-client-firestore.ts",
+      ),
+      "firebase/app": require("path").resolve(
+        __dirname,
+        "src/lib/db/pg-firestore/shim-client-app.ts",
+      ),
+      "firebase/auth": require("path").resolve(
+        __dirname,
+        "src/lib/db/pg-firestore/shim-client-auth.ts",
+      ),
+    });
+    return config;
+  },
   /** Temporarily surface readable component names in production error stacks while we diagnose runtime crashes (React #185). Safe to remove once stable. */
   productionBrowserSourceMaps: true,
   experimental: {

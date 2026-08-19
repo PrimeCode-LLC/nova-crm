@@ -70,6 +70,8 @@ export const COLLECTIONS = {
   organizations: "organizations",
   /** Product-level operators - read/write only through server (Admin SDK). */
   platformAdmins: "platformAdmins",
+  /** Append-only platform operator audit trail. */
+  platformAudit: "platformAudit",
   /** Single-use PKCE authorization codes for the Nova browser extension. */
   extensionAuthCodes: "extensionAuthCodes",
   /** Hashed, revocable 24-hour browser-extension sessions. */

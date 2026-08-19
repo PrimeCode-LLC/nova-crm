@@ -9,11 +9,10 @@ import {
   upsertCrmEntityPostgres,
   upsertLeadGraphPostgres,
 } from "@/lib/db/crm-write-postgres";
-import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import type { CrmEntity } from "@/lib/db/dual-write-crm";
+import type { CrmEntity } from "@/lib/db/crm-types";
 
 export function isCrmSoleWriterActive(): boolean {
-  return isPostgresSoleWriterCrmV1Enabled();
+  return true;
 }
 
 export async function upsertCrmDocSoleWriter(

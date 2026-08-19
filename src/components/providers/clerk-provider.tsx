@@ -1,6 +1,7 @@
 "use client";
 
 import { ClerkProvider as ClerkNextProvider } from "@clerk/nextjs";
+import { clerkAppearance } from "@/lib/auth/clerk-appearance";
 import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
 
 /**
@@ -15,5 +16,7 @@ export function OptionalClerkProvider({
   if (!isClerkAuthV1Enabled()) {
     return children;
   }
-  return <ClerkNextProvider>{children}</ClerkNextProvider>;
+  return (
+    <ClerkNextProvider appearance={clerkAppearance}>{children}</ClerkNextProvider>
+  );
 }

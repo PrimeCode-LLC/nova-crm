@@ -26,11 +26,11 @@ describe("postgres_dual_write_orgs_v1 flag", () => {
     }
   });
 
-  it("enables when env is true", () => {
+  it("stays off when env is true (dual-write removed)", () => {
     const prev = process.env.POSTGRES_DUAL_WRITE_ORGS_V1;
     process.env.POSTGRES_DUAL_WRITE_ORGS_V1 = "true";
     try {
-      expect(isPostgresDualWriteOrgsEnabled()).toBe(true);
+      expect(isPostgresDualWriteOrgsEnabled()).toBe(false);
     } finally {
       if (prev === undefined) delete process.env.POSTGRES_DUAL_WRITE_ORGS_V1;
       else process.env.POSTGRES_DUAL_WRITE_ORGS_V1 = prev;

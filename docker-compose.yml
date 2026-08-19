@@ -5,7 +5,8 @@
 
 services:
   postgres:
-    image: postgres:16-alpine
+    # pgvector required for ai_document_embeddings (P7.6). Drop-in Postgres 16.
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: nova
       POSTGRES_PASSWORD: nova_dev_password

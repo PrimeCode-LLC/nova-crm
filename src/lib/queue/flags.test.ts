@@ -6,8 +6,13 @@ import {
 } from "@/lib/queue/flags";
 
 describe("queue flags", () => {
-  it("defaults off", () => {
-    const keys = ["QUEUE_WORKER_V1", "QUEUE_IMPORT_CHUNKS_V1", "QUEUE_HEAVY_JOBS_V1"] as const;
+  it("defaults off without REDIS_URL", () => {
+    const keys = [
+      "QUEUE_WORKER_V1",
+      "QUEUE_IMPORT_CHUNKS_V1",
+      "QUEUE_HEAVY_JOBS_V1",
+      "REDIS_URL",
+    ] as const;
     const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
     for (const k of keys) delete process.env[k];
     expect(isQueueWorkerV1Enabled()).toBe(false);
@@ -19,17 +24,33 @@ describe("queue flags", () => {
     }
   });
 
-  it("requires master switch for child flags", () => {
-    const keys = ["QUEUE_WORKER_V1", "QUEUE_IMPORT_CHUNKS_V1", "QUEUE_HEAVY_JOBS_V1"] as const;
+  it("defaults on when REDIS_URL is set (P7)", () => {
+    const keys = [
+      "QUEUE_WORKER_V1",
+      "QUEUE_IMPORT_CHUNKS_V1",
+      "QUEUE_HEAVY_JOBS_V1",
+      "REDIS_URL",
+    ] as const;
     const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
-    process.env.QUEUE_IMPORT_CHUNKS_V1 = "true";
-    process.env.QUEUE_HEAVY_JOBS_V1 = "true";
-    delete process.env.QUEUE_WORKER_V1;
-    expect(isQueueImportChunksV1Enabled()).toBe(false);
-    expect(isQueueHeavyJobsV1Enabled()).toBe(false);
-    process.env.QUEUE_WORKER_V1 = "true";
+    process.env.REDIS_URL = "redis://localhost:6379";
+    for (const k of ["QUEUE_WORKER_V1", "QUEUE_IMPORT_CHUNKS_V1", "QUEUE_HEAVY_JOBS_V1"] as const) {
+      delete process.env[k];
+    }
+    expect(isQueueWorkerV1Enabled()).toBe(true);
     expect(isQueueImportChunksV1Enabled()).toBe(true);
     expect(isQueueHeavyJobsV1Enabled()).toBe(true);
+    for (const k of keys) {
+      if (prev[k] === undefined) delete process.env[k];
+      else process.env[k] = prev[k];
+    }
+  });
+
+  it("respects explicit false", () => {
+    const keys = ["QUEUE_WORKER_V1", "REDIS_URL"] as const;
+    const prev = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    process.env.REDIS_URL = "redis://localhost:6379";
+    process.env.QUEUE_WORKER_V1 = "false";
+    expect(isQueueWorkerV1Enabled()).toBe(false);
     for (const k of keys) {
       if (prev[k] === undefined) delete process.env[k];
       else process.env[k] = prev[k];

@@ -1,47 +1,26 @@
-import { cert, getApps, initializeApp, type App } from "firebase-admin/app";
-import { getAuth, type Auth } from "firebase-admin/auth";
-import { getFirestore, type Firestore } from "firebase-admin/firestore";
-import { isFirebaseDisabled } from "@/lib/firebase/runtime";
+/**
+ * Server data access — Postgres-backed (replaces Firebase Admin).
+ */
 
-let app: App | undefined;
+import type { App } from "@/lib/db/pg-firestore/shim-app";
+import { getAuth, type Auth } from "@/lib/db/pg-firestore/shim-auth";
+import {
+  getPgFirestore,
+  type PgFirestore,
+} from "@/lib/db/pg-firestore/shim-firestore";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
 
-function initAdminApp(): App | null {
-  if (isFirebaseDisabled()) return null;
-  if (app) return app;
-  const projectId =
-    process.env.FIREBASE_ADMIN_PROJECT_ID ??
-    process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID;
-  const clientEmail = process.env.FIREBASE_ADMIN_CLIENT_EMAIL;
-  const privateKey = process.env.FIREBASE_ADMIN_PRIVATE_KEY?.replace(
-    /\\n/g,
-    "\n",
-  );
+const app: App = { name: "[DEFAULT]" };
 
-  if (!projectId || !clientEmail || !privateKey) {
-    return null;
-  }
-
-  if (!getApps().length) {
-    app = initializeApp({
-      credential: cert({ projectId, clientEmail, privateKey }),
-    });
-  } else {
-    app = getApps()[0]!;
-  }
-  return app;
-}
-
-/** Returns null when service-account env is missing (local UI-only dev). */
+/** Returns null when DATABASE_URL is missing (should not happen in production). */
 export function getAdminApp(): App | null {
-  return initAdminApp();
+  return isDatabaseConfigured() ? app : null;
 }
 
 export function getAdminAuth(): Auth | null {
-  const a = initAdminApp();
-  return a ? getAuth(a) : null;
+  return isDatabaseConfigured() ? getAuth(app) : null;
 }
 
-export function getAdminDb(): Firestore | null {
-  const a = initAdminApp();
-  return a ? getFirestore(a) : null;
+export function getAdminDb(): PgFirestore | null {
+  return isDatabaseConfigured() ? getPgFirestore() : null;
 }

@@ -22,7 +22,18 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import type { PlatformAdminRecord } from "@/lib/types";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import type { PlatformAdminRecord, PlatformAdminRole } from "@/lib/types";
 import { toast } from "sonner";
 import { fmtRelative } from "@/lib/format";
 
@@ -30,8 +41,11 @@ export default function PlatformAdminsPage() {
   const [admins, setAdmins] = React.useState<PlatformAdminRecord[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [email, setEmail] = React.useState("");
-  const [role, setRole] = React.useState<"owner" | "admin">("admin");
+  const [role, setRole] = React.useState<PlatformAdminRole>("admin");
   const [adding, setAdding] = React.useState(false);
+  const [revokeTarget, setRevokeTarget] = React.useState<PlatformAdminRecord | null>(null);
+  const [revoking, setRevoking] = React.useState(false);
+  const [roleUpdating, setRoleUpdating] = React.useState<string | null>(null);
 
   const load = React.useCallback(async () => {
     const res = await fetch("/api/platform/admins");
@@ -77,8 +91,27 @@ export default function PlatformAdminsPage() {
     }
   }
 
+  async function changeRole(uid: string, nextRole: PlatformAdminRole) {
+    setRoleUpdating(uid);
+    try {
+      const res = await fetch("/api/platform/admins", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ uid, role: nextRole }),
+      });
+      const data = (await res.json()) as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Failed");
+      toast.success("Role updated");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setRoleUpdating(null);
+    }
+  }
+
   async function revoke(uid: string) {
-    if (!confirm("Remove this person’s platform admin access?")) return;
+    setRevoking(true);
     try {
       const res = await fetch(`/api/platform/admins?uid=${encodeURIComponent(uid)}`, {
         method: "DELETE",
@@ -89,8 +122,14 @@ export default function PlatformAdminsPage() {
       await load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setRevoking(false);
+      setRevokeTarget(null);
     }
   }
+
+  const storedAdmins = admins.filter((a) => !a.bootstrap);
+  const bootstrapAdmins = admins.filter((a) => a.bootstrap);
 
   return (
     <div className="space-y-8">
@@ -111,7 +150,7 @@ export default function PlatformAdminsPage() {
         className="flex max-w-xl flex-col gap-4 rounded-xl border p-4 sm:flex-row sm:items-end"
       >
         <div className="min-w-0 flex-1 space-y-2">
-          <Label htmlFor="email">User email (must already have signed up)</Label>
+          <Label htmlFor="email">User email (must already have a Clerk account)</Label>
           <Input
             id="email"
             type="email"
@@ -123,7 +162,7 @@ export default function PlatformAdminsPage() {
         </div>
         <div className="w-full space-y-2 sm:w-36">
           <Label>Role</Label>
-          <Select value={role} onValueChange={(v) => setRole(v as typeof role)}>
+          <Select value={role} onValueChange={(v) => setRole(v as PlatformAdminRole)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -143,7 +182,11 @@ export default function PlatformAdminsPage() {
       </form>
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Loading…</p>
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-12 w-full rounded-lg" />
+          ))}
+        </div>
       ) : (
         <div className="rounded-xl border">
           <Table>
@@ -151,17 +194,18 @@ export default function PlatformAdminsPage() {
               <TableRow>
                 <TableHead>Email</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Source</TableHead>
                 <TableHead className="text-right">Since</TableHead>
-                <TableHead className="w-[100px]" />
+                <TableHead className="w-[140px]" />
               </TableRow>
             </TableHeader>
             <TableBody>
               {admins.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={4} className="text-center text-muted-foreground">
-                    No Firestore records yet, operators matching{" "}
-                    <code className="rounded bg-muted px-1">PLATFORM_ADMIN_EMAILS</code> still have
-                    access.
+                  <TableCell colSpan={5} className="text-center text-muted-foreground">
+                    No platform admins yet. Set{" "}
+                    <code className="rounded bg-muted px-1">PLATFORM_ADMIN_EMAILS</code> or grant
+                    access above.
                   </TableCell>
                 </TableRow>
               ) : (
@@ -169,27 +213,80 @@ export default function PlatformAdminsPage() {
                   <TableRow key={a.uid}>
                     <TableCell className="font-mono text-xs">{a.email}</TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{a.role}</Badge>
+                      {a.bootstrap ? (
+                        <Badge variant="secondary">{a.role}</Badge>
+                      ) : (
+                        <Select
+                          value={a.role}
+                          disabled={roleUpdating === a.uid}
+                          onValueChange={(v) => void changeRole(a.uid, v as PlatformAdminRole)}
+                        >
+                          <SelectTrigger className="h-8 w-[110px]">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="admin">Admin</SelectItem>
+                            <SelectItem value="owner">Owner</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      {a.bootstrap ? (
+                        <Badge variant="outline" className="text-xs">
+                          Bootstrap env
+                        </Badge>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">Database</span>
+                      )}
                     </TableCell>
                     <TableCell className="text-right text-xs text-muted-foreground">
-                      {fmtRelative(a.createdAt)}
+                      {a.bootstrap ? "—" : fmtRelative(a.createdAt)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <button
-                        type="button"
-                        className={cn(buttonVariants({ variant: "ghost", size: "xs" }))}
-                        onClick={() => void revoke(a.uid)}
-                      >
-                        Revoke
-                      </button>
+                      {!a.bootstrap && (
+                        <button
+                          type="button"
+                          className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
+                          onClick={() => setRevokeTarget(a)}
+                        >
+                          Revoke
+                        </button>
+                      )}
                     </TableCell>
                   </TableRow>
                 ))
               )}
             </TableBody>
           </Table>
+          {bootstrapAdmins.length > 0 && (
+            <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+              {bootstrapAdmins.length} bootstrap admin(s) from env · {storedAdmins.length} stored
+              in database
+            </p>
+          )}
         </div>
       )}
+
+      <AlertDialog open={Boolean(revokeTarget)} onOpenChange={(open) => !open && setRevokeTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Revoke platform access?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {revokeTarget?.email} will no longer be able to open this console.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={revoking}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={revoking}
+              onClick={() => revokeTarget && void revoke(revokeTarget.uid)}
+            >
+              {revoking ? "Removing…" : "Revoke access"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -134,7 +134,7 @@ export interface User {
 }
 
 /** SaaS customer (tenant). Managed via platform admin + Admin SDK + tenant owner. */
-export type OrganizationStatus = "trial" | "active" | "suspended";
+export type OrganizationStatus = "trial" | "active" | "suspended" | "archived";
 
 export type SaaSPlanId = "free" | "pro" | "enterprise";
 
@@ -313,6 +313,52 @@ export interface PlatformAdminRecord {
   active: boolean;
   createdByUid?: string;
   createdAt: ISODate;
+  /** True when access comes from PLATFORM_ADMIN_EMAILS env bootstrap. */
+  bootstrap?: boolean;
+}
+
+export type PlatformAuditEvent =
+  | "org.created"
+  | "org.updated"
+  | "org.suspended"
+  | "org.archived"
+  | "org.restored"
+  | "admin.granted"
+  | "admin.revoked"
+  | "admin.role_changed"
+  | "member.disabled"
+  | "member.enabled"
+  | "migration.run"
+  | "bulk.action";
+
+export interface PlatformAuditRecord {
+  id: string;
+  event: PlatformAuditEvent;
+  actorUid: string;
+  actorEmail?: string;
+  targetOrgId?: string;
+  targetUid?: string;
+  summary: string;
+  metadata?: Record<string, unknown>;
+  createdAt: ISODate;
+}
+
+export interface PlatformStats {
+  totalOrgs: number;
+  byStatus: Record<OrganizationStatus, number>;
+  byPlan: Record<SaaSPlanId, number>;
+  unnamedCount: number;
+  trialsExpiringSoon: number;
+  totalSeatsUsed: number;
+  adminCount: number;
+  bootstrapAdminCount: number;
+  recentOrgs: Array<{
+    id: string;
+    name: string;
+    slug: string;
+    status: OrganizationStatus;
+    updatedAt: ISODate;
+  }>;
 }
 
 /** Workspace-defined tag for leads, deals, companies, and contacts. */

@@ -1,6 +1,4 @@
 import { redirect } from "next/navigation";
-import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
-import SignupClient from "./signup-client";
 
 function firstString(v: string | string[] | undefined): string | undefined {
   if (typeof v === "string") return v;
@@ -8,21 +6,18 @@ function firstString(v: string | string[] | undefined): string | undefined {
   return undefined;
 }
 
-/** P5.5: Clerk is the sole web signup when the flag is on. */
+/** P7: Firebase signup removed — Clerk only. */
 export default async function SignupPage({
   searchParams,
 }: {
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
-  if (isClerkAuthV1Enabled()) {
-    const q = await searchParams;
-    const next = new URLSearchParams();
-    for (const key of ["invite", "join"] as const) {
-      const val = firstString(q[key]);
-      if (val) next.set(key, val);
-    }
-    const qs = next.toString();
-    redirect(qs ? `/sign-up?${qs}` : "/sign-up");
+  const q = await searchParams;
+  const next = new URLSearchParams();
+  for (const key of ["invite", "join"] as const) {
+    const val = firstString(q[key]);
+    if (val) next.set(key, val);
   }
-  return <SignupClient />;
+  const qs = next.toString();
+  redirect(qs ? `/sign-up?${qs}` : "/sign-up");
 }

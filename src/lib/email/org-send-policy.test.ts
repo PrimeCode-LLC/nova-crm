@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_ORG_SEND_POLICY,
   isOrgWorkingDay,
@@ -49,6 +49,9 @@ describe("capacity spill skips weekends", () => {
     const friday = "2026-08-07";
     const saturday = "2026-08-08";
     const monday = "2026-08-10";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(`${saturday}T16:00:00.000Z`));
+    try {
     const byDay = {
       [friday]: {
         dayKey: friday,
@@ -87,6 +90,9 @@ describe("capacity spill skips weekends", () => {
     expect(result.unresolvedIds).toEqual([]);
     const placedDay = scheduleDayKeyFromDate(result.steps[0]!.scheduledAt, TZ);
     expect(placedDay).toBe(monday);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("does not leave overflow probes outside working hours", () => {

@@ -19,6 +19,7 @@ import {
 } from "@/lib/platform/invites-server";
 import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
 import { COLLECTIONS } from "@/lib/firestore/collections";
+import { provisionCrmProfileServer } from "@/lib/platform/crm-profile-provision";
 
 const bodySchema = z.object({
   inviteToken: z.string().min(1).optional(),
@@ -178,6 +179,17 @@ export async function POST(req: Request) {
     if (orgRole) userPayload.orgRole = orgRole;
   }
   await db.collection(COLLECTIONS.users).doc(uid).set(userPayload, { merge: true });
+
+  if (!membershipPending && organizationId && orgRole) {
+    await provisionCrmProfileServer(db, {
+      uid,
+      organizationId,
+      orgRole,
+      email,
+      displayName,
+      actorUid: uid,
+    });
+  }
 
   if (!membershipPending && organizationId) {
     await setAppClaims(adminAuth, uid, {

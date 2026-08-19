@@ -12,35 +12,9 @@ import {
 import type { Lead } from "@/lib/types";
 
 describe("postgres_read_leads_v1 flag", () => {
-  const prev = {
-    server: process.env.POSTGRES_READ_LEADS_V1,
-    public: process.env.NEXT_PUBLIC_POSTGRES_READ_LEADS_V1,
-  };
-
-  afterEach(() => {
-    if (prev.server === undefined) delete process.env.POSTGRES_READ_LEADS_V1;
-    else process.env.POSTGRES_READ_LEADS_V1 = prev.server;
-    if (prev.public === undefined) delete process.env.NEXT_PUBLIC_POSTGRES_READ_LEADS_V1;
-    else process.env.NEXT_PUBLIC_POSTGRES_READ_LEADS_V1 = prev.public;
-  });
-
-  it("defaults off", () => {
-    delete process.env.POSTGRES_READ_LEADS_V1;
-    delete process.env.NEXT_PUBLIC_POSTGRES_READ_LEADS_V1;
-    expect(isPostgresReadLeadsV1Enabled()).toBe(false);
+  it("is always on after P7 cutover", () => {
+    expect(isPostgresReadLeadsV1Enabled()).toBe(true);
     expect(POSTGRES_READ_LEADS_V1_FLAG).toBe("postgres_read_leads_v1");
-  });
-
-  it("is on when POSTGRES_READ_LEADS_V1=true", () => {
-    process.env.POSTGRES_READ_LEADS_V1 = "true";
-    delete process.env.NEXT_PUBLIC_POSTGRES_READ_LEADS_V1;
-    expect(isPostgresReadLeadsV1Enabled()).toBe(true);
-  });
-
-  it("is on when NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true", () => {
-    delete process.env.POSTGRES_READ_LEADS_V1;
-    process.env.NEXT_PUBLIC_POSTGRES_READ_LEADS_V1 = "true";
-    expect(isPostgresReadLeadsV1Enabled()).toBe(true);
   });
 });
 

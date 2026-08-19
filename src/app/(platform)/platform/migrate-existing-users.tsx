@@ -4,6 +4,16 @@ import * as React from "react";
 import { Button } from "@/components/ui/button";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 type Result = {
   total: number;
@@ -22,9 +32,10 @@ type Result = {
 export function MigrateExistingUsersButton() {
   const [running, setRunning] = React.useState(false);
   const [result, setResult] = React.useState<Result | null>(null);
+  const [open, setOpen] = React.useState(false);
 
   async function run() {
-    if (!confirm("Run user migration? Safe to re-run; users with an org are skipped.")) return;
+    setOpen(false);
     setRunning(true);
     try {
       const res = await fetch("/api/platform/migrate-existing-users", {
@@ -45,17 +56,33 @@ export function MigrateExistingUsersButton() {
 
   return (
     <div className="space-y-3">
-      <Button size="sm" onClick={run} disabled={running}>
-        {running && <Loader2 className="h-4 w-4 animate-spin" />}
-        Run migration
-      </Button>
+      <AlertDialog open={open} onOpenChange={setOpen}>
+        <Button size="sm" disabled={running} onClick={() => setOpen(true)}>
+          {running && <Loader2 className="h-4 w-4 animate-spin" />}
+          Run migration
+        </Button>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Run legacy user migration?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Safe to re-run. Users who already have an organization are skipped. Creates a personal
+              workspace for each legacy user without a tenant.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => void run()}>Run migration</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       {result && (
         <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-xs">
           <div className="font-medium">
-            Total {result.total} · migrated {result.migrated} · skipped{" "}
-            {result.skipped} · failed {result.failed}
+            Total {result.total} · migrated {result.migrated} · skipped {result.skipped} · failed{" "}
+            {result.failed}
           </div>
-          <div className="max-h-48 overflow-auto space-y-1 font-mono">
+          <div className="max-h-48 space-y-1 overflow-auto font-mono">
             {result.results.map((r) => (
               <div key={r.uid} className="flex gap-2">
                 <span

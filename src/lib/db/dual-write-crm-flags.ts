@@ -1,12 +1,11 @@
-/**
- * Phase 2 feature flag: `postgres_dual_write_crm_v1` (P2.6–P2.9).
- *
- * When **off** (default): account/contact/lead/deal writes stay Firestore-only.
- * When **on**: successful writes are mirrored into Postgres.
- */
+/** Dual-write removed — Postgres is sole writer (P7). */
 
-export const POSTGRES_DUAL_WRITE_CRM_V1_FLAG = "postgres_dual_write_crm_v1" as const;
+export const POSTGRES_DUAL_WRITE_CRM_V1_FLAG = "postgres_dual_write_crm_v1";
 
 export function isPostgresDualWriteCrmEnabled(): boolean {
-  return process.env.POSTGRES_DUAL_WRITE_CRM_V1 === "true";
+  return false;
+}
+
+export function isPostgresDualWriteOrgsEnabled(): boolean {
+  return false;
 }

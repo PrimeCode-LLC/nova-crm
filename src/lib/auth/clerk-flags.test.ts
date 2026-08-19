@@ -26,8 +26,8 @@ describe("clerk-flags", () => {
     else process.env[key] = value;
   }
 
-  it("flag defaults off", () => {
-    delete process.env.AUTH_CLERK_V1;
+  it("defaults off when explicitly disabled", () => {
+    process.env.AUTH_CLERK_V1 = "false";
     delete process.env.NEXT_PUBLIC_AUTH_CLERK_V1;
     expect(isClerkAuthV1FlagOn()).toBe(false);
   });

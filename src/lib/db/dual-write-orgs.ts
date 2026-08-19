@@ -1,15 +1,11 @@
 /**
- * Firestore → Postgres dual-write for organizations + members (P2.3).
- *
- * Firestore remains source of truth until read cutover. Failures here are logged
- * and never fail the Firestore write path. Uses RLS bypass (platform/ETL pattern).
+ * Organization + member Postgres upserts (P7 — sole writer helpers).
  */
 
 import type { Prisma } from "@/generated/prisma/client";
 import { Prisma as PrismaNamespace } from "@/generated/prisma/client";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withRlsBypass } from "@/lib/db/tenant-scope";
-import { isPostgresDualWriteOrgsEnabled } from "@/lib/db/dual-write-orgs-flags";
 import type { Organization, OrganizationMember } from "@/lib/types";
 
 function toDate(iso: string | undefined): Date | null {
@@ -114,7 +110,6 @@ export async function upsertMemberMirror(member: OrganizationMember): Promise<vo
         status: row.status,
         invitedByUid: row.invitedByUid,
         disabledAt: row.disabledAt,
-        // joinedAt stays create-only
       },
     });
   });
@@ -131,9 +126,8 @@ export async function deleteMemberMirror(
   });
 }
 
-/** After Firestore org write: re-read and upsert into Postgres when flag is on. */
 export async function mirrorOrganizationAfterWrite(orgId: string): Promise<void> {
-  if (!isPostgresDualWriteOrgsEnabled() || !isDatabaseConfigured()) return;
+  if (!isDatabaseConfigured()) return;
   try {
     const { getOrganizationServer } = await import(
       "@/lib/platform/organizations-server"
@@ -143,19 +137,18 @@ export async function mirrorOrganizationAfterWrite(orgId: string): Promise<void>
     await upsertOrganizationMirror(org);
   } catch (err) {
     console.error(
-      "[dual-write] organization mirror failed",
+      "[org-sync] organization mirror failed",
       orgId,
       err instanceof Error ? err.message : err,
     );
   }
 }
 
-/** After Firestore member write: re-read and upsert into Postgres when flag is on. */
 export async function mirrorMemberAfterWrite(
   orgId: string,
   uid: string,
 ): Promise<void> {
-  if (!isPostgresDualWriteOrgsEnabled() || !isDatabaseConfigured()) return;
+  if (!isDatabaseConfigured()) return;
   try {
     const { getMemberServer } = await import("@/lib/platform/members-server");
     const member = await getMemberServer(orgId, uid);
@@ -163,7 +156,7 @@ export async function mirrorMemberAfterWrite(
     await upsertMemberMirror(member);
   } catch (err) {
     console.error(
-      "[dual-write] member mirror failed",
+      "[org-sync] member mirror failed",
       orgId,
       uid,
       err instanceof Error ? err.message : err,
@@ -171,17 +164,16 @@ export async function mirrorMemberAfterWrite(
   }
 }
 
-/** After Firestore member delete. */
 export async function mirrorMemberDeleteAfterWrite(
   orgId: string,
   uid: string,
 ): Promise<void> {
-  if (!isPostgresDualWriteOrgsEnabled() || !isDatabaseConfigured()) return;
+  if (!isDatabaseConfigured()) return;
   try {
     await deleteMemberMirror(orgId, uid);
   } catch (err) {
     console.error(
-      "[dual-write] member delete mirror failed",
+      "[org-sync] member delete mirror failed",
       orgId,
       uid,
       err instanceof Error ? err.message : err,

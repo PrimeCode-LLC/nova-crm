@@ -2,7 +2,14 @@
  * P3.3 — Postgres org dashboard summary read (RLS + Redis cache key).
  */
 
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+
+vi.mock("@/lib/cache/redis", () => ({
+  isRedisConfigured: () => false,
+  cacheGetJson: vi.fn(),
+  cacheSetJson: vi.fn(),
+  cacheDel: vi.fn(),
+}));
 
 import { emptyOrgDashboardSummary } from "@/lib/dashboard-summary";
 import { emptyOrgDashboardSummaryRowData } from "@/lib/db/org-dashboard-summary-postgres";

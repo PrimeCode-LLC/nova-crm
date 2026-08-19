@@ -440,6 +440,36 @@ export async function updateOrganizationServer(
   return { ok: true };
 }
 
+export async function archiveOrganizationServer(
+  orgId: string,
+): Promise<{ ok: true } | { error: string }> {
+  return updateOrganizationServer(orgId, { status: "archived" });
+}
+
+export async function bulkUpdateOrganizationsServer(input: {
+  orgIds: string[];
+  status: OrganizationStatus;
+}): Promise<{ updated: number; errors: string[] }> {
+  let updated = 0;
+  const errors: string[] = [];
+  for (const orgId of input.orgIds) {
+    const result = await updateOrganizationServer(orgId, { status: input.status });
+    if ("error" in result) {
+      errors.push(`${orgId}: ${result.error}`);
+    } else {
+      updated += 1;
+    }
+  }
+  return { updated, errors };
+}
+
+export async function findUnnamedOrganizationIds(): Promise<string[]> {
+  const orgs = await listOrganizationsServer();
+  return orgs
+    .filter((o) => !o.name?.trim() && o.status !== "archived")
+    .map((o) => o.id);
+}
+
 export async function updateOrganizationChannelAdminServer(
   orgId: string,
   config: OrganizationChannelAdminConfig,

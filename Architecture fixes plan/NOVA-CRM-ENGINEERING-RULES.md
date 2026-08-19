@@ -21,25 +21,13 @@ These were decided deliberately after evaluating the previous Firebase-based arc
 - **Auth is not Firebase Auth.** Use the agreed provider (WorkOS/Clerk/Auth.js) with SSO/SAML support. Session pattern: short-lived httpOnly cookie, server-verified.
 - **No new Firebase dependency, of any kind, for any feature**, without an explicit, written exception. This includes "just for this one small thing."
 
-### §1b — Firebase residual exception (Phase 6 / recorded 2026-08-14)
+### §1b — Firebase residual exception (closed — Phase 7 / 2026-08-19)
 
-**CRM transactional entities** (`organizations` / `members` pending sole-writer; `accounts` / `contacts` / `leads` / `deals`; org dashboard summaries) use **PostgreSQL** as the system of record when the Phase 6 read + sole-writer flags are on. Do **not** add new Firestore collections or client listeners for those entities.
+**Firebase is removed.** PostgreSQL (+ pgvector) is the only database of record. Auth is Clerk. Background work is BullMQ. Realtime (chat, notifications) is Redis pub/sub + SSE.
 
-**Logged override (2026-08-15):** deploys may set `FIREBASE_DISABLED=true` (+ `NEXT_PUBLIC_FIREBASE_DISABLED=true`) to run **Clerk + Postgres + Redis only**. In that mode Firebase Admin/client are not initialized; residual Firestore domains below are unavailable until migrated. This is an explicit operator choice for self-hosted / Firebase-free deploy, not a silent reintroduction of Firebase.
+Do **not** add `firebase`, `firebase-admin`, Cloud Functions, Firestore, or Firebase Auth. Compatibility shims under `src/lib/db/pg-firestore/` exist only to map leftover Firestore-shaped APIs onto Postgres `pg_documents` / CRM tables; new code should use Prisma models and REST APIs, not the shim.
 
-**Written exception — Firebase may remain in the repo for non-CRM domains until separately migrated** (when Firebase is not disabled):
-
-- Realtime / collab: workspace chat, user notifications  
-- Email / mailbox / lead mail messages / reply intel / mail tracking  
-- Scrapers intake raw items + feeds (promote writes CRM to Postgres when sole-writer is on)  
-- Imports job metadata / chunks / identity keys  
-- Content calendar, prospect drafts, extension findings  
-- Scheduling / meetings / calendar connections  
-- AI org subcollections, platform admin / org settings still on Admin FS  
-- Clerk→Firebase **custom-token bridge** (required while any client Firestore listeners remain)  
-- `firebase` / `firebase-admin` packages, rules, indexes, Cloud Functions for the above  
-
-P6.5 exit for the migration means **CRM path decommissioned**, not “zero Firebase bytes in package.json.” Full package removal is a later program of work per domain above. Firebase-free mode gates the packages off at runtime via `FIREBASE_DISABLED`.
+The former `FIREBASE_DISABLED` kill switch and dual-write / cutover flags are gone — Postgres + Clerk are always on.
 
 ### §1a — On microservices (explicit, so this isn't re-decided per task)
 

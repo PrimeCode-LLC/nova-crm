@@ -17,6 +17,12 @@ await esbuild.build({
   packages: "external",
   alias: {
     "@": path.join(root, "src"),
+    "firebase-admin/firestore": path.join(
+      root,
+      "src/lib/db/pg-firestore/shim-firestore.ts",
+    ),
+    "firebase-admin/app": path.join(root, "src/lib/db/pg-firestore/shim-app.ts"),
+    "firebase-admin/auth": path.join(root, "src/lib/db/pg-firestore/shim-auth.ts"),
   },
   logLevel: "info",
 });
