@@ -1,6 +1,8 @@
-# Production stack — Postgres + Redis + web + worker + cron (P7.10)
-# Usage: docker compose -f docker-compose.prod.yml up -d
-# First deploy: docker compose -f docker-compose.prod.yml run --rm migrate
+# Production stack — Postgres + Redis + web + worker + cron + Caddy
+# Usage:
+#   cp .env.production.example .env.production   # fill in secrets, chmod 600
+#   docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 
 services:
   postgres:
@@ -12,7 +14,6 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-nova_crm}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nova} -d ${POSTGRES_DB:-nova_crm}"]
       interval: 10s
@@ -41,6 +42,7 @@ services:
       dockerfile: Dockerfile.migrate
     environment:
       MIGRATE_DATABASE_URL: ${MIGRATE_DATABASE_URL:?set MIGRATE_DATABASE_URL}
+      NOVA_APP_PASSWORD: ${NOVA_APP_PASSWORD:?set NOVA_APP_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,10 +67,15 @@ services:
         NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1: ${NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1:-true}
         NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1: ${NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1:-true}
     restart: unless-stopped
+    env_file:
+      - .env.production
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       REDIS_URL: redis://redis:6379
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?set CLERK_SECRET_KEY}
+      SITE_URL: ${SITE_URL:?set SITE_URL}
+      CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET}
       QUEUE_WORKER_V1: "true"
       QUEUE_IMPORT_CHUNKS_V1: "true"
       QUEUE_HEAVY_JOBS_V1: "true"
@@ -86,11 +93,15 @@ services:
       context: .
       dockerfile: Dockerfile.worker
     restart: unless-stopped
+    env_file:
+      - .env.production
     environment:
       NODE_ENV: production
       DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL}
       REDIS_URL: redis://redis:6379
       WORKER_HEALTH_PORT: "8081"
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY:?set CLERK_SECRET_KEY}
+      CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET}
       QUEUE_WORKER_V1: "true"
       QUEUE_IMPORT_CHUNKS_V1: "true"
       QUEUE_HEAVY_JOBS_V1: "true"
@@ -108,6 +119,8 @@ services:
     depends_on:
       web:
         condition: service_started
+    env_file:
+      - .env.production
     environment:
       CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET}
       WEB_INTERNAL_URL: http://web:3000
@@ -123,6 +136,8 @@ services:
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?set SITE_DOMAIN}
     volumes:
       - ./docker/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data

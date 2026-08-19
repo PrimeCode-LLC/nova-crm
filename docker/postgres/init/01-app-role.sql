@@ -1,5 +1,5 @@
--- Fresh Compose volumes only (docker-entrypoint-initdb.d).
--- Existing volumes: applied via Prisma migration 20260811093000_nova_app_role.
+-- Local dev only (docker-compose.yml). Fresh Compose volumes only.
+-- Production: nova_app is created by Prisma migration; password is set by Dockerfile.migrate.
 CREATE ROLE nova_app WITH
   LOGIN
   PASSWORD 'nova_dev_password'

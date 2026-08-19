@@ -154,16 +154,14 @@ Harden secrets in a root `.env` next to the compose file (never commit real valu
 POSTGRES_PASSWORD=...
 POSTGRES_USER=nova
 POSTGRES_DB=nova_crm
+NOVA_APP_PASSWORD=...
 DATABASE_URL=postgres://nova_app:...@postgres:5432/nova_crm
 MIGRATE_DATABASE_URL=postgres://nova:...@postgres:5432/nova_crm
 CRON_SECRET=...
 SITE_DOMAIN=app.yourdomain.com
 ```
 
-**App role password:** Compose init script `docker/postgres/init/01-app-role.sql` creates `nova_app` with a **dev** password. For production you must either:
-
-- change that password after first boot (`ALTER ROLE nova_app …`), **or**
-- ship a production init SQL with a strong password (never commit the real password; inject at deploy time).
+**App role password:** Prisma migration `20260811093000_nova_app_role` creates `nova_app`. The **`migrate`** container then runs `ALTER ROLE nova_app WITH PASSWORD` using `NOVA_APP_PASSWORD` from `.env.production`. Set a strong value; `DATABASE_URL` must use the same password. Always run **`migrate` before `up -d`** on first deploy and after password rotation.
 
 `DATABASE_URL` must use role **`nova_app`**. Migrations use **`nova`** via `MIGRATE_DATABASE_URL`.
 
@@ -190,7 +188,7 @@ Replace hostnames. Caddy obtains Let’s Encrypt certificates automatically when
 
 ## 8. Environment file (`.env.production`)
 
-Create `/opt/nova-crm/.env.production` with `chmod 600`. Never commit this file. Full variable reference: [`.env.example`](../.env.example).
+Create `/opt/nova-crm/.env.production` with `chmod 600`. Never commit this file. Start from [`.env.production.example`](../.env.production.example); full variable reference: [`.env.example`](../.env.example).
 
 ### 8.1 Required
 
@@ -255,14 +253,14 @@ Google Cloud: enable Calendar API + Gmail scopes; add redirect
 ```bash
 cd /opt/nova-crm
 
-# Apply database migrations first (Dockerfile.migrate)
-docker compose -f docker-compose.prod.yml run --rm migrate
+# Apply database migrations + sync nova_app password (Dockerfile.migrate)
+docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
 
 # Build and start web, worker, cron, Caddy
 docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
-If `nova_app` password still matches init SQL, align `DATABASE_URL` / `ALTER ROLE` before the app serves traffic.
+`DATABASE_URL` must match `NOVA_APP_PASSWORD` after migrate completes.
 
 Ensure org/member rows exist in Postgres and Clerk user emails match `members.email` (or `externalId` = Nova uid). Without that, login succeeds at Clerk but workspace identity fails.
 
