@@ -90,3 +90,47 @@ jobs:
         run: docker build -t nova-crm-worker -f Dockerfile.worker .
       - name: Build migrate image
         run: docker build -t nova-crm-migrate -f Dockerfile.migrate .
+
+  # Proves `migrate` applies schema AND sets the nova_app password, so the
+  # deployed web tier can actually authenticate (docker-compose.prod.yml).
+  migrate-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: nova
+          POSTGRES_PASSWORD: nova_dev_password
+          POSTGRES_DB: nova_crm
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nova -d nova_crm"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build migrate image
+        run: docker build -t nova-crm-migrate -f Dockerfile.migrate .
+
+      - name: Fail fast when required env is missing
+        run: |
+          if docker run --rm --network host nova-crm-migrate 2>/dev/null; then
+            echo "expected failure when MIGRATE_DATABASE_URL/NOVA_APP_PASSWORD unset"
+            exit 1
+          fi
+
+      - name: Run migrate (schema + nova_app password)
+        run: |
+          docker run --rm --network host \
+            -e MIGRATE_DATABASE_URL=postgres://nova:nova_dev_password@localhost:5432/nova_crm \
+            -e NOVA_APP_PASSWORD="ci-p@ss'w0rd\$x" \
+            nova-crm-migrate
+
+      - name: Verify nova_app authenticates with the new password
+        env:
+          PGPASSWORD: "ci-p@ss'w0rd$x"
+        run: psql -h localhost -U nova_app -d nova_crm -c "select current_user;"
