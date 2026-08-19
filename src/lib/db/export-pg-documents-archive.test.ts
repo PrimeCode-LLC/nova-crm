@@ -2,19 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   CRM_ARCHIVE_COLLECTIONS,
-  serializeFirestoreValue,
-} from "@/lib/db/export-firestore-crm-archive";
+  serializeDocumentValue,
+} from "@/lib/db/export-pg-documents-archive";
 
-describe("serializeFirestoreValue", () => {
+describe("serializeDocumentValue", () => {
   it("passes through primitives", () => {
-    expect(serializeFirestoreValue("a")).toBe("a");
-    expect(serializeFirestoreValue(1)).toBe(1);
-    expect(serializeFirestoreValue(true)).toBe(true);
-    expect(serializeFirestoreValue(null)).toBeNull();
+    expect(serializeDocumentValue("a")).toBe("a");
+    expect(serializeDocumentValue(1)).toBe(1);
+    expect(serializeDocumentValue(true)).toBe(true);
+    expect(serializeDocumentValue(null)).toBeNull();
   });
 
   it("converts Date to ISO", () => {
-    expect(serializeFirestoreValue(new Date("2026-08-12T00:00:00.000Z"))).toBe(
+    expect(serializeDocumentValue(new Date("2026-08-12T00:00:00.000Z"))).toBe(
       "2026-08-12T00:00:00.000Z",
     );
   });
@@ -23,18 +23,18 @@ describe("serializeFirestoreValue", () => {
     const ts = {
       toDate: () => new Date("2026-08-11T12:00:00.000Z"),
     };
-    expect(serializeFirestoreValue(ts)).toBe("2026-08-11T12:00:00.000Z");
+    expect(serializeDocumentValue(ts)).toBe("2026-08-11T12:00:00.000Z");
   });
 
   it("converts _seconds payload", () => {
     const seconds = Math.floor(Date.parse("2026-08-12T00:00:00.000Z") / 1000);
-    expect(serializeFirestoreValue({ _seconds: seconds, _nanoseconds: 0 })).toBe(
+    expect(serializeDocumentValue({ _seconds: seconds, _nanoseconds: 0 })).toBe(
       "2026-08-12T00:00:00.000Z",
     );
   });
 
   it("walks nested objects and arrays", () => {
-    const out = serializeFirestoreValue({
+    const out = serializeDocumentValue({
       name: "Acme",
       nested: { at: new Date("2026-01-01T00:00:00.000Z") },
       tags: ["a", new Date("2026-02-01T00:00:00.000Z")],

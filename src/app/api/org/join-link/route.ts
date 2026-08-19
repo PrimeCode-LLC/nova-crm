@@ -7,7 +7,7 @@ import {
   packOpenJoinToken,
   setOrganizationOpenJoinHashServer,
 } from "@/lib/platform/open-join-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import { openJoinAcceptUrl } from "@/lib/invite-link";
 
 function originFromRequest(req: Request): string {

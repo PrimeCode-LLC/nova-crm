@@ -1,6 +1,6 @@
-import { deleteDoc, deleteField, doc, serverTimestamp, setDoc, updateDoc } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { deleteDoc, deleteField, doc, serverTimestamp, setDoc, updateDoc } from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { CrmLabel } from "@/lib/types";
 
 export async function persistCrmLabelCreate(

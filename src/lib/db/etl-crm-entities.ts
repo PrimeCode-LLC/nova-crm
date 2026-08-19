@@ -3,7 +3,7 @@
  * Order: accounts → contacts → leads → deals. Safe to re-run (upserts).
  */
 
-import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
+import type { QueryDocumentSnapshot } from "@/lib/db/document-shim/shim-firestore";
 
 import {
   upsertCrmMirror,
@@ -11,8 +11,8 @@ import {
   type CrmFirestoreDoc,
 } from "@/lib/db/dual-write-crm";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 const ENTITY_ORDER: CrmEntity[] = ["account", "contact", "lead", "deal"];
 
@@ -106,7 +106,7 @@ export async function runCrmEntitiesBackfill(
     return stats;
   }
   if (!getAdminDb()) {
-    stats.errors.push("Firebase Admin is not configured (FIREBASE_ADMIN_*).");
+    stats.errors.push("Document store is not configured (FIREBASE_ADMIN_*).");
     return stats;
   }
 

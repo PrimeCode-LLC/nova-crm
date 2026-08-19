@@ -1,10 +1,10 @@
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 
-export function isFirebaseServerConfigured(): boolean {
+export function isDocumentAccessConfigured(): boolean {
   return isDatabaseConfigured();
 }
 
 /** @deprecated Firebase web removed — always false. */
-export function isFirebaseWebConfiguredServer(): boolean {
+export function isClientDocumentSyncEnabledServer(): boolean {
   return false;
 }

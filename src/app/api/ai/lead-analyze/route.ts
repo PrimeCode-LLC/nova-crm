@@ -8,9 +8,9 @@ import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";
 import { retrieveRagChunksServer } from "@/lib/ai/rag-retrieve";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { recordAudit } from "@/lib/firestore/audit";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { recordAudit } from "@/lib/documents/audit";
 import type { Role } from "@/lib/types";
 
 const emailMessageSchema = z.object({

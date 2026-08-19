@@ -6,8 +6,8 @@ import {
   getMemberServer,
 } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 export type ResolvedTenantContext = {
   organizationId?: string;

@@ -16,7 +16,7 @@ import {
   runOrgScrapersViaWorker,
   scrapersWorkerEnabled,
 } from "@/lib/scrapers/scrapers-worker-client";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import { scraperFeedIntervalSchema } from "@/lib/scrapers/scraper-feed-interval-schema";
 
 export const maxDuration = 300;

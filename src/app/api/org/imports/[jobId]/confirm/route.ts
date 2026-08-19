@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import { getUnsafeLocalImportError } from "@/lib/imports/prospect-import-runtime";
 import { confirmProspectImportJob } from "@/lib/imports/prospect-import-server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
@@ -24,7 +24,7 @@ export async function POST(
   const guard = await guardAdminFeature("import");
   if (!guard.ok) return guard.response;
   const db = getAdminDb();
-  if (!db) return NextResponse.json({ error: "Firebase Admin is not configured." }, { status: 503 });
+  if (!db) return NextResponse.json({ error: "Document store is not configured (DATABASE_URL missing)." }, { status: 503 });
 
   try {
     const body = bodySchema.parse(await req.json());

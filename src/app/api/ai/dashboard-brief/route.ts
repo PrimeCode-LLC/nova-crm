@@ -24,8 +24,8 @@ import {
   filterDealsByDateRange,
   type DashboardTimeRangeKey,
 } from "@/lib/dashboard-date-range";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { ChannelKey, Lead, Deal, Followup, LeadTask, User } from "@/lib/types";
 import { getMemberServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
@@ -34,7 +34,7 @@ import {
   getCachedDashboardBriefServer,
   saveDashboardBriefServer,
 } from "@/lib/ai/dashboard-brief-store";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 const briefSchema = z.object({
   progress: z.string(),

@@ -1,4 +1,4 @@
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 
 /**
  * Helper for stamping `organizationId` + audit timestamps on every tenant

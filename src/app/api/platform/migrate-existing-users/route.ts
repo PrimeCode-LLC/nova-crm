@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { guardPlatformApi } from "@/lib/platform/platform-api-guard";
 import { recordPlatformAudit } from "@/lib/platform/platform-audit-server";
 import { setAppClaims } from "@/lib/auth/claims";

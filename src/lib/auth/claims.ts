@@ -1,4 +1,4 @@
-import type { Auth } from "firebase-admin/auth";
+import type { Auth } from "@/lib/db/document-shim/shim-auth";
 import type { OrgMemberRole } from "@/lib/types";
 
 /**

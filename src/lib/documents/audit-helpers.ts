@@ -1,4 +1,4 @@
-import type { RecordAuditInput } from "@/lib/firestore/audit";
+import type { RecordAuditInput } from "@/lib/documents/audit";
 
 export function auditActorEmail(session: { email?: string | null }): string | null {
   const email = session.email?.trim();

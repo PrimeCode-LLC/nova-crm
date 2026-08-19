@@ -41,7 +41,7 @@ describe("runOrgsMembersBackfill (P2.4)", () => {
   it("fails closed when DB or Firebase is missing", async () => {
     const deps: OrgsMembersEtlDeps = {
       isDbReady: () => false,
-      isFirebaseReady: () => true,
+      isDocumentStoreReady: () => true,
       listOrganizationIds: async function* () {},
       getOrganization: async () => null,
       listMembers: async () => [],
@@ -58,7 +58,7 @@ describe("runOrgsMembersBackfill (P2.4)", () => {
     const upsertMember = vi.fn();
     const deps: OrgsMembersEtlDeps = {
       isDbReady: () => true,
-      isFirebaseReady: () => true,
+      isDocumentStoreReady: () => true,
       listOrganizationIds: () => ids("org-a", "org-b"),
       getOrganization: async (id) => org(id),
       listMembers: async (orgId) => [member(orgId, "u1")],
@@ -81,7 +81,7 @@ describe("runOrgsMembersBackfill (P2.4)", () => {
     const upsertMember = vi.fn(async () => undefined);
     const deps: OrgsMembersEtlDeps = {
       isDbReady: () => true,
-      isFirebaseReady: () => true,
+      isDocumentStoreReady: () => true,
       listOrganizationIds: () => ids("org-a"),
       getOrganization: async (id) => org(id),
       listMembers: async (orgId) => [
@@ -107,7 +107,7 @@ describe("runOrgsMembersBackfill (P2.4)", () => {
     const seen: number[] = [];
     const deps: OrgsMembersEtlDeps = {
       isDbReady: () => true,
-      isFirebaseReady: () => true,
+      isDocumentStoreReady: () => true,
       listOrganizationIds: async function* (opts) {
         seen.push(opts.limit ?? -1);
         yield "org-a";
@@ -124,7 +124,7 @@ describe("runOrgsMembersBackfill (P2.4)", () => {
   it("records per-entity errors without aborting the run", async () => {
     const deps: OrgsMembersEtlDeps = {
       isDbReady: () => true,
-      isFirebaseReady: () => true,
+      isDocumentStoreReady: () => true,
       listOrganizationIds: () => ids("org-ok", "org-bad"),
       getOrganization: async (id) => {
         if (id === "org-bad") throw new Error("boom");

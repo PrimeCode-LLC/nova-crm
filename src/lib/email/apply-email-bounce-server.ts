@@ -1,8 +1,8 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { cancelScheduledEmailServer } from "@/lib/email/scheduled-emails-server";
 import {
@@ -20,7 +20,7 @@ import {
   type BounceRecoveryAction,
 } from "@/lib/email/bounce-recovery";
 import { rerouteFollowupSequenceServer } from "@/lib/email/reroute-followup-sequence-server";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 
 export type ApplyEmailBounceInput = {
   organizationId: string;

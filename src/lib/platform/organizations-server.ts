@@ -2,9 +2,9 @@ import {
   FieldValue,
   Timestamp,
   type DocumentData,
-} from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { CHANNELS } from "@/lib/constants";
 import type {
   ChannelKey,

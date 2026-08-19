@@ -22,7 +22,7 @@ import { Label } from "@/components/ui/label";
 import { Progress, ProgressLabel, ProgressValue } from "@/components/ui/progress";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgMembers } from "@/hooks/use-org-members";
-import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
+import type { BulkOwnerReassignItem } from "@/lib/documents/persist-bulk-owner-reassign-client";
 import { isProspectRow, prospectPatchForSalesLeadSync } from "@/lib/prospects/prospect-access";
 import type { Lead, OrganizationMember, User } from "@/lib/types";
 

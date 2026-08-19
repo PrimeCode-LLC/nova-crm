@@ -1,9 +1,5 @@
-/** Firebase web config removed — Clerk + Postgres only. */
+/** Legacy client document sync (Firestore-style listeners) — disabled; Clerk + Postgres API only. */
 
-export function isFirebaseWebConfigured(): boolean {
+export function isClientDocumentSyncEnabled(): boolean {
   return false;
-}
-
-export function getFirebaseConfig(): null {
-  return null;
 }

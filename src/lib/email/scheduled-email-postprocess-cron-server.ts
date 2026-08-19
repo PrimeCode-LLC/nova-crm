@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/documents/tenant-write";
 
 export type ScheduledEmailPostprocessItem = {
   organizationId: string;

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { OPPORTUNITY_SOURCE_TYPES } from "@/lib/ai/opportunity-fit-types";
-import { listFitCheckProfileOptionsServer } from "@/lib/firestore/profile-server";
+import { listFitCheckProfileOptionsServer } from "@/lib/documents/profile-server";
 
 export async function GET(req: Request) {
   const g = await guardTenantApi();

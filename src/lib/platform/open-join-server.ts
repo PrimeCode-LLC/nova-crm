@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
 /** 32 bytes url-safe - entropy for the secret segment of `orgId.secret`. */

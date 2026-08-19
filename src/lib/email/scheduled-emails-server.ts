@@ -1,7 +1,7 @@
-import type { DocumentReference } from "firebase-admin/firestore";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import type { DocumentReference } from "@/lib/db/document-shim/shim-firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
 import {
   parseOutboundAttachments,
@@ -34,8 +34,8 @@ import {
 } from "@/lib/email/scheduled-send-failure";
 import { getOrgTimezoneServer } from "@/lib/org-timezone-server";
 import { createUserNotificationServer } from "@/lib/notifications/create-user-notification-server";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/documents/tenant-write";
 import { incrementOrgSendLedgerServer } from "@/lib/email/org-send-ledger-server";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";

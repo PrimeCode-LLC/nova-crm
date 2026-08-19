@@ -1,10 +1,10 @@
-import { deleteField, doc, updateDoc, serverTimestamp } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
+import { deleteField, doc, updateDoc, serverTimestamp } from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
 import { persistCrmWriteClient } from "@/lib/db/crm-write-client";
 import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/documents/resolve-owner-manager-ids-client";
 import type { Lead } from "@/lib/types";
 
 const OMIT_FROM_PATCH = new Set(["id", "createdAt", "updatedAt"]);

@@ -3,8 +3,8 @@ import { readInboxHeadsServer } from "@/lib/email/inbox-heads-server";
 import { processInboxBouncesFromHeadsServer } from "@/lib/email/process-inbox-bounces-server";
 import { fanoutInboxHeadsToLeadMailServer } from "@/lib/email/fanout-inbox-to-lead-mail-server";
 import { normalizeMailHost } from "@/lib/email/normalize-mail-host";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 
 export type PostprocessMailbox = {
   organizationId: string;

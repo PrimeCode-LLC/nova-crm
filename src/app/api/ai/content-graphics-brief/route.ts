@@ -4,8 +4,8 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   formatBrandContextForPrompt,
   getContentBrandServer,

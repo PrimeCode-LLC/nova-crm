@@ -1,5 +1,5 @@
-import type { Firestore } from "firebase-admin/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import type { Firestore } from "@/lib/db/document-shim/shim-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   mapProspectingStrategy,
   mapStrategyAssignment,

@@ -62,7 +62,7 @@ export function leadOwnerIdsVisibleToViewer(
 }
 
 /** Owner IDs to query in Firestore for workspace `orgRole == "member"` (max 30 for `in`). */
-export function memberCrmOwnerIdsForFirestore(
+export function memberCrmOwnerIdsForQuery(
   viewer: User,
   orgUsers: readonly User[],
 ): string[] {

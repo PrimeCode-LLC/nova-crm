@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { listOrganizationsServer } from "@/lib/platform/organizations-server";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
 import { resolveMailboxTransportAuthServer } from "@/lib/email/resolve-mailbox-transport-auth";

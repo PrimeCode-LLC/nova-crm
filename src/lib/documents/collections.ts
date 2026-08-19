@@ -1,4 +1,4 @@
-/** Firestore top-level collection ids (flat layout v1). */
+/** Document collection ids (legacy flat layout — stored in pg_documents). */
 export const COLLECTIONS = {
   users: "users",
   computedPermissions: "computedPermissions",

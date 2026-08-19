@@ -1,9 +1,9 @@
 import "server-only";
 
 import crypto from "node:crypto";
-import { FieldValue, Timestamp } from "firebase-admin/firestore";
-import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue, Timestamp } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminAuth, getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import type { OrgMemberRole } from "@/lib/types";
 import {

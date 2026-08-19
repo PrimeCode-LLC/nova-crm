@@ -1,9 +1,9 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import { ownerManagerIdsFromUser } from "@/lib/crm-owner-managers";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import {
   canPushProspectChannel,

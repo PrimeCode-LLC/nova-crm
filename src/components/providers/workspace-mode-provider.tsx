@@ -48,34 +48,34 @@ import {
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { useSessionUserProfile } from "@/lib/hooks/use-session-user-profile";
-import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-firestore";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { getFirebaseDb } from "@/lib/firebase/client";
+import { useLiveWorkspaceFirestore } from "@/lib/hooks/use-live-workspace-data";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { getClientDb } from "@/lib/db/document-access/client";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import { resolveOrganizationIdForFirestoreWrite } from "@/lib/firebase/resolve-organization-id-for-write";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { groupTimelineEventsByLead } from "@/lib/firestore/group-timeline-events";
+import { resolveOrganizationIdForFirestoreWrite } from "@/lib/db/document-access/resolve-organization-id-for-write";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { groupTimelineEventsByLead } from "@/lib/documents/group-timeline-events";
 import {
   persistAccountCreateClient,
   persistContactCreateClient,
   persistLeadCreateClient,
-} from "@/lib/firestore/persist-lead-graph-client";
-import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
-import { persistBulkOwnerReassignClient } from "@/lib/firestore/persist-bulk-owner-reassign-client";
-import type { BulkOwnerReassignItem } from "@/lib/firestore/persist-bulk-owner-reassign-client";
+} from "@/lib/documents/persist-lead-graph-client";
+import { persistLeadPatchClient } from "@/lib/documents/persist-lead-patch-client";
+import { persistBulkOwnerReassignClient } from "@/lib/documents/persist-bulk-owner-reassign-client";
+import type { BulkOwnerReassignItem } from "@/lib/documents/persist-bulk-owner-reassign-client";
 import { createUserNotifications, actorLabel } from "@/lib/notifications/create-user-notification";
 import { buildOwnershipHandoffNotifications } from "@/lib/notifications/ownership-handoff";
 import { persistUserNotificationDismiss } from "@/lib/notifications/persist-user-notification-client";
 import { useDemoUserNotifications } from "@/stores/demo-user-notifications-store";
-import { persistAccountPatchClient } from "@/lib/firestore/persist-account-patch-client";
-import { persistContactPatchClient } from "@/lib/firestore/persist-contact-patch-client";
-import { persistDealPatchClient } from "@/lib/firestore/persist-deal-patch-client";
+import { persistAccountPatchClient } from "@/lib/documents/persist-account-patch-client";
+import { persistContactPatchClient } from "@/lib/documents/persist-contact-patch-client";
+import { persistDealPatchClient } from "@/lib/documents/persist-deal-patch-client";
 import {
   persistCrmLabelCreate,
   persistCrmLabelDelete,
   persistCrmLabelUpdate,
-} from "@/lib/firestore/persist-crm-label-client";
-import { persistLeadDeleteClient } from "@/lib/firestore/persist-lead-delete-client";
+} from "@/lib/documents/persist-crm-label-client";
+import { persistLeadDeleteClient } from "@/lib/documents/persist-lead-delete-client";
 import {
   persistFollowupCreate,
   persistFollowupDelete,
@@ -98,9 +98,9 @@ import {
   persistCampaignUpdate,
   persistTimelineEventCreate,
   persistTouchpointCreate,
-} from "@/lib/firestore/persist-workspace-entities-client";
-import { persistOrgActivityEventCreate } from "@/lib/firestore/persist-org-activity-client";
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+} from "@/lib/documents/persist-workspace-entities-client";
+import { persistOrgActivityEventCreate } from "@/lib/documents/persist-org-activity-client";
+import { doc, serverTimestamp, updateDoc } from "@/lib/db/document-shim/shim-client-firestore";
 import { toast } from "sonner";
 import { toastError } from "@/lib/error-logging/toast-error";
 import { isAuthDisabled } from "@/lib/auth/flags";
@@ -123,7 +123,7 @@ import {
   recordDealStageChangeClient,
   recordLeadCreatedClient,
   recordLeadStageChangeClient,
-} from "@/lib/firestore/audit-change-client";
+} from "@/lib/documents/audit-change-client";
 import { leadDisplayLabel } from "@/lib/leads/lead-display-label";
 import { emitBulkLeadOrgActivity } from "@/lib/leads/record-bulk-lead-org-activity";
 import {
@@ -543,10 +543,10 @@ export function WorkspaceModeProvider({
     updates: Record<string, Partial<Pick<CrmLabel, "name" | "color">>>;
   }>({ added: [], removedIds: [], updates: {} });
 
-  const liveDbOrNull = React.useCallback((): ReturnType<typeof getFirebaseDb> | null => {
-    return isFirebaseWebConfigured() ? getFirebaseDb() : null;
+  const liveDbOrNull = React.useCallback((): ReturnType<typeof getClientDb> | null => {
+    return isClientDocumentSyncEnabled() ? getClientDb() : null;
   }, []);
-  const requireLiveDb = React.useCallback((): ReturnType<typeof getFirebaseDb> => {
+  const requireLiveDb = React.useCallback((): ReturnType<typeof getClientDb> => {
     const db = liveDbOrNull();
     if (!db) throw new Error("Firestore is not configured");
     return db;
@@ -555,7 +555,7 @@ export function WorkspaceModeProvider({
   const [sessionV2, setSessionV2] = React.useState<WorkspaceSessionV2>(() => emptyWorkspaceSession());
   const [sessionHydrated, setSessionHydrated] = React.useState(false);
 
-  const firebaseLive = isFirebaseWebConfigured();
+  const firebaseLive = isClientDocumentSyncEnabled();
   const { user: fbUser, loading: authLoading } = useAuth();
   const sessionProfile = useSessionUserProfile(
     mode === "live" && !firebaseLive,
@@ -577,7 +577,7 @@ export function WorkspaceModeProvider({
     () =>
       mode === "live" &&
       Boolean(userDoc?.organizationId) &&
-      (isPostgresSoleWriterCrmV1Enabled() || isFirebaseWebConfigured()),
+      (isPostgresSoleWriterCrmV1Enabled() || isClientDocumentSyncEnabled()),
     [mode, userDoc?.organizationId],
   );
   const liveOrgId =
@@ -765,7 +765,7 @@ export function WorkspaceModeProvider({
   const updateProfile = React.useCallback(
     (id: string, patch: Partial<Profile>) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -792,7 +792,7 @@ export function WorkspaceModeProvider({
   const addProfile = React.useCallback(
     (profile: Profile) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -816,7 +816,7 @@ export function WorkspaceModeProvider({
   const updateCampaign = React.useCallback(
     (id: string, patch: Partial<Campaign>) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -840,7 +840,7 @@ export function WorkspaceModeProvider({
   const addCampaign = React.useCallback(
     (campaign: Campaign) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1020,7 +1020,7 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1085,7 +1085,7 @@ export function WorkspaceModeProvider({
               payload: { followupId: f.id, planId: plan.id },
             }));
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1139,7 +1139,7 @@ export function WorkspaceModeProvider({
     }) => {
       const iso = new Date().toISOString();
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       const planPatch: Partial<FollowupPlan> = {
         status: "paused",
@@ -1221,7 +1221,7 @@ export function WorkspaceModeProvider({
       const iso = new Date().toISOString();
       const actorId = input.actorId ?? viewerUid ?? "";
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       const planPatch: Partial<FollowupPlan> = {
         status: "active",
@@ -1319,7 +1319,7 @@ export function WorkspaceModeProvider({
         emailScheduledAt: undefined,
       };
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1390,7 +1390,7 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1443,7 +1443,7 @@ export function WorkspaceModeProvider({
         | null,
     ) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1556,7 +1556,7 @@ export function WorkspaceModeProvider({
       >,
     ) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1609,7 +1609,7 @@ export function WorkspaceModeProvider({
   const removeFollowup = React.useCallback(
     (id: string) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1654,7 +1654,7 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1707,7 +1707,7 @@ export function WorkspaceModeProvider({
         createdAt: iso,
       };
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1747,7 +1747,7 @@ export function WorkspaceModeProvider({
   const updateLeadNote = React.useCallback(
     (noteId: string, patch: Partial<Pick<Note, "body" | "pinned">>) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1782,7 +1782,7 @@ export function WorkspaceModeProvider({
   const deleteLeadNote = React.useCallback(
     (noteId: string) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -1823,7 +1823,7 @@ export function WorkspaceModeProvider({
         createdAt: iso,
       };
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1861,7 +1861,7 @@ export function WorkspaceModeProvider({
   const addTimelineEvent = React.useCallback(
     (e: TimelineEvent) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -1896,7 +1896,7 @@ export function WorkspaceModeProvider({
   const addOrgActivityEvent = React.useCallback(
     (e: OrgActivityEvent) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
@@ -2225,7 +2225,7 @@ export function WorkspaceModeProvider({
 
   const addCrmLabel = React.useCallback(
     (label: CrmLabel) => {
-      const canLiveWrite = mode === "live" && isFirebaseWebConfigured() && Boolean(viewerUid);
+      const canLiveWrite = mode === "live" && isClientDocumentSyncEnabled() && Boolean(viewerUid);
       if (canLiveWrite) {
         void (async () => {
           try {
@@ -2262,7 +2262,7 @@ export function WorkspaceModeProvider({
   const updateCrmLabel = React.useCallback(
     (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -2288,7 +2288,7 @@ export function WorkspaceModeProvider({
   const removeCrmLabel = React.useCallback(
     (id: string) => {
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       if (writeFs) {
         void (async () => {
           try {
@@ -2546,7 +2546,7 @@ export function WorkspaceModeProvider({
         createdAt: iso,
       };
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       const linkedSalesLeadId = lead?.linkedSalesLeadId?.trim();
       const syncSalesLeadStage = Boolean(lead && isProspectRow(lead) && linkedSalesLeadId);
@@ -2820,7 +2820,7 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isFirebaseWebConfigured() && Boolean(userDoc?.organizationId);
+        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {

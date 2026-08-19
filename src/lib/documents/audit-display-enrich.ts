@@ -1,6 +1,6 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import type { AuditLogRecordWithDetail } from "@/lib/firestore/audit-detail";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import type { AuditLogRecordWithDetail } from "@/lib/documents/audit-detail";
 import { leadDisplayLabel, leadIdFromPath } from "@/lib/leads/lead-display-label";
 
 /** Primary lead id for audit drill-down (meta.leadId only - explicit CRM link). */

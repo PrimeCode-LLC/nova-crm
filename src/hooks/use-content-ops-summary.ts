@@ -9,7 +9,7 @@ type ContentOpsSummaryResponse = {
   enabled: boolean;
   org: ContentOpsOrgGauges | null;
   person: ContentOpsPersonGauges | null;
-  source?: "redis" | "firestore" | null;
+  source?: "redis" | "documents" | null;
 };
 
 /**

@@ -3,15 +3,15 @@ import { z } from "zod";
 import crypto from "crypto";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { roleAtLeast } from "@/lib/platform/org-role";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   clearInstantlyApiKeyServer,
   hasInstantlyApiKeyServer,
   isInstantlyEncryptionConfigured,
   upsertInstantlyApiKeyServer,
 } from "@/lib/integrations/instantly/secrets";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 async function getOrCreateInstantlyWebhookSecret(organizationId: string): Promise<string | null> {
   const db = getAdminDb();

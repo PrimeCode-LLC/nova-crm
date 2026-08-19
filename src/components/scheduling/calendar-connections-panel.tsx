@@ -18,8 +18,8 @@ import { useCalendarConnections } from "@/lib/scheduling/use-calendar-connection
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { fmtRelative } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { formatAuthError } from "@/lib/db/document-access/auth-errors";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 
 export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
   const searchParams = useSearchParams();
@@ -55,7 +55,7 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
       return;
     }
 
-    if (!oauth.google && !isFirebaseWebConfigured()) {
+    if (!oauth.google && !isClientDocumentSyncEnabled()) {
       toast.error("Google Calendar connect is not configured.");
       return;
     }
@@ -89,7 +89,7 @@ export function CalendarConnectionsPanel({ isDemo }: { isDemo: boolean }) {
       });
       void load({ background: true });
     } catch (e: unknown) {
-      toast.error(formatFirebaseAuthError(e));
+      toast.error(formatAuthError(e));
     } finally {
       setConnectingGoogle(false);
     }

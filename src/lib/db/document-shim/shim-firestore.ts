@@ -9,7 +9,7 @@ import {
   type ArrayRemoveSentinel,
   type ArrayUnionSentinel,
   type IncrementSentinel,
-} from "@/lib/db/pg-firestore/field-values";
+} from "@/lib/db/document-shim/field-values";
 import {
   deleteDocument,
   getDocument,
@@ -19,9 +19,9 @@ import {
   type QueryFilter,
   type QuerySpec,
   type StoredDoc,
-} from "@/lib/db/pg-firestore/store";
-import { buildPath } from "@/lib/db/pg-firestore/path";
-import { Timestamp } from "@/lib/db/pg-firestore/timestamp";
+} from "@/lib/db/document-shim/store";
+import { buildPath } from "@/lib/db/document-shim/path";
+import { Timestamp } from "@/lib/db/document-shim/timestamp";
 
 export { Timestamp };
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

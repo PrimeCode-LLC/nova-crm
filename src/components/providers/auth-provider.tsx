@@ -3,14 +3,14 @@
 import * as React from "react";
 import {
   onAuthStateChanged,
-  signOut as firebaseSignOut,
+  signOut as clientSignOut,
   type User,
-} from "firebase/auth";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { getFirebaseAuth } from "@/lib/firebase/client";
+} from "@/lib/db/document-shim/shim-client-auth";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { getClientAuth } from "@/lib/db/document-access/client";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
-import { syncFirebaseAuthClaimsClient } from "@/lib/auth/client-session";
+import { syncClientAuthClaims } from "@/lib/auth/client-session";
 import { AuthSessionSync } from "@/components/providers/auth-session-sync";
 import { ClerkSignOutBridge } from "@/components/providers/clerk-sign-out-bridge";
 
@@ -38,19 +38,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const clerkSignOutRef = React.useRef<ClerkSignOutFn | null>(null);
 
   React.useEffect(() => {
-    if (isAuthDisabled() || !isFirebaseWebConfigured()) {
+    if (isAuthDisabled() || !isClientDocumentSyncEnabled()) {
       setUser(null);
       setLoading(false);
       return;
     }
 
-    const auth = getFirebaseAuth();
+    const auth = getClientAuth();
     const unsub = onAuthStateChanged(
       auth,
       (u) => {
         setUser(u);
         setLoading(false);
-        if (u) void syncFirebaseAuthClaimsClient(u);
+        if (u) void syncClientAuthClaims(u);
       },
       () => setLoading(false),
     );
@@ -67,9 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       /* ignore */
     }
 
-    if (isFirebaseWebConfigured()) {
+    if (isClientDocumentSyncEnabled()) {
       try {
-        await firebaseSignOut(getFirebaseAuth());
+        await clientSignOut(getClientAuth());
       } catch {
         /* ignore */
       }

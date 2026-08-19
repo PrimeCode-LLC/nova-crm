@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import crypto from "node:crypto";
-import { Timestamp } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { Timestamp } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { emptyProspectForm } from "./prospect-form";
 import {
   ProspectDraftRevisionError,
@@ -17,7 +17,7 @@ import {
   updateProspectDraftFields,
 } from "./draft-server";
 
-vi.mock("@/lib/firebase/admin", () => ({ getAdminDb: vi.fn() }));
+vi.mock("@/lib/db/document-access/admin", () => ({ getAdminDb: vi.fn() }));
 vi.mock("@/lib/ai/run-feature", () => ({
   runAiStructuredFeature: vi.fn().mockRejectedValue(new Error("AI unavailable")),
 }));

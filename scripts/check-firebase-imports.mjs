@@ -1,11 +1,9 @@
 #!/usr/bin/env node
 /**
- * CI gate (Phase 7): Firebase packages and Cloud Functions must stay gone.
- * Remaining `firebase/*` / `firebase-admin/*` imports are path-aliased to
- * Postgres shims in `src/lib/db/pg-firestore/` (see tsconfig.json).
+ * CI gate (Phase 7): Firebase packages, config, and import strings must stay gone.
  */
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -17,6 +15,9 @@ const FORBIDDEN_PATHS = [
   "firestore.indexes.json",
   "firebase.emulator-test.json",
   "apphosting.yaml",
+  "src/lib/firebase",
+  "src/lib/firestore",
+  "src/lib/db/pg-firestore",
 ];
 
 const FORBIDDEN_PACKAGES = [
@@ -28,6 +29,16 @@ const FORBIDDEN_PACKAGES = [
   "@firebase/firestore",
   "@firebase/rules-unit-testing",
 ];
+
+const FORBIDDEN_IMPORT_PATTERNS = [
+  /from\s+["']firebase\//,
+  /from\s+["']firebase-admin\//,
+  /require\s*\(\s*["']firebase\//,
+  /require\s*\(\s*["']firebase-admin\//,
+];
+
+const SCAN_DIRS = ["src", "scripts"];
+const SCAN_EXT = new Set([".ts", ".tsx", ".mjs", ".js"]);
 
 const violations = [];
 
@@ -47,10 +58,40 @@ for (const section of ["dependencies", "devDependencies", "optionalDependencies"
   }
 }
 
+function walk(dir) {
+  for (const name of readdirSync(dir)) {
+    const abs = join(dir, name);
+    const st = statSync(abs);
+    if (st.isDirectory()) {
+      if (name === "node_modules" || name === ".next" || name === "dist") continue;
+      walk(abs);
+      continue;
+    }
+    const ext = name.slice(name.lastIndexOf("."));
+    if (!SCAN_EXT.has(ext)) continue;
+    const text = readFileSync(abs, "utf8");
+    for (const pattern of FORBIDDEN_IMPORT_PATTERNS) {
+      if (pattern.test(text)) {
+        violations.push(
+          `forbidden firebase import in ${relative(ROOT, abs)} (use @/lib/db/document-shim/*)`,
+        );
+        break;
+      }
+    }
+  }
+}
+
+for (const dir of SCAN_DIRS) {
+  const abs = join(ROOT, dir);
+  if (existsSync(abs)) walk(abs);
+}
+
 if (violations.length > 0) {
   console.error("Firebase removal gate failed:\n");
   for (const v of violations) console.error(`  ${v}`);
   process.exit(1);
 }
 
-console.log("Firebase removal gate passed (packages + config gone; imports alias to Postgres shims).");
+console.log(
+  "Firebase removal gate passed (packages + config gone; Postgres document store only).",
+);

@@ -4,7 +4,7 @@ import {
   connectGoogleCalendarClient,
   isGoogleCalendarConnectRedirect,
 } from "@/lib/scheduling/connect-google-calendar-client";
-import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
+import { formatAuthError } from "@/lib/db/document-access/auth-errors";
 
 export type CalendarSyncResponse =
   | {
@@ -102,6 +102,6 @@ export async function syncGoogleCalendarClient(input?: {
     const second = await postSync(input?.hostId);
     return { ...second, refreshedAccess: true };
   } catch (e: unknown) {
-    return { ok: false, error: formatFirebaseAuthError(e) };
+    return { ok: false, error: formatAuthError(e) };
   }
 }

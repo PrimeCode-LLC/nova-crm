@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   featureLabelForPath,
   PAGE_PATH_TO_FEATURE,
-} from "@/lib/firestore/audit-events";
+} from "@/lib/documents/audit-events";
 import { leadDisplayLabel, leadIdFromPath } from "@/lib/leads/lead-display-label";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 

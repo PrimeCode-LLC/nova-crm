@@ -46,7 +46,7 @@ import {
   buildContactRecipientOptions,
   defaultContactRecipientEmail,
 } from "@/lib/email/contact-recipient-options";
-import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
+import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-message-body-client";
 import {
   loadLastUsedMailboxPrefs,
   rememberLastUsedMailbox,

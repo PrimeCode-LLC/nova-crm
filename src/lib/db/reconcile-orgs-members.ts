@@ -4,12 +4,12 @@
  * Compares counts and spot-checks scalar fields. Staging first (docs/ENVIRONMENTS.md).
  */
 
-import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
+import type { QueryDocumentSnapshot } from "@/lib/db/document-shim/shim-firestore";
 
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withRlsBypass } from "@/lib/db/tenant-scope";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { listMembersServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import type { Organization, OrganizationMember } from "@/lib/types";
@@ -71,7 +71,7 @@ export type PostgresMemberRow = {
 
 export type OrgsMembersReconcileDeps = {
   isDbReady: () => boolean;
-  isFirebaseReady: () => boolean;
+  isDocumentStoreReady: () => boolean;
   listOrganizationIds: (opts: {
     organizationId?: string;
     pageSize: number;
@@ -241,7 +241,7 @@ export function diffMemberFields(
 export function createDefaultOrgsMembersReconcileDeps(): OrgsMembersReconcileDeps {
   return {
     isDbReady: () => isDatabaseConfigured(),
-    isFirebaseReady: () => Boolean(getAdminDb()),
+    isDocumentStoreReady: () => Boolean(getAdminDb()),
     listOrganizationIds: listOrganizationIdsFromFirestore,
     getOrganization: getOrganizationServer,
     listMembers: listMembersServer,
@@ -328,9 +328,9 @@ export async function runOrgsMembersReconcile(
     );
     return report;
   }
-  if (!deps.isFirebaseReady()) {
+  if (!deps.isDocumentStoreReady()) {
     report.errors.push(
-      "Firebase Admin is not configured (FIREBASE_ADMIN_* env vars).",
+      "Document store is not configured (FIREBASE_ADMIN_* env vars).",
     );
     return report;
   }

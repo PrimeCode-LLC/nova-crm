@@ -1,16 +1,16 @@
-import type { Auth } from "firebase-admin/auth";
+import type { Auth } from "@/lib/db/document-shim/shim-auth";
 import { NextResponse } from "next/server";
 
-/** Return a 503 response when a route still needs Firebase Auth Admin. */
-export function firebaseAdminRequiredResponse(
+/** Return a 503 when admin auth shim is unavailable (DATABASE_URL missing). */
+export function adminAuthRequiredResponse(
   adminAuth: Auth | null,
 ): NextResponse | null {
   if (adminAuth) return null;
   return NextResponse.json(
     {
       error:
-        "This action requires Firebase Admin. Unset FIREBASE_DISABLED and configure FIREBASE_ADMIN_*, or use Clerk-only flows.",
-      code: "firebase_admin_required",
+        "Document store admin auth is unavailable. Configure DATABASE_URL or use Clerk-only flows.",
+      code: "document_admin_unavailable",
     },
     { status: 503 },
   );

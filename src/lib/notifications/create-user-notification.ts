@@ -1,5 +1,5 @@
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import {
   persistUserNotificationCreate,
   persistUserNotificationsCreateMany,
@@ -39,9 +39,9 @@ export async function createUserNotification(
     return;
   }
 
-  if (!isFirebaseWebConfigured()) return;
+  if (!isClientDocumentSyncEnabled()) return;
   try {
-    await persistUserNotificationCreate(getFirebaseDb(), payload);
+    await persistUserNotificationCreate(getClientDb(), payload);
   } catch (e) {
     console.error("[notifications] create failed", e);
   }
@@ -69,7 +69,7 @@ export async function createUserNotifications(
     return;
   }
 
-  if (!isFirebaseWebConfigured()) return;
+  if (!isClientDocumentSyncEnabled()) return;
   const orgId = ctx.organizationId;
   const prepared: CreateUserNotificationInput[] = inputs
     .map((input) => ({
@@ -82,7 +82,7 @@ export async function createUserNotifications(
 
   if (!prepared.length) return;
   try {
-    await persistUserNotificationsCreateMany(getFirebaseDb(), prepared);
+    await persistUserNotificationsCreateMany(getClientDb(), prepared);
   } catch (e) {
     console.error("[notifications] batch create failed", e);
   }

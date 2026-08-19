@@ -1,4 +1,4 @@
-import { FirebaseError } from "firebase/app";
+import { FirebaseError } from "@/lib/db/document-shim/shim-client-app";
 
 export function readAuthErrorCode(error: unknown): string | null {
   if (error instanceof FirebaseError) return error.code;
@@ -10,9 +10,9 @@ export function readAuthErrorCode(error: unknown): string | null {
 }
 
 /**
- * Maps Firebase Auth error codes to short, user-facing copy (client + Admin SDK).
+ * Maps Firebase Auth error codes to short, user-facing copy (legacy shim + Admin SDK shapes).
  */
-export function formatFirebaseAuthError(error: unknown): string {
+export function formatAuthError(error: unknown): string {
   const code = readAuthErrorCode(error);
   const fallback =
     error instanceof Error ? error.message : "Something went wrong. Try again.";

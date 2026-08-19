@@ -1,14 +1,14 @@
 import crypto from "crypto";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
 import {
   findNovaCampaignByInstantlyId,
   incrementCampaignStatServer,
 } from "./campaign-server";
-import { recordAudit } from "@/lib/firestore/audit";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { recordAudit } from "@/lib/documents/audit";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import { buildReplyDetectedPatch } from "@/lib/leads/reply-review";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import { upsertLeadMailMessagesServer } from "@/lib/email/lead-mail-store-server";

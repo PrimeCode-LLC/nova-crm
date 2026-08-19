@@ -58,9 +58,9 @@ import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { persistLeadGraphClient } from "@/lib/documents/persist-lead-graph-client";
 import { findAccountByDomain, findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import {
@@ -489,9 +489,9 @@ function LeadFormBody({
       updatedAt: now,
     };
 
-    if (!isDemo && liveUserDoc?.organizationId && isFirebaseWebConfigured()) {
+    if (!isDemo && liveUserDoc?.organizationId && isClientDocumentSyncEnabled()) {
       try {
-        const db = getFirebaseDb();
+        const db = getClientDb();
         await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
         toast.success(isProspectingIntakeRole ? "Prospect created" : "Lead created");
         onClose();

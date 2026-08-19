@@ -102,4 +102,4 @@ export function isVector(v: unknown): v is VectorSentinel {
 }
 
 /** Re-export for store — serializes Dates/Timestamps for JSONB storage. */
-export { serializePayloadValue } from "@/lib/db/pg-firestore/timestamp";
+export { serializePayloadValue } from "@/lib/db/document-shim/timestamp";

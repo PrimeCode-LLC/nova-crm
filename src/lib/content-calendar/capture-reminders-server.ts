@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { mapContentBrand, mapContentCapture } from "@/lib/content-calendar/map-docs";
 import {
   brandCapturePolicy,

@@ -17,7 +17,7 @@ import {
 } from "@/lib/owner-scope";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { todayDateInputValue } from "@/lib/followup-date";
 import { channelMixForFollowupChannel } from "@/lib/followup-plans";
 import {
@@ -59,7 +59,7 @@ function isoFromUnknown(value: unknown): string {
   if (value == null || value === "") return "";
   if (typeof value === "string") return value;
   if (value instanceof Date) return value.toISOString();
-  return firestoreValueToIso(value);
+  return documentTimestampToIso(value);
 }
 
 function ymdFromIso(value: unknown, timeZone: string): string {

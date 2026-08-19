@@ -12,8 +12,8 @@ import {
 } from "@/lib/platform/members-server";
 import { setAppClaims } from "@/lib/auth/claims";
 import { resolveNovaUidByEmailServer } from "@/lib/auth/clerk-identity";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { FieldValue } from "firebase-admin/firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { getRequestOrigin, authSignInPath, authSignUpPath } from "@/lib/invite-link";
 import { sendSystemEmail } from "@/lib/email/send-system-email";
 import { renderInviteEmail } from "@/lib/email/invite-email";

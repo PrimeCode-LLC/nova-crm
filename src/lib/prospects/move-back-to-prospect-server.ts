@@ -1,7 +1,7 @@
-import { FieldValue, type DocumentReference } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForUpdate } from "@/lib/firestore/tenant-write";
+import { FieldValue, type DocumentReference } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForUpdate } from "@/lib/documents/tenant-write";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import { cancelScheduledEmailServer } from "@/lib/email/scheduled-emails-server";
 import {

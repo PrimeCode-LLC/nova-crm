@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { libraryAllowsFeature } from "@/lib/ai/knowledge-library-ui";
 import type { AiLibraryAllowedFeature } from "@/lib/ai/types";
 

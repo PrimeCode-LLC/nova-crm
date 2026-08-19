@@ -1,10 +1,10 @@
-import { FieldValue, type Firestore } from "firebase-admin/firestore";
+import { FieldValue, type Firestore } from "@/lib/db/document-shim/shim-firestore";
 import { randomBytes, randomUUID } from "node:crypto";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/documents/tenant-write";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import { injectMailTracking } from "@/lib/email/mail-tracking-inject";
 import { mailTrackingAvailable } from "@/lib/email/mail-tracking-token";
 import type {

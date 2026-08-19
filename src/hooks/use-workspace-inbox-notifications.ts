@@ -9,8 +9,8 @@ import {
   useInboxNotificationOverrides,
 } from "@/stores/inbox-notification-overrides-store";
 import { useDemoUserNotifications } from "@/stores/demo-user-notifications-store";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { subscribeUserNotifications } from "@/lib/notifications/subscribe-user-notifications";
 import type { UserNotificationDoc } from "@/lib/notifications/user-notification-types";
 import {
@@ -106,7 +106,7 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
   }, []);
 
   React.useEffect(() => {
-    if (isDemo || !organizationId || !currentUserId || !isFirebaseWebConfigured()) {
+    if (isDemo || !organizationId || !currentUserId || !isClientDocumentSyncEnabled()) {
       setLiveDurable([]);
       setLiveReady(true);
       return;
@@ -114,7 +114,7 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
     setLiveReady(false);
     let unsub: (() => void) | undefined;
     try {
-      const db = getFirebaseDb();
+      const db = getClientDb();
       unsub = subscribeUserNotifications(
         db,
         organizationId,
@@ -185,8 +185,8 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
           demoMarkRead(id, true);
           return;
         }
-        if (isFirebaseWebConfigured()) {
-          void persistUserNotificationMarkRead(getFirebaseDb(), id, true).catch((e) =>
+        if (isClientDocumentSyncEnabled()) {
+          void persistUserNotificationMarkRead(getClientDb(), id, true).catch((e) =>
             console.error("[notifications] markRead", e),
           );
         }
@@ -205,8 +205,8 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
           demoMarkRead(id, false);
           return;
         }
-        if (isFirebaseWebConfigured()) {
-          void persistUserNotificationMarkRead(getFirebaseDb(), id, false).catch((e) =>
+        if (isClientDocumentSyncEnabled()) {
+          void persistUserNotificationMarkRead(getClientDb(), id, false).catch((e) =>
             console.error("[notifications] markUnread", e),
           );
         }
@@ -225,8 +225,8 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
           demoDismiss(id);
           return;
         }
-        if (isFirebaseWebConfigured()) {
-          void persistUserNotificationDismiss(getFirebaseDb(), id).catch((e) =>
+        if (isClientDocumentSyncEnabled()) {
+          void persistUserNotificationDismiss(getClientDb(), id).catch((e) =>
             console.error("[notifications] dismiss", e),
           );
         }
@@ -246,8 +246,8 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
       if (durableIds.length) {
         if (isDemo) {
           demoMarkAllRead(durableIds);
-        } else if (isFirebaseWebConfigured()) {
-          void persistUserNotificationsMarkAllRead(getFirebaseDb(), durableIds).catch((e) =>
+        } else if (isClientDocumentSyncEnabled()) {
+          void persistUserNotificationsMarkAllRead(getClientDb(), durableIds).catch((e) =>
             console.error("[notifications] markAllRead", e),
           );
         }

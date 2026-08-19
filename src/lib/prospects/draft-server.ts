@@ -6,12 +6,12 @@ import {
   type DocumentData,
   type Query,
   type QueryDocumentSnapshot,
-} from "firebase-admin/firestore";
+} from "@/lib/db/document-shim/shim-firestore";
 import { z } from "zod";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import {
   PROSPECT_DRAFT_FIELD_KEYS,

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
 import { buildOrgManagerAncestorIdsMap } from "@/lib/user-hierarchy-tree";
@@ -18,7 +18,7 @@ export async function POST() {
   const db = getAdminDb();
   if (!db) {
     return NextResponse.json(
-      { error: "Firebase Admin is not configured on this server." },
+      { error: "Document store is not configured (DATABASE_URL missing)." },
       { status: 503 },
     );
   }
@@ -42,7 +42,7 @@ export async function POST() {
   await batch.commit();
 
   const { restampOwnerManagerIdsForOrgUsers } = await import(
-    "@/lib/firestore/restamp-owner-manager-ids-server"
+    "@/lib/documents/restamp-owner-manager-ids-server"
   );
   const restamp = await restampOwnerManagerIdsForOrgUsers({
     db,

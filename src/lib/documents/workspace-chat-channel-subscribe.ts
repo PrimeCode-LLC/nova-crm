@@ -5,8 +5,8 @@ import {
   where,
   type Firestore,
   type Unsubscribe,
-} from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { WorkspaceChatChannel } from "@/lib/types";
 
 export type WorkspaceChatChannelMapper = (id: string, raw: Record<string, unknown>) => WorkspaceChatChannel;

@@ -9,7 +9,7 @@ import { UserHierarchyPanel, type HierarchyPersistPayload } from "@/components/a
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { managerAssignmentCreatesCycle } from "@/lib/user-hierarchy-tree";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { toast } from "sonner";
 import { Users } from "lucide-react";
 import type { User } from "@/lib/types";
@@ -37,7 +37,7 @@ export default function AdminHierarchyPage() {
         return;
       }
 
-      const writeFs = mode === "live" && isFirebaseWebConfigured();
+      const writeFs = mode === "live" && isClientDocumentSyncEnabled();
       if (writeFs) {
         const body: Record<string, unknown> = { userId };
         if ("managerId" in patch) body.managerId = patch.managerId ?? null;
@@ -73,7 +73,7 @@ export default function AdminHierarchyPage() {
 
   /** Keep `managerAncestorIds` in Firestore aligned with reporting lines (required for manager CRM + inbox access). */
   React.useEffect(() => {
-    if (!canEdit || mode !== "live" || !isFirebaseWebConfigured()) return;
+    if (!canEdit || mode !== "live" || !isClientDocumentSyncEnabled()) return;
     let cancelled = false;
     void fetch("/api/org/repair-hierarchy", { method: "POST", credentials: "same-origin" })
       .then((res) => {

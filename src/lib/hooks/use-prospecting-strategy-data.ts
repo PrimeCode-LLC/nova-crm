@@ -6,13 +6,13 @@ import {
   onSnapshot,
   query,
   where,
-} from "firebase/firestore";
+} from "@/lib/db/document-shim/shim-client-firestore";
 import { toast } from "sonner";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   mapBuyerPersona,
   mapProspectingStrategy,
@@ -35,7 +35,7 @@ import {
   persistStrategyAssignmentCreate,
   persistStrategyAssignmentDelete,
   persistStrategyAssignmentUpdate,
-} from "@/lib/firestore/persist-prospecting-strategy-client";
+} from "@/lib/documents/persist-prospecting-strategy-client";
 import { buildSeedPersonas, buildSeedStrategy } from "@/lib/prospecting-strategy/seed";
 import { buildSampleB2bSaasPack } from "@/lib/prospecting-strategy/sample-pack";
 import {
@@ -46,7 +46,7 @@ import {
 } from "@/lib/prospecting-strategy/pack";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import { createUserNotification, actorLabel } from "@/lib/notifications/create-user-notification";
-import { recordStrategyAuditClient } from "@/lib/firestore/audit-change-client";
+import { recordStrategyAuditClient } from "@/lib/documents/audit-change-client";
 import type { OrgActivityEvent, OrgActivityEventType } from "@/lib/types";
 
 function newOrgActivityId() {
@@ -211,7 +211,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     ? DEMO_WORKSPACE_ORG_ID
     : ws.organizationId ?? "";
   const canLive =
-    !ws.isDemo && isFirebaseWebConfigured() && Boolean(organizationId);
+    !ws.isDemo && isClientDocumentSyncEnabled() && Boolean(organizationId);
 
   const [loading, setLoading] = React.useState(canLive);
   const [personas, setPersonas] = React.useState<BuyerPersona[]>([]);
@@ -237,7 +237,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
       return;
     }
 
-    const db = getFirebaseDb();
+    const db = getClientDb();
     setLoading(true);
     let pending = 3;
     const done = () => {
@@ -319,7 +319,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         return;
       }
       if (!canLive) throw new Error("No organization context");
-      await persistBuyerPersonaCreate(getFirebaseDb(), organizationId, persona);
+      await persistBuyerPersonaCreate(getClientDb(), organizationId, persona);
     },
     [ws.isDemo, canLive, organizationId],
   );
@@ -340,7 +340,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         return;
       }
       if (!canLive) throw new Error("No organization context");
-      await persistBuyerPersonaUpdate(getFirebaseDb(), id, patch);
+      await persistBuyerPersonaUpdate(getClientDb(), id, patch);
     },
     [ws.isDemo, canLive],
   );
@@ -352,7 +352,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         return;
       }
       if (!canLive) throw new Error("No organization context");
-      await persistBuyerPersonaDelete(getFirebaseDb(), id);
+      await persistBuyerPersonaDelete(getClientDb(), id);
     },
     [ws.isDemo, canLive],
   );
@@ -370,7 +370,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         );
       } else {
         if (!canLive) throw new Error("No organization context");
-        await persistProspectingStrategyCreate(getFirebaseDb(), organizationId, strategy);
+        await persistProspectingStrategyCreate(getClientDb(), organizationId, strategy);
       }
       const actor = actorLabel(ws.users, ws.currentUserId);
       const name = strategy.name?.trim() || "Untitled strategy";
@@ -405,7 +405,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         );
       } else {
         if (!canLive) throw new Error("No organization context");
-        await persistProspectingStrategyUpdate(getFirebaseDb(), id, patch);
+        await persistProspectingStrategyUpdate(getClientDb(), id, patch);
       }
       const actor = actorLabel(ws.users, ws.currentUserId);
       const name = (patch.name ?? existing?.name)?.trim() || "Untitled strategy";
@@ -439,7 +439,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         );
       } else {
         if (!canLive) throw new Error("No organization context");
-        await persistProspectingStrategyDelete(getFirebaseDb(), id);
+        await persistProspectingStrategyDelete(getClientDb(), id);
       }
       const actor = actorLabel(ws.users, ws.currentUserId);
       const name = existing?.name?.trim() || "a strategy";
@@ -482,7 +482,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         return;
       }
       if (!canLive) throw new Error("No organization context");
-      await persistStrategyAssignmentCreate(getFirebaseDb(), organizationId, assignment);
+      await persistStrategyAssignmentCreate(getClientDb(), organizationId, assignment);
       await notifyStrategyAssignment(ws, organizationId, assignment, liveStrategies, "assigned");
     },
     [ws, canLive, organizationId, liveStrategies],
@@ -521,7 +521,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         return;
       }
       if (!canLive) throw new Error("No organization context");
-      await persistStrategyAssignmentUpdate(getFirebaseDb(), id, patch);
+      await persistStrategyAssignmentUpdate(getClientDb(), id, patch);
       if (existing) {
         const merged = { ...existing, ...patch };
         const action =
@@ -555,7 +555,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
         return;
       }
       if (!canLive) throw new Error("No organization context");
-      await persistStrategyAssignmentDelete(getFirebaseDb(), id);
+      await persistStrategyAssignmentDelete(getClientDb(), id);
       if (existing) {
         await notifyStrategyAssignment(ws, organizationId, existing, liveStrategies, "removed");
       }
@@ -589,7 +589,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
       } else {
         if (!canLive) throw new Error("No organization context");
         await persistProspectingSeedBatch(
-          getFirebaseDb(),
+          getClientDb(),
           organizationId,
           materialized.personas,
           materialized.strategy,
@@ -651,7 +651,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     }
     if (!canLive) throw new Error("No organization context");
     await persistProspectingSeedBatch(
-      getFirebaseDb(),
+      getClientDb(),
       organizationId,
       personasSeed,
       strategySeed,

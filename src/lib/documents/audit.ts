@@ -2,24 +2,24 @@ import {
   FieldValue,
   type Firestore,
   type QueryDocumentSnapshot,
-} from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+} from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import {
   categoryForAuditEvent,
   type AuditEventCategory,
-} from "@/lib/firestore/audit-events";
+} from "@/lib/documents/audit-events";
 import {
   AUDIT_EVENT_DEFAULTS,
   buildAuditMessage,
   formatAuditValue,
   type AuditLogDetail,
   type AuditOperation,
-} from "@/lib/firestore/audit-detail";
+} from "@/lib/documents/audit-detail";
 
-export type { AuditLogDetail, AuditOperation } from "@/lib/firestore/audit-detail";
-export { projectLegacyAuditRow, formatAuditValue } from "@/lib/firestore/audit-detail";
+export type { AuditLogDetail, AuditOperation } from "@/lib/documents/audit-detail";
+export { projectLegacyAuditRow, formatAuditValue } from "@/lib/documents/audit-detail";
 
 export type AuditEvent =
   | "member.invited"

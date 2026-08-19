@@ -7,7 +7,7 @@ import {
   updateOrganizationAiSettingsServer,
 } from "@/lib/ai/ai-settings-server";
 import { isAiEncryptionConfigured } from "@/lib/ai/ai-secrets-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 export async function GET() {
   const g = await guardAdminFeature("ai_knowledge");

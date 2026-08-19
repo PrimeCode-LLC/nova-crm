@@ -1,9 +1,9 @@
-import { doc, serverTimestamp, writeBatch } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
+import { doc, serverTimestamp, writeBatch } from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
 import { persistCrmWriteClient } from "@/lib/db/crm-write-client";
 import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 /**
  * Deletes a lead document and decrements the parent account's `leadCount`.

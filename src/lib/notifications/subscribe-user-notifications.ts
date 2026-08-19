@@ -7,8 +7,8 @@ import {
   where,
   type Firestore,
   type Unsubscribe,
-} from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { mapUserNotificationDoc } from "@/lib/notifications/persist-user-notification-client";
 import type { UserNotificationDoc } from "@/lib/notifications/user-notification-types";
 

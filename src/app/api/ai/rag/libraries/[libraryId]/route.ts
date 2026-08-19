@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { getOrganizationAiSettingsServer, updateOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import {
   mergeFitCheckKnowledgeConfig,

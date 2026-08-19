@@ -14,7 +14,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
 import type { AdminFeatureKey } from "@/lib/admin-features";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { FeatureGrantsEditor } from "@/components/admin/feature-grants-editor";
 import { toast } from "sonner";
 
@@ -48,7 +48,7 @@ export function FeatureGrantsPanel() {
   async function handleSave() {
     if (!userId || !target) return;
     setSaving(true);
-    const writeLive = mode === "live" && !isDemo && isFirebaseWebConfigured();
+    const writeLive = mode === "live" && !isDemo && isClientDocumentSyncEnabled();
     if (writeLive) {
       const res = await fetch("/api/org/workspace-users", {
         method: "PATCH",

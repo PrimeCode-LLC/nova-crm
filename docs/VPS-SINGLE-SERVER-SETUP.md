@@ -1,21 +1,16 @@
 # Nova CRM — Single VPS setup guide (Ubuntu + Docker)
 
 **Audience:** Non-technical operators (follow numbered steps) and technical operators (see appendices).  
-**Goal:** Run Nova CRM on **one Ubuntu VPS** so login, CRM, dashboards, background jobs, and (optionally) email / AI / integrations all work.  
+**Goal:** Run Nova CRM on **one Ubuntu VPS** so login, CRM, dashboards, background jobs, email, AI, and integrations all work on Clerk + Postgres + Redis. Firebase is not used.  
 **Related:** [README.md](../README.md) · [ENVIRONMENTS.md](ENVIRONMENTS.md) · [NOVA-CRM-ENGINEERING-RULES.md](../Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md) · [NOVA-CRM-P4-QUEUE-WORKER.md](../Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md)
 
 ---
 
-## 0. Read this first (two “full” modes)
+## 0. Read this first
 
-Nova has two realistic production modes on a VPS. Pick one before you buy accounts or fill secrets.
+The production stack is one mode: **Clerk + PostgreSQL (pgvector, RLS) + Redis + web + worker + migrate + cron + Caddy**.
 
-| Mode | What you get | What you need |
-|------|----------------|---------------|
-| **A — Core CRM (Firebase off)** | Clerk login, accounts/contacts/leads/deals, dashboard KPIs, org members, platform admin, BullMQ worker for jobs that don’t need Firestore | Clerk + Postgres + Redis + web + worker |
-| **B — Full product (Firebase residual on)** | Everything in A **plus** inbox/IMAP, scheduled/bulk email, open/click tracking, scrapers, content calendar, prospect drafts, team chat, notifications, AI knowledge/RAG (Firestore vectors), Instantly, MillionVerifier, calendar connections | Mode A **plus** Firebase project + Admin credentials + encryption keys + OAuth + mail/AI API keys |
-
-> **Honest note:** With Firebase turned **off**, email, scrapers UI, chat, RAG, and several admin features are **unavailable** until those domains finish migrating off Firestore (see [README](../README.md) “What works vs what does not”). For a product that “fully works” including email and RAG **today**, use **Mode B**.
+Core CRM (login, accounts/contacts/leads/deals, dashboards, org members, chat, notifications) works once Clerk + Postgres + Redis are up. Email, scrapers, calendar, and AI need extra API keys — they still store data in Postgres, not a second database.
 
 Recommended VPS (example): **Ubuntu 24.04 LTS**, ~**18 GB RAM**, **8 CPU**, **240 GB SSD**, public IP + domain. Do **not** use Windows Server.
 
@@ -31,18 +26,23 @@ Caddy (HTTPS)  →  app.yourdomain.com  →  web (Next.js :3000)
                                       →  t.yourdomain.com (optional mail tracking) → same web
 
 Inside Docker (private network):
-   web      — UI + API
+   web      — UI + API + SSE realtime
    worker   — BullMQ jobs (IMAP, scheduled email, imports, scrapers, reminders, dashboard refresh)
-   postgres — CRM database (RLS)
-   redis    — cache + job queue
+   postgres — CRM + workspace + email + embeddings (RLS + pgvector)
+   redis    — cache + job queue + pub/sub
+   cron     — dispatches /api/cron/queue/dispatch
+   migrate  — one-shot Prisma migrate (run before first start)
 ```
 
 | Container | Image / file | Port (internal) | Health check |
 |-----------|--------------|-----------------|--------------|
 | Web | `Dockerfile` | 3000 | `GET /api/health` |
 | Worker | `Dockerfile.worker` | 8081 | `GET /healthz` |
+| Migrate | `Dockerfile.migrate` | — | one-shot |
+| Cron | `alpine:3.20` | — | dispatches every minute |
 | Postgres | `pgvector/pgvector:pg16` | 5432 | `pg_isready` |
 | Redis | `redis:7-alpine` | 6379 | `PING` |
+| Caddy | `caddy:2-alpine` | 80 / 443 | HTTPS |
 
 **Rule:** Never publish Postgres or Redis to the public internet. Only 80/443 (and SSH) on the firewall.
 
@@ -59,10 +59,9 @@ Do these before or during setup. Non-technical: create accounts; technical: note
 | 3 | Clerk application | Login / signup | https://dashboard.clerk.com |
 | 4 | Strong passwords for Postgres + Redis | Database security | Password manager |
 | 5 | Resend **or** SMTP for system emails | Invites / resets | Resend or any SMTP |
-| 6 | Firebase project (Mode B only) | Email, RAG, chat, scrapers, etc. | Firebase Console |
-| 7 | Google Cloud OAuth (Mode B, recommended) | Gmail + Google Calendar | Google Cloud Console |
-| 8 | AI API keys (Mode B) | Fit-check, RAG, drafts | OpenAI / Anthropic / Google |
-| 9 | MillionVerifier / Instantly (optional) | Verify + cold outreach sync | Their dashboards |
+| 6 | Google Cloud OAuth (recommended) | Gmail + Google Calendar | Google Cloud Console |
+| 7 | AI API keys (optional) | Fit-check, RAG, drafts | OpenAI / Anthropic / Google |
+| 8 | MillionVerifier / Instantly (optional) | Verify + cold outreach sync | Their dashboards |
 
 ---
 
@@ -71,7 +70,7 @@ Do these before or during setup. Non-technical: create accounts; technical: note
 - [ ] VPS created, you can open a terminal (SSH) or your host’s web console
 - [ ] Domain points to the VPS IP (wait up to 30–60 minutes for DNS)
 - [ ] Clerk keys copied
-- [ ] Mode A or Mode B chosen
+- [ ] Optional keys chosen (SMTP/Resend, Google OAuth, AI) if you need those features
 - [ ] Someone technical (or you, following §5–§12) installs Docker and starts the app
 - [ ] You can open `https://app.yourdomain.com/sign-in` and log in
 - [ ] Health pages OK (§11)
@@ -83,10 +82,10 @@ Do these before or during setup. Non-technical: create accounts; technical: note
 
 1. **Users** open the website (web).
 2. **Clerk** checks who they are.
-3. **Postgres** stores CRM data (leads, deals, etc.) with per-organization security (RLS).
-4. **Redis** remembers short-lived cache and holds a **job list**.
+3. **Postgres** stores CRM, workspace, email, and AI data with per-organization security (RLS). Embeddings use **pgvector**.
+4. **Redis** remembers short-lived cache, holds a **job list**, and fans out chat/notification events.
 5. The **worker** is a separate program that does slow work (send emails, sync inboxes, imports) so the website stays fast.
-6. A **timer (cron)** on the VPS wakes the app every few minutes: “please queue the next batch of emails / inbox sync.” The worker then does the work.
+6. A **timer (cron)** wakes the app every minute: “please queue the next batch of emails / inbox sync.” The worker then does the work.
 
 You always run **two app programs** (web + worker), not one.
 
@@ -147,99 +146,18 @@ git clone YOUR_REPO_URL .
 
 ## 6. Production Compose file
 
-Your repo’s `docker-compose.yml` is oriented to **local** passwords. On the VPS, create a production overlay (example name: `docker-compose.prod.yml`) in `/opt/nova-crm` with this shape:
+Use the repo file **[`docker-compose.prod.yml`](../docker-compose.prod.yml)** (do not invent a second overlay). It starts postgres, redis, web, worker, cron, and Caddy. Local `docker-compose.yml` is for development passwords only.
 
-```yaml
-# EXAMPLE — change passwords; do not commit real secrets
-services:
-  postgres:
-    image: pgvector/pgvector:pg16
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: nova
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: nova_crm
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U nova -d nova_crm"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-    # no ports: section — keep DB private
+Harden secrets in a root `.env` next to the compose file (never commit real values):
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    command: ["redis-server", "--requirepass", "${REDIS_PASSWORD}", "--appendonly", "yes"]
-    volumes:
-      - redis_data:/data
-    healthcheck:
-      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    restart: unless-stopped
-    env_file: .env.production
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgres://nova_app:${POSTGRES_APP_PASSWORD}@postgres:5432/nova_crm
-      MIGRATE_DATABASE_URL: postgres://nova:${POSTGRES_PASSWORD}@postgres:5432/nova_crm
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    expose:
-      - "3000"
-
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    restart: unless-stopped
-    env_file: .env.production
-    environment:
-      NODE_ENV: production
-      DATABASE_URL: postgres://nova_app:${POSTGRES_APP_PASSWORD}@postgres:5432/nova_crm
-      REDIS_URL: redis://:${REDIS_PASSWORD}@redis:6379
-      WORKER_HEALTH_PORT: "8081"
-      QUEUE_WORKER_V1: "true"
-      QUEUE_IMPORT_CHUNKS_V1: "true"
-      QUEUE_HEAVY_JOBS_V1: "true"
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    expose:
-      - "8081"
-
-  caddy:
-    image: caddy:2-alpine
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - web
-
-volumes:
-  postgres_data:
-  redis_data:
-  caddy_data:
-  caddy_config:
+```bash
+POSTGRES_PASSWORD=...
+POSTGRES_USER=nova
+POSTGRES_DB=nova_crm
+DATABASE_URL=postgres://nova_app:...@postgres:5432/nova_crm
+MIGRATE_DATABASE_URL=postgres://nova:...@postgres:5432/nova_crm
+CRON_SECRET=...
+SITE_DOMAIN=app.yourdomain.com
 ```
 
 **App role password:** Compose init script `docker/postgres/init/01-app-role.sql` creates `nova_app` with a **dev** password. For production you must either:
@@ -249,19 +167,11 @@ volumes:
 
 `DATABASE_URL` must use role **`nova_app`**. Migrations use **`nova`** via `MIGRATE_DATABASE_URL`.
 
-Also put compose secrets in a root `.env` next to the compose file (or export them):
-
-```bash
-POSTGRES_PASSWORD=...
-POSTGRES_APP_PASSWORD=...
-REDIS_PASSWORD=...
-```
-
 ---
 
 ## 7. Caddyfile (HTTPS)
 
-`/opt/nova-crm/Caddyfile`:
+Repo default is [`docker/caddy/Caddyfile`](../docker/caddy/Caddyfile). Set `SITE_DOMAIN` (compose interpolates `{$SITE_DOMAIN:localhost}`). For Let’s Encrypt on a public VPS, use a host-based Caddyfile such as:
 
 ```caddy
 app.yourdomain.com {
@@ -331,7 +241,7 @@ GOOGLE_CALENDAR_CLIENT_SECRET=...
 # NOVA_EXTENSION_IDS=
 ```
 
-Do **not** set Firebase env vars. Postgres + Clerk are always on.
+Postgres + Clerk are always on. Do not add Firebase env vars.
 
 Clerk dashboard: set allowed origins / redirect URLs to `https://app.yourdomain.com`.  
 Google Cloud: enable Calendar API + Gmail scopes; add redirect  
@@ -345,14 +255,11 @@ Google Cloud: enable Calendar API + Gmail scopes; add redirect
 ```bash
 cd /opt/nova-crm
 
-# Build and start
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Apply database migrations first (Dockerfile.migrate)
+docker compose -f docker-compose.prod.yml run --rm migrate
 
-# Apply database migrations (use migrate role)
-docker compose -f docker-compose.prod.yml run --rm \
-  -e DATABASE_URL="postgres://nova:${POSTGRES_PASSWORD}@postgres:5432/nova_crm" \
-  -e MIGRATE_DATABASE_URL="postgres://nova:${POSTGRES_PASSWORD}@postgres:5432/nova_crm" \
-  web npm run db:migrate:deploy
+# Build and start web, worker, cron, Caddy
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
 ```
 
 If `nova_app` password still matches init SQL, align `DATABASE_URL` / `ALTER ROLE` before the app serves traffic.
@@ -361,7 +268,9 @@ Ensure org/member rows exist in Postgres and Clerk user emails match `members.em
 
 ---
 
-## 10. Cron jobs (replaces Cloud Functions timers)
+## 10. Cron jobs
+
+`docker-compose.prod.yml` includes a **cron sidecar** that calls `POST /api/cron/queue/dispatch` every minute (see [`docker/cron/crontab`](../docker/cron/crontab)). That is the default production path. Host crontab below is optional if you are not using the sidecar.
 
 Create `/opt/nova-crm/scripts/cron-dispatch.sh`:
 
@@ -424,9 +333,10 @@ Imports use BullMQ when `QUEUE_IMPORT_CHUNKS_V1` is on (enqueued from the app, n
 | Login | `/sign-in` with Clerk user mapped to a Postgres member | Dashboard loads |
 | CRM | Create/list a lead | Persists |
 | Queue | `docker compose … logs -f worker` after a cron tick | Jobs processed |
-| Mode B email | Connect mailbox in Settings → Email; wait for imap-sync | Inbox updates |
-| Mode B tracking | Send tracked mail; open pixel hits `MAIL_TRACKING_BASE_URL` | Open recorded |
-| Mode B AI | Admin → AI & knowledge | Retrieve / generate works (needs Firebase + keys today) |
+| Chat / notifications | Team chat + bell | Live via SSE |
+| Email | Connect mailbox in Settings → Email; wait for imap-sync | Inbox updates |
+| Tracking | Send tracked mail; open pixel hits `MAIL_TRACKING_BASE_URL` | Open recorded |
+| AI | Admin → AI & knowledge (needs provider keys) | Retrieve / generate works |
 
 ---
 
@@ -465,23 +375,25 @@ Engineering rules: no hand edits on prod for “quick fixes”; deploy the same 
 
 ## 14. Feature map (what needs what)
 
-| Feature | Mode | Needs |
-|---------|------|--------|
-| Clerk login / signup | A/B | Clerk keys |
-| Accounts, contacts, leads, deals | A/B | Postgres flags + sole-writer |
-| Dashboard KPIs | A/B | Summary flags + Redis + dashboard cron |
-| Platform admin | A/B | `PLATFORM_ADMIN_EMAILS` |
-| Prospect imports (queue) | A/B* | Worker + `QUEUE_IMPORT_CHUNKS_V1` (*FS metadata may still apply in mixed mode) |
-| Scheduled / bulk email | **B** | Firebase residual + worker + scheduled-email cron + mailbox SMTP |
-| IMAP inbox sync | **B** | Firebase + worker + imap-sync cron |
-| Open / click rates | **B** | `MAIL_TRACKING_*` + HTTPS |
-| Email verifier (MillionVerifier) | **B** | Org connection / API; outbound HTTPS |
-| Instantly campaigns | **B** | Org Instantly secret + webhook |
-| Scrapers | **B** | Firebase intake + scrapers cron + worker |
-| Team chat / notifications | **B** | Firebase |
-| AI / RAG knowledge | **B** | `pgvector` (`ai_document_embeddings`) + AI keys |
-| Google/Microsoft calendar | **B** | OAuth clients + FS calendar connections |
-| System invites email | A/B | Resend or `SYSTEM_SMTP_*` |
+All features store data in **Postgres**. Extra keys only enable the integration.
+
+| Feature | Needs |
+|---------|--------|
+| Clerk login / signup | Clerk keys |
+| Accounts, contacts, leads, deals | Postgres + `POST /api/org/crm-write` |
+| Dashboard KPIs | Redis + dashboard cron |
+| Platform admin | `PLATFORM_ADMIN_EMAILS` |
+| Team chat / notifications | Redis + SSE `/api/realtime/stream` |
+| Prospect imports (queue) | Worker + `QUEUE_IMPORT_CHUNKS_V1` |
+| Scheduled / bulk email | Worker + scheduled-email cron + mailbox SMTP |
+| IMAP inbox sync | Worker + imap-sync cron |
+| Open / click rates | `MAIL_TRACKING_*` + HTTPS |
+| Email verifier (MillionVerifier) | Org connection / API; outbound HTTPS |
+| Instantly campaigns | Org Instantly secret + webhook |
+| Scrapers | Scrapers cron + worker |
+| AI / RAG knowledge | `pgvector` (`ai_document_embeddings`) + AI keys |
+| Google/Microsoft calendar | OAuth clients |
+| System invites email | Resend or `SYSTEM_SMTP_*` |
 
 ---
 
@@ -493,7 +405,7 @@ Engineering rules: no hand edits on prod for “quick fixes”; deploy the same 
 | 401 on cron | Wrong/missing `CRON_SECRET` | Match `.cron.env` and `.env.production` |
 | Jobs never run | Worker down or queue flags off | Start worker; set all three `QUEUE_*_V1` |
 | Login but empty workspace | No Postgres member for Clerk email | Insert/sync member; match email / externalId |
-| Email features 503 / empty | Firebase disabled | Use Mode B or finish email migration |
+| Email features empty | Missing mailbox secrets / worker / cron | Connect mailbox; confirm worker + cron |
 | DB connection errors | Wrong role/password | App = `nova_app`; migrate = `nova` |
 | Redis auth errors | Password mismatch | Align `REDIS_URL` and Redis `requirepass` |
 | Outbound mail fails | Provider blocks VPS IP | Use reputable SMTP/ESP; check blacklists |
@@ -526,7 +438,7 @@ See [NOVA-CRM-P4-QUEUE-WORKER.md](../Architecture%20fixes%20plan/NOVA-CRM-P4-QUE
 | `nova-dashboard-summary` | KPI drain |
 | `nova-hello` | Smoke test |
 
-AI/RAG is **not** on BullMQ yet (request/response on web). Embeddings live in Postgres `ai_document_embeddings` (`pgvector`).
+AI/RAG embeddings live in Postgres `ai_document_embeddings` (`pgvector`). Generate/retrieve currently runs on the web tier.
 
 ---
 
@@ -546,14 +458,14 @@ AI/RAG is **not** on BullMQ yet (request/response on web). Embeddings live in Po
 
 | Doc | Why |
 |-----|-----|
-| [README.md](../README.md) | Local quick start, Firebase-free matrix |
+| [README.md](../README.md) | Local quick start and architecture |
 | [ENVIRONMENTS.md](ENVIRONMENTS.md) | Local / staging / prod separation |
 | [NOVA-CRM-ENGINEERING-RULES.md](../Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md) | Binding architecture |
 | [NOVA-CRM-P4-QUEUE-WORKER.md](../Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md) | Queue details |
 | [NOVA-CRM-P5-AUTH-CLERK.md](../Architecture%20fixes%20plan/NOVA-CRM-P5-AUTH-CLERK.md) | Clerk |
-| [NOVA-CRM-P6-DECOMMISSION-FIREBASE.md](../Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md) | CRM Postgres cutover |
+| [NOVA-CRM-P6-DECOMMISSION-FIREBASE.md](../Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md) | Historical CRM Postgres cutover (Phase 7 complete) |
 | [`.env.example`](../.env.example) | Full variable reference |
 
 ---
 
-*Document version: 2026-08-15. Update when deployables, flags, or Firebase residual list change.*
+*Document version: 2026-08-19. Stack: Clerk + Postgres + Redis + web + worker. No Firebase.*

@@ -10,11 +10,11 @@ import {
   where,
   type QueryConstraint,
   type Unsubscribe,
-} from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { normalizeFeatureGrants } from "@/lib/admin-feature-access";
 import type { OpportunitySourceType } from "@/lib/ai/opportunity-fit-types";
 import type {
@@ -140,7 +140,7 @@ function asUser(id: string, raw: Record<string, unknown>): User {
     orgRole: raw.orgRole as User["orgRole"],
     featureGrants: normalizeFeatureGrants(raw.featureGrants),
     status: (raw.status as User["status"]) ?? "active",
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
   };
 }
 
@@ -153,8 +153,8 @@ function asAccount(id: string, raw: Record<string, unknown>): Account {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }
 
@@ -163,9 +163,9 @@ function asContact(id: string, raw: Record<string, unknown>): Contact {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
-    emailBouncedAt: raw.emailBouncedAt ? firestoreValueToIso(raw.emailBouncedAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
+    emailBouncedAt: raw.emailBouncedAt ? documentTimestampToIso(raw.emailBouncedAt) : undefined,
   };
 }
 
@@ -174,14 +174,14 @@ function asDeal(id: string, raw: Record<string, unknown>): Deal {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
     expectedCloseDate:
       typeof raw.expectedCloseDate === "string"
         ? raw.expectedCloseDate
-        : firestoreValueToIso(raw.expectedCloseDate),
-    wonAt: raw.wonAt ? firestoreValueToIso(raw.wonAt) : undefined,
-    lostAt: raw.lostAt ? firestoreValueToIso(raw.lostAt) : undefined,
+        : documentTimestampToIso(raw.expectedCloseDate),
+    wonAt: raw.wonAt ? documentTimestampToIso(raw.wonAt) : undefined,
+    lostAt: raw.lostAt ? documentTimestampToIso(raw.lostAt) : undefined,
   };
 }
 
@@ -197,8 +197,8 @@ function asCrmLabel(id: string, raw: Record<string, unknown>): CrmLabel {
     organizationId: String(raw.organizationId ?? ""),
     name: String(raw.name ?? ""),
     color: optionalNonEmptyString(raw.color),
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }
 
@@ -248,8 +248,8 @@ function asCampaign(id: string, raw: Record<string, unknown>): Campaign {
     status: (raw.status as Campaign["status"]) ?? "draft",
     externalRef: optionalNonEmptyString(raw.externalRef),
     instantlyId: optionalNonEmptyString(raw.instantlyId),
-    startedAt: raw.startedAt ? firestoreValueToIso(raw.startedAt) : undefined,
-    lastSyncedAt: raw.lastSyncedAt ? firestoreValueToIso(raw.lastSyncedAt) : undefined,
+    startedAt: raw.startedAt ? documentTimestampToIso(raw.startedAt) : undefined,
+    lastSyncedAt: raw.lastSyncedAt ? documentTimestampToIso(raw.lastSyncedAt) : undefined,
     sequenceSummary:
       raw.sequenceSummary && typeof raw.sequenceSummary === "object"
         ? (raw.sequenceSummary as Campaign["sequenceSummary"])
@@ -267,7 +267,7 @@ function asNote(id: string, raw: Record<string, unknown>): Note {
     dealId: optionalNonEmptyString(raw.dealId),
     authorId: String(raw.authorId ?? ""),
     body: String(raw.body ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
     pinned: Boolean(raw.pinned),
   };
 }
@@ -282,8 +282,8 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     contactId: optionalNonEmptyString(raw.contactId),
     title: String(raw.title ?? ""),
     description: typeof raw.description === "string" ? raw.description : undefined,
-    dueAt: firestoreValueToIso(raw.dueAt),
-    completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
+    dueAt: documentTimestampToIso(raw.dueAt),
+    completedAt: raw.completedAt ? documentTimestampToIso(raw.completedAt) : undefined,
     ownerId: String(raw.ownerId ?? ""),
     priority: (raw.priority as Followup["priority"]) ?? "medium",
     auto: Boolean(raw.auto),
@@ -294,13 +294,13 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
     channel: typeof raw.channel === "string" ? (raw.channel as Followup["channel"]) : undefined,
     planId: typeof raw.planId === "string" ? raw.planId : undefined,
     aiGenerated: Boolean(raw.aiGenerated),
-    pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
+    pausedAt: raw.pausedAt ? documentTimestampToIso(raw.pausedAt) : undefined,
     scheduledEmailId:
       typeof raw.scheduledEmailId === "string" && raw.scheduledEmailId.trim()
         ? raw.scheduledEmailId.trim()
         : undefined,
     emailScheduledAt: raw.emailScheduledAt
-      ? firestoreValueToIso(raw.emailScheduledAt)
+      ? documentTimestampToIso(raw.emailScheduledAt)
       : undefined,
     mailboxId:
       typeof raw.mailboxId === "string" && raw.mailboxId.trim()
@@ -326,21 +326,21 @@ function asFollowup(id: string, raw: Record<string, unknown>): Followup {
       raw.deliveryStatus === "needs_retry"
         ? raw.deliveryStatus
         : undefined,
-    sentAt: raw.sentAt ? firestoreValueToIso(raw.sentAt) : undefined,
+    sentAt: raw.sentAt ? documentTimestampToIso(raw.sentAt) : undefined,
     sentMessageId:
       typeof raw.sentMessageId === "string" && raw.sentMessageId.trim()
         ? raw.sentMessageId.trim()
         : undefined,
     freshThread: raw.freshThread === true ? true : undefined,
-    failedAt: raw.failedAt ? firestoreValueToIso(raw.failedAt) : undefined,
-    cancelledAt: raw.cancelledAt ? firestoreValueToIso(raw.cancelledAt) : undefined,
+    failedAt: raw.failedAt ? documentTimestampToIso(raw.failedAt) : undefined,
+    cancelledAt: raw.cancelledAt ? documentTimestampToIso(raw.cancelledAt) : undefined,
     deliveryError: typeof raw.deliveryError === "string" ? raw.deliveryError : undefined,
     cancelReason: typeof raw.cancelReason === "string" ? raw.cancelReason : undefined,
     deliveryAttempts:
       Number.isFinite(Number(raw.deliveryAttempts)) && Number(raw.deliveryAttempts) > 0
         ? Math.floor(Number(raw.deliveryAttempts))
         : undefined,
-    nextRetryAt: raw.nextRetryAt ? firestoreValueToIso(raw.nextRetryAt) : undefined,
+    nextRetryAt: raw.nextRetryAt ? documentTimestampToIso(raw.nextRetryAt) : undefined,
   };
 }
 
@@ -365,7 +365,7 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
     ownerId: String(raw.ownerId ?? ""),
     status: (raw.status as FollowupPlan["status"]) ?? "active",
     planSummary: String(raw.planSummary ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
     kind: raw.kind === "sequence" ? "sequence" : undefined,
     sequenceMode:
       raw.sequenceMode === "full" || raw.sequenceMode === "continue"
@@ -378,13 +378,13 @@ function asFollowupPlan(id: string, raw: Record<string, unknown>): FollowupPlan 
       raw.channelMix === "multi_channel"
         ? raw.channelMix
         : undefined,
-    pausedAt: raw.pausedAt ? firestoreValueToIso(raw.pausedAt) : undefined,
+    pausedAt: raw.pausedAt ? documentTimestampToIso(raw.pausedAt) : undefined,
     pausedReason: typeof raw.pausedReason === "string" ? raw.pausedReason : undefined,
     replyMessageId: typeof raw.replyMessageId === "string" ? raw.replyMessageId : undefined,
     supersededByPlanId:
       typeof raw.supersededByPlanId === "string" ? raw.supersededByPlanId : undefined,
     threadAnchor: asFollowupPlanThreadAnchor(raw.threadAnchor),
-    completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
+    completedAt: raw.completedAt ? documentTimestampToIso(raw.completedAt) : undefined,
     sourceScriptId:
       typeof raw.sourceScriptId === "string" && raw.sourceScriptId.trim()
         ? raw.sourceScriptId.trim()
@@ -402,9 +402,9 @@ function asLeadTask(id: string, raw: Record<string, unknown>): LeadTask {
     visibility: (raw.visibility as LeadTask["visibility"]) ?? "on_lead",
     assigneeId: String(raw.assigneeId ?? ""),
     createdById: String(raw.createdById ?? ""),
-    dueAt: raw.dueAt ? firestoreValueToIso(raw.dueAt) : undefined,
-    completedAt: raw.completedAt ? firestoreValueToIso(raw.completedAt) : undefined,
-    createdAt: firestoreValueToIso(raw.createdAt),
+    dueAt: raw.dueAt ? documentTimestampToIso(raw.dueAt) : undefined,
+    completedAt: raw.completedAt ? documentTimestampToIso(raw.completedAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
     contextCompany: optionalNonEmptyString(raw.contextCompany),
     contextContact: optionalNonEmptyString(raw.contextContact),
     source:
@@ -421,7 +421,7 @@ function asTouchpoint(id: string, raw: Record<string, unknown>): Touchpoint {
     channel: raw.channel as Touchpoint["channel"],
     state: String(raw.state ?? ""),
     stepNumber: typeof raw.stepNumber === "number" ? raw.stepNumber : undefined,
-    occurredAt: firestoreValueToIso(raw.occurredAt),
+    occurredAt: documentTimestampToIso(raw.occurredAt),
     actorId: typeof raw.actorId === "string" ? raw.actorId : undefined,
     summary: typeof raw.summary === "string" ? raw.summary : undefined,
     payload:
@@ -443,7 +443,7 @@ function asTimelineEvent(id: string, raw: Record<string, unknown>): TimelineEven
       raw.payload && typeof raw.payload === "object" && !Array.isArray(raw.payload)
         ? (raw.payload as Record<string, unknown>)
         : undefined,
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
   };
 }
 
@@ -456,7 +456,7 @@ function asActivityRecord(id: string, raw: Record<string, unknown>): ActivityRec
     profileId: optionalNonEmptyString(raw.profileId),
     leadId: optionalNonEmptyString(raw.leadId),
     type: String(raw.type ?? "activity"),
-    occurredAt: firestoreValueToIso(raw.occurredAt),
+    occurredAt: documentTimestampToIso(raw.occurredAt),
     summary: typeof raw.summary === "string" ? raw.summary : undefined,
     metadata:
       metadataRaw && typeof metadataRaw === "object" && !Array.isArray(metadataRaw)
@@ -472,7 +472,7 @@ function asOrgActivityEvent(id: string, raw: Record<string, unknown>): OrgActivi
     type: raw.type as OrgActivityEvent["type"],
     actorId: String(raw.actorId ?? ""),
     summary: String(raw.summary ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
     href: typeof raw.href === "string" ? raw.href : undefined,
     entityType: typeof raw.entityType === "string" ? raw.entityType : undefined,
     entityId: typeof raw.entityId === "string" ? raw.entityId : undefined,
@@ -527,7 +527,7 @@ export function useLiveWorkspaceFirestore(
     sessionRef.current = null;
     listenerErrorsRef.current.clear();
 
-    if (!isFirebaseWebConfigured()) {
+    if (!isClientDocumentSyncEnabled()) {
       const pgLeads = isPostgresReadLeadsV1Enabled();
       const pgCrm = isPostgresReadCrmV1Enabled();
       if (!organizationId || (!pgLeads && !pgCrm)) {
@@ -674,9 +674,9 @@ export function useLiveWorkspaceFirestore(
       return;
     }
 
-    let db: ReturnType<typeof getFirebaseDb>;
+    let db: ReturnType<typeof getClientDb>;
     try {
-      db = getFirebaseDb();
+      db = getClientDb();
     } catch (e) {
       setState({
         loading: false,

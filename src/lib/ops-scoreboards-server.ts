@@ -3,8 +3,8 @@
  * Reuses pure builders; does not put large row payloads into orgDashboardSummaries.
  */
 
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   DEFAULT_CACHE_TTL_SECONDS,
   cacheGetJson,
@@ -55,7 +55,7 @@ async function loadOrgOutreachThreshold(organizationId: string): Promise<number>
 export async function getOpsScoreboardsServer(
   organizationId: string,
   range: DashboardTimeRangeKey,
-): Promise<{ payload: OpsScoreboardsPayload; source: "redis" | "firestore" } | null> {
+): Promise<{ payload: OpsScoreboardsPayload; source: "redis" | "documents" } | null> {
   const orgId = organizationId.trim();
   if (!orgId || !isOpsScoreboardsRange(range)) return null;
 
@@ -161,5 +161,5 @@ export async function getOpsScoreboardsServer(
     }
   }
 
-  return { payload, source: "firestore" };
+  return { payload, source: "documents" };
 }

@@ -2,10 +2,10 @@ import {
   FieldValue,
   type Query,
   type QueryDocumentSnapshot,
-} from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+} from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import {
   messageFromUnknown,
   parseErrorStack,

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { ProspectImportJob } from "@/lib/imports/prospect-import-types";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 
@@ -10,7 +10,7 @@ export async function GET() {
   const guard = await guardAdminFeature("import");
   if (!guard.ok) return guard.response;
   const db = getAdminDb();
-  if (!db) return NextResponse.json({ error: "Firebase Admin is not configured." }, { status: 503 });
+  if (!db) return NextResponse.json({ error: "Document store is not configured (DATABASE_URL missing)." }, { status: 503 });
 
   let docs;
   try {

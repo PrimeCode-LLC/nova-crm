@@ -6,7 +6,7 @@ import {
   sanitizeOrganizationForApi,
   updateOrganizationServer,
 } from "@/lib/platform/organizations-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import { isValidIanaTimezone } from "@/lib/org-timezone";
 import {
   DEFAULT_ORG_SEND_POLICY,

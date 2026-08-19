@@ -1,6 +1,6 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { normalizeKeywordList } from "@/lib/intake/keyword-filter";
 import {
   EMPTY_INTAKE_FILTER_DEFAULTS,

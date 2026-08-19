@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import type { DocumentData } from "firebase-admin/firestore";
+import type { DocumentData } from "@/lib/db/document-shim/shim-firestore";
 import type { AdminFeatureKey } from "@/lib/admin-features";
 import { userHasAdminFeature } from "@/lib/admin-feature-access";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { roleAtLeast } from "@/lib/platform/org-role";
@@ -85,7 +85,7 @@ export async function guardInstantlyApi(opts?: {
       return {
         ok: false,
         response: NextResponse.json(
-          { error: "Firebase Admin is not configured on this server." },
+          { error: "Document store is not configured (DATABASE_URL missing)." },
           { status: 503 },
         ),
       };

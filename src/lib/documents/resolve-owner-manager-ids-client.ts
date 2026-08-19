@@ -1,5 +1,5 @@
-import { doc, getDoc, type Firestore } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { doc, getDoc, type Firestore } from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { ownerManagerIdsFromUser } from "@/lib/crm-owner-managers";
 import type { User } from "@/lib/types";
 

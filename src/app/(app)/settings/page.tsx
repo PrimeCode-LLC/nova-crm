@@ -51,8 +51,8 @@ import { WallDisplaySettingsCard } from "@/components/settings/wall-display-sett
 import { InstantlyIntegrationCard } from "@/components/integrations/instantly-integration-card";
 import { MillionVerifierIntegrationCard } from "@/components/integrations/millionverifier-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
-import { formatFirebaseAuthError } from "@/lib/firebase/auth-errors";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { formatAuthError } from "@/lib/db/document-access/auth-errors";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import {
   DEFAULT_USER_NOTIFICATION_SETTINGS,
@@ -366,7 +366,7 @@ function SettingsPage() {
       toast.error("No email address on this account.");
       return;
     }
-    if (!isFirebaseWebConfigured()) {
+    if (!isClientDocumentSyncEnabled()) {
       toast.error("Firebase is not configured.");
       return;
     }

@@ -1,7 +1,7 @@
-import { doc, setDoc } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { doc, setDoc } from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import type { OrgActivityEvent } from "@/lib/types";
 
 export async function persistOrgActivityEventCreate(

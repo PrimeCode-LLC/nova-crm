@@ -3,7 +3,7 @@ import {
   guardExtensionApi,
   revokeExtensionSession,
 } from "@/lib/extension/auth-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 export function OPTIONS(req: Request) {
   return extensionOptionsResponse(req);

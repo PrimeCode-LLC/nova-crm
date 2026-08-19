@@ -1,7 +1,7 @@
-import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { FieldValue, Timestamp, type DocumentData } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { listOrgUsersServer } from "@/lib/platform/hierarchy-access-server";
 import { resolveCalendarHostAccessServer } from "@/lib/scheduling/calendar-delegation-server";
 import { insertGoogleEventsForHostsServer } from "@/lib/scheduling/google-calendar-events-server";

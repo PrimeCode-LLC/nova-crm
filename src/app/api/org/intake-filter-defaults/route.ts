@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import {
   getOrganizationIntakeFilterDefaultsServer,
   updateOrganizationIntakeFilterDefaultsServer,

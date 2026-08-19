@@ -25,12 +25,12 @@ import {
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { persistLeadGraphClient } from "@/lib/firestore/persist-lead-graph-client";
-import { persistLeadPatchClient } from "@/lib/firestore/persist-lead-patch-client";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { doc, getDoc } from "firebase/firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { persistLeadGraphClient } from "@/lib/documents/persist-lead-graph-client";
+import { persistLeadPatchClient } from "@/lib/documents/persist-lead-patch-client";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { doc, getDoc } from "@/lib/db/document-shim/shim-client-firestore";
 import { findContactByEmail } from "@/lib/crm-dedupe";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { channelLabelFromValue } from "@/lib/channel-options";
@@ -696,8 +696,8 @@ export function NewProspectDialog({
 
     setSubmitting(true);
     try {
-      if (!isDemo && liveUserDoc?.organizationId && isFirebaseWebConfigured()) {
-        const db = getFirebaseDb();
+      if (!isDemo && liveUserDoc?.organizationId && isClientDocumentSyncEnabled()) {
+        const db = getClientDb();
         await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
         const saved = await getDoc(doc(db, COLLECTIONS.leads, leadId));
         if (saved.exists()) {

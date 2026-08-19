@@ -5,8 +5,8 @@ import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   OPPORTUNITY_SOURCE_TYPES,
   normalizeOpportunityFitResult,
@@ -16,11 +16,11 @@ import { createOpportunityScanServer } from "@/lib/ai/opportunity-fit-server";
 import {
   getProfileServer,
   listFitCheckProfileOptionsServer,
-} from "@/lib/firestore/profile-server";
+} from "@/lib/documents/profile-server";
 import { profileDisplayLabel } from "@/lib/ai/profile-fit-check";
 import { demoOpportunityFitResult } from "@/lib/ai/demo-opportunity-fit";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import type { Role } from "@/lib/types";
 
 const bodySchema = z.object({

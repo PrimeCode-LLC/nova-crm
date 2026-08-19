@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { indexAiDocumentServer } from "@/lib/ai/rag-indexer";
 import {
   ensureContentBrandLibraryServer,

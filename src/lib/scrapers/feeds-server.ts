@@ -1,6 +1,6 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
 import type { ScraperCategory, ScraperFeed, ScraperPlatform } from "@/lib/types";
 import { DEFAULT_SCRAPER_FEEDS } from "@/lib/scrapers/default-feeds";
 import { mapScraperFeed } from "@/lib/scrapers/map-documents";

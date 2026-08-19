@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { indexAiDocumentServer } from "@/lib/ai/rag-indexer";
 import { deleteAiDocumentServer } from "@/lib/ai/delete-ai-document-server";
 import { KNOWLEDGE_SECTIONS } from "@/lib/ai/fit-check-knowledge-types";

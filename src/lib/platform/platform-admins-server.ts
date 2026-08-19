@@ -1,11 +1,11 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import {
   resolveNovaUidByEmailServer,
   syncClerkNovaClaims,
 } from "@/lib/auth/clerk-identity";
 import { parseBootstrapPlatformAdminEmails } from "@/lib/platform/check-platform-admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { ISODate, PlatformAdminRecord, PlatformAdminRole } from "@/lib/types";
 
 function tsToIso(v: { toDate?: () => Date } | undefined): ISODate {

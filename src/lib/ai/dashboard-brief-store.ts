@@ -1,6 +1,6 @@
-import type { Firestore } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import type { Firestore } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import {
   DASHBOARD_BRIEF_CACHE_TTL_MS,
   DASHBOARD_BRIEF_HISTORY_MAX,

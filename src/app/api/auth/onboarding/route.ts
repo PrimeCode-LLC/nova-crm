@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminAuth, getAdminDb } from "@/lib/db/document-access/admin";
 import { auth } from "@clerk/nextjs/server";
 import { getVerifiedSession } from "@/lib/auth/server";
 import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
@@ -22,7 +22,7 @@ export async function POST(req: Request) {
   const db = getAdminDb();
   if (!adminAuth || !db) {
     return NextResponse.json(
-      { error: "Firebase Admin is not configured." },
+      { error: "Document store is not configured (DATABASE_URL missing)." },
       { status: 503 },
     );
   }

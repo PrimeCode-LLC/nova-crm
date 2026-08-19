@@ -18,7 +18,7 @@ import {
   FormMessage,
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { isAuthDisabled } from "@/lib/auth/flags";
 
 const schema = z.object({
@@ -42,7 +42,7 @@ export default function ForgotPasswordPage() {
       toast.success("Reset link sent. Check your inbox (auth disabled mode)");
       return;
     }
-    if (!isFirebaseWebConfigured()) {
+    if (!isClientDocumentSyncEnabled()) {
       toast.error("Firebase is not configured.");
       return;
     }

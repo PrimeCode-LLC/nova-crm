@@ -1,6 +1,6 @@
 /** firebase-admin/auth shim — auth handled by Clerk; stubs for legacy call sites. */
 
-import type { App } from "@/lib/db/pg-firestore/shim-app";
+import type { App } from "@/lib/db/document-shim/shim-app";
 
 export type DecodedIdToken = {
   uid: string;

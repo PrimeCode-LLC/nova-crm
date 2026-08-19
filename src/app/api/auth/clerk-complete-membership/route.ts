@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { auth, currentUser } from "@clerk/nextjs/server";
-import { getAdminAuth, getAdminDb } from "@/lib/firebase/admin";
+import { getAdminAuth, getAdminDb } from "@/lib/db/document-access/admin";
 import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
 import { resolveClerkIdentity, syncClerkNovaClaims } from "@/lib/auth/clerk-identity";
 import { setAppClaims } from "@/lib/auth/claims";
@@ -18,7 +18,7 @@ import {
   markInviteAcceptedServer,
 } from "@/lib/platform/invites-server";
 import { verifyOpenJoinTokenServer } from "@/lib/platform/open-join-server";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { provisionCrmProfileServer } from "@/lib/platform/crm-profile-provision";
 
 const bodySchema = z.object({
@@ -68,7 +68,7 @@ export async function POST(req: Request) {
   const adminAuth = getAdminAuth();
   const db = getAdminDb();
   if (!adminAuth || !db) {
-    return NextResponse.json({ error: "Firebase Admin is not configured." }, { status: 503 });
+    return NextResponse.json({ error: "Document store is not configured (DATABASE_URL missing)." }, { status: 503 });
   }
 
   let organizationId: string | undefined;

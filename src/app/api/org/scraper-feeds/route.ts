@@ -23,7 +23,7 @@ import {
   runOrgScrapersViaWorkerStream,
   scrapersWorkerEnabled,
 } from "@/lib/scrapers/scrapers-worker-client";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 export const maxDuration = 300;
 

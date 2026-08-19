@@ -1,13 +1,12 @@
 /**
- * P6.3 — Archive Firestore CRM collections to local JSONL.
+ * P6.3 — Archive pg_documents CRM collections to local JSONL.
  *
- *   npm run db:export:firestore-crm -- --dry-run
- *   npm run db:export:firestore-crm -- --org=ORG_ID
- *   npm run db:export:firestore-crm -- --full
- *   npm run db:export:firestore-crm -- --out=archives/my-export
+ *   npm run db:export:pg-documents -- --dry-run
+ *   npm run db:export:pg-documents -- --org=ORG_ID
+ *   npm run db:export:pg-documents -- --full
+ *   npm run db:export:pg-documents -- --out=archives/my-export
  *
- * Requires FIREBASE_ADMIN_* in .env.local. Output lands under archives/ (gitignored).
- * For production-scale managed exports, also see companion P6.3 (gcloud firestore export).
+ * Requires DATABASE_URL in .env.local. Output lands under archives/ (gitignored).
  */
 
 import { config as loadEnv } from "dotenv";
@@ -16,7 +15,7 @@ import path from "node:path";
 loadEnv();
 loadEnv({ path: ".env.local", override: true });
 
-import { runFirestoreCrmArchive } from "../src/lib/db/export-firestore-crm-archive";
+import { runPgDocumentsArchive } from "../src/lib/db/export-pg-documents-archive";
 
 function parseArgs(argv: string[]) {
   const orgArg = argv.find((a) => a.startsWith("--org="));
@@ -28,63 +27,39 @@ function parseArgs(argv: string[]) {
   const limitRaw = limitArg ? Number(limitArg.slice("--limit=".length)) : undefined;
   const limitPerCollection =
     limitRaw != null && Number.isFinite(limitRaw) && limitRaw > 0
-      ? Math.floor(limitRaw)
+      ? limitRaw
       : undefined;
-
-  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-  const defaultOut = path.join("archives", `firestore-crm-${stamp}`);
-  const outDir = path.resolve(outArg ? outArg.slice("--out=".length).trim() : defaultOut);
-
-  return { organizationId, outDir, dryRun, full, limitPerCollection };
+  const outDir = outArg ? outArg.slice("--out=".length).trim() : undefined;
+  return { dryRun, full, organizationId, limitPerCollection, outDir };
 }
 
 async function main() {
   const opts = parseArgs(process.argv.slice(2));
-  console.log("P6.3 Firestore CRM archive", {
-    outDir: opts.outDir,
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const defaultOut = path.join("archives", `pg-documents-${stamp}`);
+  const outDir = opts.outDir ?? defaultOut;
+
+  console.log("Pg documents archive", {
+    outDir,
     dryRun: opts.dryRun,
     full: opts.full,
-    organizationId: opts.organizationId ?? null,
-    limitPerCollection: opts.limitPerCollection ?? null,
+    organizationId: opts.organizationId ?? "(all)",
+    limitPerCollection: opts.limitPerCollection ?? "(none)",
   });
 
-  const result = await runFirestoreCrmArchive({
-    ...opts,
-    onProgress: (m) => console.log(m),
+  const result = await runPgDocumentsArchive({
+    outDir,
+    organizationId: opts.organizationId,
+    full: opts.full,
+    dryRun: opts.dryRun,
+    limitPerCollection: opts.limitPerCollection,
+    onProgress: (msg) => console.log(msg),
   });
 
-  console.log(
-    JSON.stringify(
-      {
-        outDir: result.outDir,
-        dryRun: result.dryRun,
-        full: result.full,
-        totalDocs: result.totalDocs,
-        errors: result.errors,
-        collections: result.collections.map((c) => ({
-          collection: c.collection,
-          docs: c.docs,
-          bytes: c.bytes,
-        })),
-      },
-      null,
-      2,
-    ),
-  );
-
-  if (result.errors.length > 0) {
-    console.error("Archive completed with errors.");
-    process.exitCode = 1;
-  } else {
-    console.log(
-      opts.dryRun
-        ? "Dry run complete (no files written)."
-        : `Archive written to ${result.outDir}`,
-    );
-  }
+  console.log("Done.", result);
 }
 
 main().catch((err) => {
   console.error(err);
-  process.exitCode = 1;
+  process.exit(1);
 });

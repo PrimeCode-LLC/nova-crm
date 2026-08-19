@@ -1,10 +1,10 @@
-import { writeBatch, doc, setDoc } from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
+import { writeBatch, doc, setDoc } from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
 import { persistCrmWriteClient } from "@/lib/db/crm-write-client";
 import { scheduleCrmMirrorClient } from "@/lib/db/crm-mirror-client";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/documents/resolve-owner-manager-ids-client";
 import type { Account, Contact, Lead } from "@/lib/types";
 
 function stripUndefined<T extends Record<string, unknown>>(obj: T): Record<string, unknown> {

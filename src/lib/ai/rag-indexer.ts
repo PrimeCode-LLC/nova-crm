@@ -1,8 +1,8 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { embedMany } from "ai";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { getAiProviderKeyServer } from "@/lib/ai/ai-secrets-server";
 import { getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { recordAiUsage } from "@/lib/ai/usage-logger";

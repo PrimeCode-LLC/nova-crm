@@ -7,10 +7,10 @@ import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
-import { listFitCheckProfileOptionsServer } from "@/lib/firestore/profile-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { recordAudit } from "@/lib/firestore/audit";
+import { listFitCheckProfileOptionsServer } from "@/lib/documents/profile-server";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { recordAudit } from "@/lib/documents/audit";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { demoIntentRadarEvaluateResult } from "@/lib/ai/demo-intent-radar-evaluate";
 import {

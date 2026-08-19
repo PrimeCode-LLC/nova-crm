@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { emptyOrgDashboardSummary } from "@/lib/dashboard-summary";
 import { getOrgDashboardSummaryServer } from "@/lib/dashboard-summary-server";
 
-vi.mock("@/lib/firebase/admin", () => ({ getAdminDb: vi.fn() }));
+vi.mock("@/lib/db/document-access/admin", () => ({ getAdminDb: vi.fn() }));
 vi.mock("@/lib/cache/redis", () => ({
   DEFAULT_CACHE_TTL_SECONDS: 60,
   isRedisConfigured: () => false,
@@ -49,7 +49,7 @@ describe("getOrgDashboardSummaryServer", () => {
     summary.openSalesLeads = 9;
     db.rows.set(`${COLLECTIONS.orgDashboardSummaries}/org_1`, summary);
     const result = await getOrgDashboardSummaryServer("org_1");
-    expect(result?.source).toBe("firestore");
+    expect(result?.source).toBe("documents");
     expect(result?.summary.openSalesLeads).toBe(9);
   });
 });

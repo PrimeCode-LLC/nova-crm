@@ -1,6 +1,6 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate } from "@/lib/documents/tenant-write";
 import type { OrgActivityEventType } from "@/lib/types";
 
 function newOrgActivityId(): string {

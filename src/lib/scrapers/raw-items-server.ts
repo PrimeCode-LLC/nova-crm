@@ -1,7 +1,7 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
 import type { ScraperRawItem, ScraperRawItemStatus } from "@/lib/types";
 import { RAW_ITEM_RETENTION_DAYS } from "@/lib/scrapers/default-feeds";
 import { mapScraperRawItem } from "@/lib/scrapers/map-documents";

@@ -13,7 +13,7 @@ import type {
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withOrganizationScope } from "@/lib/db/tenant-scope";
 import { leadFromPostgresRow } from "@/lib/db/list-leads-postgres";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import type { Account, Contact, Deal, Lead, PipelineStage } from "@/lib/types";
 
 /** Default page size for workspace polls / API. */
@@ -95,7 +95,7 @@ function clampPageSize(limit: number | undefined): number {
 
 function optionalIso(value: unknown): string | undefined {
   if (value == null || value === "") return undefined;
-  return firestoreValueToIso(value);
+  return documentTimestampToIso(value);
 }
 
 function cursorWhere(

@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { MailInbound } from "@/lib/email-account-types";
 
 const INBOX_SYNC_COLLECTION = "inboxSync";

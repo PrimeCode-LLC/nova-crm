@@ -3,7 +3,7 @@ import {
   deleteDocument,
   setDocument,
   updateDocument,
-} from "@/lib/db/pg-firestore/store";
+} from "@/lib/db/document-shim/store";
 import { requireTenantSession } from "@/lib/auth/server";
 
 export async function GET(req: Request) {
@@ -14,7 +14,7 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "collection required" }, { status: 400 });
   }
 
-  const { queryDocuments } = await import("@/lib/db/pg-firestore/store");
+  const { queryDocuments } = await import("@/lib/db/document-shim/store");
   const collectionRoot = collection.split("/")[0] ?? collection;
   const docs = await queryDocuments({
     collectionRoot,

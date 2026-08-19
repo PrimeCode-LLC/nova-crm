@@ -1,13 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { collection, getDocs, query, where } from "@/lib/db/document-shim/shim-client-firestore";
 import { toast } from "sonner";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { getFirebaseAuth, getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getClientAuth, getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import {
   mapContentBrand,
@@ -44,7 +44,7 @@ import {
   persistContentItemUpdate,
   persistContentPlanCreate,
   persistContentPlanUpdate,
-} from "@/lib/firestore/persist-content-calendar-client";
+} from "@/lib/documents/persist-content-calendar-client";
 
 function newId(prefix: string) {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
@@ -91,7 +91,7 @@ export function useContentCalendarData() {
         return;
       }
 
-      if (!organizationId || !isFirebaseWebConfigured()) {
+      if (!organizationId || !isClientDocumentSyncEnabled()) {
         if (!cancelled) {
           setBrands([]);
           setItems([]);
@@ -102,13 +102,13 @@ export function useContentCalendarData() {
         return;
       }
 
-      const auth = getFirebaseAuth();
+      const auth = getClientAuth();
       if (!auth.currentUser) {
         if (!cancelled) setLoading(false);
         return;
       }
 
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) {
         if (!cancelled) setLoading(false);
         return;
@@ -241,7 +241,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - brand saved locally only");
         return brand;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
 
       const defaults = buildBrandDefaultsFromPack({
@@ -315,7 +315,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - not persisted");
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentBrandUpdate(db, brandId, { ...patch, updatedAt });
       setBrands((prev) =>
@@ -333,7 +333,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - not persisted");
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentBrandDelete(db, brandId);
       setBrands((prev) => prev.filter((b) => b.id !== brandId));
@@ -369,7 +369,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - not persisted");
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentItemUpdate(db, itemId, {
         status,
@@ -391,7 +391,7 @@ export function useContentCalendarData() {
         );
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentItemUpdate(db, itemId, { ...patch, updatedAt });
       setItems((prev) =>
@@ -417,7 +417,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - not persisted");
         return full;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentItemCreate(db, organizationId, full);
       setItems((prev) => [...prev, full]);
@@ -432,7 +432,7 @@ export function useContentCalendarData() {
         setItems((prev) => prev.filter((i) => i.id !== itemId));
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) return;
       await persistContentItemDelete(db, itemId);
       setItems((prev) => prev.filter((i) => i.id !== itemId));
@@ -463,7 +463,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - not persisted");
         return capture;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) throw new Error("Database unavailable");
       await persistContentCaptureCreate(db, organizationId, capture);
       setCaptures((prev) => [capture, ...prev]);
@@ -490,7 +490,7 @@ export function useContentCalendarData() {
         setCaptures(applyLocal);
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) return;
       await persistContentCaptureUpdate(db, captureId, { ...patch, updatedAt });
       setCaptures(applyLocal);
@@ -531,7 +531,7 @@ export function useContentCalendarData() {
         toast.message("Demo mode - not persisted");
         return;
       }
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) return;
       if (isNew) await persistContentPlanCreate(db, organizationId, plan);
       else await persistContentPlanUpdate(db, plan.id, plan);

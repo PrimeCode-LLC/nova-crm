@@ -1,8 +1,8 @@
 "use client";
 
-import { doc, getDoc } from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { doc, getDoc } from "@/lib/db/document-shim/shim-client-firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { Followup } from "@/lib/types";
 
 /**
@@ -14,7 +14,7 @@ export async function fetchFollowupMessageBodyClient(
 ): Promise<string | undefined> {
   const id = followupId.trim();
   if (!id) return undefined;
-  const db = getFirebaseDb();
+  const db = getClientDb();
   try {
     const snap = await getDoc(doc(db, COLLECTIONS.followups, id));
     if (!snap.exists()) return undefined;

@@ -13,7 +13,7 @@ import {
   getOrganizationServer,
   updateOrganizationChannelAdminServer,
 } from "@/lib/platform/organizations-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 const ALLOWED_KEYS = new Set(Object.keys(CHANNELS) as ChannelKey[]);
 

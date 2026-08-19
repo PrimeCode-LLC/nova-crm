@@ -16,7 +16,7 @@ import {
   sendSystemEmail,
   systemEmailConfigHint,
 } from "@/lib/email/send-system-email";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 
 const postSchema = z.object({

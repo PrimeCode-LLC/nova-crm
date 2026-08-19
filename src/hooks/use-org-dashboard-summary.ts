@@ -11,12 +11,12 @@ export type OrgDashboardSummaryResponse = {
   enabled: boolean;
   summary: OrgDashboardSummary | null;
   person?: PersonDashboardTaskGauges | null;
-  source: "redis" | "firestore" | "postgres" | null;
-  personSource?: "redis" | "firestore" | null;
+  source: "redis" | "documents" | "postgres" | null;
+  personSource?: "redis" | "documents" | null;
   error?: string;
 };
 
-/** True when either Phase 0 Firestore summaries or Phase 3 Postgres read is enabled. */
+/** True when precomputed dashboard summaries (Postgres) are enabled. */
 export function isOrgDashboardSummaryClientEnabled(): boolean {
   return isDashboardSummariesV1Enabled() || isPostgresDashboardSummaryReadEnabled();
 }

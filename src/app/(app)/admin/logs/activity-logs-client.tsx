@@ -50,8 +50,8 @@ import { fmtDate, fmtRelative } from "@/lib/format";
 import {
   categoryForAuditEvent,
   type AuditEventCategory,
-} from "@/lib/firestore/audit-events";
-import type { AuditOperation } from "@/lib/firestore/audit";
+} from "@/lib/documents/audit-events";
+import type { AuditOperation } from "@/lib/documents/audit";
 import type { OrgMemberRole } from "@/lib/types";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { useChannelOptions } from "@/hooks/use-channel-options";

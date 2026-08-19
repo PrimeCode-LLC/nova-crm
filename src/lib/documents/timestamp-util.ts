@@ -1,6 +1,6 @@
-import { Timestamp } from "firebase/firestore";
+import { Timestamp } from "@/lib/db/document-shim/shim-client-firestore";
 
-export function firestoreValueToIso(value: unknown): string {
+export function documentTimestampToIso(value: unknown): string {
   if (typeof value === "string" && value.length > 0) return value;
   if (value instanceof Timestamp) return value.toDate().toISOString();
   if (

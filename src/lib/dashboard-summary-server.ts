@@ -5,8 +5,8 @@
  * Clients cannot write this collection (Firestore rules deny create/update/delete).
  */
 
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   ORG_DASHBOARD_SUMMARY_VERSION,
   emptyOrgDashboardSummary,
@@ -55,7 +55,7 @@ async function invalidateSummaryCache(organizationId: string): Promise<void> {
  */
 export async function getOrgDashboardSummaryServer(
   organizationId: string,
-): Promise<{ summary: OrgDashboardSummary; source: "redis" | "firestore" } | null> {
+): Promise<{ summary: OrgDashboardSummary; source: "redis" | "documents" } | null> {
   const orgId = organizationId.trim();
   if (!orgId) return null;
 
@@ -76,7 +76,7 @@ export async function getOrgDashboardSummaryServer(
     if (isRedisConfigured()) {
       await cacheSetJson(cacheKey, parsed, DEFAULT_CACHE_TTL_SECONDS);
     }
-    return { summary: parsed, source: "firestore" };
+    return { summary: parsed, source: "documents" };
   } catch (err) {
     console.error("[dashboard-summary] read failed", orgId, err);
     return null;

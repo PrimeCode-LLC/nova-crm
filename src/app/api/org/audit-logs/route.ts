@@ -1,16 +1,16 @@
 import { NextResponse } from "next/server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { listAuditLogsFilteredServer } from "@/lib/firestore/audit";
-import { projectLegacyAuditRow } from "@/lib/firestore/audit-detail";
+import { listAuditLogsFilteredServer } from "@/lib/documents/audit";
+import { projectLegacyAuditRow } from "@/lib/documents/audit-detail";
 import {
   categoryForAuditEvent,
   type AuditEventCategory,
-} from "@/lib/firestore/audit-events";
+} from "@/lib/documents/audit-events";
 import { listMembersServer } from "@/lib/platform/members-server";
 import { listMembersForDisplayServer, memberDisplayLabel } from "@/lib/platform/member-display";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { enrichAuditRowsWithLeadNames } from "@/lib/firestore/audit-display-enrich";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { enrichAuditRowsWithLeadNames } from "@/lib/documents/audit-display-enrich";
 
 const CATEGORIES = new Set<string>([
   "team",

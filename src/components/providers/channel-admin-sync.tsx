@@ -5,7 +5,7 @@ import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import type { ChannelKey, OrganizationChannelAdminConfig } from "@/lib/types";
 import { markChannelAdminJsonSent } from "@/lib/channel-admin-server-sync";
@@ -51,7 +51,7 @@ export function ChannelAdminSync() {
   const channelAdminLsHydrated = useZustandPersistHydrated(channelAdminStoreWithPersist);
 
   React.useEffect(() => {
-    if (isAuthDisabled() || !isFirebaseWebConfigured() || mode === "demo") {
+    if (isAuthDisabled() || !isClientDocumentSyncEnabled() || mode === "demo") {
       setHydrated(true);
       return;
     }
@@ -115,7 +115,7 @@ export function ChannelAdminSync() {
   React.useEffect(() => {
     if (
       isAuthDisabled() ||
-      !isFirebaseWebConfigured() ||
+      !isClientDocumentSyncEnabled() ||
       mode === "demo" ||
       !orgId ||
       !hydrated ||

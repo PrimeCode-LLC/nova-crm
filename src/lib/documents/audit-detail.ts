@@ -1,5 +1,5 @@
-import { labelForAuditEvent } from "@/lib/firestore/audit-events";
-import type { AuditEvent, AuditLogRecord } from "@/lib/firestore/audit";
+import { labelForAuditEvent } from "@/lib/documents/audit-events";
+import type { AuditEvent, AuditLogRecord } from "@/lib/documents/audit";
 
 export type AuditOperation =
   | "create"

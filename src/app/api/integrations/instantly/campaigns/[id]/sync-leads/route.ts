@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { recordAudit } from "@/lib/firestore/audit";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { recordAudit } from "@/lib/documents/audit";
 import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
 import { syncInstantlyCampaignLeadsToNova } from "@/lib/integrations/instantly/sync-campaign-leads-server";

@@ -4,7 +4,7 @@ import {
   extensionCorsHeaders,
   extensionOptionsResponse,
 } from "@/lib/extension/auth-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 const bodySchema = z.object({
   code: z.string().min(32).max(256),

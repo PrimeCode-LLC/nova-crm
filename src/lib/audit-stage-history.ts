@@ -1,5 +1,5 @@
-import type { AuditLogRecord } from "@/lib/firestore/audit";
-import { leadIdFromAuditRow } from "@/lib/firestore/audit-display-enrich";
+import type { AuditLogRecord } from "@/lib/documents/audit";
+import { leadIdFromAuditRow } from "@/lib/documents/audit-display-enrich";
 
 export type StageHistoryEntry = {
   id: string;

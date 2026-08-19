@@ -5,10 +5,10 @@ import {
   linkWithPopup,
   reauthenticateWithPopup,
   type UserCredential,
-} from "firebase/auth";
+} from "@/lib/db/document-shim/shim-client-auth";
 
-import { readAuthErrorCode } from "@/lib/firebase/auth-errors";
-import { getFirebaseAuth } from "@/lib/firebase/client";
+import { readAuthErrorCode } from "@/lib/db/document-access/auth-errors";
+import { getClientAuth } from "@/lib/db/document-access/client";
 
 const CALENDAR_SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -49,7 +49,7 @@ export async function connectGoogleCalendarPopup(): Promise<{
   accountEmail: string;
   expiresInSec: number;
 }> {
-  const auth = getFirebaseAuth();
+  const auth = getClientAuth();
   const user = auth.currentUser;
   if (!user) {
     throw new Error("Sign in to Nova first, then connect your calendar.");

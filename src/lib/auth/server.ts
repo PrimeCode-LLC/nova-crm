@@ -1,6 +1,6 @@
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import { getAdminAuth } from "@/lib/db/document-access/admin";
 import { SESSION_COOKIE_NAME } from "./constants";
 import { isAuthDisabled } from "./flags";
 import { isClerkAuthV1Enabled } from "./clerk-flags";
@@ -16,7 +16,7 @@ export { isAuthDisabled } from "./flags";
 const SESSION_CACHE_TTL_MS = 30_000;
 const sessionCache = new Map<string, { expiresAt: number; session: AppSession }>();
 
-async function getFirebaseAppSession(): Promise<AppSession | null> {
+async function getAppSession(): Promise<AppSession | null> {
   const token = (await cookies()).get(SESSION_COOKIE_NAME)?.value;
   if (!token) return null;
 
@@ -70,10 +70,10 @@ export async function getVerifiedSession(): Promise<AppSession | null> {
   if (isClerkAuthV1Enabled()) {
     const clerk = await getClerkAppSession();
     if (clerk) return clerk;
-    return getFirebaseAppSession();
+    return getAppSession();
   }
 
-  return getFirebaseAppSession();
+  return getAppSession();
 }
 
 export function authEntryPath(): string {

@@ -47,7 +47,7 @@ import {
 import { FollowupPlanPausedBanner } from "@/components/leads/followup-plan-paused-banner";
 import { ScheduleFollowupEmailDialog } from "@/components/leads/schedule-followup-email-dialog";
 import { ScheduleSequenceEmailsDialog } from "@/components/leads/schedule-sequence-emails-dialog";
-import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
+import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-message-body-client";
 import {
   canAutoScheduleFollowupEmail,
   getActiveFollowupPlanForLead,

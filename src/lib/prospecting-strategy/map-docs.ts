@@ -1,4 +1,4 @@
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import type {
   BuyerPersona,
   BuyerPersonaTitle,
@@ -66,8 +66,8 @@ export function mapBuyerPersona(id: string, raw: Record<string, unknown>): Buyer
     priority: typeof raw.priority === "number" ? raw.priority : 0,
     active: raw.active !== false,
     createdBy: String(raw.createdBy ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }
 
@@ -230,9 +230,9 @@ export function mapProspectingStrategy(id: string, raw: Record<string, unknown>)
     version: typeof raw.version === "number" ? raw.version : 1,
     createdBy: String(raw.createdBy ?? ""),
     updatedBy: String(raw.updatedBy ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
-    publishedAt: raw.publishedAt ? firestoreValueToIso(raw.publishedAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
+    publishedAt: raw.publishedAt ? documentTimestampToIso(raw.publishedAt) : undefined,
   };
 }
 
@@ -264,12 +264,12 @@ export function mapStrategyAssignment(id: string, raw: Record<string, unknown>):
     personaIdsOverride: strArr(raw.personaIdsOverride).length
       ? strArr(raw.personaIdsOverride)
       : undefined,
-    startDate: raw.startDate ? firestoreValueToIso(raw.startDate) : undefined,
-    endDate: raw.endDate ? firestoreValueToIso(raw.endDate) : undefined,
+    startDate: raw.startDate ? documentTimestampToIso(raw.startDate) : undefined,
+    endDate: raw.endDate ? documentTimestampToIso(raw.endDate) : undefined,
     status,
     notes: optStr(raw.notes),
     assignedBy: String(raw.assignedBy ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }

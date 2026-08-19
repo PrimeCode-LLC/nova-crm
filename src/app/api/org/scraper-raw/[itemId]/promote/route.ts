@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { promoteRawItemToProspectServer } from "@/lib/scrapers/promote-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 const bodySchema = z.object({
   /** Empty or omitted = open queue (anyone can claim). */

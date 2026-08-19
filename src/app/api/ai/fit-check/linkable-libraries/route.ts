@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import {
   FIT_CHECK_LIBRARY_KIND_CATEGORY,
   FIT_CHECK_LIBRARY_KIND_GLOBAL,

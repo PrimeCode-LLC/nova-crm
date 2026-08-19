@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   classifyInboundLeadMailServer,
   getReplyActionServer,
@@ -12,7 +12,7 @@ import {
   type ReplyAction,
 } from "@/lib/email/reply-action-types";
 import { generateReplyActionDraftServer } from "@/lib/email/generate-reply-action-draft-server";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 
 function leadMailToUpsert(message: LeadMailMessage): LeadMailUpsertInput {
   return {

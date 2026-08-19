@@ -28,7 +28,7 @@ import {
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import { useProspectingStrategyData } from "@/lib/hooks/use-prospecting-strategy-data";
 import { canAutoScheduleFollowupEmail } from "@/lib/followup-plans";
-import { hydrateFollowupsMessageBodies } from "@/lib/firestore/fetch-followup-message-body-client";
+import { hydrateFollowupsMessageBodies } from "@/lib/documents/fetch-followup-message-body-client";
 import {
   autoFixScheduleDates,
   buildDemoMailboxDayLoads,

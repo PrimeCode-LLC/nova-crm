@@ -5,7 +5,7 @@
  *   npm run db:backfill:crm-profiles -- --dry-run
  *   npm run db:backfill:crm-profiles -- --org=YOUR_ORG_ID
  *
- * Requires FIREBASE_ADMIN_* for Firestore reads/writes and Postgres for member list.
+ * Requires DATABASE_URL and Postgres member list.
  */
 
 import { config as loadEnv } from "dotenv";
@@ -13,7 +13,7 @@ import { config as loadEnv } from "dotenv";
 loadEnv();
 loadEnv({ path: ".env.local", override: true });
 
-import { getAdminDb } from "../src/lib/firebase/admin";
+import { getAdminDb } from "../src/lib/db/document-access/admin";
 import { listMembersServer } from "../src/lib/platform/members-server";
 import { backfillOrgCrmProfilesServer } from "../src/lib/platform/crm-profile-provision";
 import { listOrganizationsServer } from "../src/lib/platform/organizations-server";

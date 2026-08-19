@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { addUtcDayKey } from "@/lib/email/mailbox-schedule-capacity";
 import { resolveOrgTimezone, zonedDayKey } from "@/lib/org-timezone";
 import { getOrgTimezoneServer } from "@/lib/org-timezone-server";

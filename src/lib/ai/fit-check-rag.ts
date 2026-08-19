@@ -1,13 +1,13 @@
 import { createOpenAI } from "@ai-sdk/openai";
 import { embed } from "ai";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { getAiProviderKeyServer } from "@/lib/ai/ai-secrets-server";
 import { getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import {
   resolveFitCheckLibraryIdsServer,
 } from "@/lib/ai/fit-check-knowledge";
-import { getProfileServer } from "@/lib/firestore/profile-server";
+import { getProfileServer } from "@/lib/documents/profile-server";
 import {
   retrieveRagChunksForDocumentsServer,
   retrieveRagChunksServer,

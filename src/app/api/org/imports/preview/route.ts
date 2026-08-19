@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import { parseProspectImportFile } from "@/lib/imports/prospect-import-parse";
 import { getUnsafeLocalImportError } from "@/lib/imports/prospect-import-runtime";
 import { PROSPECT_IMPORT_MAX_BYTES } from "@/lib/imports/prospect-import-schema";
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
   const guard = await guardAdminFeature("import");
   if (!guard.ok) return guard.response;
   const db = getAdminDb();
-  if (!db) return NextResponse.json({ error: "Firebase Admin is not configured." }, { status: 503 });
+  if (!db) return NextResponse.json({ error: "Document store is not configured (DATABASE_URL missing)." }, { status: 503 });
   const contentLength = Number(req.headers.get("content-length") ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MAX_MULTIPART_BYTES) {
     return NextResponse.json({ error: "Upload exceeds the 20 MB file limit." }, { status: 413 });

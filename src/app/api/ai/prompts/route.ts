@@ -5,7 +5,7 @@ import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAiPromptServer, upsertAiPromptServer } from "@/lib/ai/ai-settings-server";
 import { REQUIRED_PROMPT_VARS } from "@/lib/ai/prompt-defaults";
 import type { AiFeatureKey } from "@/lib/ai/types";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 const FEATURE_KEYS = [
   "dashboard_brief",

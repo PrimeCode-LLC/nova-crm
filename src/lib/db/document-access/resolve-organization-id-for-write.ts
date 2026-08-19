@@ -1,6 +1,6 @@
 "use client";
 
-import { getFirebaseAuth } from "@/lib/firebase/client";
+import { getClientAuth } from "@/lib/db/document-access/client";
 
 /**
  * Matches `callerOrgId()` in `firestore.rules`: JWT claim first, then user doc.
@@ -10,7 +10,7 @@ export async function resolveOrganizationIdForFirestoreWrite(
   userDocOrganizationId?: string | null,
 ): Promise<string | null> {
   try {
-    const auth = getFirebaseAuth();
+    const auth = getClientAuth();
     const u = auth.currentUser;
     if (u) {
       const { claims } = await u.getIdTokenResult(false);

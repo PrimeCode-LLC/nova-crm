@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-provider";
 import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { readAppClaims } from "@/lib/auth/claims";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
 
@@ -22,7 +22,7 @@ export function AuthSessionSync() {
   const lastSyncedRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
-    if (isAuthDisabled() || !isFirebaseWebConfigured() || !user) return;
+    if (isAuthDisabled() || !isClientDocumentSyncEnabled() || !user) return;
 
     const docOrgId = userDoc?.organizationId;
     const docOrgRole = userDoc?.orgRole;

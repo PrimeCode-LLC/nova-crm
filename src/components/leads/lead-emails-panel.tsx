@@ -79,7 +79,7 @@ import {
 } from "@/lib/email/lead-email-conversations";
 import type { MailTrackingSummary } from "@/lib/email/mail-tracking-types";
 import { isSubjectOnlyMailBody } from "@/lib/email/mail-body-stub";
-import { hydrateFollowupsMessageBodies } from "@/lib/firestore/fetch-followup-message-body-client";
+import { hydrateFollowupsMessageBodies } from "@/lib/documents/fetch-followup-message-body-client";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import {
   LEAD_REPLY_RECEIVED_EVENT,

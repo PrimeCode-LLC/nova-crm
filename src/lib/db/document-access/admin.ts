@@ -1,13 +1,13 @@
 /**
- * Server data access — Postgres-backed (replaces Firebase Admin).
+ * Server document store — Postgres-backed (pg_documents + CRM tables).
  */
 
-import type { App } from "@/lib/db/pg-firestore/shim-app";
-import { getAuth, type Auth } from "@/lib/db/pg-firestore/shim-auth";
+import type { App } from "@/lib/db/document-shim/shim-app";
+import { getAuth, type Auth } from "@/lib/db/document-shim/shim-auth";
 import {
   getPgFirestore,
   type PgFirestore,
-} from "@/lib/db/pg-firestore/shim-firestore";
+} from "@/lib/db/document-shim/shim-firestore";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 
 const app: App = { name: "[DEFAULT]" };

@@ -1,7 +1,7 @@
-import { FieldValue, Timestamp, type DocumentData } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { isFirebaseWebConfiguredServer } from "@/lib/firebase/server-configured";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue, Timestamp, type DocumentData } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { isClientDocumentSyncEnabledServer } from "@/lib/db/document-access/server-configured";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { CalendarConnection, CalendarProvider } from "@/lib/types";
 
 export type CalendarGoogleConnectMethod = "firebase" | "oauth" | "gis" | "none";
@@ -51,7 +51,7 @@ export function calendarOAuthConfigured(): {
     process.env.GOOGLE_CALENDAR_CLIENT_ID?.trim() && clientSecret,
   );
   const gisOnly = Boolean(clientId && !dedicatedOAuth);
-  const firebaseGoogle = isFirebaseWebConfiguredServer();
+  const firebaseGoogle = isClientDocumentSyncEnabledServer();
   let googleMethod: CalendarGoogleConnectMethod = "none";
   if (dedicatedOAuth) googleMethod = "oauth";
   else if (gisOnly) googleMethod = "gis";

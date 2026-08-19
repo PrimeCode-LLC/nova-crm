@@ -5,8 +5,8 @@ import { aiErrorResponse } from "@/lib/ai/ai-route-errors";
 import { runAiTextFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveFitCheckContextServer } from "@/lib/ai/fit-check-rag";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   appendOpportunityScanMessageServer,
   formatScanForDiscussPrompt,

@@ -12,8 +12,8 @@ import {
 import { classifyInboundLeadMailServer } from "@/lib/email/classify-inbound-reply-server";
 import { getEmailAccountMetaServer } from "@/lib/email/mailbox-profiles-server";
 import { extractEmailAddress } from "@/lib/email/parse-outbound-recipients";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 /** Cap body downloads for lead-matched mail per mailbox per cron tick. */
 const MAX_LEAD_MAIL_BODIES_PER_MAILBOX = 80;

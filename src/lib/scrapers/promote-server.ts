@@ -1,7 +1,7 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
+import { stampForCreate } from "@/lib/documents/tenant-write";
 import type { Account, ChannelKey, Contact, Lead, ScraperRawItem } from "@/lib/types";
 import {
   companyNameFromRaw,
@@ -12,7 +12,7 @@ import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playbook-server";
 import { withInitialQualityScore } from "@/lib/intent/apply-quality-score";
 import { researchFieldsFromIntakeItem } from "@/lib/intent/score-intake-item";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import { mirrorCrmEntityAfterWrite } from "@/lib/db/dual-write-crm";
 import {
   getAccountFromPostgres,
@@ -23,15 +23,15 @@ import {
   isCrmSoleWriterActive,
   upsertLeadGraphSoleWriter,
 } from "@/lib/db/crm-sole-writer-server";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 
 function mapAccountDoc(id: string, raw: Record<string, unknown>): Account {
   const base = { ...raw, id } as unknown as Account;
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }
 
@@ -40,8 +40,8 @@ function mapContactDoc(id: string, raw: Record<string, unknown>): Contact {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }
 

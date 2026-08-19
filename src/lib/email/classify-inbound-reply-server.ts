@@ -1,11 +1,11 @@
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/documents/tenant-write";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import { AiForbiddenError, AiNotConfiguredError, runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { isLikelyAutoReply } from "@/lib/followup-plan-reply";

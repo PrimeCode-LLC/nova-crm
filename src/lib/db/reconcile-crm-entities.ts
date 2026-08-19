@@ -3,7 +3,7 @@
  * Counts + missing ids + sample scalar field diffs.
  */
 
-import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
+import type { QueryDocumentSnapshot } from "@/lib/db/document-shim/shim-firestore";
 
 import type { CrmEntity, CrmFirestoreDoc } from "@/lib/db/dual-write-crm";
 import {
@@ -14,8 +14,8 @@ import {
 } from "@/lib/db/dual-write-crm";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { withRlsBypass } from "@/lib/db/tenant-scope";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 const ENTITY_ORDER: CrmEntity[] = ["account", "contact", "lead", "deal"];
 
@@ -182,7 +182,7 @@ export async function runCrmEntitiesReconcile(
     return report;
   }
   if (!getAdminDb()) {
-    report.errors.push("Firebase Admin is not configured.");
+    report.errors.push("Document store is not configured (DATABASE_URL missing).");
     return report;
   }
 

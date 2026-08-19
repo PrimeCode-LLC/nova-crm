@@ -4,8 +4,8 @@ import {
   type DocumentData,
   type Firestore,
   type QueryDocumentSnapshot,
-} from "firebase-admin/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { ParsedProspectImport } from "@/lib/imports/prospect-import-parse";
 import type { NormalizedProspectImportRow } from "@/lib/imports/prospect-import-schema";
 import {

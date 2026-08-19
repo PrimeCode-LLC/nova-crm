@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 /** Comma-separated emails in env - bootstrap access when `platformAdmins` is empty. */
 export function parseBootstrapPlatformAdminEmails(): Set<string> {

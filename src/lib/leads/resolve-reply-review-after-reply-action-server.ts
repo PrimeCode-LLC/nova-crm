@@ -1,6 +1,6 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import {
   shouldOpenReplyReview,
@@ -9,8 +9,8 @@ import {
 import { isProspectRow } from "@/lib/prospects/prospect-access";
 import type { Lead, PipelineStage } from "@/lib/types";
 import type { ReplyActionCompletionOutcome } from "@/lib/leads/reply-action-completion-types";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stampForCreate } from "@/lib/documents/tenant-write";
 import { buildArchivePatch } from "@/lib/leads/lead-archive";
 import { cancelLeadOutreachServer } from "@/lib/email/cancel-lead-outreach-server";
 import { isReplyActionCloseLost } from "@/lib/email/reply-action-pending";

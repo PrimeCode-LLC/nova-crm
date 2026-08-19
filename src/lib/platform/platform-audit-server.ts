@@ -1,6 +1,6 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { ISODate, PlatformAuditEvent, PlatformAuditRecord } from "@/lib/types";
 
 function tsToIso(v: { toDate?: () => Date } | undefined): ISODate {

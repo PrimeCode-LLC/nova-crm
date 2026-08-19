@@ -1,8 +1,8 @@
 import crypto from "crypto";
-import type { DocumentReference } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
+import type { DocumentReference } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
 import { listAllLeadsForInstantlyCampaign } from "./client";
 import { mapInstantlyLeadToContact } from "./lead-mapper";
 import { getInstantlyApiKeyServer } from "./secrets";

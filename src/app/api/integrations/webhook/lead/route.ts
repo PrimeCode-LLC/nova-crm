@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate } from "@/lib/firestore/tenant-write";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate } from "@/lib/documents/tenant-write";
 
 const bodySchema = z.object({
   /** Tenant id this lead belongs to. Required (multi-tenant). */
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
   const db = getAdminDb();
   if (!db) {
     return NextResponse.json(
-      { error: "Firebase Admin is not configured" },
+      { error: "Document store is not configured" },
       { status: 503 },
     );
   }

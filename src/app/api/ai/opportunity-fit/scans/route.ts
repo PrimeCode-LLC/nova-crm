@@ -4,8 +4,8 @@ import {
   listOpportunityScansServer,
   viewerIsElevatedForFitScans,
 } from "@/lib/ai/opportunity-fit-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { Role } from "@/lib/types";
 
 export async function GET(req: Request) {

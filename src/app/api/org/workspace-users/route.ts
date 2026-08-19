@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
-import type { DocumentData } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import type { DocumentData } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { recordAudit } from "@/lib/firestore/audit";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { recordAudit } from "@/lib/documents/audit";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import {
   buildOrgManagerAncestorIdsMap,
@@ -74,7 +74,7 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
     orgRole: r.orgRole as User["orgRole"],
     featureGrants: normalizeFeatureGrants(r.featureGrants),
     status: (r.status as User["status"]) ?? "active",
-    createdAt: firestoreValueToIso(r.createdAt),
+    createdAt: documentTimestampToIso(r.createdAt),
   };
 }
 
@@ -85,7 +85,7 @@ export async function PATCH(req: Request) {
   const db = getAdminDb();
   if (!db) {
     return NextResponse.json(
-      { error: "Firebase Admin is not configured on this server." },
+      { error: "Document store is not configured (DATABASE_URL missing)." },
       { status: 503 },
     );
   }
@@ -308,7 +308,7 @@ export async function PATCH(req: Request) {
     if (changedUserIds.length > 0) {
       try {
         const { restampOwnerManagerIdsForOwners } = await import(
-          "@/lib/firestore/restamp-owner-manager-ids-server"
+          "@/lib/documents/restamp-owner-manager-ids-server"
         );
         await restampOwnerManagerIdsForOwners({
           db,

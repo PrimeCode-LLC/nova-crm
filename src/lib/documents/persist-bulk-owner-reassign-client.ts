@@ -5,12 +5,12 @@ import {
   serverTimestamp,
   setDoc,
   writeBatch,
-} from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
 import { persistCrmWriteClient } from "@/lib/db/crm-write-client";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { resolveOwnerManagerIdsClient } from "@/lib/documents/resolve-owner-manager-ids-client";
 import type { Lead, TimelineEvent } from "@/lib/types";
 
 /** Stay under Firestore's 500-op batch limit with headroom. */

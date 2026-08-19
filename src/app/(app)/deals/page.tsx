@@ -25,7 +25,7 @@ import { Plus, Search, DollarSign, TrendingUp, Trophy, Target, ArrowUpDown } fro
 import { STAGES_BY_KEY } from "@/lib/constants";
 import type { Deal } from "@/lib/types";
 import { useLocalDeals } from "@/hooks/use-local-deals";
-import { recordDealCreatedClient } from "@/lib/firestore/audit-change-client";
+import { recordDealCreatedClient } from "@/lib/documents/audit-change-client";
 import { cn } from "@/lib/utils";
 
 const NewDealDialog = dynamic(

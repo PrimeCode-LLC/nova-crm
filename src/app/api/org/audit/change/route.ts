@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { recordAudit, type AuditEvent } from "@/lib/firestore/audit";
-import { withAuditActor } from "@/lib/firestore/audit-helpers";
+import { recordAudit, type AuditEvent } from "@/lib/documents/audit";
+import { withAuditActor } from "@/lib/documents/audit-helpers";
 import { STAGES_BY_KEY } from "@/lib/constants";
 import type { PipelineStage } from "@/lib/types";
 

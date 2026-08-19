@@ -2,8 +2,8 @@
  * Content-ops KPI summary — Admin SDK + Redis (P0.12).
  */
 
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   DEFAULT_CACHE_TTL_SECONDS,
   cacheGetJson,
@@ -42,7 +42,7 @@ export async function getContentOpsSummaryServer(
 ): Promise<{
   org: ContentOpsOrgGauges;
   person: ContentOpsPersonGauges;
-  source: "redis" | "firestore";
+  source: "redis" | "documents";
 } | null> {
   const orgId = organizationId.trim();
   const uid = userId.trim();
@@ -86,5 +86,5 @@ export async function getContentOpsSummaryServer(
     ]);
   }
 
-  return { org, person, source: "firestore" };
+  return { org, person, source: "documents" };
 }

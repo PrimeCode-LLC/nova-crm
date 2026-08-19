@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import type { DocumentData } from "firebase-admin/firestore";
+import type { DocumentData } from "@/lib/db/document-shim/shim-firestore";
 import type { AdminFeatureKey } from "@/lib/admin-features";
 import { userHasAdminFeature, normalizeFeatureGrants } from "@/lib/admin-feature-access";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { canAction, type PermissionSubject } from "@/lib/permissions/can";
 import { parseComputedPermissionsDoc } from "@/lib/permissions/computed-permissions";
 import type { ActionKey } from "@/lib/permissions/catalog";
@@ -27,7 +27,7 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
     orgRole: r.orgRole as User["orgRole"],
     featureGrants: normalizeFeatureGrants(r.featureGrants),
     status: (r.status as User["status"]) ?? "active",
-    createdAt: firestoreValueToIso(r.createdAt),
+    createdAt: documentTimestampToIso(r.createdAt),
   };
 }
 
@@ -63,7 +63,7 @@ export async function guardAdminFeature(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Firebase Admin is not configured on this server." },
+        { error: "Document store is not configured (DATABASE_URL missing)." },
         { status: 503 },
       ),
     };
@@ -100,7 +100,7 @@ export async function guardPermissionAction(
     return {
       ok: false,
       response: NextResponse.json(
-        { error: "Firebase Admin is not configured on this server." },
+        { error: "Document store is not configured (DATABASE_URL missing)." },
         { status: 503 },
       ),
     };

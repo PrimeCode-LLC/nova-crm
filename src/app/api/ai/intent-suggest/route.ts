@@ -8,9 +8,9 @@ import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { getOrganizationIntentPlaybookServer } from "@/lib/intent/intent-playbook-server";
 import { computeQualityScore } from "@/lib/intent/compute-quality-score";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { recordAudit } from "@/lib/firestore/audit";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { recordAudit } from "@/lib/documents/audit";
 import type { Role } from "@/lib/types";
 
 const suggestionsSchema = z.object({

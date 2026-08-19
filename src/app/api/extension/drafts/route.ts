@@ -1,9 +1,9 @@
 import crypto from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { z } from "zod";
 import { extensionOptionsResponse, guardExtensionApi } from "@/lib/extension/auth-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   addSourceToWorkingDraft,
   completeProspectDraft,
@@ -15,7 +15,7 @@ import {
   updateProspectDraftFields,
   ProspectDraftRevisionError,
 } from "@/lib/prospects/draft-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import { PROSPECT_DRAFT_FIELD_KEYS } from "@/lib/prospects/draft-types";
 import {
   StrategyAttributionError,

@@ -5,9 +5,9 @@ import {
   updateDoc,
   writeBatch,
   type Firestore,
-} from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import type {
   CreateUserNotificationInput,
   UserNotificationDoc,

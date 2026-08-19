@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getAdminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import { listMembersServer } from "@/lib/platform/members-server";
 import { backfillOrgCrmProfilesServer } from "@/lib/platform/crm-profile-provision";
 
@@ -15,7 +15,7 @@ export async function POST() {
   const db = getAdminDb();
   if (!db) {
     return NextResponse.json(
-      { error: "Firebase Admin is not configured." },
+      { error: "Document store is not configured (DATABASE_URL missing)." },
       { status: 503 },
     );
   }

@@ -9,7 +9,7 @@ type OpsScoreboardsResponse = {
   ok: boolean;
   enabled: boolean;
   payload: OpsScoreboardsPayload | null;
-  source?: "redis" | "firestore" | null;
+  source?: "redis" | "documents" | null;
 };
 
 /**

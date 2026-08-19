@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   isLikelyMailScannerUserAgent,
   recordMailTrackingOpen,
 } from "@/lib/email/mail-tracking-server";
 
-vi.mock("@/lib/firebase/admin", () => ({ getAdminDb: vi.fn() }));
-vi.mock("@/lib/firestore/resolve-owner-manager-ids-admin", () => ({
+vi.mock("@/lib/db/document-access/admin", () => ({ getAdminDb: vi.fn() }));
+vi.mock("@/lib/documents/resolve-owner-manager-ids-admin", () => ({
   resolveOwnerManagerIdsAdmin: vi.fn().mockResolvedValue([]),
 }));
 

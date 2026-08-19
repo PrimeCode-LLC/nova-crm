@@ -3,7 +3,7 @@ import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { upsertAiProviderKeysServer, getAiProviderKeyFlagsServer } from "@/lib/ai/ai-secrets-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 const putSchema = z
   .object({

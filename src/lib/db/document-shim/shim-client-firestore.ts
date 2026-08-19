@@ -1,6 +1,6 @@
 /** firebase/firestore client shim — polls workspace API instead of onSnapshot. */
 
-import { Timestamp } from "@/lib/db/pg-firestore/timestamp";
+import { Timestamp } from "@/lib/db/document-shim/timestamp";
 
 export { Timestamp };
 
@@ -193,7 +193,7 @@ export function getFirestore(): ClientFirestore {
   return new ClientFirestore();
 }
 
-export function firestoreValueToIso(value: unknown): string | undefined {
+export function documentTimestampToIso(value: unknown): string | undefined {
   if (value instanceof Timestamp) return value.toDate().toISOString();
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "string") return value;

@@ -13,16 +13,16 @@ import {
   type DocumentReference,
   type Firestore,
   type Transaction,
-} from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 let db: Firestore;
 
 function requireDb(): Firestore {
   const next = getAdminDb();
   if (!next) {
-    throw new Error("Firebase Admin is not configured (missing service-account env).");
+    throw new Error("Document store is not configured (missing service-account env).");
   }
   db = next;
   return next;

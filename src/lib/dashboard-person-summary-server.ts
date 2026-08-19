@@ -2,8 +2,8 @@
  * Person-scoped dashboard task gauges — Admin SDK + Redis (P0.11).
  */
 
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   DEFAULT_CACHE_TTL_SECONDS,
   cacheDel,
@@ -23,7 +23,7 @@ export { personDashboardCacheKey, computePersonDashboardTaskGauges } from "@/lib
 export async function getPersonDashboardTaskGaugesServer(
   organizationId: string,
   userId: string,
-): Promise<{ gauges: PersonDashboardTaskGauges; source: "redis" | "firestore" } | null> {
+): Promise<{ gauges: PersonDashboardTaskGauges; source: "redis" | "documents" } | null> {
   const orgId = organizationId.trim();
   const uid = userId.trim();
   if (!orgId || !uid) return null;
@@ -75,7 +75,7 @@ export async function getPersonDashboardTaskGaugesServer(
     }
   }
 
-  return { gauges, source: "firestore" };
+  return { gauges, source: "documents" };
 }
 
 export async function invalidatePersonDashboardTaskGauges(

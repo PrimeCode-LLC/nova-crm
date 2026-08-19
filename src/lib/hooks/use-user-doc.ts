@@ -1,10 +1,10 @@
 "use client";
 
 import * as React from "react";
-import { doc, onSnapshot, type Unsubscribe } from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { doc, onSnapshot, type Unsubscribe } from "@/lib/db/document-shim/shim-client-firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { User } from "@/lib/types";
 
 export function useUserDoc(uid: string | undefined) {
@@ -13,7 +13,7 @@ export function useUserDoc(uid: string | undefined) {
   const [error, setError] = React.useState<Error | null>(null);
 
   React.useEffect(() => {
-    if (!uid || !isFirebaseWebConfigured()) {
+    if (!uid || !isClientDocumentSyncEnabled()) {
       setData(null);
       setLoading(false);
       return;
@@ -21,7 +21,7 @@ export function useUserDoc(uid: string | undefined) {
 
     let unsub: Unsubscribe | undefined;
     try {
-      const db = getFirebaseDb();
+      const db = getClientDb();
       const ref = doc(db, COLLECTIONS.users, uid);
       unsub = onSnapshot(
         ref,

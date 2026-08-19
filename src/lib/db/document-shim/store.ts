@@ -18,9 +18,9 @@ import {
   applyFieldValues,
   resolveWriteData,
   serializePayloadValue,
-} from "@/lib/db/pg-firestore/field-values";
-import { extractOrganizationId, parsePath } from "@/lib/db/pg-firestore/path";
-import { deserializePayload } from "@/lib/db/pg-firestore/timestamp";
+} from "@/lib/db/document-shim/field-values";
+import { extractOrganizationId, parsePath } from "@/lib/db/document-shim/path";
+import { deserializePayload } from "@/lib/db/document-shim/timestamp";
 
 export type StoredDoc = {
   path: string;

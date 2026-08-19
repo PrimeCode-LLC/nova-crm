@@ -24,7 +24,7 @@ vi.mock("@/lib/platform/organizations-server", () => ({
   getOrganizationServer,
 }));
 
-vi.mock("@/lib/firebase/admin", () => ({
+vi.mock("@/lib/db/document-access/admin", () => ({
   getAdminDb: () => ({
     collection: () => ({
       doc: () => ({ get: userGet }),
@@ -32,7 +32,7 @@ vi.mock("@/lib/firebase/admin", () => ({
   }),
 }));
 
-vi.mock("@/lib/firestore/collections", () => ({
+vi.mock("@/lib/documents/collections", () => ({
   COLLECTIONS: { users: "users" },
 }));
 

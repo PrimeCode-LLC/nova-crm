@@ -1,18 +1,18 @@
 import crypto from "node:crypto";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { z } from "zod";
 import {
   extensionOptionsResponse,
   guardExtensionApi,
 } from "@/lib/extension/auth-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   createScraperRawItemServer,
   findRawItemByDedupeKeyServer,
 } from "@/lib/scrapers/raw-items-server";
 import { promoteRawItemToProspectServer } from "@/lib/scrapers/promote-server";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import {
   StrategyAttributionError,
   validateExtensionStrategyAttribution,

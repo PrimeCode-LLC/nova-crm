@@ -7,11 +7,11 @@ import {
   setDoc,
   updateDoc,
   writeBatch,
-} from "firebase/firestore";
-import type { Firestore } from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import type { Firestore } from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { isPostgresSoleWriterCrmV1Enabled } from "@/lib/db/postgres-sole-writer-crm-flags";
-import { resolveOwnerManagerIdsClient } from "@/lib/firestore/resolve-owner-manager-ids-client";
+import { resolveOwnerManagerIdsClient } from "@/lib/documents/resolve-owner-manager-ids-client";
 import type {
   ActivityCounterRow,
   Campaign,

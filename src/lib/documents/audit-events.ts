@@ -1,4 +1,4 @@
-import type { AuditEvent } from "@/lib/firestore/audit";
+import type { AuditEvent } from "@/lib/documents/audit";
 
 /** Human-readable labels for audit log UI and exports. */
 export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {

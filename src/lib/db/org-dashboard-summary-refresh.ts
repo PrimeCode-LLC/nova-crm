@@ -24,8 +24,8 @@ import { invalidateOrgDashboardSummaryPostgresCache } from "@/lib/db/org-dashboa
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { leadFromPostgresRow } from "@/lib/db/list-leads-postgres";
 import { withRlsBypass } from "@/lib/db/tenant-scope";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { Deal, Followup } from "@/lib/types";
 
 /** Redis SET of org ids waiting for a Postgres summary refresh. */

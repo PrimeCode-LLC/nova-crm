@@ -1,9 +1,9 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stampForCreate, stampForUpdate } from "@/lib/firestore/tenant-write";
-import { resolveOwnerManagerIdsAdmin } from "@/lib/firestore/resolve-owner-manager-ids-admin";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stampForCreate, stampForUpdate } from "@/lib/documents/tenant-write";
+import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import {
   appendGlobalEmailFooter,
   appendMailboxSignature,

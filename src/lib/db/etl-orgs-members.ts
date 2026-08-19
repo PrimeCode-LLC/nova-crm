@@ -5,15 +5,15 @@
  * Always run against staging first (docs/ENVIRONMENTS.md).
  */
 
-import type { QueryDocumentSnapshot } from "firebase-admin/firestore";
+import type { QueryDocumentSnapshot } from "@/lib/db/document-shim/shim-firestore";
 
 import {
   upsertMemberMirror,
   upsertOrganizationMirror,
 } from "@/lib/db/dual-write-orgs";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { listMembersServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import type { Organization, OrganizationMember } from "@/lib/types";
@@ -39,7 +39,7 @@ export type OrgsMembersEtlOptions = {
 
 export type OrgsMembersEtlDeps = {
   isDbReady: () => boolean;
-  isFirebaseReady: () => boolean;
+  isDocumentStoreReady: () => boolean;
   listOrganizationIds: (opts: {
     organizationId?: string;
     pageSize: number;
@@ -93,7 +93,7 @@ async function* listOrganizationIdsFromFirestore(opts: {
 export function createDefaultOrgsMembersEtlDeps(): OrgsMembersEtlDeps {
   return {
     isDbReady: () => isDatabaseConfigured(),
-    isFirebaseReady: () => Boolean(getAdminDb()),
+    isDocumentStoreReady: () => Boolean(getAdminDb()),
     listOrganizationIds: listOrganizationIdsFromFirestore,
     getOrganization: getOrganizationServer,
     listMembers: listMembersServer,
@@ -127,9 +127,9 @@ export async function runOrgsMembersBackfill(
     );
     return stats;
   }
-  if (!deps.isFirebaseReady()) {
+  if (!deps.isDocumentStoreReady()) {
     stats.errors.push(
-      "Firebase Admin is not configured (FIREBASE_ADMIN_* env vars).",
+      "Document store is not configured (FIREBASE_ADMIN_* env vars).",
     );
     return stats;
   }

@@ -1,5 +1,5 @@
 /**
- * P6.3 — Export Firestore CRM (and optional full tenant) docs to a local JSONL archive.
+ * Export pg_documents CRM (and optional full tenant) rows to a local JSONL archive.
  *
  * Default scope: organizations, members, accounts, contacts, leads, deals,
  * orgDashboardSummaries. Use `--full` for all TENANT_COLLECTIONS + users.
@@ -10,14 +10,14 @@
 import { createWriteStream, mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { finished } from "node:stream/promises";
-import type { DocumentData, QueryDocumentSnapshot } from "firebase-admin/firestore";
+import type { DocumentData, QueryDocumentSnapshot } from "@/lib/db/document-shim/shim-firestore";
 
-import { getAdminDb } from "@/lib/firebase/admin";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import {
   COLLECTIONS,
   ORG_SUBCOLLECTIONS,
   TENANT_COLLECTIONS,
-} from "@/lib/firestore/collections";
+} from "@/lib/documents/collections";
 
 export const CRM_ARCHIVE_COLLECTIONS = [
   COLLECTIONS.organizations,
@@ -28,7 +28,7 @@ export const CRM_ARCHIVE_COLLECTIONS = [
   COLLECTIONS.orgDashboardSummaries,
 ] as const;
 
-export type FirestoreCrmArchiveOptions = {
+export type PgDocumentsArchiveOptions = {
   /** Absolute or cwd-relative output directory. Created if missing. */
   outDir: string;
   /** When set, only docs with this organizationId (and that org + its members). */
@@ -64,7 +64,7 @@ export type FirestoreCrmArchiveResult = {
 const DEFAULT_PAGE_SIZE = 200;
 
 /** Recursively convert Firestore Timestamp / Date / GeoPoint-ish values for JSON. */
-export function serializeFirestoreValue(value: unknown): unknown {
+export function serializeDocumentValue(value: unknown): unknown {
   if (value == null) return value;
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
     return value;
@@ -85,11 +85,11 @@ export function serializeFirestoreValue(value: unknown): unknown {
       return new Date(ms).toISOString();
     }
     if (Array.isArray(value)) {
-      return value.map(serializeFirestoreValue);
+      return value.map(serializeDocumentValue);
     }
     const out: Record<string, unknown> = {};
     for (const [k, child] of Object.entries(v)) {
-      out[k] = serializeFirestoreValue(child);
+      out[k] = serializeDocumentValue(child);
     }
     return out;
   }
@@ -136,7 +136,7 @@ async function* iterateCollectionDocs(opts: {
 
 async function exportTopLevelCollection(
   collectionId: string,
-  opts: FirestoreCrmArchiveOptions,
+  opts: PgDocumentsArchiveOptions,
 ): Promise<CollectionExportStats> {
   const pageSize = opts.pageSize ?? DEFAULT_PAGE_SIZE;
   const file = path.join(opts.outDir, collectionFileName(collectionId));
@@ -157,7 +157,7 @@ async function exportTopLevelCollection(
       JSON.stringify({
         id,
         path: docPath,
-        data: serializeFirestoreValue(data),
+        data: serializeDocumentValue(data),
       }) + "\n";
     docs += 1;
     bytes += Buffer.byteLength(line);
@@ -214,7 +214,7 @@ async function exportTopLevelCollection(
 }
 
 async function exportOrgMembers(
-  opts: FirestoreCrmArchiveOptions,
+  opts: PgDocumentsArchiveOptions,
 ): Promise<CollectionExportStats> {
   const collectionLabel = `organizations/*/${ORG_SUBCOLLECTIONS.members}`;
   const db = getAdminDb();
@@ -288,7 +288,7 @@ async function exportOrgMembers(
             id: doc.id,
             organizationId: orgId,
             path: doc.ref.path,
-            data: serializeFirestoreValue(doc.data() as DocumentData),
+            data: serializeDocumentValue(doc.data() as DocumentData),
           }) + "\n";
         if (!stream.write(line)) {
           await new Promise<void>((resolve) => stream.once("drain", resolve));
@@ -309,8 +309,8 @@ async function exportOrgMembers(
   return { collection: collectionLabel, docs, bytes, file };
 }
 
-export async function runFirestoreCrmArchive(
-  options: FirestoreCrmArchiveOptions,
+export async function runPgDocumentsArchive(
+  options: PgDocumentsArchiveOptions,
 ): Promise<FirestoreCrmArchiveResult> {
   const startedAt = new Date().toISOString();
   const log = options.onProgress ?? (() => undefined);
@@ -318,7 +318,7 @@ export async function runFirestoreCrmArchive(
   const collections: CollectionExportStats[] = [];
 
   if (!getAdminDb()) {
-    errors.push("Firebase Admin is not configured (FIREBASE_ADMIN_* env)");
+    errors.push("Document store is not configured (DATABASE_URL missing)");
     return {
       outDir: options.outDir,
       dryRun: Boolean(options.dryRun),

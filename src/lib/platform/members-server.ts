@@ -2,10 +2,10 @@ import {
   FieldValue,
   Timestamp,
   type DocumentData,
-} from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
-import { isFirestoreFailedPrecondition } from "@/lib/firestore/errors";
+} from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
+import { isDocumentQueryFailedPrecondition } from "@/lib/documents/errors";
 import type {
   ISODate,
   OrganizationMember,
@@ -251,7 +251,7 @@ export async function findMembershipByEmailServer(
     const orgId = d.ref.parent.parent?.id ?? "";
     return docToMember(orgId, d.id, d.data());
   } catch (err: unknown) {
-    if (isFirestoreFailedPrecondition(err)) {
+    if (isDocumentQueryFailedPrecondition(err)) {
       console.warn(
         "[members] findMembershipByEmailServer needs a collection-group index on members.email",
       );
@@ -278,7 +278,7 @@ export async function resolveUserTenantIdServer(
     const m = await findMembershipForUserServer(uid);
     if (m) return m.organizationId;
   } catch (err: unknown) {
-    if (!isFirestoreFailedPrecondition(err)) throw err;
+    if (!isDocumentQueryFailedPrecondition(err)) throw err;
   }
 
   const db = getAdminDb();

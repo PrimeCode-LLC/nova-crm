@@ -11,15 +11,15 @@ import {
   query,
   where,
   type Unsubscribe,
-} from "firebase/firestore";
+} from "@/lib/db/document-shim/shim-client-firestore";
 import { toast } from "sonner";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { subscribeWorkspaceChatChannelsForUser } from "@/lib/firestore/workspace-chat-channel-subscribe";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
-import { persistWorkspaceChatChannelLastRead } from "@/lib/firestore/persist-workspace-entities-client";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { subscribeWorkspaceChatChannelsForUser } from "@/lib/documents/workspace-chat-channel-subscribe";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
+import { persistWorkspaceChatChannelLastRead } from "@/lib/documents/persist-workspace-entities-client";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import { useTeamChatDemoStore } from "@/stores/team-chat-demo-store";
@@ -43,8 +43,8 @@ function asChannelRaw(id: string, raw: Record<string, unknown>): WorkspaceChatCh
     name: String(raw.name ?? raw.slug ?? id),
     memberIds: Array.isArray(raw.memberIds) ? (raw.memberIds as string[]) : undefined,
     createdById: String(raw.createdById ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: raw.updatedAt ? firestoreValueToIso(raw.updatedAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: raw.updatedAt ? documentTimestampToIso(raw.updatedAt) : undefined,
   };
 }
 
@@ -57,7 +57,7 @@ function asMessageRaw(id: string, raw: Record<string, unknown>): WorkspaceChatMe
     authorId: String(raw.authorId ?? ""),
     body: String(raw.body ?? ""),
     mentionUserIds,
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
   };
 }
 
@@ -186,7 +186,7 @@ export function TeamChatUnreadProvider({
   const liveEnabled =
     subscriptionsReady &&
     !isDemo &&
-    Boolean(organizationId && currentUserId && isFirebaseWebConfigured());
+    Boolean(organizationId && currentUserId && isClientDocumentSyncEnabled());
 
   React.useEffect(() => {
     if (!liveEnabled || !organizationId || !currentUserId) {
@@ -194,9 +194,9 @@ export function TeamChatUnreadProvider({
       setLiveChannelReads({});
       return;
     }
-    let db: ReturnType<typeof getFirebaseDb>;
+    let db: ReturnType<typeof getClientDb>;
     try {
-      db = getFirebaseDb();
+      db = getClientDb();
     } catch {
       setLiveChannels([]);
       setLiveChannelReads({});
@@ -256,9 +256,9 @@ export function TeamChatUnreadProvider({
       return;
     }
 
-    let db: ReturnType<typeof getFirebaseDb>;
+    let db: ReturnType<typeof getClientDb>;
     try {
-      db = getFirebaseDb();
+      db = getClientDb();
     } catch {
       setLiveRecentMessages([]);
       return;
@@ -332,9 +332,9 @@ export function TeamChatUnreadProvider({
         setDemoChannelLastRead(DEMO_WORKSPACE_ORG_ID, currentUserId, channelId, readThroughIso);
         return;
       }
-      if (!organizationId || !currentUserId || !isFirebaseWebConfigured()) return;
+      if (!organizationId || !currentUserId || !isClientDocumentSyncEnabled()) return;
       try {
-        const db = getFirebaseDb();
+        const db = getClientDb();
         void persistWorkspaceChatChannelLastRead(db, organizationId, currentUserId, channelId, readThroughIso);
       } catch {
         /* ignore */

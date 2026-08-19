@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
-import type { Auth } from "firebase-admin/auth";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import type { Auth } from "@/lib/db/document-shim/shim-auth";
+import { getAdminAuth } from "@/lib/db/document-access/admin";
 import { getVerifiedSession, type AppSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 
 export type PlatformApiContext = {
   session: AppSession;
-  /** Null when Firebase Admin is disabled / not configured. */
+  /** Null when document store admin is unavailable. */
   adminAuth: Auth | null;
 };
 

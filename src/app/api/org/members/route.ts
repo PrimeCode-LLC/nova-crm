@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { FieldValue } from "firebase-admin/firestore";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import {
   deleteMemberServer,
@@ -11,10 +11,10 @@ import {
   hasSeatAvailableServer,
 } from "@/lib/platform/members-server";
 import { setAppClaims } from "@/lib/auth/claims";
-import { recordAudit } from "@/lib/firestore/audit";
-import type { AuditEvent } from "@/lib/firestore/audit";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { recordAudit } from "@/lib/documents/audit";
+import type { AuditEvent } from "@/lib/documents/audit";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { provisionCrmProfileServer } from "@/lib/platform/crm-profile-provision";
 
 const patchSchema = z.object({

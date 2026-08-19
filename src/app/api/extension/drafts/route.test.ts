@@ -23,7 +23,7 @@ vi.mock("@/lib/extension/auth-server", () => ({
   }),
 }));
 
-vi.mock("@/lib/firebase/admin", () => ({
+vi.mock("@/lib/db/document-access/admin", () => ({
   getAdminDb: vi.fn(() => ({
     collection: vi.fn(() => ({
       doc: vi.fn(() => ({ set: vi.fn().mockResolvedValue(undefined) })),
@@ -42,7 +42,7 @@ vi.mock("@/lib/prospects/draft-server", () => ({
   updateProspectDraftFields: vi.fn(),
 }));
 
-vi.mock("@/lib/firestore/audit", () => ({
+vi.mock("@/lib/documents/audit", () => ({
   recordAudit: vi.fn(),
 }));
 

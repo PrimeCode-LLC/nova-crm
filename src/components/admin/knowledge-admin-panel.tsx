@@ -78,10 +78,10 @@ import {
 } from "@/lib/ai/knowledge-library-ui";
 import type { AiLibraryAllowedFeature } from "@/lib/ai/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { collection, getDocs, query, where } from "@/lib/db/document-shim/shim-client-firestore";
 import { cn } from "@/lib/utils";
 
 type LibraryRow = {
@@ -197,10 +197,10 @@ export function KnowledgeAdminPanel({
 
   React.useEffect(() => {
     const needBrands = Boolean(editLib) || newLibType === "brand";
-    if (!needBrands || !ws.organizationId || !isFirebaseWebConfigured()) return;
+    if (!needBrands || !ws.organizationId || !isClientDocumentSyncEnabled()) return;
     let cancelled = false;
     void (async () => {
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!db) return;
       try {
         const snap = await getDocs(

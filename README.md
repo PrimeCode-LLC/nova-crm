@@ -1,8 +1,8 @@
 # Nova CRM (Relay)
 
-Next.js 16 **App Router** sales CRM. **Deploy target:** Clerk (auth) + PostgreSQL (RLS) + Redis + two Docker deployables (**web** + **worker**). No Firebase.
+Next.js 16 **App Router** sales CRM. **Deploy target:** Clerk (auth) + PostgreSQL + pgvector (RLS) + Redis + two Docker deployables (**web** + **worker**). Firebase is removed.
 
-Binding rules: [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md). Migration checklist: [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md).
+Binding rules: [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md). Historical phase checklist: [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md) (Phase 7 complete).
 
 ## Architecture
 
@@ -10,34 +10,50 @@ Binding rules: [`Architecture fixes plan/NOVA-CRM-ENGINEERING-RULES.md`](Archite
 |------------|--------|------|
 | **Web** | `Dockerfile` | Next.js UI + API routes (interactive traffic only) |
 | **Worker** | `Dockerfile.worker` | BullMQ consumer — imports, IMAP, scheduled email, scrapers, reminders, dashboard refresh |
+| **Migrate** (prod) | `Dockerfile.migrate` | One-shot Prisma migrate before web/worker start |
+| **Cron** (prod) | Alpine sidecar | Dispatches `/api/cron/queue/dispatch` with `CRON_SECRET` |
 
-Local infra: Compose **Postgres 16** + **Redis 7**. Default `docker compose up` starts infra only; web/worker use profile `full`.
+Local infra: Compose **Postgres 16 + pgvector** + **Redis 7**. Default `docker compose up` starts infra only; web/worker use profile `full`. Production adds **Caddy** (HTTPS) — see [`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md).
 
 ```mermaid
-flowchart LR
-  browser[Browser] --> web[Web_Next.js]
-  web --> clerk[Clerk_Auth]
-  web --> pg[(Postgres_RLS)]
-  web --> redis[(Redis)]
+flowchart TB
+  browser[Browser]
+  web[Web_Next.js]
+  clerk[Clerk_Auth]
+  pg[(Postgres_RLS_pgvector)]
+  redis[(Redis)]
+  worker[Worker_BullMQ]
+  cron[Cron_dispatch]
+
+  browser --> web
+  web -->|SSE| browser
+  web --> clerk
+  web --> pg
+  web --> redis
   web -->|enqueue| redis
-  redis --> worker[Worker_BullMQ]
+  redis --> worker
   worker --> pg
-  worker --> redis
+  cron -->|Bearer CRON_SECRET| web
 ```
 
 | Concern | System of record |
 |---------|------------------|
 | **Auth** | **Clerk** — `/sign-in`, `/sign-up`; Nova owns tenancy (`organization_id`, roles, invites) |
-| **CRM data** | **Postgres** — accounts, contacts, leads, deals, org/member lookups, dashboard summaries |
-| **CRM writes** | **Sole writer** — `POST /api/org/crm-write` (no dual-write) |
+| **CRM + org/members/invites** | **Postgres** (RLS) — accounts, contacts, leads, deals, members, `org_invites` |
+| **Workspace + email + imports + scrapers** | **Postgres** — followups, labels, mail, prospect drafts, feeds |
+| **AI / RAG** | **Postgres + pgvector** — libraries, documents, embeddings |
+| **Dashboard KPIs** | **Postgres** `org_dashboard_summaries` + Redis cache |
+| **CRM writes** | **Sole writer** — `POST /api/org/crm-write` |
 | **Background jobs** | **BullMQ worker** (default on when `REDIS_URL` is set) |
 | **Realtime** | Chat + notifications via Redis pub/sub + SSE (`/api/realtime/stream`) |
 
 ## Deploy on one VPS (production)
 
-Step-by-step Ubuntu + Docker guide (web, worker, Postgres, Redis, HTTPS, crons, backups) for non-technical and technical operators:
+Step-by-step Ubuntu + Docker guide (web, worker, Postgres, Redis, HTTPS, crons, backups):
 
 → **[`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md)**
+
+Production Compose: `docker compose -f docker-compose.prod.yml up -d` (first: `docker compose -f docker-compose.prod.yml run --rm migrate`). Backups: `scripts/backup-postgres.sh`.
 
 ## Branching
 
@@ -78,9 +94,10 @@ REDIS_URL=redis://localhost:6379
 # Optional
 PLATFORM_ADMIN_EMAILS=you@example.com
 NEXT_PUBLIC_SITE_URL=http://localhost:3000
+CRON_SECRET=dev-cron-secret
 ```
 
-Do **not** set Firebase env vars. Cutover flags (`POSTGRES_DUAL_WRITE_*`, `FIREBASE_DISABLED`) are unused — Postgres + Clerk are always on.
+Postgres + Clerk are always on. Do not add Firebase env vars.
 
 ### Prerequisites for a working login
 
@@ -89,6 +106,8 @@ Do **not** set Firebase env vars. Cutover flags (`POSTGRES_DUAL_WRITE_*`, `FIREB
 - Platform operators: `PLATFORM_ADMIN_EMAILS`.
 
 ### Local worker
+
+Queue flags default **on** when `REDIS_URL` is set. Override only if you need them off:
 
 ```bash
 # QUEUE_WORKER_V1=true
@@ -99,7 +118,7 @@ npm run worker
 
 Health: `http://127.0.0.1:8081/healthz`.
 
-Full stack:
+Full stack (web + worker + postgres + redis):
 
 ```bash
 docker compose --profile full up --build
@@ -114,26 +133,30 @@ NEXT_PUBLIC_AUTH_DISABLED=true
 
 Never use auth-disabled in production.
 
-## What works vs what does not (Firebase off)
+## Platform capabilities
 
-| Works | Unavailable until migrated off Firestore |
-|-------|------------------------------------------|
-| Clerk login / logout | Team chat |
-| CRM lists + sole-writer mutations | User notifications (FS listeners) |
-| Dashboard summaries (Postgres + Redis) | Email / mailbox / IMAP / scheduled send |
-| Org members list (Postgres) | Scrapers intake / feeds UI |
-| Tenant APIs with Clerk session | Content calendar, prospect drafts |
-| BullMQ worker path | Firestore invite-token accept (503) |
-| | Firebase password “provision login” |
-| | Chrome extension FS auth bridge |
+All product domains run on **Clerk + Postgres + Redis + worker**. Optional third-party keys enable extra features; they are not a second database.
+
+| Area | How it runs |
+|------|-------------|
+| Clerk login / logout / signup | Required |
+| CRM lists + `POST /api/org/crm-write` | Postgres + RLS |
+| Dashboard KPIs | Postgres summaries + Redis |
+| Org members + invite send/accept | Postgres (`org_invites`) |
+| Team chat + user notifications | Postgres + SSE `/api/realtime/stream` |
+| Email / mailbox / IMAP / scheduled send | Postgres + worker + mailbox/SMTP secrets |
+| Scrapers, prospect drafts, imports | Postgres + worker |
+| Content calendar | Postgres |
+| AI / RAG | Postgres + pgvector + provider keys |
+| Chrome extension | Postgres sessions / findings (Clerk for web login) |
 
 ## Auth flow
 
 1. Sign in at **`/sign-in`** or sign up at **`/sign-up`** (Clerk).
 2. Server maps Clerk → Nova via `externalId` + email (`resolveClerkIdentity`) against **Postgres** members.
-3. Workspace shell loads identity from **`GET /api/auth/me`** (no Firebase user doc).
-4. CRM data polls Postgres APIs (no Firestore `onSnapshot`).
-5. With Firebase disabled, the Clerk→Firebase custom-token bridge is **skipped**.
+3. Workspace shell loads identity from **`GET /api/auth/me`**.
+4. CRM and workspace data use Postgres APIs (poll / request-response).
+5. Chat and notifications subscribe via **SSE** (`GET /api/realtime/stream`). Auth is Clerk-only.
 
 Details: [`NOVA-CRM-P5-AUTH-CLERK.md`](Architecture%20fixes%20plan/NOVA-CRM-P5-AUTH-CLERK.md).
 
@@ -179,19 +202,17 @@ Full list: `.env.example`. Env separation: [`docs/ENVIRONMENTS.md`](docs/ENVIRON
 | `npm run build:worker` | Bundle worker |
 | `npm run db:migrate:deploy` | Apply Prisma migrations |
 | `npm run db:studio` | Prisma Studio |
-| `npm run db:backfill:crm` / `db:reconcile:crm` | Migration helpers (legacy soak) |
-| `npm run check:firebase-imports` | CI gate — no new firebase package imports |
-
-Production Compose: `docker compose -f docker-compose.prod.yml up -d` (first: `... run --rm migrate`). Backups: `scripts/backup-postgres.sh`.
+| `npm run db:backfill:*` / `db:reconcile:*` | One-time ETL helpers (legacy soak, not daily ops) |
+| `npm run check:firebase-imports` | CI regression gate — Firebase packages/imports must stay gone |
 
 ## Docs
 
 | Doc | What |
 |-----|------|
 | [`NOVA-CRM-ENGINEERING-RULES.md`](Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md) | Binding contract |
-| [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md) | Phase checklist |
+| [`NOVA-CRM-MIGRATION-BABY-STEPS.md`](Architecture%20fixes%20plan/NOVA-CRM-MIGRATION-BABY-STEPS.md) | Historical phase checklist (Phase 7 = Firebase removal complete) |
 | [`NOVA-CRM-P5-AUTH-CLERK.md`](Architecture%20fixes%20plan/NOVA-CRM-P5-AUTH-CLERK.md) | Clerk auth |
-| [`NOVA-CRM-P6-DECOMMISSION-FIREBASE.md`](Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md) | CRM Postgres cutover |
+| [`NOVA-CRM-P6-DECOMMISSION-FIREBASE.md`](Architecture%20fixes%20plan/NOVA-CRM-P6-DECOMMISSION-FIREBASE.md) | Historical CRM Postgres cutover (superseded by Phase 7) |
 | [`NOVA-CRM-P4-QUEUE-WORKER.md`](Architecture%20fixes%20plan/NOVA-CRM-P4-QUEUE-WORKER.md) | Queue / worker |
 | [`docs/ENVIRONMENTS.md`](docs/ENVIRONMENTS.md) | Local / staging / prod |
-| [`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md) | One-VPS Ubuntu production setup (full working stack) |
+| [`docs/VPS-SINGLE-SERVER-SETUP.md`](docs/VPS-SINGLE-SERVER-SETUP.md) | One-VPS Ubuntu production setup |

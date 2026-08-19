@@ -21,9 +21,9 @@ import {
 import { runAiStructuredFeature } from "@/lib/ai/run-feature";
 import { canUseAiFeature, getOrganizationAiSettingsServer } from "@/lib/ai/ai-settings-server";
 import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { recordAudit } from "@/lib/firestore/audit";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { recordAudit } from "@/lib/documents/audit";
 import { getScriptServer } from "@/lib/platform/script-library-server";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import type { ChannelKey, Role, ScriptLibraryItem } from "@/lib/types";

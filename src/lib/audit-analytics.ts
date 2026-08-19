@@ -1,7 +1,7 @@
 import { CHANNEL_FUNNELS } from "@/lib/constants";
-import { categoryForAuditEvent } from "@/lib/firestore/audit-events";
-import { projectLegacyAuditRow } from "@/lib/firestore/audit-detail";
-import type { AuditLogRecord } from "@/lib/firestore/audit";
+import { categoryForAuditEvent } from "@/lib/documents/audit-events";
+import { projectLegacyAuditRow } from "@/lib/documents/audit-detail";
+import type { AuditLogRecord } from "@/lib/documents/audit";
 import type { ChannelKey } from "@/lib/types";
 
 export type AuditAnalyticsRangeKey = "1d" | "7d" | "30d" | "90d" | "custom";

@@ -2,8 +2,8 @@ import crypto from "crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import type { Campaign } from "@/lib/types";
 import { guardInstantlyApi } from "@/lib/integrations/instantly/guard";
 import {
@@ -16,7 +16,7 @@ import {
   persistCampaignServer,
 } from "@/lib/integrations/instantly/campaign-server";
 import { instantlyErrorResponse } from "@/lib/integrations/instantly/api-error";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 import type { InstantlySequence, InstantlySequenceStep } from "@/lib/integrations/instantly/types";
 
 const stepSchema = z.object({

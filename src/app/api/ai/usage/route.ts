@@ -3,8 +3,8 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import { getAiUsageRollupsServer } from "@/lib/ai/usage-logger";
 import { estimateTokenCostUsd } from "@/lib/ai/pricing-table";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 
 function parseRange(param: string | null): number {
   if (param === "7d") return 7;

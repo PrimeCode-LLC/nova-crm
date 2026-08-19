@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { parseInstantlyId } from "@/lib/integrations/instantly/refs";
 import { addInstantlyLeadsBulk } from "@/lib/integrations/instantly/client";
 import { leadSnapshotFromFirestore, mapNovaLeadToInstantly } from "@/lib/integrations/instantly/lead-mapper";
-import { stampForUpdate } from "@/lib/firestore/tenant-write";
+import { stampForUpdate } from "@/lib/documents/tenant-write";
 import { instantlyErrorResponse } from "@/lib/integrations/instantly/api-error";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 const bodySchema = z.object({
   leadIds: z.array(z.string().min(1)).min(1).max(1000),
 });

@@ -1,5 +1,5 @@
-import { FieldValue, type Firestore } from "firebase-admin/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue, type Firestore } from "@/lib/db/document-shim/shim-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   resolveRoleForUser,
   writeComputedPermissions,

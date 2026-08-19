@@ -1,8 +1,8 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { collectDescendantUserIds } from "@/lib/workspace-hierarchy";
 import type { User } from "@/lib/types";
-import type { DocumentData } from "firebase-admin/firestore";
+import type { DocumentData } from "@/lib/db/document-shim/shim-firestore";
 
 function asUserMinimal(id: string, raw: DocumentData): User {
   const r = raw as Record<string, unknown>;

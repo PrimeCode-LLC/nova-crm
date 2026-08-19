@@ -1,7 +1,7 @@
 "use client";
 
-import { reload, type User } from "firebase/auth";
-import { getFirebaseAuth } from "@/lib/firebase/client";
+import { reload, type User } from "@/lib/db/document-shim/shim-client-auth";
+import { getClientAuth } from "@/lib/db/document-access/client";
 import { readAppClaims } from "@/lib/auth/claims";
 
 export type ExchangeResult = {
@@ -42,7 +42,7 @@ export async function exchangeIdTokenForSession(
     needsClaimRefresh?: boolean;
   };
 
-  const auth = getFirebaseAuth();
+  const auth = getClientAuth();
   const user = auth.currentUser;
 
   if (data.needsClaimRefresh && user) {
@@ -108,7 +108,7 @@ export async function fetchAuthMe(): Promise<AuthMeBody | null> {
  * claims stamped by `/api/auth/session` (rules read `users/{uid}.organizationId`
  * first, but other clients still benefit from a fresh token).
  */
-export async function syncFirebaseAuthClaimsClient(user: User): Promise<void> {
+export async function syncClientAuthClaims(user: User): Promise<void> {
   try {
     const body = await fetchAuthMe();
     if (!body) return;

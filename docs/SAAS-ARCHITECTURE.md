@@ -1,6 +1,8 @@
 # Multi-tenant SaaS architecture
 
-Reference for the Next.js + Firebase Auth + Firestore layering added to this CRM: **platform operators**, **customer organizations (tenants)**, and **members** inside each tenant.
+> **Historical (pre–Phase 7).** Auth is **Clerk** and the database of record is **PostgreSQL + RLS**. This document describes the old Firebase Auth + Firestore tenancy model. For the current stack see [README.md](../README.md) and [NOVA-CRM-ENGINEERING-RULES.md](../Architecture%20fixes%20plan/NOVA-CRM-ENGINEERING-RULES.md).
+
+Reference for **platform operators**, **customer organizations (tenants)**, and **members** inside each tenant. Collection paths below are legacy names; live data lives in Postgres tables (`organizations`, `members`, `org_invites`, CRM tables, etc.).
 
 ## 1. Mental model
 

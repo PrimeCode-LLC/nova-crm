@@ -33,9 +33,9 @@ import { extractMentionUserIds, formatChatBodySegments } from "@/lib/team-chat-m
 import type { User, WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
 import { toast } from "sonner";
 import {
-  extractFirebaseIndexCreateUrl,
-  teamChatFirestoreErrorHint,
-} from "@/lib/firestore/team-chat-firestore-error";
+  extractDocumentIndexHintUrl,
+  teamChatDocumentErrorHint,
+} from "@/lib/documents/team-chat-document-error";
 
 function initials(name: string) {
   return name
@@ -231,17 +231,17 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
                   <p className="font-medium">
                     {messageWithoutIndexUrl(
                       chat.error.message,
-                      extractFirebaseIndexCreateUrl(chat.error.message),
+                      extractDocumentIndexHintUrl(chat.error.message),
                     )}
                   </p>
-                  {teamChatFirestoreErrorHint(chat.error.message) ? (
+                  {teamChatDocumentErrorHint(chat.error.message) ? (
                     <p className="text-[11px] leading-snug text-destructive/90">
-                      {teamChatFirestoreErrorHint(chat.error.message)}
+                      {teamChatDocumentErrorHint(chat.error.message)}
                     </p>
                   ) : null}
-                  {extractFirebaseIndexCreateUrl(chat.error.message) ? (
+                  {extractDocumentIndexHintUrl(chat.error.message) ? (
                     <a
-                      href={extractFirebaseIndexCreateUrl(chat.error.message)!}
+                      href={extractDocumentIndexHintUrl(chat.error.message)!}
                       target="_blank"
                       rel="noopener noreferrer"
                       className="inline-block text-[11px] underline"
@@ -367,7 +367,7 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
             <p className="font-medium">Could not load messages for this channel.</p>
             {(() => {
               const raw = chat.messageSyncError.message;
-              const indexUrl = extractFirebaseIndexCreateUrl(raw);
+              const indexUrl = extractDocumentIndexHintUrl(raw);
               const summary = messageWithoutIndexUrl(raw, indexUrl);
               return (
                 <>

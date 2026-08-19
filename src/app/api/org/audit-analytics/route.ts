@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { listAuditRecordsInRangeServer } from "@/lib/firestore/audit";
+import { listAuditRecordsInRangeServer } from "@/lib/documents/audit";
 import {
   aggregateAuditAnalytics,
   parseAuditAnalyticsRange,

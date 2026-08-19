@@ -1,10 +1,10 @@
 "use client";
 
-import { doc, getDoc } from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { doc, getDoc } from "@/lib/db/document-shim/shim-client-firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
 import type { Account, Contact, Lead } from "@/lib/types";
 
@@ -21,8 +21,8 @@ function asAccount(id: string, raw: Record<string, unknown>): Account {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
   };
 }
 
@@ -31,9 +31,9 @@ function asContact(id: string, raw: Record<string, unknown>): Contact {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
-    emailBouncedAt: raw.emailBouncedAt ? firestoreValueToIso(raw.emailBouncedAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
+    emailBouncedAt: raw.emailBouncedAt ? documentTimestampToIso(raw.emailBouncedAt) : undefined,
   };
 }
 
@@ -57,12 +57,12 @@ export async function fetchLeadByIdClient(input: {
   if (!leadId || !organizationId) {
     return { status: "not_found" };
   }
-  if (!isFirebaseWebConfigured()) {
+  if (!isClientDocumentSyncEnabled()) {
     return { status: "unavailable" };
   }
 
   try {
-    const db = getFirebaseDb();
+    const db = getClientDb();
     const leadSnap = await getDoc(doc(db, COLLECTIONS.leads, leadId));
     if (!leadSnap.exists()) {
       return { status: "not_found" };

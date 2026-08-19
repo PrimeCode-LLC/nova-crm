@@ -14,8 +14,8 @@ import {
   emailReviewSchema,
 } from "@/lib/ai/email-review-prompt";
 import { retrieveOutreachKnowledgeServer } from "@/lib/ai/outreach-knowledge-server";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { splitComposerReplyBody } from "@/lib/email/compose-draft-text";
 import {
   buildLeadMailThreadForReply,

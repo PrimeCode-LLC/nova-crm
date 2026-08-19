@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
-import { listAuditRecordsInRangeServer } from "@/lib/firestore/audit";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { listAuditRecordsInRangeServer } from "@/lib/documents/audit";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { listMembersForDisplayServer } from "@/lib/platform/member-display";
 import {
   auditRowToStageEntry,
@@ -11,7 +11,7 @@ import {
   timelineRowToStageEntry,
   type StageHistoryEntry,
 } from "@/lib/audit-stage-history";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 
 export async function GET(
   _req: Request,
@@ -62,7 +62,7 @@ export async function GET(
         type: String(data.type ?? ""),
         actorId,
         summary: String(data.summary ?? ""),
-        createdAt: firestoreValueToIso(data.createdAt) ?? new Date().toISOString(),
+        createdAt: documentTimestampToIso(data.createdAt) ?? new Date().toISOString(),
         actorName,
       });
       if (entry) entries.push(entry);

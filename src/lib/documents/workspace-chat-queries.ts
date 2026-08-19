@@ -6,8 +6,8 @@ import {
   where,
   type Firestore,
   type Query,
-} from "firebase/firestore";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import { COLLECTIONS } from "@/lib/documents/collections";
 
 /** Channels the signed-in user may read under `firestore.rules` (`public` or DM membership). */
 export function workspaceChatChannelsForUserQuery(

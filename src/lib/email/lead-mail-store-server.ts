@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { stripUndefined } from "@/lib/firestore/strip-undefined";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { stripUndefined } from "@/lib/documents/strip-undefined";
 import { isSubjectOnlyMailBody, shouldKeepPreviousMailBody } from "@/lib/email/mail-body-stub";
 import { parseStoredLeadMailAttachments, pickLeadMailAttachments } from "@/lib/email/lead-mail-attachments";
 import {

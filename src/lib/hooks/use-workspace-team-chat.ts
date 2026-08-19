@@ -7,16 +7,16 @@ import {
   orderBy,
   query,
   where,
-} from "firebase/firestore";
-import { getFirebaseDb } from "@/lib/firebase/client";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
-import { COLLECTIONS } from "@/lib/firestore/collections";
-import { subscribeWorkspaceChatChannelsForUser } from "@/lib/firestore/workspace-chat-channel-subscribe";
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+} from "@/lib/db/document-shim/shim-client-firestore";
+import { getClientDb } from "@/lib/db/document-access/client";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { COLLECTIONS } from "@/lib/documents/collections";
+import { subscribeWorkspaceChatChannelsForUser } from "@/lib/documents/workspace-chat-channel-subscribe";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import {
   persistWorkspaceChatChannelCreate,
   persistWorkspaceChatMessageCreate,
-} from "@/lib/firestore/persist-workspace-entities-client";
+} from "@/lib/documents/persist-workspace-entities-client";
 import type { WorkspaceChatChannel, WorkspaceChatMessage } from "@/lib/types";
 import { DEMO_WORKSPACE_ORG_ID } from "@/lib/demo-workspace-ids";
 import { dmChannelId, generalChannelId as buildGeneralChannelId, useTeamChatDemoStore } from "@/stores/team-chat-demo-store";
@@ -37,8 +37,8 @@ function asChannel(id: string, raw: Record<string, unknown>): WorkspaceChatChann
     name: String(raw.name ?? raw.slug ?? id),
     memberIds: Array.isArray(raw.memberIds) ? (raw.memberIds as string[]) : undefined,
     createdById: String(raw.createdById ?? ""),
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: raw.updatedAt ? firestoreValueToIso(raw.updatedAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: raw.updatedAt ? documentTimestampToIso(raw.updatedAt) : undefined,
   };
 }
 
@@ -51,7 +51,7 @@ function asMessage(id: string, raw: Record<string, unknown>): WorkspaceChatMessa
     authorId: String(raw.authorId ?? ""),
     body: String(raw.body ?? ""),
     mentionUserIds,
-    createdAt: firestoreValueToIso(raw.createdAt),
+    createdAt: documentTimestampToIso(raw.createdAt),
   };
 }
 
@@ -105,16 +105,16 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
   /** Live: subscribe all channels for org. */
   React.useEffect(() => {
-    if (isDemo || !organizationId || !isFirebaseWebConfigured()) {
+    if (isDemo || !organizationId || !isClientDocumentSyncEnabled()) {
       setLiveChannels([]);
       setLoading(false);
       setError(null);
       return;
     }
 
-    let db: ReturnType<typeof getFirebaseDb>;
+    let db: ReturnType<typeof getClientDb>;
     try {
-      db = getFirebaseDb();
+      db = getClientDb();
     } catch (e) {
       setError(e instanceof Error ? e : new Error(String(e)));
       setLiveChannels([]);
@@ -144,14 +144,14 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
   /** Ensure #general exists (live). */
   React.useEffect(() => {
-    if (isDemo || !organizationId || !currentUserId || !isFirebaseWebConfigured()) return;
+    if (isDemo || !organizationId || !currentUserId || !isClientDocumentSyncEnabled()) return;
     if (loading) return;
     const gid = buildGeneralChannelId(organizationId);
     if (liveChannels.some((c) => c.slug === "general" || c.id === gid)) return;
 
     void (async () => {
       try {
-        const db = getFirebaseDb();
+        const db = getClientDb();
         const iso = new Date().toISOString();
         const ch: WorkspaceChatChannel = {
           id: gid,
@@ -171,15 +171,15 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
   /** Live: subscribe messages for selected channel. */
   React.useEffect(() => {
-    if (isDemo || !organizationId || !selectedChannelId || !isFirebaseWebConfigured()) {
+    if (isDemo || !organizationId || !selectedChannelId || !isClientDocumentSyncEnabled()) {
       setLiveMessages([]);
       setMessageSyncError(null);
       return;
     }
 
-    let db: ReturnType<typeof getFirebaseDb>;
+    let db: ReturnType<typeof getClientDb>;
     try {
-      db = getFirebaseDb();
+      db = getClientDb();
     } catch {
       setLiveMessages([]);
       setMessageSyncError(null);
@@ -258,9 +258,9 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       if (isDemo) {
         demoAppendMessage(DEMO_CHAT_ORG, { ...msg, organizationId: DEMO_CHAT_ORG });
       } else {
-        if (!organizationId || !isFirebaseWebConfigured()) return;
+        if (!organizationId || !isClientDocumentSyncEnabled()) return;
         try {
-          const db = getFirebaseDb();
+          const db = getClientDb();
           const toSave = { ...msg, organizationId };
           await persistWorkspaceChatMessageCreate(db, organizationId, toSave);
           setPendingMessagesByChannel((prev) => ({
@@ -335,7 +335,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
         return;
       }
       if (!organizationId) return;
-      const db = getFirebaseDb();
+      const db = getClientDb();
       await persistWorkspaceChatChannelCreate(db, organizationId, {
         ...ch,
         organizationId,
@@ -369,9 +369,9 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
         setSelectedChannelId(id);
         return;
       }
-      if (!organizationId || !isFirebaseWebConfigured()) return;
+      if (!organizationId || !isClientDocumentSyncEnabled()) return;
       const exists = liveChannels.some((c) => c.id === id);
-      const db = getFirebaseDb();
+      const db = getClientDb();
       if (!exists) {
         const ch: WorkspaceChatChannel = {
           id,
@@ -404,6 +404,6 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
     /** Firestore listener error for the active channel (often missing composite index). */
     messageSyncError,
     /** False when live org is missing or Firebase env is not set up. */
-    liveChatAvailable: Boolean(!isDemo && organizationId && isFirebaseWebConfigured()),
+    liveChatAvailable: Boolean(!isDemo && organizationId && isClientDocumentSyncEnabled()),
   };
 }

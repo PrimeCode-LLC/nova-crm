@@ -39,7 +39,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
-import { isFirebaseWebConfigured } from "@/lib/firebase/config";
+import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { ROLES, roleLabel } from "@/lib/constants";
 import {
   MODULE_META,
@@ -176,7 +176,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
   }, [customRoles]);
 
   React.useEffect(() => {
-    if (mode !== "live" || !isFirebaseWebConfigured()) return;
+    if (mode !== "live" || !isClientDocumentSyncEnabled()) return;
     let cancelled = false;
     void fetch("/api/org/roles")
       .then(async (res) => {
@@ -214,7 +214,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
   ) {
     setBusyUserId(userId);
     try {
-      const writeFs = mode === "live" && isFirebaseWebConfigured();
+      const writeFs = mode === "live" && isClientDocumentSyncEnabled();
       if (writeFs) {
         const body: Record<string, unknown> = { userId };
         if ("departmentId" in patch) body.departmentId = patch.departmentId ?? null;

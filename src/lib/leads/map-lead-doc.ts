@@ -1,4 +1,4 @@
-import { firestoreValueToIso } from "@/lib/firestore/timestamp-util";
+import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import type {
   ChannelKey,
   Lead,
@@ -30,8 +30,8 @@ function parseProspectChannelAssignments(
       channel,
       assigneeId,
       assignedById,
-      assignedAt: firestoreValueToIso(row.assignedAt),
-      pushedAt: row.pushedAt ? firestoreValueToIso(row.pushedAt) : undefined,
+      assignedAt: documentTimestampToIso(row.assignedAt),
+      pushedAt: row.pushedAt ? documentTimestampToIso(row.pushedAt) : undefined,
       pushedByUserId:
         typeof row.pushedByUserId === "string" ? row.pushedByUserId : undefined,
     });
@@ -103,12 +103,12 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
   return {
     ...base,
     id,
-    createdAt: firestoreValueToIso(raw.createdAt),
-    updatedAt: firestoreValueToIso(raw.updatedAt),
-    firstContactAt: raw.firstContactAt ? firestoreValueToIso(raw.firstContactAt) : undefined,
-    lastActivityAt: raw.lastActivityAt ? firestoreValueToIso(raw.lastActivityAt) : undefined,
+    createdAt: documentTimestampToIso(raw.createdAt),
+    updatedAt: documentTimestampToIso(raw.updatedAt),
+    firstContactAt: raw.firstContactAt ? documentTimestampToIso(raw.firstContactAt) : undefined,
+    lastActivityAt: raw.lastActivityAt ? documentTimestampToIso(raw.lastActivityAt) : undefined,
     expectedCloseDate: raw.expectedCloseDate
-      ? firestoreValueToIso(raw.expectedCloseDate)
+      ? documentTimestampToIso(raw.expectedCloseDate)
       : undefined,
     prospectOwnerId:
       typeof raw.prospectOwnerId === "string" ? raw.prospectOwnerId : undefined,
@@ -123,7 +123,7 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       typeof raw.prospectSourceId === "string" ? raw.prospectSourceId : undefined,
     channelTags: parseChannelKeyArray(raw.channelTags),
     sharedOwnerIds: parseStringArray(raw.sharedOwnerIds),
-    lastReplyAt: raw.lastReplyAt ? firestoreValueToIso(raw.lastReplyAt) : undefined,
+    lastReplyAt: raw.lastReplyAt ? documentTimestampToIso(raw.lastReplyAt) : undefined,
     lastReplyMessageId:
       typeof raw.lastReplyMessageId === "string" ? raw.lastReplyMessageId : undefined,
     lastReplySource:
@@ -133,7 +133,7 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
         ? raw.lastReplySource
         : undefined,
     lastAutoReplyAt: raw.lastAutoReplyAt
-      ? firestoreValueToIso(raw.lastAutoReplyAt)
+      ? documentTimestampToIso(raw.lastAutoReplyAt)
       : undefined,
     lastAutoReplyMessageId:
       typeof raw.lastAutoReplyMessageId === "string"
@@ -145,7 +145,7 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
         ? raw.followUpAfterDate.trim()
         : undefined,
     lastEmailOpenedAt: raw.lastEmailOpenedAt
-      ? firestoreValueToIso(raw.lastEmailOpenedAt)
+      ? documentTimestampToIso(raw.lastEmailOpenedAt)
       : undefined,
     emailOpenCount:
       typeof raw.emailOpenCount === "number" && Number.isFinite(raw.emailOpenCount)
@@ -161,9 +161,9 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       typeof raw.emailMailCount === "number" && Number.isFinite(raw.emailMailCount)
         ? raw.emailMailCount
         : undefined,
-    lastEmailAt: raw.lastEmailAt ? firestoreValueToIso(raw.lastEmailAt) : undefined,
+    lastEmailAt: raw.lastEmailAt ? documentTimestampToIso(raw.lastEmailAt) : undefined,
     lastInboundEmailAt: raw.lastInboundEmailAt
-      ? firestoreValueToIso(raw.lastInboundEmailAt)
+      ? documentTimestampToIso(raw.lastInboundEmailAt)
       : undefined,
     pendingReplyActionId:
       typeof raw.pendingReplyActionId === "string" && raw.pendingReplyActionId.trim()
@@ -217,7 +217,7 @@ export function mapLeadDoc(id: string, raw: Record<string, unknown>): Lead {
       raw.emailVerificationSource === "manual"
         ? raw.emailVerificationSource
         : undefined,
-    archivedAt: raw.archivedAt ? firestoreValueToIso(raw.archivedAt) : undefined,
+    archivedAt: raw.archivedAt ? documentTimestampToIso(raw.archivedAt) : undefined,
     archivedBy: typeof raw.archivedBy === "string" ? raw.archivedBy : undefined,
     archiveReason:
       raw.archiveReason === "manual" ||

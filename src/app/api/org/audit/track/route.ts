@@ -2,12 +2,12 @@ import { NextResponse } from "next/server";
 import { after } from "next/server";
 import { z } from "zod";
 import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
-import { recordAudit, type AuditEvent } from "@/lib/firestore/audit";
+import { recordAudit, type AuditEvent } from "@/lib/documents/audit";
 import {
   CLIENT_TRACKABLE_AUDIT_EVENTS,
   featureLabelForPath,
-} from "@/lib/firestore/audit-events";
-import { withAuditActor } from "@/lib/firestore/audit-helpers";
+} from "@/lib/documents/audit-events";
+import { withAuditActor } from "@/lib/documents/audit-helpers";
 
 const bodySchema = z.object({
   event: z.enum(CLIENT_TRACKABLE_AUDIT_EVENTS),

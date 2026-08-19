@@ -1,6 +1,6 @@
-import { FieldValue } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { defaultIntentPlaybook } from "@/lib/intent/playbook-templates";
 import { parseIntentPlaybook, playbookForFirestore } from "@/lib/intent/parse-playbook";
 import type { IntentPlaybook } from "@/lib/intent/types";

@@ -1,5 +1,5 @@
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import { embedFitCheckQueryServer } from "@/lib/ai/fit-check-rag";
 import { retrieveRagChunksServer, type RagChunkHit } from "@/lib/ai/rag-retrieve";
 import { buildRagInstructionBlock } from "@/lib/ai/prompt-defaults";

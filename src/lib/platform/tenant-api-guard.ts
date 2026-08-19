@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import type { Auth } from "firebase-admin/auth";
-import { getAdminAuth } from "@/lib/firebase/admin";
+import type { Auth } from "@/lib/db/document-shim/shim-auth";
+import { getAdminAuth } from "@/lib/db/document-access/admin";
 import { getVerifiedSession, type AppSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import type { OrgMemberRole } from "@/lib/types";
@@ -11,7 +11,7 @@ export { roleAtLeast };
 
 export type TenantApiContext = {
   session: AppSession & { organizationId: string };
-  /** Null when Firebase Admin is disabled / not configured (Clerk + Postgres path). */
+  /** Null when document store admin is unavailable (Clerk + Postgres path). */
   adminAuth: Auth | null;
   role: OrgMemberRole;
 };

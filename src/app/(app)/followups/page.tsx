@@ -49,7 +49,7 @@ import {
 import { cancelScheduledEmailClient } from "@/lib/cancel-followup-scheduled-email-client";
 import { retryScheduledEmailClient } from "@/lib/retry-scheduled-email-client";
 import { followupScheduleMailboxFields, scheduleFollowupEmailClient } from "@/lib/schedule-followup-email-client";
-import { hydrateFollowupMessageBody } from "@/lib/firestore/fetch-followup-message-body-client";
+import { hydrateFollowupMessageBody } from "@/lib/documents/fetch-followup-message-body-client";
 import {
   followupQueueKind,
   isFollowupEmailChannel,

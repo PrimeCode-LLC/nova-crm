@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { guardInstantlyOutreachApi } from "@/lib/integrations/instantly/guard";
 import { syncInstantlyCampaignsFromRemote } from "@/lib/integrations/instantly/sync-campaigns-server";
 import { instantlyErrorResponse } from "@/lib/integrations/instantly/api-error";
-import { recordAudit } from "@/lib/firestore/audit";
+import { recordAudit } from "@/lib/documents/audit";
 
 export async function POST() {
   const g = await guardInstantlyOutreachApi();

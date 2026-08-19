@@ -19,8 +19,8 @@ import type {
   WorkspaceRoleDoc,
 } from "@/lib/permissions/role-types";
 import { normalizeDataScope } from "@/lib/permissions/role-types";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/firestore/collections";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { Role } from "@/lib/types";
 
 export {
@@ -99,7 +99,7 @@ export async function ensureOrgRolesSeeded(
   actorUid: string,
 ): Promise<WorkspaceRoleDoc[]> {
   const col = rolesCol(orgId);
-  if (!col) throw new Error("Firebase Admin is not configured.");
+  if (!col) throw new Error("Document store is not configured (DATABASE_URL missing).");
 
   const snap = await col.get();
   const existing = new Map<string, WorkspaceRoleDoc>();
@@ -149,7 +149,7 @@ export async function ensureOrgRolesSeeded(
 
 export async function listOrgRoles(orgId: string): Promise<WorkspaceRoleDoc[]> {
   const col = rolesCol(orgId);
-  if (!col) throw new Error("Firebase Admin is not configured.");
+  if (!col) throw new Error("Document store is not configured (DATABASE_URL missing).");
   const snap = await col.get();
   return snap.docs
     .map((d) => parseWorkspaceRoleDoc(d.id, d.data() as Record<string, unknown>))
@@ -161,7 +161,7 @@ export async function getOrgRole(
   roleId: string,
 ): Promise<WorkspaceRoleDoc | null> {
   const col = rolesCol(orgId);
-  if (!col) throw new Error("Firebase Admin is not configured.");
+  if (!col) throw new Error("Document store is not configured (DATABASE_URL missing).");
   const resolved =
     roleId === "data_scraper" ? "prospecting" : roleId;
   const snap = await col.doc(resolved).get();
@@ -174,7 +174,7 @@ export async function countMembersWithRole(
   roleId: string,
 ): Promise<number> {
   const db = getAdminDb();
-  if (!db) throw new Error("Firebase Admin is not configured.");
+  if (!db) throw new Error("Document store is not configured (DATABASE_URL missing).");
   const ids = roleId === "prospecting" ? ["prospecting", "data_scraper"] : [roleId];
   let total = 0;
   for (const id of ids) {
@@ -213,7 +213,7 @@ export async function createOrgRole(
   },
 ): Promise<WorkspaceRoleDoc> {
   const col = rolesCol(orgId);
-  if (!col) throw new Error("Firebase Admin is not configured.");
+  if (!col) throw new Error("Document store is not configured (DATABASE_URL missing).");
 
   let modules = input.modules;
   let actions = input.actions;
@@ -257,7 +257,7 @@ export async function updateOrgRole(
   },
 ): Promise<WorkspaceRoleDoc> {
   const col = rolesCol(orgId);
-  if (!col) throw new Error("Firebase Admin is not configured.");
+  if (!col) throw new Error("Document store is not configured (DATABASE_URL missing).");
   const existing = await getOrgRole(orgId, roleId);
   if (!existing) throw new Error("Role not found");
 
@@ -319,7 +319,7 @@ export async function deleteOrgRole(
     };
   }
   const col = rolesCol(orgId);
-  if (!col) return { error: "Firebase Admin is not configured." };
+  if (!col) return { error: "Document store is not configured (DATABASE_URL missing)." };
   await col.doc(existing.id).delete();
   return { ok: true };
 }

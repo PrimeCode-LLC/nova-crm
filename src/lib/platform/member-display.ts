@@ -1,6 +1,6 @@
-import type { DocumentData } from "firebase-admin/firestore";
-import { getAdminDb } from "@/lib/firebase/admin";
-import { COLLECTIONS } from "@/lib/firestore/collections";
+import type { DocumentData } from "@/lib/db/document-shim/shim-firestore";
+import { getAdminDb } from "@/lib/db/document-access/admin";
+import { COLLECTIONS } from "@/lib/documents/collections";
 import { listMembersServer } from "@/lib/platform/members-server";
 import type { OrganizationMember } from "@/lib/types";
 
