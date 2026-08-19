@@ -40,11 +40,11 @@ function authMethods(app: App): Auth {
     async generatePasswordResetLink() {
       throw new Error("Firebase password reset removed. Use Clerk.");
     },
-    async verifyIdToken(token: string) {
-      return { uid: token.slice(0, 32) };
+    async verifyIdToken() {
+      throw new Error("Firebase ID token verification removed. Use Clerk.");
     },
-    async verifySessionCookie(cookie: string) {
-      return { uid: cookie.slice(0, 32) };
+    async verifySessionCookie() {
+      throw new Error("Firebase session cookies removed. Use Clerk.");
     },
     async revokeRefreshTokens() {},
     async createCustomToken() {

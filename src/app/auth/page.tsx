@@ -1,7 +1,5 @@
-import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { auth } from "@clerk/nextjs/server";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
 import { authEntryPath } from "@/lib/auth/server";
@@ -45,14 +43,11 @@ export default async function AuthCompatPage({
     redirect(nextPath);
   }
 
-  const jar = await cookies();
-  if (jar.get(SESSION_COOKIE_NAME)?.value) {
-    redirect(nextPath);
-  }
-
   if (isClerkAuthV1ServerEnabled()) {
     const { userId } = await auth();
     if (userId) redirect(nextPath);
+  } else {
+    redirect(authEntryPath());
   }
 
   const entry = authEntryPath();

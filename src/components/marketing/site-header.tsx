@@ -1,5 +1,4 @@
 import Link from "next/link";
-import { cookies } from "next/headers";
 import { ArrowRight, Menu } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,7 +8,6 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
 import { isClerkAuthV1ServerEnabled } from "@/lib/auth/clerk-flags";
 import { authSignInPath } from "@/lib/invite-link";
 import { auth } from "@clerk/nextjs/server";
@@ -23,9 +21,8 @@ const NAV_LINKS = [
 ];
 
 export async function SiteHeader() {
-  const cookieStore = await cookies();
-  let hasSession = Boolean(cookieStore.get(SESSION_COOKIE_NAME)?.value);
-  if (!hasSession && isClerkAuthV1ServerEnabled()) {
+  let hasSession = false;
+  if (isClerkAuthV1ServerEnabled()) {
     const { userId } = await auth();
     hasSession = Boolean(userId);
   }

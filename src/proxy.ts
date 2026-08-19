@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { clerkMiddleware } from "@clerk/nextjs/server";
-import { SESSION_COOKIE_NAME } from "@/lib/auth/constants";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import {
   isClerkAuthV1Enabled,
@@ -58,8 +57,8 @@ function isAuthEntryPath(pathname: string): boolean {
 }
 
 /**
- * Shared gate: Firebase `__nova_session` and/or Clerk userId (when flag on).
- * Does not call auth.protect — resource routes still use requireSession.
+ * Shared gate: Clerk session (when flag on). Does not call auth.protect —
+ * resource routes still use requireSession.
  */
 function applySessionGate(
   request: NextRequest,
@@ -70,10 +69,7 @@ function applySessionGate(
   }
 
   const { pathname } = request.nextUrl;
-  const hasFirebaseSession = Boolean(
-    request.cookies.get(SESSION_COOKIE_NAME)?.value,
-  );
-  const hasSession = hasFirebaseSession || Boolean(clerkUserId);
+  const hasSession = Boolean(clerkUserId);
 
   const hasInvite = request.nextUrl.searchParams.has("invite");
   const hasJoin = request.nextUrl.searchParams.has("join");

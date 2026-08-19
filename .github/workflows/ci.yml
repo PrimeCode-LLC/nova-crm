@@ -77,7 +77,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Build web image
-        run: docker build -t nova-crm-web -f Dockerfile .
+        run: |
+          docker build -t nova-crm-web -f Dockerfile . \
+            --build-arg NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_ci \
+            --build-arg NEXT_PUBLIC_AUTH_CLERK_V1=true \
+            --build-arg NEXT_PUBLIC_SITE_URL=https://ci.example.com \
+            --build-arg NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true \
+            --build-arg NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true \
+            --build-arg NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true \
+            --build-arg NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
       - name: Build worker image
         run: docker build -t nova-crm-worker -f Dockerfile.worker .
       - name: Build migrate image

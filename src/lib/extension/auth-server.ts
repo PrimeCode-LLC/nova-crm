@@ -2,9 +2,10 @@ import "server-only";
 
 import crypto from "node:crypto";
 import { FieldValue, Timestamp } from "@/lib/db/document-shim/shim-firestore";
-import { getAdminAuth, getAdminDb } from "@/lib/db/document-access/admin";
+import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
+import { verifyClerkSessionToken } from "@/lib/auth/verify-clerk-token";
 import type { OrgMemberRole } from "@/lib/types";
 import {
   extensionSessionExpiresAt,
@@ -134,20 +135,17 @@ export async function createExtensionAuthorizationCode(input: {
     return { ok: false, status: 400, error: "Invalid PKCE code challenge." };
   }
 
-  const auth = getAdminAuth();
   const db = getAdminDb();
-  if (!auth || !db) {
+  if (!db) {
     return { ok: false, status: 503, error: "Nova authentication is unavailable." };
   }
 
-  let decoded;
-  try {
-    decoded = await auth.verifyIdToken(input.idToken, true);
-  } catch {
+  const decoded = await verifyClerkSessionToken(input.idToken);
+  if (!decoded) {
     return { ok: false, status: 401, error: "Invalid or revoked login." };
   }
 
-  const authTime = typeof decoded.auth_time === "number" ? decoded.auth_time * 1000 : 0;
+  const authTime = decoded.authTimeMs;
   if (!isFreshInteractiveLogin(authTime)) {
     return {
       ok: false,
@@ -162,9 +160,9 @@ export async function createExtensionAuthorizationCode(input: {
 
   const tenant = await resolveLiveTenantForSession({
     uid: decoded.uid,
-    organizationId:
-      typeof decoded.organizationId === "string" ? decoded.organizationId : undefined,
-    orgRole: decoded.orgRole as OrgMemberRole | undefined,
+    email: decoded.email,
+    organizationId: decoded.organizationId,
+    orgRole: decoded.orgRole,
   });
   if (
     tenant.accessDeniedReason ||
@@ -323,8 +321,7 @@ export async function guardExtensionApi(req: Request): Promise<
   }
 
   const db = getAdminDb();
-  const auth = getAdminAuth();
-  if (!db || !auth) {
+  if (!db) {
     return {
       ok: false,
       response: Response.json({ error: "Nova authentication is unavailable." }, { status: 503, headers }),
@@ -342,20 +339,6 @@ export async function guardExtensionApi(req: Request): Promise<
       response: Response.json(
         { error: "Extension session expired. Sign in again.", code: "session_expired" },
         { status: 401, headers },
-      ),
-    };
-  }
-
-  try {
-    const user = await auth.getUser(String(data.uid));
-    if (user.disabled) throw new Error("disabled");
-  } catch {
-    await ref.set({ revokedAt: FieldValue.serverTimestamp() }, { merge: true });
-    return {
-      ok: false,
-      response: Response.json(
-        { error: "Your Nova user is inactive.", code: "inactive_user" },
-        { status: 403, headers },
       ),
     };
   }

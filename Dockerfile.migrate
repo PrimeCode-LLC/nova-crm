@@ -4,6 +4,7 @@ WORKDIR /app
 RUN apk add --no-cache libc6-compat
 COPY package.json package-lock.json ./
 COPY packages/nova-scoring/package.json packages/nova-scoring/package.json
+COPY extension/package.json extension/package.json
 COPY prisma prisma
 COPY prisma.config.ts prisma.config.ts
 RUN npm ci --ignore-scripts && npx prisma generate
