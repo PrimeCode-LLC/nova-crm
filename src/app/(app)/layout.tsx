@@ -23,6 +23,11 @@ import {
 } from "@/lib/email/org-send-policy";
 import type { OrgEmailSendPolicy } from "@/lib/types";
 
+// Authenticated app routes must be evaluated per request.
+// Do not prerender/cache redirects based on build-time auth state.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 export default async function AppLayout({
   children,
 }: {
