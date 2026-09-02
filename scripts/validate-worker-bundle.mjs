@@ -34,8 +34,12 @@ assert.ok(
   "worker bundle must not embed nodemailer Dynamic require shim",
 );
 assert.ok(
-  /from\s+["']nodemailer(?:\/[^"']*)?["']/.test(bundled),
-  "worker bundle must external-import nodemailer (or a nodemailer subpath)",
+  bundled.includes('nodemailer/lib/mail-composer/index.js'),
+  "worker bundle must external-import nodemailer/lib/mail-composer/index.js (ESM-safe path)",
+);
+assert.ok(
+  !/from\s+["']nodemailer\/lib\/mail-composer["']/.test(bundled),
+  "worker bundle must not use directory import nodemailer/lib/mail-composer",
 );
 
 // Same TypeError production saw when import.meta.url was undefined.
@@ -50,7 +54,7 @@ assert.ok(threw, "expected fileURLToPath(undefined) to throw");
 
 // Runtime: deep CJS path must load from node_modules (as the worker image does).
 const req = createRequire(pathToFileURL(path.join(root, "package.json")).href);
-const MailComposer = req("nodemailer/lib/mail-composer");
-assert.equal(typeof MailComposer, "function", "nodemailer/lib/mail-composer must be constructible");
+const MailComposer = req("nodemailer/lib/mail-composer/index.js");
+assert.equal(typeof MailComposer, "function", "nodemailer/lib/mail-composer/index.js must be constructible");
 
 console.log("validate-worker-bundle: OK");

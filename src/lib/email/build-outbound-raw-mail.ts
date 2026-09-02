@@ -1,4 +1,4 @@
-import MailComposer from "nodemailer/lib/mail-composer";
+import MailComposer from "nodemailer/lib/mail-composer/index.js";
 
 export type OutboundRawMailInput = {
   from: string;
