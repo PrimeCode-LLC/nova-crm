@@ -28,7 +28,7 @@
     "test": "vitest run",
     "build:worker": "node scripts/build-worker.mjs",
     "worker": "tsx src/worker/index.ts",
-    "worker:built": "node dist/worker/index.js",
+    "worker:built": "node dist/worker/index.mjs",
     "check:firebase-imports": "node scripts/check-firebase-imports.mjs",
     "export:strategy-packs": "npx --yes tsx scripts/export-strategy-packs.ts",
     "extension:dev": "npm run dev -w @nova/intent-radar-extension",

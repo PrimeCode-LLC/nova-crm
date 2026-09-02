@@ -1,7 +1,7 @@
 /**
  * Nova CRM worker tier entrypoint (Phase 4).
  *
- * Consumes BullMQ queues on REDIS_URL. Built to `dist/worker/index.js`
+ * Consumes BullMQ queues on REDIS_URL. Built to `dist/worker/index.mjs`
  * via `npm run build:worker` (Dockerfile.worker).
  *
  * Local: `npm run worker` (tsx) or `npm run worker:built` after build.
@@ -9,9 +9,11 @@
 
 import { config as loadEnv } from "dotenv";
 
-// Match Next / scripts: load `.env` then `.env.local` (local wins).
-loadEnv();
-loadEnv({ path: ".env.local", override: true });
+// Local/dev only — production Compose injects env; do not require .env files in the image.
+if (process.env.NODE_ENV !== "production") {
+  loadEnv();
+  loadEnv({ path: ".env.local", override: true });
+}
 
 import { createServer } from "node:http";
 import { Worker, type Processor } from "bullmq";
