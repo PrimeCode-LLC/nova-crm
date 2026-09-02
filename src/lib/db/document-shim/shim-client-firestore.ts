@@ -4,7 +4,7 @@ import { Timestamp } from "@/lib/db/document-shim/timestamp";
 
 export { Timestamp };
 
-export type DocumentData = Record<string, any>;
+export type DocumentData = Record<string, unknown>;
 export type Unsubscribe = () => void;
 
 export type QueryConstraint = {

@@ -13,6 +13,12 @@ const eslintConfig = defineConfig([
     "build/**",
     "extension/dist/**",
     "next-env.d.ts",
+    // Generated / vendor / build output (not application source):
+    "dist/**",
+    "node_modules/**",
+    "extension/node_modules/**",
+    "coverage/**",
+    "src/generated/**",
   ]),
   {
     // Week 0: keep CI green while React Compiler plugin rules flood the

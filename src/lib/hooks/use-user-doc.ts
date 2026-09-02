@@ -26,7 +26,7 @@ export function useUserDoc(uid: string | undefined) {
       unsub = onSnapshot(
         ref,
         (snap) => {
-          setData(snap.exists() ? (snap.data() as User) : null);
+          setData(snap.exists() ? (snap.data() as unknown as User) : null);
           setLoading(false);
         },
         (e) => {
