@@ -1,5 +1,4 @@
-// eslint-disable-next-line @typescript-eslint/no-require-imports
-const MailComposer = require("nodemailer/lib/mail-composer");
+import MailComposer from "nodemailer/lib/mail-composer";
 
 export type OutboundRawMailInput = {
   from: string;
@@ -42,7 +41,13 @@ export async function buildOutboundRawMail(input: OutboundRawMailInput): Promise
   };
 
   return new Promise((resolve, reject) => {
-    const composer = new MailComposer(mailOptions);
+    // nodemailer CJS deep export — keep as default import so the ESM worker
+    // bundle externalizes it (bare require() becomes esbuild's broken __require).
+    const composer = new (MailComposer as new (mail: typeof mailOptions) => {
+      compile: () => {
+        build: (cb: (err: Error | null, message: Buffer) => void) => void;
+      };
+    })(mailOptions);
     composer.compile().build((err: Error | null, message: Buffer) => {
       if (err) reject(err);
       else resolve(message);
