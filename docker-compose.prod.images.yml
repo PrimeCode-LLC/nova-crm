@@ -1,0 +1,24 @@
+# Image-based production overlay — use with docker-compose.prod.yml
+# Requires immutable GHCR tags (never deploy :latest).
+#
+#   export NOVA_IMAGE_TAG=<git-sha>
+#   export GHCR_OWNER=<github-org-lowercase>
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.images.yml \
+#     --env-file .env.production pull web worker migrate cron
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.images.yml \
+#     --env-file .env.production run --rm migrate
+#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.images.yml \
+#     --env-file .env.production up -d --no-build web worker cron caddy
+
+services:
+  web:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/nova-crm-web:${NOVA_IMAGE_TAG:?set NOVA_IMAGE_TAG}
+
+  worker:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/nova-crm-worker:${NOVA_IMAGE_TAG:?set NOVA_IMAGE_TAG}
+
+  migrate:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/nova-crm-migrate:${NOVA_IMAGE_TAG:?set NOVA_IMAGE_TAG}
+
+  cron:
+    image: ghcr.io/${GHCR_OWNER:?set GHCR_OWNER}/nova-crm-cron:${NOVA_IMAGE_TAG:?set NOVA_IMAGE_TAG}

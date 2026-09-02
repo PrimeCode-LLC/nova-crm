@@ -12,8 +12,8 @@ and [`NOVA-CRM-ENGINEERING-RULES.md`](../Architecture%20fixes%20plan/NOVA-CRM-EN
 | Environment | Purpose | Data | Deploys |
 |-------------|---------|------|---------|
 | **Local / dev** | Individual development | Compose Postgres + Redis (`docker compose up -d postgres redis`); seed/fake data only | Manual (`npm run dev`) |
-| **Staging** | Pre-production validation, QA, demos | Realistic but **not** real customer data (synthetic or scrubbed) | Automatic on merge to `main` (once deploy pipeline exists) |
-| **Production** | Real customers | Real | Manual-gated, tagged releases only |
+| **Staging** | Pre-production validation, QA, demos | Realistic but **not** real customer data | Separate VPS/DB; deploy from `feature/remove-firebase` CI images (optional) |
+| **Production** | Real customers on VPS | Real | **`feature/remove-firebase` only** — GHCR immutable SHA → manual GitHub Environment approval → `scripts/deploy-vps.sh` |
 
 ## Hard rules (non-negotiable)
 
@@ -61,12 +61,21 @@ See [`Architecture fixes plan/NOVA-CRM-P4-QUEUE-WORKER.md`](../Architecture%20fi
 
 ## Production Compose
 
-Use [`docker-compose.prod.yml`](../docker-compose.prod.yml): Caddy, web, worker, postgres, redis, cron sidecar. First deploy:
+Production VPS uses **immutable GHCR images** (never `docker compose up --build` on the server):
+
+| File | Purpose |
+|------|---------|
+| [`docker-compose.prod.yml`](../docker-compose.prod.yml) | Postgres, Redis, Caddy, cron, service wiring |
+| [`docker-compose.prod.images.yml`](../docker-compose.prod.images.yml) | Pins `web` / `worker` / `migrate` to `ghcr.io/<owner>/nova-crm-*:${NOVA_IMAGE_TAG}` |
+
+Deploy flow (see [`VPS-SINGLE-SERVER-SETUP.md`](VPS-SINGLE-SERVER-SETUP.md)):
 
 ```bash
-docker compose -f docker-compose.prod.yml run --rm migrate
-docker compose -f docker-compose.prod.yml up -d
+# On VPS after GitHub Actions approval (or manual with known SHA):
+DEPLOY_REF=feature/remove-firebase DEPLOY_SHA=<git-sha> GHCR_OWNER=<org> ./scripts/deploy-vps.sh
 ```
+
+**Never** deploy `main` to production VPS.
 
 Full operator guide: [`VPS-SINGLE-SERVER-SETUP.md`](VPS-SINGLE-SERVER-SETUP.md).
 
@@ -77,13 +86,14 @@ Full operator guide: [`VPS-SINGLE-SERVER-SETUP.md`](VPS-SINGLE-SERVER-SETUP.md).
 - [ ] Migrations go through Prisma Migrate (or equivalent) via CI for shared envs — no manual `ALTER` on prod
 - [ ] Any leftover ETL / reconcile jobs run against **staging** first
 
-## Promotion flow (target)
+## Promotion flow (production)
 
 ```
-feature/* → PR → CI (lint, typecheck, test, build) → merge to main
-                                                      → staging deploy
-                                                      → tag v* + approval
-                                                      → production deploy
+feature/remove-firebase
+    → PR + CI (lint, typecheck, test, build, migrate-smoke, docker build)
+    → push: publish GHCR images tagged :<git-sha>
+    → GitHub Actions "Deploy Production" + Environment approval
+    → VPS: scripts/deploy-vps.sh (pull SHA → migrate → up --no-build → smoke)
 ```
 
-See also [`docs/BRANCHING.md`](BRANCHING.md).
+`main` remains the **Firebase/reference** branch — not deployed to VPS. See [`docs/BRANCHING.md`](BRANCHING.md).

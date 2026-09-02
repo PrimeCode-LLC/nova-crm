@@ -39,7 +39,7 @@ Inside Docker (private network):
 | Web | `Dockerfile` | 3000 | `GET /api/health` |
 | Worker | `Dockerfile.worker` | 8081 | `GET /healthz` |
 | Migrate | `Dockerfile.migrate` | — | one-shot |
-| Cron | `alpine:3.20` | — | dispatches every minute |
+| Cron | `docker/cron/Dockerfile` (curl + POST dispatch) | — | five scheduled jobs |
 | Postgres | `pgvector/pgvector:pg16` | 5432 | `pg_isready` |
 | Redis | `redis:7-alpine` | 6379 | `PING` |
 | Caddy | `caddy:2-alpine` | 80 / 443 | HTTPS |
@@ -139,14 +139,19 @@ sudo mkdir -p /opt/nova-crm
 sudo chown $USER:$USER /opt/nova-crm
 cd /opt/nova-crm
 git clone YOUR_REPO_URL .
-# or upload a release zip / use CI to deploy images
+git checkout feature/remove-firebase
+cp .env.production.example .env.production   # fill secrets, chmod 600
 ```
+
+**Branch policy:** VPS production tracks **`feature/remove-firebase` only**. Never deploy `main` to this server. Application images come from **GHCR by Git SHA**, not local `docker build`.
 
 ---
 
 ## 6. Production Compose file
 
-Use the repo file **[`docker-compose.prod.yml`](../docker-compose.prod.yml)** (do not invent a second overlay). It starts postgres, redis, web, worker, cron, and Caddy. Local `docker-compose.yml` is for development passwords only.
+Use **[`docker-compose.prod.yml`](../docker-compose.prod.yml)** plus **[`docker-compose.prod.images.yml`](../docker-compose.prod.images.yml)** for production deploys. The overlay pins immutable GHCR images; the VPS must **not** run `docker compose up --build` for application tiers.
+
+Local `docker-compose.yml` is for development only.
 
 Harden secrets in a root `.env` next to the compose file (never commit real values):
 
@@ -248,17 +253,29 @@ Google Cloud: enable Calendar API + Gmail scopes; add redirect
 
 ---
 
-## 9. First start
+## 9. First start (bootstrap Postgres + Redis, then CI deploy)
+
+**One-time infrastructure** on the VPS (Postgres + Redis volumes):
 
 ```bash
 cd /opt/nova-crm
-
-# Apply database migrations + sync nova_app password (Dockerfile.migrate)
-docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
-
-# Build and start web, worker, cron, Caddy
-docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+docker compose -f docker-compose.prod.yml --env-file .env.production up -d postgres redis caddy
 ```
+
+**Application deploy** uses immutable GHCR images (after CI has published `:sha` for your commit):
+
+```bash
+# From GitHub Actions → Deploy Production (recommended)
+# Or manual on VPS after docker login ghcr.io:
+export DEPLOY_REF=feature/remove-firebase
+export DEPLOY_SHA=<git-sha-from-ci>
+export GHCR_OWNER=<github-org-lowercase>
+./scripts/deploy-vps.sh
+```
+
+The deploy script runs: `pull` → `migrate` → `up -d --no-build` (web, worker, cron) → smoke tests.
+
+Do **not** use `git pull` + `docker compose up --build` for production updates.
 
 `DATABASE_URL` must match `NOVA_APP_PASSWORD` after migrate completes.
 
@@ -268,7 +285,9 @@ Ensure org/member rows exist in Postgres and Clerk user emails match `members.em
 
 ## 10. Cron jobs
 
-`docker-compose.prod.yml` includes a **cron sidecar** that calls `POST /api/cron/queue/dispatch` every minute (see [`docker/cron/crontab`](../docker/cron/crontab)). That is the default production path. Host crontab below is optional if you are not using the sidecar.
+The **cron sidecar** (`docker/cron/Dockerfile`) runs five schedules via `POST /api/cron/queue/dispatch` (see [`docker/cron/crontab`](../docker/cron/crontab) and [`docker/cron/cron-dispatch.sh`](../docker/cron/cron-dispatch.sh)). This is the default production path.
+
+Optional **host crontab** (only if not using the sidecar):
 
 Create `/opt/nova-crm/scripts/cron-dispatch.sh`:
 
@@ -363,7 +382,8 @@ Also back up `.env.production` in a password manager / secrets vault (not in git
 |------|------------------|
 | View logs | `docker compose -f docker-compose.prod.yml logs -f web worker` |
 | Restart | `docker compose -f docker-compose.prod.yml restart web worker` |
-| Update app | `git pull` → `docker compose … up -d --build` → migrate if needed |
+| Update app | GitHub Actions **Deploy Production** (approved SHA) or `DEPLOY_SHA=… ./scripts/deploy-vps.sh` |
+| Roll back app | `ROLLBACK_SHA=<previous-sha> ./scripts/rollback-vps.sh` (does not reverse DB migrations) |
 | Disk / RAM | `df -h`, `docker stats` |
 | Staging | **Separate** VPS + DB + secrets ([ENVIRONMENTS.md](ENVIRONMENTS.md)) |
 

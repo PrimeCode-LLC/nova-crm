@@ -1,14 +1,19 @@
-# CI — runs on every pull request (migration W0.5)
+# CI — production branch: feature/remove-firebase (PostgreSQL/VPS)
+# main is Firebase reference only — no production CI/CD from main.
 name: CI
 
 on:
   pull_request:
+    branches: [feature/remove-firebase]
   push:
-    branches: [main]
+    branches: [feature/remove-firebase]
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
 
 jobs:
   checks:
@@ -29,9 +34,7 @@ jobs:
           --health-timeout 5s
           --health-retries 10
     env:
-      # App role — RLS enforced (FORCE). Never production (docs/ENVIRONMENTS.md).
       DATABASE_URL: postgres://nova_app:nova_dev_password@localhost:5432/nova_crm
-      # DDL / migrate role (Compose superuser).
       MIGRATE_DATABASE_URL: postgres://nova:nova_dev_password@localhost:5432/nova_crm
     steps:
       - uses: actions/checkout@v4
@@ -46,6 +49,9 @@ jobs:
 
       - name: Firebase removal gate (P7.9)
         run: node scripts/check-firebase-imports.mjs
+
+      - name: Validate cron configuration
+        run: node scripts/validate-cron-config.mjs
 
       - name: Lint
         run: npm run lint
@@ -90,9 +96,9 @@ jobs:
         run: docker build -t nova-crm-worker -f Dockerfile.worker .
       - name: Build migrate image
         run: docker build -t nova-crm-migrate -f Dockerfile.migrate .
+      - name: Build cron sidecar image
+        run: docker build -t nova-crm-cron -f docker/cron/Dockerfile .
 
-  # Proves `migrate` applies schema AND sets the nova_app password, so the
-  # deployed web tier can actually authenticate (docker-compose.prod.yml).
   migrate-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -134,3 +140,68 @@ jobs:
         env:
           PGPASSWORD: "ci-p@ss'w0rd$x"
         run: psql -h localhost -U nova_app -d nova_crm -c "select current_user;"
+
+  publish-ghcr:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/remove-firebase'
+    needs: [checks, docker-images, migrate-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+    env:
+      WEB_CLERK_PK: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_ci' }}
+      WEB_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://ci.example.com' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Lowercase GHCR owner
+        id: ghcr
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push web image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-web:${{ github.sha }}
+          build-args: |
+            NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ env.WEB_CLERK_PK }}
+            NEXT_PUBLIC_AUTH_CLERK_V1=true
+            NEXT_PUBLIC_SITE_URL=${{ env.WEB_SITE_URL }}
+            NEXT_PUBLIC_POSTGRES_READ_CRM_V1=true
+            NEXT_PUBLIC_POSTGRES_READ_LEADS_V1=true
+            NEXT_PUBLIC_POSTGRES_SOLE_WRITER_CRM_V1=true
+            NEXT_PUBLIC_POSTGRES_DASHBOARD_SUMMARY_READ_V1=true
+
+      - name: Build and push worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.worker
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-worker:${{ github.sha }}
+
+      - name: Build and push migrate image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.migrate
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-migrate:${{ github.sha }}
+
+      - name: Build and push cron image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/cron/Dockerfile
+          push: true
+          tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-cron:${{ github.sha }}

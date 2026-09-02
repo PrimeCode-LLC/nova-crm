@@ -1,8 +1,8 @@
 # Production stack — Postgres + Redis + web + worker + cron + Caddy
-# Usage:
-#   cp .env.production.example .env.production   # fill in secrets, chmod 600
-#   docker compose -f docker-compose.prod.yml --env-file .env.production run --rm migrate
+# Local build (dev/emergency only):
 #   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+# Production VPS (immutable GHCR images — see docker-compose.prod.images.yml):
+#   DEPLOY_SHA=<git-sha> GHCR_OWNER=<org> ./scripts/deploy-vps.sh
 
 services:
   postgres:
@@ -114,7 +114,9 @@ services:
       - internal
 
   cron:
-    image: alpine:3.20
+    build:
+      context: .
+      dockerfile: docker/cron/Dockerfile
     restart: unless-stopped
     depends_on:
       web:
@@ -124,9 +126,6 @@ services:
     environment:
       CRON_SECRET: ${CRON_SECRET:?set CRON_SECRET}
       WEB_INTERNAL_URL: http://web:3000
-    volumes:
-      - ./docker/cron/crontab:/etc/crontabs/root:ro
-    entrypoint: ["/usr/sbin/crond", "-f", "-l", "2"]
     networks:
       - internal
 

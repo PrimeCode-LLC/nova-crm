@@ -1,0 +1,83 @@
+# Production VPS deploy — feature/remove-firebase ONLY
+# Never deploy main to VPS. Requires GitHub Environment "production" approval.
+name: Deploy Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_sha:
+        description: Immutable Git SHA to deploy (defaults to workflow commit)
+        required: false
+        type: string
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/feature/remove-firebase'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    steps:
+      - name: Hard guard — production branch only
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/feature/remove-firebase" ]; then
+            echo "Refusing deploy: production deploys only from feature/remove-firebase" >&2
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.deploy_sha || github.sha }}
+          fetch-depth: 0
+
+      - name: Resolve immutable deploy SHA
+        id: meta
+        run: |
+          SHA="$(git rev-parse HEAD)"
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
+          echo "Deploy SHA: ${SHA}"
+
+      - name: Verify SHA exists on feature/remove-firebase
+        run: |
+          git fetch origin feature/remove-firebase
+          if ! git merge-base --is-ancestor "${{ steps.meta.outputs.sha }}" "origin/feature/remove-firebase"; then
+            echo "SHA is not on feature/remove-firebase" >&2
+            exit 1
+          fi
+
+      - name: Sync deploy scripts to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "scripts/deploy-vps.sh,scripts/smoke-post-deploy.sh,scripts/rollback-vps.sh,docker-compose.prod.yml,docker-compose.prod.images.yml,docker/cron,docker/caddy"
+          target: "/opt/nova-crm"
+
+      - name: Deploy to VPS
+        uses: appleboy/ssh-action@v1.2.0
+        env:
+          DEPLOY_REF: feature/remove-firebase
+          DEPLOY_SHA: ${{ steps.meta.outputs.sha }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: DEPLOY_REF,DEPLOY_SHA,GHCR_OWNER,GHCR_USERNAME,GHCR_TOKEN
+          script: |
+            set -euo pipefail
+            chmod +x /opt/nova-crm/scripts/deploy-vps.sh /opt/nova-crm/scripts/smoke-post-deploy.sh /opt/nova-crm/scripts/rollback-vps.sh
+            export GHCR_OWNER="$(printf '%s' "${GHCR_OWNER}" | tr '[:upper:]' '[:lower:]')"
+            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
+            cd /opt/nova-crm
+            DEPLOY_REF="$DEPLOY_REF" DEPLOY_SHA="$DEPLOY_SHA" GHCR_OWNER="$GHCR_OWNER" \
+              ./scripts/deploy-vps.sh
+
+      - name: Report deployed SHA
+        run: echo "Production deploy completed for SHA ${{ steps.meta.outputs.sha }}"
