@@ -11,7 +11,6 @@ import { toast } from "sonner";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import {
   mapBuyerPersona,
@@ -211,7 +210,7 @@ export function useProspectingStrategyData(): ProspectingStrategyData {
     ? DEMO_WORKSPACE_ORG_ID
     : ws.organizationId ?? "";
   const canLive =
-    !ws.isDemo && isClientDocumentSyncEnabled() && Boolean(organizationId);
+    !ws.isDemo && Boolean(organizationId);
 
   const [loading, setLoading] = React.useState(canLive);
   const [personas, setPersonas] = React.useState<BuyerPersona[]>([]);
