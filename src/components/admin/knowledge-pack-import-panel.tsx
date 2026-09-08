@@ -46,9 +46,9 @@ export function KnowledgePackImportPanel({ onImported }: { onImported?: () => vo
   const [knowledgePreview, setKnowledgePreview] = React.useState<KnowledgePreview | null>(null);
   const [promptsPreview, setPromptsPreview] = React.useState<PromptsPreview | null>(null);
   const [indexDocuments, setIndexDocuments] = React.useState(true);
-  const [busy, setBusy] = React.useState<"preview-k" | "import-k" | "preview-p" | "import-p" | null>(
-    null,
-  );
+  const [busy, setBusy] = React.useState<
+    "preview-k" | "import-k" | "preview-p" | "import-p" | "reindex" | null
+  >(null);
 
   async function previewKnowledge() {
     if (!knowledgeFile) {
@@ -179,6 +179,33 @@ export function KnowledgePackImportPanel({ onImported }: { onImported?: () => vo
     }
   }
 
+  async function reindexAll() {
+    setBusy("reindex");
+    try {
+      const res = await fetch("/api/ai/rag/reindex-all", {
+        method: "POST",
+        credentials: "same-origin",
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        toast.error(typeof json.error === "string" ? json.error : "Re-index failed");
+        return;
+      }
+      toast.success(
+        `Indexed ${json.indexed}/${json.total} documents` +
+          (json.failed ? ` · ${json.failed} failed` : ""),
+      );
+      if (json.failed && Array.isArray(json.errors) && json.errors.length) {
+        console.warn("Re-index errors", json.errors);
+      }
+      onImported?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Re-index failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
   return (
     <div className="space-y-4 max-w-3xl">
       <Card>
@@ -302,6 +329,27 @@ export function KnowledgePackImportPanel({ onImported }: { onImported?: () => vo
               Import global prompts
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">Re-index knowledge</CardTitle>
+          <CardDescription>
+            Documents are imported, but vector chunks only appear after embedding. Requires an OpenAI
+            (or configured) API key under Setup. Use this if Overview still shows 0 chunks.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy !== null}
+            onClick={() => void reindexAll()}
+          >
+            {busy === "reindex" ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Re-index all documents
+          </Button>
         </CardContent>
       </Card>
     </div>
