@@ -61,24 +61,27 @@ export function EditAccountDialog({
   const [linkedin, setLinkedin] = React.useState("");
   const [techStack, setTechStack] = React.useState("");
 
-  React.useEffect(() => {
+  // Seed once when the dialog opens (or account id changes). Do not depend on the
+  // full `account` object — live CRM polls recreate it and were wiping in-progress
+  // edits (size, revenue, year founded, tech stack). useLayoutEffect avoids a
+  // startTransition race where typed/selected values were flushed away right after open.
+  React.useLayoutEffect(() => {
     if (!open) return;
-    React.startTransition(() => {
-      setName(account.name ?? "");
-      setDomain(account.domain ?? "");
-      setIndustry(account.industry ?? "");
-      setSize(account.size ?? UNSET);
-      setRevenueRange(account.revenueRange ?? UNSET);
-      setYearFounded(account.yearFounded != null ? String(account.yearFounded) : "");
-      setCity(account.city ?? (!account.state && !account.country ? account.location ?? "" : ""));
-      setState(account.state ?? "");
-      setCountry(account.country ?? "");
-      setDescription(account.businessDescription ?? "");
-      setWebsite(account.website ?? "");
-      setLinkedin(account.linkedin ?? "");
-      setTechStack(account.techStack?.join(", ") ?? "");
-    });
-  }, [account, open]);
+    setName(account.name ?? "");
+    setDomain(account.domain ?? "");
+    setIndustry(account.industry ?? "");
+    setSize(account.size ?? UNSET);
+    setRevenueRange(account.revenueRange ?? UNSET);
+    setYearFounded(account.yearFounded != null ? String(account.yearFounded) : "");
+    setCity(account.city ?? (!account.state && !account.country ? account.location ?? "" : ""));
+    setState(account.state ?? "");
+    setCountry(account.country ?? "");
+    setDescription(account.businessDescription ?? "");
+    setWebsite(account.website ?? "");
+    setLinkedin(account.linkedin ?? "");
+    setTechStack(account.techStack?.join(", ") ?? "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: open + account.id only
+  }, [open, account.id]);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();

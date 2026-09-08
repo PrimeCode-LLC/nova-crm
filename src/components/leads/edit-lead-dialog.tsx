@@ -171,65 +171,68 @@ export function EditLeadDialog({
     [profiles, channel],
   );
 
-  React.useEffect(() => {
+  // Seed once when the dialog opens (or lead id changes). Do not depend on the
+  // full `lead` / `profiles` objects — live CRM polls recreate them and were
+  // wiping in-progress research edits within milliseconds. useLayoutEffect
+  // avoids a startTransition race where typed text was flushed away right after open.
+  React.useLayoutEffect(() => {
     if (!open || !lead) return;
-    React.startTransition(() => {
-      setChannel(lead.channel);
-      setStage(lead.stage);
-      setTemperature(lead.temperature);
-      setPriority(lead.priority);
-      setNextAction(lead.nextAction ?? "");
-      setNotes(lead.notes ?? "");
-      setEstimatedValue(lead.estimatedValue != null ? String(lead.estimatedValue) : "");
-      setExpectedClose(dateInputFromIso(lead.expectedCloseDate));
+    setChannel(lead.channel);
+    setStage(lead.stage);
+    setTemperature(lead.temperature);
+    setPriority(lead.priority);
+    setNextAction(lead.nextAction ?? "");
+    setNotes(lead.notes ?? "");
+    setEstimatedValue(lead.estimatedValue != null ? String(lead.estimatedValue) : "");
+    setExpectedClose(dateInputFromIso(lead.expectedCloseDate));
 
-      setTriggerEvent(lead.triggerEvent ?? "");
-      setBusinessFocus(lead.businessFocus ?? "");
-      setPainPoints(lead.painPoints ?? "");
-      setRecentNews(lead.recentNews ?? "");
-      setHiringSignals(lead.hiringSignals ?? "");
-      setPsLine(lead.psLine ?? "");
-      setToolsUsedStr(toolsUsedToString(lead.toolsUsed));
+    setTriggerEvent(lead.triggerEvent ?? "");
+    setBusinessFocus(lead.businessFocus ?? "");
+    setPainPoints(lead.painPoints ?? "");
+    setRecentNews(lead.recentNews ?? "");
+    setHiringSignals(lead.hiringSignals ?? "");
+    setPsLine(lead.psLine ?? "");
+    setToolsUsedStr(toolsUsedToString(lead.toolsUsed));
 
-      setPersTrigger(lead.personalizationNote?.trigger ?? "");
-      setPersLikelyImpact(lead.personalizationNote?.likelyImpact ?? "");
-      setPersRelevantService(lead.personalizationNote?.relevantService ?? "");
-      setPersSuggestedAngle(lead.personalizationNote?.suggestedAngle ?? "");
+    setPersTrigger(lead.personalizationNote?.trigger ?? "");
+    setPersLikelyImpact(lead.personalizationNote?.likelyImpact ?? "");
+    setPersRelevantService(lead.personalizationNote?.relevantService ?? "");
+    setPersSuggestedAngle(lead.personalizationNote?.suggestedAngle ?? "");
 
-      setDoNotContact(!!lead.doNotContact);
-      setPushToInstantly(lead.pushToInstantly ?? UNSET);
-      setPushToLinkedIn(lead.pushToLinkedIn ?? UNSET);
+    setDoNotContact(!!lead.doNotContact);
+    setPushToInstantly(lead.pushToInstantly ?? UNSET);
+    setPushToLinkedIn(lead.pushToLinkedIn ?? UNSET);
 
-      const b = lead.bant;
-      setUseBant(!!b);
-      setBantBudget(String(b?.budget ?? 3));
-      setBantAuthority(String(b?.authority ?? 3));
-      setBantNeed(String(b?.need ?? 3));
-      setBantTimeline(String(b?.timeline ?? 3));
+    const b = lead.bant;
+    setUseBant(!!b);
+    setBantBudget(String(b?.budget ?? 3));
+    setBantAuthority(String(b?.authority ?? 3));
+    setBantNeed(String(b?.need ?? 3));
+    setBantTimeline(String(b?.timeline ?? 3));
 
-      const ch = lead.channel;
-      if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
-        const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
-        const want = lead.profileId?.trim() ?? "";
-        if (want && opts.some((p) => p.id === want)) {
-          setProfileId(want);
-        } else if (opts.length === 1) {
-          setProfileId(opts[0]!.id);
-        } else {
-          setProfileId("");
-        }
+    const ch = lead.channel;
+    if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
+      const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+      const want = lead.profileId?.trim() ?? "";
+      if (want && opts.some((p) => p.id === want)) {
+        setProfileId(want);
+      } else if (opts.length === 1) {
+        setProfileId(opts[0]!.id);
       } else {
         setProfileId("");
       }
+    } else {
+      setProfileId("");
+    }
 
-      setIntakeKind(lead.intakeKind ?? "sales_lead");
-      setOwnerId(lead.ownerId?.trim() || UNSET);
-      const existingScraper = lead.scraperId?.trim();
-      const me = currentUserId?.trim();
-      setScraperId(existingScraper || (me ? me : UNSET));
-      setLabelIds(lead.labelIds ?? []);
-    });
-  }, [open, lead, profiles, currentUserId]);
+    setIntakeKind(lead.intakeKind ?? "sales_lead");
+    setOwnerId(lead.ownerId?.trim() || UNSET);
+    const existingScraper = lead.scraperId?.trim();
+    const me = currentUserId?.trim();
+    setScraperId(existingScraper || (me ? me : UNSET));
+    setLabelIds(lead.labelIds ?? []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: open + lead.id only
+  }, [open, lead?.id]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
