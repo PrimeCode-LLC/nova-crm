@@ -266,6 +266,8 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
     sendPolicy?: OrgEmailSendPolicy | null;
     orgCeiling?: number | null;
     orgRemainingByDay?: Record<string, number>;
+    /** Clock for capacity horizon + min placement (tests); defaults to Date.now(). */
+    now?: Date;
   },
 ): {
   steps: T[];
@@ -288,8 +290,10 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
     return { steps, changed: false, unresolvedIds: [] };
   }
 
+  const nowMs =
+    options?.now && !Number.isNaN(options.now.getTime()) ? options.now.getTime() : Date.now();
   const remaining: Record<string, number> = {};
-  const todayKey = scheduleDayKeyFromDate(new Date(), zone);
+  const todayKey = scheduleDayKeyFromDate(new Date(nowMs), zone);
   const endKey = addUtcDayKey(todayKey, horizonDays - 1);
   for (let key = todayKey; key <= endKey; key = addUtcDayKey(key, 1)) {
     const working = !policy || isOrgWorkingDay(key, policy, zone);
@@ -311,7 +315,7 @@ export function autoFixScheduleDates<T extends { id: string; scheduledAt: string
 
   let changed = false;
   const unresolvedIds: string[] = [];
-  let minTime = Date.now() + 60_000;
+  let minTime = nowMs + 60_000;
   let prevOriginalMs: number | null = null;
   let prevPlacedMs: number | null = null;
 

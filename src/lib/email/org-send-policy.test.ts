@@ -46,6 +46,8 @@ describe("after-hours placement", () => {
 
 describe("capacity spill skips weekends", () => {
   it("auto-fix jumps Saturday to Monday when Friday is full", () => {
+    // Pin the clock: autoFix horizon/minTime use now (not the step's scheduled day).
+    const now = new Date("2026-08-07T12:00:00.000Z"); // Fri
     const friday = "2026-08-07";
     const saturday = "2026-08-08";
     const monday = "2026-08-10";
@@ -82,7 +84,7 @@ describe("capacity spill skips weekends", () => {
       1,
       14,
       TZ,
-      { sendPolicy: DEFAULT_ORG_SEND_POLICY },
+      { sendPolicy: DEFAULT_ORG_SEND_POLICY, now },
     );
     expect(result.unresolvedIds).toEqual([]);
     const placedDay = scheduleDayKeyFromDate(result.steps[0]!.scheduledAt, TZ);
@@ -91,6 +93,7 @@ describe("capacity spill skips weekends", () => {
 
   it("does not leave overflow probes outside working hours", () => {
     const zone = TZ;
+    const now = new Date("2026-08-05T08:00:00.000Z");
     const today = "2026-08-05";
     const byDay = {
       [today]: {
@@ -109,7 +112,7 @@ describe("capacity spill skips weekends", () => {
       10,
       7,
       zone,
-      { sendPolicy: DEFAULT_ORG_SEND_POLICY },
+      { sendPolicy: DEFAULT_ORG_SEND_POLICY, now },
     );
     expect(result.unresolvedIds).toEqual([]);
     const local = result.steps[0]!.scheduledAt;
