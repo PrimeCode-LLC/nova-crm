@@ -61,30 +61,37 @@ export function EditAccountDialog({
   const [linkedin, setLinkedin] = React.useState("");
   const [techStack, setTechStack] = React.useState("");
 
-  // Hydrate once when the dialog opens (or the account id changes).
-  // Do NOT depend on live `account` object identity — workspace Firestore
-  // snapshots replace it often in production, which was wiping unsaved
-  // size / revenueRange / yearFounded / techStack mid-edit.
-  const editAccountId = open ? account.id : undefined;
+  // Hydrate once per open session for this account id.
+  // Live workspace snapshots replace `account` often; also avoid startTransition
+  // races that overwrite Select/text edits a few ms after the user types.
+  const hydratedAccountIdRef = React.useRef<string | null>(null);
+  const accountSnapshotRef = React.useRef(account);
+  accountSnapshotRef.current = account;
+
   React.useEffect(() => {
-    if (!editAccountId) return;
-    React.startTransition(() => {
-      setName(account.name ?? "");
-      setDomain(account.domain ?? "");
-      setIndustry(account.industry ?? "");
-      setSize(account.size ?? UNSET);
-      setRevenueRange(account.revenueRange ?? UNSET);
-      setYearFounded(account.yearFounded != null ? String(account.yearFounded) : "");
-      setCity(account.city ?? (!account.state && !account.country ? account.location ?? "" : ""));
-      setState(account.state ?? "");
-      setCountry(account.country ?? "");
-      setDescription(account.businessDescription ?? "");
-      setWebsite(account.website ?? "");
-      setLinkedin(account.linkedin ?? "");
-      setTechStack(account.techStack?.join(", ") ?? "");
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on open/account id only
-  }, [editAccountId]);
+    if (!open) {
+      hydratedAccountIdRef.current = null;
+      return;
+    }
+    const source = accountSnapshotRef.current;
+    if (!source?.id) return;
+    if (hydratedAccountIdRef.current === source.id) return;
+    hydratedAccountIdRef.current = source.id;
+
+    setName(source.name ?? "");
+    setDomain(source.domain ?? "");
+    setIndustry(source.industry ?? "");
+    setSize(source.size ?? UNSET);
+    setRevenueRange(source.revenueRange ?? UNSET);
+    setYearFounded(source.yearFounded != null ? String(source.yearFounded) : "");
+    setCity(source.city ?? (!source.state && !source.country ? source.location ?? "" : ""));
+    setState(source.state ?? "");
+    setCountry(source.country ?? "");
+    setDescription(source.businessDescription ?? "");
+    setWebsite(source.website ?? "");
+    setLinkedin(source.linkedin ?? "");
+    setTechStack(source.techStack?.join(", ") ?? "");
+  }, [open, account.id]);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();

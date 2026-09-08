@@ -150,48 +150,64 @@ export function ProspectIntakeDialog({
   const [bestChannel, setBestChannel] = React.useState<BestContactChannel | typeof UNSET>(UNSET);
   const [linkedin, setLinkedin] = React.useState("");
 
+  const hydratedIntakeKeyRef = React.useRef<string | null>(null);
+  const accountSnapshotRef = React.useRef(account);
+  const contactSnapshotRef = React.useRef(contact);
+  if (account) accountSnapshotRef.current = account;
+  if (contact) contactSnapshotRef.current = contact;
+
   React.useEffect(() => {
-    if (!open || !account || !contact) return;
-    React.startTransition(() => {
-      setBizName(account.name ?? "");
-      setIndustry(account.industry ?? "");
-      setBizDesc(account.businessDescription ?? "");
-      setCity(account.city ?? "");
-      setState(account.state ?? "");
-      setCountry(account.country ?? "");
-      setYearFounded(account.yearFounded != null ? String(account.yearFounded) : "");
-      setBizStatus(account.businessStatus ?? UNSET);
-      setSize(account.size ?? UNSET);
-      setRev(account.revenueRange ?? UNSET);
-      setWebsite(account.website ?? "");
-      setCompanyLinkedin(account.linkedin ?? "");
-      setWebStatus(account.websiteStatus ?? UNSET);
-      setTechStackStr(techStackToString(account.techStack));
-      setActivity(account.onlineActivityScore ?? UNSET);
-      setLastSiteAt(dateInputFromIso(account.lastWebsiteActivityAt));
-      setLastSiteNote(account.lastWebsiteActivityNote ?? "");
-      setCareersUrl(account.careersPageUrl ?? "");
+    if (!open) {
+      hydratedIntakeKeyRef.current = null;
+      return;
+    }
+    const acc = account ?? accountSnapshotRef.current;
+    const con = contact ?? contactSnapshotRef.current;
+    if (!acc?.id || !con?.id) return;
+    const key = `${acc.id}:${con.id}`;
+    if (hydratedIntakeKeyRef.current === key) return;
+    hydratedIntakeKeyRef.current = key;
 
-      setFirstName(contact.firstName ?? "");
-      setLastName(contact.lastName ?? "");
-      setTitle(contact.title ?? "");
-      setSeniority(contact.seniority ?? "");
-      setContactLocation(contact.location ?? "");
-      setEmail(contact.email ?? "");
-      setPersonalEmail(contact.personalEmail ?? "");
-      setEmailVerify(contact.emailVerificationStatus ?? UNSET);
-      setPhone(contact.phone ?? "");
-      setContactSource(contact.contactSource ?? "");
-      setBestChannel(contact.bestContactChannel ?? UNSET);
-      setLinkedin(contact.linkedin ?? "");
-    });
-  }, [open, account, contact]);
+    setBizName(acc.name ?? "");
+    setIndustry(acc.industry ?? "");
+    setBizDesc(acc.businessDescription ?? "");
+    setCity(acc.city ?? "");
+    setState(acc.state ?? "");
+    setCountry(acc.country ?? "");
+    setYearFounded(acc.yearFounded != null ? String(acc.yearFounded) : "");
+    setBizStatus(acc.businessStatus ?? UNSET);
+    setSize(acc.size ?? UNSET);
+    setRev(acc.revenueRange ?? UNSET);
+    setWebsite(acc.website ?? "");
+    setCompanyLinkedin(acc.linkedin ?? "");
+    setWebStatus(acc.websiteStatus ?? UNSET);
+    setTechStackStr(techStackToString(acc.techStack));
+    setActivity(acc.onlineActivityScore ?? UNSET);
+    setLastSiteAt(dateInputFromIso(acc.lastWebsiteActivityAt));
+    setLastSiteNote(acc.lastWebsiteActivityNote ?? "");
+    setCareersUrl(acc.careersPageUrl ?? "");
 
-  if (!account || !contact) return null;
+    setFirstName(con.firstName ?? "");
+    setLastName(con.lastName ?? "");
+    setTitle(con.title ?? "");
+    setSeniority(con.seniority ?? "");
+    setContactLocation(con.location ?? "");
+    setEmail(con.email ?? "");
+    setPersonalEmail(con.personalEmail ?? "");
+    setEmailVerify(con.emailVerificationStatus ?? UNSET);
+    setPhone(con.phone ?? "");
+    setContactSource(con.contactSource ?? "");
+    setBestChannel(con.bestContactChannel ?? UNSET);
+    setLinkedin(con.linkedin ?? "");
+  }, [open, account?.id, contact?.id]);
+
+  const displayAccount = account ?? accountSnapshotRef.current;
+  const displayContact = contact ?? contactSnapshotRef.current;
+  if (!displayAccount || !displayContact) return null;
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!account || !contact) return;
+    if (!displayAccount || !displayContact) return;
     const yf = yearFounded.trim();
     let yearFoundedNum: number | undefined;
     if (yf) {
@@ -207,7 +223,7 @@ export function ProspectIntakeDialog({
     const locationStr = locParts.length ? locParts.join(", ") : undefined;
 
     const accountPatch: Partial<Account> = {
-      name: bizName.trim() || account.name,
+      name: bizName.trim() || displayAccount.name,
       industry: industry.trim() || undefined,
       businessDescription: bizDesc.trim() || undefined,
       city: city.trim() || undefined,
@@ -228,8 +244,8 @@ export function ProspectIntakeDialog({
       careersPageUrl: careersUrl.trim() || undefined,
     };
 
-    const fn = firstName.trim() || contact.firstName;
-    const ln = lastName.trim() || contact.lastName;
+    const fn = firstName.trim() || displayContact.firstName;
+    const ln = lastName.trim() || displayContact.lastName;
     const fullName = fn && ln && fn !== ln ? `${fn} ${ln}`.trim() : fn || ln;
 
     const contactPatch: Partial<Contact> = {

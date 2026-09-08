@@ -171,76 +171,85 @@ export function EditLeadDialog({
     [profiles, channel],
   );
 
-  // Hydrate once when the dialog opens (or the edited lead id changes).
-  // Do NOT depend on the live `lead` / `profiles` object identity — workspace
-  // Firestore snapshots replace those often in production, which was wiping
-  // unsaved research fields (businessFocus, recentNews, hiringSignals, toolsUsed)
-  // whenever the user tabbed between inputs mid-edit.
-  const editLeadId = open ? lead?.id : undefined;
+  // Hydrate once per open session for this lead id.
+  // Production Firestore can briefly clear `lead` mid-edit; tying hydrate to
+  // `open ? lead?.id` re-ran (and `if (!lead) return null` unmounted) and wiped
+  // unsaved research fields after a few ms. Keep a snapshot and skip re-hydrate.
+  const hydratedLeadIdRef = React.useRef<string | null>(null);
+  const leadSnapshotRef = React.useRef(lead);
+  if (lead) leadSnapshotRef.current = lead;
+
   React.useEffect(() => {
-    if (!editLeadId || !lead) return;
-    React.startTransition(() => {
-      setChannel(lead.channel);
-      setStage(lead.stage);
-      setTemperature(lead.temperature);
-      setPriority(lead.priority);
-      setNextAction(lead.nextAction ?? "");
-      setNotes(lead.notes ?? "");
-      setEstimatedValue(lead.estimatedValue != null ? String(lead.estimatedValue) : "");
-      setExpectedClose(dateInputFromIso(lead.expectedCloseDate));
+    if (!open) {
+      hydratedLeadIdRef.current = null;
+      return;
+    }
+    const source = lead ?? leadSnapshotRef.current;
+    if (!source?.id) return;
+    if (hydratedLeadIdRef.current === source.id) return;
+    hydratedLeadIdRef.current = source.id;
 
-      setTriggerEvent(lead.triggerEvent ?? "");
-      setBusinessFocus(lead.businessFocus ?? "");
-      setPainPoints(lead.painPoints ?? "");
-      setRecentNews(lead.recentNews ?? "");
-      setHiringSignals(lead.hiringSignals ?? "");
-      setPsLine(lead.psLine ?? "");
-      setToolsUsedStr(toolsUsedToString(lead.toolsUsed));
+    setChannel(source.channel);
+    setStage(source.stage);
+    setTemperature(source.temperature);
+    setPriority(source.priority);
+    setNextAction(source.nextAction ?? "");
+    setNotes(source.notes ?? "");
+    setEstimatedValue(source.estimatedValue != null ? String(source.estimatedValue) : "");
+    setExpectedClose(dateInputFromIso(source.expectedCloseDate));
 
-      setPersTrigger(lead.personalizationNote?.trigger ?? "");
-      setPersLikelyImpact(lead.personalizationNote?.likelyImpact ?? "");
-      setPersRelevantService(lead.personalizationNote?.relevantService ?? "");
-      setPersSuggestedAngle(lead.personalizationNote?.suggestedAngle ?? "");
+    setTriggerEvent(source.triggerEvent ?? "");
+    setBusinessFocus(source.businessFocus ?? "");
+    setPainPoints(source.painPoints ?? "");
+    setRecentNews(source.recentNews ?? "");
+    setHiringSignals(source.hiringSignals ?? "");
+    setPsLine(source.psLine ?? "");
+    setToolsUsedStr(toolsUsedToString(source.toolsUsed));
 
-      setDoNotContact(!!lead.doNotContact);
-      setPushToInstantly(lead.pushToInstantly ?? UNSET);
-      setPushToLinkedIn(lead.pushToLinkedIn ?? UNSET);
+    setPersTrigger(source.personalizationNote?.trigger ?? "");
+    setPersLikelyImpact(source.personalizationNote?.likelyImpact ?? "");
+    setPersRelevantService(source.personalizationNote?.relevantService ?? "");
+    setPersSuggestedAngle(source.personalizationNote?.suggestedAngle ?? "");
 
-      const b = lead.bant;
-      setUseBant(!!b);
-      setBantBudget(String(b?.budget ?? 3));
-      setBantAuthority(String(b?.authority ?? 3));
-      setBantNeed(String(b?.need ?? 3));
-      setBantTimeline(String(b?.timeline ?? 3));
+    setDoNotContact(!!source.doNotContact);
+    setPushToInstantly(source.pushToInstantly ?? UNSET);
+    setPushToLinkedIn(source.pushToLinkedIn ?? UNSET);
 
-      const ch = lead.channel;
-      if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
-        const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
-        const want = lead.profileId?.trim() ?? "";
-        if (want && opts.some((p) => p.id === want)) {
-          setProfileId(want);
-        } else if (opts.length === 1) {
-          setProfileId(opts[0]!.id);
-        } else {
-          setProfileId("");
-        }
+    const b = source.bant;
+    setUseBant(!!b);
+    setBantBudget(String(b?.budget ?? 3));
+    setBantAuthority(String(b?.authority ?? 3));
+    setBantNeed(String(b?.need ?? 3));
+    setBantTimeline(String(b?.timeline ?? 3));
+
+    const ch = source.channel;
+    if (CHANNELS_REQUIRING_OUTREACH_PROFILE.includes(ch)) {
+      const opts = profiles.filter((p) => p.channel === ch && p.active !== false);
+      const want = source.profileId?.trim() ?? "";
+      if (want && opts.some((p) => p.id === want)) {
+        setProfileId(want);
+      } else if (opts.length === 1) {
+        setProfileId(opts[0]!.id);
       } else {
         setProfileId("");
       }
+    } else {
+      setProfileId("");
+    }
 
-      setIntakeKind(lead.intakeKind ?? "sales_lead");
-      setOwnerId(lead.ownerId?.trim() || UNSET);
-      const existingScraper = lead.scraperId?.trim();
-      const me = currentUserId?.trim();
-      setScraperId(existingScraper || (me ? me : UNSET));
-      setLabelIds(lead.labelIds ?? []);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on open/lead id only
-  }, [editLeadId]);
+    setIntakeKind(source.intakeKind ?? "sales_lead");
+    setOwnerId(source.ownerId?.trim() || UNSET);
+    const existingScraper = source.scraperId?.trim();
+    const me = currentUserId?.trim();
+    setScraperId(existingScraper || (me ? me : UNSET));
+    setLabelIds(source.labelIds ?? []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- once per open session
+  }, [open, lead?.id]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!lead) return;
+    const source = lead ?? leadSnapshotRef.current;
+    if (!source) return;
     const editsRouting = section === "all" || section === "routing";
     const editsQualification = section === "all" || section === "qualification";
 
@@ -339,8 +348,9 @@ export function EditLeadDialog({
     onOpenChange(false);
   }
 
-  if (!lead) return null;
-  const readOnly = !canEditLead(lead);
+  const displayLead = lead ?? leadSnapshotRef.current;
+  if (!displayLead) return null;
+  const readOnly = !canEditLead(displayLead);
   const dialogTitle =
     section === "labels"
       ? "Edit labels"
@@ -366,10 +376,9 @@ export function EditLeadDialog({
             <DialogTitle>{dialogTitle}</DialogTitle>
             <DialogDescription>
             {readOnly ? "This lead was created from a prospect push. Only workspace admins can edit it." : null}
-              Update {section === "all" ? "this lead" : "these fields"} for {lead.contactName}.
+              Update {section === "all" ? "this lead" : "these fields"} for {displayLead.contactName}.
             </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-4 py-2 max-h-[min(78vh,640px)] overflow-y-auto pr-1">
+          </DialogHeader>          <div className="grid gap-4 py-2 max-h-[min(78vh,640px)] overflow-y-auto pr-1">
             {(section === "all" || section === "intake") && <section className="space-y-3">
               <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 Intake & ownership
@@ -679,7 +688,7 @@ export function EditLeadDialog({
                       ))}
                     </SelectContent>
                   </Select>
-                  {channel === "cold_email" && lead && (
+                  {channel === "cold_email" && displayLead && (
                     <Button
                       type="button"
                       variant="outline"
@@ -860,11 +869,11 @@ export function EditLeadDialog({
           </DialogFooter>
         </form>
       </DialogContent>
-      {lead && (
+      {displayLead && (
         <AddToCampaignDialog
           open={campaignDialogOpen}
           onOpenChange={setCampaignDialogOpen}
-          leadIds={[lead.id]}
+          leadIds={[displayLead.id]}
         />
       )}
     </Dialog>
