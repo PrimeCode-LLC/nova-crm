@@ -66,7 +66,13 @@ export function KnowledgePackImportPanel({ onImported }: { onImported?: () => vo
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(typeof json.error === "string" ? json.error : "Preview failed");
+        toast.error(
+          typeof json.error === "string"
+            ? json.error
+            : res.status === 403
+              ? "Forbidden — your CRM profile may be missing AI admin access"
+              : "Preview failed",
+        );
         return;
       }
       setKnowledgePreview(json.preview as KnowledgePreview);
@@ -127,7 +133,13 @@ export function KnowledgePackImportPanel({ onImported }: { onImported?: () => vo
       });
       const json = await res.json();
       if (!res.ok) {
-        toast.error(typeof json.error === "string" ? json.error : "Preview failed");
+        toast.error(
+          typeof json.error === "string"
+            ? json.error
+            : res.status === 403
+              ? "Forbidden — your CRM profile may be missing AI admin access"
+              : "Preview failed",
+        );
         return;
       }
       setPromptsPreview(json.preview as PromptsPreview);

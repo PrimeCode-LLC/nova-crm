@@ -10,6 +10,8 @@ import { parseComputedPermissionsDoc } from "@/lib/permissions/computed-permissi
 import type { ActionKey } from "@/lib/permissions/catalog";
 import type { EffectivePermissionSnapshot } from "@/lib/permissions/role-types";
 import type { Role, User } from "@/lib/types";
+import { defaultCrmRoleIdForOrgRole } from "@/lib/platform/crm-role-defaults";
+import { provisionCrmProfileServer } from "@/lib/platform/crm-profile-provision";
 import {
   guardTenantApi,
   type TenantApiContext,
@@ -29,6 +31,41 @@ function asUserFromAdmin(id: string, raw: DocumentData): User {
     status: (r.status as User["status"]) ?? "active",
     createdAt: documentTimestampToIso(r.createdAt),
   };
+}
+
+/** When `users/{uid}` was never provisioned (common after Firebase→Postgres cutover). */
+function actorFromTenantSession(ctx: TenantApiContext): User {
+  const roleId = defaultCrmRoleIdForOrgRole(ctx.role);
+  return {
+    id: ctx.session.uid,
+    email: ctx.session.email ?? "",
+    displayName: ctx.session.name?.trim() || ctx.session.email || ctx.session.uid,
+    roleId,
+    isSuperAdmin: ctx.role === "owner",
+    orgRole: ctx.role,
+    status: "active",
+    createdAt: new Date().toISOString(),
+  };
+}
+
+async function ensureCrmProfileBestEffort(ctx: TenantApiContext): Promise<void> {
+  const db = getAdminDb();
+  if (!db) return;
+  try {
+    await provisionCrmProfileServer(db, {
+      uid: ctx.session.uid,
+      organizationId: ctx.session.organizationId,
+      orgRole: ctx.role,
+      email: ctx.session.email,
+      displayName: ctx.session.name,
+      actorUid: ctx.session.uid,
+    });
+  } catch (err) {
+    console.warn(
+      "[guardAdminFeature] CRM profile provision failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
 }
 
 async function loadRoleSnapshot(
@@ -70,11 +107,19 @@ export async function guardAdminFeature(
   }
 
   const snap = await db.collection(COLLECTIONS.users).doc(base.ctx.session.uid).get();
-  const actor = snap.exists ? asUserFromAdmin(base.ctx.session.uid, snap.data()!) : null;
-  const roleSnapshot = actor ? await loadRoleSnapshot(actor.id) : null;
-  const subject = actor ? withSnapshot(actor, roleSnapshot) : undefined;
+  const actor = snap.exists
+    ? asUserFromAdmin(base.ctx.session.uid, snap.data()!)
+    : actorFromTenantSession(base.ctx);
 
-  if (!actor || !userHasAdminFeature(subject, feature, base.ctx.role)) {
+  if (!snap.exists) {
+    // Fill missing users/{uid} so later checks and client hooks see a CRM profile.
+    void ensureCrmProfileBestEffort(base.ctx);
+  }
+
+  const roleSnapshot = await loadRoleSnapshot(actor.id);
+  const subject = withSnapshot(actor, roleSnapshot);
+
+  if (!userHasAdminFeature(subject, feature, base.ctx.role)) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
@@ -107,18 +152,24 @@ export async function guardPermissionAction(
   }
 
   const snap = await db.collection(COLLECTIONS.users).doc(base.ctx.session.uid).get();
-  const actor = snap.exists ? asUserFromAdmin(base.ctx.session.uid, snap.data()!) : null;
-  const roleSnapshot = actor ? await loadRoleSnapshot(actor.id) : null;
-  const subject = actor ? withSnapshot(actor, roleSnapshot) : undefined;
+  const actor = snap.exists
+    ? asUserFromAdmin(base.ctx.session.uid, snap.data()!)
+    : actorFromTenantSession(base.ctx);
+
+  if (!snap.exists) {
+    void ensureCrmProfileBestEffort(base.ctx);
+  }
+
+  const roleSnapshot = await loadRoleSnapshot(actor.id);
+  const subject = withSnapshot(actor, roleSnapshot);
 
   const allowed =
-    Boolean(actor) &&
-    (canAction(subject, action) ||
-      (opts?.orAdminFeature
-        ? userHasAdminFeature(subject, opts.orAdminFeature, base.ctx.role)
-        : false));
+    canAction(subject, action) ||
+    (opts?.orAdminFeature
+      ? userHasAdminFeature(subject, opts.orAdminFeature, base.ctx.role)
+      : false);
 
-  if (!actor || !allowed) {
+  if (!allowed) {
     return {
       ok: false,
       response: NextResponse.json({ error: "Forbidden" }, { status: 403 }),
