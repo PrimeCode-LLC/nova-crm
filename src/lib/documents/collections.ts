@@ -90,6 +90,11 @@ export const COLLECTIONS = {
   prospectDraftReservations: "prospectDraftReservations",
   /** Content calendar brands (personal / company social voices). */
   contentBrands: "contentBrands",
+  /**
+   * Platform-global AI prompt templates (featureKey doc ids).
+   * Org `aiPrompts` remain as legacy fallback until fully migrated.
+   */
+  platformAiPrompts: "platformAiPrompts",
   /** Calendar posts / slots. */
   contentItems: "contentItems",
   /** Daily problem→solution captures feeding RAG. */

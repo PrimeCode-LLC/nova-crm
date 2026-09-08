@@ -44,7 +44,7 @@ function settingsDoc(orgId: string) {
     .doc("default");
 }
 
-function promptDoc(orgId: string, featureKey: AiFeatureKey) {
+function orgPromptDoc(orgId: string, featureKey: AiFeatureKey) {
   const db = getAdminDb();
   if (!db) return null;
   return db
@@ -52,6 +52,44 @@ function promptDoc(orgId: string, featureKey: AiFeatureKey) {
     .doc(orgId)
     .collection(ORG_SUBCOLLECTIONS.aiPrompts)
     .doc(featureKey);
+}
+
+function platformPromptDoc(featureKey: AiFeatureKey) {
+  const db = getAdminDb();
+  if (!db) return null;
+  return db.collection(COLLECTIONS.platformAiPrompts).doc(featureKey);
+}
+
+function promptFromSnap(
+  featureKey: AiFeatureKey,
+  data: AiPromptTemplate | undefined,
+): AiPromptTemplate {
+  const defaults = AI_PROMPT_DEFAULTS[featureKey];
+  if (!data) {
+    return {
+      featureKey,
+      systemPrompt: defaults.systemPrompt,
+      userPromptTemplate: defaults.userPromptTemplate,
+      version: 1,
+    };
+  }
+  const storedTemplate = data.userPromptTemplate ?? defaults.userPromptTemplate;
+  if (!promptTemplateIsCurrent(featureKey, storedTemplate)) {
+    return {
+      featureKey,
+      systemPrompt: defaults.systemPrompt,
+      userPromptTemplate: defaults.userPromptTemplate,
+      version: data.version ?? 1,
+      updatedAt: data.updatedAt,
+    };
+  }
+  return {
+    featureKey,
+    systemPrompt: data.systemPrompt ?? defaults.systemPrompt,
+    userPromptTemplate: storedTemplate,
+    version: data.version ?? 1,
+    updatedAt: data.updatedAt,
+  };
 }
 
 function mergeSettings(raw: Record<string, unknown> | undefined): OrganizationAiSettings {
@@ -112,9 +150,17 @@ export async function getAiPromptServer(
   organizationId: string,
   featureKey: AiFeatureKey,
 ): Promise<AiPromptTemplate> {
-  const ref = promptDoc(organizationId, featureKey);
   const defaults = AI_PROMPT_DEFAULTS[featureKey];
-  if (!ref) {
+  const platformRef = platformPromptDoc(featureKey);
+  if (platformRef) {
+    const platformSnap = await platformRef.get();
+    if (platformSnap.exists) {
+      return promptFromSnap(featureKey, platformSnap.data() as AiPromptTemplate);
+    }
+  }
+
+  const orgRef = orgPromptDoc(organizationId, featureKey);
+  if (!orgRef) {
     return {
       featureKey,
       systemPrompt: defaults.systemPrompt,
@@ -122,7 +168,7 @@ export async function getAiPromptServer(
       version: 1,
     };
   }
-  const snap = await ref.get();
+  const snap = await orgRef.get();
   if (!snap.exists) {
     return {
       featureKey,
@@ -131,38 +177,24 @@ export async function getAiPromptServer(
       version: 1,
     };
   }
-  const data = snap.data() as AiPromptTemplate;
-  const storedTemplate = data.userPromptTemplate ?? defaults.userPromptTemplate;
-  // A saved override from before a placeholder was introduced would drop the
-  // context the route now depends on, so fall back to the current default pair.
-  if (!promptTemplateIsCurrent(featureKey, storedTemplate)) {
-    return {
-      featureKey,
-      systemPrompt: defaults.systemPrompt,
-      userPromptTemplate: defaults.userPromptTemplate,
-      version: data.version ?? 1,
-      updatedAt: data.updatedAt,
-    };
-  }
-  return {
-    featureKey,
-    systemPrompt: data.systemPrompt ?? defaults.systemPrompt,
-    userPromptTemplate: storedTemplate,
-    version: data.version ?? 1,
-    updatedAt: data.updatedAt,
-  };
+  return promptFromSnap(featureKey, snap.data() as AiPromptTemplate);
 }
 
+/** Writes platform-global prompts (product-wide). Org id is unused for storage. */
 export async function upsertAiPromptServer(
-  organizationId: string,
+  _organizationId: string,
   prompt: Pick<AiPromptTemplate, "featureKey" | "systemPrompt" | "userPromptTemplate">,
 ): Promise<{ ok: true } | { error: string }> {
-  const ref = promptDoc(organizationId, prompt.featureKey);
+  const ref = platformPromptDoc(prompt.featureKey);
   if (!ref) return { error: "Database not configured" };
-  const existing = await getAiPromptServer(organizationId, prompt.featureKey);
+  const existingSnap = await ref.get();
+  const existingVersion =
+    existingSnap.exists && typeof (existingSnap.data() as AiPromptTemplate)?.version === "number"
+      ? ((existingSnap.data() as AiPromptTemplate).version ?? 1)
+      : 1;
   await ref.set({
     ...prompt,
-    version: (existing.version ?? 1) + 1,
+    version: existingVersion + 1,
     updatedAt: new Date().toISOString(),
   });
   return { ok: true };

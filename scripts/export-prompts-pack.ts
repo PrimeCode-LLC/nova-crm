@@ -53,12 +53,12 @@ async function main() {
 
   const outDir = resolve(root, argValue("--out") ?? "archives/knowledge");
 
-  const { exportPromptsPackFromFirestore } = await import(
+  const { exportPromptsPackFromStore } = await import(
     "../src/lib/ai/knowledge-pack-export-server"
   );
   const { slugifyOrgForFilename } = await import("../src/lib/ai/knowledge-pack-build");
 
-  const pack = await exportPromptsPackFromFirestore({ organizationId: orgId });
+  const pack = await exportPromptsPackFromStore({ organizationId: orgId });
   const slug = slugifyOrgForFilename(pack.sourceOrganizationName ?? pack.sourceOrganizationId);
   const filePath = join(outDir, `${slug}.prompts-pack.json`);
 

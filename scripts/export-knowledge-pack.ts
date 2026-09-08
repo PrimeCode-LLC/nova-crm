@@ -1,7 +1,7 @@
 /**
  * Export one organization's RAG knowledge pack (libraries, documents, brands, links).
  *
- * Usage (from crm/, with Firebase Admin env in .env.local or shell):
+ * Usage (from crm/, with DATABASE_URL in .env.local or shell):
  *   npx --yes tsx scripts/export-knowledge-pack.ts --org=YOUR_ORG_ID
  *   npx --yes tsx scripts/export-knowledge-pack.ts --org=YOUR_ORG_ID --out=archives/knowledge
  *
@@ -51,12 +51,12 @@ async function main() {
 
   const outDir = resolve(root, argValue("--out") ?? "archives/knowledge");
 
-  const { exportKnowledgePackFromFirestore } = await import(
+  const { exportKnowledgePackFromStore } = await import(
     "../src/lib/ai/knowledge-pack-export-server"
   );
   const { slugifyOrgForFilename } = await import("../src/lib/ai/knowledge-pack-build");
 
-  const pack = await exportKnowledgePackFromFirestore({ organizationId: orgId });
+  const pack = await exportKnowledgePackFromStore({ organizationId: orgId });
   const slug = slugifyOrgForFilename(pack.sourceOrganizationName ?? pack.sourceOrganizationId);
   const filePath = join(outDir, `${slug}.knowledge-pack.json`);
 

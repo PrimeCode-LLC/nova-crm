@@ -45,6 +45,11 @@ export const ADMIN_SUBSECTIONS: Record<string, AdminSubSection[]> = {
       label: "Brands",
       keywords: ["content", "voice", "calendar", "capture", "knowledge"],
     },
+    {
+      tab: "import",
+      label: "Import",
+      keywords: ["knowledge pack", "prompts pack", "migrate", "upload", "json"],
+    },
     { tab: "setup", label: "Setup", keywords: ["provider", "api key", "enable"] },
     {
       tab: "prompts",

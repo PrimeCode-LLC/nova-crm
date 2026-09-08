@@ -51,6 +51,7 @@ import type { AiFeatureKey, AiProvider, OrganizationAiSettings } from "@/lib/ai/
 import { AI_PROMPT_DEFAULTS } from "@/lib/ai/prompt-defaults";
 import { KnowledgeAdminPanel } from "@/components/admin/knowledge-admin-panel";
 import { KnowledgeBrandsAdminPanel } from "@/components/admin/knowledge-brands-admin-panel";
+import { KnowledgePackImportPanel } from "@/components/admin/knowledge-pack-import-panel";
 import { cn } from "@/lib/utils";
 
 const PROMPT_GROUPS: {
@@ -300,6 +301,7 @@ export function AiAdminClient() {
               <TabsTrigger value="overview">Overview</TabsTrigger>
               <TabsTrigger value="libraries">Libraries</TabsTrigger>
               <TabsTrigger value="brands">Brands</TabsTrigger>
+              <TabsTrigger value="import">Import</TabsTrigger>
               <TabsTrigger value="setup">Setup</TabsTrigger>
               <TabsTrigger value="prompts">Prompts</TabsTrigger>
               <TabsTrigger value="usage">Usage</TabsTrigger>
@@ -327,6 +329,10 @@ export function AiAdminClient() {
 
             <TabsContent value="brands" className="space-y-4">
               <KnowledgeBrandsAdminPanel />
+            </TabsContent>
+
+            <TabsContent value="import" className="space-y-4">
+              <KnowledgePackImportPanel onImported={() => void load()} />
             </TabsContent>
 
             <TabsContent value="setup" className="space-y-4">
@@ -493,6 +499,10 @@ export function AiAdminClient() {
             </TabsContent>
 
             <TabsContent value="prompts" className="space-y-4 max-w-3xl">
+              <p className="text-sm text-muted-foreground">
+                Prompts are platform-global (shared across organizations). Saving here updates the
+                shared templates for every org.
+              </p>
               <div className="space-y-4">
                 {PROMPT_GROUPS.map((group) => (
                   <div key={group.id} className="space-y-2">
