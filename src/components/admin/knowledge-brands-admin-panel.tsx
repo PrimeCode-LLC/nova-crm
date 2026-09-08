@@ -36,7 +36,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useContentCalendarData } from "@/lib/hooks/use-content-calendar-data";
 import {
   CONTENT_BRAND_KIND_LABELS,
   type ContentBrand,
@@ -63,7 +62,8 @@ type LibraryOption = {
  * libraries they read. Full strategy editing stays on /content/brands.
  */
 export function KnowledgeBrandsAdminPanel() {
-  const data = useContentCalendarData();
+  const [brands, setBrands] = React.useState<ContentBrand[]>([]);
+  const [loading, setLoading] = React.useState(true);
   const [libraries, setLibraries] = React.useState<LibraryOption[]>([]);
   const [formOpen, setFormOpen] = React.useState(false);
   const [editing, setEditing] = React.useState<ContentBrand | null>(null);
@@ -77,17 +77,45 @@ export function KnowledgeBrandsAdminPanel() {
   const [toDelete, setToDelete] = React.useState<ContentBrand | null>(null);
   const [deleting, setDeleting] = React.useState(false);
 
+  const reloadBrands = React.useCallback(async () => {
+    const res = await fetch("/api/ai/content-brands", { credentials: "same-origin" });
+    if (!res.ok) {
+      const json = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(json.error || "Could not load brands");
+    }
+    const json = (await res.json()) as { brands?: ContentBrand[] };
+    setBrands(json.brands ?? []);
+  }, []);
+
   React.useEffect(() => {
+    let cancelled = false;
     void (async () => {
+      setLoading(true);
       try {
-        const res = await fetch("/api/ai/rag/libraries", { credentials: "same-origin" });
-        if (!res.ok) return;
-        const json = (await res.json()) as { libraries?: LibraryOption[] };
-        setLibraries(json.libraries ?? []);
+        const [brandRes, libRes] = await Promise.all([
+          fetch("/api/ai/content-brands", { credentials: "same-origin" }),
+          fetch("/api/ai/rag/libraries", { credentials: "same-origin" }),
+        ]);
+        if (!cancelled && brandRes.ok) {
+          const json = (await brandRes.json()) as { brands?: ContentBrand[] };
+          setBrands(json.brands ?? []);
+        }
+        if (!cancelled && libRes.ok) {
+          const json = (await libRes.json()) as { libraries?: LibraryOption[] };
+          setLibraries(json.libraries ?? []);
+        }
+        if (!cancelled && !brandRes.ok) {
+          toast.error("Could not load brands");
+        }
       } catch {
-        /* optional */
+        if (!cancelled) toast.error("Could not load brands");
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const contentLibraries = React.useMemo(
@@ -139,24 +167,33 @@ export function KnowledgeBrandsAdminPanel() {
     }
     setSaving(true);
     try {
-      if (editing) {
-        await data.updateBrand(editing.id, {
-          name: name.trim(),
-          kind,
-          voiceRules: voiceRules.trim(),
-          positioning: positioning.trim(),
-          knowledgeLibraryIds,
-        });
-      } else {
-        await data.createBrand({
-          name: name.trim(),
-          kind,
-          voiceRules: voiceRules.trim() || undefined,
-          positioning: positioning.trim() || undefined,
-          knowledgeLibraryIds,
-        });
+      const body = {
+        name: name.trim(),
+        kind,
+        voiceRules: voiceRules.trim() || undefined,
+        positioning: positioning.trim() || undefined,
+        knowledgeLibraryIds,
+      };
+      const res = editing
+        ? await fetch(`/api/ai/content-brands/${encodeURIComponent(editing.id)}`, {
+            method: "PATCH",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          })
+        : await fetch("/api/ai/content-brands", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof json.error === "string" ? json.error : "Could not save brand");
       }
+      await reloadBrands();
       setFormOpen(false);
+      toast.success(editing ? "Brand updated" : "Brand created");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not save brand");
     } finally {
@@ -168,8 +205,17 @@ export function KnowledgeBrandsAdminPanel() {
     if (!toDelete) return;
     setDeleting(true);
     try {
-      await data.deleteBrand(toDelete.id);
+      const res = await fetch(`/api/ai/content-brands/${encodeURIComponent(toDelete.id)}`, {
+        method: "DELETE",
+        credentials: "same-origin",
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(typeof json.error === "string" ? json.error : "Could not delete brand");
+      }
       setToDelete(null);
+      await reloadBrands();
+      toast.success("Brand deleted");
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not delete brand");
     } finally {
@@ -182,7 +228,7 @@ export function KnowledgeBrandsAdminPanel() {
     return lib ? displayKnowledgeLibraryName(lib) : id;
   }
 
-  if (data.loading) {
+  if (loading) {
     return (
       <p className="text-sm text-muted-foreground flex items-center gap-2">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading brands…
@@ -203,75 +249,75 @@ export function KnowledgeBrandsAdminPanel() {
               </CardDescription>
             </div>
             <Button type="button" size="sm" onClick={openCreate}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> Add brand
+              <Plus className="h-4 w-4" />
+              Add brand
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-2">
-          {data.brands.length === 0 ? (
+        <CardContent className="space-y-3">
+          {brands.length === 0 ? (
             <p className="text-sm text-muted-foreground">
               No brands yet. Create one here, or open the full Content brands workspace.
             </p>
           ) : (
             <ul className="space-y-2">
-              {data.brands.map((brand) => (
+              {brands.map((brand) => (
                 <li
                   key={brand.id}
-                  className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2"
+                  className="flex flex-wrap items-start justify-between gap-2 rounded-md border px-3 py-2"
                 >
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium truncate">{brand.name}</p>
-                    <p className="text-[11px] text-muted-foreground">
-                      {CONTENT_BRAND_KIND_LABELS[brand.kind]} ·{" "}
-                      {brand.knowledgeLibraryIds.length
-                        ? `${brand.knowledgeLibraryIds.length} libraries`
-                        : "Company knowledge fallback"}
-                    </p>
+                  <div className="min-w-0 space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-medium text-sm">{brand.name}</span>
+                      <Badge variant="secondary" className="text-[10px]">
+                        {CONTENT_BRAND_KIND_LABELS[brand.kind] ?? brand.kind}
+                      </Badge>
+                      <span className="text-xs text-muted-foreground">
+                        {brand.knowledgeLibraryIds.length} libraries
+                      </span>
+                    </div>
                     {brand.knowledgeLibraryIds.length > 0 ? (
-                      <div className="flex flex-wrap gap-1 mt-1">
+                      <div className="flex flex-wrap gap-1">
                         {brand.knowledgeLibraryIds.slice(0, 4).map((id) => (
-                          <Badge key={id} variant="outline" className="text-[9px] font-normal">
+                          <Badge key={id} variant="outline" className="text-[10px] font-normal">
+                            <Library className="h-3 w-3 mr-1" />
                             {libraryLabel(id)}
                           </Badge>
                         ))}
                         {brand.knowledgeLibraryIds.length > 4 ? (
-                          <Badge variant="outline" className="text-[9px] font-normal">
+                          <span className="text-[10px] text-muted-foreground">
                             +{brand.knowledgeLibraryIds.length - 4}
-                          </Badge>
+                          </span>
                         ) : null}
                       </div>
-                    ) : null}
+                    ) : (
+                      <p className="text-xs text-muted-foreground">No Content libraries linked</p>
+                    )}
                   </div>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="h-7 text-xs"
-                    onClick={() => openEdit(brand)}
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    className="h-7 text-xs text-destructive"
-                    onClick={() => setToDelete(brand)}
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </Button>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button type="button" size="sm" variant="outline" onClick={() => openEdit(brand)}>
+                      Edit
+                    </Button>
+                    <Button
+                      type="button"
+                      size="icon"
+                      variant="ghost"
+                      className="text-destructive"
+                      onClick={() => setToDelete(brand)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
                 </li>
               ))}
             </ul>
           )}
           <Link
             href="/content/brands"
-            className={cn(
-              buttonVariants({ variant: "outline", size: "sm" }),
-              "h-7 text-xs inline-flex gap-1 mt-2",
-            )}
+            className={cn(buttonVariants({ variant: "outline", size: "sm" }), "inline-flex gap-1")}
           >
-            Full brand strategy <ExternalLink className="h-3 w-3" />
+            Full brand strategy
+            <ExternalLink className="h-3.5 w-3.5" />
           </Link>
         </CardContent>
       </Card>
@@ -279,20 +325,19 @@ export function KnowledgeBrandsAdminPanel() {
       <Dialog open={formOpen} onOpenChange={setFormOpen}>
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editing ? "Edit brand" : "New content brand"}</DialogTitle>
+            <DialogTitle>{editing ? "Edit brand" : "Add brand"}</DialogTitle>
             <DialogDescription>
-              Voice and knowledge for Content calendar. Strategy pillars and cadence live under
-              Content brands.
+              Link Content-allowed libraries this brand may read for Capture and drafts.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label htmlFor="kb-brand-name">Name</Label>
+              <Label htmlFor="brand-name">Name</Label>
               <Input
-                id="kb-brand-name"
+                id="brand-name"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. Hannan Khan"
+                placeholder="Stellix Soft"
               />
             </div>
             <div className="space-y-1.5">
@@ -311,54 +356,41 @@ export function KnowledgeBrandsAdminPanel() {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="kb-brand-positioning">Positioning</Label>
+              <Label htmlFor="brand-positioning">Positioning</Label>
               <Textarea
-                id="kb-brand-positioning"
-                className="min-h-[72px]"
+                id="brand-positioning"
                 value={positioning}
                 onChange={(e) => setPositioning(e.target.value)}
-                placeholder="Who this brand is and what they stand for…"
+                rows={2}
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="kb-brand-voice">Voice rules</Label>
+              <Label htmlFor="brand-voice">Voice rules</Label>
               <Textarea
-                id="kb-brand-voice"
-                className="min-h-[72px]"
+                id="brand-voice"
                 value={voiceRules}
                 onChange={(e) => setVoiceRules(e.target.value)}
-                placeholder="Tone, style, phrases to prefer or avoid…"
+                rows={3}
               />
             </div>
-            <div className="space-y-1.5">
-              <Label className="flex items-center gap-1.5">
-                <Library className="h-3.5 w-3.5" /> Knowledge libraries
-              </Label>
-              <p className="text-[11px] text-muted-foreground">
-                Only libraries allowed for Content. Leave empty to fall back to Company knowledge.
-              </p>
+            <div className="space-y-2">
+              <Label>Content libraries</Label>
               <Input
                 value={libQuery}
                 onChange={(e) => setLibQuery(e.target.value)}
-                placeholder="Search libraries…"
+                placeholder="Filter libraries…"
               />
-              <div className="max-h-44 overflow-y-auto rounded-md border p-2 space-y-1">
+              <div className="max-h-40 overflow-y-auto space-y-1 rounded-md border p-2">
                 {filteredLibraries.length === 0 ? (
-                  <p className="px-1 py-2 text-xs text-muted-foreground">
-                    No Content-allowed libraries. Enable Content on a library under Libraries, then
-                    link it here.
-                  </p>
+                  <p className="text-xs text-muted-foreground">No Content-allowed libraries</p>
                 ) : (
                   filteredLibraries.map((l) => (
-                    <label
-                      key={l.id}
-                      className="flex items-center gap-2 rounded px-1 py-1.5 text-sm hover:bg-muted/50"
-                    >
+                    <label key={l.id} className="flex items-center gap-2 text-sm">
                       <Checkbox
                         checked={knowledgeLibraryIds.includes(l.id)}
                         onCheckedChange={() => toggleLibrary(l.id)}
                       />
-                      <span className="min-w-0 truncate">{displayKnowledgeLibraryName(l)}</span>
+                      <span className="truncate">{displayKnowledgeLibraryName(l)}</span>
                     </label>
                   ))
                 )}
@@ -366,38 +398,36 @@ export function KnowledgeBrandsAdminPanel() {
             </div>
           </div>
           <DialogFooter>
-            <Button type="button" variant="ghost" onClick={() => setFormOpen(false)} disabled={saving}>
+            <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
               Cancel
             </Button>
-            <Button type="button" onClick={() => void save()} disabled={saving}>
+            <Button type="button" disabled={saving} onClick={() => void save()}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-              {editing ? "Save" : "Create"}
+              Save
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      <AlertDialog open={!!toDelete} onOpenChange={(open) => !open && setToDelete(null)}>
+      <AlertDialog open={Boolean(toDelete)} onOpenChange={(o) => !o && setToDelete(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete brand?</AlertDialogTitle>
             <AlertDialogDescription>
-              {toDelete
-                ? `“${toDelete.name}” will be removed. Calendar items that reference it may need a new brand.`
-                : null}
+              Removes {toDelete?.name}. Knowledge libraries stay; only the brand link is deleted.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleting}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               onClick={(e) => {
                 e.preventDefault();
                 void confirmDelete();
               }}
             >
-              {deleting ? "Deleting…" : "Delete"}
+              {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Delete"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
