@@ -9,8 +9,10 @@ on:
     branches: [feature/remove-firebase]
 
 concurrency:
+  # Supersede PR runs freely, but never cancel a production-branch run — it can
+  # be mid-deploy against the VPS.
   group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
   REGISTRY: ghcr.io
@@ -205,3 +207,123 @@ jobs:
           file: docker/cron/Dockerfile
           push: true
           tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-cron:${{ github.sha }}
+
+  # Continuous delivery: a green push to feature/remove-firebase deploys the exact
+  # SHA whose images publish-ghcr just pushed. `environment: production` is required
+  # (not cosmetic) — VPS_* and GHCR_* are environment secrets, not repo secrets.
+  deploy-production:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/remove-firebase'
+    needs: [publish-ghcr]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+    concurrency:
+      group: nova-production
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_REF: feature/remove-firebase
+      DEPLOY_SHA: ${{ github.sha }}
+      WEB_HEALTH_URL: https://nova.stellixsoft.com/api/health
+    steps:
+      - name: Hard guard — production branch only
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/feature/remove-firebase" ]; then
+            echo "Refusing deploy: production deploys only from feature/remove-firebase" >&2
+            exit 1
+          fi
+          echo "Deploying ref=${GITHUB_REF} sha=${DEPLOY_SHA}"
+
+      - uses: actions/checkout@v4
+
+      - name: Preparing SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_HOST_KEY: ${{ secrets.VPS_SSH_HOST_KEY }}
+        run: |
+          set -euo pipefail
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing secret ${name} in the 'production' environment" >&2
+              exit 1
+            fi
+            echo "  ${name}: set"
+          done
+          umask 077
+          printf '%s\n' "$VPS_SSH_KEY" > "$RUNNER_TEMP/nova_deploy_key"
+          chmod 600 "$RUNNER_TEMP/nova_deploy_key"
+          install -d -m 700 "$HOME/.ssh"
+          if [ -n "${VPS_SSH_HOST_KEY:-}" ]; then
+            printf '%s\n' "$VPS_SSH_HOST_KEY" >> "$HOME/.ssh/known_hosts"
+            echo "  host key: pinned from VPS_SSH_HOST_KEY"
+          else
+            ssh-keyscan -T 20 "$VPS_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
+            echo "  host key: scanned (set VPS_SSH_HOST_KEY to pin it instead)"
+          fi
+
+      - name: Deploying SHA to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          GHCR_OWNER: ${{ github.repository_owner }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Values are exported on stdin ahead of the script, so the GHCR token
+          # never appears in the VPS process list or in this log.
+          {
+            printf 'export DEPLOY_REF=%q\n'     "$DEPLOY_REF"
+            printf 'export DEPLOY_SHA=%q\n'     "$DEPLOY_SHA"
+            printf 'export GHCR_OWNER=%q\n'     "$GHCR_OWNER"
+            printf 'export GHCR_USERNAME=%q\n'  "$GHCR_USERNAME"
+            printf 'export GHCR_TOKEN=%q\n'     "$GHCR_TOKEN"
+            printf 'export WEB_HEALTH_URL=%q\n' "$WEB_HEALTH_URL"
+            cat scripts/vps-remote-deploy.sh
+          } | ssh \
+                -i "$RUNNER_TEMP/nova_deploy_key" \
+                -o IdentitiesOnly=yes \
+                -o BatchMode=yes \
+                -o ConnectTimeout=20 \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                "$VPS_USER@$VPS_HOST" 'bash -s'
+
+      - name: Checking public health from GitHub
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if body="$(curl -fsS --max-time 15 "$WEB_HEALTH_URL" 2>/dev/null)" \
+               && [ "${body#*\"ok\":true}" != "$body" ]; then
+              echo "public health OK (attempt ${attempt}): ${body}"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "Public health check failed for $WEB_HEALTH_URL" >&2
+          exit 1
+
+      - name: Deployment completed successfully
+        run: |
+          set -euo pipefail
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          {
+            echo "### Production deploy succeeded"
+            echo
+            echo "| field | value |"
+            echo "| --- | --- |"
+            echo "| branch | \`${DEPLOY_REF}\` |"
+            echo "| deployed sha | \`${DEPLOY_SHA}\` |"
+            echo "| images | \`ghcr.io/${owner}/nova-crm-{web,worker,migrate,cron}:${DEPLOY_SHA}\` |"
+            echo "| health | ${WEB_HEALTH_URL} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "deployed_sha=${DEPLOY_SHA}"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nova_deploy_key"

@@ -1,17 +1,28 @@
-# Production VPS deploy — feature/remove-firebase ONLY
-# Never deploy main to VPS. Requires GitHub Environment "production" approval.
-name: Deploy Production
+# Manual production deploy — escape hatch for redeploying / pinning an older SHA.
+#
+# Normal releases do NOT use this file: ci.yml's `deploy-production` job deploys
+# automatically on every green push to feature/remove-firebase. Reach for this
+# only to re-run a deploy or to roll forward/back to a specific known-good SHA.
+#
+# NOTE: GitHub only lists workflow_dispatch workflows that exist on the DEFAULT
+# branch (main). Until this file is cherry-picked to main it will not appear in
+# the Actions tab. The automatic path in ci.yml is unaffected by this.
+#
+# Never deploy main. Rolling back application images without reversing a forward
+# migration is only safe when the older SHA is schema-compatible — see
+# scripts/rollback-vps.sh for the caveats.
+name: Deploy Production (manual)
 
 on:
   workflow_dispatch:
     inputs:
       deploy_sha:
-        description: Immutable Git SHA to deploy (defaults to workflow commit)
+        description: Git SHA on feature/remove-firebase to deploy (defaults to the selected ref)
         required: false
         type: string
 
 concurrency:
-  group: deploy-production
+  group: nova-production
   cancel-in-progress: false
 
 jobs:
@@ -20,10 +31,17 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      DEPLOY_REF: feature/remove-firebase
+      WEB_HEALTH_URL: https://nova.stellixsoft.com/api/health
     steps:
       - name: Hard guard — production branch only
         run: |
-          if [ "${{ github.ref }}" != "refs/heads/feature/remove-firebase" ]; then
+          set -euo pipefail
+          if [ "${GITHUB_REF}" != "refs/heads/feature/remove-firebase" ]; then
             echo "Refusing deploy: production deploys only from feature/remove-firebase" >&2
             exit 1
           fi
@@ -36,48 +54,85 @@ jobs:
       - name: Resolve immutable deploy SHA
         id: meta
         run: |
+          set -euo pipefail
           SHA="$(git rev-parse HEAD)"
+          git fetch origin feature/remove-firebase
+          if ! git merge-base --is-ancestor "$SHA" origin/feature/remove-firebase; then
+            echo "Refusing deploy: $SHA is not on feature/remove-firebase" >&2
+            exit 1
+          fi
           echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           echo "Deploy SHA: ${SHA}"
 
-      - name: Verify SHA exists on feature/remove-firebase
+      - name: Preparing SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          VPS_SSH_HOST_KEY: ${{ secrets.VPS_SSH_HOST_KEY }}
         run: |
-          git fetch origin feature/remove-firebase
-          if ! git merge-base --is-ancestor "${{ steps.meta.outputs.sha }}" "origin/feature/remove-firebase"; then
-            echo "SHA is not on feature/remove-firebase" >&2
-            exit 1
+          set -euo pipefail
+          for name in VPS_HOST VPS_USER VPS_SSH_KEY; do
+            if [ -z "${!name:-}" ]; then
+              echo "Missing secret ${name} in the 'production' environment" >&2
+              exit 1
+            fi
+            echo "  ${name}: set"
+          done
+          umask 077
+          printf '%s\n' "$VPS_SSH_KEY" > "$RUNNER_TEMP/nova_deploy_key"
+          chmod 600 "$RUNNER_TEMP/nova_deploy_key"
+          install -d -m 700 "$HOME/.ssh"
+          if [ -n "${VPS_SSH_HOST_KEY:-}" ]; then
+            printf '%s\n' "$VPS_SSH_HOST_KEY" >> "$HOME/.ssh/known_hosts"
+          else
+            ssh-keyscan -T 20 "$VPS_HOST" >> "$HOME/.ssh/known_hosts" 2>/dev/null
           fi
 
-      - name: Sync deploy scripts to VPS
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          source: "scripts/deploy-vps.sh,scripts/smoke-post-deploy.sh,scripts/rollback-vps.sh,docker-compose.prod.yml,docker-compose.prod.images.yml,docker/cron,docker/caddy"
-          target: "/opt/nova-crm"
-
-      - name: Deploy to VPS
-        uses: appleboy/ssh-action@v1.2.0
+      - name: Deploying SHA to VPS
         env:
-          DEPLOY_REF: feature/remove-firebase
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
           DEPLOY_SHA: ${{ steps.meta.outputs.sha }}
           GHCR_OWNER: ${{ github.repository_owner }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN }}
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          envs: DEPLOY_REF,DEPLOY_SHA,GHCR_OWNER,GHCR_USERNAME,GHCR_TOKEN
-          script: |
-            set -euo pipefail
-            chmod +x /opt/nova-crm/scripts/deploy-vps.sh /opt/nova-crm/scripts/smoke-post-deploy.sh /opt/nova-crm/scripts/rollback-vps.sh
-            export GHCR_OWNER="$(printf '%s' "${GHCR_OWNER}" | tr '[:upper:]' '[:lower:]')"
-            echo "$GHCR_TOKEN" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
-            cd /opt/nova-crm
-            DEPLOY_REF="$DEPLOY_REF" DEPLOY_SHA="$DEPLOY_SHA" GHCR_OWNER="$GHCR_OWNER" \
-              ./scripts/deploy-vps.sh
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME || github.actor }}
+          GHCR_TOKEN: ${{ secrets.GHCR_READ_TOKEN || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          {
+            printf 'export DEPLOY_REF=%q\n'     "$DEPLOY_REF"
+            printf 'export DEPLOY_SHA=%q\n'     "$DEPLOY_SHA"
+            printf 'export GHCR_OWNER=%q\n'     "$GHCR_OWNER"
+            printf 'export GHCR_USERNAME=%q\n'  "$GHCR_USERNAME"
+            printf 'export GHCR_TOKEN=%q\n'     "$GHCR_TOKEN"
+            printf 'export WEB_HEALTH_URL=%q\n' "$WEB_HEALTH_URL"
+            cat scripts/vps-remote-deploy.sh
+          } | ssh \
+                -i "$RUNNER_TEMP/nova_deploy_key" \
+                -o IdentitiesOnly=yes \
+                -o BatchMode=yes \
+                -o ConnectTimeout=20 \
+                -o ServerAliveInterval=30 \
+                -o ServerAliveCountMax=10 \
+                "$VPS_USER@$VPS_HOST" 'bash -s'
 
-      - name: Report deployed SHA
-        run: echo "Production deploy completed for SHA ${{ steps.meta.outputs.sha }}"
+      - name: Checking public health from GitHub
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if body="$(curl -fsS --max-time 15 "$WEB_HEALTH_URL" 2>/dev/null)" \
+               && [ "${body#*\"ok\":true}" != "$body" ]; then
+              echo "public health OK (attempt ${attempt}): ${body}"
+              exit 0
+            fi
+            sleep 6
+          done
+          echo "Public health check failed for $WEB_HEALTH_URL" >&2
+          exit 1
+
+      - name: Deployment completed successfully
+        run: echo "deployed_sha=${{ steps.meta.outputs.sha }}"
+
+      - name: Cleanup SSH key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/nova_deploy_key"
