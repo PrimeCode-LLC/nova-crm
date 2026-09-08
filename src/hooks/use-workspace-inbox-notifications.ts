@@ -69,6 +69,7 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
     leadTasks,
     currentUserId,
     organizationId,
+    backupOnlyMode,
   } = useWorkspace();
   const readIds = useInboxNotificationOverrides((s) => s.readIds);
   const unreadIds = useInboxNotificationOverrides((s) => s.unreadIds);
@@ -106,7 +107,13 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
   }, []);
 
   React.useEffect(() => {
-    if (isDemo || !organizationId || !currentUserId || !isFirebaseWebConfigured()) {
+    if (
+      isDemo ||
+      backupOnlyMode ||
+      !organizationId ||
+      !currentUserId ||
+      !isFirebaseWebConfigured()
+    ) {
       setLiveDurable([]);
       setLiveReady(true);
       return;
@@ -133,7 +140,7 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
       setLiveReady(true);
     }
     return () => unsub?.();
-  }, [isDemo, organizationId, currentUserId]);
+  }, [isDemo, backupOnlyMode, organizationId, currentUserId]);
 
   const durableRows = React.useMemo(() => {
     const source = isDemo

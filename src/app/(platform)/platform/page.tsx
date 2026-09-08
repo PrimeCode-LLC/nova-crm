@@ -8,7 +8,7 @@ import {
 import Link from "next/link";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { Building2, Shield, ArrowRight, Wrench } from "lucide-react";
+import { Building2, Shield, ArrowRight, Wrench, PauseCircle } from "lucide-react";
 import { MigrateExistingUsersButton } from "./migrate-existing-users";
 
 export default function PlatformOverviewPage() {
@@ -62,6 +62,28 @@ export default function PlatformOverviewPage() {
               className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
             >
               Manage super admins
+              <ArrowRight className="ml-2 h-4 w-4" />
+            </Link>
+          </CardContent>
+        </Card>
+
+        <Card className="sm:col-span-2 border-amber-500/20">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <PauseCircle className="h-4 w-4" />
+              Backup only / pause spend
+            </CardTitle>
+            <CardDescription>
+              Soft kill-switch: stop crons and live Firestore listeners when this Firebase project is
+              archive-only. Pair with undeploying Functions / App Hosting for the deepest cut.
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Link
+              href="/platform/settings"
+              className={cn(buttonVariants({ variant: "secondary", size: "sm" }))}
+            >
+              Open ops controls
               <ArrowRight className="ml-2 h-4 w-4" />
             </Link>
           </CardContent>

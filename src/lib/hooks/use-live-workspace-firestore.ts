@@ -497,6 +497,8 @@ export function useLiveWorkspaceFirestore(
   narrowToMemberCrm: boolean,
   _viewerForMemberScope?: User | null,
   requestedGroups: ReadonlySet<WorkspaceListenerGroup> = CORE_WORKSPACE_GROUPS,
+  /** When true (platform Backup only), do not attach onSnapshot listeners. */
+  pauseListeners = false,
 ): LiveWorkspaceFirestoreState {
   const [state, setState] = React.useState<LiveWorkspaceFirestoreState>(empty);
   /** One entry per listener; cleared on that listener’s success so the banner can recover after transient errors. */
@@ -523,7 +525,7 @@ export function useLiveWorkspaceFirestore(
     sessionRef.current = null;
     listenerErrorsRef.current.clear();
 
-    if (!isFirebaseWebConfigured()) {
+    if (!isFirebaseWebConfigured() || pauseListeners) {
       setState({
         loading: false,
         coreReady: { users: true, leads: true, followups: true },
@@ -1191,7 +1193,7 @@ export function useLiveWorkspaceFirestore(
     };
     // groupsKey intentionally omitted: attach/detach is handled by the second effect.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationId, viewerUid, narrowToMemberCrm]);
+  }, [organizationId, viewerUid, narrowToMemberCrm, pauseListeners]);
 
   // Attach newly requested groups; detach groups no longer in the requested set.
   React.useEffect(() => {

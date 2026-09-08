@@ -16,6 +16,13 @@ export async function POST(req: Request) {
     );
   }
 
+  const { isBackupOnlyModeEnabled } = await import(
+    "@/lib/platform/platform-settings-server"
+  );
+  if (await isBackupOnlyModeEnabled()) {
+    return NextResponse.json({ ok: true, skipped: true, reason: "backup_only_mode", sent: 0, failed: 0 });
+  }
+
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 

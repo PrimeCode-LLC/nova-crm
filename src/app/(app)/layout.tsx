@@ -3,12 +3,14 @@ import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { AppTopbar } from "@/components/layout/app-topbar";
 import { WorkspaceStatusBanner } from "@/components/layout/workspace-status-banner";
+import { BackupOnlyBanner } from "@/components/layout/backup-only-banner";
 import { redirect } from "next/navigation";
 import { requireSession } from "@/lib/auth/server";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { findMembershipForUserServer } from "@/lib/platform/members-server";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
+import { isBackupOnlyModeEnabled } from "@/lib/platform/platform-settings-server";
 import { WorkspaceModeProvider } from "@/components/providers/workspace-mode-provider";
 import { TeamChatUnreadProvider } from "@/components/providers/team-chat-unread-provider";
 import { WorkspaceInboxNotificationsProvider } from "@/components/providers/workspace-inbox-notifications-provider";
@@ -39,9 +41,12 @@ export default async function AppLayout({
       /* allow app shell if membership lookup fails */
     }
   }
-  const showPlatformLink =
-    isAuthDisabled() ||
-    (await isUserPlatformAdmin(session.uid, session.email));
+  const [showPlatformLink, backupOnlyMode] = await Promise.all([
+    isAuthDisabled()
+      ? Promise.resolve(true)
+      : isUserPlatformAdmin(session.uid, session.email),
+    isBackupOnlyModeEnabled(),
+  ]);
   const jar = await cookies();
   const initialMode = parseWorkspaceMode(jar.get(WORKSPACE_MODE_COOKIE)?.value);
   const initialDemoPersonaId = parseDemoPersonaId(jar.get(DEMO_PERSONA_COOKIE)?.value);
@@ -68,6 +73,7 @@ export default async function AppLayout({
       organizationName={organizationName}
       organizationTimezone={organizationTimezone}
       organizationSendPolicy={organizationSendPolicy}
+      initialBackupOnlyMode={backupOnlyMode}
     >
       <TeamChatUnreadProvider deferSubscriptions>
         <WorkspaceInboxNotificationsProvider>
@@ -77,6 +83,7 @@ export default async function AppLayout({
               <AppSidebar showPlatformLink={showPlatformLink} />
               <SidebarInset>
                 <AppTopbar />
+                <BackupOnlyBanner />
                 <WorkspaceStatusBanner />
                 <div className="flex h-0 min-h-0 flex-1 flex-col overflow-hidden">
                   <ModuleRouteGate>{children}</ModuleRouteGate>

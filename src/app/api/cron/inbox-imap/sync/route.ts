@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { cronUnauthorized, verifyCronSecret } from "@/lib/scrapers/cron-auth";
+import { backupOnlyCronSkipResponse } from "@/lib/platform/backup-only-cron";
 import { runInboxImapSyncCronServer } from "@/lib/email/inbox-imap-sync-cron-server";
 
 export const maxDuration = 300;
@@ -10,6 +11,8 @@ export const maxDuration = 300;
  */
 export async function GET(req: Request) {
   if (!verifyCronSecret(req)) return cronUnauthorized();
+  const skipped = await backupOnlyCronSkipResponse("inbox-imap/sync");
+  if (skipped) return skipped;
 
   const started = Date.now();
   try {

@@ -315,6 +315,18 @@ export interface PlatformAdminRecord {
   createdAt: ISODate;
 }
 
+/**
+ * Platform ops kill-switch (Firestore `platformSettings/global`).
+ * When `backupOnlyMode` is on, crons no-op and live listeners pause to cut spend.
+ */
+export interface PlatformOpsSettings {
+  backupOnlyMode: boolean;
+  /** Why it was enabled (operator note). */
+  backupOnlyReason?: string;
+  updatedAt?: ISODate;
+  updatedByUid?: string;
+}
+
 /** Workspace-defined tag for leads, deals, companies, and contacts. */
 export interface CrmLabel {
   id: string;

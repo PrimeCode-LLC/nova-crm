@@ -1,5 +1,6 @@
 import { defineSecret, defineString } from "firebase-functions/params";
 import { onSchedule } from "firebase-functions/v2/scheduler";
+import { getFirestore } from "firebase-admin/firestore";
 
 const cronSecret = defineSecret("CRON_SECRET");
 const siteUrl = defineString("SITE_URL", {
@@ -7,7 +8,28 @@ const siteUrl = defineString("SITE_URL", {
   description: "Public App Hosting origin (no trailing slash)",
 });
 
+/** Avoid App Hosting cold starts when platform Backup only mode is on. */
+async function isBackupOnlyMode(): Promise<boolean> {
+  try {
+    const snap = await getFirestore().collection("platformSettings").doc("global").get();
+    return snap.exists === true && snap.data()?.backupOnlyMode === true;
+  } catch (e) {
+    console.warn(
+      JSON.stringify({
+        level: "warn",
+        message: "backup-only check failed; proceeding with cron",
+        error: e instanceof Error ? e.message : String(e),
+      }),
+    );
+    return false;
+  }
+}
+
 async function callAppHostingCron(path: string, label: string): Promise<Record<string, unknown>> {
+  if (await isBackupOnlyMode()) {
+    return { ok: true, skipped: true, reason: "backup_only_mode", cron: label };
+  }
+
   const base = siteUrl.value().replace(/\/$/, "");
   const secret = cronSecret.value()?.trim();
   if (!secret) {

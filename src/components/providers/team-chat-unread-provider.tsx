@@ -151,10 +151,14 @@ export function TeamChatUnreadProvider({
 }) {
   const pathname = usePathname();
   const router = useRouter();
-  const { organizationId, currentUserId, isDemo, users } = useWorkspace();
+  const { organizationId, currentUserId, isDemo, users, backupOnlyMode } = useWorkspace();
   const [subscriptionsReady, setSubscriptionsReady] = React.useState(!deferSubscriptions);
 
   React.useEffect(() => {
+    if (backupOnlyMode) {
+      setSubscriptionsReady(false);
+      return;
+    }
     if (!deferSubscriptions || subscriptionsReady) return;
     const activate = () => setSubscriptionsReady(true);
     if (typeof requestIdleCallback !== "undefined") {
@@ -163,7 +167,7 @@ export function TeamChatUnreadProvider({
     }
     const timer = window.setTimeout(activate, 200);
     return () => window.clearTimeout(timer);
-  }, [deferSubscriptions, subscriptionsReady]);
+  }, [deferSubscriptions, subscriptionsReady, backupOnlyMode]);
   const setDemoChannelLastRead = useTeamChatDemoStore((s) => s.setDemoChannelLastRead);
   const demoChannels = useTeamChatDemoStore(
     (s) => s.channelsByOrg[DEMO_WORKSPACE_ORG_ID] ?? EMPTY_DEMO_CHANNELS,
@@ -185,6 +189,7 @@ export function TeamChatUnreadProvider({
 
   const liveEnabled =
     subscriptionsReady &&
+    !backupOnlyMode &&
     !isDemo &&
     Boolean(organizationId && currentUserId && isFirebaseWebConfigured());
 

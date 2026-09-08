@@ -25,6 +25,7 @@ export default async function PlatformShellLayout({
             <PlatformNavLink href="/platform">Overview</PlatformNavLink>
             <PlatformNavLink href="/platform/organizations">Organizations</PlatformNavLink>
             <PlatformNavLink href="/platform/admins">Super admins</PlatformNavLink>
+            <PlatformNavLink href="/platform/settings">Ops / spend</PlatformNavLink>
             <Link
               href="/dashboard"
               className="ml-auto text-muted-foreground transition-colors hover:text-foreground"

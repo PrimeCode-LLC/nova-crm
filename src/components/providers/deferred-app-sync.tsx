@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import { AlertSoundUnlock } from "@/components/providers/alert-sound-unlock";
 import { EmailAccountSync } from "@/components/providers/email-account-sync";
+import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 
 const InboxBackgroundSync = dynamic(
   () => import("@/components/providers/inbox-background-sync").then((m) => ({ default: m.InboxBackgroundSync })),
@@ -86,9 +87,14 @@ function needsChannelAdminSync(pathname: string) {
  */
 export function DeferredAppSync() {
   const pathname = usePathname();
+  const { backupOnlyMode } = useWorkspace();
   const [ready, setReady] = React.useState(false);
 
   React.useEffect(() => {
+    if (backupOnlyMode) {
+      setReady(false);
+      return;
+    }
     const activate = () => setReady(true);
     if (typeof requestIdleCallback !== "undefined") {
       const id = requestIdleCallback(activate, { timeout: 2500 });
@@ -96,7 +102,11 @@ export function DeferredAppSync() {
     }
     const timer = window.setTimeout(activate, 150);
     return () => window.clearTimeout(timer);
-  }, []);
+  }, [backupOnlyMode]);
+
+  if (backupOnlyMode) {
+    return <GlobalErrorListener />;
+  }
 
   return (
     <>

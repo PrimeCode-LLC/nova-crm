@@ -170,6 +170,11 @@ export type WorkspaceContextValue = WorkspaceSnapshot &
     organizationSendPolicy: OrgEmailSendPolicy;
     /** Live mode: Firestore workspace listeners hit an error (partial data may be stale). */
     liveFirestoreError: Error | null;
+    /**
+     * Platform Backup only / pause-spend mode: live listeners are off and automation is paused.
+     * Data remains in Firebase for occasional lookup; expect empty live lists until resumed.
+     */
+    backupOnlyMode: boolean;
     /** Live mode: listener for the signed-in user document failed. */
     userProfileError: Error | null;
     /** True while workspace data is still loading (live Firestore or demo bundle). */
@@ -355,6 +360,7 @@ export function WorkspaceModeProvider({
   organizationName: organizationNameProp,
   organizationTimezone: organizationTimezoneProp,
   organizationSendPolicy: organizationSendPolicyProp,
+  initialBackupOnlyMode = false,
   children,
 }: {
   initialMode: WorkspaceMode;
@@ -364,11 +370,14 @@ export function WorkspaceModeProvider({
   /** Optional sticky org IANA timezone from Organization.settings.timezone. */
   organizationTimezone?: string | null;
   organizationSendPolicy?: OrgEmailSendPolicy | null;
+  /** Platform kill-switch from server; polled via /api/auth/me while the shell is open. */
+  initialBackupOnlyMode?: boolean;
   children: React.ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname() ?? "/";
   const [mode, setModeState] = React.useState<WorkspaceMode>(initialMode);
+  const [backupOnlyMode, setBackupOnlyMode] = React.useState(initialBackupOnlyMode);
   const [demoPersonaId, setDemoPersonaState] = React.useState(initialDemoPersonaId);
   const [demoSnapshot, setDemoSnapshot] = React.useState<WorkspaceSnapshot | null>(null);
   const snapshotRef = React.useRef<WorkspaceSnapshot>(LIVE_SNAPSHOT);
@@ -470,6 +479,32 @@ export function WorkspaceModeProvider({
   React.useEffect(() => {
     setModeState(initialMode);
   }, [initialMode]);
+
+  React.useEffect(() => {
+    setBackupOnlyMode(initialBackupOnlyMode);
+  }, [initialBackupOnlyMode]);
+
+  /** Pick up Backup only toggles without a full page reload (platform admin may flip it elsewhere). */
+  React.useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include", cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { backupOnlyMode?: boolean };
+        if (!cancelled && typeof data.backupOnlyMode === "boolean") {
+          setBackupOnlyMode(data.backupOnlyMode);
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+    const id = window.setInterval(poll, 90_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   React.useEffect(() => {
     setDemoPersonaState(initialDemoPersonaId);
@@ -588,6 +623,7 @@ export function WorkspaceModeProvider({
     narrowMemberCrm,
     viewerForMemberScope,
     requestedGroups,
+    backupOnlyMode,
   );
 
   const liveLeadsForPersistRef = React.useRef<Lead[]>([]);
@@ -2887,6 +2923,7 @@ export function WorkspaceModeProvider({
               )
             : liveFs.error
           : null,
+      backupOnlyMode,
       userProfileError: mode === "live" && fbUser ? userProfileLoadError ?? null : null,
       workspaceLoading:
         mode === "live"
@@ -2973,6 +3010,7 @@ export function WorkspaceModeProvider({
     liveFs.error,
     liveFs.loading,
     liveFs.coreReady.followups,
+    backupOnlyMode,
     demoSnapshot,
     userProfileLoadError,
     authLoading,

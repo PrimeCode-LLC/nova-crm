@@ -4,6 +4,7 @@ import { getVerifiedSession } from "@/lib/auth/server";
 import { resolveLiveTenantForSession } from "@/lib/auth/resolve-live-tenant";
 import { isUserPlatformAdmin } from "@/lib/platform/check-platform-admin";
 import { getOrganizationServer } from "@/lib/platform/organizations-server";
+import { isBackupOnlyModeEnabled } from "@/lib/platform/platform-settings-server";
 
 export async function GET() {
   if (isAuthDisabled()) {
@@ -11,6 +12,7 @@ export async function GET() {
       user: { uid: "dev", email: "dev@local", name: "Dev user" },
       isPlatformAdmin: true,
       membershipPending: false,
+      backupOnlyMode: await isBackupOnlyModeEnabled(),
     });
   }
   const session = await getVerifiedSession();
@@ -18,9 +20,10 @@ export async function GET() {
     return NextResponse.json({ user: null, isPlatformAdmin: false }, { status: 401 });
   }
 
-  const [live, isPlatformAdmin] = await Promise.all([
+  const [live, isPlatformAdmin, backupOnlyMode] = await Promise.all([
     resolveLiveTenantForSession(session),
     isUserPlatformAdmin(session.uid, session.email),
+    isBackupOnlyModeEnabled(),
   ]);
 
   const user = {
@@ -44,5 +47,6 @@ export async function GET() {
     isPlatformAdmin,
     membershipPending,
     pendingOrganizationName,
+    backupOnlyMode,
   });
 }

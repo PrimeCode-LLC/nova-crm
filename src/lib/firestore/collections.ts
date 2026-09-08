@@ -70,6 +70,11 @@ export const COLLECTIONS = {
   organizations: "organizations",
   /** Product-level operators - read/write only through server (Admin SDK). */
   platformAdmins: "platformAdmins",
+  /**
+   * Platform-wide ops settings (Admin SDK only).
+   * Singleton doc id: `global` — see `platform-settings-server.ts`.
+   */
+  platformSettings: "platformSettings",
   /** Single-use PKCE authorization codes for the Nova browser extension. */
   extensionAuthCodes: "extensionAuthCodes",
   /** Hashed, revocable 24-hour browser-extension sessions. */

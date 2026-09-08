@@ -82,6 +82,7 @@ type AuthMeBody = {
   isPlatformAdmin?: boolean;
   membershipPending?: boolean;
   pendingOrganizationName?: string | null;
+  backupOnlyMode?: boolean;
 };
 
 /** In-flight dedupe so Strict Mode / multiple mount effects share one `/api/auth/me`. */
