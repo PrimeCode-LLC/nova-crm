@@ -131,15 +131,35 @@ export default function StrategyDetailPage() {
 
   const playbookSignals = ws.intentPlaybook.signals ?? [];
 
-  const userOptions = React.useMemo(
-    () =>
-      buildWorkspaceOwnerPickerOptions(
-        ws.users,
-        ws.currentUserId,
-        ws.getOwnerDisplayName,
-      ),
-    [ws.users, ws.currentUserId, ws.getOwnerDisplayName],
+  /** Org membership is the full assignable roster; CRM `users` alone can omit teammates. */
+  const assignedUserIds = React.useMemo(
+    () => assignments.map((a) => a.userId),
+    [assignments],
   );
+
+  const userOptions = React.useMemo(() => {
+    const ensureIds = [
+      ...(ws.activeOrgMemberIds ? [...ws.activeOrgMemberIds] : []),
+      ...assignedUserIds,
+    ];
+    const options = buildWorkspaceOwnerPickerOptions(
+      ws.users,
+      ws.currentUserId,
+      ws.getOwnerDisplayName,
+      ensureIds,
+    );
+    if (!ws.activeOrgMemberIds) return options;
+    const keep = new Set(ws.activeOrgMemberIds);
+    for (const uid of assignedUserIds) keep.add(uid);
+    if (ws.currentUserId) keep.add(ws.currentUserId);
+    return options.filter((o) => keep.has(o.id));
+  }, [
+    ws.users,
+    ws.currentUserId,
+    ws.getOwnerDisplayName,
+    ws.activeOrgMemberIds,
+    assignedUserIds,
+  ]);
 
   if (data.loading && !strategy) {
     return (
