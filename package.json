@@ -31,6 +31,8 @@
     "worker:built": "node dist/worker/index.mjs",
     "check:firebase-imports": "node scripts/check-firebase-imports.mjs",
     "export:strategy-packs": "npx --yes tsx scripts/export-strategy-packs.ts",
+    "export:knowledge-pack": "npx --yes tsx scripts/export-knowledge-pack.ts",
+    "export:prompts-pack": "npx --yes tsx scripts/export-prompts-pack.ts",
     "extension:dev": "npm run dev -w @nova/intent-radar-extension",
     "extension:build": "npm run build -w @nova/intent-radar-extension",
     "extension:typecheck": "npm run typecheck -w @nova/intent-radar-extension"

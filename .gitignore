@@ -58,6 +58,9 @@ next-env.d.ts
 # Private strategy packs (tenant-specific ICP — do not ship in SaaS product)
 /packs/private/*.json
 /packs/private/seeds/
+
+# Exported org knowledge / prompts packs (may contain private corpus text)
+/archives/knowledge/
 .shots/
 
 /src/generated/prisma
