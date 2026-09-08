@@ -93,6 +93,10 @@ export interface EmailAccountStore {
   setActiveMailbox: (mailboxId: string) => void;
   addMailbox: () => string;
   removeMailbox: (mailboxId: string) => void;
+  /** Delete many owned mailboxes (server-synced when live). Returns counts for toasts. */
+  removeMailboxes: (
+    mailboxIds: string[],
+  ) => Promise<{ removed: number; failed: number; error?: string }>;
   updateMailbox: (mailboxId: string, patch: Partial<EmailMailboxSettings>) => void;
   setSmtp: (mailboxId: string, patch: Partial<EmailMailboxSettings["smtp"]>) => void;
   setImap: (mailboxId: string, patch: Partial<EmailMailboxSettings["imap"]>) => void;
@@ -355,42 +359,99 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
     return next.id;
   },
   removeMailbox: (mailboxId) => {
-    if (typeof window !== "undefined" && get().emailServerSyncEnabled) {
-      void fetch(`/api/email/mailboxes?mailboxId=${encodeURIComponent(mailboxId)}`, {
-        method: "DELETE",
-        credentials: "same-origin",
-      });
-    }
-    set((s) => {
-      const rest = s.mailboxes.filter((mb) => mb.id !== mailboxId);
-      if (rest.length === 0) {
-        const fallback = defaultEmailMailboxSettings({ label: "Primary mailbox" });
+    void get().removeMailboxes([mailboxId]);
+  },
+  removeMailboxes: async (mailboxIds) => {
+    const unique = [
+      ...new Set(mailboxIds.map((id) => id.trim()).filter(Boolean)),
+    ];
+    if (unique.length === 0) return { removed: 0, failed: 0 };
+
+    const applyLocalRemoval = (ids: string[]) => {
+      if (ids.length === 0) return;
+      const idSet = new Set(ids);
+      set((s) => {
+        const rest = s.mailboxes.filter((mb) => !idSet.has(mb.id));
+        if (rest.length === 0) {
+          const fallback = defaultEmailMailboxSettings({ label: "Primary mailbox" });
+          return {
+            ...s,
+            mailboxes: [fallback],
+            activeMailboxId: fallback.id,
+            inboundByMailbox: {},
+            trashInboundByMailbox: {},
+            drafts: s.drafts.filter((d) => !idSet.has(d.mailboxId)),
+            sent: s.sent.filter((m) => !idSet.has(m.mailboxId)),
+          };
+        }
         return {
           ...s,
-          mailboxes: [fallback],
-          activeMailboxId: fallback.id,
-          inboundByMailbox: {},
-          trashInboundByMailbox: {},
-          drafts: s.drafts.filter((d) => d.mailboxId !== mailboxId),
-          sent: s.sent.filter((m) => m.mailboxId !== mailboxId),
+          mailboxes: rest,
+          activeMailboxId: idSet.has(s.activeMailboxId)
+            ? (rest[0]?.id ?? "")
+            : s.activeMailboxId,
+          inboundByMailbox: Object.fromEntries(
+            Object.entries(s.inboundByMailbox).filter(([id]) => !idSet.has(id)),
+          ),
+          trashInboundByMailbox: Object.fromEntries(
+            Object.entries(s.trashInboundByMailbox).filter(([id]) => !idSet.has(id)),
+          ),
+          drafts: s.drafts.filter((d) => !idSet.has(d.mailboxId)),
+          sent: s.sent.filter((m) => !idSet.has(m.mailboxId)),
         };
+      });
+      scheduleEmailMetaPersist(get);
+    };
+
+    if (typeof window === "undefined" || !get().emailServerSyncEnabled) {
+      applyLocalRemoval(unique);
+      return { removed: unique.length, failed: 0 };
+    }
+
+    const BATCH = 40;
+    const succeeded: string[] = [];
+    let lastError: string | undefined;
+
+    for (let i = 0; i < unique.length; i += BATCH) {
+      const chunk = unique.slice(i, i + BATCH);
+      try {
+        const res = await fetch("/api/email/mailboxes", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          credentials: "same-origin",
+          body: JSON.stringify({ mailboxIds: chunk }),
+        });
+        let data: {
+          ok?: boolean;
+          error?: string;
+          deletedIds?: string[];
+        } = {};
+        try {
+          data = (await res.json()) as typeof data;
+        } catch {
+          data = {};
+        }
+        const deleted = Array.isArray(data.deletedIds)
+          ? data.deletedIds.filter((id): id is string => typeof id === "string" && id.length > 0)
+          : data.ok
+            ? chunk
+            : [];
+        succeeded.push(...deleted);
+        if (!data.ok && data.error) lastError = data.error;
+        else if (deleted.length < chunk.length && !lastError) {
+          lastError = "Some mailboxes could not be deleted on the server.";
+        }
+      } catch (e) {
+        lastError = e instanceof Error ? e.message : "Network error";
       }
-      return {
-        ...s,
-        mailboxes: rest,
-        activeMailboxId:
-          s.activeMailboxId === mailboxId ? (rest[0]?.id ?? "") : s.activeMailboxId,
-        inboundByMailbox: Object.fromEntries(
-          Object.entries(s.inboundByMailbox).filter(([id]) => id !== mailboxId),
-        ),
-        trashInboundByMailbox: Object.fromEntries(
-          Object.entries(s.trashInboundByMailbox).filter(([id]) => id !== mailboxId),
-        ),
-        drafts: s.drafts.filter((d) => d.mailboxId !== mailboxId),
-        sent: s.sent.filter((m) => m.mailboxId !== mailboxId),
-      };
-    });
-    scheduleEmailMetaPersist(get);
+    }
+
+    applyLocalRemoval(succeeded);
+    return {
+      removed: succeeded.length,
+      failed: unique.length - succeeded.length,
+      error: lastError,
+    };
   },
   updateMailbox: (mailboxId, patch) =>
     set((s) => ({

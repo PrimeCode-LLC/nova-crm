@@ -220,15 +220,81 @@ export async function DELETE(req: Request) {
   if (!g.ok) return g.response;
 
   const url = new URL(req.url);
-  const mailboxId = url.searchParams.get("mailboxId")?.trim() ?? "";
-  if (!mailboxId) {
-    return NextResponse.json({ ok: false, error: "mailboxId is required" }, { status: 400 });
+  const singleId = url.searchParams.get("mailboxId")?.trim() ?? "";
+  let mailboxIds: string[] = [];
+
+  if (singleId) {
+    mailboxIds = [singleId];
+  } else {
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      body = null;
+    }
+    const raw =
+      body &&
+      typeof body === "object" &&
+      Array.isArray((body as { mailboxIds?: unknown }).mailboxIds)
+        ? (body as { mailboxIds: unknown[] }).mailboxIds
+        : [];
+    mailboxIds = [
+      ...new Set(
+        raw
+          .filter((id): id is string => typeof id === "string")
+          .map((id) => id.trim())
+          .filter(Boolean),
+      ),
+    ];
+  }
+
+  if (mailboxIds.length === 0) {
+    return NextResponse.json(
+      { ok: false, error: "mailboxId or mailboxIds is required" },
+      { status: 400 },
+    );
+  }
+
+  /** Keep request time bounded for large cleanup sweeps. */
+  const MAX_BULK_DELETE = 80;
+  if (mailboxIds.length > MAX_BULK_DELETE) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: `At most ${MAX_BULK_DELETE} mailboxes can be deleted per request.`,
+      },
+      { status: 400 },
+    );
   }
 
   const { organizationId, uid } = g.ctx.session;
-  const result = await deleteMailboxForMemberServer({ organizationId, uid, mailboxId });
-  if ("error" in result) {
-    return NextResponse.json({ ok: false, error: result.error }, { status: 503 });
+  const deletedIds: string[] = [];
+  const errors: Array<{ mailboxId: string; error: string }> = [];
+
+  for (const mailboxId of mailboxIds) {
+    const result = await deleteMailboxForMemberServer({ organizationId, uid, mailboxId });
+    if ("error" in result) {
+      errors.push({ mailboxId, error: result.error });
+      continue;
+    }
+    deletedIds.push(mailboxId);
   }
-  return NextResponse.json({ ok: true });
+
+  if (deletedIds.length === 0) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: errors[0]?.error ?? "Could not delete mailboxes",
+        deletedIds,
+        errors,
+      },
+      { status: 503 },
+    );
+  }
+
+  return NextResponse.json({
+    ok: true,
+    deletedIds,
+    errors: errors.length > 0 ? errors : undefined,
+  });
 }

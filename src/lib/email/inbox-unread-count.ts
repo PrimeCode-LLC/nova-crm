@@ -5,11 +5,15 @@ import {
   type EmailAccountStore,
 } from "@/stores/email-account-store";
 
-/** Matches inbox page initial IMAP list size (newest messages). */
-export const INBOX_IMAP_HEAD_LIMIT = 800;
+/**
+ * Interactive Inbox / Sent / Trash first-page IMAP envelope size.
+ * Keep modest so single-mailbox opens stay snappy; older mail loads via “Load more”.
+ * Background cron may still sync a larger head (`IMAP_CRON_HEAD_LIMIT`).
+ */
+export const INBOX_IMAP_HEAD_LIMIT = 100;
 /**
  * Background badge / off-Inbox IMAP envelope page.
- * Keep small so local Next.js is not blocked for 10–25s by 800-UID fetches.
+ * Keep small so local Next.js is not blocked for 10–25s by large UID fetches.
  */
 export const BACKGROUND_IMAP_HEAD_LIMIT = 120;
 

@@ -147,6 +147,8 @@ import {
 import { appendMailDataOwnerParam, resolveMailApiForUserUid } from "@/lib/email/mail-data-owner-query";
 import { normalizeRecipientList } from "@/lib/email/parse-outbound-recipients";
 import { INBOX_IMAP_HEAD_LIMIT } from "@/lib/email/inbox-unread-count";
+import { ListPaginationBar } from "@/components/followups/list-pagination-bar";
+import type { FollowupPageSize } from "@/lib/followup-queue-pagination";
 import { mapPool } from "@/lib/async/map-pool";
 import {
   MAX_COMPOSE_ATTACHMENTS,
@@ -409,8 +411,10 @@ type ImapListFolder = "inbox" | "trash" | "sent";
 
 /** Matches server-side IMAP list batching; older messages load via “Load more”. */
 const INBOX_IMAP_PAGE_LIMIT = INBOX_IMAP_HEAD_LIMIT;
-/** Per-mailbox page when aggregating All mailboxes (avoids 19×800 body-heavy fetches). */
-const ALL_MAILBOXES_IMAP_PAGE_LIMIT = 100;
+/** Per-mailbox page when aggregating All mailboxes (avoids N×large body-heavy fetches). */
+const ALL_MAILBOXES_IMAP_PAGE_LIMIT = 50;
+/** Default UI page size for the conversation list (client-side pager). */
+const MAIL_LIST_DEFAULT_PAGE_SIZE: FollowupPageSize = 50;
 /** Max concurrent IMAP list requests under All mailboxes. */
 const ALL_MAILBOXES_FETCH_CONCURRENCY = 3;
 /**
@@ -701,6 +705,10 @@ export default function InboxWorkspace() {
   const hasScopedImapMailbox = scopedMailboxes.some(isImapInboxConfigured);
   /** Row ids for bulk delete (inbox → trash, or permanent delete in trash). */
   const [selectedMailRowIds, setSelectedMailRowIds] = React.useState<Set<string>>(() => new Set());
+  /** Client-side pager over filtered conversation rows (keeps bulk actions scoped). */
+  const [mailListPageIndex, setMailListPageIndex] = React.useState(0);
+  const [mailListPageSize, setMailListPageSize] =
+    React.useState<FollowupPageSize>(MAIL_LIST_DEFAULT_PAGE_SIZE);
   const [purgeTrashOpen, setPurgeTrashOpen] = React.useState(false);
   const [blockDomainOpen, setBlockDomainOpen] = React.useState(false);
   const [blockDomainTarget, setBlockDomainTarget] = React.useState("");
@@ -2600,6 +2608,35 @@ export default function InboxWorkspace() {
     flagByMessageId,
   ]);
 
+  const mailListTotalPages = Math.max(1, Math.ceil(visibleMailRows.length / mailListPageSize));
+  const safeMailListPageIndex = Math.min(mailListPageIndex, mailListTotalPages - 1);
+  const pagedMailRows = React.useMemo(() => {
+    const start = safeMailListPageIndex * mailListPageSize;
+    return visibleMailRows.slice(start, start + mailListPageSize);
+  }, [visibleMailRows, safeMailListPageIndex, mailListPageSize]);
+  const mailListPageOffset = safeMailListPageIndex * mailListPageSize;
+
+  React.useEffect(() => {
+    setMailListPageIndex(0);
+  }, [
+    mailFolder,
+    account.id,
+    allMailboxesSelected,
+    listSearchQuery,
+    readStatusFilter,
+    entityMailFilter,
+    entitySubFilter,
+    selectedMailLabelId,
+    selectedMailFlagId,
+    mailListPageSize,
+  ]);
+
+  React.useEffect(() => {
+    if (mailListPageIndex !== safeMailListPageIndex) {
+      setMailListPageIndex(safeMailListPageIndex);
+    }
+  }, [mailListPageIndex, safeMailListPageIndex]);
+
   React.useEffect(() => {
     const el = mailListScrollRef.current;
     if (!el) return;
@@ -2608,12 +2645,12 @@ export default function InboxWorkspace() {
     const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(measure) : null;
     ro?.observe(el);
     return () => ro?.disconnect();
-  }, [mailFolder, visibleMailRows.length === 0]);
+  }, [mailFolder, visibleMailRows.length === 0, safeMailListPageIndex]);
 
   const mailListWindow = React.useMemo(() => {
-    const total = visibleMailRows.length;
+    const total = pagedMailRows.length;
     if (total === 0) {
-      return { start: 0, end: 0, offsetY: 0, height: 0, rows: [] as typeof visibleMailRows };
+      return { start: 0, end: 0, offsetY: 0, height: 0, rows: [] as typeof pagedMailRows };
     }
     // Window when the list is large enough that full DOM would hitch the UI.
     if (total <= 80) {
@@ -2622,7 +2659,7 @@ export default function InboxWorkspace() {
         end: total,
         offsetY: 0,
         height: total * MAIL_LIST_ROW_ESTIMATE_PX,
-        rows: visibleMailRows,
+        rows: pagedMailRows,
       };
     }
     const visibleCount = Math.ceil(mailListViewportHeight / MAIL_LIST_ROW_ESTIMATE_PX) + MAIL_LIST_OVERSCAN * 2;
@@ -2633,15 +2670,15 @@ export default function InboxWorkspace() {
       end,
       offsetY: start * MAIL_LIST_ROW_ESTIMATE_PX,
       height: total * MAIL_LIST_ROW_ESTIMATE_PX,
-      rows: visibleMailRows.slice(start, end),
+      rows: pagedMailRows.slice(start, end),
     };
-  }, [visibleMailRows, mailListScrollTop, mailListViewportHeight]);
+  }, [pagedMailRows, mailListScrollTop, mailListViewportHeight]);
 
   const selectMailRowRange = React.useCallback((anchorIdx: number, endIdx: number) => {
     const lo = Math.min(anchorIdx, endIdx);
     const hi = Math.max(anchorIdx, endIdx);
-    setSelectedMailRowIds(new Set(visibleMailRows.slice(lo, hi + 1).map((r) => r.id)));
-  }, [visibleMailRows]);
+    setSelectedMailRowIds(new Set(pagedMailRows.slice(lo, hi + 1).map((r) => r.id)));
+  }, [pagedMailRows]);
 
   const handleMailRowBulkSelect = React.useCallback(
     (rowId: string, rowIndex: number, shiftKey: boolean) => {
@@ -3015,9 +3052,14 @@ export default function InboxWorkspace() {
     setSelectedMailFlagId(null);
   }
 
-  const selectAllVisibleMailRows = React.useCallback(() => {
+  const selectAllPagedMailRows = React.useCallback(() => {
+    setSelectedMailRowIds(new Set(pagedMailRows.map((r) => r.id)));
+    bulkSelectAnchorIndexRef.current = pagedMailRows.length > 0 ? 0 : null;
+  }, [pagedMailRows]);
+
+  const selectAllLoadedMailRows = React.useCallback(() => {
     setSelectedMailRowIds(new Set(visibleMailRows.map((r) => r.id)));
-    bulkSelectAnchorIndexRef.current = visibleMailRows.length > 0 ? 0 : null;
+    bulkSelectAnchorIndexRef.current = 0;
   }, [visibleMailRows]);
 
   async function handleMoveInboxSelectionToTrash() {
@@ -3284,25 +3326,30 @@ export default function InboxWorkspace() {
 
       let idx = resolveVisibleMailRowIndex();
 
+      const focusAbsRow = (absIdx: number) => {
+        const row = visibleMailRows[absIdx];
+        if (!row) return;
+        const targetPage = Math.floor(absIdx / mailListPageSize);
+        if (targetPage !== safeMailListPageIndex) {
+          setMailListPageIndex(targetPage);
+          setMailListScrollTop(0);
+          mailListScrollRef.current?.scrollTo({ top: 0 });
+        }
+        selectVisibleMailRow(row);
+        requestAnimationFrame(() => scrollMailRowIntoView(row.id));
+      };
+
       if (e.key === "ArrowDown") {
         e.preventDefault();
         idx = idx < 0 ? 0 : Math.min(idx + 1, visibleMailRows.length - 1);
-        const row = visibleMailRows[idx];
-        if (row) {
-          selectVisibleMailRow(row);
-          scrollMailRowIntoView(row.id);
-        }
+        focusAbsRow(idx);
         return;
       }
 
       if (e.key === "ArrowUp") {
         e.preventDefault();
         idx = idx < 0 ? 0 : Math.max(idx - 1, 0);
-        const row = visibleMailRows[idx];
-        if (row) {
-          selectVisibleMailRow(row);
-          scrollMailRowIntoView(row.id);
-        }
+        focusAbsRow(idx);
         return;
       }
 
@@ -3314,7 +3361,12 @@ export default function InboxWorkspace() {
         if (idx < 0) idx = 0;
         const row = visibleMailRows[idx];
         if (!row) return;
-        handleMailRowBulkSelect(row.id, idx, e.shiftKey);
+        const pageIdx = idx - mailListPageOffset;
+        if (pageIdx < 0 || pageIdx >= pagedMailRows.length) {
+          focusAbsRow(idx);
+          return;
+        }
+        handleMailRowBulkSelect(row.id, pageIdx, e.shiftKey);
         return;
       }
 
@@ -3350,13 +3402,17 @@ export default function InboxWorkspace() {
     blockDomainOpen,
     collectUidsFromMailRows,
     composeOpen,
+    handleMailRowBulkSelect,
     mailActionLoading,
     mailFolder,
+    mailListPageOffset,
+    mailListPageSize,
+    pagedMailRows.length,
     purgeTrashOpen,
     resolveVisibleMailRowIndex,
+    safeMailListPageIndex,
     scrollMailRowIntoView,
     selectVisibleMailRow,
-    handleMailRowBulkSelect,
     selectedMailRowIds,
     showImapBulkMailActions,
     visibleMailRows,
@@ -4035,11 +4091,24 @@ export default function InboxWorkspace() {
                       variant="outline"
                       size="sm"
                       className="h-7 text-[10px] px-2"
-                      onClick={selectAllVisibleMailRows}
-                      disabled={visibleMailRows.length === 0 || mailActionLoading}
+                      onClick={selectAllPagedMailRows}
+                      disabled={pagedMailRows.length === 0 || mailActionLoading}
                     >
-                      Select all
+                      Select page
+                      {pagedMailRows.length > 0 ? ` (${pagedMailRows.length})` : ""}
                     </Button>
+                    {visibleMailRows.length > pagedMailRows.length ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-[10px] px-2"
+                        onClick={selectAllLoadedMailRows}
+                        disabled={visibleMailRows.length === 0 || mailActionLoading}
+                      >
+                        Select all loaded ({visibleMailRows.length})
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
                       variant="ghost"
@@ -4633,6 +4702,27 @@ export default function InboxWorkspace() {
                     </div>
                   )}
               </div>
+              {visibleMailRows.length > 0 ? (
+                <div className="shrink-0 border-t px-3 pb-3">
+                  <ListPaginationBar
+                    total={visibleMailRows.length}
+                    pageIndex={safeMailListPageIndex}
+                    pageSize={mailListPageSize}
+                    onPageIndexChange={(next) => {
+                      setMailListPageIndex(next);
+                      setMailListScrollTop(0);
+                      mailListScrollRef.current?.scrollTo({ top: 0 });
+                    }}
+                    onPageSizeChange={(next) => {
+                      setMailListPageSize(next);
+                      setMailListPageIndex(0);
+                      setMailListScrollTop(0);
+                      mailListScrollRef.current?.scrollTo({ top: 0 });
+                    }}
+                    itemLabel="conversations"
+                  />
+                </div>
+              ) : null}
             </div>
 
             <div className="flex flex-1 flex-col min-h-0 min-w-0 overflow-hidden p-4 lg:p-5">
@@ -5311,7 +5401,7 @@ export default function InboxWorkspace() {
               <span className="block">
                 All future email from{" "}
                 <span className="font-medium text-foreground">{blockDomainTarget}</span> will be moved to Trash when
-                your inbox syncs. Open Trash to review, nothing is deleted until you use Select all and Delete forever.
+                your inbox syncs. Open Trash to review, nothing is deleted until you use Select page / Select all loaded and Delete forever.
               </span>
               {imapMailboxTotal != null && inbound.length < imapMailboxTotal ? (
                 <span className="block text-xs">

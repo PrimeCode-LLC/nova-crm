@@ -10,6 +10,17 @@ import { Textarea } from "@/components/ui/textarea";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Accordion,
   AccordionContent,
@@ -17,6 +28,8 @@ import {
   AccordionHeader,
   AccordionTrigger,
 } from "@/components/ui/accordion";
+import { ListPaginationBar } from "@/components/followups/list-pagination-bar";
+import type { FollowupPageSize } from "@/lib/followup-queue-pagination";
 import { isEmailAccountConfigured, useEmailAccountStore } from "@/stores/email-account-store";
 import type { EmailMailboxSettings, MailboxConnectionType } from "@/lib/email-account-types";
 import { isAssignedMailbox } from "@/lib/email-account-types";
@@ -45,6 +58,7 @@ import {
   ShieldAlert,
   Plus,
   Save,
+  Search,
   Trash2,
   Unplug,
   Users,
@@ -85,6 +99,27 @@ function isMailboxTransportConnected(mb: EmailMailboxSettings): boolean {
   }
   return Boolean(mb.emailAddress.trim() && normalizeMailHost(mb.smtp.host));
 }
+
+/** Stats tile: broken transport, not connected, or missing signature. */
+function isMailboxNeedsAttention(mb: EmailMailboxSettings): boolean {
+  return (
+    Boolean(mb.transportError?.trim()) ||
+    !isMailboxTransportConnected(mb) ||
+    !mb.signature?.trim()
+  );
+}
+
+/**
+ * Safe cleanup target for dummy/placeholder boxes: no working transport.
+ * Excludes “connected but missing signature” so real mailboxes are not wiped.
+ */
+function isMailboxNotConnected(mb: EmailMailboxSettings): boolean {
+  return !isMailboxTransportConnected(mb);
+}
+
+type MailboxListFilter = "all" | "not_connected" | "needs_fix" | "disabled" | "enabled";
+
+const MAILBOX_LIST_DEFAULT_PAGE_SIZE: FollowupPageSize = 25;
 
 /** Active teammates only - skips disabled/inactive/invited org members and inactive CRM users. */
 function buildActiveAssignableOptions(
@@ -249,7 +284,7 @@ export function EmailInboxSettingsCard() {
   const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const setActiveMailbox = useEmailAccountStore((s) => s.setActiveMailbox);
   const addMailbox = useEmailAccountStore((s) => s.addMailbox);
-  const removeMailbox = useEmailAccountStore((s) => s.removeMailbox);
+  const removeMailboxes = useEmailAccountStore((s) => s.removeMailboxes);
   const updateMailbox = useEmailAccountStore((s) => s.updateMailbox);
   const setSmtp = useEmailAccountStore((s) => s.setSmtp);
   const setImap = useEmailAccountStore((s) => s.setImap);
@@ -289,6 +324,17 @@ export function EmailInboxSettingsCard() {
   const [savingRemote, setSavingRemote] = React.useState(false);
   const [testingMailboxId, setTestingMailboxId] = React.useState<string | null>(null);
   const [openValues, setOpenValues] = React.useState<string[]>([]);
+  const [mailboxListFilter, setMailboxListFilter] = React.useState<MailboxListFilter>("all");
+  const [mailboxSearchQuery, setMailboxSearchQuery] = React.useState("");
+  const [mailboxListPageIndex, setMailboxListPageIndex] = React.useState(0);
+  const [mailboxListPageSize, setMailboxListPageSize] =
+    React.useState<FollowupPageSize>(MAILBOX_LIST_DEFAULT_PAGE_SIZE);
+  const [selectedMailboxIds, setSelectedMailboxIds] = React.useState<Set<string>>(() => new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = React.useState(false);
+  const [bulkDeleteMode, setBulkDeleteMode] = React.useState<"selection" | "not_connected">(
+    "selection",
+  );
+  const [bulkDeleting, setBulkDeleting] = React.useState(false);
   /** `${mailboxId}:smtp` | `${mailboxId}:imap` → password field visible as plain text */
   const [passwordFieldVisible, setPasswordFieldVisible] = React.useState<Record<string, boolean>>({});
   const [assignPickByMailbox, setAssignPickByMailbox] = React.useState<Record<string, string>>({});
@@ -317,26 +363,146 @@ export function EmailInboxSettingsCard() {
     let enabled = 0;
     let withSignature = 0;
     let withAssignees = 0;
+    let notConnected = 0;
+    let needsAttention = 0;
     for (const mb of ownedMailboxes) {
       if (isMailboxTransportConnected(mb)) connected += 1;
+      else notConnected += 1;
       if (mb.enabled) enabled += 1;
       if (mb.signature?.trim()) withSignature += 1;
       if ((mb.assignedUserIds ?? []).length > 0) withAssignees += 1;
+      if (isMailboxNeedsAttention(mb)) needsAttention += 1;
     }
     return {
       total: ownedMailboxes.length,
       connected,
+      notConnected,
       enabled,
       withSignature,
       withAssignees,
-      needsAttention: ownedMailboxes.filter(
-        (mb) =>
-          Boolean(mb.transportError?.trim()) ||
-          !isMailboxTransportConnected(mb) ||
-          !mb.signature?.trim(),
-      ).length,
+      needsAttention,
     };
   }, [ownedMailboxes]);
+
+  const filteredOwnedMailboxes = React.useMemo(() => {
+    const q = mailboxSearchQuery.trim().toLowerCase();
+    return ownedMailboxes.filter((mb) => {
+      if (mailboxListFilter === "not_connected" && !isMailboxNotConnected(mb)) return false;
+      if (mailboxListFilter === "needs_fix" && !isMailboxNeedsAttention(mb)) return false;
+      if (mailboxListFilter === "disabled" && mb.enabled) return false;
+      if (mailboxListFilter === "enabled" && !mb.enabled) return false;
+      if (!q) return true;
+      const hay = `${mb.label} ${mb.emailAddress} ${mb.displayName}`.toLowerCase();
+      return hay.includes(q);
+    });
+  }, [ownedMailboxes, mailboxListFilter, mailboxSearchQuery]);
+
+  const mailboxListTotalPages = Math.max(
+    1,
+    Math.ceil(filteredOwnedMailboxes.length / mailboxListPageSize),
+  );
+  const safeMailboxListPageIndex = Math.min(mailboxListPageIndex, mailboxListTotalPages - 1);
+  const pagedOwnedMailboxes = React.useMemo(() => {
+    const start = safeMailboxListPageIndex * mailboxListPageSize;
+    return filteredOwnedMailboxes.slice(start, start + mailboxListPageSize);
+  }, [filteredOwnedMailboxes, safeMailboxListPageIndex, mailboxListPageSize]);
+
+  React.useEffect(() => {
+    setMailboxListPageIndex(0);
+    setSelectedMailboxIds(new Set());
+  }, [mailboxListFilter, mailboxSearchQuery, mailboxListPageSize]);
+
+  React.useEffect(() => {
+    if (mailboxListPageIndex !== safeMailboxListPageIndex) {
+      setMailboxListPageIndex(safeMailboxListPageIndex);
+    }
+  }, [mailboxListPageIndex, safeMailboxListPageIndex]);
+
+  React.useEffect(() => {
+    const allowed = new Set(ownedMailboxes.map((m) => m.id));
+    setSelectedMailboxIds((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const id of prev) {
+        if (allowed.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [ownedMailboxes]);
+
+  const notConnectedMailboxIds = React.useMemo(
+    () => ownedMailboxes.filter(isMailboxNotConnected).map((m) => m.id),
+    [ownedMailboxes],
+  );
+
+  const pendingDeleteIds = React.useMemo(() => {
+    if (bulkDeleteMode === "not_connected") return notConnectedMailboxIds;
+    return [...selectedMailboxIds];
+  }, [bulkDeleteMode, notConnectedMailboxIds, selectedMailboxIds]);
+
+  const pageSelectedCount = pagedOwnedMailboxes.filter((m) => selectedMailboxIds.has(m.id)).length;
+  const allPageSelected =
+    pagedOwnedMailboxes.length > 0 && pageSelectedCount === pagedOwnedMailboxes.length;
+
+  function toggleMailboxSelected(mailboxId: string, checked: boolean) {
+    setSelectedMailboxIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(mailboxId);
+      else next.delete(mailboxId);
+      return next;
+    });
+  }
+
+  function selectAllOnPage() {
+    setSelectedMailboxIds((prev) => {
+      const next = new Set(prev);
+      for (const mb of pagedOwnedMailboxes) next.add(mb.id);
+      return next;
+    });
+  }
+
+  function clearMailboxSelection() {
+    setSelectedMailboxIds(new Set());
+  }
+
+  function selectAllFiltered() {
+    setSelectedMailboxIds(new Set(filteredOwnedMailboxes.map((m) => m.id)));
+  }
+
+  async function confirmBulkDelete() {
+    const ids = pendingDeleteIds;
+    if (ids.length === 0) {
+      setBulkDeleteOpen(false);
+      return;
+    }
+    setBulkDeleting(true);
+    try {
+      const result = await removeMailboxes(ids);
+      setBulkDeleteOpen(false);
+      clearMailboxSelection();
+      setOpenValues((prev) => prev.filter((id) => !ids.includes(id)));
+      if (result.removed > 0 && result.failed === 0) {
+        toast.success(
+          result.removed === 1
+            ? "Removed 1 mailbox"
+            : `Removed ${result.removed} mailboxes`,
+        );
+      } else if (result.removed > 0) {
+        toast.message(`Removed ${result.removed} mailbox(es)`, {
+          description: `${result.failed} could not be deleted${
+            result.error ? `: ${result.error}` : "."
+          }`,
+        });
+      } else {
+        toast.error("Could not remove mailboxes", {
+          description: result.error ?? "Try again or remove them one at a time.",
+        });
+      }
+    } finally {
+      setBulkDeleting(false);
+    }
+  }
 
   const assignedInboxCountByUserId = React.useMemo(() => {
     const counts = new Map<string, number>();
@@ -1016,6 +1182,7 @@ export function EmailInboxSettingsCard() {
                   value: mailboxOverviewStats.total,
                   hint: "Owned mailboxes",
                   tone: "default" as const,
+                  filter: "all" as MailboxListFilter,
                 },
                 {
                   label: "Connected",
@@ -1028,12 +1195,14 @@ export function EmailInboxSettingsCard() {
                       : mailboxOverviewStats.connected < mailboxOverviewStats.total
                         ? ("warn" as const)
                         : ("default" as const),
+                  filter: null,
                 },
                 {
                   label: "Enabled",
                   value: mailboxOverviewStats.enabled,
-                  hint: "Active in Nova",
+                  hint: "Active in Nova — click to filter",
                   tone: "default" as const,
+                  filter: "enabled" as MailboxListFilter,
                 },
                 {
                   label: "Signatures",
@@ -1043,60 +1212,197 @@ export function EmailInboxSettingsCard() {
                     mailboxOverviewStats.withSignature < mailboxOverviewStats.total
                       ? ("warn" as const)
                       : ("ok" as const),
+                  filter: null,
                 },
                 {
                   label: "Assigned",
                   value: mailboxOverviewStats.withAssignees,
                   hint: "Shared with teammates",
                   tone: "default" as const,
+                  filter: null,
                 },
                 {
                   label: "Needs fix",
                   value: mailboxOverviewStats.needsAttention,
-                  hint: "Broken sync/send, missing Google sign-in, or no signature",
+                  hint: "Broken sync/send, missing Google sign-in, or no signature — click to filter",
                   tone:
                     mailboxOverviewStats.needsAttention > 0
                       ? ("warn" as const)
                       : ("ok" as const),
+                  filter: "needs_fix" as MailboxListFilter,
                 },
               ] as const
-            ).map((stat) => (
-              <div
-                key={stat.label}
-                className={cn(
-                  "rounded-lg border px-2.5 py-2",
-                  stat.tone === "ok" && "border-success/25 bg-success/5",
-                  stat.tone === "warn" && "border-warning/25 bg-warning/5",
-                  stat.tone === "default" && "bg-muted/20",
-                )}
-                title={stat.hint}
-              >
-                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {stat.label}
-                </p>
-                <p
+            ).map((stat) => {
+              const interactive = stat.filter != null;
+              const active = interactive && mailboxListFilter === stat.filter;
+              const Comp = interactive ? "button" : "div";
+              return (
+                <Comp
+                  key={stat.label}
+                  type={interactive ? "button" : undefined}
                   className={cn(
-                    "mt-0.5 text-lg font-semibold tabular-nums leading-none",
-                    stat.tone === "ok" && "text-success",
-                    stat.tone === "warn" && "text-warning",
-                    stat.tone === "default" && "text-foreground",
+                    "rounded-lg border px-2.5 py-2 text-left",
+                    stat.tone === "ok" && "border-success/25 bg-success/5",
+                    stat.tone === "warn" && "border-warning/25 bg-warning/5",
+                    stat.tone === "default" && "bg-muted/20",
+                    interactive && "transition-colors hover:border-primary/40",
+                    active && "ring-2 ring-primary/40",
                   )}
+                  title={stat.hint}
+                  onClick={
+                    interactive
+                      ? () =>
+                          setMailboxListFilter((prev) =>
+                            prev === stat.filter ? "all" : (stat.filter as MailboxListFilter),
+                          )
+                      : undefined
+                  }
                 >
-                  {stat.value}
-                  {stat.label !== "Total" &&
-                  stat.label !== "Needs fix" &&
-                  mailboxOverviewStats.total > 0 ? (
-                    <span className="ml-1 text-xs font-normal text-muted-foreground">
-                      / {mailboxOverviewStats.total}
-                    </span>
-                  ) : null}
-                </p>
-              </div>
-            ))}
+                  <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                    {stat.label}
+                  </p>
+                  <p
+                    className={cn(
+                      "mt-0.5 text-lg font-semibold tabular-nums leading-none",
+                      stat.tone === "ok" && "text-success",
+                      stat.tone === "warn" && "text-warning",
+                      stat.tone === "default" && "text-foreground",
+                    )}
+                  >
+                    {stat.value}
+                    {stat.label !== "Total" &&
+                    stat.label !== "Needs fix" &&
+                    mailboxOverviewStats.total > 0 ? (
+                      <span className="ml-1 text-xs font-normal text-muted-foreground">
+                        / {mailboxOverviewStats.total}
+                      </span>
+                    ) : null}
+                  </p>
+                </Comp>
+              );
+            })}
           </div>
+
+          <div className="flex flex-col gap-2">
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+                aria-hidden
+              />
+              <Input
+                value={mailboxSearchQuery}
+                onChange={(e) => setMailboxSearchQuery(e.target.value)}
+                placeholder="Search mailboxes by email or label…"
+                className="h-8 pl-8 text-xs"
+                aria-label="Search mailboxes"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter mailboxes">
+              {(
+                [
+                  { id: "all" as const, label: "All" },
+                  {
+                    id: "not_connected" as const,
+                    label: `Not connected (${mailboxOverviewStats.notConnected})`,
+                  },
+                  {
+                    id: "needs_fix" as const,
+                    label: `Needs fix (${mailboxOverviewStats.needsAttention})`,
+                  },
+                  { id: "disabled" as const, label: "Off" },
+                  { id: "enabled" as const, label: "Enabled" },
+                ] as const
+              ).map((chip) => (
+                <Button
+                  key={chip.id}
+                  type="button"
+                  size="sm"
+                  variant={mailboxListFilter === chip.id ? "secondary" : "ghost"}
+                  className="h-7 px-2 text-[10px]"
+                  onClick={() => setMailboxListFilter(chip.id)}
+                >
+                  {chip.label}
+                </Button>
+              ))}
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                className="h-7 px-2 text-[10px]"
+                disabled={pagedOwnedMailboxes.length === 0 || bulkDeleting}
+                onClick={() => {
+                  if (allPageSelected) {
+                    setSelectedMailboxIds((prev) => {
+                      const next = new Set(prev);
+                      for (const mb of pagedOwnedMailboxes) next.delete(mb.id);
+                      return next;
+                    });
+                  } else {
+                    selectAllOnPage();
+                  }
+                }}
+              >
+                {allPageSelected ? "Clear page" : `Select page (${pagedOwnedMailboxes.length})`}
+              </Button>
+              {filteredOwnedMailboxes.length > pagedOwnedMailboxes.length ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className="h-7 px-2 text-[10px]"
+                  disabled={filteredOwnedMailboxes.length === 0 || bulkDeleting}
+                  onClick={selectAllFiltered}
+                >
+                  Select all filtered ({filteredOwnedMailboxes.length})
+                </Button>
+              ) : null}
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="h-7 px-2 text-[10px]"
+                disabled={selectedMailboxIds.size === 0 || bulkDeleting}
+                onClick={clearMailboxSelection}
+              >
+                Clear selection
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="destructive"
+                className="h-7 gap-1 px-2 text-[10px]"
+                disabled={selectedMailboxIds.size === 0 || bulkDeleting}
+                onClick={() => {
+                  setBulkDeleteMode("selection");
+                  setBulkDeleteOpen(true);
+                }}
+              >
+                <Trash2 className="h-3 w-3" />
+                Remove selected ({selectedMailboxIds.size})
+              </Button>
+              {mailboxOverviewStats.notConnected > 0 ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 gap-1 border-destructive/40 px-2 text-[10px] text-destructive hover:bg-destructive/10"
+                  disabled={bulkDeleting}
+                  onClick={() => {
+                    setBulkDeleteMode("not_connected");
+                    setBulkDeleteOpen(true);
+                  }}
+                >
+                  <Trash2 className="h-3 w-3" />
+                  Remove all not connected ({mailboxOverviewStats.notConnected})
+                </Button>
+              ) : null}
+            </div>
+          </div>
+
           <Accordion
             multiple
-            keepMounted
             value={openValues}
             onValueChange={(next, _details) => {
               setOpenValues(next);
@@ -1105,10 +1411,30 @@ export function EmailInboxSettingsCard() {
             }}
             className="rounded-lg border px-2"
           >
-            {ownedMailboxes.map((mb) => (
+            {pagedOwnedMailboxes.length === 0 ? (
+              <div className="px-2 py-8 text-center text-sm text-muted-foreground">
+                {ownedMailboxes.length === 0
+                  ? "No mailboxes yet."
+                  : "No mailboxes match this filter."}
+              </div>
+            ) : (
+              pagedOwnedMailboxes.map((mb) => (
               <AccordionItem key={mb.id} value={mb.id} className="border-b-0 not-last:border-b">
                 <AccordionHeader>
-                  <AccordionTrigger className="py-3 hover:no-underline">
+                  <div className="flex w-full items-stretch gap-1">
+                    <div
+                      className="flex shrink-0 items-center px-1"
+                      onClick={(e) => e.stopPropagation()}
+                      onPointerDown={(e) => e.stopPropagation()}
+                    >
+                      <Checkbox
+                        checked={selectedMailboxIds.has(mb.id)}
+                        onCheckedChange={(v) => toggleMailboxSelected(mb.id, v === true)}
+                        aria-label={`Select ${mb.label?.trim() || mb.emailAddress || "mailbox"}`}
+                        disabled={bulkDeleting}
+                      />
+                    </div>
+                    <AccordionTrigger className="min-w-0 flex-1 py-3 hover:no-underline">
                     <div className="flex min-w-0 flex-1 items-center gap-3">
                       <div className="flex min-w-0 flex-1 flex-col items-start gap-0.5 text-left sm:flex-row sm:items-center sm:gap-3">
                         <span className="truncate font-medium">{mb.label?.trim() || "Mailbox"}</span>
@@ -1124,6 +1450,14 @@ export function EmailInboxSettingsCard() {
                             Off
                           </Badge>
                         )}
+                        {!isMailboxTransportConnected(mb) ? (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-warning/30 bg-warning/10 text-[10px] text-warning"
+                          >
+                            Not connected
+                          </Badge>
+                        ) : null}
                         {mb.emailAddress?.trim() &&
                         mb.emailAddress.trim().toLowerCase() !== (mb.label?.trim() || "").toLowerCase() ? (
                           <span className="truncate text-xs font-normal text-muted-foreground">
@@ -1137,6 +1471,7 @@ export function EmailInboxSettingsCard() {
                       />
                     </div>
                   </AccordionTrigger>
+                  </div>
                 </AccordionHeader>
                 <AccordionContent className="pb-4 pt-0">
                   <div className="space-y-6 border-t pt-4">
@@ -1146,7 +1481,7 @@ export function EmailInboxSettingsCard() {
                         variant="secondary"
                         size="sm"
                         className="gap-1.5"
-                        disabled={testingMailboxId != null}
+                        disabled={testingMailboxId != null || bulkDeleting}
                         onClick={() => void testConnectionsFor(mb)}
                       >
                         {testingMailboxId === mb.id ? (
@@ -1162,7 +1497,12 @@ export function EmailInboxSettingsCard() {
                           variant="ghost"
                           size="sm"
                           className="text-destructive gap-1.5"
-                          onClick={() => removeMailbox(mb.id)}
+                          disabled={bulkDeleting}
+                          onClick={() => {
+                            setSelectedMailboxIds(new Set([mb.id]));
+                            setBulkDeleteMode("selection");
+                            setBulkDeleteOpen(true);
+                          }}
                         >
                           <Trash2 className="h-3.5 w-3.5" /> Remove mailbox
                         </Button>
@@ -1809,8 +2149,77 @@ export function EmailInboxSettingsCard() {
                   </div>
                 </AccordionContent>
               </AccordionItem>
-            ))}
+              ))
+            )}
           </Accordion>
+          {filteredOwnedMailboxes.length > 0 ? (
+            <ListPaginationBar
+              total={filteredOwnedMailboxes.length}
+              pageIndex={safeMailboxListPageIndex}
+              pageSize={mailboxListPageSize}
+              onPageIndexChange={setMailboxListPageIndex}
+              onPageSizeChange={(next) => {
+                setMailboxListPageSize(next);
+                setMailboxListPageIndex(0);
+              }}
+              itemLabel="mailboxes"
+            />
+          ) : null}
+
+          <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>
+                  {bulkDeleteMode === "not_connected"
+                    ? "Remove all not-connected mailboxes?"
+                    : `Remove ${pendingDeleteIds.length} mailbox${pendingDeleteIds.length === 1 ? "" : "es"}?`}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {bulkDeleteMode === "not_connected" ? (
+                    <>
+                      This permanently deletes{" "}
+                      <span className="font-medium text-foreground">
+                        {pendingDeleteIds.length}
+                      </span>{" "}
+                      mailbox{pendingDeleteIds.length === 1 ? "" : "es"} that are not connected
+                      (dummy / broken SMTP or Google auth). Your{" "}
+                      <span className="font-medium text-foreground">
+                        {mailboxOverviewStats.connected}
+                      </span>{" "}
+                      connected mailbox{mailboxOverviewStats.connected === 1 ? "" : "es"} stay.
+                      Connected boxes that only need a signature are not included.
+                    </>
+                  ) : (
+                    <>
+                      This permanently deletes the selected mailbox
+                      {pendingDeleteIds.length === 1 ? "" : "es"} and their stored credentials.
+                      This cannot be undone.
+                    </>
+                  )}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+                <AlertDialogAction
+                  variant="destructive"
+                  disabled={bulkDeleting || pendingDeleteIds.length === 0}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    void confirmBulkDelete();
+                  }}
+                >
+                  {bulkDeleting ? (
+                    <>
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      Removing…
+                    </>
+                  ) : (
+                    <>Remove {pendingDeleteIds.length}</>
+                  )}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           </>
           )}
 
