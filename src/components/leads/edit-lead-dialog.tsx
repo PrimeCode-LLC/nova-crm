@@ -171,8 +171,14 @@ export function EditLeadDialog({
     [profiles, channel],
   );
 
+  // Hydrate once when the dialog opens (or the edited lead id changes).
+  // Do NOT depend on the live `lead` / `profiles` object identity — workspace
+  // Firestore snapshots replace those often in production, which was wiping
+  // unsaved research fields (businessFocus, recentNews, hiringSignals, toolsUsed)
+  // whenever the user tabbed between inputs mid-edit.
+  const editLeadId = open ? lead?.id : undefined;
   React.useEffect(() => {
-    if (!open || !lead) return;
+    if (!editLeadId || !lead) return;
     React.startTransition(() => {
       setChannel(lead.channel);
       setStage(lead.stage);
@@ -229,7 +235,8 @@ export function EditLeadDialog({
       setScraperId(existingScraper || (me ? me : UNSET));
       setLabelIds(lead.labelIds ?? []);
     });
-  }, [open, lead, profiles, currentUserId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on open/lead id only
+  }, [editLeadId]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

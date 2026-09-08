@@ -61,8 +61,13 @@ export function EditAccountDialog({
   const [linkedin, setLinkedin] = React.useState("");
   const [techStack, setTechStack] = React.useState("");
 
+  // Hydrate once when the dialog opens (or the account id changes).
+  // Do NOT depend on live `account` object identity — workspace Firestore
+  // snapshots replace it often in production, which was wiping unsaved
+  // size / revenueRange / yearFounded / techStack mid-edit.
+  const editAccountId = open ? account.id : undefined;
   React.useEffect(() => {
-    if (!open) return;
+    if (!editAccountId) return;
     React.startTransition(() => {
       setName(account.name ?? "");
       setDomain(account.domain ?? "");
@@ -78,7 +83,8 @@ export function EditAccountDialog({
       setLinkedin(account.linkedin ?? "");
       setTechStack(account.techStack?.join(", ") ?? "");
     });
-  }, [account, open]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hydrate on open/account id only
+  }, [editAccountId]);
 
   function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
