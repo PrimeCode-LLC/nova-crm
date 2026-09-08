@@ -124,7 +124,12 @@ export async function buildOrgMailboxUtilizationServer(input: {
   const pendingToDayKey = addUtcDayKeys(todayKey, 6);
 
   const rows: MailboxUtilizationRow[] = [];
-  const MEMBER_CONCURRENCY = 3;
+  /**
+   * Keep utilization fan-out low: every document-store read opens an interactive
+   * Prisma transaction. Parallel member×mailbox work saturates PG_POOL_MAX and
+   * surfaces as "Unable to start a transaction in the given time" (500s).
+   */
+  const MEMBER_CONCURRENCY = 1;
 
   async function buildForUser(user: { id: string }) {
     const mailboxes = await listLiteMailboxesForMember({
@@ -133,59 +138,55 @@ export async function buildOrgMailboxUtilizationServer(input: {
     });
     if (mailboxes.length === 0) return;
 
-    await Promise.all(
-      mailboxes.map(async (mb) => {
-        const [{ byDay, total: sentWeek }, pendingByDay] = await Promise.all([
-          sumSendStatsForDays({
-            organizationId: input.organizationId,
-            uid: user.id,
-            mailboxId: mb.id,
-            dayKeys: weekDayKeys,
-          }),
-          countPendingScheduledByUtcDayServer({
-            organizationId: input.organizationId,
-            uid: user.id,
-            mailboxId: mb.id,
-            fromDayKey: todayKey,
-            toDayKey: pendingToDayKey,
-            timeZone,
-          }),
-        ]);
+    for (const mb of mailboxes) {
+      const { byDay, total: sentWeek } = await sumSendStatsForDays({
+        organizationId: input.organizationId,
+        uid: user.id,
+        mailboxId: mb.id,
+        dayKeys: weekDayKeys,
+      });
+      const pendingByDay = await countPendingScheduledByUtcDayServer({
+        organizationId: input.organizationId,
+        uid: user.id,
+        mailboxId: mb.id,
+        fromDayKey: todayKey,
+        toDayKey: pendingToDayKey,
+        timeZone,
+      });
 
-        const sentToday =
-          byDay[todayKey] ??
-          (await getMailboxSendCountForDayServer({
-            organizationId: input.organizationId,
-            uid: user.id,
-            mailboxId: mb.id,
-            dayKey: todayKey,
-            timeZone,
-          }));
+      const sentToday =
+        byDay[todayKey] ??
+        (await getMailboxSendCountForDayServer({
+          organizationId: input.organizationId,
+          uid: user.id,
+          mailboxId: mb.id,
+          dayKey: todayKey,
+          timeZone,
+        }));
 
-        const pendingToday = pendingByDay[todayKey] ?? 0;
-        let pendingWeek = 0;
-        for (const v of Object.values(pendingByDay)) pendingWeek += v;
+      const pendingToday = pendingByDay[todayKey] ?? 0;
+      let pendingWeek = 0;
+      for (const v of Object.values(pendingByDay)) pendingWeek += v;
 
-        rows.push(
-          buildMailboxUtilizationRow({
-            mailboxId: mb.id,
-            ownerUid: mb.ownerUid,
-            label: mb.label,
-            emailAddress: mb.emailAddress,
-            enabled: mb.enabled,
-            dailySendLimit: mb.dailySendLimit,
-            assignedUserIds: mb.assignedUserIds,
-            sentToday,
-            sentWeek,
-            pendingToday,
-            pendingWeek,
-          }),
-        );
-      }),
-    );
+      rows.push(
+        buildMailboxUtilizationRow({
+          mailboxId: mb.id,
+          ownerUid: mb.ownerUid,
+          label: mb.label,
+          emailAddress: mb.emailAddress,
+          enabled: mb.enabled,
+          dailySendLimit: mb.dailySendLimit,
+          assignedUserIds: mb.assignedUserIds,
+          sentToday,
+          sentWeek,
+          pendingToday,
+          pendingWeek,
+        }),
+      );
+    }
   }
 
-  // Cap parallelism so utilization does not starve /api/email/mailboxes on a busy Firestore.
+  // Cap parallelism so utilization does not starve the shared Prisma pg pool.
   for (let i = 0; i < users.length; i += MEMBER_CONCURRENCY) {
     const batch = users.slice(i, i + MEMBER_CONCURRENCY);
     await Promise.all(batch.map((user) => buildForUser(user)));

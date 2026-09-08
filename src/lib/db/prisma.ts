@@ -35,7 +35,7 @@ const globalForPrisma = globalThis as unknown as {
 function createPgPool(connectionString: string): Pool {
   const max = Math.max(
     2,
-    Math.min(20, Number.parseInt(process.env.PG_POOL_MAX ?? "10", 10) || 10),
+    Math.min(40, Number.parseInt(process.env.PG_POOL_MAX ?? "10", 10) || 10),
   );
   const pool = new Pool({
     connectionString,

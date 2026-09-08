@@ -119,7 +119,7 @@ function isMailboxNotConnected(mb: EmailMailboxSettings): boolean {
 
 type MailboxListFilter = "all" | "not_connected" | "needs_fix" | "disabled" | "enabled";
 
-const MAILBOX_LIST_DEFAULT_PAGE_SIZE: FollowupPageSize = 25;
+const MAILBOX_LIST_DEFAULT_PAGE_SIZE: FollowupPageSize = 20;
 
 /** Active teammates only - skips disabled/inactive/invited org members and inactive CRM users. */
 function buildActiveAssignableOptions(
