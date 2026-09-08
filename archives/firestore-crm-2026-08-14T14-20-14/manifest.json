@@ -1,0 +1,54 @@
+{
+  "outDir": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14",
+  "dryRun": false,
+  "full": false,
+  "organizationId": null,
+  "startedAt": "2026-08-14T14:20:14.859Z",
+  "finishedAt": "2026-08-14T14:21:30.111Z",
+  "collections": [
+    {
+      "collection": "organizations",
+      "docs": 6,
+      "bytes": 24416,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/organizations.jsonl"
+    },
+    {
+      "collection": "accounts",
+      "docs": 3566,
+      "bytes": 3041809,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/accounts.jsonl"
+    },
+    {
+      "collection": "contacts",
+      "docs": 3572,
+      "bytes": 2561029,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/contacts.jsonl"
+    },
+    {
+      "collection": "leads",
+      "docs": 3161,
+      "bytes": 9511052,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/leads.jsonl"
+    },
+    {
+      "collection": "deals",
+      "docs": 0,
+      "bytes": 0,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/deals.jsonl"
+    },
+    {
+      "collection": "orgDashboardSummaries",
+      "docs": 1,
+      "bytes": 1848,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/orgDashboardSummaries.jsonl"
+    },
+    {
+      "collection": "organizations/*/members",
+      "docs": 22,
+      "bytes": 10237,
+      "file": "/Users/primecode/Desktop/primecode projects/Sales CRM/crm/archives/firestore-crm-2026-08-14T14-20-14/organization_members.jsonl"
+    }
+  ],
+  "totalDocs": 10328,
+  "errors": []
+}

@@ -39,7 +39,7 @@ const schema = z.object({
 
 type FormValues = z.infer<typeof schema>;
 
-/** Full navigation so the next document request includes the freshly Set-Cookie __session (App Router client transitions can race). */
+/** Full navigation so the next document request includes the freshly Set-Cookie session (App Router client transitions can race). */
 function goAfterSessionCookie(nextPath: string) {
   window.location.assign(nextPath);
 }

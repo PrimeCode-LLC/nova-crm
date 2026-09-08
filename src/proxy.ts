@@ -46,22 +46,26 @@ export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const hasSession = Boolean(request.cookies.get(SESSION_COOKIE_NAME)?.value);
 
-  // Don't bounce off /signup if there's an invite token to honor.
-  const hasInvite = request.nextUrl.searchParams.has("invite");
-  const hasJoin = request.nextUrl.searchParams.has("join");
-  if (
-    hasSession &&
-    !hasInvite &&
-    !hasJoin &&
-    (pathname === "/login" || pathname === "/signup")
-  ) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
-  }
+  // Intentionally do NOT redirect /login|/signup → /dashboard based only on cookie
+  // presence. An unverifiable/stale cookie (including Clerk leftovers named
+  // `__session` before we renamed) caused an infinite 307 loop with requireSession().
+  // Valid sessions are sent to the app after login/session exchange instead.
 
   if (!hasSession && isProtectedAppPath(pathname)) {
     const login = new URL("/login", request.url);
     login.searchParams.set("next", pathname);
-    return NextResponse.redirect(login);
+    const res = NextResponse.redirect(login);
+    // Drop legacy Clerk/Firebase cookie name that used to collide with Nova's session cookie.
+    if (request.cookies.get("__session")?.value) {
+      res.cookies.set("__session", "", {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === "production",
+        sameSite: "lax",
+        path: "/",
+        maxAge: 0,
+      });
+    }
+    return res;
   }
 
   return NextResponse.next();
