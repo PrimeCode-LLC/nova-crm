@@ -3,22 +3,30 @@
 import * as React from "react";
 import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useEmailAccountStore } from "@/stores/email-account-store";
+import {
+  getActiveMailbox,
+  useEmailAccountStore,
+} from "@/stores/email-account-store";
+import {
+  appendMailDataOwnerParam,
+  resolveMailApiForUserUid,
+} from "@/lib/email/mail-data-owner-query";
 
 /** Demo: quick fallback polling for due sends. */
 const DEMO_POLL_MS = 5_000;
 /** Live: nudge the worker / member flush without hammering the web tier. */
 const LIVE_POLL_MS = 60_000;
 /** Ignore visibility/effect re-fires that would stack process-due calls. */
-const MIN_RUN_GAP_MS = 45_000;
+const MIN_RUN_GAP_MS = 20_000;
 const PROCESS_DUE_LOCK = "nova-crm-process-due";
 
 /**
  * Sends due scheduled emails while the app is open.
  *
- * - Demo: in-memory `processDueScheduledLocal` (~15s).
- * - Live: POST `/api/email/scheduled/process-due` (enqueue worker when available,
- *   otherwise member-scoped SMTP flush). Complements the every-5-min cron.
+ * - Demo: in-memory `processDueScheduledLocal`.
+ * - Live: POST `/api/email/scheduled/process-due` for the active mailbox owner
+ *   (assigned/shared boxes store rows under the owner uid, not the viewer).
+ *   Also enqueues the worker tick. Complements the every-5-min cron.
  */
 export function ScheduledEmailSendSync() {
   const {
@@ -33,6 +41,8 @@ export function ScheduledEmailSendSync() {
   const processDueScheduledLocal = useEmailAccountStore((s) => s.processDueScheduledLocal);
   const setScheduled = useEmailAccountStore((s) => s.setScheduled);
   const mailViewAsUid = useEmailAccountStore((s) => s.mailViewAsUid);
+  const mailboxes = useEmailAccountStore((s) => s.mailboxes);
+  const activeMailboxId = useEmailAccountStore((s) => s.activeMailboxId);
   const scheduled = useEmailAccountStore((s) => s.scheduled);
   const runningRef = React.useRef(false);
   const lastRunAtRef = React.useRef(0);
@@ -40,10 +50,52 @@ export function ScheduledEmailSendSync() {
 
   const currentUserIdRef = React.useRef(currentUserId);
   const mailViewAsUidRef = React.useRef(mailViewAsUid);
+  const mailboxesRef = React.useRef(mailboxes);
+  const activeMailboxIdRef = React.useRef(activeMailboxId);
+  const scheduledRef = React.useRef(scheduled);
   const setScheduledRef = React.useRef(setScheduled);
   currentUserIdRef.current = currentUserId;
   mailViewAsUidRef.current = mailViewAsUid;
+  mailboxesRef.current = mailboxes;
+  activeMailboxIdRef.current = activeMailboxId;
+  scheduledRef.current = scheduled;
   setScheduledRef.current = setScheduled;
+
+  /** Owners whose scheduledEmails collections we must flush (viewer + assigned box hosts). */
+  const resolveFlushOwnerUids = React.useCallback((): string[] => {
+    const selfUid = currentUserIdRef.current;
+    const owners = new Set<string>();
+    owners.add(selfUid);
+
+    const viewAs = (mailViewAsUidRef.current ?? "").trim();
+    if (viewAs && viewAs !== selfUid) owners.add(viewAs);
+
+    const boxes = mailboxesRef.current;
+    const activeId = activeMailboxIdRef.current;
+    const active = getActiveMailbox({ mailboxes: boxes, activeMailboxId: activeId });
+    const activeOwner = active.dataOwnerUid?.trim();
+    if (activeOwner) owners.add(activeOwner);
+
+    // Pending rows may belong to an assigned mailbox host even when "All mailboxes" is selected.
+    for (const row of scheduledRef.current) {
+      if (row.status !== "pending" && row.status !== "processing") continue;
+      const box = boxes.find((m) => m.id === row.mailboxId);
+      const owner = box?.dataOwnerUid?.trim();
+      if (owner) owners.add(owner);
+    }
+
+    return [...owners];
+  }, []);
+
+  const buildScheduledApiPath = React.useCallback((path: string, ownerUid?: string | null) => {
+    const uid = currentUserIdRef.current;
+    const forUid = resolveMailApiForUserUid({
+      mailViewAsUid: mailViewAsUidRef.current,
+      activeMailboxDataOwnerUid: ownerUid,
+      selfUid: uid,
+    });
+    return appendMailDataOwnerParam(path, forUid, uid);
+  }, []);
 
   const runLive = React.useCallback(async () => {
     if (runningRef.current) return;
@@ -54,24 +106,36 @@ export function ScheduledEmailSendSync() {
       runningRef.current = true;
       lastRunAtRef.current = Date.now();
       try {
-        const uid = currentUserIdRef.current;
-        const viewAs = mailViewAsUidRef.current;
-        const qs =
-          viewAs && viewAs !== uid ? `?forUser=${encodeURIComponent(viewAs)}` : "";
-        const processRes = await fetch(`/api/email/scheduled/process-due${qs}`, {
-          method: "POST",
-        });
-        const processData = (await processRes.json().catch(() => null)) as {
-          ok?: boolean;
-          busy?: boolean;
-          queued?: boolean;
-          sent?: number;
-          failed?: number;
-        } | null;
-        if (!processData?.ok || processData.busy) return;
+        const owners = resolveFlushOwnerUids();
+        let sent = 0;
+        let failed = 0;
+        let queued = false;
+        let busy = false;
+        let anyOk = false;
 
-        const sent = processData.sent ?? 0;
-        const failed = processData.failed ?? 0;
+        for (const owner of owners) {
+          const processPath = buildScheduledApiPath(
+            "/api/email/scheduled/process-due",
+            owner === currentUserIdRef.current ? null : owner,
+          );
+          const processRes = await fetch(processPath, { method: "POST" });
+          const processData = (await processRes.json().catch(() => null)) as {
+            ok?: boolean;
+            busy?: boolean;
+            queued?: boolean;
+            sent?: number;
+            failed?: number;
+          } | null;
+          if (!processData?.ok) continue;
+          anyOk = true;
+          sent += processData.sent ?? 0;
+          failed += processData.failed ?? 0;
+          if (processData.queued) queued = true;
+          if (processData.busy) busy = true;
+        }
+
+        if (!anyOk) return;
+
         if (sent > 0) {
           toast.success(
             sent === 1 ? "Scheduled email sent" : `${sent} scheduled emails sent`,
@@ -85,8 +149,20 @@ export function ScheduledEmailSendSync() {
             { description: "Check Inbox → Scheduled for the error details." },
           );
         }
-        if (sent > 0 || failed > 0 || processData.queued) {
-          const listRes = await fetch(`/api/email/scheduled${qs}`);
+
+        // Refresh even when busy/queued — worker may have already moved rows.
+        if (sent > 0 || failed > 0 || queued || busy) {
+          const listOwner = resolveMailApiForUserUid({
+            mailViewAsUid: mailViewAsUidRef.current,
+            activeMailboxDataOwnerUid: getActiveMailbox({
+              mailboxes: mailboxesRef.current,
+              activeMailboxId: activeMailboxIdRef.current,
+            }).dataOwnerUid,
+            selfUid: currentUserIdRef.current,
+          });
+          const listRes = await fetch(
+            buildScheduledApiPath("/api/email/scheduled", listOwner),
+          );
           const listData = (await listRes.json().catch(() => null)) as {
             ok?: boolean;
             items?: Parameters<typeof setScheduled>[0];
@@ -119,7 +195,7 @@ export function ScheduledEmailSendSync() {
       }
     }
     await execute();
-  }, []);
+  }, [buildScheduledApiPath, resolveFlushOwnerUids]);
 
   React.useEffect(() => {
     if (!sessionHydrated || !currentUserId) return;
@@ -139,7 +215,7 @@ export function ScheduledEmailSendSync() {
 
     if (!emailServerHydrated) return;
 
-    const bootstrapTimer = window.setTimeout(() => void runLive(), 8_000);
+    const bootstrapTimer = window.setTimeout(() => void runLive(), 5_000);
     const id = window.setInterval(() => void runLive(), LIVE_POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void runLive();
@@ -159,9 +235,8 @@ export function ScheduledEmailSendSync() {
     runLive,
   ]);
 
-  // Demo precision trigger: when the nearest pending row becomes due, flush immediately.
+  // Flush exactly when the nearest pending row becomes due (demo + live).
   React.useEffect(() => {
-    if (!isDemo) return;
     const pending = scheduled.filter((s) => s.status === "pending");
     if (pending.length === 0) return;
 
@@ -174,10 +249,11 @@ export function ScheduledEmailSendSync() {
     if (!Number.isFinite(minDelayMs)) return;
 
     const id = window.setTimeout(() => {
-      processDueScheduledLocal();
+      if (isDemo) processDueScheduledLocal();
+      else void runLive();
     }, minDelayMs + 50);
     return () => window.clearTimeout(id);
-  }, [isDemo, scheduled, processDueScheduledLocal]);
+  }, [isDemo, scheduled, processDueScheduledLocal, runLive]);
 
   React.useEffect(() => {
     if (!isDemo) return;

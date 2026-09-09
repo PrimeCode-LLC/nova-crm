@@ -1,6 +1,9 @@
 /**
- * In-process mutex for the local/dev process-due route.
- * Multiple browser tabs otherwise pile up long SMTP handlers on one Node process.
+ * In-process mutex for the process-due route.
+ * Multiple browser tabs otherwise pile up SMTP handlers on one Node process.
+ *
+ * Cooldown is per mailbox-owner key so flushing assigned-box hosts in sequence
+ * is not blocked after the viewer's own collection was processed.
  */
 
 type ProcessDueResult = {
@@ -12,9 +15,9 @@ type ProcessDueResult = {
 
 const GLOBAL_LOCK = "__process_due_global__";
 const inflight = new Map<string, Promise<ProcessDueResult>>();
-/** After a completed run, ignore new starts for this long (ms). */
-const COOLDOWN_MS = 60_000;
-let lastFinishedAt = 0;
+const lastFinishedByKey = new Map<string, number>();
+/** Per-owner cooldown so rapid polls do not restack the same SMTP flush. */
+const COOLDOWN_MS = 8_000;
 
 export async function withDevProcessDueLock(
   key: string,
@@ -23,6 +26,7 @@ export async function withDevProcessDueLock(
   if (inflight.has(GLOBAL_LOCK) || inflight.has(key)) {
     return { ok: false, busy: true };
   }
+  const lastFinishedAt = lastFinishedByKey.get(key) ?? 0;
   if (Date.now() - lastFinishedAt < COOLDOWN_MS) {
     return { ok: false, busy: true };
   }
@@ -30,7 +34,7 @@ export async function withDevProcessDueLock(
   const promise = run().finally(() => {
     if (inflight.get(key) === promise) inflight.delete(key);
     if (inflight.get(GLOBAL_LOCK) === promise) inflight.delete(GLOBAL_LOCK);
-    lastFinishedAt = Date.now();
+    lastFinishedByKey.set(key, Date.now());
   });
   inflight.set(key, promise);
   inflight.set(GLOBAL_LOCK, promise);
