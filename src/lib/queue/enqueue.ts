@@ -53,13 +53,24 @@ export async function enqueueImapSyncJob(): Promise<string | null> {
   return job.id ?? null;
 }
 
-export async function enqueueScheduledEmailJob(): Promise<string | null> {
+export async function enqueueScheduledEmailJob(opts?: {
+  /** Wait this many ms before the worker runs the due-send tick. */
+  delayMs?: number;
+}): Promise<string | null> {
   const queue = getQueue(QUEUE_SCHEDULED_EMAIL);
   if (!queue) return null;
+  const delayMs =
+    opts?.delayMs != null && Number.isFinite(opts.delayMs)
+      ? Math.max(0, Math.floor(opts.delayMs))
+      : 0;
   const job = await queue.add(
     "send-tick",
     {},
-    { jobId: `scheduled-email-${Date.now()}`, priority: JOB_PRIORITY.cron },
+    {
+      jobId: `scheduled-email-${Date.now()}`,
+      priority: JOB_PRIORITY.cron,
+      ...(delayMs > 0 ? { delay: delayMs } : {}),
+    },
   );
   return job.id ?? null;
 }

@@ -3,19 +3,17 @@ import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 import { resolveMailboxDataOwnerUid, canMailboxSend } from "@/lib/email/mailbox-data-owner-server";
 import { withDevProcessDueLock } from "@/lib/email/dev-process-due-lock";
 import { processDueScheduledEmailsForMemberServer } from "@/lib/email/scheduled-emails-server";
+import { isQueueHeavyJobsV1Enabled } from "@/lib/queue/flags";
+import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
 /**
- * Local/dev helper: send due scheduled emails for the current mailbox owner.
- * Production continues to use `/api/cron/scheduled-emails/send` only.
+ * Flush due scheduled emails for the current mailbox owner.
+ *
+ * Always runs a small member-scoped send (limit 8, requeue gaps — no long sleeps).
+ * When the heavy-job queue is on, also enqueues a global worker tick so cron-scale
+ * backlog keeps moving even if this tab only owns one mailbox.
  */
 export async function POST(req: Request) {
-  if (process.env.NODE_ENV === "production") {
-    return NextResponse.json(
-      { ok: false, error: "Use the scheduled-emails cron in production." },
-      { status: 404 },
-    );
-  }
-
   const g = await guardTenantApi();
   if (!g.ok) return g.response;
 
@@ -36,6 +34,11 @@ export async function POST(req: Request) {
     );
   }
 
+  let jobId: string | null = null;
+  if (isQueueHeavyJobsV1Enabled()) {
+    jobId = await enqueueScheduledEmailJob().catch(() => null);
+  }
+
   const lockKey = `${g.ctx.session.organizationId}/${resolved.dataOwnerUid}`;
   const locked = await withDevProcessDueLock(lockKey, () =>
     processDueScheduledEmailsForMemberServer({
@@ -48,6 +51,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       busy: true,
+      queued: Boolean(jobId),
+      jobId,
       processed: 0,
       sent: 0,
       failed: 0,
@@ -55,5 +60,10 @@ export async function POST(req: Request) {
     });
   }
 
-  return NextResponse.json({ ok: true, ...locked.result });
+  return NextResponse.json({
+    ok: true,
+    queued: Boolean(jobId),
+    jobId,
+    ...locked.result,
+  });
 }

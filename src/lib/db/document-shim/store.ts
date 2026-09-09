@@ -25,7 +25,10 @@ import {
   parsePath,
   pathMatchesCollectionGroup,
 } from "@/lib/db/document-shim/path";
-import { deserializePayload } from "@/lib/db/document-shim/timestamp";
+import {
+  coerceInstantMs,
+  deserializePayload,
+} from "@/lib/db/document-shim/timestamp";
 
 export type StoredDoc = {
   path: string;
@@ -53,6 +56,23 @@ export type QuerySpec = {
   startAfter?: unknown[];
 };
 
+function compareFilterValues(left: unknown, right: unknown): number | null {
+  const leftMs = coerceInstantMs(left);
+  const rightMs = coerceInstantMs(right);
+  if (leftMs != null && rightMs != null) return leftMs - rightMs;
+  if (typeof left === "number" && typeof right === "number") return left - right;
+  if (typeof left === "string" && typeof right === "string") {
+    return left.localeCompare(right);
+  }
+  // Last resort: avoid `String(Timestamp) === "[object Object]"` false negatives.
+  if (leftMs != null || rightMs != null) return null;
+  try {
+    return String(left ?? "").localeCompare(String(right ?? ""));
+  } catch {
+    return null;
+  }
+}
+
 function matchesFilter(
   payload: Record<string, unknown>,
   filter: QueryFilter,
@@ -60,21 +80,26 @@ function matchesFilter(
   const v = payload[filter.field];
   switch (filter.op) {
     case "==":
-      return v === filter.value || String(v) === String(filter.value);
+      if (v === filter.value) return true;
+      if (String(v) === String(filter.value)) return true;
+      return compareFilterValues(v, filter.value) === 0;
     case "!=":
-      return v !== filter.value;
+      return !matchesFilter(payload, { ...filter, op: "==" });
     case "in":
       return Array.isArray(filter.value) && filter.value.includes(v);
     case "array-contains":
       return Array.isArray(v) && v.some((x) => x === filter.value);
     case "<":
-      return (v as number) < (filter.value as number);
     case "<=":
-      return (v as number) <= (filter.value as number);
     case ">":
-      return (v as number) > (filter.value as number);
-    case ">=":
-      return (v as number) >= (filter.value as number);
+    case ">=": {
+      const cmp = compareFilterValues(v, filter.value);
+      if (cmp == null) return false;
+      if (filter.op === "<") return cmp < 0;
+      if (filter.op === "<=") return cmp <= 0;
+      if (filter.op === ">") return cmp > 0;
+      return cmp >= 0;
+    }
     default:
       return true;
   }
@@ -349,10 +374,16 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
     docs.sort((a, b) => {
       const av = a.payload[field];
       const bv = b.payload[field];
-      const cmp =
-        av instanceof Date && bv instanceof Date
-          ? av.getTime() - bv.getTime()
-          : String(av ?? "").localeCompare(String(bv ?? ""));
+      const aMs = coerceInstantMs(av);
+      const bMs = coerceInstantMs(bv);
+      let cmp = 0;
+      if (aMs != null && bMs != null) {
+        cmp = aMs - bMs;
+      } else if (av instanceof Date && bv instanceof Date) {
+        cmp = av.getTime() - bv.getTime();
+      } else {
+        cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      }
       return direction === "desc" ? -cmp : cmp;
     });
   }

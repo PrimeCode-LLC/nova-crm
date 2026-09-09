@@ -5,18 +5,20 @@ import { toast } from "sonner";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useEmailAccountStore } from "@/stores/email-account-store";
 
-/** Slower than before — overlapping handlers were starving the local Next.js process. */
-const POLL_MS = 180_000;
+/** Demo: quick fallback polling for due sends. */
+const DEMO_POLL_MS = 5_000;
+/** Live: nudge the worker / member flush without hammering the web tier. */
+const LIVE_POLL_MS = 60_000;
 /** Ignore visibility/effect re-fires that would stack process-due calls. */
-const MIN_RUN_GAP_MS = 90_000;
+const MIN_RUN_GAP_MS = 45_000;
 const PROCESS_DUE_LOCK = "nova-crm-process-due";
 
 /**
- * Local/dev-only sender for due scheduled emails.
+ * Sends due scheduled emails while the app is open.
  *
- * Production is unchanged: Vercel cron (`/api/cron/scheduled-emails/send`) owns live
- * sends, and the Inbox page still owns demo `processDueScheduledLocal`.
- * This component is a no-op when `NODE_ENV === "production"`.
+ * - Demo: in-memory `processDueScheduledLocal` (~15s).
+ * - Live: POST `/api/email/scheduled/process-due` (enqueue worker when available,
+ *   otherwise member-scoped SMTP flush). Complements the every-5-min cron.
  */
 export function ScheduledEmailSendSync() {
   const {
@@ -43,8 +45,6 @@ export function ScheduledEmailSendSync() {
   mailViewAsUidRef.current = mailViewAsUid;
   setScheduledRef.current = setScheduled;
 
-  const isLocalDev = process.env.NODE_ENV === "development";
-
   const runLive = React.useCallback(async () => {
     if (runningRef.current) return;
     if (Date.now() - lastRunAtRef.current < MIN_RUN_GAP_MS) return;
@@ -64,6 +64,7 @@ export function ScheduledEmailSendSync() {
         const processData = (await processRes.json().catch(() => null)) as {
           ok?: boolean;
           busy?: boolean;
+          queued?: boolean;
           sent?: number;
           failed?: number;
         } | null;
@@ -84,7 +85,7 @@ export function ScheduledEmailSendSync() {
             { description: "Check Inbox → Scheduled for the error details." },
           );
         }
-        if (sent > 0 || failed > 0) {
+        if (sent > 0 || failed > 0 || processData.queued) {
           const listRes = await fetch(`/api/email/scheduled${qs}`);
           const listData = (await listRes.json().catch(() => null)) as {
             ok?: boolean;
@@ -121,22 +122,25 @@ export function ScheduledEmailSendSync() {
   }, []);
 
   React.useEffect(() => {
-    // Production: do not poll - cron + existing Inbox demo interval remain the source of truth.
-    if (!isLocalDev) return;
     if (!sessionHydrated || !currentUserId) return;
 
     if (isDemo) {
       processDueScheduledLocal();
-      const id = window.setInterval(() => processDueScheduledLocal(), POLL_MS);
-      return () => window.clearInterval(id);
+      const id = window.setInterval(() => processDueScheduledLocal(), DEMO_POLL_MS);
+      const onVisible = () => {
+        if (document.visibilityState === "visible") processDueScheduledLocal();
+      };
+      document.addEventListener("visibilitychange", onVisible);
+      return () => {
+        window.clearInterval(id);
+        document.removeEventListener("visibilitychange", onVisible);
+      };
     }
 
     if (!emailServerHydrated) return;
 
-    // Defer first process-due so dashboard / leads can connect —
-    // this route often runs tens of seconds and saturates local Next + backend I/O.
-    const bootstrapTimer = window.setTimeout(() => void runLive(), 12_000);
-    const id = window.setInterval(() => void runLive(), POLL_MS);
+    const bootstrapTimer = window.setTimeout(() => void runLive(), 8_000);
+    const id = window.setInterval(() => void runLive(), LIVE_POLL_MS);
     const onVisible = () => {
       if (document.visibilityState === "visible") void runLive();
     };
@@ -147,7 +151,6 @@ export function ScheduledEmailSendSync() {
       document.removeEventListener("visibilitychange", onVisible);
     };
   }, [
-    isLocalDev,
     isDemo,
     sessionHydrated,
     currentUserId,
@@ -155,6 +158,26 @@ export function ScheduledEmailSendSync() {
     processDueScheduledLocal,
     runLive,
   ]);
+
+  // Demo precision trigger: when the nearest pending row becomes due, flush immediately.
+  React.useEffect(() => {
+    if (!isDemo) return;
+    const pending = scheduled.filter((s) => s.status === "pending");
+    if (pending.length === 0) return;
+
+    let minDelayMs = Number.POSITIVE_INFINITY;
+    for (const row of pending) {
+      const dueMs = new Date(row.scheduledAt).getTime();
+      if (Number.isNaN(dueMs)) continue;
+      minDelayMs = Math.min(minDelayMs, Math.max(0, dueMs - Date.now()));
+    }
+    if (!Number.isFinite(minDelayMs)) return;
+
+    const id = window.setTimeout(() => {
+      processDueScheduledLocal();
+    }, minDelayMs + 50);
+    return () => window.clearTimeout(id);
+  }, [isDemo, scheduled, processDueScheduledLocal]);
 
   React.useEffect(() => {
     if (!isDemo) return;
@@ -167,6 +190,7 @@ export function ScheduledEmailSendSync() {
         const sentAt = item.sentAt ?? new Date().toISOString();
         syncFollowupDelivery(item.followupId, { deliveryStatus: "sent", sentAt });
         setFollowupCompleted(item.followupId, true);
+        toast.success("Scheduled email sent (demo)");
       } else if (item.status === "failed") {
         syncFollowupDelivery(item.followupId, {
           deliveryStatus: "failed",

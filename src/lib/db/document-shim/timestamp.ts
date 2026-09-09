@@ -96,4 +96,60 @@ export function deserializePayload(data: Record<string, unknown>): Record<string
   return out;
 }
 
+/**
+ * Normalize Timestamp / Date / ISO / accidental `{_date}` JSON to epoch ms.
+ * Used by document-shim query filters so `scheduledAt <= now` works after deserialize.
+ */
+export function coerceInstantMs(value: unknown): number | null {
+  if (value == null) return null;
+  if (value instanceof Timestamp) {
+    const ms = value.toMillis();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? ms : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.trim()) {
+    const ms = new Date(value.trim()).getTime();
+    return Number.isNaN(ms) ? null : ms;
+  }
+  if (value && typeof value === "object") {
+    if ("toMillis" in value && typeof (value as { toMillis: unknown }).toMillis === "function") {
+      try {
+        const ms = (value as { toMillis: () => number }).toMillis();
+        return Number.isFinite(ms) ? ms : null;
+      } catch {
+        /* fall through */
+      }
+    }
+    if ("toDate" in value && typeof (value as { toDate: unknown }).toDate === "function") {
+      try {
+        const d = (value as { toDate: () => Date }).toDate();
+        if (d instanceof Date) {
+          const ms = d.getTime();
+          return Number.isNaN(ms) ? null : ms;
+        }
+      } catch {
+        /* fall through */
+      }
+    }
+    if ("_date" in value) {
+      const raw = (value as { _date: unknown })._date;
+      if (typeof raw === "string" || raw instanceof Date) {
+        return coerceInstantMs(raw);
+      }
+    }
+  }
+  return null;
+}
+
+/** ISO UTC string for API responses / comparisons (never `String(Timestamp)` → `[object Object]`). */
+export function coerceIsoInstant(value: unknown): string {
+  const ms = coerceInstantMs(value);
+  if (ms == null) return typeof value === "string" ? value.trim() : "";
+  return new Date(ms).toISOString();
+}
+
 export { toDate };

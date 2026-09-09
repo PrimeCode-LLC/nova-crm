@@ -1,5 +1,6 @@
 import type { DocumentReference } from "@/lib/db/document-shim/shim-firestore";
 import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { coerceIsoInstant, coerceInstantMs } from "@/lib/db/document-shim/timestamp";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
@@ -37,9 +38,21 @@ import { createUserNotificationServer } from "@/lib/notifications/create-user-no
 import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/documents/tenant-write";
 import { incrementOrgSendLedgerServer } from "@/lib/email/org-send-ledger-server";
+import { isQueueHeavyJobsV1Enabled } from "@/lib/queue/flags";
+import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
+
+/** Ask the worker to flush due mail around `scheduledAt` (best-effort). */
+async function nudgeScheduledEmailWorker(scheduledAt: Date | string): Promise<void> {
+  if (!isQueueHeavyJobsV1Enabled()) return;
+  const when = scheduledAt instanceof Date ? scheduledAt : new Date(scheduledAt);
+  if (Number.isNaN(when.getTime())) return;
+  const delayMs = Math.max(0, when.getTime() - Date.now());
+  // Small buffer so the row is visible as due when the tick runs.
+  await enqueueScheduledEmailJob({ delayMs: delayMs + 2_000 }).catch(() => null);
+}
 
 function scheduledRef(orgId: string, uid: string, id: string) {
   const db = getAdminDb();
@@ -83,20 +96,20 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
     text: String(data.text ?? data.body ?? ""),
     html: String(data.html ?? ""),
     attachments,
-    scheduledAt: String(data.scheduledAt ?? ""),
+    scheduledAt: coerceIsoInstant(data.scheduledAt),
     status: (String(data.status ?? "pending") as ScheduledEmailStatus) || "pending",
-    createdAt: String(data.createdAt ?? ""),
+    createdAt: coerceIsoInstant(data.createdAt) || String(data.createdAt ?? ""),
     scheduledByUserId:
       typeof data.scheduledByUserId === "string" && data.scheduledByUserId.trim()
         ? data.scheduledByUserId.trim()
         : undefined,
-    sentAt: data.sentAt ? String(data.sentAt) : undefined,
+    sentAt: data.sentAt ? coerceIsoInstant(data.sentAt) : undefined,
     messageId:
       typeof data.messageId === "string" && data.messageId.trim()
         ? data.messageId.trim()
         : undefined,
     error: data.error ? String(data.error) : undefined,
-    cancelledAt: data.cancelledAt ? String(data.cancelledAt) : undefined,
+    cancelledAt: data.cancelledAt ? coerceIsoInstant(data.cancelledAt) : undefined,
     cancelReason: data.cancelReason ? String(data.cancelReason) : undefined,
     followupId:
       typeof data.followupId === "string" && data.followupId.trim()
@@ -113,10 +126,7 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
       : undefined,
     forceNewThread: data.forceNewThread === true ? true : undefined,
     attempts: Number.isFinite(Number(data.attempts)) ? Math.max(0, Number(data.attempts)) : undefined,
-    nextRetryAt:
-      typeof data.nextRetryAt === "string" && data.nextRetryAt.trim()
-        ? data.nextRetryAt.trim()
-        : undefined,
+    nextRetryAt: data.nextRetryAt ? coerceIsoInstant(data.nextRetryAt) : undefined,
     failureKind:
       data.failureKind === "transient" ||
       data.failureKind === "permanent" ||
@@ -264,6 +274,8 @@ export async function createScheduledEmailServer(input: {
       }
     }
   }
+
+  await nudgeScheduledEmailWorker(scheduledDate);
 
   return { ok: true, id: ref.id };
 }
@@ -741,10 +753,10 @@ async function claimScheduledDoc(
     if (!snap.exists) return null;
     const data = snap.data() as Record<string, unknown>;
     const status = String(data.status ?? "");
-    const processingAt = new Date(String(data.processingAt ?? "")).getTime();
+    const processingAtMs = coerceInstantMs(data.processingAt);
     const staleProcessing =
       status === "processing" &&
-      (!Number.isFinite(processingAt) || Date.now() - processingAt >= PROCESSING_LEASE_MS);
+      (processingAtMs == null || Date.now() - processingAtMs >= PROCESSING_LEASE_MS);
     if (status !== "pending" && !staleProcessing) return null;
     const now = new Date().toISOString();
     transaction.update(docRef, {
@@ -1336,6 +1348,8 @@ export async function retryScheduledEmailServer(input: {
         .catch(() => undefined);
     }
   }
+
+  await nudgeScheduledEmailWorker(scheduledAt);
 
   return { ok: true, scheduledAt };
 }
