@@ -132,10 +132,13 @@ function computeWindowMetrics(
   for (const l of leads) {
     if (l.intakeKind === "prospect") {
       if (!inWindow(l.createdAt, start, end)) continue;
+      // Same ownership surfaces as Prospects (`prospectOwnerIdOf`): creator, scraper,
+      // prospect owner, and lead ownerId. Directors stay out via `activeIds`.
       const attrIds = new Set<string>();
       if (l.createdById) attrIds.add(l.createdById);
       if (l.scraperId) attrIds.add(l.scraperId);
       if (l.prospectOwnerId) attrIds.add(l.prospectOwnerId);
+      if (l.ownerId) attrIds.add(l.ownerId);
       for (const id of attrIds) {
         if (!activeIds.has(id)) continue;
         const m = ensureMetrics(byUser, id);

@@ -393,10 +393,12 @@ export function buildOpsScorecardRows(input: {
   for (const l of input.leads) {
     if (l.intakeKind === "prospect") {
       if ((validTime(l.createdAt) ?? 0) < start) continue;
+      // Align with Team Command / Prospects ownership (include lead ownerId).
       const attrIds = new Set<string>();
       if (l.createdById) attrIds.add(l.createdById);
       if (l.scraperId) attrIds.add(l.scraperId);
       if (l.prospectOwnerId) attrIds.add(l.prospectOwnerId);
+      if (l.ownerId) attrIds.add(l.ownerId);
       for (const id of attrIds) {
         if (!activeIds.has(id)) continue;
         byUser.get(id)!.prospectsAdded += 1;

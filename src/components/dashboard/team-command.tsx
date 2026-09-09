@@ -324,7 +324,7 @@ export function TeamCommand({
       <CardContent className={cn("pt-0", wall && "min-h-0 flex-1 overflow-y-auto")}>
         {rows.length === 0 ? (
           <p className="py-6 text-center text-xs text-muted-foreground">
-            No scored activity in this range yet.
+            No scored activity for non-director teammates in this range yet.
           </p>
         ) : (
           <div className="flex flex-col">
