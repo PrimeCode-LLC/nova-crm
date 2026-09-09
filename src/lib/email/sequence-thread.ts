@@ -1,6 +1,9 @@
 import { replySubject } from "@/lib/email/reply-compose";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 
+/** Default: prior steps older than this are no longer treated as "awaiting send". */
+export const SEQUENCE_WAIT_FOR_PRIOR_MAX_MS = 30 * 60 * 1000;
+
 /** Minimal follow-up fields needed to chain sequence emails into one thread. */
 export type SequenceThreadStep = {
   id: string;
@@ -32,9 +35,17 @@ export type SequenceThreadAnchor = {
   subject?: string;
 };
 
+export type SequenceThreadBlockedBy = {
+  followupId: string;
+  deliveryStatus?: string;
+};
+
 export type SequenceThreadResolution =
   | { kind: "root" }
-  | { kind: "wait_for_prior" }
+  | {
+      kind: "wait_for_prior";
+      blockedBy: SequenceThreadBlockedBy;
+    }
   | {
       kind: "reply";
       inReplyTo: string;
@@ -55,17 +66,47 @@ function isEarlierStep(a: SequenceThreadStep, current: SequenceThreadStep): bool
   return a.id < current.id;
 }
 
-function isAwaitingOutboundSend(step: SequenceThreadStep): boolean {
+/** Schedule clock used to decide whether a prior step is stale. */
+function awaitingScheduleMs(step: SequenceThreadStep): number | null {
+  for (const raw of [step.emailScheduledAt, step.dueAt]) {
+    if (!raw) continue;
+    const ms = new Date(String(raw)).getTime();
+    if (Number.isFinite(ms)) return ms;
+  }
+  return null;
+}
+
+/**
+ * True when an earlier step still appears to owe an outbound send.
+ * Stale schedules (older than maxWaitMs) are ignored so dead priors cannot block forever.
+ */
+export function isAwaitingOutboundSend(
+  step: SequenceThreadStep,
+  opts?: { nowMs?: number; maxWaitMs?: number },
+): boolean {
   if (step.pausedAt) return false;
   if (step.deliveryStatus === "sent") return false;
   if (step.deliveryStatus === "cancelled" || step.deliveryStatus === "failed") return false;
-  if (step.deliveryStatus === "needs_retry") return true;
-  if (step.completedAt && step.deliveryStatus !== "scheduled") return false;
-  return Boolean(
-    step.scheduledEmailId ||
-      step.deliveryStatus === "scheduled" ||
-      (step.emailScheduledAt && !step.sentAt),
-  );
+  if (step.completedAt && step.deliveryStatus !== "scheduled" && step.deliveryStatus !== "needs_retry") {
+    return false;
+  }
+
+  const looksAwaiting =
+    step.deliveryStatus === "needs_retry" ||
+    Boolean(
+      step.scheduledEmailId ||
+        step.deliveryStatus === "scheduled" ||
+        (step.emailScheduledAt && !step.sentAt),
+    );
+  if (!looksAwaiting) return false;
+
+  const nowMs = opts?.nowMs ?? Date.now();
+  const maxWaitMs = opts?.maxWaitMs ?? SEQUENCE_WAIT_FOR_PRIOR_MAX_MS;
+  const scheduleMs = awaitingScheduleMs(step);
+  // Unparseable schedule: do not block forever — treat as not awaiting.
+  if (scheduleMs == null) return false;
+  if (nowMs - scheduleMs >= maxWaitMs) return false;
+  return true;
 }
 
 /**
@@ -76,14 +117,22 @@ export function resolveSequenceThreadContext(
   current: SequenceThreadStep,
   siblings: readonly SequenceThreadStep[],
   anchor?: SequenceThreadAnchor,
+  opts?: { nowMs?: number; maxWaitMs?: number },
 ): SequenceThreadResolution {
   const scoped = current.freshThread
     ? siblings.filter((step) => step.id === current.id || Boolean(step.freshThread))
     : siblings;
   const earlier = scoped.filter((step) => step.id !== current.id && isEarlierStep(step, current));
 
-  if (earlier.some(isAwaitingOutboundSend)) {
-    return { kind: "wait_for_prior" };
+  const blocking = earlier.find((step) => isAwaitingOutboundSend(step, opts));
+  if (blocking) {
+    return {
+      kind: "wait_for_prior",
+      blockedBy: {
+        followupId: blocking.id,
+        deliveryStatus: blocking.deliveryStatus,
+      },
+    };
   }
 
   const priorSent = earlier

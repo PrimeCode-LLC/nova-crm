@@ -130,12 +130,14 @@ export function ScheduledEmailSendSync() {
         const owners = resolveFlushOwnerUids();
         let sent = 0;
         let failed = 0;
+        let skipped = 0;
         let queued = false;
         let busy = false;
         let dueFound = 0;
         let pendingCount = 0;
         let sawCounts = false;
         let anyOk = false;
+        const skipReasons: Record<string, number> = {};
         const localDue = countLocalDuePending();
 
         for (const owner of owners) {
@@ -150,8 +152,17 @@ export function ScheduledEmailSendSync() {
             queued?: boolean;
             sent?: number;
             failed?: number;
+            skipped?: number;
             dueFound?: number;
             pendingCount?: number;
+            skipReasons?: Record<string, number>;
+            rows?: Array<{
+              id: string;
+              outcome: string;
+              reason?: string;
+              blockedByFollowupId?: string;
+              detail?: string;
+            }>;
             error?: string;
             hint?: string;
           } | null;
@@ -168,6 +179,7 @@ export function ScheduledEmailSendSync() {
           anyOk = true;
           sent += processData.sent ?? 0;
           failed += processData.failed ?? 0;
+          skipped += processData.skipped ?? 0;
           if (typeof processData.dueFound === "number") {
             dueFound += processData.dueFound;
             sawCounts = true;
@@ -175,6 +187,13 @@ export function ScheduledEmailSendSync() {
           if (typeof processData.pendingCount === "number") {
             pendingCount += processData.pendingCount;
             sawCounts = true;
+          }
+          if (processData.skipReasons) {
+            for (const [key, count] of Object.entries(processData.skipReasons)) {
+              if (typeof count === "number" && count > 0) {
+                skipReasons[key] = (skipReasons[key] ?? 0) + count;
+              }
+            }
           }
           if (processData.queued) queued = true;
           if (processData.busy) busy = true;
@@ -201,13 +220,28 @@ export function ScheduledEmailSendSync() {
           Date.now() - lastStalledToastAtRef.current >= STALLED_TOAST_GAP_MS
         ) {
           lastStalledToastAtRef.current = Date.now();
+          const topSkip = Object.entries(skipReasons).sort((a, b) => b[1] - a[1])[0];
+          const skipLabel = topSkip?.[0];
+          const skipDesc =
+            skipLabel === "wait_for_prior"
+              ? "Waiting on an earlier sequence step — check that step’s send status."
+              : skipLabel === "send_gap"
+                ? "Deferred by mailbox send gap — will retry shortly."
+                : skipLabel === "quota"
+                  ? "Daily send quota reached — retries tomorrow."
+                  : skipLabel === "exception"
+                    ? "Send hit an error and will retry — check Inbox → Scheduled."
+                    : skipLabel === "claim_refused"
+                      ? "Another flush is already processing this mail."
+                      : null;
           toast.message("Due email still not sent", {
             description:
-              sawCounts && pendingCount === 0 && localDue > 0
+              skipDesc ??
+              (sawCounts && pendingCount === 0 && localDue > 0
                 ? "Followup is marked Scheduled but no pending row was found for this mailbox owner."
-                : queued
+                : queued && skipped === 0
                   ? "Queued for the worker. If it stays pending, check worker/cron on the server."
-                  : `Found ${Math.max(localDue, dueFound)} due — open Inbox → Scheduled for status/error.`,
+                  : `Found ${Math.max(localDue, dueFound)} due — open Inbox → Scheduled for status/error.`),
           });
         }
 

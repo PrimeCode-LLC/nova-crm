@@ -106,7 +106,9 @@ describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", (
     expect(coerceIsoInstant(row?.payload.scheduledAt)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
-  it("processDueScheduledEmailsForMemberServer marks due row sent", async () => {
+  it(
+    "processDueScheduledEmailsForMemberServer marks due row sent",
+    async () => {
     const { processDueScheduledEmailsForMemberServer } = await import(
       "@/lib/email/scheduled-emails-server"
     );
@@ -120,6 +122,8 @@ describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", (
     expect(result.sent).toBeGreaterThanOrEqual(1);
     expect(result.dueFound).toBeGreaterThanOrEqual(1);
     expect(result.pendingCount).toBeGreaterThanOrEqual(1);
+    expect(result.skipReasons).toBeDefined();
+    expect(Array.isArray(result.rows)).toBe(true);
     expect(sendOutboundMailServer).toHaveBeenCalled();
 
     const docs = await queryDocuments({
@@ -128,5 +132,7 @@ describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", (
       filters: [{ field: "status", op: "==", value: "sent" }],
     });
     expect(docs.some((d) => d.path === DOC_PATH)).toBe(true);
-  });
+  },
+    30_000,
+  );
 });

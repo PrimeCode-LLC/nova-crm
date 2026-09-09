@@ -6,6 +6,9 @@ import { processDueScheduledEmailsForMemberServer } from "@/lib/email/scheduled-
 import { isQueueHeavyJobsV1Enabled } from "@/lib/queue/flags";
 import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
+/** Allow SMTP work to finish before platform kill; internal budget is 20s. */
+export const maxDuration = 60;
+
 /**
  * Flush due scheduled emails for the current mailbox owner.
  *

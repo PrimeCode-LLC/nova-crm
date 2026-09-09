@@ -20,6 +20,7 @@ describe("resolveSequenceThreadContext", () => {
   });
 
   it("waits when an earlier step is still queued to send", () => {
+    const nowMs = Date.parse("2026-01-03T10:05:00.000Z");
     const result = resolveSequenceThreadContext(
       {
         id: "f2",
@@ -32,6 +33,7 @@ describe("resolveSequenceThreadContext", () => {
         {
           id: "f1",
           dueAt: "2026-01-01T10:00:00.000Z",
+          emailScheduledAt: "2026-01-03T10:00:00.000Z",
           title: "Intro",
           deliveryStatus: "scheduled",
           scheduledEmailId: "sch-1",
@@ -44,8 +46,47 @@ describe("resolveSequenceThreadContext", () => {
           scheduledEmailId: "sch-2",
         },
       ],
+      undefined,
+      { nowMs },
     );
-    expect(result).toEqual({ kind: "wait_for_prior" });
+    expect(result).toEqual({
+      kind: "wait_for_prior",
+      blockedBy: { followupId: "f1", deliveryStatus: "scheduled" },
+    });
+  });
+
+  it("does not wait on a prior step whose schedule is stale", () => {
+    const nowMs = Date.parse("2026-01-03T12:00:00.000Z");
+    const result = resolveSequenceThreadContext(
+      {
+        id: "f2",
+        dueAt: "2026-01-03T10:00:00.000Z",
+        title: "Follow-up",
+        deliveryStatus: "scheduled",
+        scheduledEmailId: "sch-2",
+      },
+      [
+        {
+          id: "f1",
+          dueAt: "2026-01-01T10:00:00.000Z",
+          emailScheduledAt: "2026-01-01T10:00:00.000Z",
+          title: "Intro",
+          deliveryStatus: "scheduled",
+          scheduledEmailId: "sch-1",
+        },
+        {
+          id: "f2",
+          dueAt: "2026-01-03T10:00:00.000Z",
+          title: "Follow-up",
+          deliveryStatus: "scheduled",
+          scheduledEmailId: "sch-2",
+        },
+      ],
+      undefined,
+      { nowMs, maxWaitMs: 30 * 60 * 1000 },
+    );
+    // Prior was due >30m ago — proceed as root (no prior sent Message-ID).
+    expect(result).toEqual({ kind: "root" });
   });
 
   it("replies to the latest prior Message-ID and uses Re: of the root subject", () => {

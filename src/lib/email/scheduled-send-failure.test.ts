@@ -96,9 +96,11 @@ describe("resolveSequenceThreadContext with needs_retry / failed priors", () => 
   };
 
   it("waits when a prior step is needs_retry", () => {
+    const nowMs = Date.parse("2026-07-09T10:05:00.000Z");
     const retrying: SequenceThreadStep = {
       id: "b",
       dueAt: "2026-07-04T10:00:00.000Z",
+      emailScheduledAt: "2026-07-09T10:00:00.000Z",
       deliveryStatus: "needs_retry",
       scheduledEmailId: "sch-1",
     };
@@ -108,9 +110,9 @@ describe("resolveSequenceThreadContext with needs_retry / failed priors", () => 
       deliveryStatus: "scheduled",
       scheduledEmailId: "sch-2",
     };
-    expect(resolveSequenceThreadContext(current, [root, retrying, current]).kind).toBe(
-      "wait_for_prior",
-    );
+    expect(
+      resolveSequenceThreadContext(current, [root, retrying, current], undefined, { nowMs }).kind,
+    ).toBe("wait_for_prior");
   });
 
   it("continues as root/reply when prior permanently failed", () => {

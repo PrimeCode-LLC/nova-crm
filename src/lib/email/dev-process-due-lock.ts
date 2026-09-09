@@ -5,6 +5,11 @@
  * Different owners may flush in parallel so one mailbox cannot starve another.
  */
 
+import type {
+  ScheduledFlushRowResult,
+  ScheduledSkipReason,
+} from "@/lib/email/scheduled-emails-server";
+
 type ProcessDueResult = {
   processed: number;
   sent: number;
@@ -12,6 +17,9 @@ type ProcessDueResult = {
   skipped: number;
   dueFound?: number;
   pendingCount?: number;
+  claimRefused?: number;
+  skipReasons?: Record<ScheduledSkipReason, number>;
+  rows?: ScheduledFlushRowResult[];
 };
 
 const inflight = new Map<string, Promise<ProcessDueResult>>();

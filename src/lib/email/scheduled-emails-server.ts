@@ -4,6 +4,7 @@ import { coerceIsoInstant, coerceInstantMs } from "@/lib/db/document-shim/timest
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
+import { isScheduledDocDue } from "@/lib/email/scheduled-due";
 import {
   parseOutboundAttachments,
   serializeOutboundAttachments,
@@ -22,6 +23,7 @@ import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 import {
   resolveSequenceThreadContext,
+  SEQUENCE_WAIT_FOR_PRIOR_MAX_MS,
   type SequenceThreadAnchor,
   type SequenceThreadStep,
 } from "@/lib/email/sequence-thread";
@@ -45,7 +47,47 @@ const SCHEDULED_COLLECTION = "scheduledEmails";
 /** Keep lease long enough for SMTP+IMAP; reclaim only truly abandoned claims. */
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
 /** If a prior sequence step never finishes, stop blocking forever and send as root. */
-const WAIT_FOR_PRIOR_MAX_MS = 30 * 60 * 1000;
+const WAIT_FOR_PRIOR_MAX_MS = SEQUENCE_WAIT_FOR_PRIOR_MAX_MS;
+
+export type ScheduledSkipReason =
+  | "wait_for_prior"
+  | "send_gap"
+  | "quota"
+  | "claim_refused"
+  | "exception"
+  | "deadline"
+  | "followup_stopped"
+  | "contact_policy"
+  | "other";
+
+export type ScheduledFlushRowResult = {
+  id: string;
+  outcome: "sent" | "failed" | "skipped";
+  reason?: ScheduledSkipReason;
+  blockedByFollowupId?: string;
+  detail?: string;
+};
+
+type SendDocResult = {
+  outcome: "sent" | "failed" | "skipped";
+  reason?: ScheduledSkipReason;
+  blockedByFollowupId?: string;
+  detail?: string;
+};
+
+function emptySkipReasons(): Record<ScheduledSkipReason, number> {
+  return {
+    wait_for_prior: 0,
+    send_gap: 0,
+    quota: 0,
+    claim_refused: 0,
+    exception: 0,
+    deadline: 0,
+    followup_stopped: 0,
+    contact_policy: 0,
+    other: 0,
+  };
+}
 
 /** Ask the worker to flush due mail around `scheduledAt` (best-effort). */
 async function nudgeScheduledEmailWorker(scheduledAt: Date | string): Promise<void> {
@@ -627,7 +669,10 @@ async function resolveSequenceThreadingForFollowup(input: {
 }): Promise<
   | { kind: "use_existing" }
   | { kind: "root" }
-  | { kind: "wait_for_prior" }
+  | {
+      kind: "wait_for_prior";
+      blockedBy: { followupId: string; deliveryStatus?: string };
+    }
   | { kind: "reply"; inReplyTo: string; referenceIds: string[]; subject: string }
   | { kind: "none" }
 > {
@@ -664,13 +709,17 @@ async function resolveSequenceThreadingForFollowup(input: {
   }
 }
 
-async function releaseScheduledClaim(docRef: DocumentReference): Promise<void> {
+async function releaseScheduledClaim(
+  docRef: DocumentReference,
+  patch?: Record<string, unknown>,
+): Promise<void> {
   const now = new Date().toISOString();
   await docRef.update({
     status: "pending",
     updatedAt: now,
     processingAt: FieldValue.delete(),
     processingClaimId: FieldValue.delete(),
+    ...(patch ?? {}),
   });
 }
 
@@ -691,7 +740,7 @@ function ownerFromScheduledRef(docRef: DocumentReference): {
 async function failScheduledDocPermanent(
   docRef: DocumentReference,
   error: string,
-): Promise<"failed"> {
+): Promise<SendDocResult> {
   const now = new Date().toISOString();
   await docRef.update({
     status: "failed",
@@ -700,8 +749,11 @@ async function failScheduledDocPermanent(
     updatedAt: now,
     processingAt: FieldValue.delete(),
     processingClaimId: FieldValue.delete(),
+    waitingForPriorSince: FieldValue.delete(),
+    blockedByFollowupId: FieldValue.delete(),
+    lastSkipReason: FieldValue.delete(),
   });
-  return "failed";
+  return { outcome: "failed" };
 }
 
 async function completePlanWhenAllStepsDone(planId: string, completedAt: string): Promise<void> {
@@ -730,7 +782,7 @@ async function cancelDueToFollowupStop(
   docRef: DocumentReference,
   followupId: string,
   reason: string,
-): Promise<"skipped"> {
+): Promise<SendDocResult> {
   const now = new Date().toISOString();
   await docRef.update({
     status: "cancelled",
@@ -740,6 +792,9 @@ async function cancelDueToFollowupStop(
     updatedAt: now,
     processingAt: FieldValue.delete(),
     processingClaimId: FieldValue.delete(),
+    lastSkipReason: "followup_stopped",
+    waitingForPriorSince: FieldValue.delete(),
+    blockedByFollowupId: FieldValue.delete(),
   });
   await updateFollowupDeliveryState(followupId, {
     deliveryStatus: "cancelled",
@@ -747,7 +802,7 @@ async function cancelDueToFollowupStop(
     cancelReason: reason,
     clearSchedule: true,
   });
-  return "skipped";
+  return { outcome: "skipped", reason: "followup_stopped", detail: reason };
 }
 
 /** Skip send when the linked followup (or its plan) was paused/completed after a reply. */
@@ -811,7 +866,7 @@ async function sendScheduledDoc(
     /** When true, never sleep for send gaps — requeue instead (local process-due). */
     requeueSendGaps?: boolean;
   },
-): Promise<"sent" | "failed" | "skipped"> {
+): Promise<SendDocResult> {
   const fromPath = ownerFromScheduledRef(docRef);
   const organizationId = String(data.organizationId ?? fromPath.organizationId ?? "");
   const uid = String(data.uid ?? fromPath.uid ?? "");
@@ -846,6 +901,7 @@ async function sendScheduledDoc(
         updatedAt: now,
         processingAt: FieldValue.delete(),
         processingClaimId: FieldValue.delete(),
+        lastSkipReason: cancelled ? "contact_policy" : FieldValue.delete(),
       });
       if (followupIdEarly) {
         await updateFollowupDeliveryState(followupIdEarly, {
@@ -865,7 +921,9 @@ async function sendScheduledDoc(
           });
         }
       }
-      return cancelled ? "skipped" : "failed";
+      return cancelled
+        ? { outcome: "skipped", reason: "contact_policy", detail: contactPolicy.error }
+        : { outcome: "failed" };
     }
   }
 
@@ -896,7 +954,7 @@ async function sendScheduledDoc(
         kind: "failed",
       });
     }
-    return "failed";
+    return { outcome: "failed" };
   }
 
   const gapSeconds = normalizeSendGapSeconds(mailbox.sendGapSeconds);
@@ -916,11 +974,16 @@ async function sendScheduledDoc(
         if (shouldSleep) {
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
+          // Keep user-visible scheduledAt stable; defer readiness via notBeforeAt.
           const retryAt = new Date(earliest).toISOString();
+          const nowIso = new Date().toISOString();
           await docRef.update({
             status: "pending",
-            scheduledAt: retryAt,
-            updatedAt: new Date().toISOString(),
+            notBeforeAt: retryAt,
+            nextRetryAt: retryAt,
+            lastSkipReason: "send_gap",
+            lastSkipAt: nowIso,
+            updatedAt: nowIso,
             processingAt: FieldValue.delete(),
             processingClaimId: FieldValue.delete(),
           });
@@ -931,7 +994,7 @@ async function sendScheduledDoc(
               nextRetryAt: retryAt,
             });
           }
-          return "skipped";
+          return { outcome: "skipped", reason: "send_gap", detail: `notBeforeAt=${retryAt}` };
         }
       }
     }
@@ -949,9 +1012,13 @@ async function sendScheduledDoc(
     const deferAt = nextZonedDayStartIso(new Date(now), orgTimeZone);
     await docRef.update({
       status: "pending",
-      scheduledAt: deferAt,
+      // Quota deferral moves readiness; keep original scheduledAt for display.
+      notBeforeAt: deferAt,
+      nextRetryAt: deferAt,
       error: quota.error,
       failureKind: "quota",
+      lastSkipReason: "quota",
+      lastSkipAt: now,
       updatedAt: now,
       processingAt: FieldValue.delete(),
       processingClaimId: FieldValue.delete(),
@@ -965,7 +1032,7 @@ async function sendScheduledDoc(
         nextRetryAt: deferAt,
       });
     }
-    return "skipped";
+    return { outcome: "skipped", reason: "quota", detail: quota.error };
   }
 
   const parsedAttachments = parseOutboundAttachments(data.attachments);
@@ -994,7 +1061,7 @@ async function sendScheduledDoc(
         kind: "failed",
       });
     }
-    return "failed";
+    return { outcome: "failed" };
   }
 
   const finalStopReason = followupIdEarly
@@ -1018,12 +1085,28 @@ async function sendScheduledDoc(
       forceNewThread,
     });
     if (thread.kind === "wait_for_prior") {
-      const scheduledAtMs = coerceInstantMs(data.scheduledAt);
+      const waitingSinceMs =
+        coerceInstantMs(data.waitingForPriorSince) ?? coerceInstantMs(data.scheduledAt);
+      // Unparseable clock → do not block forever.
       const waitedTooLong =
-        scheduledAtMs != null && Date.now() - scheduledAtMs >= WAIT_FOR_PRIOR_MAX_MS;
+        waitingSinceMs == null || Date.now() - waitingSinceMs >= WAIT_FOR_PRIOR_MAX_MS;
       if (!waitedTooLong) {
-        await releaseScheduledClaim(docRef);
-        return "skipped";
+        const nowIso = new Date().toISOString();
+        const blockedBy = thread.blockedBy.followupId;
+        await releaseScheduledClaim(docRef, {
+          lastSkipReason: "wait_for_prior",
+          lastSkipAt: nowIso,
+          blockedByFollowupId: blockedBy,
+          ...(data.waitingForPriorSince
+            ? {}
+            : { waitingForPriorSince: nowIso }),
+        });
+        return {
+          outcome: "skipped",
+          reason: "wait_for_prior",
+          blockedByFollowupId: blockedBy,
+          detail: `blocked by ${blockedBy} (${thread.blockedBy.deliveryStatus ?? "unknown"})`,
+        };
       }
       // Prior step never completed — send as a new thread root rather than stall forever.
     }
@@ -1088,6 +1171,11 @@ async function sendScheduledDoc(
       error: null,
       failureKind: FieldValue.delete(),
       nextRetryAt: FieldValue.delete(),
+      notBeforeAt: FieldValue.delete(),
+      waitingForPriorSince: FieldValue.delete(),
+      blockedByFollowupId: FieldValue.delete(),
+      lastSkipReason: FieldValue.delete(),
+      lastSkipAt: FieldValue.delete(),
       ...(messageId ? { messageId } : {}),
       ...(inReplyTo ? { inReplyTo } : {}),
       ...(referenceIds?.length ? { referenceIds } : {}),
@@ -1127,26 +1215,30 @@ async function sendScheduledDoc(
         followupId: followupId || undefined,
         mailboxId,
       });
-      await persistOutboundLeadMailServer({
-        organizationId,
-        leadId,
-        mailboxId,
-        mailboxOwnerUid: uid,
-        from: String(data.from ?? ""),
-        to: String(data.to ?? ""),
-        cc: String(data.cc ?? "") || undefined,
-        bcc: String(data.bcc ?? "") || undefined,
-        replyTo: String(data.replyTo ?? "") || undefined,
-        subject,
-        bodyText: String(data.text ?? data.body ?? ""),
-        bodyHtml: String(data.html ?? "") || undefined,
-        sentAt: now,
-        messageId,
-        inReplyTo,
-        referenceIds,
-        attachments: outboundAttachmentsToLeadMail(parsedAttachments),
-        source: followupId ? "crm_followup" : "scheduled",
-      });
+      try {
+        await persistOutboundLeadMailServer({
+          organizationId,
+          leadId,
+          mailboxId,
+          mailboxOwnerUid: uid,
+          from: String(data.from ?? ""),
+          to: String(data.to ?? ""),
+          cc: String(data.cc ?? "") || undefined,
+          bcc: String(data.bcc ?? "") || undefined,
+          replyTo: String(data.replyTo ?? "") || undefined,
+          subject,
+          bodyText: String(data.text ?? data.body ?? ""),
+          bodyHtml: String(data.html ?? "") || undefined,
+          sentAt: now,
+          messageId,
+          inReplyTo,
+          referenceIds,
+          attachments: outboundAttachmentsToLeadMail(parsedAttachments),
+          source: followupId ? "crm_followup" : "scheduled",
+        });
+      } catch {
+        /* Delivery succeeded; lead-mail persist is best-effort. */
+      }
       try {
         await resolvePendingReplyActionOnOutboundServer({
           organizationId,
@@ -1167,7 +1259,7 @@ async function sendScheduledDoc(
     if (runContext) {
       runContext.lastSentAtByMailbox.set(`${organizationId}/${uid}/${mailboxId}`, Date.now());
     }
-    return "sent";
+    return { outcome: "sent" };
   }
 
   const attempts = Math.max(0, Number(data.attempts ?? 0)) + 1;
@@ -1178,11 +1270,14 @@ async function sendScheduledDoc(
     const retryAt = nextRetryAtIso(attempts);
     await docRef.update({
       status: "pending",
-      scheduledAt: retryAt,
+      // Transient retry readiness — keep original scheduledAt for UI.
+      notBeforeAt: retryAt,
       attempts,
       nextRetryAt: retryAt,
       error: errorText,
       failureKind: "transient",
+      lastSkipReason: "other",
+      lastSkipAt: now,
       updatedAt: now,
       processingAt: FieldValue.delete(),
       processingClaimId: FieldValue.delete(),
@@ -1204,7 +1299,7 @@ async function sendScheduledDoc(
         kind: "needs_retry",
       });
     }
-    return "skipped";
+    return { outcome: "skipped", reason: "other", detail: errorText };
   }
 
   await docRef.update({
@@ -1216,6 +1311,9 @@ async function sendScheduledDoc(
     processingAt: FieldValue.delete(),
     processingClaimId: FieldValue.delete(),
     nextRetryAt: FieldValue.delete(),
+    waitingForPriorSince: FieldValue.delete(),
+    blockedByFollowupId: FieldValue.delete(),
+    lastSkipReason: FieldValue.delete(),
   });
   if (followupIdEarly) {
     await updateFollowupDeliveryState(followupIdEarly, {
@@ -1233,7 +1331,7 @@ async function sendScheduledDoc(
       kind: "failed",
     });
   }
-  return "failed";
+  return { outcome: "failed" };
 }
 
 async function processScheduledSnap(
@@ -1243,11 +1341,22 @@ async function processScheduledSnap(
     /** Stop claiming more docs after this wall-clock budget (local process-due). */
     maxDurationMs?: number;
   },
-): Promise<{ processed: number; sent: number; failed: number; skipped: number }> {
+): Promise<{
+  processed: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  claimRefused: number;
+  skipReasons: Record<ScheduledSkipReason, number>;
+  rows: ScheduledFlushRowResult[];
+}> {
   let sent = 0;
   let failed = 0;
   let skipped = 0;
   let processed = 0;
+  let claimRefused = 0;
+  const skipReasons = emptySkipReasons();
+  const rows: ScheduledFlushRowResult[] = [];
   const runContext = {
     lastSentAtByMailbox: new Map<string, number>(),
     requeueSendGaps: Boolean(opts?.requeueSendGaps),
@@ -1259,27 +1368,77 @@ async function processScheduledSnap(
 
   for (const doc of docs) {
     if (deadline != null && Date.now() >= deadline) {
-      skipped += docs.length - processed;
+      const remaining = docs.length - processed;
+      skipped += remaining;
+      skipReasons.deadline += remaining;
+      for (let i = processed; i < docs.length; i++) {
+        rows.push({ id: docs[i]!.ref.id, outcome: "skipped", reason: "deadline" });
+      }
       break;
     }
     processed += 1;
     const claimed = await claimScheduledDoc(doc.ref);
     if (!claimed) {
       skipped += 1;
+      claimRefused += 1;
+      skipReasons.claim_refused += 1;
+      rows.push({ id: doc.ref.id, outcome: "skipped", reason: "claim_refused" });
       continue;
     }
     try {
-      const outcome = await sendScheduledDoc(doc.ref, claimed, runContext);
-      if (outcome === "sent") sent += 1;
-      else if (outcome === "failed") failed += 1;
-      else skipped += 1;
-    } catch {
-      // Keep the processing lease. A later processor can safely reclaim it after expiry.
+      const result = await sendScheduledDoc(doc.ref, claimed, runContext);
+      if (result.outcome === "sent") {
+        sent += 1;
+        rows.push({ id: doc.ref.id, outcome: "sent" });
+      } else if (result.outcome === "failed") {
+        failed += 1;
+        rows.push({ id: doc.ref.id, outcome: "failed", reason: result.reason, detail: result.detail });
+      } else {
+        skipped += 1;
+        const reason = result.reason ?? "other";
+        skipReasons[reason] += 1;
+        rows.push({
+          id: doc.ref.id,
+          outcome: "skipped",
+          reason,
+          blockedByFollowupId: result.blockedByFollowupId,
+          detail: result.detail,
+        });
+      }
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.error("[scheduled-email] send threw", { path: doc.ref.path, message });
+      const nowIso = new Date().toISOString();
+      const attempts = Math.max(0, Number(claimed.attempts ?? 0)) + 1;
+      try {
+        await doc.ref.update({
+          status: "pending",
+          attempts,
+          error: message.slice(0, 500),
+          failureKind: "transient",
+          lastSkipReason: "exception",
+          lastSkipAt: nowIso,
+          nextRetryAt: nextRetryAtIso(attempts),
+          notBeforeAt: nextRetryAtIso(attempts),
+          updatedAt: nowIso,
+          processingAt: FieldValue.delete(),
+          processingClaimId: FieldValue.delete(),
+        });
+      } catch {
+        /* best-effort release */
+      }
       skipped += 1;
+      skipReasons.exception += 1;
+      rows.push({
+        id: doc.ref.id,
+        outcome: "skipped",
+        reason: "exception",
+        detail: message.slice(0, 200),
+      });
     }
   }
 
-  return { processed, sent, failed, skipped };
+  return { processed, sent, failed, skipped, claimRefused, skipReasons, rows };
 }
 
 /**
@@ -1296,11 +1455,23 @@ export async function processDueScheduledEmailsForMemberServer(input: {
   skipped: number;
   dueFound: number;
   pendingCount: number;
+  claimRefused: number;
+  skipReasons: Record<ScheduledSkipReason, number>;
+  rows: ScheduledFlushRowResult[];
 }> {
+  const empty = {
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    dueFound: 0,
+    pendingCount: 0,
+    claimRefused: 0,
+    skipReasons: emptySkipReasons(),
+    rows: [] as ScheduledFlushRowResult[],
+  };
   const db = getAdminDb();
-  if (!db) {
-    return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0, pendingCount: 0 };
-  }
+  if (!db) return empty;
 
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -1316,7 +1487,7 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     .where("status", "in", ["pending", "processing"])
     .where("scheduledAt", "<=", nowIso)
     .orderBy("scheduledAt", "asc")
-    .limit(8)
+    .limit(16)
     .get();
 
   let dueDocs = primary.docs
@@ -1324,10 +1495,8 @@ export async function processDueScheduledEmailsForMemberServer(input: {
       ref: doc.ref,
       data: () => doc.data() as Record<string, unknown>,
     }))
-    .filter((row) => {
-      const dueMs = coerceInstantMs(row.data().scheduledAt);
-      return dueMs != null && dueMs <= nowMs;
-    });
+    .filter((row) => isScheduledDocDue(row.data(), nowMs))
+    .slice(0, 8);
 
   let pendingCount = dueDocs.length;
   // Fallback only when the indexed due query finds nothing (Timestamp/ISO mismatches).
@@ -1339,10 +1508,7 @@ export async function processDueScheduledEmailsForMemberServer(input: {
         ref: doc.ref,
         data: () => doc.data() as Record<string, unknown>,
       }))
-      .filter((row) => {
-        const dueMs = coerceInstantMs(row.data().scheduledAt);
-        return dueMs != null && dueMs <= nowMs;
-      })
+      .filter((row) => isScheduledDocDue(row.data(), nowMs))
       .sort((a, b) => {
         const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
         const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
@@ -1353,7 +1519,7 @@ export async function processDueScheduledEmailsForMemberServer(input: {
 
   const result = await processScheduledSnap(dueDocs, {
     requeueSendGaps: true,
-    maxDurationMs: 25_000,
+    maxDurationMs: 20_000,
   });
   return {
     ...result,
@@ -1369,11 +1535,23 @@ export async function processDueScheduledEmailsServer(): Promise<{
   skipped: number;
   dueFound: number;
   pendingCount: number;
+  claimRefused: number;
+  skipReasons: Record<ScheduledSkipReason, number>;
+  rows: ScheduledFlushRowResult[];
 }> {
+  const empty = {
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    dueFound: 0,
+    pendingCount: 0,
+    claimRefused: 0,
+    skipReasons: emptySkipReasons(),
+    rows: [] as ScheduledFlushRowResult[],
+  };
   const db = getAdminDb();
-  if (!db) {
-    return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0, pendingCount: 0 };
-  }
+  if (!db) return empty;
 
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -1382,7 +1560,7 @@ export async function processDueScheduledEmailsServer(): Promise<{
     .where("status", "in", ["pending", "processing"])
     .where("scheduledAt", "<=", nowIso)
     .orderBy("scheduledAt", "asc")
-    .limit(50)
+    .limit(80)
     .get();
 
   let dueDocs = primary.docs
@@ -1390,10 +1568,8 @@ export async function processDueScheduledEmailsServer(): Promise<{
       ref: doc.ref,
       data: () => doc.data() as Record<string, unknown>,
     }))
-    .filter((row) => {
-      const dueMs = coerceInstantMs(row.data().scheduledAt);
-      return dueMs != null && dueMs <= nowMs;
-    });
+    .filter((row) => isScheduledDocDue(row.data(), nowMs))
+    .slice(0, 50);
 
   let pendingCount = dueDocs.length;
   if (dueDocs.length === 0) {
@@ -1408,10 +1584,7 @@ export async function processDueScheduledEmailsServer(): Promise<{
         ref: doc.ref,
         data: () => doc.data() as Record<string, unknown>,
       }))
-      .filter((row) => {
-        const dueMs = coerceInstantMs(row.data().scheduledAt);
-        return dueMs != null && dueMs <= nowMs;
-      })
+      .filter((row) => isScheduledDocDue(row.data(), nowMs))
       .sort((a, b) => {
         const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
         const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
