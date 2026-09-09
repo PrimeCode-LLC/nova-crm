@@ -19,6 +19,10 @@ const LIVE_POLL_MS = 20_000;
 const LIVE_POLL_IDLE_MS = 60_000;
 /** Ignore visibility/effect re-fires that would stack process-due calls. */
 const MIN_RUN_GAP_MS = 12_000;
+/** Avoid toast spam while a due row is legitimately processing / queued. */
+const STALLED_TOAST_GAP_MS = 45_000;
+/** setTimeout saturates near 2^31-1; rely on the poll interval for far-future rows. */
+const MAX_WAKE_MS = 24 * 60 * 60 * 1000;
 const PROCESS_DUE_LOCK = "nova-crm-process-due";
 
 /**
@@ -47,6 +51,7 @@ export function ScheduledEmailSendSync() {
   const scheduled = useEmailAccountStore((s) => s.scheduled);
   const runningRef = React.useRef(false);
   const lastRunAtRef = React.useRef(0);
+  const lastStalledToastAtRef = React.useRef(0);
   const syncedDemoStatusRef = React.useRef(new Map<string, string>());
 
   const currentUserIdRef = React.useRef(currentUserId);
@@ -77,9 +82,10 @@ export function ScheduledEmailSendSync() {
     const activeOwner = active.dataOwnerUid?.trim();
     if (activeOwner) owners.add(activeOwner);
 
-    // Pending rows may belong to an assigned mailbox host even when "All mailboxes" is selected.
     for (const row of scheduledRef.current) {
       if (row.status !== "pending" && row.status !== "processing") continue;
+      const rowOwner = row.uid?.trim();
+      if (rowOwner) owners.add(rowOwner);
       const box = boxes.find((m) => m.id === row.mailboxId);
       const owner = box?.dataOwnerUid?.trim();
       if (owner) owners.add(owner);
@@ -88,11 +94,25 @@ export function ScheduledEmailSendSync() {
     return [...owners];
   }, []);
 
+  const countLocalDuePending = React.useCallback(() => {
+    const now = Date.now();
+    return scheduledRef.current.filter((s) => {
+      if (s.status !== "pending" && s.status !== "processing") return false;
+      const due = new Date(s.scheduledAt).getTime();
+      return !Number.isNaN(due) && due <= now;
+    }).length;
+  }, []);
+
   const buildScheduledApiPath = React.useCallback((path: string, ownerUid?: string | null) => {
     const uid = currentUserIdRef.current;
+    // Prefer an explicit owner. Do not route through resolveMailApiForUserUid here —
+    // that helper prefers view-as and would collapse every owner onto one uid.
+    if (ownerUid !== undefined) {
+      return appendMailDataOwnerParam(path, ownerUid, uid);
+    }
     const forUid = resolveMailApiForUserUid({
       mailViewAsUid: mailViewAsUidRef.current,
-      activeMailboxDataOwnerUid: ownerUid,
+      activeMailboxDataOwnerUid: null,
       selfUid: uid,
     });
     return appendMailDataOwnerParam(path, forUid, uid);
@@ -113,12 +133,15 @@ export function ScheduledEmailSendSync() {
         let queued = false;
         let busy = false;
         let dueFound = 0;
+        let pendingCount = 0;
+        let sawCounts = false;
         let anyOk = false;
+        const localDue = countLocalDuePending();
 
         for (const owner of owners) {
           const processPath = buildScheduledApiPath(
             "/api/email/scheduled/process-due",
-            owner === currentUserIdRef.current ? null : owner,
+            owner,
           );
           const processRes = await fetch(processPath, { method: "POST" });
           const processData = (await processRes.json().catch(() => null)) as {
@@ -128,7 +151,9 @@ export function ScheduledEmailSendSync() {
             sent?: number;
             failed?: number;
             dueFound?: number;
+            pendingCount?: number;
             error?: string;
+            hint?: string;
           } | null;
           if (!processRes.ok) {
             if (processRes.status === 404) {
@@ -143,7 +168,14 @@ export function ScheduledEmailSendSync() {
           anyOk = true;
           sent += processData.sent ?? 0;
           failed += processData.failed ?? 0;
-          dueFound += processData.dueFound ?? 0;
+          if (typeof processData.dueFound === "number") {
+            dueFound += processData.dueFound;
+            sawCounts = true;
+          }
+          if (typeof processData.pendingCount === "number") {
+            pendingCount += processData.pendingCount;
+            sawCounts = true;
+          }
           if (processData.queued) queued = true;
           if (processData.busy) busy = true;
         }
@@ -162,16 +194,25 @@ export function ScheduledEmailSendSync() {
               : `${failed} scheduled emails failed`,
             { description: "Check Inbox → Scheduled for the error details." },
           );
-        } else if (dueFound > 0 && sent === 0 && !busy) {
-          toast.message("Due email still waiting to send", {
-            description: queued
-              ? "Queued for the background worker — check Inbox → Scheduled in a minute."
-              : "Open Inbox → Scheduled for status, or confirm worker/cron is running on the server.",
+        } else if (
+          sent === 0 &&
+          !busy &&
+          (localDue > 0 || dueFound > 0) &&
+          Date.now() - lastStalledToastAtRef.current >= STALLED_TOAST_GAP_MS
+        ) {
+          lastStalledToastAtRef.current = Date.now();
+          toast.message("Due email still not sent", {
+            description:
+              sawCounts && pendingCount === 0 && localDue > 0
+                ? "Followup is marked Scheduled but no pending row was found for this mailbox owner."
+                : queued
+                  ? "Queued for the worker. If it stays pending, check worker/cron on the server."
+                  : `Found ${Math.max(localDue, dueFound)} due — open Inbox → Scheduled for status/error.`,
           });
         }
 
-        // Refresh even when busy/queued — worker may have already moved rows.
-        if (sent > 0 || failed > 0 || queued || busy) {
+        // Always refresh when we attempted a flush and local/server thinks mail is due.
+        if (sent > 0 || failed > 0 || queued || busy || localDue > 0 || dueFound > 0) {
           const listOwner = resolveMailApiForUserUid({
             mailViewAsUid: mailViewAsUidRef.current,
             activeMailboxDataOwnerUid: getActiveMailbox({
@@ -215,7 +256,7 @@ export function ScheduledEmailSendSync() {
       }
     }
     await execute();
-  }, [buildScheduledApiPath, resolveFlushOwnerUids]);
+  }, [buildScheduledApiPath, resolveFlushOwnerUids, countLocalDuePending]);
 
   React.useEffect(() => {
     if (!sessionHydrated || !currentUserId) return;
@@ -274,7 +315,7 @@ export function ScheduledEmailSendSync() {
       if (Number.isNaN(dueMs)) continue;
       minDelayMs = Math.min(minDelayMs, Math.max(0, dueMs - Date.now()));
     }
-    if (!Number.isFinite(minDelayMs)) return;
+    if (!Number.isFinite(minDelayMs) || minDelayMs > MAX_WAKE_MS) return;
 
     const id = window.setTimeout(() => {
       if (isDemo) processDueScheduledLocal();

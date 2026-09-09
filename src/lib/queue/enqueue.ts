@@ -67,7 +67,12 @@ export async function enqueueScheduledEmailJob(opts?: {
     "send-tick",
     {},
     {
-      jobId: `scheduled-email-${Date.now()}`,
+      // Collapse client/cron spam: at most one immediate tick per wall-clock minute.
+      // Delayed nudges keep unique ids so schedule-time wakeups are not dropped.
+      jobId:
+        delayMs > 0
+          ? `scheduled-email-delay-${Date.now()}`
+          : `scheduled-email-${Math.floor(Date.now() / 60_000)}`,
       priority: JOB_PRIORITY.cron,
       ...(delayMs > 0 ? { delay: delayMs } : {}),
     },

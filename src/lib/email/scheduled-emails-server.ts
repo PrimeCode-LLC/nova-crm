@@ -42,7 +42,10 @@ import { isQueueHeavyJobsV1Enabled } from "@/lib/queue/flags";
 import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
+/** Keep lease long enough for SMTP+IMAP; reclaim only truly abandoned claims. */
 const PROCESSING_LEASE_MS = 5 * 60 * 1000;
+/** If a prior sequence step never finishes, stop blocking forever and send as root. */
+const WAIT_FOR_PRIOR_MAX_MS = 30 * 60 * 1000;
 
 /** Ask the worker to flush due mail around `scheduledAt` (best-effort). */
 async function nudgeScheduledEmailWorker(scheduledAt: Date | string): Promise<void> {
@@ -84,6 +87,7 @@ function docToScheduled(id: string, data: Record<string, unknown>): ScheduledEma
 
   return {
     id,
+    uid: typeof data.uid === "string" && data.uid.trim() ? data.uid.trim() : undefined,
     mailboxId: String(data.mailboxId ?? ""),
     from: String(data.from ?? ""),
     displayName: String(data.displayName ?? ""),
@@ -670,6 +674,36 @@ async function releaseScheduledClaim(docRef: DocumentReference): Promise<void> {
   });
 }
 
+/** Path: organizations/{orgId}/members/{uid}/scheduledEmails/{id} */
+function ownerFromScheduledRef(docRef: DocumentReference): {
+  organizationId?: string;
+  uid?: string;
+} {
+  const parts = docRef.path.split("/").filter(Boolean);
+  const orgIdx = parts.indexOf(COLLECTIONS.organizations);
+  const memIdx = parts.indexOf(ORG_SUBCOLLECTIONS.members);
+  const organizationId =
+    orgIdx >= 0 && parts[orgIdx + 1] ? String(parts[orgIdx + 1]) : undefined;
+  const uid = memIdx >= 0 && parts[memIdx + 1] ? String(parts[memIdx + 1]) : undefined;
+  return { organizationId, uid };
+}
+
+async function failScheduledDocPermanent(
+  docRef: DocumentReference,
+  error: string,
+): Promise<"failed"> {
+  const now = new Date().toISOString();
+  await docRef.update({
+    status: "failed",
+    error,
+    failureKind: "permanent",
+    updatedAt: now,
+    processingAt: FieldValue.delete(),
+    processingClaimId: FieldValue.delete(),
+  });
+  return "failed";
+}
+
 async function completePlanWhenAllStepsDone(planId: string, completedAt: string): Promise<void> {
   const db = getAdminDb();
   if (!db) return;
@@ -778,10 +812,17 @@ async function sendScheduledDoc(
     requeueSendGaps?: boolean;
   },
 ): Promise<"sent" | "failed" | "skipped"> {
-  const organizationId = String(data.organizationId ?? "");
-  const uid = String(data.uid ?? "");
+  const fromPath = ownerFromScheduledRef(docRef);
+  const organizationId = String(data.organizationId ?? fromPath.organizationId ?? "");
+  const uid = String(data.uid ?? fromPath.uid ?? "");
   const mailboxId = String(data.mailboxId ?? "");
-  if (!organizationId || !uid || !mailboxId) return "skipped";
+  if (!organizationId || !uid || !mailboxId) {
+    // Already claimed — never leave the row stuck in processing forever.
+    return failScheduledDocPermanent(
+      docRef,
+      "Scheduled email is missing organization, owner, or mailbox.",
+    );
+  }
 
   const followupIdEarly =
     typeof data.followupId === "string" ? data.followupId.trim() : "";
@@ -977,8 +1018,14 @@ async function sendScheduledDoc(
       forceNewThread,
     });
     if (thread.kind === "wait_for_prior") {
-      await releaseScheduledClaim(docRef);
-      return "skipped";
+      const scheduledAtMs = coerceInstantMs(data.scheduledAt);
+      const waitedTooLong =
+        scheduledAtMs != null && Date.now() - scheduledAtMs >= WAIT_FOR_PRIOR_MAX_MS;
+      if (!waitedTooLong) {
+        await releaseScheduledClaim(docRef);
+        return "skipped";
+      }
+      // Prior step never completed — send as a new thread root rather than stall forever.
     }
     if (thread.kind === "reply") {
       inReplyTo = thread.inReplyTo;
@@ -1248,11 +1295,15 @@ export async function processDueScheduledEmailsForMemberServer(input: {
   failed: number;
   skipped: number;
   dueFound: number;
+  pendingCount: number;
 }> {
   const db = getAdminDb();
-  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0 };
+  if (!db) {
+    return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0, pendingCount: 0 };
+  }
 
   const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
   const root = db
     .collection(COLLECTIONS.organizations)
     .doc(input.organizationId)
@@ -1260,22 +1311,30 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     .doc(input.uid)
     .collection(SCHEDULED_COLLECTION);
 
-  // Primary query (scheduledAt <= now). Fallback: load pending and filter in JS so
-  // Timestamp/ISO mismatches never leave due mail stuck forever.
+  // Filter due rows before limit so future-dated pending mail cannot crowd out sends.
   const primary = await root
     .where("status", "in", ["pending", "processing"])
-    .where("scheduledAt", "<=", new Date(nowMs).toISOString())
+    .where("scheduledAt", "<=", nowIso)
+    .orderBy("scheduledAt", "asc")
     .limit(8)
     .get();
 
-  let docs = primary.docs.map((doc) => ({
-    ref: doc.ref,
-    data: () => doc.data() as Record<string, unknown>,
-  }));
+  let dueDocs = primary.docs
+    .map((doc) => ({
+      ref: doc.ref,
+      data: () => doc.data() as Record<string, unknown>,
+    }))
+    .filter((row) => {
+      const dueMs = coerceInstantMs(row.data().scheduledAt);
+      return dueMs != null && dueMs <= nowMs;
+    });
 
-  if (docs.length === 0) {
+  let pendingCount = dueDocs.length;
+  // Fallback only when the indexed due query finds nothing (Timestamp/ISO mismatches).
+  if (dueDocs.length === 0) {
     const pendingSnap = await root.where("status", "in", ["pending", "processing"]).limit(40).get();
-    docs = pendingSnap.docs
+    pendingCount = pendingSnap.size;
+    dueDocs = pendingSnap.docs
       .map((doc) => ({
         ref: doc.ref,
         data: () => doc.data() as Record<string, unknown>,
@@ -1284,14 +1343,23 @@ export async function processDueScheduledEmailsForMemberServer(input: {
         const dueMs = coerceInstantMs(row.data().scheduledAt);
         return dueMs != null && dueMs <= nowMs;
       })
+      .sort((a, b) => {
+        const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
+        const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
+        return aMs - bMs;
+      })
       .slice(0, 8);
   }
 
-  const result = await processScheduledSnap(docs, {
+  const result = await processScheduledSnap(dueDocs, {
     requeueSendGaps: true,
     maxDurationMs: 25_000,
   });
-  return { ...result, dueFound: docs.length };
+  return {
+    ...result,
+    dueFound: dueDocs.length,
+    pendingCount,
+  };
 }
 
 export async function processDueScheduledEmailsServer(): Promise<{
@@ -1300,9 +1368,12 @@ export async function processDueScheduledEmailsServer(): Promise<{
   failed: number;
   skipped: number;
   dueFound: number;
+  pendingCount: number;
 }> {
   const db = getAdminDb();
-  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0 };
+  if (!db) {
+    return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0, pendingCount: 0 };
+  }
 
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
@@ -1310,21 +1381,29 @@ export async function processDueScheduledEmailsServer(): Promise<{
     .collectionGroup(SCHEDULED_COLLECTION)
     .where("status", "in", ["pending", "processing"])
     .where("scheduledAt", "<=", nowIso)
+    .orderBy("scheduledAt", "asc")
     .limit(50)
     .get();
 
-  let docs = primary.docs.map((doc) => ({
-    ref: doc.ref,
-    data: () => doc.data() as Record<string, unknown>,
-  }));
+  let dueDocs = primary.docs
+    .map((doc) => ({
+      ref: doc.ref,
+      data: () => doc.data() as Record<string, unknown>,
+    }))
+    .filter((row) => {
+      const dueMs = coerceInstantMs(row.data().scheduledAt);
+      return dueMs != null && dueMs <= nowMs;
+    });
 
-  if (docs.length === 0) {
+  let pendingCount = dueDocs.length;
+  if (dueDocs.length === 0) {
     const pendingSnap = await db
       .collectionGroup(SCHEDULED_COLLECTION)
       .where("status", "in", ["pending", "processing"])
       .limit(100)
       .get();
-    docs = pendingSnap.docs
+    pendingCount = pendingSnap.size;
+    dueDocs = pendingSnap.docs
       .map((doc) => ({
         ref: doc.ref,
         data: () => doc.data() as Record<string, unknown>,
@@ -1333,11 +1412,20 @@ export async function processDueScheduledEmailsServer(): Promise<{
         const dueMs = coerceInstantMs(row.data().scheduledAt);
         return dueMs != null && dueMs <= nowMs;
       })
+      .sort((a, b) => {
+        const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
+        const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
+        return aMs - bMs;
+      })
       .slice(0, 50);
   }
 
-  const result = await processScheduledSnap(docs);
-  return { ...result, dueFound: docs.length };
+  const result = await processScheduledSnap(dueDocs);
+  return {
+    ...result,
+    dueFound: dueDocs.length,
+    pendingCount,
+  };
 }
 
 /** Manual retry: re-queue a failed (or exhausted) scheduled email for immediate send. */

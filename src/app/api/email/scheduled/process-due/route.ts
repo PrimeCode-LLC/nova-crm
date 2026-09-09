@@ -10,8 +10,7 @@ import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
  * Flush due scheduled emails for the current mailbox owner.
  *
  * Always runs a small member-scoped send (limit 8, requeue gaps — no long sleeps).
- * When the heavy-job queue is on, also enqueues a global worker tick so cron-scale
- * backlog keeps moving even if this tab only owns one mailbox.
+ * When the heavy-job queue is on, also enqueues a global worker tick.
  */
 export async function POST(req: Request) {
   const g = await guardTenantApi();
@@ -48,6 +47,7 @@ export async function POST(req: Request) {
   );
 
   if (!locked.ok) {
+    // Do not invent dueFound: 0 — that hid production failures behind empty toasts.
     return NextResponse.json({
       ok: true,
       busy: true,
@@ -57,7 +57,7 @@ export async function POST(req: Request) {
       sent: 0,
       failed: 0,
       skipped: 0,
-      dueFound: 0,
+      hint: "Another process-due flush is in flight for this mailbox owner.",
     });
   }
 

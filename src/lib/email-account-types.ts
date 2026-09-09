@@ -171,6 +171,11 @@ export interface ScheduledEmailAttachment {
 /** Outbound email queued for future delivery (server-backed in live mode). */
 export interface ScheduledEmail {
   id: string;
+  /**
+   * Mailbox credential owner (member uid under which the scheduledEmails doc lives).
+   * Required for live process-due to flush assigned/shared mailboxes.
+   */
+  uid?: string;
   mailboxId: string;
   from: string;
   displayName?: string;
