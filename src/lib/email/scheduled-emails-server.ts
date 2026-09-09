@@ -1242,31 +1242,56 @@ async function processScheduledSnap(
 export async function processDueScheduledEmailsForMemberServer(input: {
   organizationId: string;
   uid: string;
-}): Promise<{ processed: number; sent: number; failed: number; skipped: number }> {
+}): Promise<{
+  processed: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  dueFound: number;
+}> {
   const db = getAdminDb();
-  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0 };
+  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0 };
 
-  const now = new Date().toISOString();
-  const snap = await db
+  const nowMs = Date.now();
+  const root = db
     .collection(COLLECTIONS.organizations)
     .doc(input.organizationId)
     .collection(ORG_SUBCOLLECTIONS.members)
     .doc(input.uid)
-    .collection(SCHEDULED_COLLECTION)
+    .collection(SCHEDULED_COLLECTION);
+
+  // Primary query (scheduledAt <= now). Fallback: load pending and filter in JS so
+  // Timestamp/ISO mismatches never leave due mail stuck forever.
+  const primary = await root
     .where("status", "in", ["pending", "processing"])
-    .where("scheduledAt", "<=", now)
-    // Keep local/dev ticks small so the web process stays responsive.
+    .where("scheduledAt", "<=", new Date(nowMs).toISOString())
     .limit(8)
     .get();
 
-  return processScheduledSnap(
-    snap.docs.map((doc) => ({
-      ref: doc.ref,
-      data: () => doc.data() as Record<string, unknown>,
-    })),
-    // Never sleep on send gaps in the browser-driven local poller.
-    { requeueSendGaps: true, maxDurationMs: 25_000 },
-  );
+  let docs = primary.docs.map((doc) => ({
+    ref: doc.ref,
+    data: () => doc.data() as Record<string, unknown>,
+  }));
+
+  if (docs.length === 0) {
+    const pendingSnap = await root.where("status", "in", ["pending", "processing"]).limit(40).get();
+    docs = pendingSnap.docs
+      .map((doc) => ({
+        ref: doc.ref,
+        data: () => doc.data() as Record<string, unknown>,
+      }))
+      .filter((row) => {
+        const dueMs = coerceInstantMs(row.data().scheduledAt);
+        return dueMs != null && dueMs <= nowMs;
+      })
+      .slice(0, 8);
+  }
+
+  const result = await processScheduledSnap(docs, {
+    requeueSendGaps: true,
+    maxDurationMs: 25_000,
+  });
+  return { ...result, dueFound: docs.length };
 }
 
 export async function processDueScheduledEmailsServer(): Promise<{
@@ -1274,24 +1299,45 @@ export async function processDueScheduledEmailsServer(): Promise<{
   sent: number;
   failed: number;
   skipped: number;
+  dueFound: number;
 }> {
   const db = getAdminDb();
-  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0 };
+  if (!db) return { processed: 0, sent: 0, failed: 0, skipped: 0, dueFound: 0 };
 
-  const now = new Date().toISOString();
-  const snap = await db
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+  const primary = await db
     .collectionGroup(SCHEDULED_COLLECTION)
     .where("status", "in", ["pending", "processing"])
-    .where("scheduledAt", "<=", now)
+    .where("scheduledAt", "<=", nowIso)
     .limit(50)
     .get();
 
-  return processScheduledSnap(
-    snap.docs.map((doc) => ({
-      ref: doc.ref,
-      data: () => doc.data() as Record<string, unknown>,
-    })),
-  );
+  let docs = primary.docs.map((doc) => ({
+    ref: doc.ref,
+    data: () => doc.data() as Record<string, unknown>,
+  }));
+
+  if (docs.length === 0) {
+    const pendingSnap = await db
+      .collectionGroup(SCHEDULED_COLLECTION)
+      .where("status", "in", ["pending", "processing"])
+      .limit(100)
+      .get();
+    docs = pendingSnap.docs
+      .map((doc) => ({
+        ref: doc.ref,
+        data: () => doc.data() as Record<string, unknown>,
+      }))
+      .filter((row) => {
+        const dueMs = coerceInstantMs(row.data().scheduledAt);
+        return dueMs != null && dueMs <= nowMs;
+      })
+      .slice(0, 50);
+  }
+
+  const result = await processScheduledSnap(docs);
+  return { ...result, dueFound: docs.length };
 }
 
 /** Manual retry: re-queue a failed (or exhausted) scheduled email for immediate send. */

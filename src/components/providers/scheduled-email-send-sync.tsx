@@ -14,10 +14,11 @@ import {
 
 /** Demo: quick fallback polling for due sends. */
 const DEMO_POLL_MS = 5_000;
-/** Live: nudge the worker / member flush without hammering the web tier. */
-const LIVE_POLL_MS = 60_000;
+/** Live: poll faster while there is due/pending mail so prod does not wait a full minute. */
+const LIVE_POLL_MS = 20_000;
+const LIVE_POLL_IDLE_MS = 60_000;
 /** Ignore visibility/effect re-fires that would stack process-due calls. */
-const MIN_RUN_GAP_MS = 20_000;
+const MIN_RUN_GAP_MS = 12_000;
 const PROCESS_DUE_LOCK = "nova-crm-process-due";
 
 /**
@@ -111,6 +112,7 @@ export function ScheduledEmailSendSync() {
         let failed = 0;
         let queued = false;
         let busy = false;
+        let dueFound = 0;
         let anyOk = false;
 
         for (const owner of owners) {
@@ -125,11 +127,23 @@ export function ScheduledEmailSendSync() {
             queued?: boolean;
             sent?: number;
             failed?: number;
+            dueFound?: number;
+            error?: string;
           } | null;
+          if (!processRes.ok) {
+            if (processRes.status === 404) {
+              toast.error("Scheduled send is not available on this deploy", {
+                description: "Redeploy web with the latest scheduled-email fix.",
+              });
+              return;
+            }
+            continue;
+          }
           if (!processData?.ok) continue;
           anyOk = true;
           sent += processData.sent ?? 0;
           failed += processData.failed ?? 0;
+          dueFound += processData.dueFound ?? 0;
           if (processData.queued) queued = true;
           if (processData.busy) busy = true;
         }
@@ -148,6 +162,12 @@ export function ScheduledEmailSendSync() {
               : `${failed} scheduled emails failed`,
             { description: "Check Inbox → Scheduled for the error details." },
           );
+        } else if (dueFound > 0 && sent === 0 && !busy) {
+          toast.message("Due email still waiting to send", {
+            description: queued
+              ? "Queued for the background worker — check Inbox → Scheduled in a minute."
+              : "Open Inbox → Scheduled for status, or confirm worker/cron is running on the server.",
+          });
         }
 
         // Refresh even when busy/queued — worker may have already moved rows.
@@ -215,8 +235,15 @@ export function ScheduledEmailSendSync() {
 
     if (!emailServerHydrated) return;
 
-    const bootstrapTimer = window.setTimeout(() => void runLive(), 5_000);
-    const id = window.setInterval(() => void runLive(), LIVE_POLL_MS);
+    const hasDuePending = scheduled.some((s) => {
+      if (s.status !== "pending" && s.status !== "processing") return false;
+      const due = new Date(s.scheduledAt).getTime();
+      return !Number.isNaN(due) && due <= Date.now() + 60_000;
+    });
+    const pollMs = hasDuePending ? LIVE_POLL_MS : LIVE_POLL_IDLE_MS;
+
+    const bootstrapTimer = window.setTimeout(() => void runLive(), 3_000);
+    const id = window.setInterval(() => void runLive(), pollMs);
     const onVisible = () => {
       if (document.visibilityState === "visible") void runLive();
     };
@@ -233,6 +260,7 @@ export function ScheduledEmailSendSync() {
     emailServerHydrated,
     processDueScheduledLocal,
     runLive,
+    scheduled,
   ]);
 
   // Flush exactly when the nearest pending row becomes due (demo + live).
@@ -255,8 +283,8 @@ export function ScheduledEmailSendSync() {
     return () => window.clearTimeout(id);
   }, [isDemo, scheduled, processDueScheduledLocal, runLive]);
 
+  // Mirror server delivery onto followups when the scheduled list updates (demo + live).
   React.useEffect(() => {
-    if (!isDemo) return;
     for (const item of scheduled) {
       if (!item.followupId || item.status === "pending" || item.status === "processing") continue;
       if (syncedDemoStatusRef.current.get(item.id) === item.status) continue;
@@ -266,7 +294,7 @@ export function ScheduledEmailSendSync() {
         const sentAt = item.sentAt ?? new Date().toISOString();
         syncFollowupDelivery(item.followupId, { deliveryStatus: "sent", sentAt });
         setFollowupCompleted(item.followupId, true);
-        toast.success("Scheduled email sent (demo)");
+        if (isDemo) toast.success("Scheduled email sent (demo)");
       } else if (item.status === "failed") {
         syncFollowupDelivery(item.followupId, {
           deliveryStatus: "failed",

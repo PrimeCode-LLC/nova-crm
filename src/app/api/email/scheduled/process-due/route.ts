@@ -57,6 +57,7 @@ export async function POST(req: Request) {
       sent: 0,
       failed: 0,
       skipped: 0,
+      dueFound: 0,
     });
   }
 

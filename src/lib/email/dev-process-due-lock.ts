@@ -11,6 +11,7 @@ type ProcessDueResult = {
   sent: number;
   failed: number;
   skipped: number;
+  dueFound?: number;
 };
 
 const GLOBAL_LOCK = "__process_due_global__";

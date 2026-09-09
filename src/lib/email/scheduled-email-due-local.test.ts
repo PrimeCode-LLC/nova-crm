@@ -118,6 +118,7 @@ describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", (
     });
 
     expect(result.sent).toBeGreaterThanOrEqual(1);
+    expect(result.dueFound).toBeGreaterThanOrEqual(1);
     expect(sendOutboundMailServer).toHaveBeenCalled();
 
     const docs = await queryDocuments({
