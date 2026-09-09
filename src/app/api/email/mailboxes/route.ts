@@ -271,13 +271,23 @@ export async function DELETE(req: Request) {
   const deletedIds: string[] = [];
   const errors: Array<{ mailboxId: string; error: string }> = [];
 
-  for (const mailboxId of mailboxIds) {
-    const result = await deleteMailboxForMemberServer({ organizationId, uid, mailboxId });
-    if ("error" in result) {
-      errors.push({ mailboxId, error: result.error });
-      continue;
+  /** Parallel deletes stay under typical request time for large cleanup sweeps. */
+  const CONCURRENCY = 8;
+  for (let i = 0; i < mailboxIds.length; i += CONCURRENCY) {
+    const slice = mailboxIds.slice(i, i + CONCURRENCY);
+    const results = await Promise.all(
+      slice.map(async (mailboxId) => {
+        const result = await deleteMailboxForMemberServer({ organizationId, uid, mailboxId });
+        return { mailboxId, result };
+      }),
+    );
+    for (const { mailboxId, result } of results) {
+      if ("error" in result) {
+        errors.push({ mailboxId, error: result.error });
+        continue;
+      }
+      deletedIds.push(mailboxId);
     }
-    deletedIds.push(mailboxId);
   }
 
   if (deletedIds.length === 0) {

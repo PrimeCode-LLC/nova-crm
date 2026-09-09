@@ -433,20 +433,24 @@ export const useEmailAccountStore = create<EmailAccountStore>()((set, get) => ({
         }
         const deleted = Array.isArray(data.deletedIds)
           ? data.deletedIds.filter((id): id is string => typeof id === "string" && id.length > 0)
-          : data.ok
-            ? chunk
-            : [];
-        succeeded.push(...deleted);
+          : [];
+        if (deleted.length > 0) {
+          succeeded.push(...deleted);
+          // Drop confirmed deletes immediately so a concurrent auto-save cannot upsert them back.
+          applyLocalRemoval(deleted);
+        }
         if (!data.ok && data.error) lastError = data.error;
         else if (deleted.length < chunk.length && !lastError) {
           lastError = "Some mailboxes could not be deleted on the server.";
+        }
+        if (!res.ok && deleted.length === 0 && !lastError) {
+          lastError = `Delete failed (${res.status}).`;
         }
       } catch (e) {
         lastError = e instanceof Error ? e.message : "Network error";
       }
     }
 
-    applyLocalRemoval(succeeded);
     return {
       removed: succeeded.length,
       failed: unique.length - succeeded.length,

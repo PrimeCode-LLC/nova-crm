@@ -477,11 +477,16 @@ export function EmailInboxSettingsCard() {
       return;
     }
     setBulkDeleting(true);
+    // Abort any in-flight auto-save upserts — they would recreate deleted mailboxes.
+    suppressAutoPersistRef.current = true;
+    persistGenerationRef.current += 1;
     try {
       const result = await removeMailboxes(ids);
       setBulkDeleteOpen(false);
       clearMailboxSelection();
       setOpenValues((prev) => prev.filter((id) => !ids.includes(id)));
+      // Removals are not "edits" — reset baseline so debounce does not PATCH survivors as dirty.
+      syncPersistBaselineFromStore();
       if (result.removed > 0 && result.failed === 0) {
         toast.success(
           result.removed === 1
@@ -501,6 +506,7 @@ export function EmailInboxSettingsCard() {
       }
     } finally {
       setBulkDeleting(false);
+      suppressAutoPersistRef.current = false;
     }
   }
 
@@ -577,14 +583,29 @@ export function EmailInboxSettingsCard() {
    */
   const persistBaselineRef = React.useRef<string | null>(null);
   const persistDirtyRef = React.useRef(false);
+  /** Bumped to abort in-flight PATCH loops (e.g. bulk delete must not be undone by upsert). */
+  const persistGenerationRef = React.useRef(0);
+  /** While true, debounce/pagehide must not start a new auto-save. */
+  const suppressAutoPersistRef = React.useRef(false);
   const latestPersistKeyRef = React.useRef(persistKey);
   latestPersistKeyRef.current = persistKey;
+
+  function syncPersistBaselineFromStore() {
+    persistBaselineRef.current = JSON.stringify(
+      useEmailAccountStore
+        .getState()
+        .mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId)),
+    );
+    persistDirtyRef.current = false;
+    latestPersistKeyRef.current = persistBaselineRef.current;
+  }
 
   /**
    * Persists owned mailboxes to the server (skips boxes assigned from teammates).
    * @param manual - when true, shows success/error toasts and surfaces “not ready” as an error instead of no-op.
    */
   const persistMailboxesRemote = React.useCallback(async (manual?: boolean): Promise<boolean> => {
+    const generation = persistGenerationRef.current;
     const s = useEmailAccountStore.getState();
     if (!s.emailServerSyncEnabled || !s.emailServerHydrated) {
       if (manual) {
@@ -614,6 +635,13 @@ export function EmailInboxSettingsCard() {
     setSavingRemote(true);
     try {
       for (const mb of all) {
+        // Bulk delete (or a newer save) aborted this run — never recreate removed boxes.
+        if (generation !== persistGenerationRef.current) return false;
+        const stillPresent = useEmailAccountStore
+          .getState()
+          .mailboxes.some((m) => m.id === mb.id && !isAssignedMailbox(m, currentUserId));
+        if (!stillPresent) continue;
+
         const res = await fetch("/api/email/mailboxes", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -646,6 +674,7 @@ export function EmailInboxSettingsCard() {
           return false;
         }
       }
+      if (generation !== persistGenerationRef.current) return false;
       persistBaselineRef.current = latestPersistKeyRef.current;
       persistDirtyRef.current = false;
       if (manual) {
@@ -705,10 +734,20 @@ export function EmailInboxSettingsCard() {
   /** Debounced persist of user edits only (never flush on every keystroke via effect cleanup). */
   React.useEffect(() => {
     if (!emailServerSyncEnabled || !emailServerHydrated) return;
+    if (suppressAutoPersistRef.current) return;
     if (!persistDirtyRef.current) return;
     if (persistBaselineRef.current !== null && persistKey === persistBaselineRef.current) return;
 
     const timer = window.setTimeout(() => {
+      // Re-check after debounce: transport health sync or bulk delete may have cleared dirty.
+      if (suppressAutoPersistRef.current) return;
+      if (!persistDirtyRef.current) return;
+      if (
+        persistBaselineRef.current !== null &&
+        latestPersistKeyRef.current === persistBaselineRef.current
+      ) {
+        return;
+      }
       void persistMailboxesRemote(false);
     }, 600);
 
@@ -721,6 +760,7 @@ export function EmailInboxSettingsCard() {
   React.useEffect(() => {
     if (!emailServerSyncEnabled || !emailServerHydrated) return;
     const flushIfDirty = () => {
+      if (suppressAutoPersistRef.current) return;
       if (!persistDirtyRef.current) return;
       void persistMailboxesRemote(false);
     };
@@ -798,12 +838,7 @@ export function EmailInboxSettingsCard() {
         // Server sync is not a user edit — refresh baseline so auto-save does not fire.
         if (changed) {
           queueMicrotask(() => {
-            persistBaselineRef.current = JSON.stringify(
-              useEmailAccountStore
-                .getState()
-                .mailboxes.filter((m) => !isAssignedMailbox(m, currentUserId)),
-            );
-            persistDirtyRef.current = false;
+            syncPersistBaselineFromStore();
           });
         }
       })
