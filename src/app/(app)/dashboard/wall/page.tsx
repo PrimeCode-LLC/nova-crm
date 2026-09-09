@@ -31,6 +31,7 @@ import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
 import { applyOrgDashboardSummaryToWorkflowMetrics } from "@/lib/dashboard-summary-apply";
+import { canApplyOrgWideDashboardSummary } from "@/lib/dashboard-kpi-scope";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
 import { DEFAULT_DASHBOARD_WIDGETS } from "@/lib/dashboard-preferences";
 import { useWallPreferences } from "@/hooks/use-wall-preferences";
@@ -303,20 +304,33 @@ function DashboardWallPageInner() {
     [leads, followups, followupPlans, leadTasks, contacts, currentUserId, range, organizationTimezone],
   );
 
+  const orgWideDashboardScope = canApplyOrgWideDashboardSummary({
+    viewer,
+    previewRole: null,
+    channelScopeEmpty: true,
+    ownerScopeIsAll: true,
+  });
   const dashboardSummary = useOrgDashboardSummary({
     enabled: !isDemo && !workspaceLoading,
-    orgWideScope: true,
+    orgWideScope: orgWideDashboardScope,
   });
   const displayMetrics = React.useMemo(() => {
     const summary = dashboardSummary.summary;
-    if (!dashboardSummary.enabled || !summary) return metrics;
+    if (!dashboardSummary.enabled || !summary || !orgWideDashboardScope) return metrics;
     return applyOrgDashboardSummaryToWorkflowMetrics(
       metrics,
       summary,
       range,
       dashboardSummary.person,
     );
-  }, [metrics, dashboardSummary.enabled, dashboardSummary.summary, dashboardSummary.person, range]);
+  }, [
+    metrics,
+    dashboardSummary.enabled,
+    dashboardSummary.summary,
+    dashboardSummary.person,
+    orgWideDashboardScope,
+    range,
+  ]);
 
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;

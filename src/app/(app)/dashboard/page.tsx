@@ -24,6 +24,10 @@ import {
   applyOrgDashboardSummaryToWorkflowMetrics,
   summaryClosedRevenue,
 } from "@/lib/dashboard-summary-apply";
+import {
+  canApplyOrgWideDashboardSummary,
+  scopeDashboardEntitiesForKpiViewer,
+} from "@/lib/dashboard-kpi-scope";
 import { downloadDashboardKpiCsv } from "@/lib/dashboard-csv";
 import { CHANNEL_LIST, roleLabel } from "@/lib/constants";
 import { useEnabledBuiltinChannelKeys } from "@/hooks/use-channel-options";
@@ -175,6 +179,40 @@ export default function DashboardPage() {
     setTimeRange(rangeFromUrl);
   }, [rangeFromUrl]);
 
+  const viewer = React.useMemo(
+    () => (currentUserId ? getUserById(currentUserId) : undefined),
+    [currentUserId, getUserById],
+  );
+  const {
+    prefs,
+    setViewMode,
+    setPreviewRole,
+    exitPreview,
+    setWidget,
+    setAllWidgets,
+    setChannelFunnelVisible,
+    setAllChannelFunnelsVisible,
+    reset,
+  } = useDashboardPreferences(currentUserId || "anon");
+
+  /**
+   * Align KPI + list rows with hierarchy / preview role before channel·owner·range filters.
+   * Org-wide viewers keep full workspace arrays; preview-as-salesperson narrows to own scope.
+   */
+  const kpiScoped = React.useMemo(
+    () =>
+      scopeDashboardEntitiesForKpiViewer({
+        viewer,
+        previewRole: prefs.previewRole,
+        orgUsers: users,
+        leads,
+        deals,
+        followups,
+        leadTasks,
+      }),
+    [viewer, prefs.previewRole, users, leads, deals, followups, leadTasks],
+  );
+
   const ownerScopeDeps = React.useMemo(
     () => ({ currentUserId, users, getUserById, getOwnerDisplayName }),
     [currentUserId, users, getUserById, getOwnerDisplayName],
@@ -182,10 +220,10 @@ export default function DashboardPage() {
 
   const personOwnerOptions = React.useMemo(
     () =>
-      buildPersonOwnerOptions(leads, users, getUserById, getOwnerDisplayName, {
+      buildPersonOwnerOptions(kpiScoped.leads, users, getUserById, getOwnerDisplayName, {
         activeMemberIds: activeOrgMemberIds ?? undefined,
       }),
-    [leads, users, getUserById, getOwnerDisplayName, activeOrgMemberIds],
+    [kpiScoped.leads, users, getUserById, getOwnerDisplayName, activeOrgMemberIds],
   );
 
   const ownerFilterTriggerLabel = React.useMemo(
@@ -199,8 +237,11 @@ export default function DashboardPage() {
   }
 
   const channelScopedLeads = React.useMemo(
-    () => (channelScope.length ? leads.filter((l) => channelScope.includes(l.channel)) : leads),
-    [leads, channelScope],
+    () =>
+      channelScope.length
+        ? kpiScoped.leads.filter((l) => channelScope.includes(l.channel))
+        : kpiScoped.leads,
+    [kpiScoped.leads, channelScope],
   );
 
   const ownerScopedLeads = React.useMemo(
@@ -224,12 +265,16 @@ export default function DashboardPage() {
   );
 
   const ownerScopedDeals = React.useMemo(() => {
-    if (channelScope.length === 0 && ownerScope === "all-owners") return deals;
+    if (channelScope.length === 0 && ownerScope === "all-owners") {
+      return kpiScoped.deals;
+    }
     const ids = new Set(
-      filterLeadsByOwnerScope(channelScopedLeads.filter(isSalesLead), ownerScope, ownerScopeDeps).map((l) => l.id),
+      filterLeadsByOwnerScope(channelScopedLeads.filter(isSalesLead), ownerScope, ownerScopeDeps).map(
+        (l) => l.id,
+      ),
     );
-    return deals.filter((d) => ids.has(d.leadId));
-  }, [deals, channelScopedLeads, ownerScope, ownerScopeDeps, channelScope.length]);
+    return kpiScoped.deals.filter((d) => ids.has(d.leadId));
+  }, [kpiScoped.deals, channelScopedLeads, ownerScope, ownerScopeDeps, channelScope.length]);
 
   const scopedDeals = React.useMemo(
     () =>
@@ -260,16 +305,17 @@ export default function DashboardPage() {
   );
 
   const workflowFollowups = React.useMemo(
-    () => followups.filter((followup) => !followup.leadId || scopedLeadIds.has(followup.leadId)),
-    [followups, scopedLeadIds],
+    () =>
+      kpiScoped.followups.filter((followup) => !followup.leadId || scopedLeadIds.has(followup.leadId)),
+    [kpiScoped.followups, scopedLeadIds],
   );
   const workflowPlans = React.useMemo(
     () => followupPlans.filter((plan) => scopedLeadIds.has(plan.leadId)),
     [followupPlans, scopedLeadIds],
   );
   const workflowTasks = React.useMemo(
-    () => leadTasks.filter((task) => !task.leadId || scopedLeadIds.has(task.leadId)),
-    [leadTasks, scopedLeadIds],
+    () => kpiScoped.leadTasks.filter((task) => !task.leadId || scopedLeadIds.has(task.leadId)),
+    [kpiScoped.leadTasks, scopedLeadIds],
   );
   const workflowMetrics = React.useMemo(
     () =>
@@ -295,8 +341,17 @@ export default function DashboardPage() {
     ],
   );
 
-  /** Org-wide summary only (P0.6) — filtered views stay on live aggregation. */
-  const orgWideDashboardScope = channelScope.length === 0 && ownerScope === "all-owners";
+  /**
+   * Precomputed org summary only when filters are unscoped **and** the viewer
+   * (honoring preview-as-role) has tenant-wide CRM access. `all-owners` alone
+   * does not grant org-wide KPIs to members / team leads.
+   */
+  const orgWideDashboardScope = canApplyOrgWideDashboardSummary({
+    viewer,
+    previewRole: prefs.previewRole,
+    channelScopeEmpty: channelScope.length === 0,
+    ownerScopeIsAll: ownerScope === "all-owners",
+  });
   const dashboardSummary = useOrgDashboardSummary({
     enabled: !isDemo && !workspaceLoading,
     orgWideScope: orgWideDashboardScope,
@@ -332,14 +387,14 @@ export default function DashboardPage() {
   const demoLeadsForBrief = React.useMemo(() => {
     if (!isDemo) return undefined;
     const mode = responseTimeModeForOwnerScope(ownerScope, currentUserId);
-    return leads.filter(isSalesLead).map((l) => {
+    return kpiScoped.leads.filter(isSalesLead).map((l) => {
       const minutes = resolveLeadResponseTimeMinutes(l, emailResponseCtx, {
         mode,
         currentUserId,
       });
       return minutes != null ? { ...l, responseTimeMinutes: minutes } : l;
     });
-  }, [isDemo, leads, emailResponseCtx, ownerScope, currentUserId]);
+  }, [isDemo, kpiScoped.leads, emailResponseCtx, ownerScope, currentUserId]);
   const pipelineMetrics = React.useMemo(
     () => computeOpenPipelineMetrics(scopedSalesLeads, scopedDeals),
     [scopedSalesLeads, scopedDeals],
@@ -406,10 +461,6 @@ export default function DashboardPage() {
   const closedValue = summaryClosed?.closedRevenue ?? liveClosedValue;
   const wonDealCount = summaryClosed?.wonDealCount ?? liveWonDealCount;
 
-  const viewer = React.useMemo(
-    () => (currentUserId ? getUserById(currentUserId) : undefined),
-    [currentUserId, getUserById],
-  );
   const permissionSubject = React.useMemo(
     () => ({
       roleId: viewer?.roleId ?? navAccess.roleId ?? "salesperson",
@@ -423,17 +474,6 @@ export default function DashboardPage() {
   const canCustomizeLayout = showOwnerOpsDashboard(viewer, viewerOrgRole, permissionSubject);
   const canExportDashboard = canAction(permissionSubject, "dashboard.export");
   const canViewOutreachCampaigns = can(permissionSubject, "email_outreach", "view");
-  const {
-    prefs,
-    setViewMode,
-    setPreviewRole,
-    exitPreview,
-    setWidget,
-    setAllWidgets,
-    setChannelFunnelVisible,
-    setAllChannelFunnelsVisible,
-    reset,
-  } = useDashboardPreferences(currentUserId || "anon");
 
   const effectiveRole = resolveEffectiveDashboardRole(viewer?.roleId, prefs);
   const scopedOwnerId = ownerScope.startsWith(OWNER_SCOPE_PREFIX)
