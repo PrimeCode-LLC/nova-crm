@@ -4,12 +4,13 @@ import type { Deal, Followup, Lead, LeadTask, User } from "@/lib/types";
 
 function user(partial: Partial<User> & Pick<User, "id" | "roleId">): User {
   return {
-    name: partial.name ?? partial.id,
     email: `${partial.id}@example.com`,
+    displayName: partial.id,
     status: "active",
     organizationId: "org_1",
+    createdAt: "2026-01-01T00:00:00.000Z",
     ...partial,
-  } as User;
+  };
 }
 
 function prospect(partial: Partial<Lead> & Pick<Lead, "id">): Lead {
@@ -21,7 +22,7 @@ function prospect(partial: Partial<Lead> & Pick<Lead, "id">): Lead {
     stage: "new",
     temperature: "cold",
     priority: "medium",
-    ownerId: partial.ownerId ?? "",
+    ownerId: "",
     contactName: "P",
     companyName: "Co",
     intakeKind: "prospect",
@@ -46,8 +47,8 @@ describe("buildTeamCommandRows prospect attribution", () => {
     const rows = buildTeamCommandRows({
       ...empty,
       users: [
-        user({ id: "dir_1", roleId: "director", name: "Director" }),
-        user({ id: "rep_1", roleId: "sdr", name: "Rep" }),
+        user({ id: "dir_1", roleId: "director", displayName: "Director" }),
+        user({ id: "rep_1", roleId: "closer", displayName: "Rep" }),
       ],
       leads: [
         prospect({
@@ -65,8 +66,8 @@ describe("buildTeamCommandRows prospect attribution", () => {
     const rows = buildTeamCommandRows({
       ...empty,
       users: [
-        user({ id: "dir_1", roleId: "director", name: "Director" }),
-        user({ id: "rep_1", roleId: "sdr", name: "Rep" }),
+        user({ id: "dir_1", roleId: "director", displayName: "Director" }),
+        user({ id: "rep_1", roleId: "closer", displayName: "Rep" }),
       ],
       leads: [
         prospect({
@@ -87,7 +88,7 @@ describe("buildTeamCommandRows prospect attribution", () => {
   it("still credits createdById / prospectOwnerId for non-directors", () => {
     const rows = buildTeamCommandRows({
       ...empty,
-      users: [user({ id: "rep_1", roleId: "sdr", name: "Rep" })],
+      users: [user({ id: "rep_1", roleId: "closer", displayName: "Rep" })],
       leads: [
         prospect({
           id: "p1",
