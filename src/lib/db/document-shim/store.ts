@@ -19,7 +19,12 @@ import {
   resolveWriteData,
   serializePayloadValue,
 } from "@/lib/db/document-shim/field-values";
-import { extractOrganizationId, parsePath } from "@/lib/db/document-shim/path";
+import {
+  extractOrganizationId,
+  isImmediateCollectionDocument,
+  parsePath,
+  pathMatchesCollectionGroup,
+} from "@/lib/db/document-shim/path";
 import { deserializePayload } from "@/lib/db/document-shim/timestamp";
 
 export type StoredDoc = {
@@ -47,14 +52,6 @@ export type QuerySpec = {
   limit?: number;
   startAfter?: unknown[];
 };
-
-function pathHasCollectionGroup(path: string, groupName: string): boolean {
-  const segments = path.split("/").filter(Boolean);
-  for (let i = 2; i < segments.length; i += 2) {
-    if (segments[i] === groupName) return true;
-  }
-  return false;
-}
 
 function matchesFilter(
   payload: Record<string, unknown>,
@@ -291,6 +288,21 @@ export async function deleteDocument(path: string): Promise<void> {
   );
 }
 
+/** Delete a document and every nested path under it (`path` and `path/...`). */
+export async function deleteDocumentSubtree(path: string): Promise<number> {
+  if (!isDatabaseConfigured()) return 0;
+  const prefix = path.replace(/\/+$/, "");
+  if (!prefix) return 0;
+  const result = await withRlsBypass((tx) =>
+    tx.pgDocument.deleteMany({
+      where: {
+        OR: [{ path: prefix }, { path: { startsWith: `${prefix}/` } }],
+      },
+    }),
+  );
+  return result.count;
+}
+
 export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
   if (!isDatabaseConfigured()) return [];
 
@@ -318,11 +330,14 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
 
   if (spec.collectionGroup) {
     docs = docs.filter((d) =>
-      pathHasCollectionGroup(d.path, spec.collectionGroup!),
+      pathMatchesCollectionGroup(d.path, spec.collectionGroup!),
     );
     if (spec.pathPrefix) {
       docs = docs.filter((d) => d.path.startsWith(spec.pathPrefix!));
     }
+  } else if (spec.pathPrefix) {
+    // Match Firestore collection queries: only immediate docs under the collection path.
+    docs = docs.filter((d) => isImmediateCollectionDocument(d.path, spec.pathPrefix!));
   }
 
   for (const filter of spec.filters) {

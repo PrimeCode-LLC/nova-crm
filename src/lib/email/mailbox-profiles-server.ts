@@ -1,4 +1,5 @@
 import { getAdminDb } from "@/lib/db/document-access/admin";
+import { deleteDocumentSubtree } from "@/lib/db/document-shim/store";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { EmailMailboxSettings, MailboxConnectionType } from "@/lib/email-account-types";
 import {
@@ -578,7 +579,8 @@ export async function deleteMailboxForMemberServer(input: {
 }): Promise<{ ok: true } | { error: string }> {
   const ref = mailboxProfileRef(input.organizationId, input.uid, input.mailboxId);
   if (!ref) return { error: "Database not configured" };
-  await ref.delete();
+  // Profile + nested sendStats / inboxSync (and any other subdocs under this mailbox).
+  await deleteDocumentSubtree(ref.path);
   await deleteMailboxSecretsServer(input);
   return { ok: true };
 }
