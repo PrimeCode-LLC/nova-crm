@@ -1,0 +1,940 @@
+# Firestore security rules archive
+
+**Status:** Historical archive only. These rules are **not** live, are **not** deployed, and must **not** be restored as `firestore.rules` (CI forbids that path).
+
+This file is a verbatim record of the last committed Firestore security rules, captured so the access model is still readable after Firebase was removed.
+
+| Item | Value |
+|------|--------|
+| Original path | `firestore.rules` |
+| Last present in | parent of `5187955` (`git show 5187955^:firestore.rules`) |
+| Removed in | `5187955` — *Refactor project for Firebase decommissioning and Postgres integration* (19 Aug 2026) |
+| Rules version | `2` |
+| Service | `cloud.firestore` |
+| Storage / RTDB rules | None — this repo never had `storage.rules` or `database.rules.json` |
+| `firebase.json` | Pointed at `firestore.rules` + `firestore.indexes.json` + Cloud Functions only |
+
+Replacement in the current app: Postgres RLS (`organization_id`) plus application RBAC in `src/lib/permissions/`. That is not a 1:1 port of every `match` block below.
+
+---
+
+## Tenant helpers (how access was decided)
+
+- **`signedIn()`** — `request.auth != null`
+- **`candidateOrgId()`** — user doc `organizationId`, else JWT claim
+- **`hasActiveTenantAccess()`** — signed in; org id present; user status `active` or `pip`; membership exists and is `active`; org exists and status is `trial` or `active`
+- **`callerOrgId()` / `callerOrgRole()`** — only when tenant access is active; role comes from the membership doc, not the user doc
+- **`isOrgAtLeast(role)`** — `member` < `manager` < `admin` < `owner`
+- **`inCallerOrg` / `isCreatingInOwnOrg` / `tenantUnchanged`** — document `organizationId` must match the caller and cannot change on update
+- **`crmTenantReadAll()`** — org admin+, super-admin, or workspace `roleId == director`
+- **CRM ownership** — owner, reporting-tree managers (`managerId` / `managerAncestorIds` / denormalized `ownerManagerIds`), prospect assignees, shared co-owners
+- **Admin SDK** bypassed these rules entirely (server-only collections used `allow read, write: if false`)
+
+---
+
+## Collection index
+
+Client access as encoded in the last rules. "Server-only" means no client read or write (`if false`).
+
+### Identity and permissions
+
+| Path | Client access |
+|------|----------------|
+| `/users/{userId}` | Read: self, or same-org user. Create: self. Update: self, but **cannot** change `organizationId`, `orgRole`, `roleId`, `membershipPendingOrgId`, `isSuperAdmin`, `featureGrants`. Delete: denied. |
+| `/computedPermissions/{userId}` | Read: self. Write: denied (server-only). |
+
+### CRM records (tenant + ownership / hierarchy)
+
+| Path | Get | List | Create | Update | Delete |
+|------|-----|------|--------|--------|--------|
+| `/leads/{id}` | `canReadLead` (owner, managers, prospect assignee/owner/hierarchy, shared co-owner, or tenant-read-all) | `canListLead` (no extra `get()` hierarchy; uses `ownerManagerIds`) | own org | own org; `prospectSourceId` locked unless admin | manager+ |
+| `/notes/{id}` | author, lead-owner tree, or tenant-read-all | `canListNote` | tenant write | tenant write | tenant write |
+| `/followups/{id}` | `canReadFollowupOrPlan` | `canListCrmOwned` | own org | own org, tenant unchanged | elevated, row owner, or parent-lead owner |
+| `/followupPlans/{id}` | same as followups | same | same | same | same |
+| `/leadTasks/{id}` | participant, elevated, or manager of assignee/creator | participant or elevated (list skips hierarchy `get()`) | own org + `createdById` = self | participant or elevated | participant or elevated |
+| `/touchpoints/{id}` | lead-owner tree | `canListByLeadOwner` | tenant write | tenant write | tenant write |
+| `/timelineEvents/{id}` | lead-owner tree | `canListByLeadOwner` | tenant write | tenant write | tenant write |
+| `/orgActivityEvents/{id}` | tenant read | tenant read | own org | denied | denied |
+| `/accounts/{id}` | CRM owner tree | `canListCrmOwned` | tenant write | tenant write | tenant write |
+| `/contacts/{id}` | CRM owner tree | `canListCrmOwned` | tenant write | tenant write | tenant write |
+| `/deals/{id}` | CRM owner tree | `canListCrmOwned` | tenant write | tenant write | tenant write |
+| `/profiles/{id}` | CRM owner tree | `canListCrmOwned` | tenant write | tenant write | tenant write |
+
+### Org configuration and content
+
+| Path | Read | Write |
+|------|------|--------|
+| `/campaigns/{id}` | tenant | tenant + manager+ |
+| `/labels/{id}` | tenant | tenant |
+| `/buyerPersonas/{id}` | tenant | create own org; update tenant; delete if in org |
+| `/contentBrands/{id}` | tenant | same as personas |
+| `/contentItems/{id}` | tenant | same as personas |
+| `/contentCaptures/{id}` | tenant | same as personas |
+| `/contentPlans/{id}` | tenant | same as personas |
+| `/prospectingStrategies/{id}` | tenant | same as personas |
+| `/strategyAssignments/{id}` | tenant | same as personas |
+| `/departments/{id}` | tenant | tenant + admin+ |
+| `/permissionOverrides/{id}` | tenant | tenant + admin+ |
+| `/activityCounters/{id}` | get: activity user or their manager / tenant-read-all. list: `canListActivityRow`. | create own org; update tenant unchanged; delete admin+ |
+| `/orgDashboardSummaries/{orgId}` | get if tenant and `organizationId == orgId`; list if tenant | **denied** (server-only writes) |
+| `/activityRecords/{id}` | same pattern as activityCounters | same as activityCounters |
+| `/auditLog/{id}` | tenant + admin+ | create: tenant write; update/delete denied |
+
+### Chat and notifications
+
+| Path | Client access |
+|------|----------------|
+| `/workspaceChatChannels/{channelId}` | Read: public channel in org, or DM where caller is in `memberIds`. Create: public, or 2-member DM including self. Update: admin+ or creator; kind frozen. Delete: admin+. |
+| `/workspaceChatMessages/{messageId}` | Read/create if caller can access the parent channel; create requires `authorId == self`. Update/delete: author only. |
+| `/userNotifications/{id}` | Get: missing doc (idempotent create) or recipient. List/update/delete: recipient only. Update may change only `readAt` / `dismissedAt`. Create: any org member with required fields. |
+| `/workspaceChatReads/{readDocId}` | Read/create/update: own `userId` in org. Delete: denied. |
+
+### Organizations (nested)
+
+| Path | Client access |
+|------|----------------|
+| `/organizations/{orgId}` | Read own org. Write: **denied** (server-only). |
+| `/organizations/{orgId}/members/{memberUid}` | Read if in that org. Write: **denied**. |
+| `/organizations/{orgId}/invites/{inviteId}` | **Server-only** |
+| `/organizations/{orgId}/audit/{auditId}` | Read: org admin+. Write: **denied**. |
+| `/organizations/{orgId}/sendLedger/{dayKey}` | **Server-only** |
+
+### Server-only collections (`allow read, write: if false`)
+
+No client access. Admin SDK / API routes only.
+
+- `/errorLogs/{id}`
+- `/schedulingLinks/{id}`
+- `/meetings/{id}`
+- `/availabilitySchedules/{id}`
+- `/calendarDelegations/{id}`
+- `/calendarConnections/{id}`
+- `/ingestQueue/{id}`
+- `/importJobs/{id}`
+- `/importJobChunks/{id}`
+- `/importIdentityKeys/{id}`
+- `/scraperFeeds/{id}`
+- `/scraperRawItems/{id}`
+- `/platformAdmins/{id}`
+- `/extensionAuthCodes/{id}`
+- `/extensionSessions/{id}`
+- `/extensionAuthRateLimits/{id}`
+- `/extensionFindings/{id}`
+- `/prospectDrafts/{id}`
+- `/prospectDraftSources/{id}`
+- `/prospectDraftLocks/{id}`
+- `/prospectDraftReservations/{id}`
+- `/mailTrackingMessages/{id}`
+
+---
+
+## Complete rules source
+
+Verbatim copy of the last `firestore.rules`. Do not treat this as something to deploy.
+
+```
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ───────────────────────────── Helpers ─────────────────────────────
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function userDoc() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function candidateOrgId() {
+      return signedIn()
+        ? userDoc().get(
+            'organizationId',
+            request.auth.token.get('organizationId', null)
+          )
+        : null;
+    }
+
+    function callerMembership() {
+      return get(
+        /databases/$(database)/documents/organizations/$(candidateOrgId())/members/$(request.auth.uid)
+      ).data;
+    }
+
+    function callerOrganization() {
+      return get(
+        /databases/$(database)/documents/organizations/$(candidateOrgId())
+      ).data;
+    }
+
+    /** Tenant access is live: stale user fields or claims cannot bypass disable/suspension. */
+    function hasActiveTenantAccess() {
+      let orgId = candidateOrgId();
+      return signedIn()
+        && orgId is string
+        && orgId.size() > 0
+        && userDoc().get('status', 'active') in ['active', 'pip']
+        && exists(
+          /databases/$(database)/documents/organizations/$(orgId)/members/$(request.auth.uid)
+        )
+        && callerMembership().get('status', '') == 'active'
+        && callerMembership().get('organizationId', '') == orgId
+        && exists(/databases/$(database)/documents/organizations/$(orgId))
+        && callerOrganization().get('status', 'trial') in ['trial', 'active'];
+    }
+
+    function callerOrgId() {
+      return hasActiveTenantAccess() ? candidateOrgId() : null;
+    }
+
+    function callerOrgRole() {
+      return hasActiveTenantAccess()
+        ? callerMembership().get('role', null)
+        : null;
+    }
+
+    function isOrgRole(role) {
+      return callerOrgRole() == role;
+    }
+
+    function isOrgAtLeast(role) {
+      let r = callerOrgRole();
+      return role == 'member'
+        ? r in ['owner', 'admin', 'manager', 'member']
+        : role == 'manager'
+          ? r in ['owner', 'admin', 'manager']
+          : role == 'admin'
+            ? r in ['owner', 'admin']
+            : r == 'owner';
+    }
+
+    /** True when the doc lives in the caller's tenant. */
+    function inCallerOrg(data) {
+      return data.organizationId != null
+        && data.organizationId == callerOrgId();
+    }
+
+    /** Used on writes — the *new* doc must declare the caller's tenant and not change it. */
+    function isCreatingInOwnOrg() {
+      return request.resource.data.organizationId == callerOrgId();
+    }
+
+    function tenantUnchanged() {
+      return request.resource.data.organizationId == resource.data.organizationId;
+    }
+
+    // ───────────────────────────── Users ─────────────────────────────
+    // Users can read members in their own tenant (so /admin/team can list).
+    // Users can read/write their own user doc, but they CANNOT change their
+    // own organizationId, orgRole, isSuperAdmin, roleId — those are
+    // server-only fields. Membership in another org is impossible.
+
+    match /users/{userId} {
+      allow read: if signedIn() && (
+        isSelf(userId)
+        || (resource.data.organizationId == callerOrgId() && resource.data.organizationId != null)
+      );
+
+      allow create: if isSelf(userId);
+
+      allow update: if isSelf(userId)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.orgRole == resource.data.orgRole
+        && request.resource.data.roleId == resource.data.roleId
+        && request.resource.data.get('membershipPendingOrgId', null)
+            == resource.data.get('membershipPendingOrgId', null)
+        && (!('isSuperAdmin' in request.resource.data)
+            || request.resource.data.isSuperAdmin == resource.data.get('isSuperAdmin', false))
+        && request.resource.data.get('featureGrants', []) == resource.data.get('featureGrants', []);
+
+      allow delete: if false;
+    }
+
+    match /computedPermissions/{userId} {
+      allow read: if isSelf(userId);
+      allow write: if false;
+    }
+
+    // ───────────────────────── Tenant-scoped CRM data ─────────────────────────
+    // Every doc must declare `organizationId == caller's org`. Reads are
+    // unconditional within the tenant (per-record ACLs are enforced in app
+    // code through `permissionOverrides`); writes additionally must not
+    // change the tenant id.
+
+    function tenantReadable() {
+      return hasActiveTenantAccess() && inCallerOrg(resource.data);
+    }
+
+    function tenantWritable() {
+      return hasActiveTenantAccess()
+        && (resource == null
+              ? isCreatingInOwnOrg()
+              : (inCallerOrg(resource.data) && tenantUnchanged()));
+    }
+
+    /** CRM read scope: workspace owner/admin, super-admin, or CRM director may load all org rows. */
+    function crmTenantReadAll() {
+      return isOrgAtLeast('admin')
+        || userDoc().get('isSuperAdmin', false)
+        || userDoc().get('roleId', '') == 'director';
+    }
+
+    function ownsCrmDoc(data) {
+      return data.get('ownerId', '') == request.auth.uid;
+    }
+
+    function rosterUser(uid) {
+      return get(/databases/$(database)/documents/users/$(uid)).data;
+    }
+
+    /** Org-chart parent may read CRM rows owned by a direct/indirect report (`managerAncestorIds` on owner user). */
+    function callerManagesCrmOwner(ownerId) {
+      return ownerId == request.auth.uid
+        || rosterUser(ownerId).get('managerId', '') == request.auth.uid
+        || request.auth.uid in rosterUser(ownerId).get('managerAncestorIds', []);
+    }
+
+    function canReadCrmOwnedBy(ownerId) {
+      return crmTenantReadAll()
+        || ownsCrmDoc({'ownerId': ownerId})
+        || callerManagesCrmOwner(ownerId);
+    }
+
+    /** Channel assignees may read prospects they were assigned to work. */
+    function isProspectAssignee(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && request.auth.uid in data.get('prospectAssigneeIds', []);
+    }
+
+    function isProspectOwner(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && (
+          data.get('prospectOwnerId', '') == request.auth.uid
+          || data.get('createdById', '') == request.auth.uid
+        );
+    }
+
+    function prospectCreatorId(data) {
+      let po = data.get('prospectOwnerId', '');
+      return po != ''
+        ? po
+        : data.get('createdById', data.get('ownerId', ''));
+    }
+
+    function isProspectHierarchyManager(data) {
+      return data.get('intakeKind', '') == 'prospect'
+        && callerManagesCrmOwner(prospectCreatorId(data));
+    }
+
+    function isSharedLeadCoOwner(data) {
+      return request.auth.uid in data.get('sharedOwnerIds', []);
+    }
+
+    /** Prospects use the same owner/reporting-tree scope as sales leads (no org-wide open pool). */
+    function canReadLead(data) {
+      return crmTenantReadAll()
+        || isProspectAssignee(data)
+        || isProspectOwner(data)
+        || isProspectHierarchyManager(data)
+        || isSharedLeadCoOwner(data)
+        || canReadCrmOwnedBy(data.get('ownerId', ''));
+    }
+
+    /**
+     * List/query path must not use resource-dependent get() (hierarchy).
+     * Those checks stay on `get` so managers can still open a report's doc by id.
+     * Client member queries constrain ownerId / assignee arrays to the signed-in user.
+     */
+    function canListLead(data) {
+      return crmTenantReadAll()
+        || isProspectAssignee(data)
+        || isProspectOwner(data)
+        || isSharedLeadCoOwner(data)
+        || ownsCrmDoc(data)
+        || request.auth.uid in data.get('ownerManagerIds', []);
+    }
+
+    function canListCrmOwned(data) {
+      return crmTenantReadAll()
+        || ownsCrmDoc(data)
+        || request.auth.uid in data.get('ownerManagerIds', []);
+    }
+
+    function canListByLeadOwner(data) {
+      return crmTenantReadAll()
+        || data.get('leadOwnerId', '') == request.auth.uid
+        || request.auth.uid in data.get('leadOwnerManagerIds', []);
+    }
+
+    function canListNote(data) {
+      return crmTenantReadAll()
+        || data.authorId == request.auth.uid
+        || data.get('leadOwnerId', '') == request.auth.uid
+        || request.auth.uid in data.get('leadOwnerManagerIds', []);
+    }
+
+    function canListActivityRow(data) {
+      return crmTenantReadAll()
+        || data.get('userId', '') == request.auth.uid
+        || request.auth.uid in data.get('userManagerIds', []);
+    }
+
+    function canReadCrmActivityUser(activityUserId) {
+      return crmTenantReadAll()
+        || activityUserId == request.auth.uid
+        || callerManagesCrmOwner(activityUserId);
+    }
+
+    function workspaceChatChannelDoc(channelId) {
+      return get(/databases/$(database)/documents/workspaceChatChannels/$(channelId)).data;
+    }
+
+    function canAccessWorkspaceChatChannel(ch) {
+      return ch.organizationId == callerOrgId()
+        && (
+          ch.get('kind', 'public') == 'public'
+          || (
+            ch.get('kind', '') == 'dm'
+            && ch.get('memberIds', []) is list
+            && request.auth.uid in ch.memberIds
+          )
+        );
+    }
+
+    /** Team tasks: only assignee, requester, or oversight roles may read/update. */
+    function leadTaskElevated() {
+      return isOrgAtLeast('admin')
+        || userDoc().get('roleId', '') == 'director'
+        || userDoc().get('isSuperAdmin', false) == true;
+    }
+
+    function leadTaskParticipant(data) {
+      return data.assigneeId == request.auth.uid
+        || data.createdById == request.auth.uid;
+    }
+
+    function leadTaskCanRead(data) {
+      return signedIn()
+        && inCallerOrg(data)
+        && (
+          crmTenantReadAll()
+          || leadTaskParticipant(data)
+          || leadTaskElevated()
+          || callerManagesCrmOwner(data.assigneeId)
+          || callerManagesCrmOwner(data.createdById)
+        );
+    }
+
+    function leadTaskCanList(data) {
+      return signedIn()
+        && inCallerOrg(data)
+        && (
+          crmTenantReadAll()
+          || leadTaskParticipant(data)
+          || leadTaskElevated()
+        );
+    }
+
+    /**
+     * Match `canMutateFollowup`: elevated roles, row owner, or lead owner may delete
+     * follow-ups / sequence plans (sales need to remove mistaken sequences).
+     */
+    function callerOwnsLead(leadId) {
+      return leadId is string
+        && leadId.size() > 0
+        && exists(/databases/$(database)/documents/leads/$(leadId))
+        && get(/databases/$(database)/documents/leads/$(leadId)).data.get('ownerId', '') == request.auth.uid
+        && get(/databases/$(database)/documents/leads/$(leadId)).data.get('organizationId', '') == callerOrgId();
+    }
+
+    function canDeleteFollowupOrPlan(data) {
+      return isOrgAtLeast('admin')
+        || userDoc().get('isSuperAdmin', false) == true
+        || userDoc().get('roleId', '') == 'director'
+        || ownsCrmDoc(data)
+        || callerOwnsLead(data.get('leadId', ''));
+    }
+
+    /**
+     * Single-doc get for follow-ups / plans. Must cover everyone who can already
+     * list via `ownerManagerIds`, plus teammates who can read the parent lead
+     * (shared co-owners, prospect assignees). Live CRM snapshots omit
+     * `messageBody` and re-fetch by id before schedule/send — a stricter get
+     * than list caused "Missing or insufficient permissions" on bulk schedule.
+     */
+    function canReadFollowupOrPlan(data) {
+      return canReadCrmOwnedBy(data.get('ownerId', ''))
+        || request.auth.uid in data.get('ownerManagerIds', [])
+        || (
+          data.get('leadId', '') is string
+          && data.get('leadId', '').size() > 0
+          && exists(/databases/$(database)/documents/leads/$(data.get('leadId', '')))
+          && canReadLead(get(/databases/$(database)/documents/leads/$(data.get('leadId', ''))).data)
+        );
+    }
+
+    match /leads/{id} {
+      allow get: if tenantReadable() && canReadLead(resource.data);
+      allow list: if tenantReadable() && canListLead(resource.data);
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && (
+          !('prospectSourceId' in resource.data)
+          || resource.data.get('prospectSourceId', '') == ''
+          || isOrgAtLeast('admin')
+        );
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('manager');
+    }
+
+    match /notes/{id} {
+      allow get: if tenantReadable()
+        && (
+          crmTenantReadAll()
+          || resource.data.authorId == request.auth.uid
+          || canReadCrmOwnedBy(resource.data.get('leadOwnerId', ''))
+        );
+      allow list: if tenantReadable() && canListNote(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /followups/{id} {
+      allow get: if tenantReadable() && canReadFollowupOrPlan(resource.data);
+      allow list: if tenantReadable() && canListCrmOwned(resource.data);
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && canDeleteFollowupOrPlan(resource.data);
+    }
+
+    match /followupPlans/{id} {
+      allow get: if tenantReadable() && canReadFollowupOrPlan(resource.data);
+      allow list: if tenantReadable() && canListCrmOwned(resource.data);
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && canDeleteFollowupOrPlan(resource.data);
+    }
+
+    match /leadTasks/{id} {
+      allow get: if leadTaskCanRead(resource.data);
+      allow list: if leadTaskCanList(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.createdById == request.auth.uid;
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && (leadTaskParticipant(resource.data) || leadTaskElevated());
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && (leadTaskParticipant(resource.data) || leadTaskElevated());
+    }
+
+    match /touchpoints/{id} {
+      allow get: if tenantReadable()
+        && canReadCrmOwnedBy(resource.data.get('leadOwnerId', ''));
+      allow list: if tenantReadable() && canListByLeadOwner(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /timelineEvents/{id} {
+      allow get: if tenantReadable()
+        && canReadCrmOwnedBy(resource.data.get('leadOwnerId', ''));
+      allow list: if tenantReadable() && canListByLeadOwner(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /orgActivityEvents/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update, delete: if false;
+    }
+
+    match /accounts/{id} {
+      allow get: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow list: if tenantReadable() && canListCrmOwned(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /contacts/{id} {
+      allow get: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow list: if tenantReadable() && canListCrmOwned(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /deals/{id} {
+      allow get: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow list: if tenantReadable() && canListCrmOwned(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /profiles/{id} {
+      allow get: if tenantReadable() && canReadCrmOwnedBy(resource.data.get('ownerId', ''));
+      allow list: if tenantReadable() && canListCrmOwned(resource.data);
+      allow write: if tenantWritable();
+    }
+
+    match /campaigns/{id} {
+      allow read: if tenantReadable() && inCallerOrg(resource.data);
+      allow write: if tenantWritable() && isOrgAtLeast('manager');
+    }
+
+    match /labels/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable();
+    }
+
+    match /buyerPersonas/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    // Content calendar (brands, items, captures, plans) — tenant-scoped like buyerPersonas.
+    match /contentBrands/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /contentItems/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /contentCaptures/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /contentPlans/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /prospectingStrategies/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /strategyAssignments/{id} {
+      allow read: if tenantReadable();
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if tenantWritable();
+      allow delete: if signedIn() && inCallerOrg(resource.data);
+    }
+
+    match /departments/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable() && isOrgAtLeast('admin');
+    }
+
+    match /permissionOverrides/{id} {
+      allow read: if tenantReadable();
+      allow write: if tenantWritable() && isOrgAtLeast('admin');
+    }
+
+    match /activityCounters/{id} {
+      allow get: if tenantReadable() && canReadCrmActivityUser(resource.data.get('userId', ''));
+      allow list: if tenantReadable() && canListActivityRow(resource.data);
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
+    }
+
+    // Precomputed org dashboard KPIs (Phase 0). Doc id === organizationId.
+    // Writes are Admin SDK / server only so clients cannot forge metrics.
+    match /orgDashboardSummaries/{orgId} {
+      allow get: if tenantReadable()
+        && inCallerOrg(resource.data)
+        && resource.data.organizationId == orgId;
+      allow list: if tenantReadable() && inCallerOrg(resource.data);
+      allow create, update, delete: if false;
+    }
+
+    match /activityRecords/{id} {
+      allow get: if tenantReadable() && canReadCrmActivityUser(resource.data.get('userId', ''));
+      allow list: if tenantReadable() && canListActivityRow(resource.data);
+      allow create: if signedIn() && isCreatingInOwnOrg();
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId;
+      allow delete: if signedIn() && inCallerOrg(resource.data) && isOrgAtLeast('admin');
+    }
+
+    match /auditLog/{id} {
+      allow read: if tenantReadable() && isOrgAtLeast('admin');
+      allow create: if tenantWritable();
+      allow update, delete: if false;
+    }
+
+    // Error logs — Admin SDK only (POST/GET via /api/org/error-logs).
+    match /errorLogs/{id} {
+      allow read, write: if false;
+    }
+
+    // Scheduling module — server (Admin SDK) only; block direct client access.
+    match /schedulingLinks/{id} {
+      allow read, write: if false;
+    }
+    match /meetings/{id} {
+      allow read, write: if false;
+    }
+    match /availabilitySchedules/{id} {
+      allow read, write: if false;
+    }
+    match /calendarDelegations/{id} {
+      allow read, write: if false;
+    }
+    match /calendarConnections/{id} {
+      allow read, write: if false;
+    }
+
+    match /workspaceChatChannels/{channelId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && canAccessWorkspaceChatChannel(resource.data);
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && (
+          request.resource.data.kind == 'public'
+          || (
+            request.resource.data.kind == 'dm'
+            && request.resource.data.memberIds is list
+            && request.resource.data.memberIds.size() == 2
+            && request.auth.uid in request.resource.data.memberIds
+          )
+        );
+
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.kind == resource.data.kind
+        && (
+          isOrgAtLeast('admin')
+          || resource.data.createdById == request.auth.uid
+        );
+
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && isOrgAtLeast('admin');
+    }
+
+    match /workspaceChatMessages/{messageId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && exists(/databases/$(database)/documents/workspaceChatChannels/$(resource.data.channelId))
+        && canAccessWorkspaceChatChannel(
+          workspaceChatChannelDoc(resource.data.channelId)
+        );
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.authorId == request.auth.uid
+        && exists(/databases/$(database)/documents/workspaceChatChannels/$(request.resource.data.channelId))
+        && canAccessWorkspaceChatChannel(
+          workspaceChatChannelDoc(request.resource.data.channelId)
+        );
+
+      allow update: if signedIn()
+        && inCallerOrg(resource.data)
+        && tenantUnchanged()
+        && resource.data.authorId == request.auth.uid
+        && request.resource.data.authorId == resource.data.authorId
+        && request.resource.data.channelId == resource.data.channelId;
+
+      allow delete: if signedIn()
+        && inCallerOrg(resource.data)
+        && resource.data.authorId == request.auth.uid;
+    }
+
+    /**
+     * Durable CRM notifications for a single recipient.
+     * Any org member may create (targeted handoffs); only the recipient may read/update/dismiss.
+     * `get` allows resource == null so idempotent creates can existence-check missing docs
+     * (FollowupDueNotificationSync / deterministic ids) without permission-denied.
+     */
+    match /userNotifications/{id} {
+      allow get: if signedIn()
+        && (
+          (resource == null && hasActiveTenantAccess())
+          || (
+            resource.data.organizationId == callerOrgId()
+            && resource.data.recipientId == request.auth.uid
+          )
+        );
+
+      allow list: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.recipientId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.recipientId is string
+        && request.resource.data.recipientId.size() > 0
+        && request.resource.data.kind is string
+        && request.resource.data.actorId is string
+        && request.resource.data.message is string
+        && request.resource.data.target is string
+        && request.resource.data.targetHref is string
+        && request.resource.data.createdAt is string;
+
+      allow update: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.recipientId == request.auth.uid
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.recipientId == resource.data.recipientId
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['readAt', 'dismissedAt']);
+
+      allow delete: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.recipientId == request.auth.uid;
+    }
+
+    /** Per-user read cursors for team chat (client merge-updates `channels` map). */
+    match /workspaceChatReads/{readDocId} {
+      allow read: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.userId == request.auth.uid;
+
+      allow create: if signedIn()
+        && request.resource.data.organizationId == callerOrgId()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.get('channels', {}) is map;
+
+      allow update: if signedIn()
+        && resource.data.organizationId == callerOrgId()
+        && resource.data.userId == request.auth.uid
+        && request.resource.data.organizationId == resource.data.organizationId
+        && request.resource.data.userId == resource.data.userId
+        && request.resource.data.get('channels', {}) is map;
+
+      allow delete: if false;
+    }
+
+    // Server-only collections: admin SDK bypasses rules; no client access.
+    match /ingestQueue/{id} {
+      allow read, write: if false;
+    }
+
+    match /importJobs/{id} {
+      allow read, write: if false;
+    }
+
+    match /importJobChunks/{id} {
+      allow read, write: if false;
+    }
+
+    match /importIdentityKeys/{id} {
+      allow read, write: if false;
+    }
+
+    match /scraperFeeds/{id} {
+      allow read, write: if false;
+    }
+
+    match /scraperRawItems/{id} {
+      allow read, write: if false;
+    }
+
+    match /organizations/{orgId} {
+      // Members of an org can READ their own org doc (for plan / seats UI).
+      // Admins / owners can update *settings* (name, billingEmail, etc.) — but
+      // writes that touch ownership / planId / status are server-only.
+      allow read: if signedIn() && orgId == callerOrgId();
+      allow write: if false;
+
+      match /members/{memberUid} {
+        // Anyone in the org can list members. Modifications are server-only.
+        allow read: if signedIn() && orgId == callerOrgId();
+        allow write: if false;
+      }
+
+      match /invites/{inviteId} {
+        // Invites are server-only — recipients verify them via the unsigned API.
+        allow read, write: if false;
+      }
+
+      match /audit/{auditId} {
+        allow read: if signedIn() && orgId == callerOrgId() && isOrgAtLeast('admin');
+        allow write: if false;
+      }
+
+      match /sendLedger/{dayKey} {
+        allow read, write: if false;
+      }
+    }
+
+    match /platformAdmins/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionAuthCodes/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionSessions/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionAuthRateLimits/{id} {
+      allow read, write: if false;
+    }
+
+    match /extensionFindings/{id} {
+      allow read, write: if false;
+    }
+
+    match /prospectDrafts/{id} {
+      allow read, write: if false;
+    }
+
+    match /prospectDraftSources/{id} {
+      allow read, write: if false;
+    }
+
+    // Installed-extension pointer only; manual and in-app drafts never acquire it.
+    match /prospectDraftLocks/{id} {
+      allow read, write: if false;
+    }
+
+    // Transactional identity/contact-limit reservations used during draft completion.
+    match /prospectDraftReservations/{id} {
+      allow read, write: if false;
+    }
+
+    // Server-only engagement records for CRM SMTP open/click tracking.
+    match /mailTrackingMessages/{id} {
+      allow read, write: if false;
+    }
+  }
+}
+```

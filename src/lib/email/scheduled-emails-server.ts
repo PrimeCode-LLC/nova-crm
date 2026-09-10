@@ -1,9 +1,9 @@
-import type { DocumentReference } from "@/lib/db/document-shim/shim-firestore";
+import type { DocumentReference, DocumentSnapshot } from "@/lib/db/document-shim/shim-firestore";
 import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
 import { coerceIsoInstant, coerceInstantMs } from "@/lib/db/document-shim/timestamp";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
-import type { ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
+import type { EmailMailboxSettings, ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
 import { isScheduledDocDue } from "@/lib/email/scheduled-due";
 import {
   parseOutboundAttachments,
@@ -11,7 +11,10 @@ import {
   type OutboundAttachmentPayload,
 } from "@/lib/email/outbound-attachments";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
-import { listMailboxesForMemberServer } from "@/lib/email/mailbox-profiles-server";
+import {
+  listMailboxesForMemberServer,
+  findMailboxHostInOrgServer,
+} from "@/lib/email/mailbox-profiles-server";
 import {
   assertMailboxDailySendQuotaServer,
   getMailboxLastSentAtServer,
@@ -871,8 +874,11 @@ async function sendScheduledDoc(
   const organizationId = String(data.organizationId ?? fromPath.organizationId ?? "");
   const uid = String(data.uid ?? fromPath.uid ?? "");
   const mailboxId = String(data.mailboxId ?? "");
+
+  console.log(`[scheduled-send] sendScheduledDoc starting for docId: "${docRef.id}", path: "${docRef.path}", org: "${organizationId}", docUid: "${uid}", mailboxId: "${mailboxId}", status: "${data.status}", scheduledAt: "${data.scheduledAt}"`);
+
   if (!organizationId || !uid || !mailboxId) {
-    // Already claimed — never leave the row stuck in processing forever.
+    console.error(`[scheduled-send] Permanent failure: scheduled doc "${docRef.id}" is missing organizationId ("${organizationId}"), uid ("${uid}"), or mailboxId ("${mailboxId}")`);
     return failScheduledDocPermanent(
       docRef,
       "Scheduled email is missing organization, owner, or mailbox.",
@@ -885,12 +891,14 @@ async function sendScheduledDoc(
     ? await shouldStopScheduledFollowupEmail(followupIdEarly)
     : undefined;
   if (followupIdEarly && initialStopReason) {
+    console.log(`[scheduled-send] Follow-up "${followupIdEarly}" is stopped (${initialStopReason}), cancelling doc "${docRef.id}"`);
     return cancelDueToFollowupStop(docRef, followupIdEarly, initialStopReason);
   }
   const leadId = typeof data.leadId === "string" ? data.leadId.trim() : "";
   if (leadId) {
     const contactPolicy = await assertLeadContactAllowedServer({ organizationId, leadId });
     if (!contactPolicy.ok) {
+      console.warn(`[scheduled-send] Lead contact policy disallowed for lead "${leadId}" on doc "${docRef.id}": ${contactPolicy.error}`);
       const now = new Date().toISOString();
       const cancelled = contactPolicy.status === 409;
       await docRef.update({
@@ -927,9 +935,40 @@ async function sendScheduledDoc(
     }
   }
 
-  const mailboxes = await listMailboxesForMemberServer({ organizationId, uid });
-  const mailbox = mailboxes.find((m) => m.id === mailboxId);
+  let mailboxOwnerUid =
+    (typeof data.mailboxOwnerUid === "string" && data.mailboxOwnerUid.trim()) ||
+    (typeof data.dataOwnerUid === "string" && data.dataOwnerUid.trim()) ||
+    uid;
+
+  console.log(`[scheduled-send] Resolving mailbox "${mailboxId}" starting with mailboxOwnerUid: "${mailboxOwnerUid}" (docUid: "${uid}")`);
+
+  let mailbox: EmailMailboxSettings | undefined;
+  if (mailboxOwnerUid !== uid) {
+    const hostMailboxes = await listMailboxesForMemberServer({ organizationId, uid: mailboxOwnerUid });
+    mailbox = hostMailboxes.find((m) => m.id === mailboxId);
+    if (mailbox) {
+      console.log(`[scheduled-send] Found mailbox in initial host mailbox list under hostUid "${mailboxOwnerUid}"`);
+    }
+  }
   if (!mailbox) {
+    const memberMailboxes = await listMailboxesForMemberServer({ organizationId, uid });
+    mailbox = memberMailboxes.find((m) => m.id === mailboxId);
+    if (mailbox) {
+      console.log(`[scheduled-send] Found mailbox in doc owner's list under uid "${uid}"`);
+    }
+  }
+  if (!mailbox) {
+    console.log(`[scheduled-send] Mailbox "${mailboxId}" not in member profile, searching org via findMailboxHostInOrgServer...`);
+    const hostInfo = await findMailboxHostInOrgServer({ organizationId, mailboxId });
+    if (hostInfo) {
+      mailbox = hostInfo.mailbox;
+      mailboxOwnerUid = hostInfo.uid;
+      console.log(`[scheduled-send] findMailboxHostInOrgServer located hostUid "${mailboxOwnerUid}" with mailbox "${mailbox.emailAddress}"`);
+    }
+  }
+
+  if (!mailbox) {
+    console.error(`[scheduled-send] Mailbox "${mailboxId}" could not be found anywhere in organization "${organizationId}". Marking doc "${docRef.id}" failed.`);
     const now = new Date().toISOString();
     await docRef.update({
       status: "failed",
@@ -957,13 +996,19 @@ async function sendScheduledDoc(
     return { outcome: "failed" };
   }
 
+  console.log(`[scheduled-send] Mailbox verified: "${mailbox.emailAddress}" (host: "${mailbox.smtp.host}:${mailbox.smtp.port}", user: "${mailbox.smtp.user ? "configured" : "empty"}", owner: "${mailboxOwnerUid}")`);
+
   const gapSeconds = normalizeSendGapSeconds(mailbox.sendGapSeconds);
   if (gapSeconds > 0) {
-    const mailboxKey = `${organizationId}/${uid}/${mailboxId}`;
+    const mailboxKey = `${organizationId}/${mailboxOwnerUid}/${mailboxId}`;
     let lastMs = runContext?.lastSentAtByMailbox.get(mailboxKey);
     if (lastMs == null) {
-      const persisted = await getMailboxLastSentAtServer({ organizationId, uid, mailboxId });
-      lastMs = persisted ? new Date(persisted).getTime() : undefined;
+      const persisted = await getMailboxLastSentAtServer({
+        organizationId,
+        uid: mailboxOwnerUid,
+        mailboxId,
+      });
+      lastMs = persisted ? coerceInstantMs(persisted) ?? undefined : undefined;
     }
     if (lastMs != null && Number.isFinite(lastMs)) {
       const earliest = lastMs + gapSeconds * 1000;
@@ -972,11 +1017,13 @@ async function sendScheduledDoc(
         // Local/dev process-due must not block the Next.js process for up to 25s per gap.
         const shouldSleep = !runContext?.requeueSendGaps && waitMs <= 25_000;
         if (shouldSleep) {
+          console.log(`[scheduled-send] Send gap active: sleeping ${waitMs}ms before sending from mailbox "${mailboxId}"`);
           await new Promise((r) => setTimeout(r, waitMs));
         } else {
           // Keep user-visible scheduledAt stable; defer readiness via notBeforeAt.
           const retryAt = new Date(earliest).toISOString();
           const nowIso = new Date().toISOString();
+          console.log(`[scheduled-send] Send gap active: deferring doc "${docRef.id}" until "${retryAt}"`);
           await docRef.update({
             status: "pending",
             notBeforeAt: retryAt,
@@ -1002,7 +1049,7 @@ async function sendScheduledDoc(
 
   const quota = await assertMailboxDailySendQuotaServer({
     organizationId,
-    uid,
+    uid: mailboxOwnerUid,
     mailboxId,
     dailySendLimit: mailbox.dailySendLimit,
   });
@@ -1117,9 +1164,19 @@ async function sendScheduledDoc(
     }
   }
 
+  console.log(`[scheduled-send] Dispatching outbound mail via sendOutboundMailServer for doc "${docRef.id}":`, {
+    to: data.to,
+    from: data.from ?? mailbox.emailAddress,
+    subject,
+    mailboxOwnerUid,
+    mailboxId,
+    smtpHost: mailbox.smtp.host,
+    connectionType: mailbox.connectionType,
+  });
+
   const result = await sendOutboundMailServer({
     organizationId,
-    uid,
+    uid: mailboxOwnerUid,
     mailboxId,
     smtp: {
       host: mailbox.smtp.host,
@@ -1161,9 +1218,16 @@ async function sendScheduledDoc(
     },
   });
 
+  console.log(`[scheduled-send] sendOutboundMailServer result for doc "${docRef.id}":`, {
+    ok: result.ok,
+    messageId: (result as { messageId?: string }).messageId,
+    error: (result as { error?: string }).error,
+  });
+
   const now = new Date().toISOString();
   if (result.ok) {
     const messageId = normalizeMessageId(result.messageId);
+    console.log(`[scheduled-send] SUCCESS: Marked scheduled doc "${docRef.id}" as sent (messageId: ${messageId || "none"})`);
     await docRef.update({
       status: "sent",
       sentAt: now,
@@ -1196,7 +1260,7 @@ async function sendScheduledDoc(
         mailboxId,
         fromEmail: String(data.from ?? mailbox.emailAddress ?? ""),
         toEmail: String(data.to ?? ""),
-        mailboxOwnerUid: uid,
+        mailboxOwnerUid,
       });
       if (planId) await completePlanWhenAllStepsDone(planId, now);
     }
@@ -1207,7 +1271,7 @@ async function sendScheduledDoc(
           : undefined;
       await recordScheduledEmailSentTimeline({
         organizationId,
-        mailboxOwnerUid: uid,
+        mailboxOwnerUid,
         scheduledByUserId,
         leadId,
         subject,
@@ -1220,7 +1284,7 @@ async function sendScheduledDoc(
           organizationId,
           leadId,
           mailboxId,
-          mailboxOwnerUid: uid,
+          mailboxOwnerUid,
           from: String(data.from ?? ""),
           to: String(data.to ?? ""),
           cc: String(data.cc ?? "") || undefined,
@@ -1252,15 +1316,17 @@ async function sendScheduledDoc(
       }
     }
     try {
-      await incrementMailboxSendCountServer({ organizationId, uid, mailboxId });
+      await incrementMailboxSendCountServer({ organizationId, uid: mailboxOwnerUid, mailboxId });
     } catch {
       /* Delivery is authoritative; quota accounting can recover independently. */
     }
     if (runContext) {
-      runContext.lastSentAtByMailbox.set(`${organizationId}/${uid}/${mailboxId}`, Date.now());
+      runContext.lastSentAtByMailbox.set(`${organizationId}/${mailboxOwnerUid}/${mailboxId}`, Date.now());
     }
     return { outcome: "sent" };
   }
+
+  console.error(`[scheduled-send] FAILURE: Outbound send returned error for doc "${docRef.id}": ${result.error}`);
 
   const attempts = Math.max(0, Number(data.attempts ?? 0)) + 1;
   const kind = classifyScheduledSendError(result.error);
@@ -1471,10 +1537,16 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     rows: [] as ScheduledFlushRowResult[],
   };
   const db = getAdminDb();
-  if (!db) return empty;
+  if (!db) {
+    console.warn(`[scheduled-member-due] Database not configured for member "${input.uid}" in org "${input.organizationId}"`);
+    return empty;
+  }
 
   const nowMs = Date.now();
   const nowIso = new Date(nowMs).toISOString();
+
+  console.log(`[scheduled-member-due] Starting member flush for org: "${input.organizationId}", uid: "${input.uid}", cutoff: "${nowIso}"`);
+
   const root = db
     .collection(COLLECTIONS.organizations)
     .doc(input.organizationId)
@@ -1501,6 +1573,7 @@ export async function processDueScheduledEmailsForMemberServer(input: {
   let pendingCount = dueDocs.length;
   // Fallback only when the indexed due query finds nothing (Timestamp/ISO mismatches).
   if (dueDocs.length === 0) {
+    console.log(`[scheduled-member-due] Primary query returned 0 due docs for uid "${input.uid}", checking pending fallback...`);
     const pendingSnap = await root.where("status", "in", ["pending", "processing"]).limit(40).get();
     pendingCount = pendingSnap.size;
     dueDocs = pendingSnap.docs
@@ -1517,10 +1590,155 @@ export async function processDueScheduledEmailsForMemberServer(input: {
       .slice(0, 8);
   }
 
+  console.log(`[scheduled-member-due] Found ${dueDocs.length} due docs for member "${input.uid}" (pending count: ${pendingCount})`);
+
   const result = await processScheduledSnap(dueDocs, {
     requeueSendGaps: true,
     maxDurationMs: 20_000,
   });
+
+  console.log(`[scheduled-member-due] Member flush complete for uid "${input.uid}": sent=${result.sent}, failed=${result.failed}, skipped=${result.skipped}, dueFound=${dueDocs.length}`);
+
+  return {
+    ...result,
+    dueFound: dueDocs.length,
+    pendingCount,
+  };
+}
+
+/**
+ * Process due emails across the entire organization (multi-member safe).
+ * Allows any member's client flush to send due sequence/follow-up mail
+ * without depending on member-specific routing or a background cron.
+ */
+export async function processDueScheduledEmailsForOrgServer(input: {
+  organizationId: string;
+}): Promise<{
+  processed: number;
+  sent: number;
+  failed: number;
+  skipped: number;
+  dueFound: number;
+  pendingCount: number;
+  claimRefused: number;
+  skipReasons: Record<ScheduledSkipReason, number>;
+  rows: ScheduledFlushRowResult[];
+}> {
+  const empty = {
+    processed: 0,
+    sent: 0,
+    failed: 0,
+    skipped: 0,
+    dueFound: 0,
+    pendingCount: 0,
+    claimRefused: 0,
+    skipReasons: emptySkipReasons(),
+    rows: [] as ScheduledFlushRowResult[],
+  };
+  const db = getAdminDb();
+  if (!db) {
+    console.warn(`[scheduled-org-due] Database not configured for org "${input.organizationId}"`);
+    return empty;
+  }
+
+  const nowMs = Date.now();
+  const nowIso = new Date(nowMs).toISOString();
+
+  console.log(`[scheduled-org-due] Starting org-wide due processing for org: "${input.organizationId}", cutoff time: "${nowIso}"`);
+
+  const isDocInOrg = (docRef: DocumentReference, data: Record<string, unknown>) => {
+    const fromPath = ownerFromScheduledRef(docRef);
+    const docOrg = String(data.organizationId ?? fromPath.organizationId ?? "");
+    return docOrg === input.organizationId;
+  };
+
+  // Try org-scoped collectionGroup query first
+  let primaryDocs: DocumentSnapshot[] = [];
+  try {
+    const orgSnap = await db
+      .collectionGroup(SCHEDULED_COLLECTION)
+      .where("organizationId", "==", input.organizationId)
+      .where("status", "in", ["pending", "processing"])
+      .where("scheduledAt", "<=", nowIso)
+      .orderBy("scheduledAt", "asc")
+      .limit(80)
+      .get();
+    primaryDocs = orgSnap.docs;
+    console.log(`[scheduled-org-due] Org-scoped collectionGroup query returned ${primaryDocs.length} candidate docs for org "${input.organizationId}"`);
+  } catch (err) {
+    console.warn(`[scheduled-org-due] Org-scoped query threw (falling back to global collectionGroup):`, err);
+    try {
+      const globalSnap = await db
+        .collectionGroup(SCHEDULED_COLLECTION)
+        .where("status", "in", ["pending", "processing"])
+        .where("scheduledAt", "<=", nowIso)
+        .orderBy("scheduledAt", "asc")
+        .limit(100)
+        .get();
+      primaryDocs = globalSnap.docs;
+      console.log(`[scheduled-org-due] Global collectionGroup query returned ${primaryDocs.length} candidate docs`);
+    } catch (globalErr) {
+      console.error(`[scheduled-org-due] Global collectionGroup query also failed:`, globalErr);
+    }
+  }
+
+  let dueDocs = primaryDocs
+    .filter((doc) => isDocInOrg(doc.ref, doc.data() as Record<string, unknown>))
+    .map((doc) => ({
+      ref: doc.ref,
+      data: () => doc.data() as Record<string, unknown>,
+    }))
+    .filter((row) => isScheduledDocDue(row.data(), nowMs))
+    .slice(0, 16);
+
+  let pendingCount = dueDocs.length;
+  if (dueDocs.length === 0) {
+    console.log(`[scheduled-org-due] Primary query returned 0 due docs. Checking fallback pending query for org: "${input.organizationId}"`);
+    try {
+      const pendingSnap = await db
+        .collectionGroup(SCHEDULED_COLLECTION)
+        .where("status", "in", ["pending", "processing"])
+        .limit(100)
+        .get();
+      const orgPendingDocs = pendingSnap.docs.filter((doc) =>
+        isDocInOrg(doc.ref, doc.data() as Record<string, unknown>),
+      );
+      pendingCount = orgPendingDocs.length;
+      dueDocs = orgPendingDocs
+        .map((doc) => ({
+          ref: doc.ref,
+          data: () => doc.data() as Record<string, unknown>,
+        }))
+        .filter((row) => isScheduledDocDue(row.data(), nowMs))
+        .sort((a, b) => {
+          const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
+          const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
+          return aMs - bMs;
+        })
+        .slice(0, 16);
+      console.log(`[scheduled-org-due] Fallback pending query found ${dueDocs.length} due docs out of ${pendingCount} org pending rows`);
+    } catch (e) {
+      console.warn(`[scheduled-org-due] Fallback pending collectionGroup query failed:`, e);
+    }
+  }
+
+  console.log(`[scheduled-org-due] Dispatching ${dueDocs.length} due docs to processScheduledSnap for org "${input.organizationId}"`);
+
+  const result = await processScheduledSnap(dueDocs, {
+    requeueSendGaps: true,
+    maxDurationMs: 20_000,
+  });
+
+  console.log(`[scheduled-org-due] Completed org-wide processing for org "${input.organizationId}":`, {
+    processed: result.processed,
+    sent: result.sent,
+    failed: result.failed,
+    skipped: result.skipped,
+    dueFound: dueDocs.length,
+    pendingCount,
+    skipReasons: result.skipReasons,
+  });
+
   return {
     ...result,
     dueFound: dueDocs.length,

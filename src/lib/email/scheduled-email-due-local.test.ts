@@ -15,39 +15,83 @@ vi.mock("@/lib/email/send-outbound-mail-server", () => ({
 }));
 
 vi.mock("@/lib/email/mailbox-profiles-server", () => ({
-  listMailboxesForMemberServer: vi.fn(async () => [
-    {
-      id: "mb-vitest",
-      enabled: true,
-      emailAddress: "vitest@nova.local",
-      displayName: "Vitest",
-      replyTo: "",
-      signature: "",
-      smtp: {
-        host: "smtp.test",
-        port: 587,
-        secure: false,
-        user: "u",
-        password: "p",
+  listMailboxesForMemberServer: vi.fn(async ({ uid }) => {
+    if (uid === "uid-rep-assigned") {
+      return [];
+    }
+    return [
+      {
+        id: "mb-vitest",
+        enabled: true,
+        emailAddress: "vitest@nova.local",
+        displayName: "Vitest",
+        replyTo: "",
+        signature: "",
+        smtp: {
+          host: "smtp.test",
+          port: 587,
+          secure: false,
+          user: "u",
+          password: "p",
+        },
+        imap: {
+          host: "imap.test",
+          port: 993,
+          secure: true,
+          user: "u",
+          password: "p",
+        },
+        connectionType: "custom",
+        dailySendLimit: null,
+        sendGapSeconds: 0,
+        assignedUserIds: [],
+        readReceipts: false,
+        trackClicks: false,
+        syncIntervalMinutes: 5,
+        archiveOnSend: false,
+        label: "Vitest",
       },
-      imap: {
-        host: "imap.test",
-        port: 993,
-        secure: true,
-        user: "u",
-        password: "p",
-      },
-      connectionType: "custom",
-      dailySendLimit: null,
-      sendGapSeconds: 0,
-      assignedUserIds: [],
-      readReceipts: false,
-      trackClicks: false,
-      syncIntervalMinutes: 5,
-      archiveOnSend: false,
-      label: "Vitest",
-    },
-  ]),
+    ];
+  }),
+  findMailboxHostInOrgServer: vi.fn(async ({ mailboxId }) => {
+    if (mailboxId === "mb-assigned-host") {
+      return {
+        uid: "uid-host-owner",
+        mailbox: {
+          id: "mb-assigned-host",
+          enabled: true,
+          emailAddress: "host@nova.local",
+          displayName: "Host",
+          replyTo: "",
+          signature: "",
+          smtp: {
+            host: "smtp.test",
+            port: 587,
+            secure: false,
+            user: "u",
+            password: "p",
+          },
+          imap: {
+            host: "imap.test",
+            port: 993,
+            secure: true,
+            user: "u",
+            password: "p",
+          },
+          connectionType: "custom",
+          dailySendLimit: null,
+          sendGapSeconds: 0,
+          assignedUserIds: ["uid-rep-assigned"],
+          readReceipts: false,
+          trackClicks: false,
+          syncIntervalMinutes: 5,
+          archiveOnSend: false,
+          label: "Host Mailbox",
+        },
+      };
+    }
+    return null;
+  }),
 }));
 
 vi.mock("@/lib/email/mailbox-send-quota-server", () => ({
@@ -59,6 +103,14 @@ vi.mock("@/lib/email/mailbox-send-quota-server", () => ({
 vi.mock("@/lib/email/lead-contact-policy-server", () => ({
   assertLeadContactAllowedServer: vi.fn(async () => ({ ok: true as const })),
 }));
+
+const UID_2 = "uid-vitest-scheduled-2";
+const DOC_ID_2 = `sch-vitest-2-${Date.now()}`;
+const DOC_PATH_2 = `${COLLECTIONS.organizations}/${ORG}/${ORG_SUBCOLLECTIONS.members}/${UID_2}/scheduledEmails/${DOC_ID_2}`;
+
+const UID_REP = "uid-rep-assigned";
+const DOC_ID_REP = `sch-vitest-rep-${Date.now()}`;
+const DOC_PATH_REP = `${COLLECTIONS.organizations}/${ORG}/${ORG_SUBCOLLECTIONS.members}/${UID_REP}/scheduledEmails/${DOC_ID_REP}`;
 
 describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", () => {
   beforeAll(async () => {
@@ -85,6 +137,8 @@ describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", (
 
   afterAll(async () => {
     await deleteDocument(DOC_PATH).catch(() => undefined);
+    await deleteDocument(DOC_PATH_2).catch(() => undefined);
+    await deleteDocument(DOC_PATH_REP).catch(() => undefined);
     await disconnectPrisma();
   });
 
@@ -109,30 +163,128 @@ describe.runIf(runDb)("scheduled email due send (local Postgres + mock SMTP)", (
   it(
     "processDueScheduledEmailsForMemberServer marks due row sent",
     async () => {
-    const { processDueScheduledEmailsForMemberServer } = await import(
-      "@/lib/email/scheduled-emails-server"
-    );
-    const { sendOutboundMailServer } = await import("@/lib/email/send-outbound-mail-server");
+      const { processDueScheduledEmailsForMemberServer } = await import(
+        "@/lib/email/scheduled-emails-server"
+      );
+      const { sendOutboundMailServer } = await import("@/lib/email/send-outbound-mail-server");
 
-    const result = await processDueScheduledEmailsForMemberServer({
-      organizationId: ORG,
-      uid: UID,
-    });
+      const result = await processDueScheduledEmailsForMemberServer({
+        organizationId: ORG,
+        uid: UID,
+      });
 
-    expect(result.sent).toBeGreaterThanOrEqual(1);
-    expect(result.dueFound).toBeGreaterThanOrEqual(1);
-    expect(result.pendingCount).toBeGreaterThanOrEqual(1);
-    expect(result.skipReasons).toBeDefined();
-    expect(Array.isArray(result.rows)).toBe(true);
-    expect(sendOutboundMailServer).toHaveBeenCalled();
+      expect(result.sent).toBeGreaterThanOrEqual(1);
+      expect(result.dueFound).toBeGreaterThanOrEqual(1);
+      expect(result.pendingCount).toBeGreaterThanOrEqual(1);
+      expect(result.skipReasons).toBeDefined();
+      expect(Array.isArray(result.rows)).toBe(true);
+      expect(sendOutboundMailServer).toHaveBeenCalled();
 
-    const docs = await queryDocuments({
-      collectionRoot: COLLECTIONS.organizations,
-      pathPrefix: `${COLLECTIONS.organizations}/${ORG}/${ORG_SUBCOLLECTIONS.members}/${UID}/scheduledEmails`,
-      filters: [{ field: "status", op: "==", value: "sent" }],
-    });
-    expect(docs.some((d) => d.path === DOC_PATH)).toBe(true);
-  },
+      const docs = await queryDocuments({
+        collectionRoot: COLLECTIONS.organizations,
+        pathPrefix: `${COLLECTIONS.organizations}/${ORG}/${ORG_SUBCOLLECTIONS.members}/${UID}/scheduledEmails`,
+        filters: [{ field: "status", op: "==", value: "sent" }],
+      });
+      expect(docs.some((d) => d.path === DOC_PATH)).toBe(true);
+    },
+    30_000,
+  );
+
+  it(
+    "processDueScheduledEmailsForOrgServer processes due mail across different member roots",
+    async () => {
+      const past = new Date(Date.now() - 120_000).toISOString();
+      await setDocument(
+        DOC_PATH_2,
+        {
+          organizationId: ORG,
+          uid: UID_2,
+          mailboxId: "mb-vitest",
+          from: "vitest@nova.local",
+          to: "member2-due@test.local",
+          subject: "Org process due test",
+          text: "body 2",
+          html: "<p>body 2</p>",
+          scheduledAt: past,
+          status: "pending",
+          createdAt: past,
+          updatedAt: past,
+        },
+        false,
+      );
+
+      const { processDueScheduledEmailsForOrgServer } = await import(
+        "@/lib/email/scheduled-emails-server"
+      );
+
+      const result = await processDueScheduledEmailsForOrgServer({
+        organizationId: ORG,
+      });
+
+      expect(result.sent).toBeGreaterThanOrEqual(1);
+      expect(result.dueFound).toBeGreaterThanOrEqual(1);
+
+      const docs = await queryDocuments({
+        collectionRoot: COLLECTIONS.organizations,
+        pathPrefix: `${COLLECTIONS.organizations}/${ORG}/${ORG_SUBCOLLECTIONS.members}/${UID_2}/scheduledEmails`,
+        filters: [{ field: "status", op: "==", value: "sent" }],
+      });
+      expect(docs.some((d) => d.path === DOC_PATH_2)).toBe(true);
+    },
+    30_000,
+  );
+
+  it(
+    "resolves mailbox host when scheduled doc belongs to an assigned rep and passes host UID to sender",
+    async () => {
+      const past = new Date(Date.now() - 120_000).toISOString();
+      await setDocument(
+        DOC_PATH_REP,
+        {
+          organizationId: ORG,
+          uid: UID_REP,
+          mailboxId: "mb-assigned-host",
+          from: "host@nova.local",
+          to: "lead-assigned@test.local",
+          subject: "Assigned mailbox send test",
+          text: "rep body",
+          html: "<p>rep body</p>",
+          scheduledAt: past,
+          status: "pending",
+          createdAt: past,
+          updatedAt: past,
+        },
+        false,
+      );
+
+      const { processDueScheduledEmailsForMemberServer } = await import(
+        "@/lib/email/scheduled-emails-server"
+      );
+      const { sendOutboundMailServer } = await import("@/lib/email/send-outbound-mail-server");
+
+      const result = await processDueScheduledEmailsForMemberServer({
+        organizationId: ORG,
+        uid: UID_REP,
+      });
+
+      expect(result.sent).toBeGreaterThanOrEqual(1);
+
+      // Verify sendOutboundMailServer was called with uid: "uid-host-owner" (the mailbox host), NOT "uid-rep-assigned"
+      expect(sendOutboundMailServer).toHaveBeenCalledWith(
+        expect.objectContaining({
+          organizationId: ORG,
+          uid: "uid-host-owner",
+          mailboxId: "mb-assigned-host",
+        }),
+      );
+
+      const docs = await queryDocuments({
+        collectionRoot: COLLECTIONS.organizations,
+        pathPrefix: `${COLLECTIONS.organizations}/${ORG}/${ORG_SUBCOLLECTIONS.members}/${UID_REP}/scheduledEmails`,
+        filters: [{ field: "status", op: "==", value: "sent" }],
+      });
+      expect(docs.some((d) => d.path === DOC_PATH_REP)).toBe(true);
+    },
     30_000,
   );
 });

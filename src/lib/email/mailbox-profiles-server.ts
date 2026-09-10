@@ -475,6 +475,83 @@ export async function listMailboxesAssignedToViewerServer(input: {
   return out;
 }
 
+/** Look up which member in the organization owns mailboxId, and return the profile with secrets. */
+export async function findMailboxHostInOrgServer(input: {
+  organizationId: string;
+  mailboxId: string;
+}): Promise<{ uid: string; mailbox: EmailMailboxSettings } | null> {
+  const db = getAdminDb();
+  if (!db) {
+    console.warn("[mailbox-profiles] findMailboxHostInOrgServer: Database not configured");
+    return null;
+  }
+
+  console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Searching for mailboxId: "${input.mailboxId}" in org: "${input.organizationId}"`);
+
+  try {
+    const snap = await db.collectionGroup("emailMailboxes").get();
+    console.log(`[mailbox-profiles] findMailboxHostInOrgServer: collectionGroup("emailMailboxes") returned ${snap.docs.length} total mailboxes`);
+    for (const doc of snap.docs) {
+      const docData = doc.data() as Record<string, unknown>;
+      const matchId = doc.id === input.mailboxId || docData.id === input.mailboxId;
+      if (!matchId) continue;
+
+      const parts = doc.ref.path.split("/").filter(Boolean);
+      // Path format: organizations/{orgId}/members/{uid}/emailMailboxes/{mailboxId}
+      const orgIdx = parts.indexOf(COLLECTIONS.organizations);
+      const memIdx = parts.indexOf(ORG_SUBCOLLECTIONS.members);
+      const docOrg = orgIdx >= 0 && parts[orgIdx + 1] ? parts[orgIdx + 1] : "";
+      if (docOrg && docOrg !== input.organizationId) {
+        console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Matched mailboxId "${input.mailboxId}" but belongs to org "${docOrg}" (expected "${input.organizationId}"). Skipping for isolation.`);
+        continue;
+      }
+      const hostUid = memIdx >= 0 && parts[memIdx + 1] ? parts[memIdx + 1] : "";
+      if (!hostUid) {
+        console.warn(`[mailbox-profiles] findMailboxHostInOrgServer: Matched mailbox "${input.mailboxId}" but could not extract hostUid from path: "${doc.ref.path}"`);
+        continue;
+      }
+
+      console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Found candidate mailbox owner hostUid: "${hostUid}" at path: "${doc.ref.path}"`);
+      const profile = await getMailboxProfileServer({
+        organizationId: input.organizationId,
+        uid: hostUid,
+        mailboxId: input.mailboxId,
+      });
+      if (profile) {
+        console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Successfully resolved mailbox profile for hostUid: "${hostUid}", email: "${profile.emailAddress}"`);
+        return { uid: hostUid, mailbox: profile };
+      } else {
+        console.warn(`[mailbox-profiles] findMailboxHostInOrgServer: Found candidate doc at "${doc.ref.path}" but getMailboxProfileServer returned null for hostUid "${hostUid}"`);
+      }
+    }
+  } catch (err) {
+    console.warn(`[mailbox-profiles] findMailboxHostInOrgServer: collectionGroup search encountered an error, falling back to per-member search. Error:`, err);
+  }
+
+  try {
+    console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Scanning org users fallback for org: "${input.organizationId}"`);
+    const users = await listOrgUsersServer(input.organizationId);
+    console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Found ${users.length} members in org "${input.organizationId}"`);
+    for (const user of users) {
+      if (!user.id) continue;
+      const profile = await getMailboxProfileServer({
+        organizationId: input.organizationId,
+        uid: user.id,
+        mailboxId: input.mailboxId,
+      });
+      if (profile) {
+        console.log(`[mailbox-profiles] findMailboxHostInOrgServer: Fallback per-member search matched mailbox "${input.mailboxId}" under user "${user.id}" ("${profile.emailAddress}")`);
+        return { uid: user.id, mailbox: profile };
+      }
+    }
+  } catch (err) {
+    console.warn(`[mailbox-profiles] findMailboxHostInOrgServer: Error during fallback per-member search:`, err);
+  }
+
+  console.warn(`[mailbox-profiles] findMailboxHostInOrgServer: Mailbox "${input.mailboxId}" was NOT found in org "${input.organizationId}"`);
+  return null;
+}
+
 /** True when the host has at least one mailbox assigned to the viewer. */
 export async function viewerHasAssignedMailboxOnHostServer(input: {
   organizationId: string;

@@ -38,6 +38,7 @@ export function ScheduledEmailSendSync() {
     isDemo,
     sessionHydrated,
     currentUserId,
+    followups,
     setFollowupCompleted,
     clearFollowupEmailSchedule,
     syncFollowupDelivery,
@@ -60,27 +61,38 @@ export function ScheduledEmailSendSync() {
   const activeMailboxIdRef = React.useRef(activeMailboxId);
   const scheduledRef = React.useRef(scheduled);
   const setScheduledRef = React.useRef(setScheduled);
+  const followupsRef = React.useRef(followups);
   currentUserIdRef.current = currentUserId;
   mailViewAsUidRef.current = mailViewAsUid;
   mailboxesRef.current = mailboxes;
   activeMailboxIdRef.current = activeMailboxId;
   scheduledRef.current = scheduled;
   setScheduledRef.current = setScheduled;
+  followupsRef.current = followups;
 
-  /** Owners whose scheduledEmails collections we must flush (viewer + assigned box hosts). */
+  /** Owners whose scheduledEmails collections we must flush (viewer + assigned box hosts + followup owners). */
   const resolveFlushOwnerUids = React.useCallback((): string[] => {
     const selfUid = currentUserIdRef.current;
     const owners = new Set<string>();
-    owners.add(selfUid);
+    if (selfUid) owners.add(selfUid);
 
     const viewAs = (mailViewAsUidRef.current ?? "").trim();
     if (viewAs && viewAs !== selfUid) owners.add(viewAs);
 
     const boxes = mailboxesRef.current;
-    const activeId = activeMailboxIdRef.current;
-    const active = getActiveMailbox({ mailboxes: boxes, activeMailboxId: activeId });
-    const activeOwner = active.dataOwnerUid?.trim();
-    if (activeOwner) owners.add(activeOwner);
+    // Add all accessible mailbox dataOwnerUids
+    for (const box of boxes) {
+      const boxOwner = box.dataOwnerUid?.trim();
+      if (boxOwner) owners.add(boxOwner);
+    }
+
+    // Add owners from followups in workspace
+    for (const f of followupsRef.current) {
+      if (f.deliveryStatus === "scheduled" || f.scheduledEmailId) {
+        if (f.mailboxOwnerUid?.trim()) owners.add(f.mailboxOwnerUid.trim());
+        if (f.ownerId?.trim()) owners.add(f.ownerId.trim());
+      }
+    }
 
     for (const row of scheduledRef.current) {
       if (row.status !== "pending" && row.status !== "processing") continue;
@@ -96,11 +108,21 @@ export function ScheduledEmailSendSync() {
 
   const countLocalDuePending = React.useCallback(() => {
     const now = Date.now();
-    return scheduledRef.current.filter((s) => {
+    const scheduledDue = scheduledRef.current.filter((s) => {
       if (s.status !== "pending" && s.status !== "processing") return false;
       const due = new Date(s.scheduledAt).getTime();
       return !Number.isNaN(due) && due <= now;
     }).length;
+
+    const followupDue = followupsRef.current.filter((f) => {
+      if (f.deliveryStatus !== "scheduled" && !f.scheduledEmailId) return false;
+      const when = f.emailScheduledAt || f.dueAt;
+      if (!when) return false;
+      const due = new Date(when).getTime();
+      return !Number.isNaN(due) && due <= now;
+    }).length;
+
+    return Math.max(scheduledDue, followupDue);
   }, []);
 
   const buildScheduledApiPath = React.useCallback((path: string, ownerUid?: string | null) => {
@@ -140,11 +162,17 @@ export function ScheduledEmailSendSync() {
         const skipReasons: Record<string, number> = {};
         const localDue = countLocalDuePending();
 
+        console.log(`[scheduled-sync] runLive started: localDue=${localDue}, owners=${JSON.stringify(owners)}, followupsInWorkspace=${followupsRef.current.length}`);
+
+        // Always include tenant-wide org flush (no forUser) so all member roots are swept
+        const flushPaths = new Set<string>();
+        flushPaths.add("/api/email/scheduled/process-due");
         for (const owner of owners) {
-          const processPath = buildScheduledApiPath(
-            "/api/email/scheduled/process-due",
-            owner,
-          );
+          flushPaths.add(buildScheduledApiPath("/api/email/scheduled/process-due", owner));
+        }
+
+        for (const processPath of flushPaths) {
+          console.log(`[scheduled-sync] Calling process-due endpoint: "${processPath}"`);
           const processRes = await fetch(processPath, { method: "POST" });
           const processData = (await processRes.json().catch(() => null)) as {
             ok?: boolean;
@@ -166,6 +194,9 @@ export function ScheduledEmailSendSync() {
             error?: string;
             hint?: string;
           } | null;
+
+          console.log(`[scheduled-sync] Response from "${processPath}": status=${processRes.status}`, processData);
+
           if (!processRes.ok) {
             if (processRes.status === 404) {
               toast.error("Scheduled send is not available on this deploy", {
@@ -197,7 +228,27 @@ export function ScheduledEmailSendSync() {
           }
           if (processData.queued) queued = true;
           if (processData.busy) busy = true;
+
+          // Immediately update local followups in workspace if any rows were sent
+          if (Array.isArray(processData.rows)) {
+            for (const r of processData.rows) {
+              if (r.outcome === "sent") {
+                const targetFollowup = followupsRef.current.find((f) => f.scheduledEmailId === r.id);
+                if (targetFollowup) {
+                  console.log(`[scheduled-sync] Immediately updating UI status to sent for followup "${targetFollowup.id}" (scheduledId: "${r.id}")`);
+                  syncFollowupDelivery(targetFollowup.id, {
+                    deliveryStatus: "sent",
+                    sentAt: new Date().toISOString(),
+                  });
+                  setFollowupCompleted(targetFollowup.id, true);
+                  clearFollowupEmailSchedule(targetFollowup.id);
+                }
+              }
+            }
+          }
         }
+
+        console.log(`[scheduled-sync] runLive cycle summary: sent=${sent}, failed=${failed}, skipped=${skipped}, dueFound=${dueFound}, pendingCount=${pendingCount}, busy=${busy}`);
 
         if (!anyOk) return;
 
@@ -310,12 +361,37 @@ export function ScheduledEmailSendSync() {
 
     if (!emailServerHydrated) return;
 
-    const hasDuePending = scheduled.some((s) => {
-      if (s.status !== "pending" && s.status !== "processing") return false;
-      const due = new Date(s.scheduledAt).getTime();
-      return !Number.isNaN(due) && due <= Date.now() + 60_000;
-    });
+    const hasDuePending =
+      scheduled.some((s) => {
+        if (s.status !== "pending" && s.status !== "processing") return false;
+        const due = new Date(s.scheduledAt).getTime();
+        return !Number.isNaN(due) && due <= Date.now() + 60_000;
+      }) ||
+      followups.some((f) => {
+        if (f.deliveryStatus !== "scheduled" && !f.scheduledEmailId) return false;
+        const when = f.emailScheduledAt || f.dueAt;
+        if (!when) return false;
+        const due = new Date(when).getTime();
+        return !Number.isNaN(due) && due <= Date.now() + 60_000;
+      });
     const pollMs = hasDuePending ? LIVE_POLL_MS : LIVE_POLL_IDLE_MS;
+
+    // If scheduled store is empty but we have scheduled followups, hydrate scheduled emails
+    if (
+      scheduled.length === 0 &&
+      followups.some((f) => f.deliveryStatus === "scheduled" || f.scheduledEmailId)
+    ) {
+      void (async () => {
+        const listRes = await fetch(buildScheduledApiPath("/api/email/scheduled")).catch(() => null);
+        const listData = (await listRes?.json().catch(() => null)) as {
+          ok?: boolean;
+          items?: Parameters<typeof setScheduled>[0];
+        } | null;
+        if (listData?.ok && Array.isArray(listData.items) && listData.items.length > 0) {
+          setScheduledRef.current(listData.items);
+        }
+      })();
+    }
 
     const bootstrapTimer = window.setTimeout(() => void runLive(), 3_000);
     const id = window.setInterval(() => void runLive(), pollMs);
@@ -336,6 +412,8 @@ export function ScheduledEmailSendSync() {
     processDueScheduledLocal,
     runLive,
     scheduled,
+    followups,
+    buildScheduledApiPath,
   ]);
 
   // Flush exactly when the nearest pending row becomes due (demo + live).

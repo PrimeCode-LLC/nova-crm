@@ -234,6 +234,18 @@ export class PgCollectionGroupReference {
   limit(n: number): PgQuery {
     return new PgQuery(this.firestore, "", [], undefined, n, undefined, this.collectionId);
   }
+
+  select(..._fields: string[]): PgQuery {
+    return new PgQuery(this.firestore, "", [], undefined, undefined, undefined, this.collectionId);
+  }
+
+  count(): PgAggregateQuery {
+    return new PgQuery(this.firestore, "", [], undefined, undefined, undefined, this.collectionId).count();
+  }
+
+  async get(): Promise<PgQuerySnapshot> {
+    return new PgQuery(this.firestore, "", [], undefined, undefined, undefined, this.collectionId).get();
+  }
 }
 
 export class PgQuery {
