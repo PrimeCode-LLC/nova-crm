@@ -154,12 +154,17 @@ jobs:
     env:
       WEB_CLERK_PK: ${{ vars.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY || 'pk_test_ci' }}
       WEB_SITE_URL: ${{ vars.NEXT_PUBLIC_SITE_URL || 'https://ci.example.com' }}
+      # build-push-action@v6 defaults provenance on; GHCR then fails with "unknown blob".
+      BUILDX_NO_DEFAULT_ATTESTATIONS: "1"
     steps:
       - uses: actions/checkout@v4
 
       - name: Lowercase GHCR owner
         id: ghcr
         run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
 
       - name: Log in to GHCR
         uses: docker/login-action@v3
@@ -174,6 +179,8 @@ jobs:
           context: .
           file: Dockerfile
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-web:${{ github.sha }}
           build-args: |
             NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=${{ env.WEB_CLERK_PK }}
@@ -190,6 +197,8 @@ jobs:
           context: .
           file: Dockerfile.worker
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-worker:${{ github.sha }}
 
       - name: Build and push migrate image
@@ -198,6 +207,8 @@ jobs:
           context: .
           file: Dockerfile.migrate
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-migrate:${{ github.sha }}
 
       - name: Build and push cron image
@@ -206,6 +217,8 @@ jobs:
           context: .
           file: docker/cron/Dockerfile
           push: true
+          provenance: false
+          sbom: false
           tags: ${{ env.REGISTRY }}/${{ steps.ghcr.outputs.owner }}/nova-crm-cron:${{ github.sha }}
 
   # Continuous delivery: a green push to feature/remove-firebase deploys the exact
