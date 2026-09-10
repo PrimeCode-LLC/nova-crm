@@ -59,25 +59,6 @@ export async function POST(req: Request) {
       });
 
       console.log(`[process-due-route] Member flush finished for "${resolved.dataOwnerUid}": dueFound=${memberRes.dueFound}, sent=${memberRes.sent}, pendingCount=${memberRes.pendingCount}`);
-
-      // If no due rows found under this specific member root, also flush tenant-wide
-      // so assigned/shared mailbox rows or different member roots are never stranded.
-      if (memberRes.dueFound === 0) {
-        console.log(`[process-due-route] No due rows for member "${resolved.dataOwnerUid}". Triggering tenant-wide fallback flush for org "${organizationId}"...`);
-        const orgRes = await processDueScheduledEmailsForOrgServer({ organizationId });
-        console.log(`[process-due-route] Fallback org flush complete: dueFound=${orgRes.dueFound}, sent=${orgRes.sent}, pendingCount=${orgRes.pendingCount}`);
-        return {
-          processed: memberRes.processed + orgRes.processed,
-          sent: memberRes.sent + orgRes.sent,
-          failed: memberRes.failed + orgRes.failed,
-          skipped: memberRes.skipped + orgRes.skipped,
-          dueFound: orgRes.dueFound,
-          pendingCount: Math.max(memberRes.pendingCount, orgRes.pendingCount),
-          claimRefused: memberRes.claimRefused + orgRes.claimRefused,
-          skipReasons: orgRes.skipReasons,
-          rows: [...(memberRes.rows ?? []), ...(orgRes.rows ?? [])],
-        };
-      }
       return memberRes;
     });
 

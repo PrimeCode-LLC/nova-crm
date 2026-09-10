@@ -19,6 +19,13 @@ describe("coerceInstantMs / coerceIsoInstant", () => {
     expect(coerceIsoInstant({ _date: iso })).toBe(iso);
   });
 
+  it("supports Firestore export {_seconds,_nanoseconds} shapes", () => {
+    const iso = "2026-09-09T15:25:00.000Z";
+    const seconds = Math.floor(Date.parse(iso) / 1000);
+    expect(coerceIsoInstant({ _seconds: seconds, _nanoseconds: 0 })).toBe(iso);
+    expect(coerceInstantMs({ seconds, nanoseconds: 0 })).toBe(Date.parse(iso));
+  });
+
   it("compares due scheduledAt against now without [object Object]", () => {
     const past = Timestamp.fromDate(new Date(Date.now() - 60_000));
     const nowIso = new Date().toISOString();

@@ -1507,6 +1507,73 @@ async function processScheduledSnap(
   return { processed, sent, failed, skipped, claimRefused, skipReasons, rows };
 }
 
+type DueCandidate = {
+  ref: DocumentReference;
+  data: () => Record<string, unknown>;
+};
+
+/** One-pass due selection + deferral diagnostics for pending fallback scans. */
+function selectDueFromPending(
+  rows: DueCandidate[],
+  nowMs: number,
+  limit: number,
+): {
+  dueDocs: DueCandidate[];
+  overdueIgnoringNotBefore: number;
+  notBeforeBlocked: number;
+  unparsedScheduledAt: number;
+} {
+  let overdueIgnoringNotBefore = 0;
+  let notBeforeBlocked = 0;
+  let unparsedScheduledAt = 0;
+  const dueDocs: DueCandidate[] = [];
+  for (const row of rows) {
+    const data = row.data();
+    const dueMs = coerceInstantMs(data.scheduledAt);
+    if (dueMs == null) {
+      unparsedScheduledAt += 1;
+      continue;
+    }
+    if (dueMs > nowMs) continue;
+    overdueIgnoringNotBefore += 1;
+    const notBeforeMs = coerceInstantMs(data.notBeforeAt);
+    if (notBeforeMs != null && notBeforeMs > nowMs) {
+      notBeforeBlocked += 1;
+      continue;
+    }
+    if (dueDocs.length < limit) dueDocs.push(row);
+  }
+  return { dueDocs, overdueIgnoringNotBefore, notBeforeBlocked, unparsedScheduledAt };
+}
+
+function warnNoDuePending(
+  label: string,
+  pendingCount: number,
+  rows: DueCandidate[],
+  stats: {
+    overdueIgnoringNotBefore: number;
+    notBeforeBlocked: number;
+    unparsedScheduledAt: number;
+  },
+): void {
+  if (pendingCount === 0) return;
+  const sample = rows.slice(0, 5).map((row) => {
+    const data = row.data();
+    return {
+      id: row.ref.id,
+      scheduledAt: coerceIsoInstant(data.scheduledAt) || String(data.scheduledAt ?? ""),
+      notBeforeAt: data.notBeforeAt
+        ? coerceIsoInstant(data.notBeforeAt) || String(data.notBeforeAt)
+        : null,
+      lastSkipReason: data.lastSkipReason ?? null,
+    };
+  });
+  console.warn(
+    `[${label}] No due rows among ${pendingCount} pending (overdueIgnoringNotBefore=${stats.overdueIgnoringNotBefore}, notBeforeBlocked=${stats.notBeforeBlocked}, unparsedScheduledAt=${stats.unparsedScheduledAt}). sample=`,
+    sample,
+  );
+}
+
 /**
  * Dev/local helper: process due emails for one mailbox owner.
  * Production cron uses processDueScheduledEmailsServer (collection group) with the same claim path.
@@ -1524,6 +1591,9 @@ export async function processDueScheduledEmailsForMemberServer(input: {
   claimRefused: number;
   skipReasons: Record<ScheduledSkipReason, number>;
   rows: ScheduledFlushRowResult[];
+  overdueIgnoringNotBefore?: number;
+  notBeforeBlocked?: number;
+  unparsedScheduledAt?: number;
 }> {
   const empty = {
     processed: 0,
@@ -1571,23 +1641,30 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     .slice(0, 8);
 
   let pendingCount = dueDocs.length;
+  let overdueIgnoringNotBefore = 0;
+  let notBeforeBlocked = 0;
+  let unparsedScheduledAt = 0;
   // Fallback only when the indexed due query finds nothing (Timestamp/ISO mismatches).
   if (dueDocs.length === 0) {
     console.log(`[scheduled-member-due] Primary query returned 0 due docs for uid "${input.uid}", checking pending fallback...`);
-    const pendingSnap = await root.where("status", "in", ["pending", "processing"]).limit(40).get();
+    const pendingSnap = await root
+      .where("status", "in", ["pending", "processing"])
+      .orderBy("scheduledAt", "asc")
+      .limit(100)
+      .get();
     pendingCount = pendingSnap.size;
-    dueDocs = pendingSnap.docs
-      .map((doc) => ({
-        ref: doc.ref,
-        data: () => doc.data() as Record<string, unknown>,
-      }))
-      .filter((row) => isScheduledDocDue(row.data(), nowMs))
-      .sort((a, b) => {
-        const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
-        const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
-        return aMs - bMs;
-      })
-      .slice(0, 8);
+    const mapped = pendingSnap.docs.map((doc) => ({
+      ref: doc.ref,
+      data: () => doc.data() as Record<string, unknown>,
+    }));
+    const selected = selectDueFromPending(mapped, nowMs, 8);
+    dueDocs = selected.dueDocs;
+    overdueIgnoringNotBefore = selected.overdueIgnoringNotBefore;
+    notBeforeBlocked = selected.notBeforeBlocked;
+    unparsedScheduledAt = selected.unparsedScheduledAt;
+    if (dueDocs.length === 0) {
+      warnNoDuePending("scheduled-member-due", pendingCount, mapped, selected);
+    }
   }
 
   console.log(`[scheduled-member-due] Found ${dueDocs.length} due docs for member "${input.uid}" (pending count: ${pendingCount})`);
@@ -1603,6 +1680,9 @@ export async function processDueScheduledEmailsForMemberServer(input: {
     ...result,
     dueFound: dueDocs.length,
     pendingCount,
+    overdueIgnoringNotBefore,
+    notBeforeBlocked,
+    unparsedScheduledAt,
   };
 }
 
@@ -1623,6 +1703,9 @@ export async function processDueScheduledEmailsForOrgServer(input: {
   claimRefused: number;
   skipReasons: Record<ScheduledSkipReason, number>;
   rows: ScheduledFlushRowResult[];
+  overdueIgnoringNotBefore?: number;
+  notBeforeBlocked?: number;
+  unparsedScheduledAt?: number;
 }> {
   const empty = {
     processed: 0,
@@ -1692,31 +1775,63 @@ export async function processDueScheduledEmailsForOrgServer(input: {
     .slice(0, 16);
 
   let pendingCount = dueDocs.length;
+  let overdueIgnoringNotBefore = 0;
+  let notBeforeBlocked = 0;
+  let unparsedScheduledAt = 0;
   if (dueDocs.length === 0) {
     console.log(`[scheduled-org-due] Primary query returned 0 due docs. Checking fallback pending query for org: "${input.organizationId}"`);
     try {
-      const pendingSnap = await db
+      // Always merge:
+      // 1) orgId-filtered pending (tenant-safe, preferred)
+      // 2) path-matched pending (legacy rows missing organizationId on payload)
+      // Do not gate (2) on (1) being empty — future org rows would hide overdue legacy mail.
+      const byPath = new Map<string, DocumentSnapshot>();
+      const orgSnap = await db
+        .collectionGroup(SCHEDULED_COLLECTION)
+        .where("organizationId", "==", input.organizationId)
+        .where("status", "in", ["pending", "processing"])
+        .orderBy("scheduledAt", "asc")
+        .limit(200)
+        .get();
+      for (const doc of orgSnap.docs) {
+        if (isDocInOrg(doc.ref, doc.data() as Record<string, unknown>)) {
+          byPath.set(doc.ref.path, doc);
+        }
+      }
+      const pathSnap = await db
         .collectionGroup(SCHEDULED_COLLECTION)
         .where("status", "in", ["pending", "processing"])
-        .limit(100)
+        .orderBy("scheduledAt", "asc")
+        .limit(300)
         .get();
-      const orgPendingDocs = pendingSnap.docs.filter((doc) =>
-        isDocInOrg(doc.ref, doc.data() as Record<string, unknown>),
+      for (const doc of pathSnap.docs) {
+        if (byPath.has(doc.ref.path)) continue;
+        if (isDocInOrg(doc.ref, doc.data() as Record<string, unknown>)) {
+          byPath.set(doc.ref.path, doc);
+        }
+      }
+
+      const mapped = [...byPath.values()].map((doc) => ({
+        ref: doc.ref,
+        data: () => doc.data() as Record<string, unknown>,
+      }));
+      mapped.sort((a, b) => {
+        const aMs = coerceInstantMs(a.data().scheduledAt) ?? Number.POSITIVE_INFINITY;
+        const bMs = coerceInstantMs(b.data().scheduledAt) ?? Number.POSITIVE_INFINITY;
+        return aMs - bMs;
+      });
+      pendingCount = mapped.length;
+      const selected = selectDueFromPending(mapped, nowMs, 16);
+      dueDocs = selected.dueDocs;
+      overdueIgnoringNotBefore = selected.overdueIgnoringNotBefore;
+      notBeforeBlocked = selected.notBeforeBlocked;
+      unparsedScheduledAt = selected.unparsedScheduledAt;
+      console.log(
+        `[scheduled-org-due] Fallback pending query found ${dueDocs.length} due docs out of ${pendingCount} org pending rows (overdueIgnoringNotBefore=${overdueIgnoringNotBefore}, notBeforeBlocked=${notBeforeBlocked}, unparsedScheduledAt=${unparsedScheduledAt})`,
       );
-      pendingCount = orgPendingDocs.length;
-      dueDocs = orgPendingDocs
-        .map((doc) => ({
-          ref: doc.ref,
-          data: () => doc.data() as Record<string, unknown>,
-        }))
-        .filter((row) => isScheduledDocDue(row.data(), nowMs))
-        .sort((a, b) => {
-          const aMs = coerceInstantMs(a.data().scheduledAt) ?? 0;
-          const bMs = coerceInstantMs(b.data().scheduledAt) ?? 0;
-          return aMs - bMs;
-        })
-        .slice(0, 16);
-      console.log(`[scheduled-org-due] Fallback pending query found ${dueDocs.length} due docs out of ${pendingCount} org pending rows`);
+      if (dueDocs.length === 0) {
+        warnNoDuePending("scheduled-org-due", pendingCount, mapped, selected);
+      }
     } catch (e) {
       console.warn(`[scheduled-org-due] Fallback pending collectionGroup query failed:`, e);
     }
@@ -1736,6 +1851,9 @@ export async function processDueScheduledEmailsForOrgServer(input: {
     skipped: result.skipped,
     dueFound: dueDocs.length,
     pendingCount,
+    overdueIgnoringNotBefore,
+    notBeforeBlocked,
+    unparsedScheduledAt,
     skipReasons: result.skipReasons,
   });
 
@@ -1743,6 +1861,9 @@ export async function processDueScheduledEmailsForOrgServer(input: {
     ...result,
     dueFound: dueDocs.length,
     pendingCount,
+    overdueIgnoringNotBefore,
+    notBeforeBlocked,
+    unparsedScheduledAt,
   };
 }
 

@@ -164,49 +164,42 @@ export function ScheduledEmailSendSync() {
 
         console.log(`[scheduled-sync] runLive started: localDue=${localDue}, owners=${JSON.stringify(owners)}, followupsInWorkspace=${followupsRef.current.length}`);
 
-        // Always include tenant-wide org flush (no forUser) so all member roots are swept
-        const flushPaths = new Set<string>();
-        flushPaths.add("/api/email/scheduled/process-due");
-        for (const owner of owners) {
-          flushPaths.add(buildScheduledApiPath("/api/email/scheduled/process-due", owner));
-        }
+        // Single org-wide flush covers every member root. Calling org + every forUser
+        // stacked process-due locks and produced busy:true with sent=0 in production.
+        const processPath = "/api/email/scheduled/process-due";
+        console.log(`[scheduled-sync] Calling process-due endpoint: "${processPath}"`);
+        const processRes = await fetch(processPath, { method: "POST" });
+        const processData = (await processRes.json().catch(() => null)) as {
+          ok?: boolean;
+          busy?: boolean;
+          queued?: boolean;
+          sent?: number;
+          failed?: number;
+          skipped?: number;
+          dueFound?: number;
+          pendingCount?: number;
+          skipReasons?: Record<string, number>;
+          rows?: Array<{
+            id: string;
+            outcome: string;
+            reason?: string;
+            blockedByFollowupId?: string;
+            detail?: string;
+          }>;
+          error?: string;
+          hint?: string;
+        } | null;
 
-        for (const processPath of flushPaths) {
-          console.log(`[scheduled-sync] Calling process-due endpoint: "${processPath}"`);
-          const processRes = await fetch(processPath, { method: "POST" });
-          const processData = (await processRes.json().catch(() => null)) as {
-            ok?: boolean;
-            busy?: boolean;
-            queued?: boolean;
-            sent?: number;
-            failed?: number;
-            skipped?: number;
-            dueFound?: number;
-            pendingCount?: number;
-            skipReasons?: Record<string, number>;
-            rows?: Array<{
-              id: string;
-              outcome: string;
-              reason?: string;
-              blockedByFollowupId?: string;
-              detail?: string;
-            }>;
-            error?: string;
-            hint?: string;
-          } | null;
+        console.log(`[scheduled-sync] Response from "${processPath}": status=${processRes.status}`, processData);
 
-          console.log(`[scheduled-sync] Response from "${processPath}": status=${processRes.status}`, processData);
-
-          if (!processRes.ok) {
-            if (processRes.status === 404) {
-              toast.error("Scheduled send is not available on this deploy", {
-                description: "Redeploy web with the latest scheduled-email fix.",
-              });
-              return;
-            }
-            continue;
+        if (!processRes.ok) {
+          if (processRes.status === 404) {
+            toast.error("Scheduled send is not available on this deploy", {
+              description: "Redeploy web with the latest scheduled-email fix.",
+            });
+            return;
           }
-          if (!processData?.ok) continue;
+        } else if (processData?.ok) {
           anyOk = true;
           sent += processData.sent ?? 0;
           failed += processData.failed ?? 0;
@@ -216,7 +209,7 @@ export function ScheduledEmailSendSync() {
             sawCounts = true;
           }
           if (typeof processData.pendingCount === "number") {
-            pendingCount += processData.pendingCount;
+            pendingCount = Math.max(pendingCount, processData.pendingCount);
             sawCounts = true;
           }
           if (processData.skipReasons) {
@@ -229,21 +222,18 @@ export function ScheduledEmailSendSync() {
           if (processData.queued) queued = true;
           if (processData.busy) busy = true;
 
-          // Immediately update local followups in workspace if any rows were sent
           if (Array.isArray(processData.rows)) {
             for (const r of processData.rows) {
-              if (r.outcome === "sent") {
-                const targetFollowup = followupsRef.current.find((f) => f.scheduledEmailId === r.id);
-                if (targetFollowup) {
-                  console.log(`[scheduled-sync] Immediately updating UI status to sent for followup "${targetFollowup.id}" (scheduledId: "${r.id}")`);
-                  syncFollowupDelivery(targetFollowup.id, {
-                    deliveryStatus: "sent",
-                    sentAt: new Date().toISOString(),
-                  });
-                  setFollowupCompleted(targetFollowup.id, true);
-                  clearFollowupEmailSchedule(targetFollowup.id);
-                }
-              }
+              if (r.outcome !== "sent") continue;
+              const targetFollowup = followupsRef.current.find((f) => f.scheduledEmailId === r.id);
+              if (!targetFollowup) continue;
+              console.log(`[scheduled-sync] Immediately updating UI status to sent for followup "${targetFollowup.id}" (scheduledId: "${r.id}")`);
+              syncFollowupDelivery(targetFollowup.id, {
+                deliveryStatus: "sent",
+                sentAt: new Date().toISOString(),
+              });
+              setFollowupCompleted(targetFollowup.id, true);
+              clearFollowupEmailSchedule(targetFollowup.id);
             }
           }
         }

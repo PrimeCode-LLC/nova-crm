@@ -80,6 +80,26 @@ export function serializePayloadValue(value: unknown): unknown {
   return value;
 }
 
+/** Firestore-export / Admin SDK JSON timestamp shapes. */
+function coerceFirestoreTimestampObjectMs(value: object): number | null {
+  const v = value as Record<string, unknown>;
+  const seconds =
+    typeof v._seconds === "number"
+      ? v._seconds
+      : typeof v.seconds === "number"
+        ? v.seconds
+        : null;
+  if (seconds == null || !Number.isFinite(seconds)) return null;
+  const nanos =
+    typeof v._nanoseconds === "number"
+      ? v._nanoseconds
+      : typeof v.nanoseconds === "number"
+        ? v.nanoseconds
+        : 0;
+  const ms = seconds * 1000 + Math.floor((Number.isFinite(nanos) ? nanos : 0) / 1e6);
+  return Number.isFinite(ms) ? ms : null;
+}
+
 /** Deserialize stored JSON into runtime objects (ISO strings → Timestamp where needed). */
 export function deserializePayload(data: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -91,13 +111,20 @@ export function deserializePayload(data: Record<string, unknown>): Record<string
         continue;
       }
     }
+    if (v && typeof v === "object" && k.endsWith("At")) {
+      const ms = coerceFirestoreTimestampObjectMs(v);
+      if (ms != null) {
+        out[k] = Timestamp.fromMillis(ms);
+        continue;
+      }
+    }
     out[k] = v;
   }
   return out;
 }
 
 /**
- * Normalize Timestamp / Date / ISO / accidental `{_date}` JSON to epoch ms.
+ * Normalize Timestamp / Date / ISO / accidental `{_date}` / Firestore `{_seconds}` JSON to epoch ms.
  * Used by document-shim query filters so `scheduledAt <= now` works after deserialize.
  */
 export function coerceInstantMs(value: unknown): number | null {
@@ -141,6 +168,8 @@ export function coerceInstantMs(value: unknown): number | null {
         return coerceInstantMs(raw);
       }
     }
+    const firestoreMs = coerceFirestoreTimestampObjectMs(value);
+    if (firestoreMs != null) return firestoreMs;
   }
   return null;
 }
