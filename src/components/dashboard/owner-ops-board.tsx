@@ -119,6 +119,7 @@ export function OwnerOpsBoard({
   isDemo,
   wallPrefs,
   orgWideScope = false,
+  extraSentAts,
 }: {
   metrics: DashboardWorkflowMetrics;
   leads: Lead[];
@@ -145,6 +146,8 @@ export function OwnerOpsBoard({
   wallPrefs?: WallPreferences;
   /** Org-wide (no channel/owner filters) — enables Redis scoreboards when flag on. */
   orgWideScope?: boolean;
+  /** Compose / inbox / reply send timestamps for email volume. */
+  extraSentAts?: readonly number[];
 }) {
   const wallSettings = wallPrefs ?? defaultWallPreferences();
   const needMeetings = Boolean(widgets.pulse || widgets.actionBoard || wall);
@@ -315,6 +318,7 @@ export function OwnerOpsBoard({
                 leads={leads}
                 contacts={contacts}
                 tasks={tasks}
+                extraSentAts={extraSentAts}
                 fill
               />
             </div>
@@ -467,6 +471,7 @@ export function OwnerOpsBoard({
                       leads={leads}
                       contacts={contacts}
                       tasks={tasks}
+                      extraSentAts={extraSentAts}
                     />
                   ) : null}
                   {widgets.followupSchedule ? (

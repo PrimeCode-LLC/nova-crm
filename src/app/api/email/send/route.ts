@@ -14,6 +14,7 @@ import {
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
 import { assertLeadContactAllowedServer } from "@/lib/email/lead-contact-policy-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
+import { recordEmailSendEventServer } from "@/lib/email/record-email-send-event-server";
 import { resolvePendingReplyActionOnOutboundServer } from "@/lib/email/resolve-pending-reply-action-on-outbound-server";
 
 export async function POST(req: Request) {
@@ -199,6 +200,21 @@ export async function POST(req: Request) {
         attachments: outboundAttachmentsToLeadMail(parsedAttachments),
         source: "smtp_send",
       });
+    }
+
+    try {
+      await recordEmailSendEventServer({
+        organizationId: g.ctx.session.organizationId,
+        actorId: g.ctx.session.uid,
+        source: "smtp_send",
+        mailboxId: mailboxId || undefined,
+        leadId,
+        messageId: result.messageId,
+        subject,
+        writeTimeline: Boolean(leadId),
+      });
+    } catch {
+      /* send already succeeded; dashboard count can catch up on next recompute */
     }
 
     if (leadId) {

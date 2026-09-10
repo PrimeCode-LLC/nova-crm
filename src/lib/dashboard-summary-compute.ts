@@ -6,6 +6,7 @@
 import { CHANNEL_FUNNELS, CHANNEL_LIST, PIPELINE_STAGES } from "@/lib/constants";
 import { getDashboardRangeStart } from "@/lib/dashboard-date-range";
 import { aggregateChannelFunnelCounts } from "@/lib/dashboard-analytics";
+import { countEmailsSentInRange } from "@/lib/dashboard-emails-sent";
 import {
   isFollowupDueThroughToday,
   isFollowupOverdue,
@@ -155,6 +156,8 @@ export function computeOrgRangeMetrics(input: {
   range: OrgDashboardSummaryRangeKey;
   timeZone?: string;
   now?: Date;
+  /** Compose / inbox / reply send timestamps (ms), excluding sequence followups. */
+  extraSentAts?: readonly number[];
 }): OrgDashboardSummaryRangeMetrics {
   const now = input.now ?? new Date();
   const start = getDashboardRangeStart(input.range, {
@@ -162,13 +165,11 @@ export function computeOrgRangeMetrics(input: {
     timeZone: input.timeZone,
   }).getTime();
 
-  let sent = 0;
-  for (const followup of input.followups) {
-    const sentAt = validTime(followup.sentAt);
-    if (followup.deliveryStatus === "sent" && sentAt !== undefined && sentAt >= start) {
-      sent += 1;
-    }
-  }
+  const sent = countEmailsSentInRange({
+    followups: input.followups,
+    extraSentAts: input.extraSentAts,
+    rangeStart: start,
+  });
 
   let replies = 0;
   let opens = 0;
@@ -210,6 +211,7 @@ export function computeAllOrgRangeMetrics(input: {
   deals: readonly Deal[];
   timeZone?: string;
   now?: Date;
+  extraSentAts?: readonly number[];
 }): OrgDashboardSummary["ranges"] {
   const ranges: OrgDashboardSummary["ranges"] = {};
   for (const key of ORG_DASHBOARD_SUMMARY_RANGE_KEYS) {
@@ -225,6 +227,7 @@ export function computeOrgDashboardSummaryFields(input: {
   followups: readonly Followup[];
   timeZone?: string;
   now?: Date;
+  extraSentAts?: readonly number[];
 }): Omit<OrgDashboardSummary, "id" | "organizationId" | "version" | "updatedAt"> {
   const point = computeOrgPointInTimeGauges(input);
   const pipelineLeads = input.leads.map((l) => ({

@@ -1604,6 +1604,8 @@ export function LeadEmailsPanel({
     bcc?: string;
     body: string;
     messageId?: string;
+    /** When false, skip client timeline (server already wrote `email_sent`). */
+    writeTimeline?: boolean;
   }) {
     const id = addSent({
       mailboxId: input.mailboxId,
@@ -1624,14 +1626,16 @@ export function LeadEmailsPanel({
       referenceIds,
     });
     linkMessageToLead(id, lead.id);
-    workspace.addTimelineEvent({
-      id: `te-${crypto.randomUUID()}`,
-      leadId: lead.id,
-      type: "email_sent",
-      actorId: workspace.currentUserId ?? "system",
-      summary: `Email sent: ${subject.trim() || "(no subject)"}`,
-      createdAt: new Date().toISOString(),
-    });
+    if (input.writeTimeline !== false) {
+      workspace.addTimelineEvent({
+        id: `te-${crypto.randomUUID()}`,
+        leadId: lead.id,
+        type: "email_sent",
+        actorId: workspace.currentUserId ?? "system",
+        summary: `Email sent: ${subject.trim() || "(no subject)"}`,
+        createdAt: new Date().toISOString(),
+      });
+    }
     workspace.bumpLeadActivity(lead.id);
   }
 
@@ -1734,6 +1738,7 @@ export function LeadEmailsPanel({
         bcc: recipients.bcc,
         body: outboundBody,
         messageId: data.messageId,
+        writeTimeline: false,
       });
       if (draftId) useEmailAccountStore.getState().deleteDraft(draftId);
       rememberLastUsedMailbox(

@@ -340,11 +340,17 @@ async function recomputeOrgDashboardSummaryFirestoreOnly(
       ? settings.timezone.trim()
       : "UTC";
 
+  const { loadEmailSendEventAtsFromServer } = await import(
+    "@/lib/email/record-email-send-event-server"
+  );
+  const extraSentAts = await loadEmailSendEventAtsFromServer(orgId);
+
   const fields = computeOrgDashboardSummaryFields({
     leads,
     deals,
     followups,
     timeZone,
+    extraSentAts,
   });
   const now = new Date().toISOString();
   const summary: OrgDashboardSummary = {

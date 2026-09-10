@@ -189,6 +189,8 @@ export function buildEmailVolumeSeries(input: {
   contacts?: readonly Contact[];
   tasks?: readonly LeadTask[];
   timelineByLead?: Record<string, readonly TimelineEvent[]>;
+  /** Compose / inbox / reply send timestamps (ms), excluding sequence followups. */
+  extraSentAts?: readonly number[];
   timeZone?: string;
 }): EmailVolumePoint[] {
   const now = input.now ?? new Date();
@@ -244,6 +246,9 @@ export function buildEmailVolumeSeries(input: {
   for (const f of input.followups) {
     if (f.deliveryStatus !== "sent") continue;
     bump(sent, validTime(f.sentAt));
+  }
+  for (const at of input.extraSentAts ?? []) {
+    bump(sent, Number.isFinite(at) ? at : undefined);
   }
   for (const l of input.leads) {
     bump(opens, validTime(l.lastEmailOpenedAt));

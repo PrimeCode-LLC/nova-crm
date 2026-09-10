@@ -29,6 +29,7 @@ export function EmailVolumeChart({
   leads,
   contacts,
   tasks,
+  extraSentAts,
   compact,
   fill,
   timeZone: timeZoneProp,
@@ -37,6 +38,8 @@ export function EmailVolumeChart({
   leads: Lead[];
   contacts?: Contact[];
   tasks?: LeadTask[];
+  /** Compose / inbox / reply send timestamps (ms). */
+  extraSentAts?: readonly number[];
   compact?: boolean;
   /** Grow to fill the parent's height instead of a fixed chart height. */
   fill?: boolean;
@@ -50,6 +53,7 @@ export function EmailVolumeChart({
   const deferredLeads = React.useDeferredValue(leads);
   const deferredContacts = React.useDeferredValue(contacts);
   const deferredTasks = React.useDeferredValue(tasks);
+  const deferredExtraSentAts = React.useDeferredValue(extraSentAts);
   const data = React.useMemo(
     () =>
       buildEmailVolumeSeries({
@@ -58,9 +62,18 @@ export function EmailVolumeChart({
         period,
         contacts: deferredContacts,
         tasks: deferredTasks,
+        extraSentAts: deferredExtraSentAts,
         timeZone,
       }),
-    [deferredFollowups, deferredLeads, period, deferredContacts, deferredTasks, timeZone],
+    [
+      deferredFollowups,
+      deferredLeads,
+      period,
+      deferredContacts,
+      deferredTasks,
+      deferredExtraSentAts,
+      timeZone,
+    ],
   );
   const totals = React.useMemo(() => emailVolumeTotals(data), [data]);
   const { wrapRef, chartSize } = useChartSize({ w: 320, h: compact ? 140 : 200 });

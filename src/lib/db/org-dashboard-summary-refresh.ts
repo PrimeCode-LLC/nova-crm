@@ -165,11 +165,16 @@ export async function recomputeOrgDashboardSummaryPostgres(
     });
 
     const followups = await loadFollowupsFromFirestore(orgId);
+    const { loadEmailSendEventAtsFromServer } = await import(
+      "@/lib/email/record-email-send-event-server"
+    );
+    const extraSentAts = await loadEmailSendEventAtsFromServer(orgId);
     const fields = computeOrgDashboardSummaryFields({
       leads,
       deals,
       followups,
       timeZone,
+      extraSentAts,
     });
     const now = new Date().toISOString();
     const summary: OrgDashboardSummary = {

@@ -107,6 +107,11 @@ export const COLLECTIONS = {
   replyActions: "replyActions",
   /** Per-send open/click tracking records for CRM SMTP outbound mail. */
   mailTrackingMessages: "mailTrackingMessages",
+  /**
+   * Compose / inbox / reply SMTP sends for dashboard “Emails sent”
+   * (sequence steps still count via followups — do not double-write those here).
+   */
+  emailSendEvents: "emailSendEvents",
 } as const;
 
 /** Subcollections under `organizations/{orgId}/*` (server-managed). */
@@ -188,4 +193,5 @@ export const TENANT_COLLECTIONS = [
   COLLECTIONS.leadMailMessages,
   COLLECTIONS.replyActions,
   COLLECTIONS.mailTrackingMessages,
+  COLLECTIONS.emailSendEvents,
 ] as const;

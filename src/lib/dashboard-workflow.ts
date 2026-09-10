@@ -1,4 +1,5 @@
 import { getDashboardRangeStart, type DashboardTimeRangeKey } from "@/lib/dashboard-date-range";
+import { countEmailsSentInRange } from "@/lib/dashboard-emails-sent";
 import { PIPELINE_STAGES } from "@/lib/constants";
 import {
   isFollowupActionable,
@@ -121,6 +122,11 @@ export function computeDashboardWorkflowMetrics(input: {
   contacts?: readonly Contact[];
   /** IANA timezone for due/overdue calendar boundaries (org or browser). */
   timeZone?: string;
+  /**
+   * Compose / inbox / reply send timestamps (ms) not represented by followups.
+   * Typically from timeline `email_sent` without `followupId`, or `emailSendEvents`.
+   */
+  extraSentAts?: readonly number[];
 }): DashboardWorkflowMetrics {
   const now = input.now ?? new Date();
   const nowMs = now.getTime();
@@ -186,10 +192,11 @@ export function computeDashboardWorkflowMetrics(input: {
         (Boolean(followup.messageBody?.trim()) || Boolean(followup.hasMessageBody)) &&
         !followup.scheduledEmailId,
     ).length,
-    sentInRange: input.followups.filter((followup) => {
-      const sent = validTime(followup.sentAt);
-      return followup.deliveryStatus === "sent" && sent !== undefined && sent >= start;
-    }).length,
+    sentInRange: countEmailsSentInRange({
+      followups: input.followups,
+      extraSentAts: input.extraSentAts,
+      rangeStart: start,
+    }),
     failedDeliveries: input.followups.filter(
       (followup) => followup.deliveryStatus === "failed" && !followup.completedAt,
     ).length,

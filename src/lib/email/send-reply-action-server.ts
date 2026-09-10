@@ -15,6 +15,7 @@ import {
   incrementMailboxSendCountServer,
 } from "@/lib/email/mailbox-send-quota-server";
 import { persistOutboundLeadMailServer } from "@/lib/email/persist-outbound-lead-mail-server";
+import { recordEmailSendEventServer } from "@/lib/email/record-email-send-event-server";
 import { replySubject } from "@/lib/email/reply-compose";
 import { sendOutboundMailServer } from "@/lib/email/send-outbound-mail-server";
 import { normalizeMessageId } from "@/lib/email/thread-inbound";
@@ -341,6 +342,22 @@ export async function sendReplyActionServer(input: {
     );
   } catch {
     /* timeline best-effort */
+  }
+
+  try {
+    await recordEmailSendEventServer({
+      organizationId: input.organizationId,
+      actorId: input.decidedBy,
+      sentAt: now,
+      source: "reply_intelligence",
+      mailboxId: resolved.mailboxId,
+      leadId: action.leadId,
+      messageId,
+      subject,
+      writeTimeline: false,
+    });
+  } catch {
+    /* send already succeeded */
   }
 
   try {

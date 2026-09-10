@@ -104,6 +104,10 @@ import {
   Monitor,
 } from "lucide-react";
 import { computeDashboardWorkflowMetrics, isSalesLead } from "@/lib/dashboard-workflow";
+import {
+  composeEmailSentAtsFromTimeline,
+  flattenTimelineByLead,
+} from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
 import {
   Select,
@@ -317,6 +321,15 @@ export default function DashboardPage() {
     () => kpiScoped.leadTasks.filter((task) => !task.leadId || scopedLeadIds.has(task.leadId)),
     [kpiScoped.leadTasks, scopedLeadIds],
   );
+  const composeSentAts = React.useMemo(
+    () =>
+      composeEmailSentAtsFromTimeline(
+        flattenTimelineByLead(timelineByLead).filter(
+          (event) => !event.leadId || scopedLeadIds.has(event.leadId),
+        ),
+      ),
+    [timelineByLead, scopedLeadIds],
+  );
   const workflowMetrics = React.useMemo(
     () =>
       computeDashboardWorkflowMetrics({
@@ -328,6 +341,7 @@ export default function DashboardPage() {
         currentUserId,
         range: timeRange as DashboardTimeRangeKey,
         timeZone: organizationTimezone,
+        extraSentAts: composeSentAts,
       }),
     [
       scopedLeads,
@@ -338,6 +352,7 @@ export default function DashboardPage() {
       currentUserId,
       timeRange,
       organizationTimezone,
+      composeSentAts,
     ],
   );
 
@@ -930,6 +945,7 @@ export default function DashboardPage() {
                 widgets={opsWidgets}
                 isDemo={isDemo}
                 orgWideScope={orgWideDashboardScope}
+                extraSentAts={composeSentAts}
               />
             ) : frontlineLayout ? (
               <FrontlineBoard

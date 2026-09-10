@@ -29,6 +29,10 @@ import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skelet
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
+import {
+  composeEmailSentAtsFromTimeline,
+  flattenTimelineByLead,
+} from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
 import { applyOrgDashboardSummaryToWorkflowMetrics } from "@/lib/dashboard-summary-apply";
 import { canApplyOrgWideDashboardSummary } from "@/lib/dashboard-kpi-scope";
@@ -289,6 +293,10 @@ function DashboardWallPageInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [armedHash]);
 
+  const composeSentAts = React.useMemo(
+    () => composeEmailSentAtsFromTimeline(flattenTimelineByLead(timelineByLead)),
+    [timelineByLead],
+  );
   const metrics = React.useMemo(
     () =>
       computeDashboardWorkflowMetrics({
@@ -300,8 +308,19 @@ function DashboardWallPageInner() {
         currentUserId,
         range,
         timeZone: organizationTimezone,
+        extraSentAts: composeSentAts,
       }),
-    [leads, followups, followupPlans, leadTasks, contacts, currentUserId, range, organizationTimezone],
+    [
+      leads,
+      followups,
+      followupPlans,
+      leadTasks,
+      contacts,
+      currentUserId,
+      range,
+      organizationTimezone,
+      composeSentAts,
+    ],
   );
 
   const orgWideDashboardScope = canApplyOrgWideDashboardSummary({
@@ -596,6 +615,7 @@ function DashboardWallPageInner() {
           isDemo={isDemo}
           wallPrefs={wallPrefs}
           orgWideScope
+          extraSentAts={composeSentAts}
         />
       </div>
     </div>
