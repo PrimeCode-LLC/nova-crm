@@ -108,21 +108,38 @@ export function ScheduledEmailSendSync() {
 
   const countLocalDuePending = React.useCallback(() => {
     const now = Date.now();
+    // Only email schedule times — followup.dueAt is the CRM task date, not send readiness.
     const scheduledDue = scheduledRef.current.filter((s) => {
       if (s.status !== "pending" && s.status !== "processing") return false;
       const due = new Date(s.scheduledAt).getTime();
       return !Number.isNaN(due) && due <= now;
-    }).length;
+    });
 
     const followupDue = followupsRef.current.filter((f) => {
       if (f.deliveryStatus !== "scheduled" && !f.scheduledEmailId) return false;
-      const when = f.emailScheduledAt || f.dueAt;
+      const when = f.emailScheduledAt;
       if (!when) return false;
       const due = new Date(when).getTime();
       return !Number.isNaN(due) && due <= now;
-    }).length;
+    });
 
-    return Math.max(scheduledDue, followupDue);
+    if (scheduledDue.length > 0 || followupDue.length > 0) {
+      console.log("[scheduled-sync] local due candidates", {
+        scheduled: scheduledDue.slice(0, 5).map((s) => ({
+          id: s.id,
+          scheduledAt: s.scheduledAt,
+          status: s.status,
+          mailboxId: s.mailboxId,
+        })),
+        followups: followupDue.slice(0, 5).map((f) => ({
+          id: f.id,
+          emailScheduledAt: f.emailScheduledAt,
+          scheduledEmailId: f.scheduledEmailId,
+        })),
+      });
+    }
+
+    return Math.max(scheduledDue.length, followupDue.length);
   }, []);
 
   const buildScheduledApiPath = React.useCallback((path: string, ownerUid?: string | null) => {
@@ -164,42 +181,57 @@ export function ScheduledEmailSendSync() {
 
         console.log(`[scheduled-sync] runLive started: localDue=${localDue}, owners=${JSON.stringify(owners)}, followupsInWorkspace=${followupsRef.current.length}`);
 
-        // Single org-wide flush covers every member root. Calling org + every forUser
-        // stacked process-due locks and produced busy:true with sent=0 in production.
-        const processPath = "/api/email/scheduled/process-due";
-        console.log(`[scheduled-sync] Calling process-due endpoint: "${processPath}"`);
-        const processRes = await fetch(processPath, { method: "POST" });
-        const processData = (await processRes.json().catch(() => null)) as {
-          ok?: boolean;
-          busy?: boolean;
-          queued?: boolean;
-          sent?: number;
-          failed?: number;
-          skipped?: number;
-          dueFound?: number;
-          pendingCount?: number;
-          skipReasons?: Record<string, number>;
-          rows?: Array<{
-            id: string;
-            outcome: string;
-            reason?: string;
-            blockedByFollowupId?: string;
-            detail?: string;
-          }>;
-          error?: string;
-          hint?: string;
-        } | null;
+        // Org-wide first. If the client sees due mail and the org scan finds none,
+        // retry each mailbox owner with the path-scoped member flush (no nested org lock).
+        const flushPaths = ["/api/email/scheduled/process-due"];
+        const processOne = async (processPath: string) => {
+          console.log(`[scheduled-sync] Calling process-due endpoint: "${processPath}"`);
+          const processRes = await fetch(processPath, { method: "POST" });
+          const processData = (await processRes.json().catch(() => null)) as {
+            ok?: boolean;
+            busy?: boolean;
+            queued?: boolean;
+            sent?: number;
+            failed?: number;
+            skipped?: number;
+            dueFound?: number;
+            pendingCount?: number;
+            overdueIgnoringNotBefore?: number;
+            notBeforeBlocked?: number;
+            unparsedScheduledAt?: number;
+            diagnostics?: {
+              nowIso?: string;
+              earliestPendingScheduledAt?: string | null;
+              notBeforeBlocked?: number;
+              unparsedScheduledAt?: number;
+              overdueIgnoringNotBefore?: number;
+              sample?: unknown[];
+            };
+            skipReasons?: Record<string, number>;
+            rows?: Array<{
+              id: string;
+              outcome: string;
+              reason?: string;
+              blockedByFollowupId?: string;
+              detail?: string;
+            }>;
+            error?: string;
+            hint?: string;
+          } | null;
 
-        console.log(`[scheduled-sync] Response from "${processPath}": status=${processRes.status}`, processData);
+          console.log(`[scheduled-sync] Response from "${processPath}": status=${processRes.status}`, processData);
 
-        if (!processRes.ok) {
-          if (processRes.status === 404) {
-            toast.error("Scheduled send is not available on this deploy", {
-              description: "Redeploy web with the latest scheduled-email fix.",
-            });
-            return;
+          if (!processRes.ok) {
+            if (processRes.status === 404) {
+              toast.error("Scheduled send is not available on this deploy", {
+                description: "Redeploy web with the latest scheduled-email fix.",
+              });
+              return null;
+            }
+            return processData;
           }
-        } else if (processData?.ok) {
+          if (!processData?.ok) return processData;
+
           anyOk = true;
           sent += processData.sent ?? 0;
           failed += processData.failed ?? 0;
@@ -236,9 +268,28 @@ export function ScheduledEmailSendSync() {
               clearFollowupEmailSchedule(targetFollowup.id);
             }
           }
+          return processData;
+        };
+
+        let lastData = await processOne(flushPaths[0]!);
+        if (
+          localDue > 0 &&
+          (lastData?.dueFound ?? 0) === 0 &&
+          !lastData?.busy
+        ) {
+          for (const owner of owners) {
+            const memberPath = buildScheduledApiPath(
+              "/api/email/scheduled/process-due",
+              owner,
+            );
+            if (flushPaths.includes(memberPath)) continue;
+            flushPaths.push(memberPath);
+            lastData = await processOne(memberPath);
+            if ((lastData?.dueFound ?? 0) > 0 || (lastData?.sent ?? 0) > 0) break;
+          }
         }
 
-        console.log(`[scheduled-sync] runLive cycle summary: sent=${sent}, failed=${failed}, skipped=${skipped}, dueFound=${dueFound}, pendingCount=${pendingCount}, busy=${busy}`);
+        console.log(`[scheduled-sync] runLive cycle summary: sent=${sent}, failed=${failed}, skipped=${skipped}, dueFound=${dueFound}, pendingCount=${pendingCount}, busy=${busy}`, lastData?.diagnostics);
 
         if (!anyOk) return;
 
@@ -263,6 +314,8 @@ export function ScheduledEmailSendSync() {
           lastStalledToastAtRef.current = Date.now();
           const topSkip = Object.entries(skipReasons).sort((a, b) => b[1] - a[1])[0];
           const skipLabel = topSkip?.[0];
+          const diag = lastData?.diagnostics;
+          const earliest = diag?.earliestPendingScheduledAt;
           const skipDesc =
             skipLabel === "wait_for_prior"
               ? "Waiting on an earlier sequence step — check that step’s send status."
@@ -275,13 +328,25 @@ export function ScheduledEmailSendSync() {
                     : skipLabel === "claim_refused"
                       ? "Another flush is already processing this mail."
                       : null;
+          const blocked =
+            (diag?.notBeforeBlocked ?? lastData?.notBeforeBlocked ?? 0) > 0
+              ? "Send is deferred (send-gap/quota notBeforeAt). Open Inbox → Scheduled."
+              : null;
+          const notDueYet =
+            dueFound === 0 && earliest
+              ? `Server earliest pending send is ${earliest} (now ${diag?.nowIso ?? "unknown"}).`
+              : dueFound === 0 && localDue > 0
+                ? "Browser thinks mail is due, but the server found no due rows — check Inbox → Scheduled times."
+                : null;
           toast.message("Due email still not sent", {
             description:
               skipDesc ??
+              blocked ??
+              notDueYet ??
               (sawCounts && pendingCount === 0 && localDue > 0
                 ? "Followup is marked Scheduled but no pending row was found for this mailbox owner."
-                : queued && skipped === 0
-                  ? "Queued for the worker. If it stays pending, check worker/cron on the server."
+                : dueFound > 0 && queued && skipped === 0
+                  ? "Found due mail and queued a worker tick — if it stays pending, check worker/cron."
                   : `Found ${Math.max(localDue, dueFound)} due — open Inbox → Scheduled for status/error.`),
           });
         }
@@ -359,7 +424,7 @@ export function ScheduledEmailSendSync() {
       }) ||
       followups.some((f) => {
         if (f.deliveryStatus !== "scheduled" && !f.scheduledEmailId) return false;
-        const when = f.emailScheduledAt || f.dueAt;
+        const when = f.emailScheduledAt;
         if (!when) return false;
         const due = new Date(when).getTime();
         return !Number.isNaN(due) && due <= Date.now() + 60_000;
