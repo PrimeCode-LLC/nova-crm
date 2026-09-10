@@ -29,8 +29,8 @@ const PROCESS_DUE_LOCK = "nova-crm-process-due";
  * Sends due scheduled emails while the app is open.
  *
  * - Demo: in-memory `processDueScheduledLocal`.
- * - Live: POST `/api/email/scheduled/process-due` for the active mailbox owner
- *   (assigned/shared boxes store rows under the owner uid, not the viewer).
+ * - Live: path-scoped member `process-due?forUser=` first when mail is due (fast),
+ *   then org-wide sweep as secondary. Org collectionGroup must not block due sends.
  *   Also enqueues the worker tick. Complements the every-5-min cron.
  */
 export function ScheduledEmailSendSync() {
@@ -159,7 +159,10 @@ export function ScheduledEmailSendSync() {
 
   const runLive = React.useCallback(async () => {
     if (runningRef.current) return;
-    if (Date.now() - lastRunAtRef.current < MIN_RUN_GAP_MS) return;
+    // Allow faster retries when the client already sees due mail (prod busy lock races).
+    const duePeek = countLocalDuePending();
+    const minGap = duePeek > 0 ? 5_000 : MIN_RUN_GAP_MS;
+    if (Date.now() - lastRunAtRef.current < minGap) return;
 
     const execute = async () => {
       if (runningRef.current) return;
@@ -172,52 +175,51 @@ export function ScheduledEmailSendSync() {
         let skipped = 0;
         let queued = false;
         let busy = false;
+        let orgBusy = false;
+        let memberBusy = false;
         let dueFound = 0;
         let pendingCount = 0;
         let sawCounts = false;
         let anyOk = false;
         const skipReasons: Record<string, number> = {};
-        const localDue = countLocalDuePending();
+        const localDue = duePeek > 0 ? duePeek : countLocalDuePending();
 
         console.log(`[scheduled-sync] runLive started: localDue=${localDue}, owners=${JSON.stringify(owners)}, followupsInWorkspace=${followupsRef.current.length}`);
 
-        // Org-wide first. If the client sees due mail and the org scan finds none,
-        // retry each mailbox owner with the path-scoped member flush (no nested org lock).
-        const flushPaths = ["/api/email/scheduled/process-due"];
+        type ProcessDueResponse = {
+          ok?: boolean;
+          busy?: boolean;
+          queued?: boolean;
+          sent?: number;
+          failed?: number;
+          skipped?: number;
+          dueFound?: number;
+          pendingCount?: number;
+          notBeforeBlocked?: number;
+          diagnostics?: {
+            nowIso?: string;
+            earliestPendingScheduledAt?: string | null;
+            notBeforeBlocked?: number;
+            unparsedScheduledAt?: number;
+            overdueIgnoringNotBefore?: number;
+            sample?: unknown[];
+          };
+          skipReasons?: Record<string, number>;
+          rows?: Array<{
+            id: string;
+            outcome: string;
+            reason?: string;
+            blockedByFollowupId?: string;
+            detail?: string;
+          }>;
+          error?: string;
+          hint?: string;
+        };
+
         const processOne = async (processPath: string) => {
           console.log(`[scheduled-sync] Calling process-due endpoint: "${processPath}"`);
           const processRes = await fetch(processPath, { method: "POST" });
-          const processData = (await processRes.json().catch(() => null)) as {
-            ok?: boolean;
-            busy?: boolean;
-            queued?: boolean;
-            sent?: number;
-            failed?: number;
-            skipped?: number;
-            dueFound?: number;
-            pendingCount?: number;
-            overdueIgnoringNotBefore?: number;
-            notBeforeBlocked?: number;
-            unparsedScheduledAt?: number;
-            diagnostics?: {
-              nowIso?: string;
-              earliestPendingScheduledAt?: string | null;
-              notBeforeBlocked?: number;
-              unparsedScheduledAt?: number;
-              overdueIgnoringNotBefore?: number;
-              sample?: unknown[];
-            };
-            skipReasons?: Record<string, number>;
-            rows?: Array<{
-              id: string;
-              outcome: string;
-              reason?: string;
-              blockedByFollowupId?: string;
-              detail?: string;
-            }>;
-            error?: string;
-            hint?: string;
-          } | null;
+          const processData = (await processRes.json().catch(() => null)) as ProcessDueResponse | null;
 
           console.log(`[scheduled-sync] Response from "${processPath}": status=${processRes.status}`, processData);
 
@@ -226,11 +228,11 @@ export function ScheduledEmailSendSync() {
               toast.error("Scheduled send is not available on this deploy", {
                 description: "Redeploy web with the latest scheduled-email fix.",
               });
-              return null;
+              return { fatal404: true as const, data: null };
             }
-            return processData;
+            return { fatal404: false as const, data: processData };
           }
-          if (!processData?.ok) return processData;
+          if (!processData?.ok) return { fatal404: false as const, data: processData };
 
           anyOk = true;
           sent += processData.sent ?? 0;
@@ -268,28 +270,97 @@ export function ScheduledEmailSendSync() {
               clearFollowupEmailSchedule(targetFollowup.id);
             }
           }
-          return processData;
+          return { fatal404: false as const, data: processData };
         };
 
-        let lastData = await processOne(flushPaths[0]!);
-        if (
-          localDue > 0 &&
-          (lastData?.dueFound ?? 0) === 0 &&
-          !lastData?.busy
-        ) {
-          for (const owner of owners) {
-            const memberPath = buildScheduledApiPath(
-              "/api/email/scheduled/process-due",
-              owner,
-            );
-            if (flushPaths.includes(memberPath)) continue;
-            flushPaths.push(memberPath);
-            lastData = await processOne(memberPath);
-            if ((lastData?.dueFound ?? 0) > 0 || (lastData?.sent ?? 0) > 0) break;
+        /** Owners that hold a locally due row — flush these before everyone else. */
+        const dueOwnerUids = (() => {
+          const now = Date.now();
+          const set = new Set<string>();
+          const boxes = mailboxesRef.current;
+          for (const s of scheduledRef.current) {
+            if (s.status !== "pending" && s.status !== "processing") continue;
+            const due = new Date(s.scheduledAt).getTime();
+            if (Number.isNaN(due) || due > now) continue;
+            if (s.uid?.trim()) set.add(s.uid.trim());
+            const box = boxes.find((m) => m.id === s.mailboxId);
+            const owner = box?.dataOwnerUid?.trim();
+            if (owner) set.add(owner);
+          }
+          for (const f of followupsRef.current) {
+            if (f.deliveryStatus !== "scheduled" && !f.scheduledEmailId) continue;
+            if (!f.emailScheduledAt) continue;
+            const due = new Date(f.emailScheduledAt).getTime();
+            if (Number.isNaN(due) || due > now) continue;
+            if (f.mailboxOwnerUid?.trim()) set.add(f.mailboxOwnerUid.trim());
+            if (f.ownerId?.trim()) set.add(f.ownerId.trim());
+          }
+          return [...set];
+        })();
+
+        const orderedOwners = [
+          ...dueOwnerUids,
+          ...owners.filter((o) => !dueOwnerUids.includes(o)),
+        ];
+
+        const memberPaths: string[] = [];
+        for (const owner of orderedOwners) {
+          const path = buildScheduledApiPath("/api/email/scheduled/process-due", owner);
+          if (!memberPaths.includes(path)) memberPaths.push(path);
+        }
+        const orgPath = "/api/email/scheduled/process-due";
+
+        let lastData: ProcessDueResponse | null = null;
+
+        // Fast path: path-scoped member flushes. Org collectionGroup holds a long lock in
+        // production and was returning busy:true exactly when mail became due.
+        const runMemberFlushes = async () => {
+          for (const memberPath of memberPaths) {
+            const result = await processOne(memberPath);
+            if (result.fatal404) return true;
+            lastData = result.data;
+            if (result.data?.busy) memberBusy = true;
+            // Keep going across owners — due mail may sit under a different root.
+            if (sent > 0) break;
+          }
+          return false;
+        };
+
+        if (localDue > 0) {
+          if (await runMemberFlushes()) return;
+          // Secondary org sweep only if members did not clear due mail (and even if org is busy
+          // we already attempted the fast path above).
+          if (sent === 0 && dueFound === 0) {
+            const orgResult = await processOne(orgPath);
+            if (orgResult.fatal404) return;
+            lastData = orgResult.data ?? lastData;
+            if (orgResult.data?.busy) orgBusy = true;
+            // Org busy must not skip members — already ran; if members were empty/busy, retry once.
+            if (orgResult.data?.busy && sent === 0) {
+              console.log("[scheduled-sync] Org flush busy; retrying member flushes");
+              if (await runMemberFlushes()) return;
+            }
+          }
+        } else {
+          // Idle: org-wide sweep catches other members' due mail without hammering every owner.
+          const orgResult = await processOne(orgPath);
+          if (orgResult.fatal404) return;
+          lastData = orgResult.data;
+          if (orgResult.data?.busy) {
+            orgBusy = true;
+            // Org lock held — still try active mailbox owners so one slow org scan cannot starve sends.
+            if (await runMemberFlushes()) return;
+          } else if ((orgResult.data?.dueFound ?? 0) === 0 && memberPaths.length > 0) {
+            // Cheap member nudge when org found nothing (legacy rows / path mismatch).
+            // Limit to due-priority owners only when idle to avoid N member calls every minute.
+            /* idle: org-only is enough unless we know of owners with near-due rows */
           }
         }
 
-        console.log(`[scheduled-sync] runLive cycle summary: sent=${sent}, failed=${failed}, skipped=${skipped}, dueFound=${dueFound}, pendingCount=${pendingCount}, busy=${busy}`, lastData?.diagnostics);
+        console.log(
+          `[scheduled-sync] runLive cycle summary: sent=${sent}, failed=${failed}, skipped=${skipped}, dueFound=${dueFound}, pendingCount=${pendingCount}, busy=${busy}, orgBusy=${orgBusy}, memberBusy=${memberBusy}`,
+          lastData?.diagnostics,
+        );
 
         if (!anyOk) return;
 
@@ -305,6 +376,18 @@ export function ScheduledEmailSendSync() {
               : `${failed} scheduled emails failed`,
             { description: "Check Inbox → Scheduled for the error details." },
           );
+        } else if (
+          sent === 0 &&
+          localDue > 0 &&
+          busy &&
+          dueFound === 0 &&
+          Date.now() - lastStalledToastAtRef.current >= STALLED_TOAST_GAP_MS
+        ) {
+          lastStalledToastAtRef.current = Date.now();
+          toast.message("Scheduled send is busy", {
+            description:
+              "Another flush is still running. Retrying with the mailbox owner path — keep this tab open.",
+          });
         } else if (
           sent === 0 &&
           !busy &&

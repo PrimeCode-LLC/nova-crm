@@ -15,8 +15,8 @@ export const maxDuration = 60;
 /**
  * Flush due scheduled emails for the organization or a specific mailbox owner.
  *
- * Runs a member-scoped send when `forUser` is given (with org fallback if none found under that uid).
- * When `forUser` is omitted, flushes due emails organization-wide across all member roots.
+ * - `forUser`: fast path-scoped member flush (preferred when the client knows mail is due).
+ * - no `forUser`: org-wide sweep across member roots (heavier; may return busy under load).
  * When the heavy-job queue is on, also enqueues a global worker tick.
  */
 export async function POST(req: Request) {
@@ -36,7 +36,7 @@ export async function POST(req: Request) {
     jobId = await enqueueScheduledEmailJob().catch(() => null);
   }
 
-  // If a specific member is requested, flush that member with fallback to org flush
+  // If a specific member is requested, flush that member root only (no nested org scan).
   if (forUser && forUser !== "all") {
     const resolved = await resolveMailboxDataOwnerUid({
       organizationId,
