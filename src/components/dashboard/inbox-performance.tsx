@@ -33,8 +33,8 @@ export function InboxPerformance({
   const scoreboards = useOpsScoreboards({ range, orgWideScope });
   const limit = wall ? 6 : 10;
   const rows = React.useMemo(() => {
-    if (scoreboards.enabled && scoreboards.payload?.inbox) {
-      return scoreboards.payload.inbox.slice(0, limit);
+    if (scoreboards.enabled && (scoreboards.payload?.inbox?.length ?? 0) > 0) {
+      return scoreboards.payload!.inbox.slice(0, limit);
     }
     return buildInboxPerformanceRows({
       users,

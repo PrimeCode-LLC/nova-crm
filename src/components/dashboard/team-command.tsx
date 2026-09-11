@@ -249,8 +249,10 @@ export function TeamCommand({
     viewerHasElevatedWorkspaceRole(viewer);
 
   const rowsAll = React.useMemo(() => {
-    if (scoreboards.enabled && scoreboards.payload?.teamCommand) {
-      return scoreboards.payload.teamCommand;
+    // Empty [] is truthy — only prefer precomputed rows when they have data.
+    const precomputed = scoreboards.payload?.teamCommand;
+    if (scoreboards.enabled && precomputed && precomputed.length > 0) {
+      return precomputed;
     }
     return buildTeamCommandRows({
       users,

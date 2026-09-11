@@ -571,8 +571,8 @@ export function useLiveWorkspaceFirestore(
           [key]: rows,
           coreReady:
             coreKey === "leads"
-              ? { ...prev.coreReady, leads: true, users: true, followups: true }
-              : { ...prev.coreReady, users: true, followups: true },
+              ? { ...prev.coreReady, leads: true }
+              : prev.coreReady,
         }));
       };
       const load = async () => {
@@ -616,9 +616,14 @@ export function useLiveWorkspaceFirestore(
             }
           }
 
-          // Followups / plans are pg_documents (not CRM tables). Poll with leads so
-          // Firebase-free mode does not leave sequences only in browser session.
-          const [fuRes, planRes] = await Promise.all([
+          // Users / followups / plans live in pg_documents (not CRM tables).
+          // Without the org roster, Team Command / scorecards collapse to the
+          // viewer only (often a director) and look empty.
+          const [usersRes, fuRes, planRes] = await Promise.all([
+            fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.users)}`, {
+              credentials: "same-origin",
+              cache: "no-store",
+            }),
             fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.followups)}`, {
               credentials: "same-origin",
               cache: "no-store",
@@ -629,6 +634,9 @@ export function useLiveWorkspaceFirestore(
             ),
           ]);
           if (cancelled) return;
+          const usersJson = (await usersRes.json().catch(() => null)) as {
+            docs?: Array<{ id: string; data: Record<string, unknown> }>;
+          } | null;
           const fuJson = (await fuRes.json().catch(() => null)) as {
             docs?: Array<{ id: string; data: Record<string, unknown> }>;
           } | null;
@@ -636,6 +644,9 @@ export function useLiveWorkspaceFirestore(
             docs?: Array<{ id: string; data: Record<string, unknown> }>;
           } | null;
           // Failed fetch → empty list (session extras still overlay until reload).
+          const users = usersRes.ok && Array.isArray(usersJson?.docs)
+            ? usersJson!.docs.map((d) => asUser(d.id, d.data ?? {}))
+            : [];
           const followups = fuRes.ok && Array.isArray(fuJson?.docs)
             ? fuJson!.docs.map((d) => asFollowup(d.id, d.data ?? {}))
             : [];
@@ -646,6 +657,7 @@ export function useLiveWorkspaceFirestore(
             ...prev,
             loading: false,
             error: null,
+            users,
             followups,
             followupPlans,
             coreReady: { ...prev.coreReady, followups: true, users: true },

@@ -55,8 +55,8 @@ export function PersonScorecard({
   const scoreboards = useOpsScoreboards({ range, orgWideScope });
 
   const rowsAll = React.useMemo(() => {
-    if (scoreboards.enabled && scoreboards.payload?.opsScorecard) {
-      return scoreboards.payload.opsScorecard;
+    if (scoreboards.enabled && (scoreboards.payload?.opsScorecard?.length ?? 0) > 0) {
+      return scoreboards.payload!.opsScorecard;
     }
     return buildOpsScorecardRows({
       users,
