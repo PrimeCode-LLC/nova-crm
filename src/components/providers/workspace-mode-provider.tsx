@@ -580,6 +580,17 @@ export function WorkspaceModeProvider({
       (isPostgresSoleWriterCrmV1Enabled() || isClientDocumentSyncEnabled()),
     [mode, userDoc?.organizationId],
   );
+  /**
+   * pg_documents entities (followups/plans, notes, tasks, labels, etc.) that still
+   * write through the client document shim → /api/org/workspace-documents.
+   * Client Firestore sync is permanently off; CRM tables use canPersistCrmLive instead.
+   */
+  const canPersistWorkspaceDocsLive = React.useCallback(
+    () => mode === "live" && Boolean(userDoc?.organizationId),
+    [mode, userDoc?.organizationId],
+  );
+  /** Shim db handle for workspace-documents writes (not real Firestore). */
+  const requireWorkspaceDb = React.useCallback(() => getClientDb(), []);
   const liveOrgId =
     mode === "live" && userDoc?.organizationId ? userDoc.organizationId : undefined;
   const viewerForMemberScope = React.useMemo((): User | null => {
@@ -765,12 +776,12 @@ export function WorkspaceModeProvider({
   const updateProfile = React.useCallback(
     (id: string, patch: Partial<Profile>) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistProfileUpdate(db, id, patch);
           } catch (e) {
             toastError("Could not save profile", e, {
@@ -792,12 +803,12 @@ export function WorkspaceModeProvider({
   const addProfile = React.useCallback(
     (profile: Profile) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistProfileCreate(db, orgId, profile);
           } catch (e) {
             toastError("Could not save profile", e, {
@@ -816,11 +827,11 @@ export function WorkspaceModeProvider({
   const updateCampaign = React.useCallback(
     (id: string, patch: Partial<Campaign>) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistCampaignUpdate(db, id, patch);
           } catch (e) {
             console.error(e);
@@ -840,11 +851,11 @@ export function WorkspaceModeProvider({
   const addCampaign = React.useCallback(
     (campaign: Campaign) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             const orgId = userDoc!.organizationId!;
             await persistCampaignCreate(db, orgId, campaign);
           } catch (e) {
@@ -1020,12 +1031,12 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupCreate(db, orgId, f);
             if (f.leadId) await persistLeadActivityBump(db, f.leadId);
             if (timeline) {
@@ -1085,12 +1096,12 @@ export function WorkspaceModeProvider({
               payload: { followupId: f.id, planId: plan.id },
             }));
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupPlanCreate(db, orgId, plan);
             for (const f of items) {
               await persistFollowupCreate(db, orgId, f);
@@ -1139,7 +1150,7 @@ export function WorkspaceModeProvider({
     }) => {
       const iso = new Date().toISOString();
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       const planPatch: Partial<FollowupPlan> = {
         status: "paused",
@@ -1149,7 +1160,7 @@ export function WorkspaceModeProvider({
       };
       if (writeFs && orgId) {
         try {
-          const db = requireLiveDb();
+          const db = requireWorkspaceDb();
           await persistFollowupPlanPatch(db, input.planId, planPatch);
           for (const fid of input.openFollowupIds) {
             await persistFollowupSetPaused(db, fid, true);
@@ -1221,7 +1232,7 @@ export function WorkspaceModeProvider({
       const iso = new Date().toISOString();
       const actorId = input.actorId ?? viewerUid ?? "";
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       const planPatch: Partial<FollowupPlan> = {
         status: "active",
@@ -1231,7 +1242,7 @@ export function WorkspaceModeProvider({
       };
       if (writeFs && orgId) {
         try {
-          const db = requireLiveDb();
+          const db = requireWorkspaceDb();
           await persistFollowupPlanPatch(db, input.planId, {
             status: "active",
             pausedAt: null,
@@ -1319,11 +1330,11 @@ export function WorkspaceModeProvider({
         emailScheduledAt: undefined,
       };
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupPlanSupersede(db, {
               oldPlanId,
               newPlanId,
@@ -1390,12 +1401,12 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupSetCompleted(db, id, completed);
             if (timeline && followup?.leadId) {
               await persistTimelineEventCreate(
@@ -1443,11 +1454,11 @@ export function WorkspaceModeProvider({
         | null,
     ) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupEmailSchedule(db, id, schedule);
           } catch (e) {
             toastError("Could not update email schedule", e, {
@@ -1556,11 +1567,11 @@ export function WorkspaceModeProvider({
       >,
     ) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupPatch(db, id, patch);
           } catch (e) {
             toastError("Could not update follow-up", e, {
@@ -1609,11 +1620,11 @@ export function WorkspaceModeProvider({
   const removeFollowup = React.useCallback(
     (id: string) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistFollowupDelete(db, id);
           } catch (e) {
             toastError("Could not delete follow-up", e, {
@@ -1654,12 +1665,12 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistLeadTaskCreate(db, orgId, t);
             if (timeline && t.leadId) {
               await persistTimelineEventCreate(
@@ -1707,12 +1718,12 @@ export function WorkspaceModeProvider({
         createdAt: iso,
       };
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistNoteCreate(db, orgId, note, {
               leadOwnerId: leadOwnerIdForFirestore(leadId),
             });
@@ -1747,11 +1758,11 @@ export function WorkspaceModeProvider({
   const updateLeadNote = React.useCallback(
     (noteId: string, patch: Partial<Pick<Note, "body" | "pinned">>) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistNoteUpdate(db, noteId, patch);
           } catch (e) {
             toastError("Could not save note", e, {
@@ -1782,11 +1793,11 @@ export function WorkspaceModeProvider({
   const deleteLeadNote = React.useCallback(
     (noteId: string) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistNoteDelete(db, noteId);
           } catch (e) {
             toastError("Could not delete note", e, {
@@ -1823,12 +1834,12 @@ export function WorkspaceModeProvider({
         createdAt: iso,
       };
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistTouchpointCreate(db, orgId, { ...t, occurredAt: iso }, leadOwnerIdForFirestore(t.leadId));
             await persistTimelineEventCreate(db, orgId, event, leadOwnerIdForFirestore(t.leadId));
             await persistLeadActivityBump(db, t.leadId);
@@ -1861,12 +1872,12 @@ export function WorkspaceModeProvider({
   const addTimelineEvent = React.useCallback(
     (e: TimelineEvent) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistTimelineEventCreate(db, orgId, e, leadOwnerIdForFirestore(e.leadId));
           } catch (err) {
             toastError("Could not save timeline event", err, {
@@ -1896,12 +1907,12 @@ export function WorkspaceModeProvider({
   const addOrgActivityEvent = React.useCallback(
     (e: OrgActivityEvent) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistOrgActivityEventCreate(db, orgId, e);
           } catch (err) {
             toastError("Could not save activity", err, {
@@ -2225,7 +2236,7 @@ export function WorkspaceModeProvider({
 
   const addCrmLabel = React.useCallback(
     (label: CrmLabel) => {
-      const canLiveWrite = mode === "live" && isClientDocumentSyncEnabled() && Boolean(viewerUid);
+      const canLiveWrite = mode === "live" && Boolean(viewerUid) && Boolean(userDoc?.organizationId);
       if (canLiveWrite) {
         void (async () => {
           try {
@@ -2243,7 +2254,7 @@ export function WorkspaceModeProvider({
               );
               return;
             }
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistCrmLabelCreate(db, orgId, label);
           } catch (e) {
             toastError("Could not save label", e, {
@@ -2262,11 +2273,11 @@ export function WorkspaceModeProvider({
   const updateCrmLabel = React.useCallback(
     (id: string, patch: Partial<Pick<CrmLabel, "name" | "color">>) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistCrmLabelUpdate(db, id, patch);
           } catch (e) {
             toastError("Could not update label", e, {
@@ -2288,11 +2299,11 @@ export function WorkspaceModeProvider({
   const removeCrmLabel = React.useCallback(
     (id: string) => {
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       if (writeFs) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistCrmLabelDelete(db, id);
           } catch (e) {
             toastError("Could not delete label", e, {
@@ -2546,7 +2557,7 @@ export function WorkspaceModeProvider({
         createdAt: iso,
       };
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       const linkedSalesLeadId = lead?.linkedSalesLeadId?.trim();
       const syncSalesLeadStage = Boolean(lead && isProspectRow(lead) && linkedSalesLeadId);
@@ -2554,7 +2565,7 @@ export function WorkspaceModeProvider({
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             const stagePayload: Record<string, unknown> = {
               stage: nextStage,
               ...(archivePatch ?? {}),
@@ -2820,12 +2831,12 @@ export function WorkspaceModeProvider({
             }
           : null;
       const writeFs =
-        mode === "live" && isClientDocumentSyncEnabled() && Boolean(userDoc?.organizationId);
+        canPersistWorkspaceDocsLive();
       const orgId = userDoc?.organizationId;
       if (writeFs && orgId) {
         void (async () => {
           try {
-            const db = requireLiveDb();
+            const db = requireWorkspaceDb();
             await persistLeadTaskSetCompleted(db, id, completed);
             if (timeline && task?.leadId) {
               await persistTimelineEventCreate(

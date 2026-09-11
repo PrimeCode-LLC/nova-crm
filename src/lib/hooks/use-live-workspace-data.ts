@@ -615,6 +615,41 @@ export function useLiveWorkspaceFirestore(
               applyPg(entity, null, rows as unknown[]);
             }
           }
+
+          // Followups / plans are pg_documents (not CRM tables). Poll with leads so
+          // Firebase-free mode does not leave sequences only in browser session.
+          const [fuRes, planRes] = await Promise.all([
+            fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.followups)}`, {
+              credentials: "same-origin",
+              cache: "no-store",
+            }),
+            fetch(
+              `/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.followupPlans)}`,
+              { credentials: "same-origin", cache: "no-store" },
+            ),
+          ]);
+          if (cancelled) return;
+          const fuJson = (await fuRes.json().catch(() => null)) as {
+            docs?: Array<{ id: string; data: Record<string, unknown> }>;
+          } | null;
+          const planJson = (await planRes.json().catch(() => null)) as {
+            docs?: Array<{ id: string; data: Record<string, unknown> }>;
+          } | null;
+          // Failed fetch → empty list (session extras still overlay until reload).
+          const followups = fuRes.ok && Array.isArray(fuJson?.docs)
+            ? fuJson!.docs.map((d) => asFollowup(d.id, d.data ?? {}))
+            : [];
+          const followupPlans = planRes.ok && Array.isArray(planJson?.docs)
+            ? planJson!.docs.map((d) => asFollowupPlan(d.id, d.data ?? {}))
+            : [];
+          setState((prev) => ({
+            ...prev,
+            loading: false,
+            error: null,
+            followups,
+            followupPlans,
+            coreReady: { ...prev.coreReady, followups: true, users: true },
+          }));
         } catch (err) {
           if (cancelled) return;
           setState((prev) => ({

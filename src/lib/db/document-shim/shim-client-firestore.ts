@@ -222,15 +222,47 @@ export async function deleteDoc(ref: DocumentReference): Promise<void> {
   });
 }
 
+/**
+ * Encode FieldValue symbols for /api/org/workspace-documents.
+ * JSON.stringify drops Symbols, which previously made pause/unpause/schedule
+ * patches silently omit deleteField / serverTimestamp.
+ */
+function encodeClientFieldValues(data: DocumentData): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (typeof value === "symbol") {
+      if (value.description === "FIELD_DELETE") {
+        out[key] = { __fv: "delete" };
+      } else if (value.description === "SERVER_TIMESTAMP") {
+        out[key] = { __fv: "serverTimestamp" };
+      }
+      continue;
+    }
+    if (value && typeof value === "object" && !Array.isArray(value) && !(value instanceof Date)) {
+      if ("__increment" in (value as object) || "__arrayUnion" in (value as object) || "__arrayRemove" in (value as object)) {
+        out[key] = value;
+        continue;
+      }
+      out[key] = encodeClientFieldValues(value as DocumentData);
+      continue;
+    }
+    out[key] = value;
+  }
+  return out;
+}
+
 export async function updateDoc(
   ref: DocumentReference,
   data: DocumentData,
 ): Promise<void> {
-  await fetch("/api/org/workspace-documents", {
+  const res = await fetch("/api/org/workspace-documents", {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: ref.path, patch: data }),
+    body: JSON.stringify({ path: ref.path, patch: encodeClientFieldValues(data) }),
   });
+  if (!res.ok) {
+    throw new Error(`workspace-documents PATCH failed (${res.status})`);
+  }
 }
 
 export async function setDoc(
@@ -238,11 +270,18 @@ export async function setDoc(
   data: DocumentData,
   options?: { merge?: boolean },
 ): Promise<void> {
-  await fetch("/api/org/workspace-documents", {
+  const res = await fetch("/api/org/workspace-documents", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ path: ref.path, data, merge: options?.merge }),
+    body: JSON.stringify({
+      path: ref.path,
+      data: encodeClientFieldValues(data),
+      merge: options?.merge,
+    }),
   });
+  if (!res.ok) {
+    throw new Error(`workspace-documents PUT failed (${res.status})`);
+  }
 }
 
 export async function addDoc(

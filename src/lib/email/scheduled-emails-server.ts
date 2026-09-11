@@ -5,7 +5,10 @@ import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { EmailMailboxSettings, ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
 import { isScheduledDocDue } from "@/lib/email/scheduled-due";
-import { scheduledFollowupStopReason } from "@/lib/email/scheduled-followup-stop";
+import {
+  FOLLOWUP_MISSING_STOP_REASON,
+  scheduledFollowupStopReason,
+} from "@/lib/email/scheduled-followup-stop";
 import {
   parseOutboundAttachments,
   serializeOutboundAttachments,
@@ -917,12 +920,25 @@ async function sendScheduledDoc(
     );
   }
 
-  const followupIdEarly =
+  let followupIdEarly =
     typeof data.followupId === "string" ? data.followupId.trim() : "";
   const initialStopReason = followupIdEarly
     ? await shouldStopScheduledFollowupEmail(followupIdEarly)
     : undefined;
-  if (followupIdEarly && initialStopReason) {
+  if (followupIdEarly && initialStopReason === FOLLOWUP_MISSING_STOP_REASON) {
+    // Orphan link: scheduled row has followupId but the followup doc is gone
+    // (e.g. never persisted while client sync was off). Pause/complete still cancel;
+    // only "missing" sends as standalone so due mail is not auto-dropped.
+    console.warn(
+      `[scheduled-send] Orphan followupId "${followupIdEarly}" on "${docRef.id}" (${FOLLOWUP_MISSING_STOP_REASON}) — sending as standalone`,
+    );
+    const nowIso = new Date().toISOString();
+    await docRef.update({
+      followupId: FieldValue.delete(),
+      updatedAt: nowIso,
+    });
+    followupIdEarly = "";
+  } else if (followupIdEarly && initialStopReason) {
     console.log(`[scheduled-send] Follow-up "${followupIdEarly}" is stopped (${initialStopReason}), cancelling doc "${docRef.id}"`);
     return cancelDueToFollowupStop(docRef, followupIdEarly, initialStopReason);
   }
@@ -1146,7 +1162,12 @@ async function sendScheduledDoc(
   const finalStopReason = followupIdEarly
     ? await shouldStopScheduledFollowupEmail(followupIdEarly)
     : undefined;
-  if (followupIdEarly && finalStopReason) {
+  if (followupIdEarly && finalStopReason === FOLLOWUP_MISSING_STOP_REASON) {
+    console.warn(
+      `[scheduled-send] Follow-up "${followupIdEarly}" vanished before dispatch on "${docRef.id}" — sending as standalone`,
+    );
+    followupIdEarly = "";
+  } else if (followupIdEarly && finalStopReason) {
     return cancelDueToFollowupStop(docRef, followupIdEarly, finalStopReason);
   }
 
