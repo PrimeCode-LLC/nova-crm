@@ -44,6 +44,8 @@ export type SendOutboundMailInput = {
   attachments?: OutboundAttachment[];
   /** First-party open/click tracking (off unless flags are set). */
   tracking?: MailTrackingContext;
+  /** RFC 2369 List-Unsubscribe header value (e.g. `<https://…/api/u/…>`). */
+  listUnsubscribe?: string;
 };
 
 export async function sendOutboundMailServer(
@@ -175,6 +177,14 @@ export async function sendOutboundMailServer(
             inReplyTo,
             references: references.length > 0 ? references : undefined,
             attachments: mailAttachments,
+            ...(input.listUnsubscribe
+              ? {
+                  headers: {
+                    "List-Unsubscribe": input.listUnsubscribe,
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                  },
+                }
+              : {}),
           });
         }
 
@@ -193,6 +203,14 @@ export async function sendOutboundMailServer(
             references: references.length > 0 ? references : undefined,
             attachments: mailAttachments,
             envelope: { from, to: recipient.email },
+            ...(input.listUnsubscribe
+              ? {
+                  headers: {
+                    "List-Unsubscribe": input.listUnsubscribe,
+                    "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+                  },
+                }
+              : {}),
           });
         }
         return lastInfo;

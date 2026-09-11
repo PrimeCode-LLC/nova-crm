@@ -93,6 +93,8 @@ model Contact {
   email          String?
   phone          String?
   title          String?
+  /// Optional IANA timezone for recipient-local send windows (e.g. `America/New_York`).
+  timezone       String?
   ownerId        String   @map("owner_id")
   payload        Json     @default("{}")
   createdAt      DateTime @map("created_at") @db.Timestamptz(3)
@@ -222,4 +224,93 @@ model OrgInvite {
   @@index([organizationId])
   @@index([tokenHash])
   @@map("org_invites")
+}
+
+/// Relational outbound scheduled-email queue (replaces nested scheduledEmails docs).
+model ScheduledEmailRow {
+  id                String    @id
+  organizationId    String    @map("organization_id")
+  mailboxOwnerUid   String    @map("mailbox_owner_uid")
+  mailboxId         String    @map("mailbox_id")
+  scheduledByUserId String?   @map("scheduled_by_user_id")
+  followupId        String?   @map("followup_id")
+  leadId            String?   @map("lead_id")
+  /// pending | processing | sent | failed | cancelled
+  status            String
+  scheduledAt       DateTime  @map("scheduled_at") @db.Timestamptz(3)
+  notBeforeAt       DateTime? @map("not_before_at") @db.Timestamptz(3)
+  attempts          Int       @default(0)
+  failureKind       String?   @map("failure_kind")
+  leaseUntil        DateTime? @map("lease_until") @db.Timestamptz(3)
+  leaseId           String?   @map("lease_id")
+  idempotencyKey    String    @map("idempotency_key")
+  toEmail           String    @map("to_email")
+  fromEmail         String    @map("from_email")
+  subject           String
+  messageId         String?   @map("message_id")
+  sentAt            DateTime? @map("sent_at") @db.Timestamptz(3)
+  cancelledAt       DateTime? @map("cancelled_at") @db.Timestamptz(3)
+  cancelReason      String?   @map("cancel_reason")
+  error             String?
+  lastSkipReason    String?   @map("last_skip_reason")
+  /// body/html/text/cc/bcc/replyTo/displayName/attachments/inReplyTo/referenceIds/forceNewThread
+  payload           Json      @default("{}")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt         DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, mailboxOwnerUid, status])
+  @@index([organizationId, mailboxId, status, scheduledAt])
+  @@map("scheduled_emails")
+}
+
+/// Per-mailbox send pacing (nextAvailableAt reserved at claim time).
+model MailboxSendState {
+  organizationId  String    @map("organization_id")
+  mailboxOwnerUid String    @map("mailbox_owner_uid")
+  mailboxId       String    @map("mailbox_id")
+  nextAvailableAt DateTime  @map("next_available_at") @db.Timestamptz(3)
+  lastSentAt      DateTime? @map("last_sent_at") @db.Timestamptz(3)
+  updatedAt       DateTime  @default(now()) @map("updated_at") @db.Timestamptz(3)
+
+  @@id([organizationId, mailboxOwnerUid, mailboxId])
+  @@map("mailbox_send_state")
+}
+
+/// Org-wide email suppression list (unsubscribe / hard bounce / complaint / manual).
+model EmailSuppression {
+  id              String   @id
+  organizationId  String   @map("organization_id")
+  emailNormalized String   @map("email_normalized")
+  /// unsubscribe | hard_bounce | complaint | manual
+  reason          String
+  source          String   @default("system")
+  leadId          String?  @map("lead_id")
+  createdBy       String?  @map("created_by")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@unique([organizationId, emailNormalized])
+  @@index([organizationId])
+  @@map("email_suppressions")
+}
+
+/// Append-only email lifecycle events (deliverability + conversion analytics).
+model EmailEvent {
+  id               String   @id
+  organizationId   String   @map("organization_id")
+  occurredAt       DateTime @default(now()) @map("occurred_at") @db.Timestamptz(3)
+  /// scheduled | sent | failed | cancelled | bounced | opened | clicked | replied | unsubscribed
+  type             String
+  scheduledEmailId String?  @map("scheduled_email_id")
+  followupId       String?  @map("followup_id")
+  leadId           String?  @map("lead_id")
+  mailboxId        String?  @map("mailbox_id")
+  messageId        String?  @map("message_id")
+  recipient        String?
+  meta             Json     @default("{}")
+
+  @@index([organizationId, type, occurredAt])
+  @@index([organizationId, scheduledEmailId])
+  @@index([organizationId, leadId])
+  @@map("email_events")
 }

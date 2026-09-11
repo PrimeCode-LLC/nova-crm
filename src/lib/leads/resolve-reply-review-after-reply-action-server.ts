@@ -235,6 +235,39 @@ async function applyCloseLostCompletion(input: {
     await db.collection(COLLECTIONS.leads).doc(id).set(patch, { merge: true });
     clientPatches.push({ leadId: id, patch: clientPatch });
 
+    const hardNoEmailFromLead =
+      typeof (row as { email?: string }).email === "string"
+        ? String((row as { email?: string }).email).trim()
+        : "";
+    let hardNoEmail = hardNoEmailFromLead;
+    if (!hardNoEmail.includes("@") && row.contactId?.trim()) {
+      try {
+        const contactSnap = await db
+          .collection(COLLECTIONS.contacts)
+          .doc(row.contactId.trim())
+          .get();
+        const contactEmail =
+          typeof contactSnap.data()?.email === "string"
+            ? String(contactSnap.data()?.email).trim()
+            : "";
+        if (contactEmail.includes("@")) hardNoEmail = contactEmail;
+      } catch {
+        // best-effort suppression only
+      }
+    }
+    if (hardNoEmail.includes("@")) {
+      void import("@/lib/email/suppression-server").then(({ addSuppression }) =>
+        addSuppression({
+          organizationId: input.organizationId,
+          email: hardNoEmail,
+          reason: "unsubscribe",
+          source: "hard_no",
+          leadId: id,
+          createdBy: input.actorUid,
+        }),
+      );
+    }
+
     if (shouldMoveStage) {
       try {
         const leadOwnerId = row.ownerId?.trim() || input.actorUid;

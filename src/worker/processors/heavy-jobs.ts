@@ -12,6 +12,7 @@ import {
   assertTenantFairness,
   TENANT_RATE_WINDOW_SECONDS,
 } from "../../lib/queue/fairness";
+import { isScheduledEmailPgV1Enabled } from "../../lib/queue/flags";
 
 export type OrgScopedJobData = {
   organizationId?: string;
@@ -33,7 +34,6 @@ async function delayIfUnfair(
 export async function processImapSyncJob(
   _job: Job<OrgScopedJobData>,
 ): Promise<{ ok: true }> {
-  // Full AH-parity path (heads + bounce/lead-mail) — same as IMAP_SYNC_RUNTIME=apphosting.
   const { runInboxImapSyncCronServer } = await import(
     "../../lib/email/inbox-imap-sync-cron-server"
   );
@@ -42,9 +42,36 @@ export async function processImapSyncJob(
 }
 
 export async function processScheduledEmailJob(
-  _job: Job<OrgScopedJobData>,
+  job: Job<OrgScopedJobData & { id?: string; leaseId?: string }>,
+  token?: string,
 ): Promise<{ ok: true }> {
-  // Full AH-parity path — same as SCHEDULED_EMAIL_RUNTIME=apphosting.
+  const name = job.name;
+
+  if (name === "send-one" && isScheduledEmailPgV1Enabled()) {
+    const organizationId = job.data.organizationId?.trim();
+    const id = job.data.id?.trim();
+    const leaseId = job.data.leaseId?.trim();
+    if (!organizationId || !id || !leaseId) {
+      console.warn("[scheduled-email] send-one missing fields", job.data);
+      return { ok: true };
+    }
+    await delayIfUnfair(job, "nova-scheduled-email", organizationId, token);
+    const { sendClaimedScheduledEmailPg } = await import(
+      "../../lib/email/send-claimed-scheduled-email-pg"
+    );
+    await sendClaimedScheduledEmailPg({ organizationId, id, leaseId });
+    return { ok: true };
+  }
+
+  // send-tick (default) — PG dispatcher or legacy due scan
+  if (isScheduledEmailPgV1Enabled()) {
+    const { runScheduledEmailTickServer } = await import(
+      "../../lib/email/scheduled-email-tick-server"
+    );
+    await runScheduledEmailTickServer();
+    return { ok: true };
+  }
+
   const { processDueScheduledEmailsServer } = await import(
     "../../lib/email/scheduled-emails-server"
   );

@@ -1,6 +1,8 @@
 /**
  * Queue flags default on when REDIS_URL is set (P7 — no Cloud Functions fallback).
  * Set `QUEUE_*=false` to disable.
+ *
+ * `SCHEDULED_EMAIL_PG_V1` is opt-in (default off) until backfill + cutover complete.
  */
 
 export const QUEUE_WORKER_V1_FLAG = "queue_worker_v1" as const;
@@ -24,4 +26,12 @@ export function isQueueImportChunksV1Enabled(): boolean {
 
 export function isQueueHeavyJobsV1Enabled(): boolean {
   return isQueueWorkerV1Enabled() && queueFlag("QUEUE_HEAVY_JOBS_V1");
+}
+
+/**
+ * Relational scheduled_emails path (SKIP LOCKED claim, no document-shim due scan).
+ * Explicit opt-in: set SCHEDULED_EMAIL_PG_V1=true after migrate + backfill.
+ */
+export function isScheduledEmailPgV1Enabled(): boolean {
+  return process.env.SCHEDULED_EMAIL_PG_V1 === "true";
 }

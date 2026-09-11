@@ -65,6 +65,7 @@ import {
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
+  resolveLeadScheduleTimezone,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
 import {
@@ -577,6 +578,12 @@ export function BulkScheduleSequencesDialog({
       const lead = leadsRef.current.find((l) => l.id === leadId)!;
       const plan = getActiveFollowupPlanForLead(followupPlansRef.current, leadId)!;
       const contact = getContactByIdRef.current(lead.contactId);
+      const leadTimeZone = resolveLeadScheduleTimezone({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+        orgTimezone: timeZone,
+        recipientTimezone: contact?.timezone,
+      });
       const to = defaultContactRecipientEmail(buildContactRecipientOptions(lead, contact));
       const planSteps = followupsRef.current.filter((f) => f.planId === plan.id);
       const schedulable = openFollowupsForPlan(followupsRef.current, plan.id)
@@ -596,13 +603,13 @@ export function BulkScheduleSequencesDialog({
               scheduledAt: isoFromDatetimeLocalInZone(
                 defaultAudienceScheduleDatetimeLocal({
                   preferIso: f.dueAt,
-                  timeZone,
+                  timeZone: leadTimeZone,
                   sendWindowStartHour: sendWindow.startHour,
                   sendWindowEndHour: sendWindow.endHour,
                   spreadKey: f.id,
                   sendPolicy: organizationSendPolicy,
                 }),
-                timeZone,
+                leadTimeZone,
               ),
               included: true as const,
             }));

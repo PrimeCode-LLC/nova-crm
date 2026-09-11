@@ -91,6 +91,14 @@ export async function countPendingScheduledByUtcDayServer(input: {
   toDayKey: string;
   timeZone?: string;
 }): Promise<Record<string, number>> {
+  const { isScheduledEmailPgV1Enabled } = await import("@/lib/queue/flags");
+  if (isScheduledEmailPgV1Enabled()) {
+    const { countPendingByMailboxDayPg } = await import(
+      "@/lib/email/scheduled-emails-repo"
+    );
+    return countPendingByMailboxDayPg(input);
+  }
+
   const root = scheduledRoot(input.organizationId, input.uid);
   const out: Record<string, number> = {};
   if (!root || !input.mailboxId.trim()) return out;

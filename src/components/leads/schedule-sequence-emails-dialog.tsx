@@ -19,6 +19,7 @@ import { formatTimezoneDisplayLabel, isoFromDatetimeLocalInZone } from "@/lib/or
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import {
   defaultAudienceScheduleDatetimeLocal,
+  resolveLeadScheduleTimezone,
   resolveLeadSendWindow,
 } from "@/lib/email/audience-schedule";
 import {
@@ -191,7 +192,16 @@ export function ScheduleSequenceEmailsDialog({
 
   const timezone = useOrgTimezone();
   const prospecting = useProspectingStrategyData();
-  const scheduleTimezone = timezone;
+  const scheduleTimezone = React.useMemo(
+    () =>
+      resolveLeadScheduleTimezone({
+        strategyId: lead.strategyId,
+        strategies: prospecting.strategies,
+        orgTimezone: timezone,
+        recipientTimezone: contact?.timezone,
+      }),
+    [lead.strategyId, prospecting.strategies, timezone, contact?.timezone],
+  );
   const sendWindow = React.useMemo(
     () =>
       resolveLeadSendWindow({
@@ -264,7 +274,7 @@ export function ScheduleSequenceEmailsDialog({
             subject: f.emailSubject?.trim() || f.title,
             scheduledAt: defaultAudienceScheduleDatetimeLocal({
               preferIso,
-              timeZone: timezone,
+              timeZone: scheduleTimezone,
               sendWindowStartHour: sendWindow.startHour,
               sendWindowEndHour: sendWindow.endHour,
               spreadKey: f.id,

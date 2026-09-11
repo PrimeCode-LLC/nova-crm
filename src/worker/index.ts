@@ -97,7 +97,8 @@ async function main(): Promise<void> {
     {
       name: QUEUE_SCHEDULED_EMAIL,
       processor: processScheduledEmailJob,
-      concurrency: 1,
+      concurrency: 25,
+      fair: true,
     },
     {
       name: QUEUE_SCRAPERS,
@@ -126,6 +127,25 @@ async function main(): Promise<void> {
       ...fairOpts,
     });
   });
+
+  // PG path: repeatable send-tick every 15s (safety net + primary dispatcher).
+  try {
+    const { isScheduledEmailPgV1Enabled } = await import("../lib/queue/flags");
+    if (isScheduledEmailPgV1Enabled()) {
+      const { getQueue, QUEUE_SCHEDULED_EMAIL } = await import("../lib/queue/queues");
+      const queue = getQueue(QUEUE_SCHEDULED_EMAIL);
+      if (queue && typeof queue.upsertJobScheduler === "function") {
+        await queue.upsertJobScheduler(
+          "scheduled-email-tick",
+          { every: 15_000 },
+          { name: "send-tick", data: {} },
+        );
+        console.info("[worker] scheduled-email JobScheduler every 15s");
+      }
+    }
+  } catch (err) {
+    console.warn("[worker] scheduled-email JobScheduler setup failed", err);
+  }
 
   for (const w of workers) {
     w.on("failed", (job, err) => {

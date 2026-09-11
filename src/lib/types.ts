@@ -468,6 +468,8 @@ export interface Contact {
   title?: string;
   seniority?: string;
   location?: string;
+  /** Optional IANA timezone for recipient-local send windows. */
+  timezone?: string;
   /** e.g. Website, LinkedIn, Google Maps, Crunchbase */
   contactSource?: string;
   bestContactChannel?: BestContactChannel;

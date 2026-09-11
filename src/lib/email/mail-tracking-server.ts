@@ -325,6 +325,16 @@ export async function recordMailTrackingOpen(input: {
     } catch {
       /* best-effort */
     }
+    void import("@/lib/email/email-events-server").then(({ recordEmailEvent }) =>
+      recordEmailEvent({
+        organizationId: sideEffect!.organizationId,
+        type: "opened",
+        leadId: sideEffect!.leadId,
+        mailboxId: sideEffect!.mailboxId,
+        messageId: sideEffect!.messageId,
+        recipient: sideEffect!.recipientEmail,
+      }),
+    );
   }
   return { ok: true };
 }
@@ -381,6 +391,30 @@ export async function resolveMailTrackingClick(input: {
       tx.update(ref, patch);
     });
     if (!destination) return { ok: false, reason: "not_found" };
+    try {
+      const snap = await ref.get();
+      if (snap.exists) {
+        const data = snap.data() as Record<string, unknown>;
+        const organizationId =
+          typeof data.organizationId === "string" ? data.organizationId.trim() : "";
+        if (organizationId) {
+          void import("@/lib/email/email-events-server").then(({ recordEmailEvent }) =>
+            recordEmailEvent({
+              organizationId,
+              type: "clicked",
+              leadId: typeof data.leadId === "string" ? data.leadId : undefined,
+              mailboxId: typeof data.mailboxId === "string" ? data.mailboxId : undefined,
+              messageId: typeof data.messageId === "string" ? data.messageId : undefined,
+              scheduledEmailId:
+                typeof data.scheduledEmailId === "string" ? data.scheduledEmailId : undefined,
+              meta: { linkId: input.linkId },
+            }),
+          );
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
     return { ok: true, url: destination };
   } catch {
     return { ok: false, reason: "error" };

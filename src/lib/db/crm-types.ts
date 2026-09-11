@@ -88,6 +88,7 @@ export function contactRowFromFirestore(
     email: strOpt(data.email)?.toLowerCase() ?? null,
     phone: strOpt(data.phone),
     title: strOpt(data.title),
+    timezone: strOpt(data.timezone),
     ownerId: str(data.ownerId),
     payload: toJson(data),
     createdAt: toDate(data.createdAt),

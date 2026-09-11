@@ -107,6 +107,7 @@ async function upsertInTx(
           email: row.email,
           phone: row.phone,
           title: row.title,
+          timezone: row.timezone,
           ownerId: row.ownerId,
           payload: row.payload,
           updatedAt: row.updatedAt,

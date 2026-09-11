@@ -16,6 +16,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { findContactByEmail } from "@/lib/crm-dedupe";
+import { deriveContactTimezone } from "@/lib/email/contact-timezone";
 import type { Account } from "@/lib/types";
 
 function newContactId(): string {
@@ -40,6 +41,7 @@ export function AddAccountContactDialog({
   const [email, setEmail] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [title, setTitle] = React.useState("");
+  const [timezone, setTimezone] = React.useState("");
   const [saving, setSaving] = React.useState(false);
 
   React.useEffect(() => {
@@ -50,6 +52,7 @@ export function AddAccountContactDialog({
       setEmail("");
       setPhone("");
       setTitle("");
+      setTimezone("");
       setSaving(false);
     });
   }, [open]);
@@ -76,6 +79,12 @@ export function AddAccountContactDialog({
     }
 
     const now = new Date().toISOString();
+    const derivedTimezone =
+      timezone.trim() ||
+      deriveContactTimezone({
+        phone: phone.trim(),
+        country: account.country,
+      });
     setSaving(true);
     try {
       await addContact({
@@ -87,6 +96,7 @@ export function AddAccountContactDialog({
         email: trimmedEmail || undefined,
         phone: phone.trim() || undefined,
         title: title.trim() || undefined,
+        timezone: derivedTimezone,
         ownerId,
         createdAt: now,
         updatedAt: now,
@@ -152,6 +162,15 @@ export function AddAccountContactDialog({
                 id="account-contact-phone"
                 value={phone}
                 onChange={(event) => setPhone(event.target.value)}
+              />
+            </div>
+            <div className="grid gap-1.5 sm:col-span-2">
+              <Label htmlFor="account-contact-timezone">Timezone (IANA, optional)</Label>
+              <Input
+                id="account-contact-timezone"
+                value={timezone}
+                onChange={(event) => setTimezone(event.target.value)}
+                placeholder="America/New_York"
               />
             </div>
           </div>

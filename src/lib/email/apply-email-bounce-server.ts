@@ -512,6 +512,30 @@ export async function applyEmailBounceServer(
       );
   }
 
+  if (input.bounceKind === "hard") {
+    for (const email of failedRecipients) {
+      void import("@/lib/email/suppression-server").then(({ addSuppression }) =>
+        addSuppression({
+          organizationId: input.organizationId,
+          email,
+          reason: "hard_bounce",
+          source: "imap_bounce",
+          leadId: leadId || undefined,
+        }),
+      );
+      void import("@/lib/email/email-events-server").then(({ recordEmailEvent }) =>
+        recordEmailEvent({
+          organizationId: input.organizationId,
+          type: "bounced",
+          leadId: leadId || undefined,
+          mailboxId,
+          recipient: email,
+          meta: { reason, inboundMessageId },
+        }),
+      );
+    }
+  }
+
   if (leadId) {
     const leadPatch: Record<string, unknown> = {
       emailVerified: false,

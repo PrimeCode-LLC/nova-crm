@@ -3,7 +3,8 @@ SHELL=/bin/sh
 PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 */5 * * * * /usr/local/bin/cron-dispatch.sh imap-sync >/dev/null 2>&1
-2-59/5 * * * * /usr/local/bin/cron-dispatch.sh scheduled-email >/dev/null 2>&1
+# Safety net for scheduled-email (JobScheduler runs every 15s on the worker when PG V1 is on).
+* * * * * /usr/local/bin/cron-dispatch.sh scheduled-email >/dev/null 2>&1
 7-59/15 * * * * /usr/local/bin/cron-dispatch.sh scrapers >/dev/null 2>&1
 0 * * * * /usr/local/bin/cron-dispatch.sh content-reminders >/dev/null 2>&1
 * * * * * /usr/local/bin/cron-dispatch.sh dashboard-summary >/dev/null 2>&1

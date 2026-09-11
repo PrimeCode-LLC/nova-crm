@@ -9,6 +9,7 @@ import {
   resolveOrgTimezone,
   zonedDayKey,
   zonedWallTimeToUtc,
+  isValidIanaTimezone,
 } from "@/lib/org-timezone";
 import { toDatetimeLocalValue } from "@/lib/schedule-followup-email-client";
 
@@ -22,13 +23,17 @@ export type AudienceSendWindow = {
 };
 
 /**
- * Email schedule placement always uses the workspace timezone.
- * Strategy `audienceTimezone` is legacy and ignored.
+ * Prefer recipient contact timezone, then strategy audienceTimezone, then org timezone.
  */
 export function resolveScheduleTimezone(
-  _audienceTimezone: string | null | undefined,
+  audienceTimezone?: string | null,
   orgTimezone?: string | null,
+  recipientTimezone?: string | null,
 ): string {
+  for (const candidate of [recipientTimezone, audienceTimezone, orgTimezone]) {
+    const value = candidate?.trim();
+    if (value && isValidIanaTimezone(value)) return value;
+  }
   return resolveOrgTimezone(orgTimezone);
 }
 
@@ -134,12 +139,18 @@ export function resolveLeadScheduleTimezone(input: {
   strategyId?: string | null;
   strategies: readonly { id: string; audienceTimezone?: string | null }[];
   orgTimezone?: string | null;
+  /** Contact IANA timezone when known. */
+  recipientTimezone?: string | null;
 }): string {
   const strategyId = input.strategyId?.trim();
   const strategy = strategyId
     ? input.strategies.find((s) => s.id === strategyId)
     : undefined;
-  return resolveScheduleTimezone(strategy?.audienceTimezone, input.orgTimezone);
+  return resolveScheduleTimezone(
+    strategy?.audienceTimezone,
+    input.orgTimezone,
+    input.recipientTimezone,
+  );
 }
 
 export function resolveLeadSendWindow(input: {

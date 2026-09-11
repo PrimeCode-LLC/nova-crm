@@ -47,7 +47,7 @@ import { createUserNotificationServer } from "@/lib/notifications/create-user-no
 import { resolveOwnerManagerIdsAdmin } from "@/lib/documents/resolve-owner-manager-ids-admin";
 import { stampForCreate } from "@/lib/documents/tenant-write";
 import { incrementOrgSendLedgerServer } from "@/lib/email/org-send-ledger-server";
-import { isQueueHeavyJobsV1Enabled } from "@/lib/queue/flags";
+import { isQueueHeavyJobsV1Enabled, isScheduledEmailPgV1Enabled } from "@/lib/queue/flags";
 import { enqueueScheduledEmailJob } from "@/lib/queue/enqueue";
 
 const SCHEDULED_COLLECTION = "scheduledEmails";
@@ -65,6 +65,7 @@ export type ScheduledSkipReason =
   | "deadline"
   | "followup_stopped"
   | "contact_policy"
+  | "suppressed"
   | "other";
 
 export type ScheduledFlushRowResult = {
@@ -92,6 +93,7 @@ function emptySkipReasons(): Record<ScheduledSkipReason, number> {
     deadline: 0,
     followup_stopped: 0,
     contact_policy: 0,
+    suppressed: 0,
     other: 0,
   };
 }
@@ -194,6 +196,12 @@ export async function listScheduledEmailsForMemberServer(input: {
   uid: string;
   status?: ScheduledEmailStatus | "pending" | "done";
 }): Promise<ScheduledEmail[]> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { listScheduledEmailsForMemberPgServer } = await import(
+      "@/lib/email/scheduled-emails-pg-server"
+    );
+    return listScheduledEmailsForMemberPgServer(input);
+  }
   const db = getAdminDb();
   if (!db) return [];
 
@@ -239,6 +247,12 @@ export async function createScheduledEmailServer(input: {
   /** Start a new sequence thread (ignore prior non-fresh sent steps). */
   forceNewThread?: boolean;
 }): Promise<{ ok: true; id: string } | { error: string }> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { createScheduledEmailPgServer } = await import(
+      "@/lib/email/scheduled-emails-pg-server"
+    );
+    return createScheduledEmailPgServer(input);
+  }
   const ref = scheduledRef(input.organizationId, input.uid, `sch-${crypto.randomUUID()}`);
   if (!ref) return { error: "Database not configured" };
 
@@ -398,6 +412,12 @@ export async function cancelScheduledEmailServer(input: {
   /** Extra member mailbox roots to try when the doc is not under `uid`. */
   fallbackUids?: string[];
 }): Promise<{ ok: true } | { error: string }> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { cancelScheduledEmailPgServer } = await import(
+      "@/lib/email/scheduled-emails-pg-server"
+    );
+    return cancelScheduledEmailPgServer(input);
+  }
   const followupIdHint = input.followupId?.trim() || "";
   const fallbackUids = [...(input.fallbackUids ?? [])];
 
@@ -1703,6 +1723,15 @@ export async function processDueScheduledEmailsForMemberServer(input: {
   unparsedScheduledAt?: number;
   diagnostics?: ReturnType<typeof pendingDiagnostics>;
 }> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { processDueScheduledEmailsPgServer } = await import(
+      "@/lib/email/scheduled-emails-pg-server"
+    );
+    return processDueScheduledEmailsPgServer({
+      organizationId: input.organizationId,
+      uid: input.uid,
+    });
+  }
   const empty = {
     processed: 0,
     sent: 0,
@@ -1819,6 +1848,14 @@ export async function processDueScheduledEmailsForOrgServer(input: {
   unparsedScheduledAt?: number;
   diagnostics?: ReturnType<typeof pendingDiagnostics>;
 }> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { processDueScheduledEmailsPgServer } = await import(
+      "@/lib/email/scheduled-emails-pg-server"
+    );
+    return processDueScheduledEmailsPgServer({
+      organizationId: input.organizationId,
+    });
+  }
   const empty = {
     processed: 0,
     sent: 0,
@@ -2027,6 +2064,23 @@ export async function processDueScheduledEmailsServer(): Promise<{
   skipReasons: Record<ScheduledSkipReason, number>;
   rows: ScheduledFlushRowResult[];
 }> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { runScheduledEmailTickServer } = await import(
+      "@/lib/email/scheduled-email-tick-server"
+    );
+    const tick = await runScheduledEmailTickServer();
+    return {
+      processed: tick.claimed,
+      sent: 0,
+      failed: 0,
+      skipped: 0,
+      dueFound: tick.claimed,
+      pendingCount: tick.claimed,
+      claimRefused: 0,
+      skipReasons: emptySkipReasons(),
+      rows: [],
+    };
+  }
   const empty = {
     processed: 0,
     sent: 0,
@@ -2095,6 +2149,12 @@ export async function retryScheduledEmailServer(input: {
   uid: string;
   id: string;
 }): Promise<{ ok: true; scheduledAt: string } | { error: string }> {
+  if (isScheduledEmailPgV1Enabled()) {
+    const { retryScheduledEmailPgServer } = await import(
+      "@/lib/email/scheduled-emails-pg-server"
+    );
+    return retryScheduledEmailPgServer(input);
+  }
   const ref = scheduledRef(input.organizationId, input.uid, input.id);
   if (!ref) return { error: "Database not configured" };
 
