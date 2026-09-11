@@ -55,12 +55,29 @@ export async function GET(req: Request) {
       return NextResponse.json({ error: "collection required" }, { status: 400 });
     }
 
+    const orderByField = url.searchParams.get("orderBy")?.trim() || undefined;
+    const orderDirRaw = url.searchParams.get("orderDir")?.trim().toLowerCase();
+    const orderDir =
+      orderDirRaw === "asc" || orderDirRaw === "desc" ? orderDirRaw : "desc";
+    const limitRaw = url.searchParams.get("limit");
+    const limitParsed = limitRaw != null ? Number(limitRaw) : undefined;
+    const limit =
+      typeof limitParsed === "number" &&
+      Number.isFinite(limitParsed) &&
+      limitParsed > 0
+        ? Math.min(Math.floor(limitParsed), 2000)
+        : undefined;
+
     const { queryDocuments } = await import("@/lib/db/document-shim/store");
     const collectionRoot = collection.split("/")[0] ?? collection;
     const docs = await queryDocuments({
       collectionRoot,
       pathPrefix: collection,
       filters: [{ field: "organizationId", op: "==", value: guard.ctx.session.organizationId }],
+      ...(orderByField
+        ? { orderBy: { field: orderByField, direction: orderDir } }
+        : {}),
+      ...(limit != null ? { limit } : {}),
     });
 
     return NextResponse.json({

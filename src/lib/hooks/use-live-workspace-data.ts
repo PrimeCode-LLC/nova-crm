@@ -54,6 +54,9 @@ const ACTIVITY_RECORDS_LIVE_LIMIT = 200;
 const POSTGRES_CRM_POLL_MS = 60_000;
 const ORG_ACTIVITY_EVENTS_LIVE_LIMIT = 120;
 const TIMELINE_EVENTS_LIVE_LIMIT = 400;
+/** Lead-detail history caps for Firebase-free org-wide polls (notes / touchpoints). */
+const NOTES_LIVE_LIMIT = 2000;
+const TOUCHPOINTS_LIVE_LIMIT = 2000;
 
 /** Collections that must arrive before CRM pages leave the loading skeleton. */
 export type LiveWorkspaceCoreKey = "users" | "leads" | "followups";
@@ -616,43 +619,78 @@ export function useLiveWorkspaceFirestore(
             }
           }
 
-          // Users / followups / plans live in pg_documents (not CRM tables).
-          // Without the org roster, Team Command / scorecards collapse to the
-          // viewer only (often a director) and look empty.
-          const [usersRes, fuRes, planRes] = await Promise.all([
-            fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.users)}`, {
+          // Document-store collections (pg_documents). CRM tables are polled above.
+          // Skipping any of these leaves Firebase-free mode looking empty for that
+          // feature after reload (Team Command, Live activity, Tasks, Labels, …).
+          type DocsJson = {
+            docs?: Array<{ id: string; data: Record<string, unknown> }>;
+          };
+          const docsUrl = (collection: string, extra?: Record<string, string>) => {
+            const params = new URLSearchParams({ collection, ...extra });
+            return `/api/org/workspace-documents?${params.toString()}`;
+          };
+          const fetchDocs = async <T>(
+            collection: string,
+            mapDoc: (id: string, raw: Record<string, unknown>) => T,
+            extra?: Record<string, string>,
+          ): Promise<T[]> => {
+            const res = await fetch(docsUrl(collection, extra), {
               credentials: "same-origin",
               cache: "no-store",
+            });
+            const json = (await res.json().catch(() => null)) as DocsJson | null;
+            if (!res.ok || !Array.isArray(json?.docs)) return [];
+            return json.docs.map((d) => mapDoc(d.id, d.data ?? {}));
+          };
+
+          const [
+            users,
+            followups,
+            followupPlans,
+            leadTasks,
+            crmLabels,
+            profiles,
+            campaigns,
+            timelineEvents,
+            orgActivityEvents,
+            activityRecords,
+            notes,
+            touchpoints,
+          ] = await Promise.all([
+            fetchDocs(COLLECTIONS.users, asUser),
+            fetchDocs(COLLECTIONS.followups, asFollowup),
+            fetchDocs(COLLECTIONS.followupPlans, asFollowupPlan),
+            fetchDocs(COLLECTIONS.leadTasks, asLeadTask),
+            fetchDocs(COLLECTIONS.labels, asCrmLabel),
+            fetchDocs(COLLECTIONS.profiles, asProfile),
+            fetchDocs(COLLECTIONS.campaigns, asCampaign),
+            fetchDocs(COLLECTIONS.timelineEvents, asTimelineEvent, {
+              orderBy: "createdAt",
+              orderDir: "desc",
+              limit: String(TIMELINE_EVENTS_LIVE_LIMIT),
             }),
-            fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.followups)}`, {
-              credentials: "same-origin",
-              cache: "no-store",
+            fetchDocs(COLLECTIONS.orgActivityEvents, asOrgActivityEvent, {
+              orderBy: "createdAt",
+              orderDir: "desc",
+              limit: String(ORG_ACTIVITY_EVENTS_LIVE_LIMIT),
             }),
-            fetch(
-              `/api/org/workspace-documents?collection=${encodeURIComponent(COLLECTIONS.followupPlans)}`,
-              { credentials: "same-origin", cache: "no-store" },
-            ),
+            fetchDocs(COLLECTIONS.activityRecords, asActivityRecord, {
+              orderBy: "occurredAt",
+              orderDir: "desc",
+              limit: String(ACTIVITY_RECORDS_LIVE_LIMIT),
+            }),
+            fetchDocs(COLLECTIONS.notes, asNote, {
+              orderBy: "createdAt",
+              orderDir: "desc",
+              limit: String(NOTES_LIVE_LIMIT),
+            }),
+            fetchDocs(COLLECTIONS.touchpoints, asTouchpoint, {
+              orderBy: "occurredAt",
+              orderDir: "desc",
+              limit: String(TOUCHPOINTS_LIVE_LIMIT),
+            }),
           ]);
           if (cancelled) return;
-          const usersJson = (await usersRes.json().catch(() => null)) as {
-            docs?: Array<{ id: string; data: Record<string, unknown> }>;
-          } | null;
-          const fuJson = (await fuRes.json().catch(() => null)) as {
-            docs?: Array<{ id: string; data: Record<string, unknown> }>;
-          } | null;
-          const planJson = (await planRes.json().catch(() => null)) as {
-            docs?: Array<{ id: string; data: Record<string, unknown> }>;
-          } | null;
-          // Failed fetch → empty list (session extras still overlay until reload).
-          const users = usersRes.ok && Array.isArray(usersJson?.docs)
-            ? usersJson!.docs.map((d) => asUser(d.id, d.data ?? {}))
-            : [];
-          const followups = fuRes.ok && Array.isArray(fuJson?.docs)
-            ? fuJson!.docs.map((d) => asFollowup(d.id, d.data ?? {}))
-            : [];
-          const followupPlans = planRes.ok && Array.isArray(planJson?.docs)
-            ? planJson!.docs.map((d) => asFollowupPlan(d.id, d.data ?? {}))
-            : [];
           setState((prev) => ({
             ...prev,
             loading: false,
@@ -660,6 +698,15 @@ export function useLiveWorkspaceFirestore(
             users,
             followups,
             followupPlans,
+            leadTasks,
+            crmLabels,
+            profiles,
+            campaigns,
+            timelineEvents,
+            orgActivityEvents,
+            activityRecords,
+            notes,
+            touchpoints,
             coreReady: { ...prev.coreReady, followups: true, users: true },
           }));
         } catch (err) {
