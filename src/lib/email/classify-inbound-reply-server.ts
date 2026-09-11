@@ -1,4 +1,5 @@
 import { FieldValue } from "@/lib/db/document-shim/shim-firestore";
+import { coerceIsoInstant } from "@/lib/db/document-shim/timestamp";
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { getAdminDb } from "@/lib/db/document-access/admin";
@@ -622,12 +623,13 @@ export async function getReplyActionServer(input: {
     inboundSubject: typeof data.inboundSubject === "string" ? data.inboundSubject : undefined,
     draftStatus: (data.draftStatus as ReplyAction["draftStatus"]) ?? "none",
     draftError: typeof data.draftError === "string" ? data.draftError : undefined,
-    sentAt: typeof data.sentAt === "string" ? data.sentAt : undefined,
+    sentAt: data.sentAt != null ? coerceIsoInstant(data.sentAt) || undefined : undefined,
     sentMessageId: typeof data.sentMessageId === "string" ? data.sentMessageId : undefined,
     source: (data.source as ReplyAction["source"]) || "system",
-    createdAt: String(data.createdAt ?? ""),
-    updatedAt: String(data.updatedAt ?? ""),
-    decidedAt: typeof data.decidedAt === "string" ? data.decidedAt : undefined,
+    // deserializePayload turns *At ISO strings into Timestamp; never String(ts).
+    createdAt: coerceIsoInstant(data.createdAt),
+    updatedAt: coerceIsoInstant(data.updatedAt),
+    decidedAt: data.decidedAt != null ? coerceIsoInstant(data.decidedAt) || undefined : undefined,
     decidedBy: typeof data.decidedBy === "string" ? data.decidedBy : undefined,
   };
 }
