@@ -108,6 +108,21 @@ async function fetchWorkspaceCollection(
   return Array.isArray(json.docs) ? json.docs : [];
 }
 
+async function fetchWorkspaceDocument(
+  docPath: string,
+): Promise<{ id: string; data: DocumentData } | null> {
+  const res = await fetch(
+    `/api/org/workspace-documents?path=${encodeURIComponent(docPath)}`,
+    { credentials: "same-origin", cache: "no-store" },
+  );
+  if (!res.ok) {
+    throw new Error(`workspace-documents ${res.status}`);
+  }
+  const json = (await res.json()) as { docs?: { id: string; data: DocumentData }[] };
+  const row = Array.isArray(json.docs) ? json.docs[0] : undefined;
+  return row ?? null;
+}
+
 export async function getDocs(
   q: ClientQuery | ClientCollectionReference,
 ): Promise<QuerySnapshot> {
@@ -128,9 +143,7 @@ export async function getDocs(
 }
 
 export async function getDoc(ref: DocumentReference): Promise<DocumentSnapshot> {
-  const collectionPath = ref.path.split("/").slice(0, -1).join("/");
-  const rows = await fetchWorkspaceCollection(collectionPath);
-  const found = rows.find((d) => d.id === ref.id);
+  const found = await fetchWorkspaceDocument(ref.path);
   return {
     id: ref.id,
     exists: () => Boolean(found),
