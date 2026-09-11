@@ -9,6 +9,7 @@ import {
   crmEntityFromCollection,
   dealRowFromFirestore,
   leadRowFromFirestore,
+  type CrmEntity,
   type CrmFirestoreDoc,
 } from "@/lib/db/crm-types";
 import { scheduleOrgDashboardSummaryRefresh } from "@/lib/db/org-dashboard-summary-refresh";
@@ -369,10 +370,198 @@ export async function deleteDocumentSubtree(path: string): Promise<number> {
   return result.count;
 }
 
+function collectionRootFromCrmEntity(entity: CrmEntity): string {
+  switch (entity) {
+    case "account":
+      return "accounts";
+    case "contact":
+      return "contacts";
+    case "lead":
+      return "leads";
+    case "deal":
+      return "deals";
+  }
+}
+
+function crmRowToStoredDoc(
+  entity: CrmEntity,
+  row: {
+    id: string;
+    organizationId: string;
+    payload: unknown;
+    createdAt: Date;
+    updatedAt: Date;
+    contactId?: string;
+    ownerId?: string;
+    email?: string | null;
+    accountId?: string;
+  },
+): StoredDoc {
+  const collectionRoot = collectionRootFromCrmEntity(entity);
+  const base = deserializePayload({
+    ...(row.payload as Record<string, unknown>),
+    organizationId: row.organizationId,
+    id: row.id,
+  });
+  if (entity === "lead") {
+    if (row.contactId) base.contactId = row.contactId;
+    if (row.ownerId) base.ownerId = row.ownerId;
+  } else if (entity === "contact") {
+    if (row.email != null) base.email = row.email;
+    if (row.ownerId) base.ownerId = row.ownerId;
+    if (row.accountId) base.accountId = row.accountId;
+  } else if (entity === "account" || entity === "deal") {
+    if (row.ownerId) base.ownerId = row.ownerId;
+  }
+  return {
+    path: `${collectionRoot}/${row.id}`,
+    organizationId: row.organizationId,
+    collectionRoot,
+    payload: base,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}
+
+/**
+ * Query CRM sole-writer tables (not leftover pg_documents copies).
+ * Without this, `.collection("leads").where(...)` only sees ~few hundred
+ * migrated stubs and misses the live Postgres CRM rows.
+ */
+async function queryCrmEntityDocuments(
+  entity: CrmEntity,
+  spec: QuerySpec,
+): Promise<StoredDoc[]> {
+  const organizationId = organizationIdFromSpec(spec);
+  if (!organizationId) return [];
+
+  const filters = spec.filters.filter((f) => f.field !== "organizationId");
+  const contactEmailIn = filters.find(
+    (f) => f.field === "contactEmail" && f.op === "in" && Array.isArray(f.value),
+  );
+  const contactIdEq = filters.find((f) => f.field === "contactId" && f.op === "==");
+  const emailIn = filters.find(
+    (f) => f.field === "email" && f.op === "in" && Array.isArray(f.value),
+  );
+  const personalEmailIn = filters.find(
+    (f) => f.field === "personalEmail" && f.op === "in" && Array.isArray(f.value),
+  );
+
+  const rows = await withOrganizationScope(organizationId, async (tx) => {
+    switch (entity) {
+      case "lead": {
+        const where: Prisma.LeadWhereInput = { organizationId };
+        if (contactIdEq) {
+          where.contactId = String(contactIdEq.value);
+        } else if (contactEmailIn) {
+          const emails = (contactEmailIn.value as unknown[])
+            .map((v) => String(v).trim().toLowerCase())
+            .filter((e) => e.includes("@"));
+          if (emails.length === 0) return [];
+          where.OR = emails.map((email) => ({
+            payload: { path: ["contactEmail"], equals: email },
+          }));
+        }
+        return tx.lead.findMany({
+          where,
+          take: spec.limit ?? undefined,
+        });
+      }
+      case "contact": {
+        const where: Prisma.ContactWhereInput = { organizationId };
+        if (emailIn || personalEmailIn) {
+          const or: Prisma.ContactWhereInput[] = [];
+          if (emailIn) {
+            const emails = (emailIn.value as unknown[])
+              .map((v) => String(v).trim().toLowerCase())
+              .filter(Boolean);
+            if (emails.length) {
+              or.push({ email: { in: emails, mode: "insensitive" } });
+            }
+          }
+          if (personalEmailIn) {
+            const emails = (personalEmailIn.value as unknown[])
+              .map((v) => String(v).trim().toLowerCase())
+              .filter(Boolean);
+            for (const email of emails) {
+              or.push({ payload: { path: ["personalEmail"], equals: email } });
+            }
+          }
+          if (or.length === 0) return [];
+          where.OR = or;
+        }
+        return tx.contact.findMany({
+          where,
+          take: spec.limit ?? undefined,
+        });
+      }
+      case "account":
+        return tx.account.findMany({
+          where: { organizationId },
+          take: spec.limit ?? undefined,
+        });
+      case "deal":
+        return tx.deal.findMany({
+          where: { organizationId },
+          take: spec.limit ?? undefined,
+        });
+    }
+  });
+
+  let docs = rows.map((row) => crmRowToStoredDoc(entity, row));
+
+  const pushedToSql = new Set<string>();
+  if (entity === "lead") {
+    if (contactIdEq) pushedToSql.add("contactId");
+    if (contactEmailIn) pushedToSql.add("contactEmail");
+  } else if (entity === "contact") {
+    if (emailIn) pushedToSql.add("email");
+    if (personalEmailIn) pushedToSql.add("personalEmail");
+  }
+
+  for (const filter of filters) {
+    if (pushedToSql.has(filter.field)) continue;
+    docs = docs.filter((d) => matchesFilter(d.payload, filter));
+  }
+
+  if (spec.orderBy) {
+    const { field, direction } = spec.orderBy;
+    docs.sort((a, b) => {
+      const av = a.payload[field];
+      const bv = b.payload[field];
+      const aMs = coerceInstantMs(av);
+      const bMs = coerceInstantMs(bv);
+      let cmp = 0;
+      if (aMs != null && bMs != null) {
+        cmp = aMs - bMs;
+      } else if (av instanceof Date && bv instanceof Date) {
+        cmp = av.getTime() - bv.getTime();
+      } else {
+        cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      }
+      return direction === "desc" ? -cmp : cmp;
+    });
+  }
+
+  if (spec.limit != null) {
+    docs = docs.slice(0, spec.limit);
+  }
+
+  return docs;
+}
+
 export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
   if (!isDatabaseConfigured()) return [];
 
   const organizationId = organizationIdFromSpec(spec);
+
+  const crmEntity =
+    !spec.collectionGroup && spec.collectionRoot
+      ? crmEntityFromCollection(spec.collectionRoot)
+      : null;
+  if (crmEntity) {
+    return queryCrmEntityDocuments(crmEntity, spec);
+  }
 
   const loadRows = async (tx: TenantTx) => {
     if (spec.collectionGroup) {

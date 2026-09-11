@@ -409,16 +409,107 @@ export async function findLeadIdByContactEmailPostgres(
   organizationId: string,
   email: string,
 ): Promise<string | null> {
-  const normalized = email.trim().toLowerCase();
-  if (!isDatabaseConfigured() || !organizationId.trim() || !normalized) return null;
-  const row = await withOrganizationScope(organizationId, (tx) =>
-    tx.lead.findFirst({
+  const map = await findLeadIdsByContactEmailsPostgres(organizationId, [email]);
+  return map.get(email.trim().toLowerCase()) ?? null;
+}
+
+/**
+ * Batch lead lookup by denormalized `contactEmail`, with contacts.email /
+ * personalEmail → lead.contactId fallback. Prefer this over document-shim
+ * collection queries — CRM sole-writer keeps live rows in Prisma tables, not
+ * `pg_documents`.
+ */
+export async function findLeadIdsByContactEmailsPostgres(
+  organizationId: string,
+  emails: readonly string[],
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const unique = [
+    ...new Set(
+      emails
+        .map((e) => e.trim().toLowerCase())
+        .filter((e) => e.includes("@")),
+    ),
+  ];
+  if (!isDatabaseConfigured() || !organizationId.trim() || unique.length === 0) {
+    return map;
+  }
+
+  await withOrganizationScope(organizationId, async (tx) => {
+    for (let i = 0; i < unique.length; i += 25) {
+      const chunk = unique.slice(i, i + 25);
+      const rows = await tx.lead.findMany({
+        where: {
+          organizationId,
+          OR: chunk.map((email) => ({
+            payload: { path: ["contactEmail"], equals: email },
+          })),
+        },
+        select: { id: true, payload: true },
+      });
+      for (const row of rows) {
+        const email = String(
+          (row.payload as Record<string, unknown>).contactEmail ?? "",
+        )
+          .trim()
+          .toLowerCase();
+        if (email && !map.has(email)) map.set(email, row.id);
+      }
+    }
+
+    const missing = unique.filter((e) => !map.has(e));
+    if (missing.length === 0) return;
+
+    const contactEmailToId = new Map<string, string>();
+    for (let i = 0; i < missing.length; i += 25) {
+      const chunk = missing.slice(i, i + 25);
+      const contacts = await tx.contact.findMany({
+        where: {
+          organizationId,
+          OR: [
+            { email: { in: chunk, mode: "insensitive" } },
+            ...chunk.map((email) => ({
+              payload: { path: ["personalEmail"], equals: email },
+            })),
+          ],
+        },
+        select: { id: true, email: true, payload: true },
+      });
+      for (const c of contacts) {
+        const email = String(c.email ?? "")
+          .trim()
+          .toLowerCase();
+        const personal = String(
+          (c.payload as Record<string, unknown>).personalEmail ?? "",
+        )
+          .trim()
+          .toLowerCase();
+        if (email) contactEmailToId.set(email, c.id);
+        if (personal) contactEmailToId.set(personal, c.id);
+      }
+    }
+
+    const contactIds = [...new Set(contactEmailToId.values())];
+    if (contactIds.length === 0) return;
+
+    const leadsByContact = await tx.lead.findMany({
       where: {
         organizationId,
-        payload: { path: ["contactEmail"], equals: normalized },
+        contactId: { in: contactIds },
       },
-      select: { id: true },
-    }),
-  );
-  return row?.id ?? null;
+      select: { id: true, contactId: true },
+    });
+    const contactIdToLead = new Map(
+      leadsByContact.map((l) => [l.contactId, l.id] as const),
+    );
+    for (const email of missing) {
+      if (map.has(email)) continue;
+      const contactId = contactEmailToId.get(email);
+      if (!contactId) continue;
+      const leadId = contactIdToLead.get(contactId);
+      if (leadId) map.set(email, leadId);
+    }
+  });
+
+  return map;
 }

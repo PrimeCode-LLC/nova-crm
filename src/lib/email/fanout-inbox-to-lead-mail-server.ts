@@ -14,6 +14,7 @@ import { getEmailAccountMetaServer } from "@/lib/email/mailbox-profiles-server";
 import { extractEmailAddress } from "@/lib/email/parse-outbound-recipients";
 import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS } from "@/lib/documents/collections";
+import { findLeadIdsByContactEmailsPostgres } from "@/lib/db/list-crm-postgres";
 
 /** Cap body downloads for lead-matched mail per mailbox per cron tick. */
 const MAX_LEAD_MAIL_BODIES_PER_MAILBOX = 80;
@@ -55,72 +56,10 @@ async function resolveLeadIdsByContactEmails(
   organizationId: string,
   emails: string[],
 ): Promise<Map<string, string>> {
-  const db = getAdminDb();
-  const map = new Map<string, string>();
-  if (!db || emails.length === 0) return map;
-
-  const unique = [...new Set(emails.map((e) => e.trim().toLowerCase()).filter((e) => e.includes("@")))];
-
-  for (const chunk of chunkArray(unique, 10)) {
-    const snap = await db
-      .collection(COLLECTIONS.leads)
-      .where("organizationId", "==", organizationId)
-      .where("contactEmail", "in", chunk)
-      .limit(30)
-      .get();
-    for (const doc of snap.docs) {
-      const email = String(doc.data().contactEmail ?? "")
-        .trim()
-        .toLowerCase();
-      if (email && !map.has(email)) map.set(email, doc.id);
-    }
-  }
-
-  const missing = unique.filter((e) => !map.has(e));
-  for (const chunk of chunkArray(missing, 10)) {
-    if (chunk.length === 0) continue;
-    const [byEmail, byPersonal] = await Promise.all([
-      db
-        .collection(COLLECTIONS.contacts)
-        .where("organizationId", "==", organizationId)
-        .where("email", "in", chunk)
-        .limit(30)
-        .get(),
-      db
-        .collection(COLLECTIONS.contacts)
-        .where("organizationId", "==", organizationId)
-        .where("personalEmail", "in", chunk)
-        .limit(30)
-        .get(),
-    ]);
-
-    const contactEmailToId = new Map<string, string>();
-    for (const doc of [...byEmail.docs, ...byPersonal.docs]) {
-      const data = doc.data();
-      const email = String(data.email ?? "")
-        .trim()
-        .toLowerCase();
-      const personal = String(data.personalEmail ?? "")
-        .trim()
-        .toLowerCase();
-      if (email) contactEmailToId.set(email, doc.id);
-      if (personal) contactEmailToId.set(personal, doc.id);
-    }
-
-    for (const email of chunk) {
-      const contactId = contactEmailToId.get(email);
-      if (!contactId) continue;
-      const leadSnap = await db
-        .collection(COLLECTIONS.leads)
-        .where("organizationId", "==", organizationId)
-        .where("contactId", "==", contactId)
-        .limit(1)
-        .get();
-      if (!leadSnap.empty) map.set(email, leadSnap.docs[0]!.id);
-    }
-  }
-
-  return map;
+  // CRM sole-writer: live leads/contacts live in Prisma tables. Document-shim
+  // collection queries only see leftover pg_documents rows (~few hundred) and
+  // miss almost all matches — which left Reply intelligence empty.
+  return findLeadIdsByContactEmailsPostgres(organizationId, emails);
 }
 
 type MatchedInbound = { message: MailInbound; leadId: string; providerKey: string };
@@ -284,7 +223,16 @@ export async function fanoutInboxHeadsToLeadMailServer(input: {
   const { matched, skipped } = await matchInboundToLeads(input);
   result.matched = matched.length;
   result.skipped = skipped;
-  if (matched.length === 0) return result;
+  if (matched.length === 0) {
+    if (skipped > 0) {
+      console.info("[lead-mail-fanout] no lead matches", {
+        organizationId: input.organizationId,
+        mailboxId: input.mailboxId,
+        candidates: skipped,
+      });
+    }
+    return result;
+  }
 
   const toCheck = matched.slice(0, MAX_LEAD_MAIL_SYNC_CHECK);
   const alreadySynced = await loadBodySyncedKeys(toCheck);
@@ -336,6 +284,15 @@ export async function fanoutInboxHeadsToLeadMailServer(input: {
   });
   result.written = write.written;
   result.classified = write.classified;
+  console.info("[lead-mail-fanout] done", {
+    organizationId: input.organizationId,
+    mailboxId: input.mailboxId,
+    matched: result.matched,
+    skipped: result.skipped,
+    written: result.written,
+    classified: result.classified,
+    bodiesFetched: result.bodiesFetched,
+  });
 
   return result;
 }
