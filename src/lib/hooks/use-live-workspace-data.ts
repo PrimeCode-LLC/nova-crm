@@ -24,12 +24,14 @@ import type {
   ChannelKey,
   Contact,
   Deal,
+  Department,
   Followup,
   FollowupPlan,
   Lead,
   LeadTask,
   Note,
   OrgActivityEvent,
+  PermissionOverride,
   Role,
   Touchpoint,
   TimelineEvent,
@@ -85,6 +87,8 @@ export type LiveWorkspaceFirestoreState = {
   profiles: Profile[];
   campaigns: Campaign[];
   crmLabels: CrmLabel[];
+  departments: Department[];
+  permissionOverrides: PermissionOverride[];
 };
 
 const coreReadyEmpty: LiveWorkspaceCoreReady = {
@@ -114,6 +118,8 @@ const empty: LiveWorkspaceFirestoreState = {
   profiles: [],
   campaigns: [],
   crmLabels: [],
+  departments: [],
+  permissionOverrides: [],
 };
 
 function isCoreKey(key: string): key is LiveWorkspaceCoreKey {
@@ -202,6 +208,37 @@ function asCrmLabel(id: string, raw: Record<string, unknown>): CrmLabel {
     color: optionalNonEmptyString(raw.color),
     createdAt: documentTimestampToIso(raw.createdAt),
     updatedAt: documentTimestampToIso(raw.updatedAt),
+  };
+}
+
+function asDepartment(id: string, raw: Record<string, unknown>): Department {
+  return {
+    id,
+    name: String(raw.name ?? ""),
+    parentId: typeof raw.parentId === "string" ? raw.parentId : undefined,
+    leadUserId: typeof raw.leadUserId === "string" ? raw.leadUserId : undefined,
+    description: typeof raw.description === "string" ? raw.description : undefined,
+    defaultRoleId: typeof raw.defaultRoleId === "string" ? (raw.defaultRoleId as Role) : undefined,
+  };
+}
+
+function asPermissionOverride(id: string, raw: Record<string, unknown>): PermissionOverride {
+  return {
+    id,
+    userId: String(raw.userId ?? ""),
+    resource: (raw.resource as PermissionOverride["resource"]) ?? "leads",
+    action: (raw.action as PermissionOverride["action"]) ?? "read",
+    scope: (raw.scope as PermissionOverride["scope"]) ?? "own",
+    effect: (raw.effect as PermissionOverride["effect"]) ?? "grant",
+    scopeDepartmentId:
+      typeof raw.scopeDepartmentId === "string" ? raw.scopeDepartmentId : undefined,
+    scopeCustomDefinition:
+      typeof raw.scopeCustomDefinition === "string" ? raw.scopeCustomDefinition : undefined,
+    scopeTeamAnchorUserId:
+      typeof raw.scopeTeamAnchorUserId === "string" ? raw.scopeTeamAnchorUserId : undefined,
+    note: typeof raw.note === "string" ? raw.note : undefined,
+    createdBy: String(raw.createdBy ?? ""),
+    createdAt: documentTimestampToIso(raw.createdAt),
   };
 }
 
@@ -555,6 +592,8 @@ export function useLiveWorkspaceFirestore(
           profiles: [],
           campaigns: [],
           crmLabels: [],
+          departments: [],
+          permissionOverrides: [],
         });
         return;
       }
@@ -656,6 +695,8 @@ export function useLiveWorkspaceFirestore(
             activityRecords,
             notes,
             touchpoints,
+            departments,
+            permissionOverrides,
           ] = await Promise.all([
             fetchDocs(COLLECTIONS.users, asUser),
             fetchDocs(COLLECTIONS.followups, asFollowup),
@@ -689,6 +730,8 @@ export function useLiveWorkspaceFirestore(
               orderDir: "desc",
               limit: String(TOUCHPOINTS_LIVE_LIMIT),
             }),
+            fetchDocs(COLLECTIONS.departments, asDepartment),
+            fetchDocs(COLLECTIONS.permissionOverrides, asPermissionOverride),
           ]);
           if (cancelled) return;
           setState((prev) => ({
@@ -707,6 +750,8 @@ export function useLiveWorkspaceFirestore(
             activityRecords,
             notes,
             touchpoints,
+            departments,
+            permissionOverrides,
             coreReady: { ...prev.coreReady, followups: true, users: true },
           }));
         } catch (err) {
@@ -764,6 +809,8 @@ export function useLiveWorkspaceFirestore(
         profiles: [],
         campaigns: [],
         crmLabels: [],
+        departments: [],
+        permissionOverrides: [],
       });
       return;
     }
@@ -793,6 +840,8 @@ export function useLiveWorkspaceFirestore(
         profiles: [],
         campaigns: [],
         crmLabels: [],
+        departments: [],
+        permissionOverrides: [],
       });
       return;
     }
@@ -1002,6 +1051,42 @@ export function useLiveWorkspaceFirestore(
               applySnapshot("users", "users", users);
             },
             (err) => applyListenerError("users", err),
+          ),
+        );
+
+        const qDepartments = query(
+          collection(db, COLLECTIONS.departments),
+          where("organizationId", "==", organizationId),
+        );
+        pushUnsub(
+          group,
+          onSnapshot(
+            qDepartments,
+            (snap) => {
+              const departments = snap.docs.map((d) =>
+                asDepartment(d.id, d.data() as Record<string, unknown>),
+              );
+              applySnapshot("departments", "departments", departments);
+            },
+            (err) => applyListenerError("departments", err),
+          ),
+        );
+
+        const qPermissionOverrides = query(
+          collection(db, COLLECTIONS.permissionOverrides),
+          where("organizationId", "==", organizationId),
+        );
+        pushUnsub(
+          group,
+          onSnapshot(
+            qPermissionOverrides,
+            (snap) => {
+              const permissionOverrides = snap.docs.map((d) =>
+                asPermissionOverride(d.id, d.data() as Record<string, unknown>),
+              );
+              applySnapshot("permissionOverrides", "permissionOverrides", permissionOverrides);
+            },
+            (err) => applyListenerError("permissionOverrides", err),
           ),
         );
 

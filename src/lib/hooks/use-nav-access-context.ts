@@ -2,30 +2,34 @@
 
 import { mockUsers } from "@/lib/mock-data";
 import type { NavAccessContext } from "@/lib/nav";
-import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useComputedPermissions } from "@/lib/hooks/use-computed-permissions";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
 
+/**
+ * Nav access from the live workspace roster / demo persona.
+ * Do not key off Firebase Auth — Clerk + Postgres deploys leave `useAuth().user` null.
+ */
 export function useNavAccessContext(): NavAccessContext {
-  const { user: fbUser } = useAuth();
-  const { isDemo, demoPersonaId } = useWorkspace();
-  const useMockPersona = isDemo || isAuthDisabled() || !fbUser;
+  const { isDemo, demoPersonaId, currentUserId, getUserById, users } = useWorkspace();
+  const useMockPersona = isDemo || isAuthDisabled();
   const mockUser =
-    mockUsers.find((u) => u.id === demoPersonaId) ?? mockUsers[0]!;
-  const uid = useMockPersona || !fbUser ? undefined : fbUser.uid;
-  const { data: userDoc, loading: userDocLoading } = useUserDoc(uid);
+    mockUsers.find((u) => u.id === demoPersonaId) ??
+    users.find((u) => u.id === demoPersonaId) ??
+    users[0] ??
+    mockUsers[0]!;
+  const liveUser = useMockPersona ? null : getUserById(currentUserId) ?? null;
+  const uid = useMockPersona ? undefined : currentUserId || undefined;
   const { data: roleSnapshot, loading: permsLoading } = useComputedPermissions(uid);
 
-  const profileReady = useMockPersona || userDoc != null || !userDocLoading;
+  const profileReady = useMockPersona || liveUser != null || Boolean(currentUserId);
   const permsReady = useMockPersona || !profileReady || !permsLoading;
 
   return {
-    roleId: useMockPersona ? mockUser.roleId : userDoc?.roleId,
-    orgRole: useMockPersona ? mockUser.orgRole : userDoc?.orgRole,
-    isSuperAdmin: !useMockPersona && Boolean(userDoc?.isSuperAdmin),
-    featureGrants: useMockPersona ? mockUser.featureGrants : userDoc?.featureGrants,
+    roleId: useMockPersona ? mockUser.roleId : liveUser?.roleId,
+    orgRole: useMockPersona ? mockUser.orgRole : liveUser?.orgRole,
+    isSuperAdmin: !useMockPersona && Boolean(liveUser?.isSuperAdmin),
+    featureGrants: useMockPersona ? mockUser.featureGrants : liveUser?.featureGrants,
     roleSnapshot: useMockPersona ? null : roleSnapshot,
     roleLoading: !useMockPersona && (!profileReady || !permsReady),
   };

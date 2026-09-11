@@ -10,7 +10,6 @@ import {
 } from "@/stores/inbox-notification-overrides-store";
 import { useDemoUserNotifications } from "@/stores/demo-user-notifications-store";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { subscribeUserNotifications } from "@/lib/notifications/subscribe-user-notifications";
 import type { UserNotificationDoc } from "@/lib/notifications/user-notification-types";
 import {
@@ -106,7 +105,7 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
   }, []);
 
   React.useEffect(() => {
-    if (isDemo || !organizationId || !currentUserId || !isClientDocumentSyncEnabled()) {
+    if (isDemo || !organizationId || !currentUserId) {
       setLiveDurable([]);
       setLiveReady(true);
       return;
@@ -185,11 +184,9 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
           demoMarkRead(id, true);
           return;
         }
-        if (isClientDocumentSyncEnabled()) {
-          void persistUserNotificationMarkRead(getClientDb(), id, true).catch((e) =>
-            console.error("[notifications] markRead", e),
-          );
-        }
+        void persistUserNotificationMarkRead(getClientDb(), id, true).catch((e) =>
+          console.error("[notifications] markRead", e),
+        );
         return;
       }
       markReadLocal(id);
@@ -205,11 +202,9 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
           demoMarkRead(id, false);
           return;
         }
-        if (isClientDocumentSyncEnabled()) {
-          void persistUserNotificationMarkRead(getClientDb(), id, false).catch((e) =>
-            console.error("[notifications] markUnread", e),
-          );
-        }
+        void persistUserNotificationMarkRead(getClientDb(), id, false).catch((e) =>
+          console.error("[notifications] markUnread", e),
+        );
         return;
       }
       markUnreadLocal(id);
@@ -225,11 +220,9 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
           demoDismiss(id);
           return;
         }
-        if (isClientDocumentSyncEnabled()) {
-          void persistUserNotificationDismiss(getClientDb(), id).catch((e) =>
-            console.error("[notifications] dismiss", e),
-          );
-        }
+        void persistUserNotificationDismiss(getClientDb(), id).catch((e) =>
+          console.error("[notifications] dismiss", e),
+        );
         return;
       }
       dismissLocal(id);
@@ -246,7 +239,7 @@ export function useWorkspaceInboxNotificationsState(): WorkspaceInboxNotificatio
       if (durableIds.length) {
         if (isDemo) {
           demoMarkAllRead(durableIds);
-        } else if (isClientDocumentSyncEnabled()) {
+        } else {
           void persistUserNotificationsMarkAllRead(getClientDb(), durableIds).catch((e) =>
             console.error("[notifications] markAllRead", e),
           );

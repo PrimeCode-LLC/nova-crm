@@ -56,13 +56,9 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { isoFromDateInput, todayDateInputValue } from "@/lib/followup-date";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { buildWorkspaceOwnerPickerOptions } from "@/lib/owner-scope";
-import { useAuth } from "@/components/providers/auth-provider";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { persistLeadGraphClient } from "@/lib/documents/persist-lead-graph-client";
 import { findAccountByDomain, findContactByEmail } from "@/lib/crm-dedupe";
-import { isAuthDisabled } from "@/lib/auth/flags";
 import {
   leadPickerTriggerLabel,
   selectTriggerLabelById,
@@ -293,6 +289,7 @@ function LeadFormBody({
   const {
     users,
     currentUserId,
+    organizationId,
     getOwnerDisplayName,
     getProfileById,
     profiles,
@@ -311,12 +308,6 @@ function LeadFormBody({
     forceIntakeProspect || viewerRoleId === "prospecting" || viewerRoleId === "data_scraper";
   const router = useRouter();
   const channelOptions = useChannelOptions();
-  const { user: fbUser } = useAuth();
-  const { data: liveUserDoc } = useUserDoc(
-    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
-  );
-  /** Live workspace often has no `currentUserId`; Firebase Auth uid is enough for owner + picker. */
-  const sessionOwnerId = fbUser?.uid ?? null;
 
   const form = useForm<LeadForm>({
     resolver: zodResolver(leadSchema),
@@ -341,7 +332,7 @@ function LeadFormBody({
     [selectedChannel, channelOptions],
   );
 
-  const ownerPickerCurrentUser = (currentUserId || sessionOwnerId || "").trim();
+  const ownerPickerCurrentUser = (currentUserId || "").trim();
   const ownerOptions = React.useMemo(
     () =>
       buildWorkspaceOwnerPickerOptions(
@@ -374,7 +365,7 @@ function LeadFormBody({
   }, [channelNeedsProfile, profileOptionsForChannel, setLeadFormValue, getLeadFormValues]);
 
   const defaultOwnerId =
-    currentUserId || sessionOwnerId || users[0]?.id || "";
+    currentUserId || users[0]?.id || "";
 
   React.useEffect(() => {
     if (!defaultOwnerId) return;
@@ -489,10 +480,10 @@ function LeadFormBody({
       updatedAt: now,
     };
 
-    if (!isDemo && liveUserDoc?.organizationId && isClientDocumentSyncEnabled()) {
+    if (!isDemo && organizationId) {
       try {
         const db = getClientDb();
-        await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
+        await persistLeadGraphClient(db, organizationId, account, contact, lead);
         toast.success(isProspectingIntakeRole ? "Prospect created" : "Lead created");
         onClose();
       } catch (e) {

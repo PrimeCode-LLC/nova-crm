@@ -1,5 +1,4 @@
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import {
   persistUserNotificationCreate,
   persistUserNotificationsCreateMany,
@@ -39,7 +38,6 @@ export async function createUserNotification(
     return;
   }
 
-  if (!isClientDocumentSyncEnabled()) return;
   try {
     await persistUserNotificationCreate(getClientDb(), payload);
   } catch (e) {
@@ -69,7 +67,6 @@ export async function createUserNotifications(
     return;
   }
 
-  if (!isClientDocumentSyncEnabled()) return;
   const orgId = ctx.organizationId;
   const prepared: CreateUserNotificationInput[] = inputs
     .map((input) => ({

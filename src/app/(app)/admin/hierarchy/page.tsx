@@ -9,7 +9,6 @@ import { UserHierarchyPanel, type HierarchyPersistPayload } from "@/components/a
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
 import { managerAssignmentCreatesCycle } from "@/lib/user-hierarchy-tree";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { toast } from "sonner";
 import { Users } from "lucide-react";
 import type { User } from "@/lib/types";
@@ -37,8 +36,8 @@ export default function AdminHierarchyPage() {
         return;
       }
 
-      const writeFs = mode === "live" && isClientDocumentSyncEnabled();
-      if (writeFs) {
+      const writeLive = mode === "live";
+      if (writeLive) {
         const body: Record<string, unknown> = { userId };
         if ("managerId" in patch) body.managerId = patch.managerId ?? null;
         if ("departmentId" in patch) body.departmentId = patch.departmentId ?? null;
@@ -71,9 +70,9 @@ export default function AdminHierarchyPage() {
     [users, mode, patchUser],
   );
 
-  /** Keep `managerAncestorIds` in Firestore aligned with reporting lines (required for manager CRM + inbox access). */
+  /** Keep `managerAncestorIds` aligned with reporting lines (required for manager CRM + inbox access). */
   React.useEffect(() => {
-    if (!canEdit || mode !== "live" || !isClientDocumentSyncEnabled()) return;
+    if (!canEdit || mode !== "live") return;
     let cancelled = false;
     void fetch("/api/org/repair-hierarchy", { method: "POST", credentials: "same-origin" })
       .then((res) => {

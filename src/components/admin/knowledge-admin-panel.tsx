@@ -79,7 +79,6 @@ import {
 import type { AiLibraryAllowedFeature } from "@/lib/ai/types";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { collection, getDocs, query, where } from "@/lib/db/document-shim/shim-client-firestore";
 import { cn } from "@/lib/utils";
@@ -197,7 +196,7 @@ export function KnowledgeAdminPanel({
 
   React.useEffect(() => {
     const needBrands = Boolean(editLib) || newLibType === "brand";
-    if (!needBrands || !ws.organizationId || !isClientDocumentSyncEnabled()) return;
+    if (!needBrands || !ws.organizationId) return;
     let cancelled = false;
     void (async () => {
       const db = getClientDb();

@@ -23,10 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useAuth } from "@/components/providers/auth-provider";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { persistLeadGraphClient } from "@/lib/documents/persist-lead-graph-client";
 import { persistLeadPatchClient } from "@/lib/documents/persist-lead-patch-client";
 import { COLLECTIONS } from "@/lib/documents/collections";
@@ -106,7 +103,9 @@ export function NewProspectDialog({
   const router = useRouter();
   const {
     currentUserId,
+    organizationId,
     getOwnerDisplayName,
+    getUserById,
     profiles,
     contacts,
     leads,
@@ -118,12 +117,8 @@ export function NewProspectDialog({
     intentPlaybook,
   } = useWorkspace();
   const channelOptions = useChannelOptions();
-  const { user: fbUser } = useAuth();
-  const { data: liveUserDoc } = useUserDoc(
-    isDemo || isAuthDisabled() || !fbUser ? undefined : fbUser.uid,
-  );
-  /** Prefer workspace uid; fall back to Firebase Auth uid (no extra `/api/auth/me`). */
-  const effectiveUid = currentUserId || fbUser?.uid || undefined;
+  /** Prefer workspace uid for drafts and ownership (Clerk + Postgres). */
+  const effectiveUid = currentUserId || undefined;
 
   const [form, setForm] = React.useState<NewProspectFormDraft>(() =>
     mergePrefillIntoDraft(emptyNewProspectFormDraft(), initialPrefill),
@@ -690,15 +685,14 @@ export function NewProspectDialog({
     const createdById = oid;
     const creatorLabel =
       getOwnerDisplayName(oid)?.trim() ||
-      liveUserDoc?.displayName?.trim() ||
-      (fbUser?.email?.includes("@") ? fbUser.email.split("@")[0]!.trim() : "") ||
+      getUserById(oid)?.displayName?.trim() ||
       "Teammate";
 
     setSubmitting(true);
     try {
-      if (!isDemo && liveUserDoc?.organizationId && isClientDocumentSyncEnabled()) {
+      if (!isDemo && organizationId) {
         const db = getClientDb();
-        await persistLeadGraphClient(db, liveUserDoc.organizationId, account, contact, lead);
+        await persistLeadGraphClient(db, organizationId, account, contact, lead);
         const saved = await getDoc(doc(db, COLLECTIONS.leads, leadId));
         if (saved.exists()) {
           const data = saved.data();

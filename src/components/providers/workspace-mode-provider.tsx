@@ -98,6 +98,10 @@ import {
   persistCampaignUpdate,
   persistTimelineEventCreate,
   persistTouchpointCreate,
+  persistDepartmentCreate,
+  persistDepartmentUpdate,
+  persistPermissionOverrideCreate,
+  persistPermissionOverrideDelete,
 } from "@/lib/documents/persist-workspace-entities-client";
 import { persistOrgActivityEventCreate } from "@/lib/documents/persist-org-activity-client";
 import { doc, serverTimestamp, updateDoc } from "@/lib/db/document-shim/shim-client-firestore";
@@ -741,24 +745,73 @@ export function WorkspaceModeProvider({
     setLabelDelta({ added: [], removedIds: [], updates: {} });
   }, [mode, demoPersonaId]);
 
-  const addPermissionOverride = React.useCallback((override: PermissionOverride) => {
-    setPoDelta((d) => ({ ...d, added: [...d.added, override] }));
-  }, []);
+  const addPermissionOverride = React.useCallback(
+    (override: PermissionOverride) => {
+      setPoDelta((d) => ({ ...d, added: [...d.added, override] }));
+      if (!canPersistWorkspaceDocsLive()) return;
+      const orgId = userDoc?.organizationId;
+      if (!orgId) return;
+      void (async () => {
+        try {
+          const db = requireWorkspaceDb();
+          await persistPermissionOverrideCreate(db, orgId, override);
+        } catch (e) {
+          toastError("Could not save permission override", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "workspacePersist",
+          });
+        }
+      })();
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const removePermissionOverride = React.useCallback((id: string) => {
-    setPoDelta((d) => {
-      const added = d.added.filter((x) => x.id !== id);
-      if (added.length !== d.added.length) {
-        return { ...d, added };
-      }
-      if (d.removedIds.includes(id)) return d;
-      return { ...d, removedIds: [...d.removedIds, id] };
-    });
-  }, []);
+  const removePermissionOverride = React.useCallback(
+    (id: string) => {
+      setPoDelta((d) => {
+        const added = d.added.filter((x) => x.id !== id);
+        if (added.length !== d.added.length) {
+          return { ...d, added };
+        }
+        if (d.removedIds.includes(id)) return d;
+        return { ...d, removedIds: [...d.removedIds, id] };
+      });
+      if (!canPersistWorkspaceDocsLive()) return;
+      void (async () => {
+        try {
+          const db = requireWorkspaceDb();
+          await persistPermissionOverrideDelete(db, id);
+        } catch (e) {
+          toastError("Could not remove permission override", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "workspacePersist",
+          });
+        }
+      })();
+    },
+    [mode, userDoc?.organizationId],
+  );
 
-  const addDepartment = React.useCallback((dept: Department) => {
-    setAddedDepartments((prev) => [...prev, dept]);
-  }, []);
+  const addDepartment = React.useCallback(
+    (dept: Department) => {
+      setAddedDepartments((prev) => [...prev, dept]);
+      if (!canPersistWorkspaceDocsLive()) return;
+      const orgId = userDoc?.organizationId;
+      if (!orgId) return;
+      void (async () => {
+        try {
+          const db = requireWorkspaceDb();
+          await persistDepartmentCreate(db, orgId, dept);
+        } catch (e) {
+          toastError("Could not save team", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "workspacePersist",
+          });
+        }
+      })();
+    },
+    [mode, userDoc?.organizationId],
+  );
 
   const updateDepartment = React.useCallback(
     (id: string, patch: Partial<Omit<Department, "id">>) => {
@@ -769,8 +822,20 @@ export function WorkspaceModeProvider({
         ...prev,
         [id]: { ...prev[id], ...patch },
       }));
+      if (!canPersistWorkspaceDocsLive()) return;
+      void (async () => {
+        try {
+          const db = requireWorkspaceDb();
+          await persistDepartmentUpdate(db, id, patch);
+        } catch (e) {
+          toastError("Could not update team", e, {
+            location: "src/components/providers/workspace-mode-provider.tsx",
+            functionName: "workspacePersist",
+          });
+        }
+      })();
     },
-    [],
+    [mode, userDoc?.organizationId],
   );
 
   const updateProfile = React.useCallback(
@@ -2666,6 +2731,8 @@ export function WorkspaceModeProvider({
       profiles: liveFs.profiles,
       campaigns: liveFs.campaigns,
       crmLabels: liveFs.crmLabels,
+      departments: liveFs.departments,
+      permissionOverrides: liveFs.permissionOverrides,
       currentUserId: uid,
     };
     if (!uid || !userDoc) {
@@ -2703,13 +2770,19 @@ export function WorkspaceModeProvider({
     liveFs.profiles,
     liveFs.campaigns,
     liveFs.crmLabels,
+    liveFs.departments,
+    liveFs.permissionOverrides,
   ]);
 
   const preSessionSnapshot = React.useMemo((): WorkspaceSnapshot => {
     const removed = new Set(poDelta.removedIds);
     const permissionOverrides = [
       ...tenantBaseSnapshot.permissionOverrides.filter((p) => !removed.has(p.id)),
-      ...poDelta.added,
+      ...poDelta.added.filter(
+        (p) =>
+          !removed.has(p.id) &&
+          !tenantBaseSnapshot.permissionOverrides.some((existing) => existing.id === p.id),
+      ),
     ];
     const applyPatches = (list: Profile[]) =>
       list.map((p) => {
@@ -2774,10 +2847,14 @@ export function WorkspaceModeProvider({
     return {
       ...tenantBaseSnapshot,
       permissionOverrides,
-      departments: [...tenantBaseSnapshot.departments, ...addedDepartments].map((d) => {
-        const patch = departmentPatches[d.id];
-        return patch ? { ...d, ...patch } : d;
-      }),
+      departments: (() => {
+        const liveIds = new Set(tenantBaseSnapshot.departments.map((d) => d.id));
+        const extras = addedDepartments.filter((d) => !liveIds.has(d.id));
+        return [...tenantBaseSnapshot.departments, ...extras].map((d) => {
+          const patch = departmentPatches[d.id];
+          return patch ? { ...d, ...patch } : d;
+        });
+      })(),
       profiles,
       campaigns,
       accounts: accountsMerged,

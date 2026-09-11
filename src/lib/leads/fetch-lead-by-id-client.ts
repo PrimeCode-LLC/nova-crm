@@ -2,7 +2,6 @@
 
 import { doc, getDoc } from "@/lib/db/document-shim/shim-client-firestore";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
 import { mapLeadDoc } from "@/lib/leads/map-lead-doc";
@@ -56,9 +55,6 @@ export async function fetchLeadByIdClient(input: {
   const organizationId = input.organizationId.trim();
   if (!leadId || !organizationId) {
     return { status: "not_found" };
-  }
-  if (!isClientDocumentSyncEnabled()) {
-    return { status: "unavailable" };
   }
 
   try {

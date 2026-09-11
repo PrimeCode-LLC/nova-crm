@@ -42,7 +42,6 @@ import { Badge } from "@/components/ui/badge";
 import { ScheduleMeetingDialog } from "@/components/scheduling/schedule-meeting-dialog";
 import { CalendarCreateMenu } from "@/components/scheduling/calendar-create-menu";
 import { CalendarTaskDialog } from "@/components/scheduling/calendar-task-dialog";
-import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import type { ExternalCalendarEvent, Meeting, SchedulingLink } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -256,8 +255,7 @@ export function SchedulingCalendarView({
   onMeetingBooked?: (meeting: Meeting) => void;
   onCreateAppointmentSchedule?: () => void;
 }) {
-  const { user: fbUser } = useAuth();
-  const { followups, leadTasks, currentUserId, addFollowup } = useWorkspace();
+  const { followups, leadTasks, currentUserId, getUserById, addFollowup } = useWorkspace();
   const [view, setView] = React.useState<CalendarViewMode>("month");
   const [cursor, setCursor] = React.useState(() => new Date());
   const [selectedDay, setSelectedDay] = React.useState<Date | null>(null);
@@ -310,11 +308,12 @@ export function SchedulingCalendarView({
     return [...openFollowups, ...openLeadTasks];
   }, [showTasks, followups, leadTasks, currentUserId]);
 
+  const me = getUserById(currentUserId);
   const defaultGuestEmail =
-    fbUser?.email?.trim() ||
+    me?.email?.trim() ||
     `${hostLabel.split(" ")[0]?.toLowerCase() ?? "guest"}@example.com`;
   const defaultGuestName =
-    fbUser?.displayName?.trim() || hostLabel.replace(/\s*\(.*\)$/, "").trim() || "Guest";
+    me?.displayName?.trim() || hostLabel.replace(/\s*\(.*\)$/, "").trim() || "Guest";
 
   const monthStart = startOfMonth(cursor);
   const monthEnd = endOfMonth(cursor);

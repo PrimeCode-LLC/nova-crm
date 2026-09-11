@@ -39,7 +39,6 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { WorkspaceEmptyHint } from "@/components/common/workspace-empty-hint";
 import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skeleton";
 import { canManageOrgHierarchy } from "@/lib/can-manage-org-users";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { ROLES, roleLabel } from "@/lib/constants";
 import {
   MODULE_META,
@@ -176,7 +175,7 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
   }, [customRoles]);
 
   React.useEffect(() => {
-    if (mode !== "live" || !isClientDocumentSyncEnabled()) return;
+    if (mode !== "live") return;
     let cancelled = false;
     void fetch("/api/org/roles")
       .then(async (res) => {
@@ -214,8 +213,8 @@ export function TeamDetailView({ teamId }: { teamId: string }) {
   ) {
     setBusyUserId(userId);
     try {
-      const writeFs = mode === "live" && isClientDocumentSyncEnabled();
-      if (writeFs) {
+      const writeLive = mode === "live";
+      if (writeLive) {
         const body: Record<string, unknown> = { userId };
         if ("departmentId" in patch) body.departmentId = patch.departmentId ?? null;
         if (patch.roleId) body.roleId = patch.roleId;

@@ -43,7 +43,6 @@ import { resolveWallPrefsUserId } from "@/lib/wall-preferences";
 import { useNavAccessContext } from "@/lib/hooks/use-nav-access-context";
 import { roleAtLeast } from "@/lib/platform/org-role";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { persistUserNotificationCreate } from "@/lib/notifications/persist-user-notification-client";
 import { selectTriggerLabelByKey } from "@/lib/base-ui-select-label";
 import {
@@ -199,7 +198,7 @@ function DashboardWallPageInner() {
     };
     emitWallActivity("wall_exit_attempt", summaries[reason] ?? `Exit attempt on the wall display (${reason})`);
 
-    if (!notify || isDemo || !currentUserId || !organizationId || !isClientDocumentSyncEnabled()) return;
+    if (!notify || isDemo || !currentUserId || !organizationId) return;
     void (async () => {
       try {
         const db = getClientDb();
@@ -419,7 +418,7 @@ function DashboardWallPageInner() {
 
   async function onDeniedAttempt() {
     emitWallActivity("wall_exit_denied", "Wrong PIN entered on the wall display");
-    if (isDemo || !currentUserId || !organizationId || !isClientDocumentSyncEnabled()) return;
+    if (isDemo || !currentUserId || !organizationId) return;
     try {
       const db = getClientDb();
       await persistUserNotificationCreate(db, {

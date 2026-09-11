@@ -3,7 +3,6 @@
 import * as React from "react";
 import { doc, onSnapshot, type Unsubscribe } from "@/lib/db/document-shim/shim-client-firestore";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import type { EffectivePermissionSnapshot } from "@/lib/permissions/role-types";
 import { parseComputedPermissionsDoc } from "@/lib/permissions/computed-permissions";
@@ -20,7 +19,7 @@ export function useComputedPermissions(uid: string | undefined): {
   const [loading, setLoading] = React.useState(Boolean(uid));
 
   React.useEffect(() => {
-    if (!uid || !isClientDocumentSyncEnabled()) {
+    if (!uid) {
       setData(null);
       setLoading(false);
       return;

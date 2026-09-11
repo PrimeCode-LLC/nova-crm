@@ -15,7 +15,6 @@ import {
 import { toast } from "sonner";
 import { playAlertSound } from "@/lib/notifications/play-alert-sound";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { subscribeWorkspaceChatChannelsForUser } from "@/lib/documents/workspace-chat-channel-subscribe";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
@@ -186,7 +185,7 @@ export function TeamChatUnreadProvider({
   const liveEnabled =
     subscriptionsReady &&
     !isDemo &&
-    Boolean(organizationId && currentUserId && isClientDocumentSyncEnabled());
+    Boolean(organizationId && currentUserId);
 
   React.useEffect(() => {
     if (!liveEnabled || !organizationId || !currentUserId) {
@@ -332,7 +331,7 @@ export function TeamChatUnreadProvider({
         setDemoChannelLastRead(DEMO_WORKSPACE_ORG_ID, currentUserId, channelId, readThroughIso);
         return;
       }
-      if (!organizationId || !currentUserId || !isClientDocumentSyncEnabled()) return;
+      if (!organizationId || !currentUserId) return;
       try {
         const db = getClientDb();
         void persistWorkspaceChatChannelLastRead(db, organizationId, currentUserId, channelId, readThroughIso);

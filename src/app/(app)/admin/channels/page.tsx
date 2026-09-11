@@ -56,9 +56,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { cn } from "@/lib/utils";
-import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { userHasAdminFeature } from "@/lib/admin-feature-access";
 
@@ -82,22 +80,19 @@ function openAddCustomDialog(setOpen: (v: boolean) => void) {
 }
 
 export default function AdminChannelsPage() {
-  const { user } = useAuth();
-  const { isDemo } = useWorkspace();
-  const { data: userDoc } = useUserDoc(
-    isDemo || isAuthDisabled() || !user ? undefined : user.uid,
-  );
+  const { isDemo, currentUserId, getUserById } = useWorkspace();
+  const liveUser = isDemo || isAuthDisabled() ? null : getUserById(currentUserId);
   const isWorkspaceAdmin =
     isDemo ||
     userHasAdminFeature(
       {
-        roleId: userDoc?.roleId ?? "salesperson",
-        isSuperAdmin: userDoc?.isSuperAdmin,
-        featureGrants: userDoc?.featureGrants,
-        orgRole: userDoc?.orgRole,
+        roleId: liveUser?.roleId ?? "salesperson",
+        isSuperAdmin: liveUser?.isSuperAdmin,
+        featureGrants: liveUser?.featureGrants,
+        orgRole: liveUser?.orgRole,
       },
       "channels",
-      userDoc?.orgRole,
+      liveUser?.orgRole,
     );
 
   const autoMap = useChannelAdminStore((s) => s.autoMap);

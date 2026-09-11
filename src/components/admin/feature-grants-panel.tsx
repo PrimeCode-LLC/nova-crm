@@ -14,7 +14,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { canManageFeatureGrants } from "@/lib/can-manage-feature-grants";
 import type { AdminFeatureKey } from "@/lib/admin-features";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { FeatureGrantsEditor } from "@/components/admin/feature-grants-editor";
 import { toast } from "sonner";
 
@@ -48,7 +47,7 @@ export function FeatureGrantsPanel() {
   async function handleSave() {
     if (!userId || !target) return;
     setSaving(true);
-    const writeLive = mode === "live" && !isDemo && isClientDocumentSyncEnabled();
+    const writeLive = mode === "live" && !isDemo;
     if (writeLive) {
       const res = await fetch("/api/org/workspace-users", {
         method: "PATCH",
@@ -67,7 +66,7 @@ export function FeatureGrantsPanel() {
       }
     }
     patchUser(userId, { featureGrants: grants.length ? grants : undefined });
-    toast.success("Feature access updated");
+    toast.success(writeLive ? "Feature access updated" : "Feature access updated (this tab)");
     setSaving(false);
   }
 

@@ -44,7 +44,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { AvailabilityScheduleEditor } from "@/components/scheduling/availability-schedule-editor";
 import { CalendarConnectionsPanel } from "@/components/scheduling/calendar-connections-panel";
@@ -113,7 +112,6 @@ function formatDelegationLabel(d: CalendarDelegation, users: readonly User[]): s
 
 export function SchedulingHub() {
   const { isDemo, users, currentUserId, organizationId } = useWorkspace();
-  const { user: fbUser } = useAuth();
   const queryClient = useQueryClient();
   const hostsQuery = useBookableHosts(!isDemo);
   const [orgSlug, setOrgSlug] = React.useState(isDemo ? DEMO_ORG_SLUG : "");
@@ -402,12 +400,9 @@ export function SchedulingHub() {
   );
   const myLabel = React.useMemo(() => {
     const me = users.find((u) => u.id === currentUserId);
-    const name =
-      me?.displayName?.trim() ||
-      fbUser?.displayName?.trim() ||
-      fbUser?.email?.split("@")[0]?.trim();
+    const name = me?.displayName?.trim() || me?.email?.split("@")[0]?.trim();
     return name ? `${name} (my calendar)` : "My calendar";
-  }, [users, currentUserId, fbUser]);
+  }, [users, currentUserId]);
 
   const hostOptions: { id: string; label: string }[] = [
     { id: currentUserId, label: myLabel },

@@ -9,7 +9,6 @@ import {
   where,
 } from "@/lib/db/document-shim/shim-client-firestore";
 import { getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { subscribeWorkspaceChatChannelsForUser } from "@/lib/documents/workspace-chat-channel-subscribe";
 import { documentTimestampToIso } from "@/lib/documents/timestamp-util";
@@ -105,7 +104,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
   /** Live: subscribe all channels for org. */
   React.useEffect(() => {
-    if (isDemo || !organizationId || !isClientDocumentSyncEnabled()) {
+    if (isDemo || !organizationId) {
       setLiveChannels([]);
       setLoading(false);
       setError(null);
@@ -144,7 +143,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
   /** Ensure #general exists (live). */
   React.useEffect(() => {
-    if (isDemo || !organizationId || !currentUserId || !isClientDocumentSyncEnabled()) return;
+    if (isDemo || !organizationId || !currentUserId) return;
     if (loading) return;
     const gid = buildGeneralChannelId(organizationId);
     if (liveChannels.some((c) => c.slug === "general" || c.id === gid)) return;
@@ -171,7 +170,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
 
   /** Live: subscribe messages for selected channel. */
   React.useEffect(() => {
-    if (isDemo || !organizationId || !selectedChannelId || !isClientDocumentSyncEnabled()) {
+    if (isDemo || !organizationId || !selectedChannelId) {
       setLiveMessages([]);
       setMessageSyncError(null);
       return;
@@ -258,7 +257,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
       if (isDemo) {
         demoAppendMessage(DEMO_CHAT_ORG, { ...msg, organizationId: DEMO_CHAT_ORG });
       } else {
-        if (!organizationId || !isClientDocumentSyncEnabled()) return;
+        if (!organizationId) return;
         try {
           const db = getClientDb();
           const toSave = { ...msg, organizationId };
@@ -369,7 +368,7 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
         setSelectedChannelId(id);
         return;
       }
-      if (!organizationId || !isClientDocumentSyncEnabled()) return;
+      if (!organizationId) return;
       const exists = liveChannels.some((c) => c.id === id);
       const db = getClientDb();
       if (!exists) {
@@ -404,6 +403,6 @@ export function useWorkspaceTeamChat({ organizationId, isDemo, currentUserId }: 
     /** Firestore listener error for the active channel (often missing composite index). */
     messageSyncError,
     /** False when live org is missing or Firebase env is not set up. */
-    liveChatAvailable: Boolean(!isDemo && organizationId && isClientDocumentSyncEnabled()),
+    liveChatAvailable: Boolean(!isDemo && organizationId),
   };
 }

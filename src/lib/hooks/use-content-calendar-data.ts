@@ -5,8 +5,7 @@ import { collection, getDocs, query, where } from "@/lib/db/document-shim/shim-c
 import { toast } from "sonner";
 
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { getClientAuth, getClientDb } from "@/lib/db/document-access/client";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
+import { getClientDb } from "@/lib/db/document-access/client";
 import { COLLECTIONS } from "@/lib/documents/collections";
 import { buildBrandDefaultsFromPack } from "@/lib/content-calendar/strategy-packs";
 import {
@@ -91,7 +90,7 @@ export function useContentCalendarData() {
         return;
       }
 
-      if (!organizationId || !isClientDocumentSyncEnabled()) {
+      if (!organizationId) {
         if (!cancelled) {
           setBrands([]);
           setItems([]);
@@ -99,12 +98,6 @@ export function useContentCalendarData() {
           setPlans([]);
           setLoading(false);
         }
-        return;
-      }
-
-      const auth = getClientAuth();
-      if (!auth.currentUser) {
-        if (!cancelled) setLoading(false);
         return;
       }
 

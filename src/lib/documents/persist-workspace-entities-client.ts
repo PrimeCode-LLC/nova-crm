@@ -15,9 +15,11 @@ import { resolveOwnerManagerIdsClient } from "@/lib/documents/resolve-owner-mana
 import type {
   ActivityCounterRow,
   Campaign,
+  Department,
   Followup,
   LeadTask,
   Note,
+  PermissionOverride,
   Profile,
   Touchpoint,
   TimelineEvent,
@@ -614,4 +616,75 @@ export async function persistWorkspaceChatChannelLastRead(
     },
     { merge: true },
   );
+}
+
+export async function persistDepartmentCreate(
+  db: Firestore,
+  organizationId: string,
+  dept: Department,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    name: dept.name.trim(),
+  };
+  if (dept.parentId) data.parentId = dept.parentId;
+  if (dept.leadUserId) data.leadUserId = dept.leadUserId;
+  if (dept.description?.trim()) data.description = dept.description.trim();
+  if (dept.defaultRoleId) data.defaultRoleId = dept.defaultRoleId;
+  await setDoc(doc(db, COLLECTIONS.departments, dept.id), data);
+}
+
+export async function persistDepartmentUpdate(
+  db: Firestore,
+  departmentId: string,
+  patch: Partial<Omit<Department, "id">>,
+): Promise<void> {
+  const payload: Record<string, unknown> = {};
+  if (patch.name !== undefined) payload.name = patch.name.trim();
+  if (patch.parentId !== undefined) {
+    payload.parentId = patch.parentId || deleteField();
+  }
+  if (patch.leadUserId !== undefined) {
+    payload.leadUserId = patch.leadUserId || deleteField();
+  }
+  if (patch.description !== undefined) {
+    const d = patch.description?.trim();
+    payload.description = d ? d : deleteField();
+  }
+  if (patch.defaultRoleId !== undefined) {
+    payload.defaultRoleId = patch.defaultRoleId || deleteField();
+  }
+  if (Object.keys(payload).length === 0) return;
+  await updateDoc(doc(db, COLLECTIONS.departments, departmentId), payload);
+}
+
+export async function persistPermissionOverrideCreate(
+  db: Firestore,
+  organizationId: string,
+  override: PermissionOverride,
+): Promise<void> {
+  const data: Record<string, unknown> = {
+    organizationId,
+    userId: override.userId,
+    resource: override.resource,
+    action: override.action,
+    scope: override.scope,
+    effect: override.effect,
+    createdBy: override.createdBy,
+    createdAt: override.createdAt,
+  };
+  if (override.scopeDepartmentId) data.scopeDepartmentId = override.scopeDepartmentId;
+  if (override.scopeCustomDefinition)
+    data.scopeCustomDefinition = override.scopeCustomDefinition;
+  if (override.scopeTeamAnchorUserId)
+    data.scopeTeamAnchorUserId = override.scopeTeamAnchorUserId;
+  if (override.note?.trim()) data.note = override.note.trim();
+  await setDoc(doc(db, COLLECTIONS.permissionOverrides, override.id), data);
+}
+
+export async function persistPermissionOverrideDelete(
+  db: Firestore,
+  overrideId: string,
+): Promise<void> {
+  await deleteDoc(doc(db, COLLECTIONS.permissionOverrides, overrideId));
 }

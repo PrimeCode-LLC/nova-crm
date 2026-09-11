@@ -16,7 +16,6 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Separator } from "@/components/ui/separator";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useAuth } from "@/components/providers/auth-provider";
 import { initials } from "@/lib/format";
 import { useTheme } from "next-themes";
 import {
@@ -52,7 +51,6 @@ import { InstantlyIntegrationCard } from "@/components/integrations/instantly-in
 import { MillionVerifierIntegrationCard } from "@/components/integrations/millionverifier-integration-card";
 import { refreshServerSessionFromCurrentUser } from "@/lib/auth/client-session";
 import { formatAuthError } from "@/lib/db/document-access/auth-errors";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import {
   DEFAULT_USER_NOTIFICATION_SETTINGS,
@@ -190,9 +188,9 @@ function SettingsPage() {
     if (t && adminSubSectionTabs("/settings").includes(t)) setActiveTab(t);
   }, [searchParams]);
 
-  const { isDemo, users, currentUserId, demoPersonaId, patchUser } = useWorkspace();
-  const { user: fbUser } = useAuth();
-  const demoUser = users.find((u) => u.id === currentUserId);
+  const { isDemo, users, currentUserId, demoPersonaId, patchUser, getUserById } = useWorkspace();
+  const liveUser = getUserById(currentUserId);
+  const profileUser = isDemo ? users.find((u) => u.id === currentUserId) : liveUser;
 
   const [displayName, setDisplayName] = React.useState("");
   const [email, setEmail] = React.useState("");
@@ -202,31 +200,38 @@ function SettingsPage() {
   const [confirmPassword, setConfirmPassword] = React.useState("");
 
   React.useEffect(() => {
-    if (isDemo && demoUser) {
-      setDisplayName(demoUser.displayName);
-      setEmail(demoUser.email);
-      setTitle(demoUser.title ?? "");
-    } else if (fbUser) {
-      setEmail(fbUser.email ?? "");
+    if (isDemo && profileUser) {
+      setDisplayName(profileUser.displayName);
+      setEmail(profileUser.email);
+      setTitle(profileUser.title ?? "");
+      return;
+    }
+    if (profileUser) {
+      setEmail(profileUser.email);
       try {
-        const raw = typeof window !== "undefined" ? localStorage.getItem(`${LS_PROFILE}:${fbUser.uid}`) : null;
+        const raw =
+          typeof window !== "undefined" && currentUserId
+            ? localStorage.getItem(`${LS_PROFILE}:${currentUserId}`)
+            : null;
         if (raw) {
           const j = JSON.parse(raw) as { displayName?: string; title?: string };
-          setDisplayName(j.displayName?.trim() || fbUser.displayName || fbUser.email?.split("@")[0] || "");
-          setTitle(j.title?.trim() ?? "");
+          setDisplayName(
+            j.displayName?.trim() || profileUser.displayName || profileUser.email?.split("@")[0] || "",
+          );
+          setTitle(j.title?.trim() ?? profileUser.title ?? "");
           return;
         }
       } catch {
         /* ignore */
       }
-      setDisplayName(fbUser.displayName || fbUser.email?.split("@")[0] || "");
-      setTitle("");
-    } else {
-      setDisplayName(demoUser?.displayName ?? "");
-      setEmail(demoUser?.email ?? "");
-      setTitle(demoUser?.title ?? "");
+      setDisplayName(profileUser.displayName);
+      setTitle(profileUser.title ?? "");
+      return;
     }
-  }, [isDemo, currentUserId, demoPersonaId, demoUser, fbUser]);
+    setDisplayName("");
+    setEmail("");
+    setTitle("");
+  }, [isDemo, currentUserId, demoPersonaId, profileUser]);
   const [savingProfile, setSavingProfile] = React.useState(false);
   const [changingPassword, setChangingPassword] = React.useState(false);
   const [sendingResetEmail, setSendingResetEmail] = React.useState(false);
@@ -301,21 +306,23 @@ function SettingsPage() {
     }
     setSavingProfile(true);
     try {
-      if (isDemo && currentUserId) {
+      if (!currentUserId) {
+        toast.error("Sign in or use Demo mode to save your profile.");
+        return;
+      }
+      if (isDemo) {
         patchUser(currentUserId, { displayName: dn, title: title.trim() || undefined });
-      } else if (fbUser?.uid) {
+      } else {
         try {
           localStorage.setItem(
-            `${LS_PROFILE}:${fbUser.uid}`,
+            `${LS_PROFILE}:${currentUserId}`,
             JSON.stringify({ displayName: dn, title: title.trim() }),
           );
         } catch {
           toast.error("Could not save profile in this browser (storage blocked).");
           return;
         }
-      } else {
-        toast.error("Sign in or use Demo mode to save your profile.");
-        return;
+        patchUser(currentUserId, { displayName: dn, title: title.trim() || undefined });
       }
       toast.success("Profile saved");
     } finally {
@@ -328,7 +335,7 @@ function SettingsPage() {
       toast.info("Password change is not available in Demo mode.");
       return;
     }
-    if (!fbUser || !fbUser.email) {
+    if (!email) {
       toast.error("Sign in with email/password to change your password.");
       return;
     }
@@ -361,13 +368,9 @@ function SettingsPage() {
       toast.success("Reset link sent (auth disabled mode, no email sent).");
       return;
     }
-    const addr = fbUser?.email?.trim();
+    const addr = email.trim();
     if (!addr) {
       toast.error("No email address on this account.");
-      return;
-    }
-    if (!isClientDocumentSyncEnabled()) {
-      toast.error("Firebase is not configured.");
       return;
     }
 
@@ -551,9 +554,9 @@ function SettingsPage() {
                   <div>
                     <div className="text-sm font-medium">Reset password by email</div>
                     <p className="text-xs text-muted-foreground mt-0.5">
-                      We&apos;ll email a secure reset link from this app (your SYSTEM_SMTP mail server), not Firebase&apos;s mailer.
-                      {fbUser?.email ? (
-                        <span className="block mt-1 font-medium text-foreground/90">{fbUser.email}</span>
+                      We&apos;ll email a secure reset link from this app (your SYSTEM_SMTP mail server).
+                      {email ? (
+                        <span className="block mt-1 font-medium text-foreground/90">{email}</span>
                       ) : null}
                     </p>
                   </div>
@@ -564,7 +567,7 @@ function SettingsPage() {
                       variant="secondary"
                       className="gap-1.5"
                       onClick={() => void handleSendPasswordResetEmail()}
-                      disabled={sendingResetEmail || !fbUser?.email}
+                      disabled={sendingResetEmail || !email}
                     >
                       {sendingResetEmail ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />

@@ -36,7 +36,6 @@ import { useWorkspaceInboxNotifications } from "@/components/providers/workspace
 import { formatUnreadBadgeCount } from "@/lib/email/inbox-unread-count";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { useComputedPermissions } from "@/lib/hooks/use-computed-permissions";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import type { Role } from "@/lib/types";
 
 import {
@@ -148,11 +147,12 @@ export function AppSidebar({
   const pathname = usePathname();
   const router = useRouter();
   const { theme, setTheme } = useTheme();
-  const { user: fbUser, signOut } = useAuth();
-  const { isDemo, demoPersonaId, setDemoPersona, users } = useWorkspace();
-  const useMockPersona = isDemo || isAuthDisabled() || !fbUser;
-  const liveUid = useMockPersona || !fbUser ? undefined : fbUser.uid;
-  const { data: userDoc, loading: userDocLoading } = useUserDoc(liveUid);
+  const { signOut } = useAuth();
+  const { isDemo, demoPersonaId, setDemoPersona, users, currentUserId, getUserById } =
+    useWorkspace();
+  const useMockPersona = isDemo || isAuthDisabled();
+  const liveUser = useMockPersona ? null : getUserById(currentUserId) ?? null;
+  const liveUid = useMockPersona ? undefined : currentUserId || undefined;
   const { data: roleSnapshot, loading: permsLoading } = useComputedPermissions(liveUid);
   const mockUser =
     users.find((u) => u.id === demoPersonaId) ?? users[0] ?? {
@@ -163,13 +163,13 @@ export function AppSidebar({
     };
   const displayName = useMockPersona
     ? mockUser.displayName
-    : fbUser.displayName || fbUser.email?.split("@")[0] || "User";
-  const email = useMockPersona ? mockUser.email : (fbUser.email ?? "");
+    : liveUser?.displayName || liveUser?.email?.split("@")[0] || "User";
+  const email = useMockPersona ? mockUser.email : (liveUser?.email ?? "");
   const displayRoleLabel = useMockPersona
     ? roleLabel(mockUser.roleId)
-    : workspaceRoleSubtitle(userDoc?.roleId, userDoc?.isSuperAdmin, {
-        loading: userDocLoading,
-        hasDoc: userDoc != null,
+    : workspaceRoleSubtitle(liveUser?.roleId, liveUser?.isSuperAdmin, {
+        loading: !liveUser && Boolean(liveUid),
+        hasDoc: liveUser != null,
       });
   const avatarInitials = useMockPersona
     ? mockUser.displayName
@@ -177,7 +177,7 @@ export function AppSidebar({
         .map((n) => n[0])
         .join("")
         .slice(0, 2)
-    : (fbUser.displayName || fbUser.email || "?")
+    : (liveUser?.displayName || liveUser?.email || "?")
         .split(/[\s@]+/)
         .filter(Boolean)
         .map((n) => n[0])
@@ -185,15 +185,15 @@ export function AppSidebar({
         .slice(0, 2)
         .toUpperCase();
 
-  const profileReady = useMockPersona || userDoc != null || !userDocLoading;
+  const profileReady = useMockPersona || liveUser != null || Boolean(liveUid);
   const permsReady = useMockPersona || !profileReady || !permsLoading;
 
   const navAccess = React.useMemo<NavAccessContext>(
     () => ({
-      roleId: useMockPersona ? mockUser.roleId : userDoc?.roleId,
-      orgRole: useMockPersona ? mockUser.orgRole : userDoc?.orgRole,
-      isSuperAdmin: !useMockPersona && Boolean(userDoc?.isSuperAdmin),
-      featureGrants: useMockPersona ? mockUser.featureGrants : userDoc?.featureGrants,
+      roleId: useMockPersona ? mockUser.roleId : liveUser?.roleId,
+      orgRole: useMockPersona ? mockUser.orgRole : liveUser?.orgRole,
+      isSuperAdmin: !useMockPersona && Boolean(liveUser?.isSuperAdmin),
+      featureGrants: useMockPersona ? mockUser.featureGrants : liveUser?.featureGrants,
       roleSnapshot: useMockPersona ? null : roleSnapshot,
       roleLoading: !useMockPersona && (!profileReady || !permsReady),
     }),
@@ -202,10 +202,10 @@ export function AppSidebar({
       mockUser.roleId,
       mockUser.orgRole,
       mockUser.featureGrants,
-      userDoc?.roleId,
-      userDoc?.orgRole,
-      userDoc?.isSuperAdmin,
-      userDoc?.featureGrants,
+      liveUser?.roleId,
+      liveUser?.orgRole,
+      liveUser?.isSuperAdmin,
+      liveUser?.featureGrants,
       roleSnapshot,
       profileReady,
       permsReady,

@@ -193,18 +193,6 @@ export function WorkspaceTeamChatPanel({ users, currentUserId, isDemo, organizat
     );
   }
 
-  if (!isDemo && !chat.liveChatAvailable) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-8">
-        <EmptyState
-          icon={MessagesSquare}
-          title="Firebase is not configured"
-          description="Team chat syncs through Firestore. Add your Firebase web config so messages reach everyone on your team."
-        />
-      </div>
-    );
-  }
-
   return (
     <div className="flex min-h-0 min-w-0 flex-1 divide-x">
       <div className="flex min-h-0 w-full max-w-[280px] shrink-0 flex-col border-r bg-muted/10">

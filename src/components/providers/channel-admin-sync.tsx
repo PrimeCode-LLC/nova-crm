@@ -1,11 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { useAuth } from "@/components/providers/auth-provider";
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
-import { useUserDoc } from "@/lib/hooks/use-user-doc";
 import { isAuthDisabled } from "@/lib/auth/flags";
-import { isClientDocumentSyncEnabled } from "@/lib/db/document-access/config";
 import { mergeChannelAdminConfig } from "@/lib/channel-admin-defaults";
 import type { ChannelKey, OrganizationChannelAdminConfig } from "@/lib/types";
 import { markChannelAdminJsonSent } from "@/lib/channel-admin-server-sync";
@@ -30,14 +27,10 @@ const channelAdminStoreWithPersist = useChannelAdminStore as {
  * server-controlled on the wire).
  */
 export function ChannelAdminSync() {
-  const { user } = useAuth();
-  const { mode } = useWorkspace();
-  const { data: userDoc } = useUserDoc(
-    mode === "demo" || isAuthDisabled() || !user ? undefined : user.uid,
-  );
-
-  const orgId = userDoc?.organizationId;
-  const orgRole = userDoc?.orgRole;
+  const { mode, organizationId, viewerOrgRole, currentUserId, getUserById } = useWorkspace();
+  const liveUser = getUserById(currentUserId);
+  const orgId = mode === "demo" || isAuthDisabled() ? undefined : organizationId;
+  const orgRole = liveUser?.orgRole ?? viewerOrgRole;
   const isAdmin = orgRole !== undefined && roleAtLeast(orgRole, "admin");
 
   const [hydrated, setHydrated] = React.useState(false);
@@ -51,7 +44,7 @@ export function ChannelAdminSync() {
   const channelAdminLsHydrated = useZustandPersistHydrated(channelAdminStoreWithPersist);
 
   React.useEffect(() => {
-    if (isAuthDisabled() || !isClientDocumentSyncEnabled() || mode === "demo") {
+    if (isAuthDisabled() || mode === "demo") {
       setHydrated(true);
       return;
     }
@@ -77,7 +70,7 @@ export function ChannelAdminSync() {
         }
         const merged = mergeChannelAdminConfig(data.channelAdmin ?? undefined);
         const prev = useChannelAdminStore.getState();
-        /** Org has no Firestore payload yet - keep browser-local custom channels once, then PUT migrates them. */
+        /** Org has no server payload yet - keep browser-local custom channels once, then PUT migrates them. */
         const customChannels =
           data.channelAdmin != null
             ? merged.customChannels
@@ -113,14 +106,7 @@ export function ChannelAdminSync() {
   }, [orgId, mode, channelAdminLsHydrated]);
 
   React.useEffect(() => {
-    if (
-      isAuthDisabled() ||
-      !isClientDocumentSyncEnabled() ||
-      mode === "demo" ||
-      !orgId ||
-      !hydrated ||
-      orgRole === undefined
-    ) {
+    if (isAuthDisabled() || mode === "demo" || !orgId || !hydrated || orgRole === undefined) {
       return;
     }
 
