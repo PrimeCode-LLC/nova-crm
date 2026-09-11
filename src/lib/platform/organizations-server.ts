@@ -209,6 +209,48 @@ export function sanitizeOrganizationForApi(org: Organization): Organization {
 }
 
 export async function listOrganizationsServer(): Promise<Organization[]> {
+  try {
+    const { isDatabaseConfigured } = await import("@/lib/db/prisma");
+    if (isDatabaseConfigured()) {
+      const { withRlsBypass } = await import("@/lib/db/tenant-scope");
+      const rows = await withRlsBypass(async (tx) =>
+        tx.organization.findMany({
+          orderBy: { updatedAt: "desc" },
+          take: 200,
+        }),
+      );
+      return rows.map((row) =>
+        docToOrg(row.id, {
+          name: row.name,
+          slug: row.slug,
+          status: row.status,
+          planId: row.planId,
+          maxUsers: row.maxUsers ?? undefined,
+          seatsUsed: row.seatsUsed,
+          ownerUid: row.ownerUid ?? undefined,
+          primaryEmail: row.primaryEmail ?? undefined,
+          pendingOwnerEmail: row.pendingOwnerEmail ?? undefined,
+          trialEndsAt: row.trialEndsAt ?? undefined,
+          settings: row.settings ?? {},
+          channelAdmin: row.channelAdmin ?? undefined,
+          intakeFilterDefaults: row.intakeFilterDefaults ?? undefined,
+          intakePoolEpoch: row.intakePoolEpoch,
+          intentPlaybook: row.intentPlaybook ?? undefined,
+          openJoinTokenHash: row.openJoinTokenHash ?? undefined,
+          createdAt: row.createdAt,
+          updatedAt: row.updatedAt,
+        }),
+      );
+    }
+  } catch (err) {
+    console.warn(
+      "[orgs] listOrganizationsServer postgres lookup failed",
+      err instanceof Error ? err.message : err,
+    );
+  }
+
+  // Legacy fallback — org roots are no longer mirrored into pg_documents after
+  // the organizations-table cutover (0 root docs); keep for empty-DB bootstraps.
   const db = getAdminDb();
   if (!db) return [];
   const snap = await db
