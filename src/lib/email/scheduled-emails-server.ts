@@ -5,6 +5,7 @@ import { getAdminDb } from "@/lib/db/document-access/admin";
 import { COLLECTIONS, ORG_SUBCOLLECTIONS } from "@/lib/documents/collections";
 import type { EmailMailboxSettings, ScheduledEmail, ScheduledEmailStatus } from "@/lib/email-account-types";
 import { isScheduledDocDue } from "@/lib/email/scheduled-due";
+import { scheduledFollowupStopReason } from "@/lib/email/scheduled-followup-stop";
 import {
   parseOutboundAttachments,
   serializeOutboundAttachments,
@@ -303,7 +304,8 @@ export async function createScheduledEmailServer(input: {
     const db = getAdminDb();
     if (db) {
       try {
-        await db.collection(COLLECTIONS.followups).doc(followupId).update({
+        const followupRef = db.collection(COLLECTIONS.followups).doc(followupId);
+        await followupRef.update({
           scheduledEmailId: ref.id,
           emailScheduledAt: scheduledDate.toISOString(),
           deliveryStatus: "scheduled",
@@ -311,6 +313,10 @@ export async function createScheduledEmailServer(input: {
           fromEmail: input.from.trim(),
           toEmail: input.to.trim(),
           mailboxOwnerUid: input.uid,
+          // Scheduling is an explicit send intent — clear stale stop markers that would
+          // auto-cancel on process-due (empty-string or leftover pause/complete).
+          pausedAt: FieldValue.delete(),
+          completedAt: FieldValue.delete(),
           failedAt: FieldValue.delete(),
           cancelledAt: FieldValue.delete(),
           deliveryError: FieldValue.delete(),
@@ -318,6 +324,27 @@ export async function createScheduledEmailServer(input: {
           ...(input.forceNewThread ? { freshThread: true } : {}),
           updatedAt: now,
         });
+        // If the plan was reply/bounce-paused, resuming schedule means send again.
+        const followupSnap = await followupRef.get();
+        const planId =
+          followupSnap.exists && typeof followupSnap.data()?.planId === "string"
+            ? String(followupSnap.data()?.planId).trim()
+            : "";
+        if (planId) {
+          const planRef = db.collection(COLLECTIONS.followupPlans).doc(planId);
+          const planSnap = await planRef.get();
+          if (planSnap.exists) {
+            const planStatus = String((planSnap.data() as Record<string, unknown>).status ?? "");
+            if (planStatus === "paused") {
+              await planRef.update({
+                status: "active",
+                pausedAt: FieldValue.delete(),
+                pausedReason: FieldValue.delete(),
+                updatedAt: now,
+              });
+            }
+          }
+        }
       } catch {
         /* Client persistFollowupEmailSchedule is the primary path; this is best-effort. */
       }
@@ -816,19 +843,24 @@ async function shouldStopScheduledFollowupEmail(
   if (!db) return undefined;
   try {
     const snap = await db.collection(COLLECTIONS.followups).doc(followupId).get();
-    if (!snap.exists) return "Follow-up no longer exists";
+    if (!snap.exists) {
+      return scheduledFollowupStopReason({ followupExists: false });
+    }
     const f = snap.data() as Record<string, unknown>;
-    if (f.pausedAt != null) return "Follow-up paused";
-    if (f.completedAt != null) return "Follow-up completed";
     const planId = typeof f.planId === "string" ? f.planId.trim() : "";
-    if (!planId) return undefined;
-    const planSnap = await db.collection(COLLECTIONS.followupPlans).doc(planId).get();
-    if (!planSnap.exists) return undefined;
-    const status = String((planSnap.data() as Record<string, unknown>).status ?? "");
-    if (status === "paused") return "Sequence paused";
-    if (status === "superseded") return "Sequence superseded";
-    if (status === "completed") return "Sequence completed";
-    return undefined;
+    let planStatus: string | undefined;
+    if (planId) {
+      const planSnap = await db.collection(COLLECTIONS.followupPlans).doc(planId).get();
+      if (planSnap.exists) {
+        planStatus = String((planSnap.data() as Record<string, unknown>).status ?? "");
+      }
+    }
+    return scheduledFollowupStopReason({
+      followupExists: true,
+      pausedAt: f.pausedAt,
+      completedAt: f.completedAt,
+      planStatus,
+    });
   } catch {
     return undefined;
   }

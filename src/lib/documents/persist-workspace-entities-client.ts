@@ -249,6 +249,9 @@ export async function persistFollowupEmailSchedule(
       scheduledEmailId: schedule.scheduledEmailId,
       emailScheduledAt: schedule.emailScheduledAt,
       deliveryStatus: "scheduled",
+      // Explicit schedule clears stale pause/complete so process-due will send.
+      pausedAt: deleteField(),
+      completedAt: deleteField(),
       failedAt: deleteField(),
       cancelledAt: deleteField(),
       deliveryError: deleteField(),

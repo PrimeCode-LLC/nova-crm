@@ -256,8 +256,14 @@ export function ScheduledEmailSendSync() {
           if (processData.queued) queued = true;
           if (processData.busy) busy = true;
 
-          if (Array.isArray(processData.rows)) {
+          if (Array.isArray(processData.rows) && processData.rows.length > 0) {
+            console.log("[scheduled-sync] process-due rows", processData.rows);
             for (const r of processData.rows) {
+              if (r.outcome === "skipped" || r.outcome === "failed") {
+                console.warn(
+                  `[scheduled-sync] ${r.outcome} id=${r.id} reason=${r.reason ?? "n/a"} detail=${r.detail ?? "n/a"}`,
+                );
+              }
               if (r.outcome !== "sent") continue;
               const targetFollowup = followupsRef.current.find((f) => f.scheduledEmailId === r.id);
               if (!targetFollowup) continue;
