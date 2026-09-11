@@ -930,7 +930,7 @@ async function sendScheduledDoc(
   const uid = String(data.uid ?? fromPath.uid ?? "");
   const mailboxId = String(data.mailboxId ?? "");
 
-  console.log(`[scheduled-send] sendScheduledDoc starting for docId: "${docRef.id}", path: "${docRef.path}", org: "${organizationId}", docUid: "${uid}", mailboxId: "${mailboxId}", status: "${data.status}", scheduledAt: "${data.scheduledAt}"`);
+  console.log(`[scheduled-send] sendScheduledDoc starting for docId: "${docRef.id}", path: "${docRef.path}", org: "${organizationId}", docUid: "${uid}", mailboxId: "${mailboxId}", status: "${data.status}", scheduledAt: "${coerceIsoInstant(data.scheduledAt) || String(data.scheduledAt ?? "")}"`);
 
   if (!organizationId || !uid || !mailboxId) {
     console.error(`[scheduled-send] Permanent failure: scheduled doc "${docRef.id}" is missing organizationId ("${organizationId}"), uid ("${uid}"), or mailboxId ("${mailboxId}")`);
@@ -1546,7 +1546,17 @@ async function processScheduledSnap(
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
-      console.error("[scheduled-email] send threw", { path: doc.ref.path, message });
+      const cause =
+        e instanceof Error && e.cause instanceof Error
+          ? e.cause.message
+          : e instanceof Error && e.cause != null
+            ? String(e.cause)
+            : undefined;
+      console.error("[scheduled-email] send threw", {
+        path: doc.ref.path,
+        message,
+        cause,
+      });
       const nowIso = new Date().toISOString();
       const attempts = Math.max(0, Number(claimed.attempts ?? 0)) + 1;
       try {

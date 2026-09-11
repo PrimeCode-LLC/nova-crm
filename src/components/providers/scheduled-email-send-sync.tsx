@@ -104,9 +104,13 @@ export function ScheduledEmailSendSync() {
     runningRef.current = true;
     lastRunAtRef.current = Date.now();
     try {
-      // Soft nudge only — route is enqueue-only when the worker queue is on.
+      // Soft nudge only (enqueue). Do not await — under load this route has caused
+      // Caddy 502s that spam the console; cron + worker JobScheduler own the flush.
       if (duePeek > 0) {
-        await fetch("/api/email/scheduled/process-due", { method: "POST" }).catch(() => null);
+        void fetch("/api/email/scheduled/process-due", {
+          method: "POST",
+          keepalive: true,
+        }).catch(() => null);
       }
 
       const listOwner = resolveMailApiForUserUid({

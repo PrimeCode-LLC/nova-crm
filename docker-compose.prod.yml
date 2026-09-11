@@ -110,8 +110,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Needs egress for SMTP / Google OAuth / IMAP (internal-only has no default gateway).
     networks:
       - internal
+      - public
 
   cron:
     build:

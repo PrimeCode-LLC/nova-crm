@@ -128,20 +128,18 @@ async function main(): Promise<void> {
     });
   });
 
-  // PG path: repeatable send-tick every 15s (safety net + primary dispatcher).
+  // Repeatable send-tick every 15s — primary dispatcher (PG or legacy due scan).
+  // Do not depend on browser process-due nudges; cron remains a minute-level safety net.
   try {
-    const { isScheduledEmailPgV1Enabled } = await import("../lib/queue/flags");
-    if (isScheduledEmailPgV1Enabled()) {
-      const { getQueue, QUEUE_SCHEDULED_EMAIL } = await import("../lib/queue/queues");
-      const queue = getQueue(QUEUE_SCHEDULED_EMAIL);
-      if (queue && typeof queue.upsertJobScheduler === "function") {
-        await queue.upsertJobScheduler(
-          "scheduled-email-tick",
-          { every: 15_000 },
-          { name: "send-tick", data: {} },
-        );
-        console.info("[worker] scheduled-email JobScheduler every 15s");
-      }
+    const { getQueue, QUEUE_SCHEDULED_EMAIL } = await import("../lib/queue/queues");
+    const queue = getQueue(QUEUE_SCHEDULED_EMAIL);
+    if (queue && typeof queue.upsertJobScheduler === "function") {
+      await queue.upsertJobScheduler(
+        "scheduled-email-tick",
+        { every: 15_000 },
+        { name: "send-tick", data: {} },
+      );
+      console.info("[worker] scheduled-email JobScheduler every 15s");
     }
   } catch (err) {
     console.warn("[worker] scheduled-email JobScheduler setup failed", err);
