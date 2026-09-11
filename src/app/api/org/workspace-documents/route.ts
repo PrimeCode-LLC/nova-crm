@@ -5,7 +5,8 @@ import {
   updateDocument,
 } from "@/lib/db/document-shim/store";
 import { FIELD_DELETE, SERVER_TIMESTAMP } from "@/lib/db/document-shim/field-values";
-import { requireTenantSession } from "@/lib/auth/server";
+import { serializePayloadValue } from "@/lib/db/document-shim/timestamp";
+import { guardTenantApi } from "@/lib/platform/tenant-api-guard";
 
 /**
  * Revive client FieldValue markers after JSON transport.
@@ -44,69 +45,119 @@ function decodeClientFieldValues(data: Record<string, unknown>): Record<string, 
 }
 
 export async function GET(req: Request) {
-  const session = await requireTenantSession();
-  const url = new URL(req.url);
-  const collection = url.searchParams.get("collection");
-  if (!collection) {
-    return NextResponse.json({ error: "collection required" }, { status: 400 });
+  const guard = await guardTenantApi();
+  if (!guard.ok) return guard.response;
+
+  try {
+    const url = new URL(req.url);
+    const collection = url.searchParams.get("collection");
+    if (!collection) {
+      return NextResponse.json({ error: "collection required" }, { status: 400 });
+    }
+
+    const { queryDocuments } = await import("@/lib/db/document-shim/store");
+    const collectionRoot = collection.split("/")[0] ?? collection;
+    const docs = await queryDocuments({
+      collectionRoot,
+      pathPrefix: collection,
+      filters: [{ field: "organizationId", op: "==", value: guard.ctx.session.organizationId }],
+    });
+
+    return NextResponse.json({
+      docs: docs.map((d) => ({
+        id: d.path.split("/").pop() ?? d.path,
+        // Timestamp class instances are not JSON-safe; normalize like writes do.
+        data: serializePayloadValue(d.payload) as Record<string, unknown>,
+      })),
+    });
+  } catch (err) {
+    console.error("[workspace-documents GET]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to load documents" },
+      { status: 500 },
+    );
   }
-
-  const { queryDocuments } = await import("@/lib/db/document-shim/store");
-  const collectionRoot = collection.split("/")[0] ?? collection;
-  const docs = await queryDocuments({
-    collectionRoot,
-    pathPrefix: collection,
-    filters: [{ field: "organizationId", op: "==", value: session.organizationId }],
-  });
-
-  return NextResponse.json({
-    docs: docs.map((d) => ({
-      id: d.path.split("/").pop() ?? d.path,
-      data: d.payload,
-    })),
-  });
 }
 
 export async function PUT(req: Request) {
-  const session = await requireTenantSession();
-  const body = (await req.json()) as {
-    path?: string;
-    data?: Record<string, unknown>;
-    merge?: boolean;
-  };
-  if (!body.path || !body.data) {
-    return NextResponse.json({ error: "path and data required" }, { status: 400 });
+  const guard = await guardTenantApi();
+  if (!guard.ok) return guard.response;
+
+  try {
+    const body = (await req.json()) as {
+      path?: string;
+      data?: Record<string, unknown>;
+      merge?: boolean;
+    };
+    if (!body.path || !body.data) {
+      return NextResponse.json({ error: "path and data required" }, { status: 400 });
+    }
+    const data = {
+      ...decodeClientFieldValues(body.data),
+      organizationId: guard.ctx.session.organizationId,
+    };
+    await setDocument(body.path, data, body.merge ?? false);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[workspace-documents PUT]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to save document" },
+      { status: 500 },
+    );
   }
-  const data = {
-    ...decodeClientFieldValues(body.data),
-    organizationId: session.organizationId,
-  };
-  await setDocument(body.path, data, body.merge ?? false);
-  return NextResponse.json({ ok: true });
 }
 
 export async function PATCH(req: Request) {
-  const session = await requireTenantSession();
-  const body = (await req.json()) as {
-    path?: string;
-    patch?: Record<string, unknown>;
-  };
-  if (!body.path || !body.patch) {
-    return NextResponse.json({ error: "path and patch required" }, { status: 400 });
+  const guard = await guardTenantApi();
+  if (!guard.ok) return guard.response;
+
+  try {
+    const body = (await req.json()) as {
+      path?: string;
+      patch?: Record<string, unknown>;
+    };
+    if (!body.path || !body.patch) {
+      return NextResponse.json({ error: "path and patch required" }, { status: 400 });
+    }
+    await updateDocument(body.path, {
+      ...decodeClientFieldValues(body.patch),
+      organizationId: guard.ctx.session.organizationId,
+    });
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[workspace-documents PATCH]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to update document" },
+      { status: 500 },
+    );
   }
-  await updateDocument(body.path, {
-    ...decodeClientFieldValues(body.patch),
-    organizationId: session.organizationId,
-  });
-  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(req: Request) {
-  await requireTenantSession();
-  const body = (await req.json()) as { path?: string };
-  if (!body.path) {
-    return NextResponse.json({ error: "path required" }, { status: 400 });
+  const guard = await guardTenantApi();
+  if (!guard.ok) return guard.response;
+
+  try {
+    const body = (await req.json()) as { path?: string };
+    if (!body.path) {
+      return NextResponse.json({ error: "path required" }, { status: 400 });
+    }
+    // Tenancy: only delete docs that belong to this org (path or payload).
+    const { getDocument } = await import("@/lib/db/document-shim/store");
+    const existing = await getDocument(body.path);
+    if (existing) {
+      const orgId = existing.organizationId ?? existing.payload.organizationId;
+      if (orgId && orgId !== guard.ctx.session.organizationId) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+    }
+    await deleteDocument(body.path);
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[workspace-documents DELETE]", err);
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Failed to delete document" },
+      { status: 500 },
+    );
   }
-  await deleteDocument(body.path);
-  return NextResponse.json({ ok: true });
 }

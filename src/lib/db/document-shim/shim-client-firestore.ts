@@ -94,13 +94,26 @@ function isDocumentReference(target: unknown): target is DocumentReference {
   );
 }
 
+async function fetchWorkspaceCollection(
+  collectionPath: string,
+): Promise<{ id: string; data: DocumentData }[]> {
+  const res = await fetch(
+    `/api/org/workspace-documents?collection=${encodeURIComponent(collectionPath)}`,
+    { credentials: "same-origin", cache: "no-store" },
+  );
+  if (!res.ok) {
+    throw new Error(`workspace-documents ${res.status}`);
+  }
+  const json = (await res.json()) as { docs?: { id: string; data: DocumentData }[] };
+  return Array.isArray(json.docs) ? json.docs : [];
+}
+
 export async function getDocs(
   q: ClientQuery | ClientCollectionReference,
 ): Promise<QuerySnapshot> {
   const path = q instanceof ClientQuery ? q.col.path : q.path;
-  const res = await fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(path)}`);
-  const json = (await res.json()) as { docs: { id: string; data: DocumentData }[] };
-  const docs = json.docs.map((d) => ({
+  const rows = await fetchWorkspaceCollection(path);
+  const docs = rows.map((d) => ({
     id: d.id,
     exists: () => true,
     data: () => d.data,
@@ -116,11 +129,8 @@ export async function getDocs(
 
 export async function getDoc(ref: DocumentReference): Promise<DocumentSnapshot> {
   const collectionPath = ref.path.split("/").slice(0, -1).join("/");
-  const res = await fetch(
-    `/api/org/workspace-documents?collection=${encodeURIComponent(collectionPath)}`,
-  );
-  const json = (await res.json()) as { docs: { id: string; data: DocumentData }[] };
-  const found = json.docs.find((d) => d.id === ref.id);
+  const rows = await fetchWorkspaceCollection(collectionPath);
+  const found = rows.find((d) => d.id === ref.id);
   return {
     id: ref.id,
     exists: () => Boolean(found),
@@ -129,6 +139,7 @@ export async function getDoc(ref: DocumentReference): Promise<DocumentSnapshot> 
 }
 
 const POLL_MS = 60_000;
+const POLL_ERROR_MS = 120_000;
 
 export function onSnapshot(
   ref: DocumentReference,
@@ -147,8 +158,13 @@ export function onSnapshot(
   onError?: (err: Error) => void,
 ): Unsubscribe {
   let cancelled = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let inFlight = false;
 
   async function poll() {
+    if (cancelled || inFlight) return;
+    inFlight = true;
+    let nextDelay = POLL_MS;
     try {
       if (isDocumentReference(target)) {
         const snap = await getDoc(target);
@@ -160,32 +176,39 @@ export function onSnapshot(
         target instanceof ClientQuery
           ? target.col.path
           : target.path;
-      const res = await fetch(`/api/org/workspace-documents?collection=${encodeURIComponent(path)}`);
-      if (!res.ok) throw new Error(`workspace-documents ${res.status}`);
-      const json = (await res.json()) as { docs: { id: string; data: DocumentData }[] };
+      const rows = await fetchWorkspaceCollection(path);
       if (cancelled) return;
       const snap: QuerySnapshot = {
-        docs: json.docs.map((d) => ({
+        docs: rows.map((d) => ({
           id: d.id,
           exists: () => true,
           data: () => d.data,
         })),
-        empty: json.docs.length === 0,
+        empty: rows.length === 0,
         forEach(fn) {
           this.docs.forEach(fn);
         },
       };
       onNext(snap);
     } catch (err) {
-      onError?.(err instanceof Error ? err : new Error(String(err)));
+      nextDelay = POLL_ERROR_MS;
+      if (!cancelled) {
+        onError?.(err instanceof Error ? err : new Error(String(err)));
+      }
+    } finally {
+      inFlight = false;
+      if (!cancelled) {
+        timer = setTimeout(() => {
+          void poll();
+        }, nextDelay);
+      }
     }
   }
 
   void poll();
-  const interval = setInterval(() => void poll(), POLL_MS);
   return () => {
     cancelled = true;
-    clearInterval(interval);
+    if (timer) clearTimeout(timer);
   };
 }
 
@@ -215,11 +238,15 @@ export function increment(n: number): { __increment: number } {
 }
 
 export async function deleteDoc(ref: DocumentReference): Promise<void> {
-  await fetch("/api/org/workspace-documents", {
+  const res = await fetch("/api/org/workspace-documents", {
     method: "DELETE",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: ref.path }),
   });
+  if (!res.ok) {
+    throw new Error(`workspace-documents DELETE failed (${res.status})`);
+  }
 }
 
 /**
@@ -257,6 +284,7 @@ export async function updateDoc(
 ): Promise<void> {
   const res = await fetch("/api/org/workspace-documents", {
     method: "PATCH",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ path: ref.path, patch: encodeClientFieldValues(data) }),
   });
@@ -272,6 +300,7 @@ export async function setDoc(
 ): Promise<void> {
   const res = await fetch("/api/org/workspace-documents", {
     method: "PUT",
+    credentials: "same-origin",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       path: ref.path,

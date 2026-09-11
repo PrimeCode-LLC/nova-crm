@@ -384,18 +384,6 @@ export function ScheduledEmailSendSync() {
           );
         } else if (
           sent === 0 &&
-          localDue > 0 &&
-          busy &&
-          dueFound === 0 &&
-          Date.now() - lastStalledToastAtRef.current >= STALLED_TOAST_GAP_MS
-        ) {
-          lastStalledToastAtRef.current = Date.now();
-          toast.message("Scheduled send is busy", {
-            description:
-              "Another flush is still running. Retrying with the mailbox owner path — keep this tab open.",
-          });
-        } else if (
-          sent === 0 &&
           !busy &&
           (localDue > 0 || dueFound > 0) &&
           Date.now() - lastStalledToastAtRef.current >= STALLED_TOAST_GAP_MS
