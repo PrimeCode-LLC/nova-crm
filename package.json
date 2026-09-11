@@ -25,6 +25,7 @@
     "db:backfill:crm-profiles": "npx --yes tsx scripts/backfill-crm-profiles.ts",
     "db:reconcile:crm": "npx --yes tsx scripts/reconcile-crm-entities.ts",
     "db:export:pg-documents": "npx --yes tsx scripts/export-pg-documents-archive.ts",
+    "db:import:script-library": "npx --yes tsx scripts/import-script-library-archive.ts",
     "test": "vitest run",
     "build:worker": "node scripts/build-worker.mjs",
     "worker": "tsx src/worker/index.ts",
