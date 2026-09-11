@@ -2742,10 +2742,30 @@ export function WorkspaceModeProvider({
     const roster =
       liveFs.users.length === 0
         ? [viewer]
-        : liveFs.users.some((u) => u.id === uid)
-          ? liveFs.users
-          : [...liveFs.users, viewer];
-    return applyLiveHierarchyScope(raw, viewer, roster);
+        : liveFs.users.map((u) => {
+            if (u.id !== uid) return u;
+            const rosterEmail = u.email?.trim().toLowerCase();
+            const sessionEmail = userDoc.email?.trim().toLowerCase();
+            const emailMismatch =
+              Boolean(rosterEmail) &&
+              Boolean(sessionEmail) &&
+              rosterEmail !== sessionEmail;
+            // Stale Clerk→Nova uid bridge: roster row is a different person.
+            // Prefer the signed-in session identity until the bridge is repaired.
+            if (emailMismatch) {
+              return viewer;
+            }
+            return {
+              ...u,
+              displayName: userDoc.displayName?.trim() || u.displayName,
+              email: userDoc.email?.trim() || u.email,
+              orgRole: userDoc.orgRole ?? u.orgRole,
+              photoURL: userDoc.photoURL ?? u.photoURL,
+            };
+          });
+    const rosterHasViewer = roster.some((u) => u.id === uid);
+    const fullRoster = rosterHasViewer ? roster : [...roster, viewer];
+    return applyLiveHierarchyScope(raw, viewer, fullRoster);
   }, [
     mode,
     demoSnapshot,

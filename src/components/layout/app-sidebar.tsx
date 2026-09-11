@@ -148,8 +148,15 @@ export function AppSidebar({
   const router = useRouter();
   const { theme, setTheme } = useTheme();
   const { signOut } = useAuth();
-  const { isDemo, demoPersonaId, setDemoPersona, users, currentUserId, getUserById } =
-    useWorkspace();
+  const {
+    isDemo,
+    demoPersonaId,
+    setDemoPersona,
+    users,
+    currentUserId,
+    getUserById,
+    workspaceLoading,
+  } = useWorkspace();
   const useMockPersona = isDemo || isAuthDisabled();
   const liveUser = useMockPersona ? null : getUserById(currentUserId) ?? null;
   const liveUid = useMockPersona ? undefined : currentUserId || undefined;
@@ -161,29 +168,37 @@ export function AppSidebar({
       email: "demo@example.com",
       roleId: "salesperson" as const,
     };
+  const identityPending =
+    !useMockPersona && (workspaceLoading || (!liveUser && !liveUid));
   const displayName = useMockPersona
     ? mockUser.displayName
-    : liveUser?.displayName || liveUser?.email?.split("@")[0] || "User";
+    : liveUser?.displayName ||
+      liveUser?.email?.split("@")[0] ||
+      (identityPending ? "Loading…" : "User");
   const email = useMockPersona ? mockUser.email : (liveUser?.email ?? "");
   const displayRoleLabel = useMockPersona
     ? roleLabel(mockUser.roleId)
-    : workspaceRoleSubtitle(liveUser?.roleId, liveUser?.isSuperAdmin, {
-        loading: !liveUser && Boolean(liveUid),
-        hasDoc: liveUser != null,
-      });
+    : identityPending
+      ? "…"
+      : workspaceRoleSubtitle(liveUser?.roleId, liveUser?.isSuperAdmin, {
+          loading: !liveUser && Boolean(liveUid),
+          hasDoc: liveUser != null,
+        });
   const avatarInitials = useMockPersona
     ? mockUser.displayName
         .split(" ")
         .map((n) => n[0])
         .join("")
         .slice(0, 2)
-    : (liveUser?.displayName || liveUser?.email || "?")
-        .split(/[\s@]+/)
-        .filter(Boolean)
-        .map((n) => n[0])
-        .join("")
-        .slice(0, 2)
-        .toUpperCase();
+    : identityPending
+      ? "…"
+      : (liveUser?.displayName || liveUser?.email || "?")
+          .split(/[\s@]+/)
+          .filter(Boolean)
+          .map((n) => n[0])
+          .join("")
+          .slice(0, 2)
+          .toUpperCase();
 
   const profileReady = useMockPersona || liveUser != null || Boolean(liveUid);
   const permsReady = useMockPersona || !profileReady || !permsLoading;

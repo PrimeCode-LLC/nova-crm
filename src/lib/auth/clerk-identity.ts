@@ -63,12 +63,15 @@ function applyMembership(
  * Map a Clerk user to Nova session fields.
  *
  * Order:
- * 1. `externalId` / publicMetadata.novaUid → membership by uid
+ * 1. `externalId` / publicMetadata.novaUid → membership by uid (only if email matches)
  * 2. Membership lookup by email (Postgres then Firestore)
  * 3. Fall back to Clerk user id (new user → onboarding)
  *
  * When email matches an existing member, best-effort syncs `externalId` +
  * publicMetadata so later requests skip the email lookup.
+ *
+ * Stale bridges (Clerk linked to someone else's Nova uid) are rejected when the
+ * membership email does not match the Clerk primary email, then repaired via email.
  */
 export async function resolveClerkIdentity(
   user: User,
@@ -82,31 +85,57 @@ export async function resolveClerkIdentity(
   const metaUid = readMetaString(meta, "novaUid");
   const linkedUid = externalId || metaUid;
 
-  let uid = linkedUid || clerkUserId;
+  let uid = clerkUserId;
   let organizationId = readMetaString(meta, "organizationId");
   let orgRole =
     typeof meta.orgRole === "string"
       ? (meta.orgRole as OrgMemberRole)
       : undefined;
-  let bridged = Boolean(linkedUid);
+  let bridged = false;
+  let repairedLink = false;
+
+  const membershipEmailOk = (membershipEmail: string | undefined): boolean => {
+    if (!email) return true;
+    if (!membershipEmail?.trim()) return true;
+    return membershipEmail.trim().toLowerCase() === email;
+  };
+
+  const applyIfUsable = (membership: OrganizationMember): boolean => {
+    if (membership.status !== "active" && membership.status !== "pending") {
+      return false;
+    }
+    if (!membershipEmailOk(membership.email)) {
+      return false;
+    }
+    const applied = applyMembership(membership);
+    uid = applied.uid;
+    organizationId = applied.organizationId;
+    orgRole = applied.orgRole;
+    bridged = true;
+    return true;
+  };
 
   if (linkedUid) {
     const byUid = await findMembershipForUserServer(linkedUid);
-    if (byUid && (byUid.status === "active" || byUid.status === "pending")) {
-      const applied = applyMembership(byUid);
-      uid = applied.uid;
-      organizationId = applied.organizationId;
-      orgRole = applied.orgRole;
-      bridged = true;
+    if (byUid && applyIfUsable(byUid)) {
+      // Linked uid is trustworthy for this Clerk email.
+    } else if (email) {
+      // Missing membership or email mismatch → resolve by Clerk email and repair link.
+      const byEmail = await findMembershipByEmailServer(email);
+      if (byEmail && applyIfUsable(byEmail)) {
+        repairedLink = byEmail.uid !== linkedUid;
+        await syncClerkBridge(clerkUserId, {
+          novaUid: byEmail.uid,
+          organizationId:
+            byEmail.status === "active" ? byEmail.organizationId : undefined,
+          orgRole: byEmail.status === "active" ? byEmail.role : undefined,
+          previousExternalId: externalId,
+        });
+      }
     }
   } else if (email) {
     const byEmail = await findMembershipByEmailServer(email);
-    if (byEmail && (byEmail.status === "active" || byEmail.status === "pending")) {
-      const applied = applyMembership(byEmail);
-      uid = applied.uid;
-      organizationId = applied.organizationId;
-      orgRole = applied.orgRole;
-      bridged = true;
+    if (byEmail && applyIfUsable(byEmail)) {
       await syncClerkBridge(clerkUserId, {
         novaUid: byEmail.uid,
         organizationId:
@@ -117,13 +146,14 @@ export async function resolveClerkIdentity(
     }
   }
 
-  // Keep metadata org claims fresh when we already have externalId.
+  // Keep metadata org claims fresh when we already have a bridge.
   if (
     bridged &&
-    linkedUid &&
     organizationId &&
+    !repairedLink &&
     (organizationId !== readMetaString(meta, "organizationId") ||
-      orgRole !== meta.orgRole)
+      orgRole !== meta.orgRole ||
+      (linkedUid && linkedUid !== uid))
   ) {
     await syncClerkBridge(clerkUserId, {
       novaUid: uid,
@@ -182,15 +212,22 @@ export async function resolveNovaUidForClerkUser(user: User): Promise<string> {
   const externalId = user.externalId?.trim() || undefined;
   const metaUid = readMetaString(meta, "novaUid");
   const linkedUid = externalId || metaUid;
-  if (linkedUid) return linkedUid;
-
   const email = clerkEmail(user);
+
+  if (linkedUid) {
+    const byUid = await findMembershipForUserServer(linkedUid);
+    const membershipEmail = byUid?.email?.trim().toLowerCase();
+    const emailOk =
+      !email || !membershipEmail || membershipEmail === email;
+    if (byUid && emailOk) return linkedUid;
+  }
+
   if (email) {
     const byEmail = await findMembershipByEmailServer(email);
     if (byEmail) return byEmail.uid;
   }
 
-  return user.id;
+  return linkedUid || user.id;
 }
 
 /** Resolve Nova uid + Clerk id for an email, or null when no Clerk account exists. */

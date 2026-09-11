@@ -73,7 +73,16 @@ function applySessionGate(
 
   const hasInvite = request.nextUrl.searchParams.has("invite");
   const hasJoin = request.nextUrl.searchParams.has("join");
-  if (hasSession && !hasInvite && !hasJoin && isAuthEntryPath(pathname)) {
+  if (hasSession && isAuthEntryPath(pathname)) {
+    // Already signed in + invite/join link → finish membership on the app shell.
+    if (hasInvite || hasJoin) {
+      const dest = new URL("/dashboard", request.url);
+      const invite = request.nextUrl.searchParams.get("invite");
+      const join = request.nextUrl.searchParams.get("join");
+      if (invite) dest.searchParams.set("invite", invite);
+      if (join) dest.searchParams.set("join", join);
+      return NextResponse.redirect(dest);
+    }
     return NextResponse.redirect(new URL("/dashboard", request.url));
   }
 

@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import { Suspense } from "react";
 import {
   onAuthStateChanged,
   signOut as clientSignOut,
@@ -13,6 +14,7 @@ import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
 import { syncClientAuthClaims } from "@/lib/auth/client-session";
 import { AuthSessionSync } from "@/components/providers/auth-session-sync";
 import { ClerkSignOutBridge } from "@/components/providers/clerk-sign-out-bridge";
+import { ClerkCompleteMembership } from "@/components/providers/clerk-complete-membership";
 
 type AuthContextValue = {
   user: User | null;
@@ -97,11 +99,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   return (
     <AuthContext.Provider value={value}>
       {isClerkAuthV1Enabled() ? (
-        <ClerkSignOutBridge
-          register={(fn) => {
-            clerkSignOutRef.current = fn;
-          }}
-        />
+        <>
+          <ClerkSignOutBridge
+            register={(fn) => {
+              clerkSignOutRef.current = fn;
+            }}
+          />
+          <Suspense fallback={null}>
+            <ClerkCompleteMembership />
+          </Suspense>
+        </>
       ) : null}
       <AuthSessionSync />
       {children}

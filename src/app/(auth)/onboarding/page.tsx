@@ -9,29 +9,53 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { isAuthDisabled } from "@/lib/auth/flags";
 import { isClerkAuthV1Enabled } from "@/lib/auth/clerk-flags";
+import { peekInviteTokens } from "@/components/providers/clerk-invite-stash";
 
 export default function OnboardingPage() {
   const router = useRouter();
   const [name, setName] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
+  const [inviteInFlight, setInviteInFlight] = React.useState(false);
 
   React.useEffect(() => {
     if (isAuthDisabled()) return;
+    // Invitee landing here while membership sync runs — don't flash "create workspace".
+    const tokens = peekInviteTokens();
+    if (tokens.inviteToken || tokens.openJoinToken) {
+      setInviteInFlight(true);
+    }
     let cancelled = false;
-    (async () => {
+    const checkMe = async () => {
       try {
         const res = await fetch("/api/auth/me", { cache: "no-store" });
         if (!res.ok) return;
-        const data = (await res.json()) as { membershipPending?: boolean };
-        if (!cancelled && data.membershipPending) {
+        const data = (await res.json()) as {
+          membershipPending?: boolean;
+          organizationId?: string | null;
+        };
+        if (cancelled) return;
+        if (data.membershipPending) {
           router.replace("/join/pending");
+          return;
+        }
+        if (data.organizationId) {
+          router.replace("/dashboard");
         }
       } catch {
         /* ignore */
       }
-    })();
+    };
+    void checkMe();
+    const interval = window.setInterval(() => {
+      void checkMe();
+    }, 1500);
+    const giveUp = window.setTimeout(() => {
+      if (!cancelled) setInviteInFlight(false);
+    }, 12_000);
     return () => {
       cancelled = true;
+      window.clearInterval(interval);
+      window.clearTimeout(giveUp);
     };
   }, [router]);
 
@@ -54,6 +78,15 @@ export default function OnboardingPage() {
       toast.error(err instanceof Error ? err.message : "Failed");
       setSubmitting(false);
     }
+  }
+
+  if (inviteInFlight) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-3 py-10 text-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">Joining your workspace…</p>
+      </div>
+    );
   }
 
   return (

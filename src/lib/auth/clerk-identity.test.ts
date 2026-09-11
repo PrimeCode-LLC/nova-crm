@@ -99,6 +99,42 @@ describe("resolveClerkIdentity", () => {
     expect(updateUserMetadata).toHaveBeenCalled();
   });
 
+  it("rejects linkedUid when membership email mismatches Clerk email", async () => {
+    findByUid.mockResolvedValue({
+      uid: "farjad_uid",
+      organizationId: "org_1",
+      email: "farjad@example.com",
+      displayName: "Farjad",
+      role: "member",
+      status: "active",
+      invitedByUid: "owner",
+      joinedAt: new Date().toISOString(),
+    });
+    findByEmail.mockResolvedValue({
+      uid: "hannan_uid",
+      organizationId: "org_1",
+      email: "hannan@example.com",
+      displayName: "Hannan",
+      role: "admin",
+      status: "active",
+      invitedByUid: "owner",
+      joinedAt: new Date().toISOString(),
+    });
+
+    const session = await resolveClerkIdentity(
+      fakeUser({
+        externalId: "farjad_uid",
+        email: "hannan@example.com",
+        publicMetadata: { novaUid: "farjad_uid" },
+      }),
+    );
+    expect(session.uid).toBe("hannan_uid");
+    expect(session.bridged).toBe(true);
+    expect(updateUser).toHaveBeenCalledWith("user_clerk_1", {
+      externalId: "hannan_uid",
+    });
+  });
+
   it("falls back to Clerk id when no membership", async () => {
     const session = await resolveClerkIdentity(fakeUser({}));
     expect(session.uid).toBe("user_clerk_1");
