@@ -67,8 +67,17 @@ export function toTimestamp(value: unknown): Timestamp | undefined {
 
 /** Serialize payload values for JSON storage (Dates → ISO, Timestamp → ISO). */
 export function serializePayloadValue(value: unknown): unknown {
-  if (value instanceof Timestamp) return value.toDate().toISOString();
-  if (value instanceof Date) return value.toISOString();
+  if (value instanceof Timestamp) {
+    const ms = value.toMillis();
+    return Number.isFinite(ms) ? new Date(ms).toISOString() : null;
+  }
+  if (value instanceof Date) {
+    const ms = value.getTime();
+    return Number.isFinite(ms) ? value.toISOString() : null;
+  }
+  if (typeof value === "bigint") {
+    return value.toString();
+  }
   if (Array.isArray(value)) return value.map(serializePayloadValue);
   if (value && typeof value === "object") {
     const out: Record<string, unknown> = {};
@@ -78,6 +87,24 @@ export function serializePayloadValue(value: unknown): unknown {
     return out;
   }
   return value;
+}
+
+/**
+ * List/snapshot projection for workspace-documents GET.
+ * Omits heavy email HTML so live polls stay under gateway limits.
+ */
+export function projectWorkspaceListPayload(
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const data = serializePayloadValue(payload) as Record<string, unknown>;
+  const body = data.messageBody;
+  if (typeof body === "string") {
+    if (body.trim()) {
+      data.hasMessageBody = true;
+    }
+    delete data.messageBody;
+  }
+  return data;
 }
 
 /** Firestore-export / Admin SDK JSON timestamp shapes. */

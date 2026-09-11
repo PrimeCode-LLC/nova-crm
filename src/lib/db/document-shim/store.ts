@@ -13,7 +13,11 @@ import {
 } from "@/lib/db/crm-types";
 import { scheduleOrgDashboardSummaryRefresh } from "@/lib/db/org-dashboard-summary-refresh";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
-import { withRlsBypass } from "@/lib/db/tenant-scope";
+import {
+  withOrganizationScope,
+  withRlsBypass,
+  type TenantTx,
+} from "@/lib/db/tenant-scope";
 import {
   applyFieldValues,
   resolveWriteData,
@@ -50,11 +54,45 @@ export type QuerySpec = {
   /** Firestore collectionGroup id (e.g. `members`). */
   collectionGroup?: string;
   pathPrefix?: string;
+  /**
+   * Prefer SQL/RLS tenant scope. When omitted, inferred from an
+   * `organizationId ==` filter when present.
+   */
+  organizationId?: string;
   filters: QueryFilter[];
   orderBy?: { field: string; direction: "asc" | "desc" };
   limit?: number;
   startAfter?: unknown[];
 };
+
+function organizationIdFromSpec(spec: QuerySpec): string | undefined {
+  if (typeof spec.organizationId === "string" && spec.organizationId.trim()) {
+    return spec.organizationId.trim();
+  }
+  for (const filter of spec.filters) {
+    if (
+      filter.field === "organizationId" &&
+      filter.op === "==" &&
+      typeof filter.value === "string" &&
+      filter.value.trim()
+    ) {
+      return filter.value.trim();
+    }
+  }
+  return undefined;
+}
+
+function documentMatchesOrganization(
+  doc: StoredDoc,
+  organizationId: string,
+): boolean {
+  // Column is authoritative when set (avoids cross-tenant leakage if payload was rewritten).
+  if (doc.organizationId != null && doc.organizationId !== "") {
+    return doc.organizationId === organizationId;
+  }
+  const payloadOrg = doc.payload.organizationId;
+  return payloadOrg === organizationId || String(payloadOrg ?? "") === organizationId;
+}
 
 function compareFilterValues(left: unknown, right: unknown): number | null {
   const leftMs = coerceInstantMs(left);
@@ -295,7 +333,10 @@ export async function updateDocument(
 ): Promise<void> {
   const existing = await getDocument(path);
   if (!existing) {
-    throw new Error(`Document ${path} not found`);
+    // Cutover-safe: clients historically called Firestore update() after local
+    // creates. Upsert so missing pg_documents rows do not 500 the live UI.
+    await setDocument(path, patch, true);
+    return;
   }
   const merged = applyFieldValues(existing.payload, patch);
   await setDocument(path, merged, false);
@@ -331,18 +372,63 @@ export async function deleteDocumentSubtree(path: string): Promise<number> {
 export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
   if (!isDatabaseConfigured()) return [];
 
-  const rows = await withRlsBypass((tx) =>
-    spec.collectionGroup
-      ? tx.pgDocument.findMany()
-      : tx.pgDocument.findMany({
-          where: {
-            collectionRoot: spec.collectionRoot!,
-            ...(spec.pathPrefix
-              ? { path: { startsWith: spec.pathPrefix } }
-              : {}),
-          },
-        }),
-  );
+  const organizationId = organizationIdFromSpec(spec);
+
+  const loadRows = async (tx: TenantTx) => {
+    if (spec.collectionGroup) {
+      // Platform / cross-path scans still need bypass; callers must filter.
+      return tx.pgDocument.findMany(
+        organizationId
+          ? {
+              where: {
+                OR: [
+                  { organizationId },
+                  {
+                    AND: [
+                      { organizationId: null },
+                      {
+                        payload: {
+                          path: ["organizationId"],
+                          equals: organizationId,
+                        },
+                      },
+                    ],
+                  },
+                ],
+              },
+            }
+          : undefined,
+      );
+    }
+
+    const where: Prisma.PgDocumentWhereInput = {
+      collectionRoot: spec.collectionRoot!,
+      ...(spec.pathPrefix ? { path: { startsWith: spec.pathPrefix } } : {}),
+    };
+
+    if (organizationId) {
+      where.OR = [
+        { organizationId },
+        {
+          AND: [
+            { organizationId: null },
+            {
+              payload: {
+                path: ["organizationId"],
+                equals: organizationId,
+              },
+            },
+          ],
+        },
+      ];
+    }
+
+    return tx.pgDocument.findMany({ where });
+  };
+
+  const rows = organizationId
+    ? await withOrganizationScope(organizationId, loadRows)
+    : await withRlsBypass(loadRows);
 
   let docs = rows.map((row) => ({
     path: row.path,
@@ -352,6 +438,11 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }));
+
+  if (organizationId) {
+    // Defense in depth: RLS allows null organization_id rows for every tenant.
+    docs = docs.filter((d) => documentMatchesOrganization(d, organizationId));
+  }
 
   if (spec.collectionGroup) {
     docs = docs.filter((d) =>
@@ -366,7 +457,21 @@ export async function queryDocuments(spec: QuerySpec): Promise<StoredDoc[]> {
   }
 
   for (const filter of spec.filters) {
-    docs = docs.filter((d) => matchesFilter(d.payload, filter));
+    if (filter.field === "organizationId" && organizationId) {
+      // Already applied via SQL + documentMatchesOrganization.
+      continue;
+    }
+    docs = docs.filter((d) => {
+      if (filter.field === "organizationId") {
+        return matchesFilter(
+          {
+            organizationId: d.organizationId ?? d.payload.organizationId,
+          },
+          filter,
+        );
+      }
+      return matchesFilter(d.payload, filter);
+    });
   }
 
   if (spec.orderBy) {

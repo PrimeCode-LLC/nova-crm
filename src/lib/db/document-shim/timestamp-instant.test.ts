@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   coerceInstantMs,
   coerceIsoInstant,
+  projectWorkspaceListPayload,
+  serializePayloadValue,
   Timestamp,
 } from "@/lib/db/document-shim/timestamp";
 
@@ -36,5 +38,28 @@ describe("coerceInstantMs / coerceIsoInstant", () => {
     expect(pastMs!).toBeLessThanOrEqual(nowMs!);
     expect(String(past)).toBe("[object Object]");
     expect(coerceIsoInstant(past)).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+});
+
+describe("serializePayloadValue / projectWorkspaceListPayload", () => {
+  it("does not throw on Invalid Date", () => {
+    expect(serializePayloadValue(new Date("not-a-date"))).toBeNull();
+  });
+
+  it("omits messageBody from list projections and sets hasMessageBody", () => {
+    const projected = projectWorkspaceListPayload({
+      title: "Ping",
+      messageBody: "<p>hello</p>",
+      organizationId: "org-1",
+    });
+    expect(projected.messageBody).toBeUndefined();
+    expect(projected.hasMessageBody).toBe(true);
+    expect(projected.title).toBe("Ping");
+  });
+
+  it("leaves docs without messageBody unchanged", () => {
+    const projected = projectWorkspaceListPayload({ title: "Call" });
+    expect(projected.hasMessageBody).toBeUndefined();
+    expect(projected.messageBody).toBeUndefined();
   });
 });
