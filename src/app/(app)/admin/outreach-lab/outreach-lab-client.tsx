@@ -61,6 +61,10 @@ export function OutreachLabClient() {
       if (cfgRes.ok) {
         setConfigs(cfgData.configs ?? []);
         setProjection(cfgData.projection ?? null);
+      } else {
+        toast.error(
+          typeof cfgData.error === "string" ? cfgData.error : "Failed to load configs",
+        );
       }
       if (brRes.ok) {
         const br = await brRes.json();
@@ -184,10 +188,16 @@ export function OutreachLabClient() {
 
       <div className="grid gap-4">
         {configs.length === 0 && (
-          <p className="text-sm text-muted-foreground">
-            No configs yet. Generate a sequence to seed the default config, or create one via
-            API.
-          </p>
+          <div className="space-y-2">
+            <p className="text-sm text-muted-foreground">
+              No configs loaded. Click Refresh — the lab will seed a default from your
+              followup_suggest prompt. If it stays empty, the outreach_eval_loop migration
+              may not be applied yet.
+            </p>
+            <Button size="sm" variant="outline" onClick={() => void load()}>
+              Seed / refresh
+            </Button>
+          </div>
         )}
         {configs.map((c) => {
           const sc = c.scorecard;

@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { guardAdminFeature, guardPermissionAction } from "@/lib/platform/guard-admin-feature";
+import { guardAdminFeature } from "@/lib/platform/guard-admin-feature";
 import {
   createOutreachConfig,
-  getOutreachConfig,
   listOutreachConfigs,
-  promoteOutreachConfig,
+  resolveOutreachConfig,
 } from "@/lib/ai/outreach-config-server";
 import { getOutreachConfigScorecard } from "@/lib/ai/eval/scorecard-server";
 import { projectOutreachFunnel } from "@/lib/ai/eval/projection";
-import { betaPosterior, probVariantBeatsControl } from "@/lib/ai/eval/posterior";
 import type { AiFeatureKey } from "@/lib/ai/types";
 
 export const runtime = "nodejs";
@@ -19,9 +17,16 @@ export async function GET(req: Request) {
   if (!g.ok) return g.response;
 
   const url = new URL(req.url);
-  const featureKey = url.searchParams.get("featureKey") ?? "followup_suggest";
+  const featureKey = (url.searchParams.get("featureKey") ?? "followup_suggest") as AiFeatureKey;
   const orgId = g.ctx.session.organizationId;
-  const configs = await listOutreachConfigs(orgId, featureKey);
+
+  // Seed default config on first lab open so the page is never a dead empty state.
+  let configs = await listOutreachConfigs(orgId, featureKey);
+  if (configs.length === 0) {
+    await resolveOutreachConfig(orgId, featureKey, "default");
+    configs = await listOutreachConfigs(orgId, featureKey);
+  }
+
   const withScorecards = await Promise.all(
     configs.map(async (c) => ({
       ...c,
