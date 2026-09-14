@@ -252,3 +252,56 @@ export async function getOutreachConfig(organizationId: string, configId: string
     });
   });
 }
+
+/** Zone → configId map for a feature (lab | canary | default). */
+export async function getZonePointers(
+  organizationId: string,
+  featureKey: string,
+): Promise<Partial<Record<OutreachZone, string>>> {
+  if (!isDatabaseConfigured()) return {};
+  return withOrganizationScope(organizationId, async (tx) => {
+    const rows = await tx.outreachZonePointer.findMany({
+      where: { organizationId, featureKey },
+    });
+    const out: Partial<Record<OutreachZone, string>> = {};
+    for (const r of rows) {
+      if (r.zone === "lab" || r.zone === "canary" || r.zone === "default") {
+        out[r.zone] = r.configId;
+      }
+    }
+    return out;
+  });
+}
+
+/** Walk parentConfigId chain (newest → oldest), capped. */
+export async function getConfigLineage(
+  organizationId: string,
+  configId: string,
+  maxDepth = 12,
+): Promise<Array<{ id: string; label: string; parentConfigId: string | null; createdAt: Date }>> {
+  if (!isDatabaseConfigured()) return [];
+  return withOrganizationScope(organizationId, async (tx) => {
+    const chain: Array<{
+      id: string;
+      label: string;
+      parentConfigId: string | null;
+      createdAt: Date;
+    }> = [];
+    let currentId: string | null = configId;
+    for (let i = 0; i < maxDepth && currentId; i++) {
+      const row: {
+        id: string;
+        label: string;
+        parentConfigId: string | null;
+        createdAt: Date;
+      } | null = await tx.outreachConfig.findFirst({
+        where: { id: currentId, organizationId },
+        select: { id: true, label: true, parentConfigId: true, createdAt: true },
+      });
+      if (!row) break;
+      chain.push(row);
+      currentId = row.parentConfigId;
+    }
+    return chain;
+  });
+}

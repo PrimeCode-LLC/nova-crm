@@ -152,6 +152,9 @@ const DIRECTOR_EXTRA: ActionKey[] = [
   "organization.edit",
   "organization.billing",
   "audit.export",
+  "outreach_lab.promote_config",
+  "outreach_lab.start_experiment",
+  "outreach_lab.clear_circuit_breaker",
 ];
 
 const PROSPECTING_ACTIONS: ActionKey[] = [

@@ -88,7 +88,8 @@ export type AuditEvent =
   | "role.reset"
   | "outreach.circuit_breaker_trip"
   | "outreach.circuit_breaker_clear"
-  | "outreach.config_promoted";
+  | "outreach.config_promoted"
+  | "outreach.experiment_stopped";
 
 export type AuditLogRecord = {
   id: string;

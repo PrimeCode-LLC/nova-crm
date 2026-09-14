@@ -6,6 +6,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { withOrganizationScope, withRlsBypass } from "@/lib/db/tenant-scope";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import { betaPosterior } from "@/lib/ai/eval/posterior";
+import { attributeReplyToConfig } from "@/lib/ai/eval/reply-attribution";
 
 const POSITIVE = new Set(["positive", "meeting_ready"]);
 const ENGAGED = new Set([
@@ -29,16 +30,89 @@ export async function refreshOutreachConfigScorecard(input: {
       where: { organizationId, configId },
     });
     const followupIds = provenance.map((p) => p.followupId);
+    const leadIds = [
+      ...new Set(
+        provenance
+          .map((p) => p.leadId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0),
+      ),
+    ];
 
-    const events =
+    const followupToConfig = new Map(
+      provenance.map((p) => [p.followupId, configId] as const),
+    );
+
+    // Delivery events join by followupId (sent/bounced carry it).
+    const deliveryEvents =
       followupIds.length === 0
         ? []
         : await tx.emailEvent.findMany({
             where: {
               organizationId,
               followupId: { in: followupIds },
+              type: { in: ["sent", "bounced", "unsubscribed"] },
             },
           });
+
+    // Replies often lack followupId — join by leadId, then attribute to the
+    // config of the most recent prior send for that lead.
+    const repliedEvents =
+      leadIds.length === 0
+        ? []
+        : await tx.emailEvent.findMany({
+            where: {
+              organizationId,
+              leadId: { in: leadIds },
+              type: "replied",
+            },
+          });
+
+    // Sent events for attribution may include other configs' sends for the same leads.
+    const attributionSents =
+      leadIds.length === 0
+        ? []
+        : await tx.emailEvent.findMany({
+            where: {
+              organizationId,
+              leadId: { in: leadIds },
+              type: "sent",
+            },
+            select: {
+              leadId: true,
+              followupId: true,
+              occurredAt: true,
+              meta: true,
+            },
+          });
+
+    // Expand followup→config for attribution sends that aren't in this config's provenance.
+    const otherFollowupIds = [
+      ...new Set(
+        attributionSents
+          .map((e) => e.followupId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+          .filter((id) => !followupToConfig.has(id)),
+      ),
+    ];
+    if (otherFollowupIds.length > 0) {
+      const otherProv = await tx.sequenceStepProvenance.findMany({
+        where: { organizationId, followupId: { in: otherFollowupIds } },
+        select: { followupId: true, configId: true },
+      });
+      for (const p of otherProv) {
+        followupToConfig.set(p.followupId, p.configId);
+      }
+    }
+
+    const sentForAttr = attributionSents.map((e) => {
+      const meta = (e.meta ?? {}) as Record<string, unknown>;
+      return {
+        leadId: e.leadId,
+        createdAt: e.occurredAt,
+        followupId: e.followupId,
+        configId: typeof meta.configId === "string" ? meta.configId : null,
+      };
+    });
 
     let sent = 0;
     let bounced = 0;
@@ -50,7 +124,7 @@ export async function refreshOutreachConfigScorecard(input: {
     let potentialScoreSum = 0;
     const mailboxCounts = new Map<string, number>();
 
-    for (const ev of events) {
+    for (const ev of deliveryEvents) {
       if (ev.type === "sent") {
         sent += 1;
         if (ev.mailboxId) {
@@ -58,27 +132,36 @@ export async function refreshOutreachConfigScorecard(input: {
         }
       }
       if (ev.type === "bounced") bounced += 1;
-      if (ev.type === "replied") {
-        const meta = (ev.meta ?? {}) as Record<string, unknown>;
-        if (meta.classifiedBy === "fallback") continue;
-        const classification = String(meta.classification ?? "");
-        const score = Number(meta.potentialScore ?? 0);
-        if (POSITIVE.has(classification)) positiveReplies += 1;
-        if (ENGAGED.has(classification)) engagedReplies += 1;
-        if (classification === "hard_no") hardNoCount += 1;
-        if (classification === "unsubscribe_request") unsubscribeCount += 1;
-        if (Number.isFinite(score)) potentialScoreSum += score;
-      }
       if (ev.type === "unsubscribed") unsubscribeCount += 1;
+    }
+
+    for (const ev of repliedEvents) {
+      const leadId = ev.leadId?.trim() ?? "";
+      if (!leadId) continue;
+      const attributed = attributeReplyToConfig({
+        leadId,
+        replyAt: ev.occurredAt,
+        sentEvents: sentForAttr,
+        followupToConfig,
+      });
+      if (attributed !== configId) continue;
+
+      const meta = (ev.meta ?? {}) as Record<string, unknown>;
+      if (meta.classifiedBy === "fallback") continue;
+      const classification = String(meta.classification ?? "");
+      const score = Number(meta.potentialScore ?? 0);
+      if (POSITIVE.has(classification)) positiveReplies += 1;
+      if (ENGAGED.has(classification)) engagedReplies += 1;
+      if (classification === "hard_no") hardNoCount += 1;
+      if (classification === "unsubscribe_request") unsubscribeCount += 1;
+      if (Number.isFinite(score)) potentialScoreSum += score;
     }
 
     const suppressions = await tx.emailSuppression.count({
       where: {
         organizationId,
         reason: { in: ["unsubscribe", "complaint"] },
-        ...(provenance.some((p) => p.leadId)
-          ? { leadId: { in: provenance.map((p) => p.leadId!).filter(Boolean) } }
-          : {}),
+        ...(leadIds.length > 0 ? { leadId: { in: leadIds } } : {}),
       },
     });
     unsubscribeCount = Math.max(unsubscribeCount, suppressions);
@@ -105,7 +188,6 @@ export async function refreshOutreachConfigScorecard(input: {
     const hardNoRate = delivered > 0 ? hardNoCount / delivered : 0;
     const spamComplaintRate = delivered > 0 ? spamComplaintCount / delivered : 0;
 
-    // Maturity: plans where all provenance steps have sentBody or we treat as done if any sent.
     const byPlan = new Map<string, typeof provenance>();
     for (const p of provenance) {
       const key = p.planId ?? p.followupId;
@@ -136,6 +218,19 @@ export async function refreshOutreachConfigScorecard(input: {
       orderBy: { finishedAt: "desc" },
     });
 
+    const offlinePassRate =
+      latestEval && latestEval.itemCount > 0
+        ? latestEval.passCount / latestEval.itemCount
+        : null;
+    const judgeWinRate =
+      latestEval &&
+      latestEval.pairwiseWins != null &&
+      latestEval.pairwiseLosses != null &&
+      latestEval.pairwiseWins + latestEval.pairwiseLosses > 0
+        ? latestEval.pairwiseWins /
+          (latestEval.pairwiseWins + latestEval.pairwiseLosses)
+        : null;
+
     await tx.outreachConfigScorecard.upsert({
       where: { configId },
       create: {
@@ -164,19 +259,9 @@ export async function refreshOutreachConfigScorecard(input: {
         unsubscribeRate,
         hardNoRate,
         spamComplaintRate,
-        offlinePassRate:
-          latestEval && latestEval.itemCount > 0
-            ? latestEval.passCount / latestEval.itemCount
-            : null,
+        offlinePassRate,
         offlineHallucination: latestEval?.hallucinationCount ?? null,
-        judgeWinRate:
-          latestEval &&
-          latestEval.pairwiseWins != null &&
-          latestEval.pairwiseLosses != null &&
-          latestEval.pairwiseWins + latestEval.pairwiseLosses > 0
-            ? latestEval.pairwiseWins /
-              (latestEval.pairwiseWins + latestEval.pairwiseLosses)
-            : null,
+        judgeWinRate,
         segments: {} as Prisma.InputJsonValue,
         posteriorAlpha: posterior.alpha,
         posteriorBeta: posterior.beta,
@@ -207,19 +292,9 @@ export async function refreshOutreachConfigScorecard(input: {
         unsubscribeRate,
         hardNoRate,
         spamComplaintRate,
-        offlinePassRate:
-          latestEval && latestEval.itemCount > 0
-            ? latestEval.passCount / latestEval.itemCount
-            : null,
+        offlinePassRate,
         offlineHallucination: latestEval?.hallucinationCount ?? null,
-        judgeWinRate:
-          latestEval &&
-          latestEval.pairwiseWins != null &&
-          latestEval.pairwiseLosses != null &&
-          latestEval.pairwiseWins + latestEval.pairwiseLosses > 0
-            ? latestEval.pairwiseWins /
-              (latestEval.pairwiseWins + latestEval.pairwiseLosses)
-            : null,
+        judgeWinRate,
         posteriorAlpha: posterior.alpha,
         posteriorBeta: posterior.beta,
         confoundWarnings: confoundWarnings as unknown as Prisma.InputJsonValue,

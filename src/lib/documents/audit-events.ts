@@ -69,6 +69,7 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "outreach.circuit_breaker_trip": "Outreach circuit breaker tripped",
   "outreach.circuit_breaker_clear": "Outreach circuit breaker cleared",
   "outreach.config_promoted": "Outreach config promoted",
+  "outreach.experiment_stopped": "Outreach experiment stopped",
 };
 
 export type AuditEventCategory =
@@ -147,6 +148,7 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "outreach.circuit_breaker_trip": "ai",
   "outreach.circuit_breaker_clear": "ai",
   "outreach.config_promoted": "ai",
+  "outreach.experiment_stopped": "ai",
 };
 
 export function labelForAuditEvent(event: string): string {

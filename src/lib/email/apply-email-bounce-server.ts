@@ -512,6 +512,20 @@ export async function applyEmailBounceServer(
       );
   }
 
+  // Prefer followup from message-id match; if we matched by email first, still try
+  // originalMessageId so bounced events join scorecards via followupId.
+  let matchedFollowupId =
+    matched && "followupId" in matched
+      ? (matched as MatchedLead).followupId
+      : undefined;
+  if (!matchedFollowupId && originalMessageId) {
+    const byMsg = await findLeadByOriginalMessageId(
+      input.organizationId,
+      originalMessageId,
+    );
+    if (byMsg?.followupId) matchedFollowupId = byMsg.followupId;
+  }
+
   if (input.bounceKind === "hard") {
     for (const email of failedRecipients) {
       void import("@/lib/email/suppression-server").then(({ addSuppression }) =>
@@ -528,6 +542,7 @@ export async function applyEmailBounceServer(
           organizationId: input.organizationId,
           type: "bounced",
           leadId: leadId || undefined,
+          followupId: matchedFollowupId,
           mailboxId,
           recipient: email,
           meta: { reason, inboundMessageId },
@@ -556,10 +571,6 @@ export async function applyEmailBounceServer(
   let planPaused = false;
   let cancelledScheduled = 0;
   let reroutedCount = 0;
-  let matchedFollowupId =
-    matched && "followupId" in matched
-      ? (matched as MatchedLead).followupId
-      : undefined;
 
   const createReviewTask = async (title: string, description: string) => {
     if (!leadId) return;

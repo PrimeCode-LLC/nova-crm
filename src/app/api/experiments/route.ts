@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { guardPermissionAction } from "@/lib/platform/guard-admin-feature";
+import {
+  guardAdminFeature,
+  guardPermissionAction,
+} from "@/lib/platform/guard-admin-feature";
 import { withOrganizationScope } from "@/lib/db/tenant-scope";
 import { isDatabaseConfigured } from "@/lib/db/prisma";
 import {
@@ -21,6 +24,54 @@ const startSchema = z.object({
   variantConfigId: z.string().min(1),
   leadIds: z.array(z.string().min(1)).min(2).max(50_000),
 });
+
+export async function GET(req: Request) {
+  const g = await guardAdminFeature("outreach_lab");
+  if (!g.ok) return g.response;
+  if (!isDatabaseConfigured()) {
+    return NextResponse.json({ experiments: [] });
+  }
+
+  const orgId = g.ctx.session.organizationId;
+  const experiments = await withOrganizationScope(orgId, async (tx) => {
+    const rows = await tx.experiment.findMany({
+      where: { organizationId: orgId },
+      orderBy: { createdAt: "desc" },
+      take: 40,
+    });
+    const withArms = await Promise.all(
+      rows.map(async (exp) => {
+        const arms = await tx.experimentArm.findMany({
+          where: { organizationId: orgId, experimentId: exp.id },
+        });
+        const assignmentCount = await tx.experimentAssignment.count({
+          where: { organizationId: orgId, experimentId: exp.id },
+        });
+        const perArm = await Promise.all(
+          arms.map(async (arm) => ({
+            ...arm,
+            assigned: await tx.experimentAssignment.count({
+              where: { organizationId: orgId, experimentId: exp.id, armId: arm.id },
+            }),
+          })),
+        );
+        const minAssigned =
+          perArm.length > 0 ? Math.min(...perArm.map((a) => a.assigned)) : 0;
+        const remainingPerArm = Math.max(0, exp.minPerArm - minAssigned);
+        return {
+          ...exp,
+          arms: perArm,
+          assignmentCount,
+          remainingPerArm,
+          stageMinPerArm: STAGE_MIN_PER_ARM[exp.stage as 1 | 2] ?? exp.minPerArm,
+        };
+      }),
+    );
+    return withArms;
+  });
+
+  return NextResponse.json({ experiments });
+}
 
 export async function POST(req: Request) {
   const g = await guardPermissionAction("outreach_lab.start_experiment", {

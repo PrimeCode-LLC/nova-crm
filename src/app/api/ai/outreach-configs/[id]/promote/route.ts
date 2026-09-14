@@ -7,7 +7,13 @@ import {
 } from "@/lib/ai/outreach-config-server";
 import { getOutreachConfigScorecard } from "@/lib/ai/eval/scorecard-server";
 import { betaPosterior, probVariantBeatsControl } from "@/lib/ai/eval/posterior";
+import {
+  evaluateCanaryGates,
+  evaluateDefaultGates,
+} from "@/lib/ai/eval/promotion-gates";
+import { withOrganizationScope } from "@/lib/db/tenant-scope";
 import { recordAudit } from "@/lib/documents/audit";
+import { cancelLeadOutreachServer } from "@/lib/email/cancel-lead-outreach-server";
 import type { AiFeatureKey } from "@/lib/ai/types";
 import type { OutreachZone } from "@/lib/ai/eval/types";
 
@@ -16,9 +22,65 @@ export const runtime = "nodejs";
 const bodySchema = z.object({
   toZone: z.enum(["lab", "canary", "default"]),
   cancelPending: z.boolean().optional(),
+  /** Preview gates only — do not mutate zone pointers. */
+  dryRun: z.boolean().optional(),
 });
 
 type Ctx = { params: Promise<{ id: string }> };
+
+async function buildGates(input: {
+  orgId: string;
+  configId: string;
+  featureKey: string;
+  toZone: OutreachZone;
+  scorecard: Awaited<ReturnType<typeof getOutreachConfigScorecard>>;
+}) {
+  if (input.toZone === "canary") {
+    return evaluateCanaryGates(input.scorecard);
+  }
+  if (input.toZone === "default") {
+    const defaultPointer = await withOrganizationScope(input.orgId, async (tx) =>
+      tx.outreachZonePointer.findUnique({
+        where: {
+          organizationId_featureKey_zone: {
+            organizationId: input.orgId,
+            featureKey: input.featureKey,
+            zone: "default",
+          },
+        },
+      }),
+    );
+
+    const controlConfigId =
+      defaultPointer?.configId && defaultPointer.configId !== input.configId
+        ? defaultPointer.configId
+        : null;
+    const controlScorecard = controlConfigId
+      ? await getOutreachConfigScorecard(input.orgId, controlConfigId)
+      : null;
+
+    let pBeat: number | null = null;
+    if (input.scorecard && controlScorecard) {
+      const variant = betaPosterior(
+        input.scorecard.positiveReplies,
+        input.scorecard.delivered,
+      );
+      const control = betaPosterior(
+        controlScorecard.positiveReplies,
+        controlScorecard.delivered,
+      );
+      pBeat = probVariantBeatsControl(variant, control);
+    }
+
+    return evaluateDefaultGates({
+      variant: input.scorecard,
+      control: controlScorecard,
+      controlConfigId,
+      pBeat,
+    });
+  }
+  return [];
+}
 
 export async function POST(req: Request, ctx: Ctx) {
   const g = await guardPermissionAction("outreach_lab.promote_config", {
@@ -44,62 +106,25 @@ export async function POST(req: Request, ctx: Ctx) {
 
   const toZone = parsed.data.toZone as OutreachZone;
   const scorecard = await getOutreachConfigScorecard(orgId, configId);
-  const gates: Array<{ id: string; passed: boolean; detail: string }> = [];
+  const gates = await buildGates({
+    orgId,
+    configId,
+    featureKey: config.featureKey,
+    toZone,
+    scorecard,
+  });
 
-  if (toZone === "canary") {
-    const passRate = scorecard?.offlinePassRate;
-    gates.push({
-      id: "offline_pass",
-      passed: passRate == null || passRate >= 0.9,
-      detail: `Offline pass rate ${passRate == null ? "n/a" : (100 * passRate).toFixed(0) + "%"}`,
-    });
-    gates.push({
-      id: "hallucination",
-      passed: (scorecard?.offlineHallucination ?? 0) === 0,
-      detail: `Hallucination failures: ${scorecard?.offlineHallucination ?? 0}`,
-    });
-    gates.push({
-      id: "judge_win",
-      passed: scorecard?.judgeWinRate == null || scorecard.judgeWinRate >= 0.55,
-      detail: `Judge win rate ${scorecard?.judgeWinRate == null ? "n/a" : (100 * scorecard.judgeWinRate).toFixed(0) + "%"}`,
+  const blocked = gates.filter((gate) => !gate.passed);
+
+  if (parsed.data.dryRun) {
+    return NextResponse.json({
+      ok: blocked.length === 0 || toZone === "lab",
+      dryRun: true,
+      gates,
+      blocked,
     });
   }
 
-  if (toZone === "default") {
-    gates.push({
-      id: "delivered",
-      passed: (scorecard?.delivered ?? 0) >= 500,
-      detail: `Delivered ${scorecard?.delivered ?? 0} (need ≥500)`,
-    });
-    gates.push({
-      id: "maturity",
-      passed: (scorecard?.maturityPct ?? 0) >= 0.6,
-      detail: `Maturity ${((scorecard?.maturityPct ?? 0) * 100).toFixed(0)}% (need ≥60%)`,
-    });
-    gates.push({
-      id: "bounce",
-      passed: (scorecard?.bounceRate ?? 0) <= 0.03,
-      detail: `Bounce rate ${((scorecard?.bounceRate ?? 0) * 100).toFixed(1)}%`,
-    });
-    // Compare to org default if present
-    const defaultPointerScore = scorecard
-      ? betaPosterior(scorecard.positiveReplies, scorecard.delivered)
-      : null;
-    if (defaultPointerScore && scorecard) {
-      const control = betaPosterior(
-        Math.max(0, scorecard.positiveReplies - 1),
-        Math.max(scorecard.delivered, 1),
-      );
-      const pBeat = probVariantBeatsControl(defaultPointerScore, control);
-      gates.push({
-        id: "posterior",
-        passed: pBeat >= 0.5 || scorecard.delivered < 500,
-        detail: `P(variant>baseline)≈${pBeat.toFixed(2)} on positive reply rate`,
-      });
-    }
-  }
-
-  const blocked = gates.filter((g) => !g.passed);
   if (blocked.length > 0 && toZone !== "lab") {
     return NextResponse.json(
       { error: "Promotion gates failed", gates, blocked },
@@ -116,12 +141,52 @@ export async function POST(req: Request, ctx: Ctx) {
   });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 500 });
 
+  let cancelledLeads = 0;
+  if (parsed.data.cancelPending === true) {
+    const leadIds = await withOrganizationScope(orgId, async (tx) => {
+      const rows = await tx.sequenceStepProvenance.findMany({
+        where: {
+          organizationId: orgId,
+          configId,
+          sentBody: null,
+        },
+        select: { leadId: true },
+        take: 500,
+      });
+      return [
+        ...new Set(
+          rows
+            .map((r) => r.leadId)
+            .filter((id): id is string => typeof id === "string" && id.length > 0),
+        ),
+      ];
+    });
+    for (const leadId of leadIds) {
+      try {
+        await cancelLeadOutreachServer({
+          organizationId: orgId,
+          leadId,
+          userId: g.ctx.session.uid,
+          reason: `outreach_config_promoted:${toZone}:${configId}`,
+        });
+        cancelledLeads += 1;
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+
   void recordAudit({
     organizationId: orgId,
     actorUid: g.ctx.session.uid,
     event: "outreach.config_promoted",
-    meta: { configId, toZone, cancelPending: parsed.data.cancelPending === true },
+    meta: {
+      configId,
+      toZone,
+      cancelPending: parsed.data.cancelPending === true,
+      cancelledLeads,
+    },
   });
 
-  return NextResponse.json({ ok: true, gates });
+  return NextResponse.json({ ok: true, gates, cancelledLeads });
 }

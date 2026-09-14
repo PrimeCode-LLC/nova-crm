@@ -5,6 +5,7 @@ import {
   createOutreachConfig,
   listOutreachConfigs,
   resolveOutreachConfig,
+  getZonePointers,
 } from "@/lib/ai/outreach-config-server";
 import { getOutreachConfigScorecard } from "@/lib/ai/eval/scorecard-server";
 import { projectOutreachFunnel } from "@/lib/ai/eval/projection";
@@ -27,14 +28,20 @@ export async function GET(req: Request) {
     configs = await listOutreachConfigs(orgId, featureKey);
   }
 
+  const zonePointers = await getZonePointers(orgId, featureKey);
+
   const withScorecards = await Promise.all(
     configs.map(async (c) => ({
       ...c,
       scorecard: await getOutreachConfigScorecard(orgId, c.id),
+      zones: (["lab", "canary", "default"] as const).filter(
+        (z) => zonePointers[z] === c.id,
+      ),
     })),
   );
   return NextResponse.json({
     configs: withScorecards,
+    zonePointers,
     projection: projectOutreachFunnel({ targetDeals: 1 }),
   });
 }

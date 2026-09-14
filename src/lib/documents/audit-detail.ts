@@ -439,6 +439,12 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     message: (m) =>
       `Outreach config promoted to ${String(m.toZone ?? "zone")} (${String(m.configId ?? "")})`,
   },
+  "outreach.experiment_stopped": {
+    operation: "update",
+    tableName: "experiments",
+    message: (m) =>
+      `Outreach experiment stopped (${String(m.experimentId ?? "")}: ${String(m.reason ?? "")})`,
+  },
 };
 
 export function buildAuditMessage(
