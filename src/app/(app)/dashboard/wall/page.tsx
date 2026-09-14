@@ -29,11 +29,13 @@ import { WorkspacePageSkeleton } from "@/components/common/workspace-page-skelet
 import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { useSidebar } from "@/components/ui/sidebar";
 import { computeDashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
+import { buildEmailKpiCardMetrics } from "@/lib/dashboard-email-kpi-card";
 import {
   composeEmailSentAtsFromTimeline,
   flattenTimelineByLead,
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
+import { useEmailKpiCardLive } from "@/hooks/use-email-kpi-card-live";
 import { applyOrgDashboardSummaryToWorkflowMetrics } from "@/lib/dashboard-summary-apply";
 import { canApplyOrgWideDashboardSummary } from "@/lib/dashboard-kpi-scope";
 import { showOwnerOpsDashboard } from "@/lib/dashboard-ops-analytics";
@@ -350,6 +352,40 @@ function DashboardWallPageInner() {
     range,
   ]);
 
+  const emailKpiLive = useEmailKpiCardLive({
+    enabled: !isDemo && !workspaceLoading && Boolean(viewer),
+    range,
+    ownerScope: "all-owners",
+    timeZone: organizationTimezone,
+  });
+
+  const emailCardMetrics = React.useMemo(() => {
+    if (!viewer) return null;
+    return buildEmailKpiCardMetrics({
+      leads,
+      followups,
+      tasks: leadTasks,
+      viewer,
+      orgUsers: users,
+      ownerScope: "all-owners",
+      range,
+      timeZone: organizationTimezone,
+      live: isDemo ? null : emailKpiLive.live,
+      fallbackOpensInRange: emailKpiLive.live == null ? metrics.opensInRange : undefined,
+    });
+  }, [
+    viewer,
+    leads,
+    followups,
+    leadTasks,
+    users,
+    range,
+    organizationTimezone,
+    isDemo,
+    emailKpiLive.live,
+    metrics.opensInRange,
+  ]);
+
   const orgRole = (viewerOrgRole ?? viewer?.orgRole) as OrgMemberRole | undefined;
   const orgMeetingsScope = orgRole ? roleAtLeast(orgRole, "manager") : false;
 
@@ -615,6 +651,7 @@ function DashboardWallPageInner() {
           wallPrefs={wallPrefs}
           orgWideScope
           extraSentAts={composeSentAts}
+          emailCardMetrics={emailCardMetrics}
         />
       </div>
     </div>
