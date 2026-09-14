@@ -9,7 +9,10 @@ export type ReplyClass =
   | "objection"
   | "soft_no"
   | "hard_no"
+  | "unsubscribe_request"
   | "unclear";
+
+export type ClassifiedBy = "ai" | "heuristic" | "fallback";
 
 export type ReplyRecommendedAction =
   | "reply_now"
@@ -55,6 +58,8 @@ export type ReplyAction = {
   sentAt?: ISODate;
   sentMessageId?: string;
   source: "imap" | "instantly" | "client_sync" | "manual" | "system";
+  /** How the classification was produced. Exclude `fallback` from outcome metrics. */
+  classifiedBy?: ClassifiedBy;
   createdAt: ISODate;
   updatedAt: ISODate;
   decidedAt?: ISODate;
@@ -69,6 +74,7 @@ export const REPLY_CLASS_LABELS: Record<ReplyClass, string> = {
   objection: "Objection",
   soft_no: "Soft no",
   hard_no: "Hard no",
+  unsubscribe_request: "Unsubscribe request",
   unclear: "Unclear",
 };
 
@@ -80,6 +86,7 @@ export function replyActionNeedsDraft(input: {
   if (
     input.classification === "auto_reply" ||
     input.classification === "hard_no" ||
+    input.classification === "unsubscribe_request" ||
     input.recommendedAction === "ignore" ||
     input.recommendedAction === "wait" ||
     input.recommendedAction === "close_lost" ||

@@ -52,6 +52,7 @@ export type ModuleKey =
   | "buyer_personas"
   | "import"
   | "scrapers"
+  | "outreach_lab"
   | "settings_self";
 
 export type ModulePermission = {
@@ -295,6 +296,12 @@ export const MODULE_META: Record<ModuleKey, ModuleMeta> = {
     cluster: "programs",
     href: "/admin/scrapers",
   },
+  outreach_lab: {
+    label: "Outreach Lab",
+    description: "AI sequence testing, evaluation, and config promotion",
+    cluster: "programs",
+    href: "/admin/outreach-lab",
+  },
   settings_self: {
     label: "Settings",
     description: "Personal account settings",
@@ -372,6 +379,11 @@ export type ActionKey =
   | "ai.manage_providers"
   | "ai.manage_knowledge"
   | "ai.view_usage"
+  | "outreach_lab.review_queue"
+  | "outreach_lab.run_eval"
+  | "outreach_lab.promote_config"
+  | "outreach_lab.start_experiment"
+  | "outreach_lab.clear_circuit_breaker"
   | "organization.edit"
   | "organization.billing"
   | "audit.export";
@@ -636,6 +648,31 @@ export const ACTION_META: Record<ActionKey, ActionMeta> = {
   "ai.view_usage": {
     label: "View AI usage",
     description: "See AI token/cost usage",
+    group: "programs",
+  },
+  "outreach_lab.review_queue": {
+    label: "Review outreach eval queue",
+    description: "Review and triage AI outreach evaluation results",
+    group: "programs",
+  },
+  "outreach_lab.run_eval": {
+    label: "Run outreach eval",
+    description: "Trigger AI sequence evaluation runs",
+    group: "programs",
+  },
+  "outreach_lab.promote_config": {
+    label: "Promote outreach config",
+    description: "Promote evaluated configs to production",
+    group: "programs",
+  },
+  "outreach_lab.start_experiment": {
+    label: "Start outreach experiment",
+    description: "Start A/B or shadow outreach experiments",
+    group: "programs",
+  },
+  "outreach_lab.clear_circuit_breaker": {
+    label: "Clear outreach circuit breaker",
+    description: "Reset circuit breaker after failed eval or send guardrails",
     group: "programs",
   },
   "organization.edit": {

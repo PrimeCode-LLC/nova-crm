@@ -485,7 +485,7 @@ async function extractFields(input: {
   source: ProspectDraftSourceInput;
   currentFields: ProspectDraft["fields"];
 }) {
-  return runAiStructuredFeature({
+  const result = await runAiStructuredFeature({
     organizationId: input.organizationId,
     userId: input.userId,
     feature: "prospect_draft_extract",
@@ -505,6 +505,7 @@ async function extractFields(input: {
       pageText: input.source.text,
     },
   });
+  return result.output;
 }
 
 function mergeExtractedFields(input: {

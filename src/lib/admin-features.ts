@@ -21,7 +21,8 @@ export type AdminFeatureKey =
   | "delete_intake_pool"
   | "intent_playbook"
   | "buyer_personas"
-  | "prospecting_strategies";
+  | "prospecting_strategies"
+  | "outreach_lab";
 
 export type AdminFeatureMeta = {
   label: string;
@@ -63,6 +64,12 @@ export const ADMIN_FEATURES: Record<AdminFeatureKey, AdminFeatureMeta> = {
     minWorkspaceRole: "manager",
     minOrgRole: "manager",
     href: "/admin/scrapers",
+  },
+  outreach_lab: {
+    label: "Outreach Lab",
+    description: "AI sequence testing, evaluation, and config promotion",
+    cluster: "programs",
+    href: "/admin/outreach-lab",
   },
   permissions: {
     label: "Person overrides",

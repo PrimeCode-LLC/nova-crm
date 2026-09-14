@@ -314,3 +314,248 @@ model EmailEvent {
   @@index([organizationId, leadId])
   @@map("email_events")
 }
+
+/// Immutable outreach variant bundle (prompt + model + cadence recipe).
+model OutreachConfig {
+  id                   String   @id
+  organizationId       String   @map("organization_id")
+  featureKey           String   @map("feature_key")
+  label                String
+  systemPrompt         String   @map("system_prompt") @db.Text
+  userPromptTemplate   String   @map("user_prompt_template") @db.Text
+  contentHash          String   @map("content_hash")
+  provider             String
+  model                String
+  scriptId             String?  @map("script_id")
+  ragMode              String?  @map("rag_mode")
+  ragLibraryIds        Json     @default("[]") @map("rag_library_ids")
+  sequenceMode         String?  @map("sequence_mode")
+  channelMix           String?  @map("channel_mix")
+  stepCount            Int?     @map("step_count")
+  personalizationDepth String?  @map("personalization_depth")
+  parentConfigId       String?  @map("parent_config_id")
+  /// draft | lab_passed | canary | active | archived | rejected
+  status               String   @default("draft")
+  createdBy            String?  @map("created_by")
+  notes                String?
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, featureKey, status])
+  @@map("outreach_configs")
+}
+
+/// Zone pointer: lab | canary | default -> configId.
+model OutreachZonePointer {
+  organizationId String   @map("organization_id")
+  featureKey     String   @map("feature_key")
+  /// lab | canary | default
+  zone           String
+  configId       String   @map("config_id")
+  updatedAt      DateTime @default(now()) @map("updated_at") @db.Timestamptz(3)
+  updatedBy      String?  @map("updated_by")
+
+  @@id([organizationId, featureKey, zone])
+  @@index([organizationId])
+  @@map("outreach_zone_pointers")
+}
+
+/// One row per LLM generation call with full provenance.
+model AiGeneration {
+  id               String    @id
+  organizationId   String    @map("organization_id")
+  configId         String    @map("config_id")
+  featureKey       String    @map("feature_key")
+  /// lab | canary | default | production
+  zone             String
+  leadId           String?   @map("lead_id")
+  userId           String?   @map("user_id")
+  provider         String
+  model            String
+  systemPromptHash String    @map("system_prompt_hash")
+  userPrompt       String    @map("user_prompt") @db.Text
+  contextHash      String    @map("context_hash")
+  output           Json      @default("{}")
+  inputTokens      Int       @default(0) @map("input_tokens")
+  outputTokens     Int       @default(0) @map("output_tokens")
+  latencyMs        Int       @default(0) @map("latency_ms")
+  /// ok | error
+  status           String
+  errorCode        String?   @map("error_code")
+  accepted         Boolean?
+  acceptedAt       DateTime? @map("accepted_at") @db.Timestamptz(3)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, configId, createdAt])
+  @@index([organizationId, leadId])
+  @@map("ai_generations")
+}
+
+/// Bridges client followup id to generation + config for outcome joins.
+model SequenceStepProvenance {
+  followupId       String   @id @map("followup_id")
+  organizationId   String   @map("organization_id")
+  planId           String?  @map("plan_id")
+  leadId           String?  @map("lead_id")
+  generationId     String   @map("generation_id")
+  configId         String   @map("config_id")
+  zone             String
+  experimentId     String?  @map("experiment_id")
+  variantId        String?  @map("variant_id")
+  stepIndex        Int      @map("step_index")
+  channel          String?
+  generatedSubject String?  @map("generated_subject")
+  generatedBody    String?  @map("generated_body") @db.Text
+  sentSubject      String?  @map("sent_subject")
+  sentBody         String?  @map("sent_body") @db.Text
+  editDistance     Int?     @map("edit_distance")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@index([organizationId, configId])
+  @@index([organizationId, generationId])
+  @@index([organizationId, planId])
+  @@map("sequence_step_provenance")
+}
+
+model EvalDatasetItem {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  datasetKey     String   @map("dataset_key")
+  label          String
+  segment        String
+  leadContext    Json     @map("lead_context")
+  threadContext  Json?    @map("thread_context")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organizationId, datasetKey, active])
+  @@map("eval_dataset_items")
+}
+
+model EvalRun {
+  id                 String    @id
+  organizationId     String    @map("organization_id")
+  configId           String    @map("config_id")
+  datasetKey         String    @map("dataset_key")
+  /// pending | running | completed | failed
+  status             String
+  itemCount          Int       @default(0) @map("item_count")
+  passCount          Int       @default(0) @map("pass_count")
+  failCount          Int       @default(0) @map("fail_count")
+  hallucinationCount Int       @default(0) @map("hallucination_count")
+  meanJudgeScore     Float?    @map("mean_judge_score")
+  comparedToConfigId String?   @map("compared_to_config_id")
+  pairwiseWins       Int?      @map("pairwise_wins")
+  pairwiseLosses     Int?      @map("pairwise_losses")
+  summary            Json      @default("{}")
+  startedAt          DateTime  @default(now()) @map("started_at") @db.Timestamptz(3)
+  finishedAt         DateTime? @map("finished_at") @db.Timestamptz(3)
+
+  @@index([organizationId, configId])
+  @@map("eval_runs")
+}
+
+model EvalResult {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  evalRunId      String   @map("eval_run_id")
+  datasetItemId  String   @map("dataset_item_id")
+  generationId   String?  @map("generation_id")
+  ruleFailures   Json     @default("[]") @map("rule_failures")
+  judgeScores    Json     @default("{}") @map("judge_scores")
+  judgeNotes     String?  @map("judge_notes")
+  passed         Boolean
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organizationId, evalRunId])
+  @@map("eval_results")
+}
+
+model Experiment {
+  id             String    @id
+  organizationId String    @map("organization_id")
+  name           String
+  hypothesis     String    @db.Text
+  /// draft | running | stopped | concluded
+  status         String    @default("draft")
+  primaryMetric  String    @map("primary_metric")
+  /// 1 | 2
+  stage          Int       @default(1)
+  minPerArm      Int       @default(600) @map("min_per_arm")
+  startedAt      DateTime? @map("started_at") @db.Timestamptz(3)
+  stoppedAt      DateTime? @map("stopped_at") @db.Timestamptz(3)
+  stopReason     String?   @map("stop_reason")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  @@index([organizationId, status])
+  @@map("experiments")
+}
+
+model ExperimentArm {
+  id             String  @id
+  organizationId String  @map("organization_id")
+  experimentId   String  @map("experiment_id")
+  label          String
+  configId       String  @map("config_id")
+  allocation     Int     @default(50)
+  isControl      Boolean @default(false) @map("is_control")
+
+  @@index([organizationId, experimentId])
+  @@map("experiment_arms")
+}
+
+model ExperimentAssignment {
+  id             String   @id
+  organizationId String   @map("organization_id")
+  experimentId   String   @map("experiment_id")
+  armId          String   @map("arm_id")
+  leadId         String   @map("lead_id")
+  assignedAt     DateTime @default(now()) @map("assigned_at") @db.Timestamptz(3)
+
+  @@unique([experimentId, leadId])
+  @@index([organizationId, experimentId])
+  @@map("experiment_assignments")
+}
+
+/// Precomputed scorecard per outreach config (worker-refreshed).
+model OutreachConfigScorecard {
+  configId             String   @id @map("config_id")
+  organizationId       String   @map("organization_id")
+  delivered            Int      @default(0)
+  sent                 Int      @default(0)
+  bounced              Int      @default(0)
+  positiveReplies      Int      @default(0) @map("positive_replies")
+  engagedReplies       Int      @default(0) @map("engaged_replies")
+  hardNoCount          Int      @default(0) @map("hard_no_count")
+  unsubscribeCount     Int      @default(0) @map("unsubscribe_count")
+  spamComplaintCount   Int      @default(0) @map("spam_complaint_count")
+  potentialScoreSum    Float    @default(0) @map("potential_score_sum")
+  generationCount      Int      @default(0) @map("generation_count")
+  acceptedCount        Int      @default(0) @map("accepted_count")
+  editDistanceSum      Float    @default(0) @map("edit_distance_sum")
+  editDistanceCount    Int      @default(0) @map("edit_distance_count")
+  maturityPct          Float    @default(0) @map("maturity_pct")
+  positiveReplyRate    Float    @default(0) @map("positive_reply_rate")
+  engagedReplyRate     Float    @default(0) @map("engaged_reply_rate")
+  meanPotentialScore   Float    @default(0) @map("mean_potential_score")
+  acceptanceRate       Float    @default(0) @map("acceptance_rate")
+  meanEditDistance     Float    @default(0) @map("mean_edit_distance")
+  bounceRate           Float    @default(0) @map("bounce_rate")
+  unsubscribeRate      Float    @default(0) @map("unsubscribe_rate")
+  hardNoRate           Float    @default(0) @map("hard_no_rate")
+  spamComplaintRate    Float    @default(0) @map("spam_complaint_rate")
+  /// Offline eval snapshot
+  offlinePassRate      Float?   @map("offline_pass_rate")
+  offlineHallucination Float?   @map("offline_hallucination")
+  judgeWinRate         Float?   @map("judge_win_rate")
+  segments             Json     @default("{}")
+  posteriorAlpha       Float    @default(1) @map("posterior_alpha")
+  posteriorBeta        Float    @default(1) @map("posterior_beta")
+  confoundWarnings     Json     @default("[]") @map("confound_warnings")
+  refreshedAt          DateTime @default(now()) @map("refreshed_at") @db.Timestamptz(3)
+
+  @@index([organizationId])
+  @@map("outreach_config_scorecards")
+}

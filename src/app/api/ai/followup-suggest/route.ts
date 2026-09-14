@@ -327,7 +327,9 @@ export async function POST(req: Request) {
     : "(none - no style template selected; generate from lead context and instructions only)";
 
   try {
-    const result = await runAiStructuredFeature({
+    const { resolveOutreachConfig } = await import("@/lib/ai/outreach-config-server");
+    const outreachConfig = await resolveOutreachConfig(orgId, "followup_suggest", "default");
+    const aiResult = await runAiStructuredFeature({
       organizationId: orgId,
       userId: uid,
       userDisplayName: g.ctx.session.name,
@@ -348,7 +350,16 @@ export async function POST(req: Request) {
       },
       schema: parsed.data.singleStep ? singleStepSuggestSchema : suggestSchema,
       leadId: parsed.data.leadId,
+      ...(outreachConfig
+        ? {
+            configId: outreachConfig.id,
+            zone: "default" as const,
+            systemPromptOverride: outreachConfig.systemPrompt,
+            userPromptOverride: undefined,
+          }
+        : {}),
     });
+    const result = aiResult.output;
     void recordAudit({
       organizationId: orgId,
       actorUid: uid,
@@ -372,6 +383,8 @@ export async function POST(req: Request) {
         : undefined;
     return NextResponse.json({
       ...normalizeSuggestResult(result),
+      generationId: aiResult.generationId,
+      configId: aiResult.configId,
       leadChannel: loaded.lead.channel as ChannelKey,
       sequenceMode,
       channelMix,

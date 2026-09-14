@@ -423,6 +423,22 @@ export const AUDIT_EVENT_DEFAULTS: Record<AuditEvent, EventDefault> = {
     tableName: "roles",
     message: (m) => `CRM role reset to default (${String(m.roleName ?? m.roleId ?? "")})`,
   },
+  "outreach.circuit_breaker_trip": {
+    operation: "update",
+    tableName: "outreach",
+    message: (m) => `Outreach circuit breaker tripped (${String(m.reason ?? "guardrail")})`,
+  },
+  "outreach.circuit_breaker_clear": {
+    operation: "update",
+    tableName: "outreach",
+    message: () => "Outreach circuit breaker cleared",
+  },
+  "outreach.config_promoted": {
+    operation: "update",
+    tableName: "outreach_configs",
+    message: (m) =>
+      `Outreach config promoted to ${String(m.toZone ?? "zone")} (${String(m.configId ?? "")})`,
+  },
 };
 
 export function buildAuditMessage(

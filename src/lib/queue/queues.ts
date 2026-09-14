@@ -17,6 +17,7 @@ export const QUEUE_SCHEDULED_EMAIL = "nova-scheduled-email" as const;
 export const QUEUE_SCRAPERS = "nova-scrapers" as const;
 export const QUEUE_CONTENT_REMINDERS = "nova-content-reminders" as const;
 export const QUEUE_DASHBOARD_SUMMARY = "nova-dashboard-summary" as const;
+export const QUEUE_EVAL_RUN = "nova-eval-run" as const;
 
 export type NovaQueueName =
   | typeof QUEUE_HELLO
@@ -25,7 +26,8 @@ export type NovaQueueName =
   | typeof QUEUE_SCHEDULED_EMAIL
   | typeof QUEUE_SCRAPERS
   | typeof QUEUE_CONTENT_REMINDERS
-  | typeof QUEUE_DASHBOARD_SUMMARY;
+  | typeof QUEUE_DASHBOARD_SUMMARY
+  | typeof QUEUE_EVAL_RUN;
 
 const DEFAULT_JOB_OPTS: JobsOptions = {
   removeOnComplete: { count: 200 },

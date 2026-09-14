@@ -186,7 +186,7 @@ Output only the improved email body text (no closing line like "Best,", no signa
 
     if (isReview) {
       const replyPrompt = await getAiPromptServer(orgId, "email_reply");
-      const review = await runAiStructuredFeature({
+      const { output: review } = await runAiStructuredFeature({
         organizationId: orgId,
         userId: uid,
         userDisplayName: g.ctx.session.name,

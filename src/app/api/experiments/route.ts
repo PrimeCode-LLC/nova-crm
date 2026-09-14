@@ -1,0 +1,131 @@
+import { NextResponse } from "next/server";
+import { randomUUID } from "node:crypto";
+import { z } from "zod";
+import { guardPermissionAction } from "@/lib/platform/guard-admin-feature";
+import { withOrganizationScope } from "@/lib/db/tenant-scope";
+import { isDatabaseConfigured } from "@/lib/db/prisma";
+import {
+  assignLeadsToArms,
+  persistAssignments,
+  STAGE_MIN_PER_ARM,
+} from "@/lib/ai/eval/assignment-server";
+
+export const runtime = "nodejs";
+
+const startSchema = z.object({
+  name: z.string().min(1),
+  hypothesis: z.string().min(1),
+  stage: z.union([z.literal(1), z.literal(2)]).default(1),
+  primaryMetric: z.string().default("meanPotentialScore"),
+  controlConfigId: z.string().min(1),
+  variantConfigId: z.string().min(1),
+  leadIds: z.array(z.string().min(1)).min(2).max(50_000),
+});
+
+export async function POST(req: Request) {
+  const g = await guardPermissionAction("outreach_lab.start_experiment", {
+    orAdminFeature: "outreach_lab",
+  });
+  if (!g.ok) return g.response;
+  if (!isDatabaseConfigured()) {
+    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+  }
+
+  let json: unknown;
+  try {
+    json = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  const parsed = startSchema.safeParse(json);
+  if (!parsed.success) {
+    return NextResponse.json({ error: "Invalid body", details: parsed.error.flatten() }, { status: 400 });
+  }
+
+  const orgId = g.ctx.session.organizationId;
+  const minPerArm = STAGE_MIN_PER_ARM[parsed.data.stage];
+  if (parsed.data.leadIds.length < minPerArm * 2) {
+    return NextResponse.json(
+      {
+        error: `Stage ${parsed.data.stage} needs at least ${minPerArm * 2} leads (${minPerArm}/arm)`,
+      },
+      { status: 400 },
+    );
+  }
+
+  const experimentId = `exp-${randomUUID()}`;
+  const armControl = `arm-${randomUUID()}`;
+  const armVariant = `arm-${randomUUID()}`;
+
+  await withOrganizationScope(orgId, async (tx) => {
+    await tx.experiment.create({
+      data: {
+        id: experimentId,
+        organizationId: orgId,
+        name: parsed.data.name,
+        hypothesis: parsed.data.hypothesis,
+        status: "running",
+        primaryMetric: parsed.data.primaryMetric,
+        stage: parsed.data.stage,
+        minPerArm,
+        startedAt: new Date(),
+      },
+    });
+    await tx.experimentArm.createMany({
+      data: [
+        {
+          id: armControl,
+          organizationId: orgId,
+          experimentId,
+          label: "control",
+          configId: parsed.data.controlConfigId,
+          allocation: 50,
+          isControl: true,
+        },
+        {
+          id: armVariant,
+          organizationId: orgId,
+          experimentId,
+          label: "variant",
+          configId: parsed.data.variantConfigId,
+          allocation: 50,
+          isControl: false,
+        },
+      ],
+    });
+  });
+
+  const assignments = assignLeadsToArms({
+    experimentId,
+    leadIds: parsed.data.leadIds,
+    arms: [
+      {
+        id: armControl,
+        allocation: 50,
+        configId: parsed.data.controlConfigId,
+        label: "control",
+        isControl: true,
+      },
+      {
+        id: armVariant,
+        allocation: 50,
+        configId: parsed.data.variantConfigId,
+        label: "variant",
+      },
+    ],
+  });
+  const { upserted } = await persistAssignments({
+    organizationId: orgId,
+    experimentId,
+    assignments,
+  });
+
+  return NextResponse.json({
+    ok: true,
+    experimentId,
+    assigned: upserted,
+    stage: parsed.data.stage,
+    minPerArm,
+    note: "Schedule both arms in a single bulk batch so mailbox round-robin does not confound results.",
+  });
+}

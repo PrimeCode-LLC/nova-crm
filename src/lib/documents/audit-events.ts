@@ -66,6 +66,9 @@ export const AUDIT_EVENT_LABELS: Record<AuditEvent, string> = {
   "role.updated": "CRM role updated",
   "role.deleted": "CRM role deleted",
   "role.reset": "CRM role reset to default",
+  "outreach.circuit_breaker_trip": "Outreach circuit breaker tripped",
+  "outreach.circuit_breaker_clear": "Outreach circuit breaker cleared",
+  "outreach.config_promoted": "Outreach config promoted",
 };
 
 export type AuditEventCategory =
@@ -141,6 +144,9 @@ export const AUDIT_EVENT_CATEGORY: Record<AuditEvent, AuditEventCategory> = {
   "role.updated": "settings",
   "role.deleted": "settings",
   "role.reset": "settings",
+  "outreach.circuit_breaker_trip": "ai",
+  "outreach.circuit_breaker_clear": "ai",
+  "outreach.config_promoted": "ai",
 };
 
 export function labelForAuditEvent(event: string): string {

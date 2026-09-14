@@ -22,6 +22,7 @@ import { tenantAwareWorkerOptions } from "../lib/queue/fairness";
 import {
   QUEUE_CONTENT_REMINDERS,
   QUEUE_DASHBOARD_SUMMARY,
+  QUEUE_EVAL_RUN,
   QUEUE_HELLO,
   QUEUE_IMAP_SYNC,
   QUEUE_IMPORT_CHUNKS,
@@ -38,6 +39,7 @@ import {
   processScheduledEmailJob,
   processScrapersJob,
 } from "./processors/heavy-jobs";
+import { processEvalRunJob } from "./processors/eval-run";
 
 type WorkerRegistration = {
   name: NovaQueueName;
@@ -117,6 +119,12 @@ async function main(): Promise<void> {
       concurrency: 2,
       fair: true,
     },
+    {
+      name: QUEUE_EVAL_RUN,
+      processor: processEvalRunJob,
+      concurrency: 1,
+      fair: true,
+    },
   ];
 
   const workers = registrations.map((reg) => {
@@ -143,6 +151,21 @@ async function main(): Promise<void> {
     }
   } catch (err) {
     console.warn("[worker] scheduled-email JobScheduler setup failed", err);
+  }
+
+  try {
+    const { getQueue, QUEUE_EVAL_RUN } = await import("../lib/queue/queues");
+    const queue = getQueue(QUEUE_EVAL_RUN);
+    if (queue && typeof queue.upsertJobScheduler === "function") {
+      await queue.upsertJobScheduler(
+        "outreach-scorecard-tick",
+        { every: 15 * 60_000 },
+        { name: "scorecard-tick", data: {} },
+      );
+      console.info("[worker] outreach scorecard JobScheduler every 15m");
+    }
+  } catch (err) {
+    console.warn("[worker] scorecard JobScheduler setup failed", err);
   }
 
   for (const w of workers) {

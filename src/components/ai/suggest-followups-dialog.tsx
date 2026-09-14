@@ -58,6 +58,7 @@ import {
 } from "@/lib/email/ooo-return-date";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
+import { recordFollowupSuggestAccept } from "@/lib/ai/record-followup-suggest-accept-client";
 import { leadHasLinkedIn } from "@/lib/email/bounce-recovery";
 import {
   channelMixLabel,
@@ -197,6 +198,8 @@ export function SuggestFollowupsDialog({
   const [selectedScript, setSelectedScript] = React.useState<ScriptLibraryItem | null>(null);
   /** Set by the API on a replan so the new cadence lands in the reply's thread. */
   const [threadAnchor, setThreadAnchor] = React.useState<FollowupPlan["threadAnchor"]>();
+  const [generationId, setGenerationId] = React.useState<string | undefined>();
+  const [configId, setConfigId] = React.useState<string | undefined>();
 
   React.useEffect(() => {
     if (!open) return;
@@ -229,6 +232,8 @@ export function SuggestFollowupsDialog({
     setScriptId(regenerateFromPlan?.sourceScriptId ?? "");
     setSelectedScript(null);
     setThreadAnchor(undefined);
+    setGenerationId(undefined);
+    setConfigId(undefined);
   }, [
     open,
     lead.id,
@@ -269,12 +274,22 @@ export function SuggestFollowupsDialog({
       leadChannel?: ChannelKey;
       items?: SuggestApiItem[];
       threadAnchor?: FollowupPlan["threadAnchor"];
+      generationId?: string;
+      configId?: string;
     },
     mode: FollowupSequenceMode = sequenceMode,
   ) {
     setPlanSummary(data.planSummary ?? "");
     setLeadChannel(data.leadChannel ?? lead.channel);
     setThreadAnchor(data.threadAnchor?.inReplyTo ? data.threadAnchor : undefined);
+    setGenerationId(
+      typeof data.generationId === "string" && data.generationId.trim()
+        ? data.generationId.trim()
+        : undefined,
+    );
+    setConfigId(
+      typeof data.configId === "string" && data.configId.trim() ? data.configId.trim() : undefined,
+    );
     const apiItems = (data.items ?? []) as SuggestApiItem[];
     const includeInitial = mode === "full";
     const cadenceFrom = sequenceCadenceStartFromWaitUntil({
@@ -410,6 +425,19 @@ export function SuggestFollowupsDialog({
       auto: false,
     }));
     onCreatePlanWithFollowups(plan, created);
+    void recordFollowupSuggestAccept({
+      generationId,
+      configId,
+      planId,
+      leadId: lead.id,
+      steps: created.map((f, i) => ({
+        followupId: f.id,
+        stepIndex: i,
+        channel: f.channel,
+        subject: f.emailSubject,
+        body: f.messageBody,
+      })),
+    });
     const emailCount = created.filter((f) =>
       canAutoScheduleFollowupEmail(f, lead.channel),
     ).length;

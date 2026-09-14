@@ -82,6 +82,14 @@ export async function createScheduledEmailPgServer(input: {
   referenceIds?: string[];
   forceNewThread?: boolean;
 }): Promise<{ ok: true; id: string } | { error: string }> {
+  const { assertSendingAllowed } = await import(
+    "@/lib/email/outreach-circuit-breaker-server"
+  );
+  const gate = await assertSendingAllowed(input.organizationId);
+  if (!gate.allowed) {
+    return { error: gate.reason ?? "Outreach sending is paused by circuit breaker" };
+  }
+
   const scheduledDate = new Date(input.scheduledAt);
   if (Number.isNaN(scheduledDate.getTime())) {
     return { error: "Invalid schedule date." };

@@ -151,6 +151,16 @@ export async function getAiPromptServer(
   featureKey: AiFeatureKey,
 ): Promise<AiPromptTemplate> {
   const defaults = AI_PROMPT_DEFAULTS[featureKey];
+
+  // Org overrides win (multi-tenant SaaS). Platform is fallback, code defaults last.
+  const orgRef = orgPromptDoc(organizationId, featureKey);
+  if (orgRef) {
+    const snap = await orgRef.get();
+    if (snap.exists) {
+      return promptFromSnap(featureKey, snap.data() as AiPromptTemplate);
+    }
+  }
+
   const platformRef = platformPromptDoc(featureKey);
   if (platformRef) {
     const platformSnap = await platformRef.get();
@@ -159,25 +169,12 @@ export async function getAiPromptServer(
     }
   }
 
-  const orgRef = orgPromptDoc(organizationId, featureKey);
-  if (!orgRef) {
-    return {
-      featureKey,
-      systemPrompt: defaults.systemPrompt,
-      userPromptTemplate: defaults.userPromptTemplate,
-      version: 1,
-    };
-  }
-  const snap = await orgRef.get();
-  if (!snap.exists) {
-    return {
-      featureKey,
-      systemPrompt: defaults.systemPrompt,
-      userPromptTemplate: defaults.userPromptTemplate,
-      version: 1,
-    };
-  }
-  return promptFromSnap(featureKey, snap.data() as AiPromptTemplate);
+  return {
+    featureKey,
+    systemPrompt: defaults.systemPrompt,
+    userPromptTemplate: defaults.userPromptTemplate,
+    version: 1,
+  };
 }
 
 /** Writes platform-global prompts (product-wide). Org id is unused for storage. */

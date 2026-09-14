@@ -94,7 +94,7 @@ export async function POST(req: Request) {
   const context = buildLeadAiContext(loaded);
 
   try {
-    const result = await runAiStructuredFeature({
+    const { output: result } = await runAiStructuredFeature({
       organizationId: orgId,
       userId: uid,
       userDisplayName: g.ctx.session.name,

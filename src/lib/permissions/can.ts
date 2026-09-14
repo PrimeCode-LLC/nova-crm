@@ -55,6 +55,7 @@ const ADMIN_FEATURE_TO_MODULE: Partial<Record<AdminFeatureKey, ModuleKey>> = {
   intent_playbook: "intent_playbook",
   buyer_personas: "buyer_personas",
   prospecting_strategies: "prospecting_strategies",
+  outreach_lab: "outreach_lab",
 };
 
 const ADMIN_FEATURE_TO_ACTION: Partial<Record<AdminFeatureKey, ActionKey>> = {

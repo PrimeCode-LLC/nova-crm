@@ -523,6 +523,30 @@ export async function sendClaimedScheduledEmailPg(
       }
     }
 
+    let sentEventMeta: Record<string, unknown> = {};
+    if (followupId) {
+      try {
+        const { updateProvenanceOnSend } = await import("@/lib/ai/eval/generation-server");
+        const sentBody = payload.text ?? payload.body ?? "";
+        const sentSubject = subject ?? row.subject ?? "";
+        const prov = await updateProvenanceOnSend({
+          organizationId,
+          followupId,
+          sentSubject,
+          sentBody,
+        });
+        if (prov) {
+          sentEventMeta = {
+            configId: prov.configId,
+            generationId: prov.generationId,
+            zone: prov.zone,
+          };
+        }
+      } catch {
+        /* provenance best-effort */
+      }
+    }
+
     void recordEmailEvent({
       organizationId,
       type: "sent",
@@ -532,6 +556,7 @@ export async function sendClaimedScheduledEmailPg(
       mailboxId,
       messageId,
       recipient: row.to,
+      meta: sentEventMeta,
     });
     return { outcome: "sent" };
   }

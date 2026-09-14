@@ -344,7 +344,8 @@ Classes (pick the single best fit):
 - neutral: acknowledgement, deferral without rejection, or a reply that neither opens nor closes the door ("noted", "I'll take a look", forwarded internally with no comment).
 - objection: engaged pushback with a stated reason - budget, timing, priority, existing vendor, unclear fit, or a challenge to our claim. They are still talking to us.
 - soft_no: rejection without hostility and without a permanent block ("we're all set", "not right now", "no need for this"). A sharper angle later could reopen it.
-- hard_no: firm and final. Stop emailing, unsubscribe or removal request, spam complaint, legal or compliance language, hostile tone, or an explicit ban on further contact.
+- hard_no: firm and final rejection of the offer (wrong fit, already have a vendor with no room, hostile brush-off) — but NOT an unsubscribe/removal request (use unsubscribe_request for those).
+- unsubscribe_request: ask to be removed, take me off your list, stop emailing, spam complaint, or legal do-not-contact language. Distinct from hard_no because it is an irritation/compliance signal, not a qualification signal.
 - unclear: too little signal to act on, unrelated content, or a message whose meaning cannot be determined.
 
 Edge-case routing:
@@ -354,7 +355,7 @@ Edge-case routing:
 - Conditional interest ("if you can do X, then yes"): positive when we can plausibly answer, objection when the condition is a real blocker.
 - Timing deferral with no date and no interest: soft_no with nurture.
 - Existing vendor or in-house team: objection when they explain or leave room, soft_no when it is a clean brush-off.
-- Unsubscribe, removal, spam complaint, or legal language: hard_no with close_lost, regardless of how politely it is phrased.
+- Unsubscribe, removal, spam complaint, or legal language: unsubscribe_request with close_lost, regardless of how politely it is phrased.
 - They are selling to us, or the message is marketing noise, spam, or a newsletter: unclear with ignore.
 - Auto-reply that names a return date: auto_reply with wait, put the return date in nextStepSummary, and set waitUntilDate to that calendar day as YYYY-MM-DD (resolve relative phrases like "next Monday" against Today).
 - Timing deferral with a named date ("ask me in Q3" / "after Sept 1"): soft_no with schedule_followup, put the timeframe in nextStepSummary, and set waitUntilDate to the first calendar day they named (YYYY-MM-DD). When only a quarter/month is named, use the first day of that period.
@@ -407,7 +408,7 @@ Lead snapshot:
 {{leadContext}}
 
 Return JSON with:
-- classification: auto_reply | positive | meeting_ready | neutral | objection | soft_no | hard_no | unclear
+- classification: auto_reply | positive | meeting_ready | neutral | objection | soft_no | hard_no | unsubscribe_request | unclear
 - potentialScore: number 0-100
 - recommendedAction: reply_now | schedule_followup | book_meeting | nurture | close_lost | ignore | wait
 - rationale: string (1-2 sentences citing the wording or thread fact that decided it)

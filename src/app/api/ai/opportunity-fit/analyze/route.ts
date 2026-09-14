@@ -125,7 +125,7 @@ export async function POST(req: Request) {
     });
 
     try {
-      const raw = await runAiStructuredFeature({
+      const { output: raw } = await runAiStructuredFeature({
         organizationId: orgId,
         userId: uid,
         userDisplayName: g.ctx.session.name,

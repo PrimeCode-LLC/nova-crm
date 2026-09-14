@@ -26,6 +26,7 @@ import { useWorkspace } from "@/components/providers/workspace-mode-provider";
 import { ScriptTemplatePicker } from "@/components/ai/script-template-picker";
 import type { LeadFollowupAiContext } from "@/components/ai/suggest-followups-dialog";
 import { demoFollowupSuggestions } from "@/lib/ai/demo-followup-suggestions";
+import { recordFollowupSuggestAccept } from "@/lib/ai/record-followup-suggest-accept-client";
 import { dateInputForSequenceStep, isoFromDateInput } from "@/lib/followup-date";
 import { useOrgTimezone } from "@/hooks/use-org-timezone";
 import type {
@@ -291,7 +292,13 @@ export function BulkBuildSequencesDialog({
     tplId: string,
     script: ScriptLibraryItem | null,
   ): Promise<
-    | { ok: true; planSummary: string; items: SuggestApiItem[] }
+    | {
+        ok: true;
+        planSummary: string;
+        items: SuggestApiItem[];
+        generationId?: string;
+        configId?: string;
+      }
     | { ok: false; error: string }
   > {
     const ctx = buildAiContext(leadId);
@@ -366,6 +373,9 @@ export function BulkBuildSequencesDialog({
         ok: true,
         planSummary: typeof data.planSummary === "string" ? data.planSummary : "Personalized sequence",
         items: (data.items ?? []) as SuggestApiItem[],
+        generationId:
+          typeof data.generationId === "string" ? data.generationId : undefined,
+        configId: typeof data.configId === "string" ? data.configId : undefined,
       };
     } catch {
       if (isDemo) {
@@ -387,6 +397,7 @@ export function BulkBuildSequencesDialog({
     planSummary: string,
     items: SuggestApiItem[],
     tplId: string,
+    provenance?: { generationId?: string; configId?: string },
   ): { ok: true; stepCount: number } | { ok: false; error: string } {
     const lead = leadsRef.current.find((l) => l.id === leadId);
     if (!lead) return { ok: false, error: "Lead not found" };
@@ -430,6 +441,19 @@ export function BulkBuildSequencesDialog({
       auto: false,
     }));
     createPlanRef.current(plan, created, { skipTimeline: true });
+    void recordFollowupSuggestAccept({
+      generationId: provenance?.generationId,
+      configId: provenance?.configId,
+      planId,
+      leadId: lead.id,
+      steps: created.map((f, i) => ({
+        followupId: f.id,
+        stepIndex: i,
+        channel: f.channel,
+        subject: f.emailSubject,
+        body: f.messageBody,
+      })),
+    });
     return { ok: true, stepCount: created.length };
   }
 
@@ -494,6 +518,10 @@ export function BulkBuildSequencesDialog({
         generated.planSummary,
         generated.items,
         tplId,
+        {
+          generationId: "generationId" in generated ? generated.generationId : undefined,
+          configId: "configId" in generated ? generated.configId : undefined,
+        },
       );
       if (!activated.ok) {
         patchRow(leadId, { status: "failed", detail: activated.error });

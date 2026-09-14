@@ -45,6 +45,7 @@ function scopeFill(scope: DataScope, opts?: {
     "buyer_personas",
     "import",
     "scrapers",
+    "outreach_lab",
   ]);
   return (key) => {
     if (key === "settings_self") {
@@ -57,7 +58,7 @@ function scopeFill(scope: DataScope, opts?: {
         view,
         create: edit,
         edit,
-        delete: edit && key !== "activity_logs" && key !== "organization",
+        delete: edit && key !== "activity_logs" && key !== "organization" && key !== "outreach_lab",
         scope: view ? "all" : "none",
       });
     }
@@ -135,6 +136,8 @@ const MANAGER_ACTIONS: ActionKey[] = [
   "scrapers.run",
   "scrapers.edit_feeds",
   "import.run",
+  "outreach_lab.review_queue",
+  "outreach_lab.run_eval",
 ];
 
 const DIRECTOR_EXTRA: ActionKey[] = [
@@ -179,7 +182,8 @@ function directorModules(): Record<ModuleKey, ModulePermission> {
         key !== "notifications" &&
         key !== "activity" &&
         key !== "fit_check" &&
-        key !== "my_strategy",
+        key !== "my_strategy" &&
+        key !== "outreach_lab",
       scope: "all",
     });
   });

@@ -26,6 +26,7 @@ import {
   ScanSearch,
   Rss,
   Sparkles,
+  FlaskConical,
   ScrollText,
   Crosshair,
   BookOpen,
@@ -189,6 +190,14 @@ export const NAV_SECTIONS: NavSection[] = [
         icon: Sparkles,
         minWorkspaceRole: "director",
         adminFeature: "ai_knowledge",
+        adminCluster: "programs",
+      },
+      {
+        href: "/admin/outreach-lab",
+        label: "Outreach Lab",
+        icon: FlaskConical,
+        minWorkspaceRole: "manager",
+        adminFeature: "outreach_lab",
         adminCluster: "programs",
       },
       {

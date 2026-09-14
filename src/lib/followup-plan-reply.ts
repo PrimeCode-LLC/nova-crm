@@ -13,9 +13,26 @@ export function extractEmailAddress(header: string): string | null {
   return null;
 }
 
-/** True for OOO / vacation / generic auto-replies - not bounce DSNs (see detectHardBounce). */
 export function isLikelyAutoReply(message: Pick<MailInbound, "subject" | "preview">): boolean {
-  return OOO_RE.test(`${message.subject} ${message.preview}`);
+  const blob = `${message.subject} ${message.preview}`;
+  if (OOO_RE.test(blob)) return true;
+  if (
+    isDeliveryStatusNotification({
+      from: "",
+      subject: message.subject,
+      preview: message.preview,
+      bodyText: message.preview,
+    })
+  ) {
+    return true;
+  }
+  if (/case\s*#?\s*\d+|ticket\s*#?\s*\d+|your request has been received|auto[- ]?generated/i.test(blob)) {
+    return true;
+  }
+  if (/no longer (with|at) (the )?company|left the company|no longer employed/i.test(blob)) {
+    return true;
+  }
+  return false;
 }
 
 export function inboundMessageLeadId(input: {

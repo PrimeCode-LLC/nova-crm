@@ -143,32 +143,34 @@ export async function POST(req: Request) {
     }
 
     try {
-      result = await runAiStructuredFeature({
-        organizationId,
-        userId: uid,
-        userDisplayName: name,
-        roleId,
-        feature: "intent_radar_evaluate",
-        promptVars: {
-          title,
-          url: parsed.data.page.url,
-          lexicalScore: String(parsed.data.lexicalScore),
-          strategyName: parsed.data.strategyName || "Unassigned",
-          opportunityLabel: parsed.data.opportunityLabel || "None",
-          signalsJson: JSON.stringify(
-            parsed.data.matchedSignals.map((signal) => ({
-              signalId: signal.signalId,
-              label: signal.label,
-              points: signal.points,
-              reason: signal.reason,
-              evidenceExcerpt: signal.evidenceExcerpt || "",
-            })),
-          ),
-          pageText: parsed.data.page.text.slice(0, 16000),
-          ragBlock,
-        },
-        schema: intentRadarEvaluateResultSchema,
-      });
+      result = (
+        await runAiStructuredFeature({
+          organizationId,
+          userId: uid,
+          userDisplayName: name,
+          roleId,
+          feature: "intent_radar_evaluate",
+          promptVars: {
+            title,
+            url: parsed.data.page.url,
+            lexicalScore: String(parsed.data.lexicalScore),
+            strategyName: parsed.data.strategyName || "Unassigned",
+            opportunityLabel: parsed.data.opportunityLabel || "None",
+            signalsJson: JSON.stringify(
+              parsed.data.matchedSignals.map((signal) => ({
+                signalId: signal.signalId,
+                label: signal.label,
+                points: signal.points,
+                reason: signal.reason,
+                evidenceExcerpt: signal.evidenceExcerpt || "",
+              })),
+            ),
+            pageText: parsed.data.page.text.slice(0, 16000),
+            ragBlock,
+          },
+          schema: intentRadarEvaluateResultSchema,
+        })
+      ).output;
     } catch (error) {
       return withCors(aiErrorResponse(error), guarded.headers);
     }

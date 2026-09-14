@@ -18,6 +18,7 @@ import {
   type ReplyAction,
   type ReplyClass,
   type ReplyRecommendedAction,
+  type ClassifiedBy,
 } from "@/lib/email/reply-action-types";
 import { generateReplyActionDraftServer } from "@/lib/email/generate-reply-action-draft-server";
 import { buildInboundReplySignalBlock } from "@/lib/email/reply-signals";
@@ -38,6 +39,7 @@ export const replyClassifySchema = z.object({
     "objection",
     "soft_no",
     "hard_no",
+    "unsubscribe_request",
     "unclear",
   ]),
   potentialScore: z.number().min(0).max(100),
@@ -193,6 +195,7 @@ async function writeReplyActionAndLead(input: {
   inboundMessageId?: string;
   source: ReplyAction["source"];
   result: z.infer<typeof replyClassifySchema>;
+  classifiedBy: ClassifiedBy;
   actorUid?: string;
   /** When true, clear prior draft / decision fields so a manual re-run starts clean. */
   force?: boolean;
@@ -245,6 +248,7 @@ async function writeReplyActionAndLead(input: {
     ...(inboundMessageId ? { draftInReplyTo: inboundMessageId } : {}),
     draftStatus: needsDraft ? "pending" : "none",
     source: input.source,
+    classifiedBy: input.classifiedBy,
     createdAt: now,
     updatedAt: now,
   };
@@ -366,6 +370,7 @@ async function writeReplyActionAndLead(input: {
             replyActionId: actionId,
             classification: doc.classification,
             potentialScore: doc.potentialScore,
+            classifiedBy: input.classifiedBy,
             ...(inboundMessageId ? { messageId: inboundMessageId } : {}),
           },
           createdAt: now,
@@ -375,6 +380,25 @@ async function writeReplyActionAndLead(input: {
     );
   } catch {
     /* timeline best-effort */
+  }
+
+  if (!isAutoReply) {
+    void import("@/lib/email/email-events-server").then(({ recordEmailEvent }) =>
+      recordEmailEvent({
+        organizationId: input.organizationId,
+        type: "replied",
+        leadId: input.leadId,
+        mailboxId: input.mailboxId,
+        messageId: inboundMessageId,
+        recipient: inboundFrom || undefined,
+        meta: {
+          classification: doc.classification,
+          potentialScore: doc.potentialScore,
+          replyActionId: actionId,
+          classifiedBy: input.classifiedBy,
+        },
+      }),
+    );
   }
 
   if (needsDraft) {
@@ -476,10 +500,12 @@ export async function classifyInboundLeadMailServer(input: {
     bodyText: body,
     today,
   });
+  let classifiedBy: ClassifiedBy = result ? "heuristic" : "ai";
   if (!result) {
     const settings = await getOrganizationAiSettingsServer(input.organizationId);
     if (!settings.enabled || !canUseAiFeature(settings, "email_reply_classify", undefined)) {
       // AI off: still stamp human inbound so dashboard/timeline stay consistent with Inbox.
+      classifiedBy = "fallback";
       result = {
         classification: "unclear",
         potentialScore: 50,
@@ -509,27 +535,31 @@ export async function classifyInboundLeadMailServer(input: {
           doNotContact: lead.doNotContact,
         });
 
+        classifiedBy = "ai";
         result = withResolvedWaitUntil(
-          await runAiStructuredFeature({
-            organizationId: input.organizationId,
-            userId: input.actorUid || "system",
-            feature: "email_reply_classify",
-            leadId: input.leadId,
-            schema: replyClassifySchema,
-            promptVars: {
-              today,
-              from: newest.from,
-              subject: newest.subject,
-              date: newest.date,
-              body: body.slice(0, 8_000),
-              signals,
-              thread: thread.text.slice(0, 12_000),
-              leadContext: leadSnapshotForClassify(lead),
-            },
-          }),
+          (
+            await runAiStructuredFeature({
+              organizationId: input.organizationId,
+              userId: input.actorUid || "system",
+              feature: "email_reply_classify",
+              leadId: input.leadId,
+              schema: replyClassifySchema,
+              promptVars: {
+                today,
+                from: newest.from,
+                subject: newest.subject,
+                date: newest.date,
+                body: body.slice(0, 8_000),
+                signals,
+                thread: thread.text.slice(0, 12_000),
+                leadContext: leadSnapshotForClassify(lead),
+              },
+            })
+          ).output,
           { subject: newest.subject, body, today },
         );
       } catch (error) {
+        classifiedBy = "fallback";
         if (error instanceof AiForbiddenError || error instanceof AiNotConfiguredError) {
           result = {
             classification: "unclear",
@@ -574,6 +604,7 @@ export async function classifyInboundLeadMailServer(input: {
     inboundMessageId: normalizeMessageId(newest.messageId) ?? undefined,
     source,
     result,
+    classifiedBy,
     actorUid: input.actorUid,
     force: input.force,
   });
@@ -626,6 +657,12 @@ export async function getReplyActionServer(input: {
     sentAt: data.sentAt != null ? coerceIsoInstant(data.sentAt) || undefined : undefined,
     sentMessageId: typeof data.sentMessageId === "string" ? data.sentMessageId : undefined,
     source: (data.source as ReplyAction["source"]) || "system",
+    classifiedBy:
+      data.classifiedBy === "ai" ||
+      data.classifiedBy === "heuristic" ||
+      data.classifiedBy === "fallback"
+        ? data.classifiedBy
+        : undefined,
     // deserializePayload turns *At ISO strings into Timestamp; never String(ts).
     createdAt: coerceIsoInstant(data.createdAt),
     updatedAt: coerceIsoInstant(data.updatedAt),
