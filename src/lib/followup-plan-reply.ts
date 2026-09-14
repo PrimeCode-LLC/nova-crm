@@ -1,6 +1,7 @@
 import type { FollowupPlan, Lead } from "@/lib/types";
 import type { MailInbound } from "@/lib/email-account-types";
 import { leadContactEmails } from "@/lib/followup-plans";
+import { isDeliveryStatusNotification } from "@/lib/email/detect-hard-bounce";
 
 const OOO_RE = /out of office|automatic reply|auto[- ]?reply/i;
 
