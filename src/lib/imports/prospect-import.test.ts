@@ -61,6 +61,95 @@ describe("prospect import template", () => {
     expect(parsed.rows[0]!.issues).toEqual([]);
     expect(parsed.rows[0]!.normalized.companyDomain).toBe("acme.example");
   }, 15_000);
+
+  it("accepts a single Data sheet workbook without helper sheets", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Data");
+    const values: Record<string, string> = {
+      "Company Name": "Solo Sheet Co",
+      "Company Domain": "solo.example",
+      "First Name": "Sam",
+      "Last Name": "Lee",
+      "Company Email": "sam@solo.example",
+    };
+    PROSPECT_IMPORT_HEADERS.forEach((header, index) => {
+      sheet.getCell(2, index + 1).value = header;
+      sheet.getCell(3, index + 1).value = values[header] ?? "";
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const parsed = await parseProspectImportFile("solo.xlsx", Buffer.from(buffer));
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.companyName).toBe("Solo Sheet Co");
+  }, 15_000);
+
+  it("accepts Excel HYPERLINK formula cells using cached results", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Data");
+    const values: Record<string, unknown> = {
+      "Company Name": "Link Co",
+      "Company Domain": "link.example",
+      "First Name": "Lee",
+      "Last Name": "Chen",
+      "Website URL": {
+        text: "link.example",
+        hyperlink: "https://link.example",
+      },
+      "Contact LinkedIn URL": {
+        formula: 'HYPERLINK("https://linkedin.com/in/lee-chen","https://linkedin.com/in/lee-chen")',
+        result: "https://linkedin.com/in/lee-chen",
+      },
+    };
+    PROSPECT_IMPORT_HEADERS.forEach((header, index) => {
+      sheet.getCell(2, index + 1).value = header;
+      sheet.getCell(3, index + 1).value = (values[header] ?? "") as ExcelJS.CellValue;
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const parsed = await parseProspectImportFile("links.xlsx", Buffer.from(buffer));
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.contactLinkedIn).toBe("https://linkedin.com/in/lee-chen");
+    expect(parsed.rows[0]!.normalized.website).toBe("https://link.example/");
+  }, 15_000);
+
+  it("prefers hyperlink URL when Excel shows a friendly label", async () => {
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Data");
+    const values: Record<string, unknown> = {
+      "Company Name": "Label Co",
+      "Company Domain": "label.example",
+      "First Name": "Pat",
+      "Last Name": "Ng",
+      "Contact LinkedIn URL": {
+        text: "Pat Ng",
+        hyperlink: "https://linkedin.com/in/pat-ng",
+      },
+    };
+    PROSPECT_IMPORT_HEADERS.forEach((header, index) => {
+      sheet.getCell(2, index + 1).value = header;
+      sheet.getCell(3, index + 1).value = (values[header] ?? "") as ExcelJS.CellValue;
+    });
+    const buffer = await workbook.xlsx.writeBuffer();
+    const parsed = await parseProspectImportFile("label.xlsx", Buffer.from(buffer));
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.contactLinkedIn).toBe("https://linkedin.com/in/pat-ng");
+  }, 15_000);
+
+  it("accepts Excel serial dates and skips blank CSV rows", async () => {
+    // 2025-11-19 => Excel serial 45980 (1899-12-30 epoch).
+    const csv = `${buildProspectImportCsv()}${csvRow({
+      "Company Name": "Date Co",
+      "Company Domain": "date.example",
+      "First Name": "Ada",
+      "Last Name": "Lovelace",
+      Phone: "+15555550123",
+      "Last Website Activity Date": "45980",
+    })}\r\n${",".repeat(PROSPECT_IMPORT_HEADERS.length - 1)}\r\n`;
+    const parsed = await parseProspectImportFile("dates.csv", Buffer.from(csv));
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.lastWebsiteActivityAt).toBe("2025-11-19");
+  });
 });
 
 describe("prospect import parsing", () => {
@@ -140,6 +229,21 @@ describe("prospect import parsing", () => {
         "contact_identity_required",
       ]),
     );
+  });
+
+  it("accepts website URLs without an explicit scheme", async () => {
+    const csv = `${buildProspectImportCsv()}${csvRow({
+      "Company Name": "Acme Inc.",
+      "Company Domain": "acme.com",
+      "Website URL": "www.acme.com/about",
+      "First Name": "Jane",
+      "Last Name": "Doe",
+      "Contact LinkedIn URL": "linkedin.com/in/jane-doe",
+    })}\r\n`;
+    const parsed = await parseProspectImportFile("prospects.csv", Buffer.from(csv));
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.website).toBe("https://www.acme.com/about");
+    expect(parsed.rows[0]!.normalized.contactLinkedIn).toBe("https://linkedin.com/in/jane-doe");
   });
 
   it("rejects formula-like CSV values", async () => {

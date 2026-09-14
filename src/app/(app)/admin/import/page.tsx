@@ -138,7 +138,7 @@ export default function AdminImportPage() {
       setReimportConfirmed(false);
       toast.success(`Validated ${data.job.counts.total.toLocaleString()} rows`);
     } catch (error) {
-      toastError("Could not preview import", error, {
+      toastError(error instanceof Error ? error.message : "Could not preview import", error, {
         location: "src/app/(app)/admin/import/page.tsx",
         functionName: "previewFile",
       });

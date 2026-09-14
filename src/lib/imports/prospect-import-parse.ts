@@ -103,15 +103,134 @@ function compactKey(value: string): string {
     .trim();
 }
 
+function looksLikeUrl(value: string): boolean {
+  const text = value.trim();
+  if (!text) return false;
+  return (
+    /^https?:\/\//i.test(text) ||
+    /^www\./i.test(text) ||
+    /^[\w.-]+\.[a-z]{2,}([/:?]|$)/i.test(text)
+  );
+}
+
+function normalizeHeaderLabel(value: string): string {
+  return value.replace(/\u00a0/g, " ").trim();
+}
+
 function stringValue(value: unknown): string {
   if (value == null) return "";
   if (value instanceof Date) {
     return value.toISOString().slice(0, 10);
   }
-  if (typeof value === "object" && "text" in value) {
-    return String((value as { text?: unknown }).text ?? "").trim();
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return String(value);
+  }
+  if (typeof value === "object") {
+    const record = value as unknown as Record<string, unknown>;
+    if (Array.isArray(record.richText)) {
+      return (record.richText as Array<{ text?: unknown }>)
+        .map((part) => String(part.text ?? ""))
+        .join("")
+        .trim();
+    }
+    if ("result" in record && record.result != null) {
+      const fromResult = stringValue(record.result);
+      if (fromResult) return fromResult;
+    }
+    if (typeof record.text === "string" || typeof record.text === "number") {
+      return String(record.text).trim();
+    }
+    if (typeof record.hyperlink === "string" && record.hyperlink.trim()) {
+      return record.hyperlink.trim();
+    }
+    if (typeof record.formula === "string") {
+      const hyperlinkMatch = record.formula.match(
+        /^HYPERLINK\(\s*"([^"]+)"(?:\s*,\s*"([^"]*)")?\s*\)$/i,
+      );
+      if (hyperlinkMatch) {
+        const url = (hyperlinkMatch[1] || "").trim();
+        const label = (hyperlinkMatch[2] || "").trim();
+        if (label && looksLikeUrl(label)) return label;
+        return url || label;
+      }
+    }
+    if ("text" in record) {
+      return String(record.text ?? "").trim();
+    }
   }
   return String(value).trim();
+}
+
+/** Prefer display/result values so Excel HYPERLINK formulas do not abort the upload. */
+function excelCellValue(cell: ExcelJS.Cell): unknown {
+  const value = cell.value;
+  if (value == null) return "";
+  if (typeof value !== "object") return value;
+  const record = value as unknown as Record<string, unknown>;
+  if ("formula" in record || "sharedFormula" in record) {
+    if (record.result != null) return record.result;
+    const asText = stringValue(value);
+    if (asText) return asText;
+    return undefined;
+  }
+  if ("hyperlink" in record) {
+    const text =
+      typeof record.text === "string" || typeof record.text === "number"
+        ? String(record.text).trim()
+        : "";
+    const link = typeof record.hyperlink === "string" ? record.hyperlink.trim() : "";
+    // Prefer the real URL when Excel shows a friendly label as the cell text.
+    if (text && looksLikeUrl(text)) return text;
+    if (link) return link;
+    return text;
+  }
+  if (Array.isArray(record.richText)) {
+    return stringValue(value);
+  }
+  return value;
+}
+
+function headersMatchOfficial(headers: string[]): boolean {
+  return (
+    headers.length === PROSPECT_IMPORT_HEADERS.length &&
+    headers.every(
+      (header, index) => normalizeHeaderLabel(header) === PROSPECT_IMPORT_HEADERS[index],
+    )
+  );
+}
+
+function readSheetHeaders(sheet: ExcelJS.Worksheet, rowNumber: number): string[] {
+  return PROSPECT_IMPORT_HEADERS.map((_, index) =>
+    normalizeHeaderLabel(stringValue(excelCellValue(sheet.getCell(rowNumber, index + 1)))),
+  );
+}
+
+function findImportSheet(workbook: ExcelJS.Workbook): {
+  sheet: ExcelJS.Worksheet;
+  headerRow: number;
+} {
+  const namedData = workbook.getWorksheet(PROSPECT_IMPORT_DATA_SHEET);
+  const candidates = namedData
+    ? [namedData, ...workbook.worksheets.filter((sheet) => sheet !== namedData)]
+    : workbook.worksheets;
+
+  for (const sheet of candidates) {
+    for (const headerRow of [2, 1] as const) {
+      const headers = readSheetHeaders(sheet, headerRow);
+      if (headersMatchOfficial(headers)) {
+        return { sheet, headerRow };
+      }
+    }
+  }
+
+  const attempted =
+    namedData != null
+      ? readSheetHeaders(namedData, 2)
+      : readSheetHeaders(workbook.worksheets[0]!, 1);
+  assertExactHeaders(attempted);
+  throw new Error(
+    `Could not find the official header row. Download the XLSX template from Import Prospects and keep the ${PROSPECT_IMPORT_HEADERS.length} column names unchanged.`,
+  );
 }
 
 function normalizeDomain(value: string): string | undefined {
@@ -128,8 +247,9 @@ function normalizeDomain(value: string): string | undefined {
 function normalizeUrl(value: string): string | undefined {
   if (!value) return undefined;
   try {
-    const parsed = new URL(value);
+    const parsed = new URL(value.includes("://") ? value : `https://${value}`);
     if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return undefined;
+    if (!parsed.hostname.includes(".")) return undefined;
     parsed.hash = "";
     return parsed.toString();
   } catch {
@@ -137,15 +257,31 @@ function normalizeUrl(value: string): string | undefined {
   }
 }
 
+function excelSerialDateToIso(serial: number): string | undefined {
+  // Excel's day-zero is 1899-12-30 (with the legacy 1900 leap-year bug).
+  if (!Number.isFinite(serial) || serial < 1 || serial > 100_000) return undefined;
+  const date = new Date(Date.UTC(1899, 11, 30) + Math.floor(serial) * 86_400_000);
+  if (Number.isNaN(date.getTime())) return undefined;
+  return date.toISOString().slice(0, 10);
+}
+
 function normalizeDate(value: unknown): string | undefined {
   if (value instanceof Date && !Number.isNaN(value.getTime())) {
     return value.toISOString().slice(0, 10);
+  }
+  if (typeof value === "number") {
+    return excelSerialDateToIso(value);
   }
   const text = stringValue(value);
   if (!text) return undefined;
   if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
     const date = new Date(`${text}T12:00:00Z`);
     if (!Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text) return text;
+  }
+  const asNumber = Number(text);
+  if (Number.isFinite(asNumber) && /^\d+(\.\d+)?$/.test(text)) {
+    const fromSerial = excelSerialDateToIso(asNumber);
+    if (fromSerial) return fromSerial;
   }
   const namedDate = text.match(
     /^(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{1,2}),\s*(\d{4})$/i,
@@ -382,50 +518,74 @@ function normalizeRawRow(rowNumber: number, raw: Record<string, unknown>): Parse
 }
 
 function assertExactHeaders(headers: string[]): void {
+  const nonEmpty = headers.filter(Boolean);
+  if (nonEmpty.length === 0) {
+    throw new Error(
+      `Could not find the official header row. Download the XLSX template from Import Prospects and keep the ${PROSPECT_IMPORT_HEADERS.length} column names unchanged.`,
+    );
+  }
   if (headers.length !== PROSPECT_IMPORT_HEADERS.length) {
     throw new Error(`Template has ${headers.length} columns; expected ${PROSPECT_IMPORT_HEADERS.length}.`);
   }
   const duplicateHeaders = headers.filter((header, index) => headers.indexOf(header) !== index);
-  if (duplicateHeaders.length) throw new Error(`Template contains duplicate headers: ${[...new Set(duplicateHeaders)].join(", ")}.`);
+  if (duplicateHeaders.length) {
+    throw new Error(`Template contains duplicate headers: ${[...new Set(duplicateHeaders)].join(", ")}.`);
+  }
   for (let index = 0; index < PROSPECT_IMPORT_HEADERS.length; index++) {
-    if (headers[index] !== PROSPECT_IMPORT_HEADERS[index]) {
-      throw new Error(`Column ${index + 1} must be "${PROSPECT_IMPORT_HEADERS[index]}".`);
+    if (normalizeHeaderLabel(headers[index] ?? "") !== PROSPECT_IMPORT_HEADERS[index]) {
+      const found = headers[index] ? `"${headers[index]}"` : "(blank)";
+      throw new Error(
+        `Column ${index + 1} must be "${PROSPECT_IMPORT_HEADERS[index]}", found ${found}. Download the official template and do not rename columns.`,
+      );
     }
   }
 }
 
 async function parseXlsx(buffer: Buffer): Promise<ParsedProspectImportRow[]> {
   const workbook = new ExcelJS.Workbook();
-  await workbook.xlsx.load(buffer as never);
-  const expectedSheets = [PROSPECT_IMPORT_DATA_SHEET, "Instructions", "Allowed Values"];
-  const actualSheets = workbook.worksheets.map((worksheet) => worksheet.name);
-  if (
-    actualSheets.length !== expectedSheets.length ||
-    expectedSheets.some((name, index) => actualSheets[index] !== name)
-  ) {
-    throw new Error(`Workbook sheets must be exactly: ${expectedSheets.join(", ")}.`);
+  try {
+    await workbook.xlsx.load(buffer as never);
+  } catch {
+    throw new Error(
+      "Could not read this Excel file. Upload an .xlsx file from the official Import Prospects template (not .xls or a corrupted export).",
+    );
   }
-  const sheet = workbook.getWorksheet(PROSPECT_IMPORT_DATA_SHEET);
-  if (!sheet) throw new Error(`Workbook must contain a "${PROSPECT_IMPORT_DATA_SHEET}" sheet.`);
-  const headers = PROSPECT_IMPORT_HEADERS.map((_, index) => stringValue(sheet.getCell(2, index + 1).value));
-  assertExactHeaders(headers);
+  if (!workbook.worksheets.length) {
+    throw new Error("Workbook has no sheets.");
+  }
 
+  const { sheet, headerRow } = findImportSheet(workbook);
+  const dataStartRow = headerRow + 1;
   const rows: ParsedProspectImportRow[] = [];
-  const lastRow = Math.min(sheet.actualRowCount, PROSPECT_IMPORT_MAX_ROWS + 2);
-  for (let rowNumber = 3; rowNumber <= lastRow; rowNumber++) {
+  const dimensionBottom =
+    typeof sheet.dimensions?.bottom === "number" ? sheet.dimensions.bottom : 0;
+  const lastRow = Math.min(
+    Math.max(sheet.actualRowCount || 0, sheet.rowCount || 0, dimensionBottom, headerRow),
+    PROSPECT_IMPORT_MAX_ROWS + headerRow,
+  );
+  for (let rowNumber = dataStartRow; rowNumber <= lastRow; rowNumber++) {
     const raw: Record<string, unknown> = {};
     let hasValue = false;
     for (let index = 0; index < PROSPECT_IMPORT_HEADERS.length; index++) {
+      const header = PROSPECT_IMPORT_HEADERS[index]!;
       const cell = sheet.getCell(rowNumber, index + 1);
-      if (cell.type === ExcelJS.ValueType.Formula || (cell.value && typeof cell.value === "object" && "formula" in cell.value)) {
-        throw new Error(`Formulas are not allowed (row ${rowNumber}, ${PROSPECT_IMPORT_HEADERS[index]}).`);
+      const value = excelCellValue(cell);
+      if (
+        value === undefined &&
+        cell.value &&
+        typeof cell.value === "object" &&
+        ("formula" in cell.value || "sharedFormula" in cell.value)
+      ) {
+        throw new Error(
+          `Formulas are not allowed (row ${rowNumber}, ${header}). Paste values instead of formulas.`,
+        );
       }
-      raw[PROSPECT_IMPORT_HEADERS[index]!] = cell.value;
-      if (stringValue(cell.value)) hasValue = true;
+      raw[header] = value ?? "";
+      if (stringValue(value)) hasValue = true;
     }
     if (hasValue) rows.push(normalizeRawRow(rowNumber, raw));
   }
-  if (sheet.actualRowCount > PROSPECT_IMPORT_MAX_ROWS + 2) {
+  if (Math.max(sheet.actualRowCount || 0, dimensionBottom) > PROSPECT_IMPORT_MAX_ROWS + headerRow) {
     throw new Error(`Workbook exceeds the ${PROSPECT_IMPORT_MAX_ROWS.toLocaleString()} row limit.`);
   }
   return rows;
@@ -441,7 +601,7 @@ function parseCsv(buffer: Buffer): ParsedProspectImportRow[] {
   const csvRows = parsed.data.map((row) => row.map((value) => String(value ?? "").trim()));
   const exactHeaderAt = (index: number) => {
     const row = csvRows[index] ?? [];
-    const headers = row.slice(0, PROSPECT_IMPORT_HEADERS.length);
+    const headers = row.slice(0, PROSPECT_IMPORT_HEADERS.length).map(normalizeHeaderLabel);
     const extras = row.slice(PROSPECT_IMPORT_HEADERS.length).filter(Boolean);
     return (
       extras.length === 0 &&
@@ -460,7 +620,9 @@ function parseCsv(buffer: Buffer): ParsedProspectImportRow[] {
   if (dataRows.length > PROSPECT_IMPORT_MAX_ROWS) {
     throw new Error(`CSV exceeds the ${PROSPECT_IMPORT_MAX_ROWS.toLocaleString()} row limit.`);
   }
-  return dataRows.map((values, index) => {
+  const rows: ParsedProspectImportRow[] = [];
+  for (let index = 0; index < dataRows.length; index++) {
+    const values = dataRows[index]!;
     const extraValues = values.slice(PROSPECT_IMPORT_HEADERS.length).filter(Boolean);
     if (extraValues.length) {
       throw new Error(`CSV row ${headerIndex + index + 2} has unexpected extra columns.`);
@@ -468,8 +630,11 @@ function parseCsv(buffer: Buffer): ParsedProspectImportRow[] {
     const raw = Object.fromEntries(
       PROSPECT_IMPORT_HEADERS.map((header, column) => [header, values[column] ?? ""]),
     );
-    return normalizeRawRow(headerIndex + index + 2, raw);
-  });
+    const hasValue = PROSPECT_IMPORT_HEADERS.some((header) => stringValue(raw[header]));
+    if (!hasValue) continue;
+    rows.push(normalizeRawRow(headerIndex + index + 2, raw));
+  }
+  return rows;
 }
 
 export async function parseProspectImportFile(
