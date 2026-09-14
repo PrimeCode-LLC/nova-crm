@@ -120,7 +120,6 @@ export function OwnerOpsBoard({
   wallPrefs,
   orgWideScope = false,
   extraSentAts,
-  emailCardMetrics,
 }: {
   metrics: DashboardWorkflowMetrics;
   leads: Lead[];
@@ -149,8 +148,6 @@ export function OwnerOpsBoard({
   orgWideScope?: boolean;
   /** Compose / inbox / reply send timestamps for email volume. */
   extraSentAts?: readonly number[];
-  /** Emails pulse tile only — sender/lead ownership rules. */
-  emailCardMetrics?: import("@/lib/dashboard-email-kpi-card").EmailKpiCardMetrics | null;
 }) {
   const wallSettings = wallPrefs ?? defaultWallPreferences();
   const needMeetings = Boolean(widgets.pulse || widgets.actionBoard || wall);
@@ -408,7 +405,6 @@ export function OwnerOpsBoard({
               openTasksCount={openTasksCount}
               wall
               range={range}
-              emailCardMetrics={emailCardMetrics}
             />
           </div>
         ) : null}
@@ -450,7 +446,6 @@ export function OwnerOpsBoard({
           meetingsToday={meetingsToday}
           openTasksCount={openTasksCount}
           range={range}
-          emailCardMetrics={emailCardMetrics}
         />
       ) : null}
 

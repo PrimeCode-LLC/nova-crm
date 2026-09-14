@@ -6,7 +6,6 @@ import {
   buildRepliesDrillHref,
   type DashboardTimeRangeKey,
 } from "@/lib/dashboard-date-range";
-import type { EmailKpiCardMetrics } from "@/lib/dashboard-email-kpi-card";
 import type { DashboardWorkflowMetrics } from "@/lib/dashboard-workflow";
 import { fmtNumber } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -20,36 +19,6 @@ import {
   UserRoundSearch,
   type LucideIcon,
 } from "lucide-react";
-
-/** Emails tile uses dedicated sender/lead rules; other pulse tiles keep `metrics`. */
-function emailsMetricsForCard(
-  metrics: DashboardWorkflowMetrics,
-  emailCard?: EmailKpiCardMetrics | null,
-): Pick<
-  DashboardWorkflowMetrics,
-  | "sentInRange"
-  | "opensInRange"
-  | "bouncedEmailsInRange"
-  | "scheduledSteps"
-  | "readyUnscheduledSteps"
-  | "failedDeliveries"
-  | "retryingDeliveries"
-  | "openBounceReviewTasks"
-> {
-  if (!emailCard) {
-    return {
-      sentInRange: metrics.sentInRange,
-      opensInRange: metrics.opensInRange,
-      bouncedEmailsInRange: metrics.bouncedEmailsInRange,
-      scheduledSteps: metrics.scheduledSteps,
-      readyUnscheduledSteps: metrics.readyUnscheduledSteps,
-      failedDeliveries: metrics.failedDeliveries,
-      retryingDeliveries: metrics.retryingDeliveries,
-      openBounceReviewTasks: metrics.openBounceReviewTasks,
-    };
-  }
-  return emailCard;
-}
 
 type HintPart = {
   text: string;
@@ -82,9 +51,9 @@ function HintLine({ parts }: { parts: HintPart[] }) {
 }
 
 /** Card color = metric identity. Hint color = urgency (except follow-ups/tasks). */
-function emailsTone(sentInRange: number): KpiTone {
+function emailsTone(metrics: DashboardWorkflowMetrics): KpiTone {
   // Match email volume chart "Sent" (chart-1). Delivery issues stay in the hint.
-  return sentInRange > 0 ? "info" : "default";
+  return metrics.sentInRange > 0 ? "info" : "default";
 }
 
 function repliesTone(metrics: DashboardWorkflowMetrics): KpiTone {
@@ -129,18 +98,7 @@ type PulseItem = {
   tone: KpiTone;
 };
 
-function buildEmailHints(
-  metrics: Pick<
-    DashboardWorkflowMetrics,
-    | "scheduledSteps"
-    | "readyUnscheduledSteps"
-    | "failedDeliveries"
-    | "retryingDeliveries"
-    | "opensInRange"
-    | "bouncedEmailsInRange"
-    | "openBounceReviewTasks"
-  >,
-): HintPart[] {
+function buildEmailHints(metrics: DashboardWorkflowMetrics): HintPart[] {
   const emailHints: HintPart[] = [
     { text: `${metrics.scheduledSteps} queued` },
     {
@@ -202,7 +160,6 @@ export function OpsPulseStrip({
   wall,
   focus = "ops",
   range = "30d",
-  emailCardMetrics,
 }: {
   metrics: DashboardWorkflowMetrics;
   meetingsToday: number;
@@ -214,26 +171,20 @@ export function OpsPulseStrip({
   focus?: OpsPulseFocus;
   /** Dashboard date range — used for the Replies KPI drill-down. */
   range?: DashboardTimeRangeKey;
-  /**
-   * When set, only the Emails tile uses these numbers (sender/lead rules).
-   * Other pulse tiles keep `metrics` unchanged.
-   */
-  emailCardMetrics?: EmailKpiCardMetrics | null;
 }) {
   const openTasks = openTasksCount ?? metrics.myOpenTasks;
-  const emailMetrics = emailsMetricsForCard(metrics, emailCardMetrics);
-  const emailHints = buildEmailHints(emailMetrics);
+  const emailHints = buildEmailHints(metrics);
   const prospectHints = buildProspectHints(metrics);
 
   const byKey: Record<string, PulseItem> = {
     emails: {
       key: "emails",
       label: "Emails sent",
-      value: emailMetrics.sentInRange,
+      value: metrics.sentInRange,
       hint: <HintLine parts={emailHints} />,
       icon: Send,
       href: "/inbox?folder=scheduled",
-      tone: emailsTone(emailMetrics.sentInRange),
+      tone: emailsTone(metrics),
     },
     replies: {
       key: "replies",

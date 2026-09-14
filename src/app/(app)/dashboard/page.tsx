@@ -104,13 +104,11 @@ import {
   Monitor,
 } from "lucide-react";
 import { computeDashboardWorkflowMetrics, isSalesLead } from "@/lib/dashboard-workflow";
-import { buildEmailKpiCardMetrics } from "@/lib/dashboard-email-kpi-card";
 import {
   composeEmailSentAtsFromTimeline,
   flattenTimelineByLead,
 } from "@/lib/dashboard-emails-sent";
 import { useOrgDashboardSummary } from "@/hooks/use-org-dashboard-summary";
-import { useEmailKpiCardLive } from "@/hooks/use-email-kpi-card-live";
 import {
   Select,
   SelectContent,
@@ -392,43 +390,6 @@ export default function DashboardPage() {
     orgWideDashboardScope,
     timeRange,
   ]);
-
-  const emailKpiLive = useEmailKpiCardLive({
-    enabled: !isDemo && !workspaceLoading && Boolean(viewer),
-    range: timeRange as DashboardTimeRangeKey,
-    ownerScope,
-    timeZone: organizationTimezone,
-  });
-
-  const emailCardMetrics = React.useMemo(() => {
-    if (!viewer) return null;
-    return buildEmailKpiCardMetrics({
-      leads: ownerScopedLeads,
-      followups: kpiScoped.followups,
-      tasks: kpiScoped.leadTasks,
-      viewer,
-      orgUsers: users,
-      ownerScope,
-      range: timeRange as DashboardTimeRangeKey,
-      timeZone: organizationTimezone,
-      live: isDemo ? null : emailKpiLive.live,
-      // Until the live API returns, keep prior open count to avoid a 0-flash; live replaces it.
-      fallbackOpensInRange: emailKpiLive.live == null ? workflowMetrics.opensInRange : undefined,
-    });
-  }, [
-    viewer,
-    ownerScopedLeads,
-    kpiScoped.followups,
-    kpiScoped.leadTasks,
-    users,
-    ownerScope,
-    timeRange,
-    organizationTimezone,
-    isDemo,
-    emailKpiLive.live,
-    workflowMetrics.opensInRange,
-  ]);
-
   const avgResponseMin = React.useMemo(
     () =>
       computeAverageResponseTimeMinutes(scopedSalesLeads, emailResponseCtx, {
@@ -985,7 +946,6 @@ export default function DashboardPage() {
                 isDemo={isDemo}
                 orgWideScope={orgWideDashboardScope}
                 extraSentAts={composeSentAts}
-                emailCardMetrics={emailCardMetrics}
               />
             ) : frontlineLayout ? (
               <FrontlineBoard
@@ -1004,7 +964,6 @@ export default function DashboardPage() {
                 wonDealCount={wonDealCount}
                 avgResponseMin={avgResponseMin}
                 isDemo={isDemo}
-                emailCardMetrics={emailCardMetrics}
               />
             ) : w.classicKpis ? (
               <>

@@ -41,7 +41,6 @@ export function FrontlineBoard({
   wonDealCount,
   avgResponseMin,
   isDemo,
-  emailCardMetrics,
 }: {
   role: Role | undefined;
   metrics: DashboardWorkflowMetrics;
@@ -58,8 +57,6 @@ export function FrontlineBoard({
   wonDealCount: number;
   avgResponseMin: number | null;
   isDemo?: boolean;
-  /** Emails pulse tile only — sender/lead ownership rules. */
-  emailCardMetrics?: import("@/lib/dashboard-email-kpi-card").EmailKpiCardMetrics | null;
 }) {
   const isProspecting = role === "prospecting" || role === "data_scraper";
   const focus = pulseFocusForRole(role);
@@ -110,7 +107,6 @@ export function FrontlineBoard({
           pipelineLabel={isProspecting ? "your day" : "your pipeline"}
           focus={focus}
           range={range}
-          emailCardMetrics={emailCardMetrics}
         />
       ) : null}
 
