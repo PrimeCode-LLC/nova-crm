@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import {
   PROSPECT_IMPORT_FIELDS,
@@ -16,6 +17,41 @@ function csvRow(values: Record<string, string>): string {
     const value = values[header] ?? "";
     return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
   }).join(",");
+}
+
+/** Mimic Excel rewriting header notes into comment paths ExcelJS cannot reconcile. */
+async function rewriteCommentsLikeExcel(buffer: Buffer | ArrayBuffer | Uint8Array): Promise<Buffer> {
+  const zip = await JSZip.loadAsync(buffer);
+  const commentEntry = zip.file("xl/comments1.xml");
+  const vmlEntry = zip.file("xl/drawings/vmlDrawing1.vml");
+  if (!commentEntry || !vmlEntry) {
+    throw new Error("Expected ExcelJS comment parts for fixture rewrite.");
+  }
+  zip.file("xl/comments/comment1.xml", await commentEntry.async("uint8array"));
+  zip.file("xl/drawings/commentsDrawing1.vml", await vmlEntry.async("uint8array"));
+  zip.remove("xl/comments1.xml");
+  zip.remove("xl/drawings/vmlDrawing1.vml");
+
+  const relsPath = "xl/worksheets/_rels/sheet1.xml.rels";
+  const rels = zip.file(relsPath);
+  if (!rels) throw new Error("Missing sheet relationships.");
+  let relXml = await rels.async("string");
+  relXml = relXml
+    .replace(/Target="[^"]*comments1\.xml"/i, 'Target="/xl/comments/comment1.xml"')
+    .replace(/Target="[^"]*vmlDrawing1\.vml"/i, 'Target="/xl/drawings/commentsDrawing1.vml"');
+  zip.file(relsPath, relXml);
+
+  const contentTypes = zip.file("[Content_Types].xml");
+  if (contentTypes) {
+    let ct = await contentTypes.async("string");
+    ct = ct.replace(
+      /PartName="\/xl\/comments1\.xml"/i,
+      'PartName="/xl/comments/comment1.xml"',
+    );
+    zip.file("[Content_Types].xml", ct);
+  }
+
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
 }
 
 describe("prospect import template", () => {
@@ -61,6 +97,33 @@ describe("prospect import template", () => {
     expect(parsed.rows[0]!.issues).toEqual([]);
     expect(parsed.rows[0]!.normalized.companyDomain).toBe("acme.example");
   }, 15_000);
+
+  it("accepts templates re-saved by Excel with rewritten comment paths", async () => {
+    const template = await buildProspectImportWorkbook();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(template as never);
+    workbook.getWorksheet("Data")!.getRow(3).values = PROSPECT_IMPORT_HEADERS.map((header) => {
+      const values: Record<string, string> = {
+        "Company Name": "Excel Resave Co",
+        "Company Domain": "excel-resave.example",
+        "First Name": "Alex",
+        "Last Name": "Rivera",
+        "Company Email": "alex@excel-resave.example",
+      };
+      return values[header] ?? "";
+    });
+    const completed = Buffer.from(await workbook.xlsx.writeBuffer());
+    const excelLike = await rewriteCommentsLikeExcel(completed);
+
+    // Guard: ExcelJS alone still fails on Excel-style comment paths.
+    await expect(new ExcelJS.Workbook().xlsx.load(excelLike as never)).rejects.toThrow();
+
+    const parsed = await parseProspectImportFile("excel-resave.xlsx", excelLike);
+    expect(parsed.rows).toHaveLength(1);
+    expect(parsed.rows[0]!.issues).toEqual([]);
+    expect(parsed.rows[0]!.normalized.companyName).toBe("Excel Resave Co");
+    expect(parsed.rows[0]!.normalized.companyDomain).toBe("excel-resave.example");
+  }, 20_000);
 
   it("accepts a single Data sheet workbook without helper sheets", async () => {
     const workbook = new ExcelJS.Workbook();

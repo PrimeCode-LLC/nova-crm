@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import ExcelJS from "exceljs";
+import JSZip from "jszip";
 import Papa from "papaparse";
 import {
   PROSPECT_IMPORT_DATA_SHEET,
@@ -541,10 +542,71 @@ function assertExactHeaders(headers: string[]): void {
   }
 }
 
+/**
+ * Excel (and some editors) rewrite header cell notes into comment parts/paths that
+ * ExcelJS cannot reconcile (`Cannot read properties of undefined (reading 'comments')`).
+ * Import only needs cell values, so strip comment/VML chrome before load.
+ */
+async function stripXlsxCommentsForImport(buffer: Buffer): Promise<Buffer> {
+  let zip: JSZip;
+  try {
+    zip = await JSZip.loadAsync(buffer);
+  } catch {
+    return buffer;
+  }
+
+  const names = Object.keys(zip.files);
+  const commentParts = names.filter(
+    (name) =>
+      /(^|\/)comments\d*\.xml$/i.test(name) ||
+      /(^|\/)comments\//i.test(name) ||
+      /commentsDrawing\d*\.vml$/i.test(name) ||
+      /vmlDrawing\d*\.vml$/i.test(name),
+  );
+  if (!commentParts.length) return buffer;
+
+  for (const name of commentParts) zip.remove(name);
+
+  const relFiles = names.filter((name) => /worksheets\/_rels\/[^/]+\.rels$/i.test(name));
+  await Promise.all(
+    relFiles.map(async (name) => {
+      const entry = zip.file(name);
+      if (!entry) return;
+      let xml = await entry.async("string");
+      xml = xml.replace(
+        /<Relationship\b[^>]*Type="[^"]*\/(comments|vmlDrawing)"[^>]*\/>/gi,
+        "",
+      );
+      zip.file(name, xml);
+    }),
+  );
+
+  const sheetFiles = names.filter((name) => /worksheets\/sheet\d+\.xml$/i.test(name));
+  await Promise.all(
+    sheetFiles.map(async (name) => {
+      const entry = zip.file(name);
+      if (!entry) return;
+      let xml = await entry.async("string");
+      xml = xml.replace(/<legacyDrawing\b[^>]*\/>/gi, "");
+      zip.file(name, xml);
+    }),
+  );
+
+  const contentTypes = zip.file("[Content_Types].xml");
+  if (contentTypes) {
+    let xml = await contentTypes.async("string");
+    xml = xml.replace(/<Override\b[^>]*PartName="[^"]*comments[^"]*"[^>]*\/>/gi, "");
+    zip.file("[Content_Types].xml", xml);
+  }
+
+  return Buffer.from(await zip.generateAsync({ type: "nodebuffer", compression: "DEFLATE" }));
+}
+
 async function parseXlsx(buffer: Buffer): Promise<ParsedProspectImportRow[]> {
   const workbook = new ExcelJS.Workbook();
   try {
-    await workbook.xlsx.load(buffer as never);
+    const sanitized = await stripXlsxCommentsForImport(buffer);
+    await workbook.xlsx.load(sanitized as never);
   } catch {
     throw new Error(
       "Could not read this Excel file. Upload an .xlsx file from the official Import Prospects template (not .xls or a corrupted export).",
