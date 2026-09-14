@@ -1,7 +1,6 @@
 import type { FollowupPlan, Lead } from "@/lib/types";
 import type { MailInbound } from "@/lib/email-account-types";
 import { leadContactEmails } from "@/lib/followup-plans";
-import { isDeliveryStatusNotification } from "@/lib/email/detect-hard-bounce";
 
 const OOO_RE = /out of office|automatic reply|auto[- ]?reply/i;
 
@@ -13,19 +12,13 @@ export function extractEmailAddress(header: string): string | null {
   return null;
 }
 
+/**
+ * True for OOO / vacation / ticketing autoresponders / "left company" notices.
+ * Bounce DSNs are intentionally excluded — use detectHardBounce / isDeliveryStatusNotification.
+ */
 export function isLikelyAutoReply(message: Pick<MailInbound, "subject" | "preview">): boolean {
   const blob = `${message.subject} ${message.preview}`;
   if (OOO_RE.test(blob)) return true;
-  if (
-    isDeliveryStatusNotification({
-      from: "",
-      subject: message.subject,
-      preview: message.preview,
-      bodyText: message.preview,
-    })
-  ) {
-    return true;
-  }
   if (/case\s*#?\s*\d+|ticket\s*#?\s*\d+|your request has been received|auto[- ]?generated/i.test(blob)) {
     return true;
   }
