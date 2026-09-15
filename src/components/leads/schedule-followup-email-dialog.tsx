@@ -166,85 +166,82 @@ export function ScheduleFollowupEmailDialog({
   );
   const timezoneLabel = formatTimezoneDisplayLabel(scheduleTimezone);
 
-  // Seed once per open. Lock before hydrate — followup identity churn from
-  // workspace polls must not cancel and re-seed mid-flight.
-  const seededRef = React.useRef(false);
+  // Seed once per open (per followup id). Lock before hydrate so workspace
+  // polls that replace the `followup` object cannot cancel mid-flight.
+  const seededForIdRef = React.useRef<string | null>(null);
 
   React.useEffect(() => {
     if (!open || !followup) {
-      seededRef.current = false;
+      seededForIdRef.current = null;
       return;
     }
-    if (seededRef.current) return;
-    seededRef.current = true;
+    if (seededForIdRef.current === followup.id) return;
+    seededForIdRef.current = followup.id;
     const followupSnapshot = followup;
+    const recipientSnapshot = recipientOptions;
+    const mailboxSnapshot = mailboxOptions;
+    const activeMb = activeMailboxId;
+    const scheduleTz = scheduleTimezone;
+    const windowStart = sendWindow.startHour;
+    const windowEnd = sendWindow.endHour;
+    const tz = timezone;
+    const orgId = organizationId;
+    const uid = currentUserId;
+    const waitUntil = lead.followUpAfterDate;
+    const sendPolicy = organizationSendPolicy;
     let cancelled = false;
     void (async () => {
-      const prefs = loadLastUsedMailboxPrefs(organizationId, currentUserId);
+      const prefs = loadLastUsedMailboxPrefs(orgId, uid);
       const rememberedMailboxId =
         followupSnapshot.mailboxId &&
-        mailboxOptions.some((m) => m.id === followupSnapshot.mailboxId)
+        mailboxSnapshot.some((m) => m.id === followupSnapshot.mailboxId)
           ? followupSnapshot.mailboxId
           : "";
       const defaultId =
         rememberedMailboxId ||
         resolveDefaultScheduleMailboxId({
-          mailboxIds: mailboxOptions.map((mb) => mb.id),
+          mailboxIds: mailboxSnapshot.map((mb) => mb.id),
           lastUsedId: prefs.lastMailboxId,
-          activeMailboxId,
+          activeMailboxId: activeMb,
         });
       const hydrated = await hydrateFollowupMessageBody(followupSnapshot);
       if (cancelled) return;
       setMailboxId(defaultId);
-      const rememberedTo = followup.toEmail?.trim();
+      const rememberedTo = followupSnapshot.toEmail?.trim();
       setTo(
-        rememberedTo && recipientOptions.some((o) => o.email === rememberedTo)
+        rememberedTo && recipientSnapshot.some((o) => o.email === rememberedTo)
           ? rememberedTo
-          : defaultContactRecipientEmail(recipientOptions),
+          : defaultContactRecipientEmail(recipientSnapshot),
       );
       setSubject(hydrated.emailSubject?.trim() || hydrated.title || "");
-      const waitDate = lead.followUpAfterDate;
       const dueDay = hydrated.dueAt?.slice(0, 10);
       const preferIso =
-        hasActiveFollowUpAfterDate(waitDate, timezone) &&
-        waitDate &&
-        (!dueDay || dueDay < waitDate)
-          ? isoFromDateInput(waitDate, timezone)
+        hasActiveFollowUpAfterDate(waitUntil, tz) &&
+        waitUntil &&
+        (!dueDay || dueDay < waitUntil)
+          ? isoFromDateInput(waitUntil, tz)
           : hydrated.dueAt;
       setScheduledAt(
         defaultAudienceScheduleDatetimeLocal({
           preferIso,
-          timeZone: scheduleTimezone,
-          sendWindowStartHour: sendWindow.startHour,
-          sendWindowEndHour: sendWindow.endHour,
+          timeZone: scheduleTz,
+          sendWindowStartHour: windowStart,
+          sendWindowEndHour: windowEnd,
           spreadKey: hydrated.id,
-          sendPolicy: organizationSendPolicy,
+          sendPolicy,
         }),
       );
       setBody(hydrated.messageBody ?? "");
       setIncludeSignature(true);
       setIncludeFooter(true);
       setSubmitting(false);
-      seededRef.current = true;
     })();
     return () => {
       cancelled = true;
     };
-  }, [
-    open,
-    followup,
-    recipientOptions,
-    mailboxOptions,
-    activeMailboxId,
-    scheduleTimezone,
-    sendWindow.startHour,
-    sendWindow.endHour,
-    timezone,
-    organizationId,
-    currentUserId,
-    lead.followUpAfterDate,
-    organizationSendPolicy,
-  ]);
+    // Seed on open / target id only — not on followup object identity churn.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- see comment above
+  }, [open, followup?.id]);
 
   React.useEffect(() => {
     if (!open || !mailboxId) {
